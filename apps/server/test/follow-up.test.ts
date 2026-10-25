@@ -185,6 +185,17 @@ describe('follow-up and chase', () => {
     expect((await w.t.req('POST', `/api/desk/${id}/snooze`, { body: { days: 1 } })).status).toBe(401);
   });
 
+  it('caps re-snoozes per item', async () => {
+    const id = await raise();
+    for (let i = 0; i < 5; i++)
+      await ok(w.t.req('POST', `/api/desk/${id}/snooze`, { cookie: w.owner.cookie, body: { days: 1 } }));
+    const sixth = await w.t.req('POST', `/api/desk/${id}/snooze`, {
+      cookie: w.owner.cookie,
+      body: { days: 1 },
+    });
+    expect(sixth.status).toBe(409);
+  });
+
   it('chases digest rating items but not reports', async () => {
     const rating = await raise({ subkind: 'digest' }, 'rating');
     const report = await raise({ subkind: 'floor_report' }, 'alert');

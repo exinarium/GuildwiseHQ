@@ -25,6 +25,11 @@ export type FollowUpAction = 'nudge' | 'requeue' | null;
  * What the sweep does with one open item. Pure and replay-safe: the answer depends only on the item's recorded state and the
  * clock, and a second sweep right after sees the nudge it just recorded.
  */
+/** An item nudges its owner at most this often in all; after that it waits in the list without more pushes. */
+export const FOLLOW_UP_MAX_NUDGES = 3;
+/** A person may snooze one item at most this many times. */
+export const FOLLOW_UP_MAX_SNOOZES = 5;
+
 export function followUpAction(s: FollowUpState, now: Date, days: number): FollowUpAction {
   if (days <= FOLLOW_UP_OFF) return null;
   const window = days * DAY_MS;
@@ -33,7 +38,7 @@ export function followUpAction(s: FollowUpState, now: Date, days: number): Follo
   const since = Math.max(s.openedAt.getTime(), s.lastNudgeAt?.getTime() ?? 0);
   if (now.getTime() - since < window) return null;
   if (s.routedTo === 'agent') return s.nudgeCount === 0 ? 'requeue' : null;
-  return 'nudge';
+  return s.nudgeCount >= FOLLOW_UP_MAX_NUDGES ? null : 'nudge';
 }
 
 export function clampFollowUpDays(n: number): number {

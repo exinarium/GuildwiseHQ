@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { auditExport } from '../src/governance/audit-export.ts';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 
@@ -175,5 +176,55 @@ describe('audit export', () => {
     for (let i = 0; i < 3; i++) await ledger(admin.id, org, `bulk ${i}`);
     const rows = (await get(admin, '?format=json&type=LedgerEntryAdded')).body as any[];
     expect(rows.filter((r) => String(r.payload?.title).startsWith('bulk')).length).toBe(3);
+  });
+
+  it('allows one export at a time per person and ten an hour', async () => {
+    const heavy = await t.userSession(uniqueEmail('heavy'));
+    await t.addOrgMember(org, heavy.id, 'admin');
+    const ctx = t.app.ctx;
+    const query = { format: 'json' as const };
+    const first = await auditExport(ctx, org, heavy.id, query);
+    await expect(auditExport(ctx, org, heavy.id, query)).rejects.toMatchObject({
+      status: 429,
+      code: 'export_running',
+    });
+    // somebody else is not held up by it
+    const parallel = await auditExport(ctx, org, admin.id, query);
+    parallel.stream.destroy();
+    // finished (or abandoned): the next one starts
+    first.stream.destroy();
+    await new Promise((r) => setTimeout(r, 20));
+    for (let i = 1; i < 10; i++) {
+      const o = await auditExport(ctx, org, heavy.id, query);
+      o.stream.destroy();
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect((await get(heavy)).status).toBe(429);
+  });
+
+  it('ends a failed export with a marker and an aborted stream instead of a file that looks complete', async () => {
+    const ctx = t.app.ctx;
+    const orig = ctx.pool.query.bind(ctx.pool);
+    let calls = 0;
+    // the second batch query fails
+    (ctx.pool as any).query = (...args: any[]) => {
+      if (typeof args[0] === 'string' && args[0].includes('FROM events e LEFT JOIN users u') && ++calls === 1)
+        return Promise.reject(new Error('boom'));
+      return (orig as any)(...args);
+    };
+    try {
+      const out = await auditExport(ctx, org, owner.id, { format: 'csv' });
+      let text = '';
+      let failed = false;
+      try {
+        for await (const c of out.stream) text += c;
+      } catch {
+        failed = true;
+      }
+      expect(failed).toBe(true);
+      expect(text).toContain('EXPORT ABORTED');
+    } finally {
+      (ctx.pool as any).query = orig;
+    }
   });
 });

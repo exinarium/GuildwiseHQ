@@ -11,7 +11,8 @@ import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /** Only same-origin relative paths are honoured for `?next=`. */
 export function safeNext(next: string | null): string {
-  return next?.startsWith('/') && !next.startsWith('//') ? next : '/';
+  // a path on this origin only: `//host` and `/\host` are read by browsers as another site
+  return next?.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/';
 }
 
 function failureText(err: unknown): string | null {

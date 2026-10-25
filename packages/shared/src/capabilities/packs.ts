@@ -559,7 +559,7 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
   }
   for (const a of manifest?.agents ?? []) {
     const path = safePackPath(a.file);
-    const text = path ? tree[path] : undefined;
+    const text = path && Object.hasOwn(tree, path) ? tree[path] : undefined;
     if (!path || text === undefined) {
       issues.push({
         path: a.file,

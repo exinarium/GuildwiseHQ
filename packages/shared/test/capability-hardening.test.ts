@@ -29,6 +29,12 @@ describe('toml-lite and manifest hardening', () => {
     indexPack({ name: 'p', tree: { 'pack.json': `{"agents":[${'{"file":"x"},'.repeat(5000)}{}]}` } });
     expect(Date.now() - t0).toBeLessThan(3000);
   });
+  it('does not read a manifest entry from the prototype of the file tree', () => {
+    for (const file of ['constructor', 'toString', '__proto__']) {
+      const r = indexPack({ name: 'p', tree: { 'pack.json': JSON.stringify({ agents: [{ file }] }) } });
+      expect(r.issues.some((i) => i.message.includes('the file is not in the pack'))).toBe(true);
+    }
+  });
   it('hashes ambiguous file sets differently', () => {
     expect(hashCapabilityFiles({ a: 'b\u0000c' })).not.toBe(hashCapabilityFiles({ 'a\u0000b': 'c' }));
     expect(hashCapabilityFiles({ a: 'x\u0001b\u0000y' })).not.toBe(hashCapabilityFiles({ a: 'x', b: 'y' }));

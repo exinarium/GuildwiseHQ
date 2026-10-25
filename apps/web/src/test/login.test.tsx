@@ -99,3 +99,21 @@ describe('password strength (advisory)', () => {
     expect(strengthOf('Abcdefgh1jkl!').label).toBe('Strong');
   });
 });
+
+describe('safeNext', () => {
+  it('keeps a path on this origin and drops anything a browser reads as another site', async () => {
+    const { safeNext } = await import('../pages/Login.tsx');
+    expect(safeNext('/desk?x=1')).toBe('/desk?x=1');
+    expect(safeNext('/m/desk/abc')).toBe('/m/desk/abc');
+    for (const bad of [
+      '//evil.test',
+      '/\\evil.test',
+      '/\\\\evil.test',
+      'https://evil.test',
+      'desk',
+      '',
+      null,
+    ])
+      expect(safeNext(bad as never)).toBe('/');
+  });
+});

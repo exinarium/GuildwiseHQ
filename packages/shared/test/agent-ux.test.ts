@@ -86,6 +86,11 @@ describe('follow-up window', () => {
     expect(followUpAction(snoozed, at(7), 3)).toBeNull();
     expect(followUpAction(snoozed, at(8), 3)).toBe('nudge');
   });
+  it('stops nudging after three nudges in all', () => {
+    const third = { ...base, lastNudgeAt: at(9), nudgeCount: 3 };
+    expect(followUpAction({ ...base, lastNudgeAt: at(6), nudgeCount: 2 }, at(9), 3)).toBe('nudge');
+    expect(followUpAction(third, at(30), 3)).toBeNull();
+  });
   it('re-queues an agent’s item once', () => {
     const agent = { ...base, routedTo: 'agent' as const };
     expect(followUpAction(agent, at(2), 3)).toBeNull();

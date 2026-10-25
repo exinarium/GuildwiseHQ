@@ -2,6 +2,7 @@ import {
   clampFollowUpDays,
   FOLLOW_UP_DEFAULT_DAYS,
   FOLLOW_UP_KINDS,
+  FOLLOW_UP_MAX_SNOOZES,
   FOLLOW_UP_SKIP_SUBKINDS,
   followUpAction,
   followUpNudgeText,
@@ -15,7 +16,7 @@ import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { forbidden, notFound } from '../errors.ts';
+import { conflict, forbidden, notFound } from '../errors.ts';
 import { notifyUsers } from '../push/notifier.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -68,6 +69,16 @@ export async function snoozeDeskItem(
     const role = item.project_id ? await projectRole(tx, user.id, item.project_id) : null;
     if (!canAnswerItem(item, user.id, role, await orgRoleOf(tx, user.id, item.org_id)))
       throw forbidden('you cannot act on this item');
+    const snoozed = await one(
+      tx,
+      `SELECT count(*)::int AS n FROM events WHERE stream_id=$1 AND type='DeskItemSnoozed'`,
+      [streamId.desk(itemId)],
+    );
+    if (Number(snoozed?.n ?? 0) >= FOLLOW_UP_MAX_SNOOZES)
+      throw conflict(
+        'snoozed_too_often',
+        `this item was snoozed ${FOLLOW_UP_MAX_SNOOZES} times already: decide it, or ask someone else to`,
+      );
     const until = new Date(ctx.clock.now().getTime() + d * 86_400_000).toISOString();
     await ctx.store.append(
       [
