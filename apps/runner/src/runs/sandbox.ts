@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { BROWSER_MASKED, DEVOPS_INHERITED_ENV, HOME_SECRETS, onPath } from '../adapters/claude-policy.ts';
 import { SECRETISH } from '../toolchain/registry.ts';
@@ -49,13 +49,22 @@ export function maskedPaths(spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 
     ...BROWSER_MASKED,
     ...(uid !== undefined ? [`/run/user/${uid}`] : []),
   ];
-  return [...new Set(all)].filter((p) => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of new Set(all)) {
     try {
-      return !lstatSync(p).isSymbolicLink(); // a symlink is masked through its target (listed separately)
+      if (lstatSync(p).isSymbolicLink()) continue; // a symlink is masked through its target (listed separately)
+      // `/var/run` is usually a link to `/run`: two spellings of one file are masked once (bwrap cannot create the
+      // second mount point under a path it has already covered).
+      const real = realpathSync(p);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      out.push(real);
     } catch {
-      return false;
+      // not there: nothing to mask
     }
-  });
+  }
+  return out;
 }
 
 /** The bubblewrap arguments (without the command); the command follows `--`. */

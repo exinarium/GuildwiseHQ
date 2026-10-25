@@ -213,113 +213,112 @@ const bwrapWorks =
  * Runs `dotnet new console && dotnet build` under bubblewrap with the mounts of the policy the runner generates for a
  * builder (read-only root, the policy's allowWrite paths writable) and the env of `sandboxEnv`.
  */
-describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
-  'dotnet in a real bubblewrap sandbox (skipped without bwrap or dotnet)',
-  () => {
-    const run = async (
-      withShm: boolean,
-      opts: { script?: string; dropEnv?: string[]; timeoutMs?: number; maskGitmodules?: boolean } = {},
-    ) => {
-      const root = realpathSync(tmp());
-      const paths = runnerPaths(root);
-      const sb = await ensureSandbox(paths, A1, 'Ada');
-      const cwd = join(root, 'worktrees', 'P-1', 'X-1');
-      mkdirSync(cwd, { recursive: true });
-      const policy = buildShiftSettings(
-        role('builder').permissions,
-        policyCtx({
-          runnerRoot: root,
-          agentDir: paths.agentDir(A1),
-          cwd,
-          gitDirs: [],
-          sharedCacheDir: sb.cacheRoot,
-          dotnetShmDir: DOTNET_SHM_DIR,
-        }),
-        sb,
-        'builder',
-      );
-      const writable = (policy.sandbox?.filesystem.allowWrite ?? []).filter(
-        (p) => (withShm || p !== DOTNET_SHM_DIR) && existsSync(p),
-      );
-      const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc'];
-      // like the sandbox: everything (also /tmp) is read-only except the policy's writable paths
-      for (const w of writable) args.push('--bind', w, w);
-      args.push('--bind', cwd, cwd);
-      // the sandbox runtime masks a protected path that does not exist with /dev/null
-      if (opts.maskGitmodules) args.push('--ro-bind', '/dev/null', join(cwd, '.gitmodules'));
-      args.push('--chdir', cwd);
-      const env = {
-        PATH: `${join(dotnet as string, '..')}:${process.env.PATH}`,
-        DOTNET_ROOT: join(dotnet as string, '..'),
-        ...sandboxEnv(sb),
-      };
-      for (const k of opts.dropEnv ?? []) delete (env as Record<string, string>)[k];
-      const script =
-        opts.script ??
-        'dotnet new console -n app --no-restore >/dev/null && cd app && dotnet build 2>&1 | tail -20';
-      return spawnSync(bwrap as string, [...args, 'bash', '-c', script], {
-        env,
-        encoding: 'utf8',
-        timeout: opts.timeoutMs ?? 120_000,
-      });
+describe.skipIf(
+  !bwrapWorks || !dotnet || process.platform !== 'linux' || process.env.AOM_SKIP_DOTNET_SANDBOX === '1',
+)('dotnet in a real bubblewrap sandbox (skipped without bwrap or dotnet)', () => {
+  const run = async (
+    withShm: boolean,
+    opts: { script?: string; dropEnv?: string[]; timeoutMs?: number; maskGitmodules?: boolean } = {},
+  ) => {
+    const root = realpathSync(tmp());
+    const paths = runnerPaths(root);
+    const sb = await ensureSandbox(paths, A1, 'Ada');
+    const cwd = join(root, 'worktrees', 'P-1', 'X-1');
+    mkdirSync(cwd, { recursive: true });
+    const policy = buildShiftSettings(
+      role('builder').permissions,
+      policyCtx({
+        runnerRoot: root,
+        agentDir: paths.agentDir(A1),
+        cwd,
+        gitDirs: [],
+        sharedCacheDir: sb.cacheRoot,
+        dotnetShmDir: DOTNET_SHM_DIR,
+      }),
+      sb,
+      'builder',
+    );
+    const writable = (policy.sandbox?.filesystem.allowWrite ?? []).filter(
+      (p) => (withShm || p !== DOTNET_SHM_DIR) && existsSync(p),
+    );
+    const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc'];
+    // like the sandbox: everything (also /tmp) is read-only except the policy's writable paths
+    for (const w of writable) args.push('--bind', w, w);
+    args.push('--bind', cwd, cwd);
+    // the sandbox runtime masks a protected path that does not exist with /dev/null
+    if (opts.maskGitmodules) args.push('--ro-bind', '/dev/null', join(cwd, '.gitmodules'));
+    args.push('--chdir', cwd);
+    const env = {
+      PATH: `${join(dotnet as string, '..')}:${process.env.PATH}`,
+      DOTNET_ROOT: join(dotnet as string, '..'),
+      ...sandboxEnv(sb),
     };
+    for (const k of opts.dropEnv ?? []) delete (env as Record<string, string>)[k];
+    const script =
+      opts.script ??
+      'dotnet new console -n app --no-restore >/dev/null && cd app && dotnet build 2>&1 | tail -20';
+    return spawnSync(bwrap as string, [...args, 'bash', '-c', script], {
+      env,
+      encoding: 'utf8',
+      timeout: opts.timeoutMs ?? 120_000,
+    });
+  };
 
-    // card P4-7: a solution of several projects makes MSBuild start one worker node per CPU, and every node binds a
-    // named pipe at the hard-coded `/tmp/MSBuild<pid>`, which the sandbox's read-only /tmp refuses (the real sandbox's
-    // seccomp filter also refuses the socket itself). DOTNET_PROCESSOR_COUNT=1 keeps the build in one process.
-    const multiProject = [
-      'dotnet new sln -n S >/dev/null',
-      'for p in A B C D; do dotnet new classlib -n $p -o $p --no-restore >/dev/null; dotnet sln add $p/$p.csproj >/dev/null; done',
-      'dotnet add B/B.csproj reference A/A.csproj >/dev/null',
-      'dotnet add C/C.csproj reference A/A.csproj >/dev/null',
-      'dotnet add D/D.csproj reference B/B.csproj C/C.csproj >/dev/null',
-      'timeout 60 dotnet build 2>&1 | tail -20',
-    ].join(' && ');
+  // card P4-7: a solution of several projects makes MSBuild start one worker node per CPU, and every node binds a
+  // named pipe at the hard-coded `/tmp/MSBuild<pid>`, which the sandbox's read-only /tmp refuses (the real sandbox's
+  // seccomp filter also refuses the socket itself). DOTNET_PROCESSOR_COUNT=1 keeps the build in one process.
+  const multiProject = [
+    'dotnet new sln -n S >/dev/null',
+    'for p in A B C D; do dotnet new classlib -n $p -o $p --no-restore >/dev/null; dotnet sln add $p/$p.csproj >/dev/null; done',
+    'dotnet add B/B.csproj reference A/A.csproj >/dev/null',
+    'dotnet add C/C.csproj reference A/A.csproj >/dev/null',
+    'dotnet add D/D.csproj reference B/B.csproj C/C.csproj >/dev/null',
+    'timeout 60 dotnet build 2>&1 | tail -20',
+  ].join(' && ');
 
-    it('a plain `dotnet build` of a multi-project solution succeeds (no MSBuild worker nodes)', async () => {
-      const r = await run(true, { script: multiProject, timeoutMs: 150_000 });
-      expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
-      expect(r.stdout).not.toContain('Build FAILED');
-    }, 180_000);
+  it('a plain `dotnet build` of a multi-project solution succeeds (no MSBuild worker nodes)', async () => {
+    const r = await run(true, { script: multiProject, timeoutMs: 150_000 });
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
+    expect(r.stdout).not.toContain('Build FAILED');
+  }, 180_000);
 
-    it('without DOTNET_PROCESSOR_COUNT the same build fails or hangs in the sandbox (the bug)', async () => {
-      const r = await run(true, {
-        script: multiProject.replace('timeout 60', 'timeout 25'),
-        dropEnv: ['DOTNET_PROCESSOR_COUNT'],
-        timeoutMs: 150_000,
-      });
-      expect(`${r.stdout}${r.stderr}`).not.toContain('not a valid option'); // the setup ran, the build was tried
-      expect(r.stdout).not.toContain('Build succeeded');
-    }, 180_000);
+  it('without DOTNET_PROCESSOR_COUNT the same build fails or hangs in the sandbox (the bug)', async () => {
+    const r = await run(true, {
+      script: multiProject.replace('timeout 60', 'timeout 25'),
+      dropEnv: ['DOTNET_PROCESSOR_COUNT'],
+      timeoutMs: 150_000,
+    });
+    expect(`${r.stdout}${r.stderr}`).not.toContain('not a valid option'); // the setup ran, the build was tried
+    expect(r.stdout).not.toContain('Build succeeded');
+  }, 180_000);
 
-    it('without write access to /tmp/.dotnet the build fails on the NuGet-Migrations mutex (the bug)', async () => {
-      const r = await run(false);
-      expect(r.stdout).not.toContain('Build succeeded');
-      expect(`${r.stdout}${r.stderr}`).toMatch(/NuGet-Migrations|cannot open the device or file/);
-    }, 150_000);
+  it('without write access to /tmp/.dotnet the build fails on the NuGet-Migrations mutex (the bug)', async () => {
+    const r = await run(false);
+    expect(r.stdout).not.toContain('Build succeeded');
+    expect(`${r.stdout}${r.stderr}`).toMatch(/NuGet-Migrations|cannot open the device or file/);
+  }, 150_000);
 
-    it('with the policy mounts (/tmp/.dotnet writable, caches shared, DOTNET_CLI_HOME) dotnet build succeeds', async () => {
-      const r = await run(true);
-      expect(r.stdout, r.stderr).toContain('Build succeeded');
-    }, 150_000);
+  it('with the policy mounts (/tmp/.dotnet writable, caches shared, DOTNET_CLI_HOME) dotnet build succeeds', async () => {
+    const r = await run(true);
+    expect(r.stdout, r.stderr).toContain('Build succeeded');
+  }, 150_000);
 
-    // #33: a repository without .gitmodules, whose path the sandbox masks with /dev/null
-    const gitmodulesScript =
-      'git init -q . && dotnet new classlib -n lib -o lib --no-restore >/dev/null && cd lib && dotnet build -nologo 2>&1 | tail -8';
+  // #33: a repository without .gitmodules, whose path the sandbox masks with /dev/null
+  const gitmodulesScript =
+    'git init -q . && dotnet new classlib -n lib -o lib --no-restore >/dev/null && cd lib && dotnet build -nologo 2>&1 | tail -8';
 
-    it('a build in a repository without .gitmodules succeeds (no SourceLink probe)', async () => {
-      const r = await run(true, { script: gitmodulesScript, maskGitmodules: true });
-      expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
-    }, 150_000);
+  it('a build in a repository without .gitmodules succeeds (no SourceLink probe)', async () => {
+    const r = await run(true, { script: gitmodulesScript, maskGitmodules: true });
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
+  }, 150_000);
 
-    it('without EnableSourceControlManagerQueries=false the same build fails on .gitmodules (the bug)', async () => {
-      const r = await run(true, {
-        script: gitmodulesScript,
-        maskGitmodules: true,
-        dropEnv: ['EnableSourceControlManagerQueries'],
-      });
-      expect(r.stdout).not.toContain('Build succeeded');
-      expect(`${r.stdout}${r.stderr}`).toContain('.gitmodules');
-    }, 150_000);
-  },
-);
+  it('without EnableSourceControlManagerQueries=false the same build fails on .gitmodules (the bug)', async () => {
+    const r = await run(true, {
+      script: gitmodulesScript,
+      maskGitmodules: true,
+      dropEnv: ['EnableSourceControlManagerQueries'],
+    });
+    expect(r.stdout).not.toContain('Build succeeded');
+    expect(`${r.stdout}${r.stderr}`).toContain('.gitmodules');
+  }, 150_000);
+});

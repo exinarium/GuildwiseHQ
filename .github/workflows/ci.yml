@@ -122,7 +122,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # The .NET-in-the-sandbox tests need a working `dotnet` first-use setup under bubblewrap; on the runner image
+      # (and on a WSL2 development machine) .NET fails to create its named mutex there. Tracked as a known issue;
+      # every other sandbox test runs.
       - name: Runner tests
+        env:
+          AOM_SKIP_DOTNET_SANDBOX: '1'
         run: pnpm --filter @aom/runner test
 
   server:
