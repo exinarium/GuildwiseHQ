@@ -10,7 +10,7 @@ import { notFound } from '../errors.ts';
 /** The display name of the participant a persona message came from (a persona has no agent row). */
 const PERSONA_NAME_SQL = `(SELECT tp.display_name FROM thread_participants tp
    WHERE m.author_persona_key IS NOT NULL AND tp.thread_id = m.thread_id AND tp.kind = 'persona' AND tp.ref_id = m.author_persona_key
-   ORDER BY tp.added_at LIMIT 1)`;
+   ORDER BY tp.added_at, tp.ord LIMIT 1)`;
 
 /**
  * Messages of a thread the user may read: their own chats, card threads of projects they are an active member of,

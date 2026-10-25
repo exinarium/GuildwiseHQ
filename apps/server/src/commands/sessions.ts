@@ -52,7 +52,7 @@ export async function listParticipants(
 ): Promise<Row[]> {
   return rows(
     db,
-    `SELECT * FROM thread_participants WHERE thread_id=$1 ${includeRemoved ? '' : 'AND removed_at IS NULL'} ORDER BY added_at, id`,
+    `SELECT * FROM thread_participants WHERE thread_id=$1 ${includeRemoved ? '' : 'AND removed_at IS NULL'} ORDER BY added_at, ord`,
     [threadId],
   );
 }

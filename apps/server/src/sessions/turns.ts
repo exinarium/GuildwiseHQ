@@ -616,7 +616,7 @@ export class SessionTurns {
     if (ctxSpec.mode === 'none') return [];
     const base = `SELECT m.id, m.body, m.author_kind, m.author_persona_key, u.display_name AS user_name, a.name AS agent_name,
          (SELECT tp.display_name FROM thread_participants tp WHERE m.author_persona_key IS NOT NULL AND tp.thread_id = m.thread_id
-            AND tp.kind='persona' AND tp.ref_id = m.author_persona_key ORDER BY tp.added_at LIMIT 1) AS persona_name
+            AND tp.kind='persona' AND tp.ref_id = m.author_persona_key ORDER BY tp.added_at, tp.ord LIMIT 1) AS persona_name
        FROM thread_messages m LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
       WHERE m.thread_id = $1 AND m.kind IN ('chat','comment')
         AND COALESCE(m.data->>'purpose','') NOT IN ('board_chair','board_cast','board_minutes')`;
