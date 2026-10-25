@@ -236,6 +236,71 @@ describe('dispatch on a Codex account', () => {
     expect(ev[0]?.payload.accountKey).toBe('work');
   });
 
+  it('does not spend the workstation owner’s named account for a project they are not on, unless they allow it', async () => {
+    await reset();
+    const runtimes = [codex([info('main'), info('work')])];
+    const now = new Date();
+    const project = randomUUID();
+    const owner = randomUUID();
+    const settingsOf = async (members: string[], fallbackToMain = false) => {
+      const { ProjectAccounts } = await import('../src/dispatcher/accounts.ts');
+      const accounts = new ProjectAccounts();
+      accounts.add('codex', project, { accountKey: 'work', fallbackToMain });
+      accounts.setMembers(project, members);
+      return accounts;
+    };
+    const { accountForAgent } = await import('../src/dispatcher/accounts.ts');
+    const agent = (over: Record<string, unknown> = {}) =>
+      ({
+        runtime: 'codex',
+        model: 'gpt-6-sol',
+        runtimes,
+        org_id: orgId,
+        ws_user_id: owner,
+        ...over,
+      }) as never;
+    // a member of the project: the account is honored
+    expect(accountForAgent(await settingsOf([owner]), project, agent(), now)).toEqual({
+      key: 'work',
+      viaFallback: false,
+    });
+    // not a member, no opt-in: the ticket waits, or runs on main when the project allows the fallback
+    expect(accountForAgent(await settingsOf([]), project, agent(), now)).toBeNull();
+    expect(accountForAgent(await settingsOf([], true), project, agent(), now)).toEqual({
+      key: 'main',
+      viaFallback: true,
+    });
+    // an unknown workstation owner is treated the same way
+    expect(
+      accountForAgent(await settingsOf([owner]), project, agent({ ws_user_id: undefined }), now),
+    ).toBeNull();
+    // the owner opted in
+    expect(accountForAgent(await settingsOf([]), project, agent({ share_accounts: true }), now)).toEqual({
+      key: 'work',
+      viaFallback: false,
+    });
+    // the owner's setting is an event-sourced switch, off by default, owner only
+    const flip = (cookie: string, allow: boolean) =>
+      w.t.req('PUT', `/api/workstations/${w.workstationId}/account-sharing`, { cookie, body: { allow } });
+    const other = await w.t.userSession(`other-${randomUUID().slice(0, 6)}@example.test`);
+    expect((await flip(other.cookie, true)).status).toBe(404);
+    expect((await flip(w.owner.cookie, true)).status).toBe(200);
+    expect(
+      (await q('SELECT share_accounts FROM workstations WHERE id=$1', [w.workstationId]))[0]?.share_accounts,
+    ).toBe(true);
+    expect(
+      (
+        await ok<any>(
+          w.t.req('GET', `/api/workstations/${w.workstationId}/ai-runtimes`, { cookie: w.owner.cookie }),
+        )
+      ).shareAccounts,
+    ).toBe(true);
+    await flip(w.owner.cookie, false);
+    expect(
+      (await q('SELECT share_accounts FROM workstations WHERE id=$1', [w.workstationId]))[0]?.share_accounts,
+    ).toBe(false);
+  });
+
   it('a project without an account uses main and sends none', async () => {
     await reset();
     await report(codex([info('main'), info('work')]));
@@ -564,6 +629,20 @@ describe('the project view', () => {
       main: { key: 'main', login: 'ok', email: 'm@x.test' },
       account: { key: 'work', login: 'ok', email: 'w@x.test' },
     });
+  });
+
+  it('shows the sign-in e-mail of an account only to the owner of the workstation', async () => {
+    await reset();
+    await report(codex([info('main', { email: 'm@x.test' }), info('work', { email: 'w@x.test' })]));
+    await hireCodex('Cody');
+    await put('codex', { accountKey: 'work' });
+    const m = await addMember(w, 'peek');
+    const seen = await ok<any>(
+      w.t.req('GET', `/api/projects/${w.projectId}/provider-accounts/codex`, { cookie: m.cookie }),
+    );
+    expect(seen.workstations).toHaveLength(1);
+    expect(JSON.stringify(seen)).not.toContain('@x.test');
+    expect((await view('codex')).workstations[0].main.email).toBe('m@x.test');
   });
 
   it('says a key account has no key on the workstation', async () => {

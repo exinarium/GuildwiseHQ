@@ -13,7 +13,7 @@ const MIN = 60_000;
 async function hasQueuedWork(ctx: Ctx, workstationId: string): Promise<boolean> {
   const agents = await rows(
     ctx.pool,
-    `SELECT a.*, ws.runtimes FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
+    `SELECT a.*, ws.runtimes, ws.user_id AS ws_user_id, ws.share_accounts FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
        JOIN users wu ON wu.id = ws.user_id AND wu.status='active'
       WHERE a.workstation_id=$1 AND a.status='active' AND NOT a.is_devops AND ws.status='active'`,
     [workstationId],

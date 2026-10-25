@@ -42,7 +42,7 @@ export async function questionPass(
     ctx.pool,
     `SELECT d.id, d.routed_agent_id, d.updated_at, d.created_at, d.card_id,
             dc.project_id AS card_project_id,
-            a.status AS agent_status, a.runtime, a.model AS agent_model, d.org_id AS item_org_id, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
+            a.status AS agent_status, a.runtime, a.model AS agent_model, d.org_id AS item_org_id, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.share_accounts, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
             (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
                AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'rejected' AND s.outcome IS DISTINCT FROM 'reported') AS failed
        FROM desk_items d JOIN agents a ON a.id = d.routed_agent_id LEFT JOIN workstations ws ON ws.id = a.workstation_id
@@ -65,7 +65,14 @@ export async function questionPass(
     // The account: the card's project's, when the question is about one of its tickets; else main. No usable account
     // (the project's is out and it does not fall back, or main is out) counts as not reachable: the item waits, and
     // goes on along its chain if that lasts (as with a limited runtime before accounts).
-    const agent = { runtime: r.runtime, model: r.agent_model, runtimes: r.runtimes, org_id: r.item_org_id };
+    const agent = {
+      runtime: r.runtime,
+      model: r.agent_model,
+      runtimes: r.runtimes,
+      org_id: r.item_org_id,
+      ws_user_id: r.ws_user_id,
+      share_accounts: r.share_accounts,
+    };
     const account = accountForAgent(accounts, r.card_id ? r.card_project_id : null, agent, now);
     const reachable =
       r.agent_status === 'active' &&

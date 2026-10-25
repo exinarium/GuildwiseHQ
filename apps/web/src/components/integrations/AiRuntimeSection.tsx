@@ -12,7 +12,7 @@ import {
 } from '@aom/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { useAiRuntimes, usePromoteAccount } from '../../api/queries/ai-runtimes.ts';
+import { useAiRuntimes, usePromoteAccount, useSetAccountSharing } from '../../api/queries/ai-runtimes.ts';
 import { useRemoveIntegration } from '../../api/queries/integrations.ts';
 import { useRemoveProviderKey, useSetProviderKey } from '../../api/queries/providers.ts';
 import type { PageCtx } from '../../lib/integrations.ts';
@@ -476,6 +476,7 @@ export function AiRuntimeSection({
   openConnect: boolean;
 }) {
   const q = useAiRuntimes(ctx.workstationId);
+  const sharing = useSetAccountSharing(ctx.workstationId);
   if (q.isPending)
     return (
       <p className="text-sm text-muted" data-testid="ai-loading">
@@ -488,7 +489,7 @@ export function AiRuntimeSection({
         Could not read the AI runtimes of {ctx.workstationName}.
       </Callout>
     );
-  const { tiles = [], online, lastPromote, pinnedProjects: pinned = [] } = q.data;
+  const { tiles = [], online, lastPromote, pinnedProjects: pinned = [], shareAccounts = false } = q.data;
   // Claude Code has its own tiles above; opencode and the providers follow the login runtimes
   const rest = tiles.filter((t) => t.id !== 'claude-code');
   const keys = rest.filter((t) => t.kind === 'key');
@@ -500,6 +501,20 @@ export function AiRuntimeSection({
           Could not make {lastPromote.key} the main account: {lastPromote.error ?? 'the workstation refused'}.
         </Callout>
       )}
+      <label className="flex items-start gap-2 text-sm text-fg" data-testid="ai-share-accounts">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={shareAccounts}
+          disabled={sharing.isPending}
+          onChange={(e) => sharing.mutate(e.target.checked)}
+        />
+        <span>
+          <strong>Allow projects to use my accounts.</strong> A project picks one of the named accounts on
+          this workstation, which spend your own keys and logins. Off: only projects you are a member of may
+          do that here; others wait or use the main account.
+        </span>
+      </label>
       <p className="text-sm text-muted">
         Each runtime and provider has a <strong>main account</strong> and any number of{' '}
         <strong>named accounts</strong>. A project picks an account per provider in its settings and falls

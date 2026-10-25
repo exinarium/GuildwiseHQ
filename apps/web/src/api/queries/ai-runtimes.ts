@@ -36,6 +36,15 @@ export function usePromoteAccount(workstationId: string) {
   });
 }
 
+/** "Allow projects to use my accounts" (per workstation, off by default). */
+export function useSetAccountSharing(workstationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (allow: boolean) => put(`/workstations/${workstationId}/account-sharing`, { allow }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-runtimes', workstationId] }),
+  });
+}
+
 /** The project's account for one provider or runtime and how it stands on each workstation that can serve it. */
 export function useProviderAccounts(
   projectId: string,

@@ -1,4 +1,5 @@
 import {
+  AccountSharingRequestSchema,
   IdParamsSchema,
   PrivateEndpointsSetSchema,
   ProviderAccountKeySchema,
@@ -12,6 +13,7 @@ import { requireUser } from '../auth/guards.ts';
 import {
   clearProviderKey,
   promoteAccount,
+  setAccountSharing,
   setPrivateEndpoints,
   setProviderKey,
   workstationAiRuntimes,
@@ -76,6 +78,16 @@ export function providerRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return workstationAiRuntimes(ctx, s.user, req.params.id);
     });
+
+    app.put(
+      '/api/workstations/:id/account-sharing',
+      { schema: { params: IdParamsSchema, body: AccountSharingRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setAccountSharing(ctx, s.user, req.params.id, req.body.allow);
+        return { allow: req.body.allow };
+      },
+    );
 
     app.post(
       '/api/workstations/:id/accounts/promote',

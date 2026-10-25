@@ -53,7 +53,7 @@ export async function getProjectClaudeAccounts(
   const key: string | null = p.claude_account_key ?? null;
   const stations = await rows(
     ctx.pool,
-    `SELECT DISTINCT ws.id, ws.name, ws.connected, ws.runtimes, ws.claude_account_ensure,
+    `SELECT DISTINCT ws.id, ws.user_id AS owner_id, ws.name, ws.connected, ws.runtimes, ws.claude_account_ensure,
             COALESCE($2 = ANY (wc.capabilities), false) AS supports
        FROM workstations ws
        JOIN agents a ON a.workstation_id = ws.id AND a.org_id = $1 AND a.status = 'active' AND a.runtime = 'claude-code'
@@ -71,8 +71,14 @@ export async function getProjectClaudeAccounts(
       if (!a.main && ClaudeAccountKeySchema.safeParse(a.key).success) known.add(a.key);
     const ensure = key ? (w.claude_account_ensure?.[key] as { state?: string } | undefined) : undefined;
     const provisioning = ClaudeAccountEnsureResultSchema.shape.state.safeParse(ensure?.state);
-    const main = mainAccountInfo(rt);
-    const account = key ? rt?.accounts?.find((a) => a.key === key) : undefined;
+    // the sign-in e-mail of an account is the workstation owner's to see
+    const seen = (i: ClaudeAccountInfo | undefined) => {
+      if (!i || w.owner_id === userId) return i;
+      const { email: _email, ...rest } = i;
+      return rest as ClaudeAccountInfo;
+    };
+    const main = seen(mainAccountInfo(rt));
+    const account = seen(key ? rt?.accounts?.find((a) => a.key === key) : undefined);
     return {
       workstationId: w.id as string,
       name: w.name as string,

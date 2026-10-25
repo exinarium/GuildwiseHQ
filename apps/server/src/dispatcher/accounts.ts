@@ -6,6 +6,7 @@ import {
   anyAccountUsable,
   isLoginScope,
   MAIN_ACCOUNT,
+  ORG_ACCOUNT,
   type ProjectAccountSetting,
   resolveScopeAccount,
   resolveShiftAccount,
@@ -34,6 +35,9 @@ export interface AccountAgent {
   model: string;
   runtimes: unknown;
   org_id?: string | null | undefined;
+  /** The workstation's owner and whether they allow projects they are not on to use their named accounts (see `mayUseNamed`). */
+  ws_user_id?: string | null | undefined;
+  share_accounts?: boolean | null | undefined;
 }
 
 /** The scope an agent's shifts spend, from its runtime and model (Gemini: the login unless the workstation runs it on a key). */
@@ -62,6 +66,26 @@ export class ProjectAccounts {
   settingFor(projectId: string | null | undefined, scope: AccountScope | null): ProjectAccountSetting | null {
     if (!projectId || !scope) return null;
     return this.byScope.get(scope)?.get(projectId) ?? null;
+  }
+
+  /** The active members of the projects that name an account (loaded with the settings). */
+  private readonly members = new Map<string, Set<string>>();
+
+  setMembers(projectId: string, userIds: Iterable<string>): void {
+    this.members.set(projectId, new Set(userIds));
+  }
+
+  /**
+   * May the project's NAMED account be used on this agent's workstation? A named account is the workstation owner's own key or
+   * login, chosen by the project's owner or manager: it is used only when the workstation owner is a member of the project, or
+   * switched on "Allow projects to use my accounts" for the workstation. The main account and the organization's key are not
+   * personal and are not held back. Unknown workstation owner: not allowed.
+   */
+  mayUseNamed(projectId: string, setting: ProjectAccountSetting, a: AccountAgent): boolean {
+    if (!setting.accountKey || setting.accountKey === MAIN_ACCOUNT || setting.accountKey === ORG_ACCOUNT)
+      return true;
+    if (a.share_accounts === true) return true;
+    return !!a.ws_user_id && (this.members.get(projectId)?.has(a.ws_user_id) ?? false);
   }
 
   /** The projects that name an account for the scope. */
@@ -95,6 +119,17 @@ export async function loadProjectAccounts(
     projectIds ? [projectIds] : [],
   );
   for (const p of other) out.add(p.scope, p.project_id, { accountKey: p.key, fallbackToMain: p.fallback });
+  const named = [...new Set([...claude.map((p) => p.id), ...other.map((p) => p.project_id)])];
+  if (named.length) {
+    const members = await rows<{ project_id: string; user_id: string }>(
+      db,
+      `SELECT project_id, user_id FROM project_members WHERE status='active' AND project_id = ANY ($1::uuid[])`,
+      [named],
+    );
+    const byProject = new Map<string, string[]>();
+    for (const m of members) byProject.set(m.project_id, [...(byProject.get(m.project_id) ?? []), m.user_id]);
+    for (const id of named) out.setMembers(id, byProject.get(id) ?? []);
+  }
   return out;
 }
 
@@ -114,7 +149,26 @@ export function accountForAgent(
   // a runtime with no accounts (the mock): the old rule, available and not paused
   if (!scope)
     return mainUsable(a.runtimes, a.runtime, now) ? { key: MAIN_ACCOUNT, viaFallback: false } : null;
-  const setting = accounts?.settingFor(projectId, scope) ?? null;
+  let setting = accounts?.settingFor(projectId, scope) ?? null;
+  // The project's named account is the workstation owner's: not honored here unless they are on the project or allow it. The ticket
+  // then waits, or (when the project allows a fallback) runs on the main account.
+  let held = false;
+  if (setting && projectId && accounts && !accounts.mayUseNamed(projectId, setting, a)) {
+    if (!setting.fallbackToMain) return null;
+    setting = null;
+    held = true;
+  }
+  const out = resolveFor(scope, setting, a, now, orgCapped);
+  return out && held ? { ...out, viaFallback: true } : out;
+}
+
+function resolveFor(
+  scope: AccountScope,
+  setting: ProjectAccountSetting | null,
+  a: AccountAgent,
+  now: Date,
+  orgCapped: boolean,
+): { key: string; viaFallback: boolean } | null {
   if (isLoginScope(scope)) return resolveShiftAccount(setting, viewOf(a.runtimes, a.runtime), now);
   // a provider key: the runtime that spends it has to be there, and then the key facts decide
   if (!viewOf(a.runtimes, a.runtime)?.available) return null;

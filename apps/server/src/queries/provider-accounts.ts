@@ -40,14 +40,15 @@ interface Report {
 
 const reportsOf = (runtimes: unknown): Report[] => (Array.isArray(runtimes) ? (runtimes as Report[]) : []);
 
-const fromInfo = (a: ClaudeAccountInfo): ProviderAccountStatus => ({
+/** `withEmail`: the sign-in e-mail is shown only to the owner of the workstation it belongs to. */
+const fromInfo = (a: ClaudeAccountInfo, withEmail = true): ProviderAccountStatus => ({
   key: a.key,
   main: a.main,
   kind: 'login',
   login: a.login,
   usage: a.usage,
   ...(a.limitedUntil ? { limitedUntil: a.limitedUntil } : {}),
-  ...(a.email ? { email: a.email } : {}),
+  ...(a.email && withEmail ? { email: a.email } : {}),
   ...(a.detail ? { detail: a.detail } : {}),
 });
 
@@ -121,7 +122,7 @@ export async function getProjectProviderAccounts(
   const key = cur?.account_key ?? null;
   const agents = await rows(
     ctx.pool,
-    `SELECT a.runtime, a.model, ws.id AS ws_id, ws.name, ws.connected, ws.runtimes,
+    `SELECT a.runtime, a.model, ws.id AS ws_id, ws.user_id AS owner_id, ws.name, ws.connected, ws.runtimes,
             COALESCE($2 = ANY (wc.capabilities), false) AS supports
        FROM agents a
        JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
@@ -147,7 +148,7 @@ export async function getProjectProviderAccounts(
       for (const x of rt?.accounts ?? []) if (!x.main) known.add(x.key);
       const list = rt?.accounts ?? [];
       const m = list.find((x) => x.main);
-      if (m) main = fromInfo(m);
+      if (m) main = fromInfo(m, a.owner_id === userId);
       else if (rt)
         main = {
           key: MAIN_ACCOUNT,
@@ -158,7 +159,7 @@ export async function getProjectProviderAccounts(
           ...(rt.limitedUntil ? { limitedUntil: rt.limitedUntil } : {}),
         };
       const chosen = key ? list.find((x) => x.key === key) : undefined;
-      if (chosen) account = fromInfo(chosen);
+      if (chosen) account = fromInfo(chosen, a.owner_id === userId);
     } else if (isKeyScope(scope)) {
       const k = reportsOf(a.runtimes)
         .find((r) => r.id === 'direct-model')

@@ -308,6 +308,16 @@ describe('Integrations > AI runtime: sign in', () => {
     expect(codex.queryByTestId('ai-remove-codex-main')).toBeNull();
   });
 
+  it('has a per-workstation switch “Allow projects to use my accounts”, off by default', async () => {
+    const user = userEvent.setup();
+    page();
+    const box = await screen.findByRole('checkbox', { name: /Allow projects to use my accounts/ });
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    await waitFor(() => expect(callTo('PUT', '/account-sharing')).toBeDefined());
+    expect(callTo('PUT', '/account-sharing')?.body).toEqual({ allow: true });
+  });
+
   it('Make main lists the projects that name the main or the named account before it swaps them', async () => {
     pinnedProjects = [
       { scope: 'codex', account: 'main', projectKey: 'TOY', projectName: 'Toy' },

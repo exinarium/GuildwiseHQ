@@ -181,7 +181,7 @@ export class Dispatcher {
     const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
     const list = await rows(
       this.ctx.pool,
-      `SELECT a.*, ws.runtimes,
+      `SELECT a.*, ws.runtimes, ws.user_id AS ws_user_id, ws.share_accounts,
               (SELECT count(*)::int FROM cards c WHERE c.claimed_by_agent_id = a.id AND c.claim_id IS NOT NULL) AS active
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
                  JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'

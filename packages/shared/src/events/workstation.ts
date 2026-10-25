@@ -25,6 +25,11 @@ export const workstationEvents = [
       changedBy: Id,
     }),
   ),
+  /** The owner allows (or stops allowing) projects they are not a member of to use their named accounts on this workstation. */
+  defineEvent(
+    'WorkstationAccountSharingSet',
+    z.object({ workstationId: Id, allow: z.boolean(), changedBy: Id }),
+  ),
   defineEvent('WorkstationRenamed', z.object({ workstationId: Id, name: z.string().min(1) })),
   defineEvent('WorkstationUnlinked', z.object({ workstationId: Id, by: z.enum(['owner', 'admin']) })),
   defineEvent('WorkstationConnected', z.object({ workstationId: Id, runnerVersion: z.string().optional() })),

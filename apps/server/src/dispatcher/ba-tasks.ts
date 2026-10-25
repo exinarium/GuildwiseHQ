@@ -117,7 +117,7 @@ export async function baTaskPass(
     const scopingRole = scoping?.role ?? null;
     const bas = await rows(
       ctx.pool,
-      `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.runner_version, ws.runtimes, ws.connected, ws.last_seen_at
+      `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.share_accounts, ws.runner_version, ws.runtimes, ws.connected, ws.last_seen_at
          FROM ${BA_TASK_AGENT_FROM}
         WHERE a.role_key = $5 AND ${baTaskAgentEligibleSql({ org: '$1', project: '$2', orgLevel: '$4' })}
         ORDER BY (a.id = $3::uuid) DESC,

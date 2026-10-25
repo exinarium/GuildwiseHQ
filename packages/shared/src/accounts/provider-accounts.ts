@@ -150,6 +150,7 @@ export const ProviderAccountPromotePayloadSchema = z.object({
   nonce: z.string().min(8).max(64).optional(),
 });
 export type ProviderAccountPromotePayload = z.infer<typeof ProviderAccountPromotePayloadSchema>;
+export const AccountSharingRequestSchema = z.object({ allow: z.boolean() });
 export const ProviderAccountPromoteResultSchema = z.object({
   ok: z.boolean(),
   error: z.string().max(300).optional(),
@@ -281,6 +282,8 @@ export const AiRuntimesResponseSchema = z.object({
    * Projects (visible to the owner) that name an account of a scope explicitly (`main` or a named one): "Make main" changes what
    * these get, so the confirmation lists them. Projects with no choice follow the main account and are not listed.
    */
+  /** "Allow projects to use my accounts": projects the owner is not a member of may name a named account here. Default off. */
+  shareAccounts: z.boolean().default(false),
   pinnedProjects: z
     .array(
       z.object({

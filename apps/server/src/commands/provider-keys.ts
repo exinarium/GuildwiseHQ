@@ -14,6 +14,7 @@ import {
   ProviderKeyResultSchema,
   type ReportedProvider,
   type SetProviderKeyRequest,
+  streamId,
   type WorkstationProvidersResponse,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -24,6 +25,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { providersOf, runtimeReports } from '../sessions/offer.ts';
+import { userActor, userScope } from './common.ts';
 import { applyOrgKeyResult } from './org-provider-keys.ts';
 import { deliver } from './workstation-setup.ts';
 
@@ -360,6 +362,7 @@ export async function workstationAiRuntimes(
     capabilities: Array.isArray(caps?.capabilities) ? (caps?.capabilities as string[]) : [],
   });
   const last = lastPromote.get(workstationId);
+  const shared = await one(ctx.pool, 'SELECT share_accounts FROM workstations WHERE id=$1', [workstationId]);
   const pinned = await rows(
     ctx.pool,
     `SELECT ppa.scope, ppa.account_key, p.key AS project_key, p.name AS project_name
@@ -371,6 +374,7 @@ export async function workstationAiRuntimes(
   return {
     workstationId,
     online: ctx.services.runners.isOnline(workstationId),
+    shareAccounts: shared?.share_accounts === true,
     pinnedProjects: pinned.map((r) => ({
       scope: r.scope as string,
       account: r.account_key as string,
@@ -389,4 +393,35 @@ export async function workstationAiRuntimes(
         }
       : null,
   };
+}
+
+/**
+ * "Allow projects to use my accounts" (per workstation, off by default). A project's named account spends the workstation owner's
+ * key or login; without this, only the projects the owner is a member of may name one on this workstation. Only the owner.
+ */
+export async function setAccountSharing(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  workstationId: string,
+  allow: boolean,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    await ownWorkstation(ctx, tx, user, workstationId);
+    const cur = await one(tx, 'SELECT share_accounts FROM workstations WHERE id=$1', [workstationId]);
+    if ((cur?.share_accounts === true) === allow) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.workstation(workstationId),
+          event: {
+            type: 'WorkstationAccountSharingSet',
+            payload: { workstationId, allow, changedBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: userScope(user.id),
+        },
+      ],
+      { tx },
+    );
+  });
 }

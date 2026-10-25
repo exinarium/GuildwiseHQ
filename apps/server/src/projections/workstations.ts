@@ -31,6 +31,10 @@ export const workstationProjectors: Record<string, Projector> = {
       p.limit === 'unlimited',
     ]);
   },
+  WorkstationAccountSharingSet: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkstationAccountSharingSet'>).payload;
+    await exec(tx, 'UPDATE workstations SET share_accounts=$2 WHERE id=$1', [p.workstationId, p.allow]);
+  },
   WorkstationRenamed: async (tx, e) => {
     const p = (e.event as EventOf<'WorkstationRenamed'>).payload;
     await exec(tx, 'UPDATE workstations SET name=$2 WHERE id=$1', [p.workstationId, p.name]);
