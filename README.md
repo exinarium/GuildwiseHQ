@@ -1,6 +1,6 @@
 # Guildwise HQ
 
-**An AI delivery team for software work.** Free and open source. Agents spec, build, review, test and deploy your code, on your own machines, while you make the decisions.
+**Run an organization of AI agents.** Free and open source. Give your agents roles, a lean team, a board, a decision desk, approval gates, budgets and an audit trail, on your own machines and AI accounts, while you make the decisions. It comes set up for software delivery (spec, build, review, test, deploy) and extends to other work you hand to agents.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/releases)
@@ -14,11 +14,13 @@
 
 ## What is Guildwise HQ?
 
-Guildwise HQ is an **AI delivery organization for software work**. You describe what you want as a card. A team of AI agents turns it into a specification, builds it on a branch of your repository, has another agent review it, tests it, and lands it. When an agent is unsure, or a step is risky, it asks you on your **Desk** and waits.
+Guildwise HQ is a way to **run an organization of AI agents**. You hire agents into roles, give them work as cards on a board, and stay in charge: when an agent is unsure, or a step is risky, it asks you on your **Desk** and waits.
+
+It comes **set up for software delivery by default**: you describe what you want as a card, and a team of agents turns it into a specification, builds it on a branch of your repository, has another agent review it, tests it and lands it. The same organization also runs other work: research projects that answer questions with cited sources, scheduled feeds and digests, and your own roles and workflows. Packs and playbooks teach agents how you work, and Discovery and the Boardroom help you think an idea or a decision through into a document.
 
 - **The board** shows every piece of work and where it stands.
 - **The Desk** is your inbox of decisions: questions, approvals and go-aheads that only you can give.
-- **The agents** have roles, seniority and a place on the org chart. They run on *your* workstations, so your code, credentials and files stay where they are.
+- **The agents** have roles, seniority and a place on the org chart. They run on *your* workstations, so your files, credentials and accounts stay where they are.
 - **The ledger** remembers decisions and standing orders, so nobody asks you the same thing twice.
 - **The guardrails** are budgets, approval gates, sandboxed sessions and an audit log.
 
@@ -28,18 +30,19 @@ The Guildwise HQ server holds the board, the desk and the records. It never hold
 
 ## Key features
 
-**Work, from idea to done**
+**Work, from idea to done** (software delivery is the default workflow)
 - **Board and cards.** Cards move through spec, build, review, test, finalize and optional QA. Filters show what is blocked, in rework or waiting for you.
 - **Backlog and intake.** Quick-add ideas, send them to the business analyst, or bring in tickets (Jira is supported on the runner).
-- **Discovery.** Turn a rough idea into a product requirements document (PRD) with an analyst agent.
-- **Boardroom.** A multi-persona discussion run by a chair agent, with minutes you can pull into a PRD.
+- **Discovery.** Turn a rough idea into a requirements document (by default a PRD) with an analyst agent.
+- **Boardroom.** A multi-persona discussion of any question or decision, run by a chair agent, with minutes you can pull into a PRD.
 - **Phases, releases and environments.** Ship work in phases, through a release queue, with delivery recipes for your own apps.
 
 **Agents and team**
-- Roles: business analyst, planner, architect (optional), builder, pre-reviewer, reviewer, tester and DevOps engineer.
+- Roles in the default software workflow: business analyst, planner, architect (optional), builder, pre-reviewer, reviewer, tester and DevOps engineer.
 - Hire agents with a role, seniority and a per-project allow-list. Pause, resume or change their model.
 - A **CEO agent** in every organization handles routine items before they reach your Desk and writes a daily report.
-- An **org chart**, plus custom roles, departments and workflows.
+- An **org chart**, plus custom roles, departments and workflows, so the organization can be shaped for work other than software.
+- **Other kinds of project.** Research projects (questions answered with cited sources, results kept in your vault) and feeds (scheduled scans and digests) sit next to code projects.
 
 **Runtimes**
 - Claude Code, Codex CLI, Gemini CLI, opencode and direct model APIs. Each workstation signs in to the runtimes it uses.
@@ -73,13 +76,13 @@ flowchart LR
     You["You<br/>board, Desk, decisions"] <--> Web["Web app"]
     Web <--> Server["Guildwise server<br/>Fastify, Postgres, event log"]
     Runner["Runner on a workstation"] -- "outbound WebSocket (wss)" --> Server
-    Runner --> Agents["Agents in sandboxed<br/>git worktrees"]
-    Agents --> Repos[("Your repositories<br/>and vaults")]
+    Runner --> Agents["Agents in sandboxed<br/>sessions"]
+    Agents --> Repos[("Your repositories,<br/>files and vaults")]
 ```
 
 - The **server** records every change as an event and keeps a projection for the board. It needs only Postgres.
 - The **runner** is a small Node program on each workstation. It connects *out* to the server, so no inbound port is needed on the workstation.
-- **Agents** run inside the runner, on the machine that holds the code.
+- **Agents** run inside the runner, on the machine that holds the work (for software, in a separate git worktree per card).
 
 Technical design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Product guide: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 

@@ -1,6 +1,6 @@
 # Self-hosting Guildwise HQ
 
-This guide covers running your own Guildwise HQ server: installation, configuration, the platform account, connecting workstations, upgrades, backups and troubleshooting. For the quick path, see the [README](../README.md#self-host-in-10-minutes).
+Guildwise HQ lets you run an organization of AI agents (set up for software delivery by default). This guide covers running your own Guildwise HQ server: installation, configuration, the platform account, connecting workstations, upgrades, backups and troubleshooting. For the quick path, see the [README](../README.md#self-host-in-10-minutes).
 
 Every feature is included in a self-hosted install, and organizations are unlimited: there are no plans, trials, sign-up pages or limits on your own server. The platform administrator invites organizations directly.
 

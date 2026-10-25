@@ -1,6 +1,6 @@
 # Governance
 
-This document describes how Guildwise HQ is run: who decides, how work is accepted, and what to expect from the project.
+This document describes how Guildwise HQ, a way to run an organization of AI agents, is run: who decides, how work is accepted, and what to expect from the project.
 
 ## Roles
 

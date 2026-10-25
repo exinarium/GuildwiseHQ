@@ -51,13 +51,15 @@
 **Screens**
 
 - Open on the Board of the demo project "Web shop" (about eight cards across the columns, cards moving). Hold for three seconds before the narration starts.
-- Show the Guildwise HQ logo on the sidebar, then the title card: "Guildwise HQ: an AI delivery team for software work."
+- Show the Guildwise HQ logo on the sidebar, then the title card: "Guildwise HQ: run an organization of AI agents."
 
 **Narration**
 
 > Welcome to Guildwise H Q. This video is a short tour of the whole product, at a high level. It takes about twelve minutes.
 >
-> Guildwise H Q is an AI delivery organization for software work. You describe what you want, in plain words. A team of AI agents turns it into a clear specification, builds it on a branch of your code, has another agent review it, and tests it.
+> Guildwise H Q lets you run an organization of AI agents. You hire agents into roles, give them work on a board, and keep every decision that matters.
+>
+> It comes set up for software delivery. You describe what you want, in plain words. A team of agents turns it into a clear specification, builds it on a branch of your code, has another agent review it, and tests it. The same organization can also run other work, like research and scheduled digests, and you can shape its roles and workflows to fit.
 >
 > You stay in charge. The agents ask you when they need a decision, and they wait for your go-ahead before anything risky.
 >
@@ -76,7 +78,7 @@
 
 **Narration**
 
-> Think of it as hiring a small team. Someone writes the specification. Someone builds. Someone reviews the work and tries to break it. Someone tests it. And an assistant keeps notes and reports to you.
+> Think of it as hiring a small team. In the default software setup, someone writes the specification. Someone builds. Someone reviews the work and tries to break it. Someone tests it. And an assistant keeps notes and reports to you.
 >
 > Each member has a role, a level of seniority, and a name. They work on the projects you allow them to work on, and they can only take work from those projects.
 >
@@ -118,7 +120,7 @@
 
 **Narration**
 
-> A piece of work is a card. You create one with New card, and you write what you want, in your own words.
+> A piece of work is a card. You create one with New card, and you write what you want, in your own words. The default software workflow is what you see here. Research and feed projects use their own, simpler workflows, and you can design your own.
 >
 > The card then moves across the board by itself. First it is specified: the context, the requirements, and what done looks like. Then a builder works on a branch of your repository. A reviewer reads the change, and sends it back when it is not right.
 >
@@ -295,7 +297,7 @@
 
 **Narration**
 
-> That is Guildwise H Q. A team of agents that builds, reviews and tests your software, on your own machines, with you in charge of every decision.
+> That is Guildwise H Q. An organization of AI agents that you run on your own machines, with you in charge of every decision. It builds, reviews and tests your software out of the box, and it is ready for other work too.
 >
 > Thank you for watching.
 
@@ -307,8 +309,8 @@ Used for the README clip, `docs/media/overview-teaser.mp4`. It shows the same pr
 
 | Time | Screen | Narration |
 | --- | --- | --- |
-| 0:00 to 0:06 | Board, cards moving left to right | "What if your software team never ships without asking you first?" |
-| 0:06 to 0:16 | Board, title card "Guildwise HQ" | "This is Guildwise H Q. You describe the work as a card. Agents specify it, build it, review it and test it, on your own machines." |
+| 0:00 to 0:06 | Board, cards moving left to right | "What if your team of AI agents never did anything important without asking you first?" |
+| 0:06 to 0:16 | Board, title card "Guildwise HQ" | "This is Guildwise H Q. You describe the work as a card. Out of the box, agents specify it, build it, review it and test it, on your own machines." |
 | 0:16 to 0:28 | Desk, a question open, the answer typed | "When an agent needs a decision, it asks you on the Desk. You answer once, and the team carries on." |
 | 0:28 to 0:40 | Discovery, the draft panel with a PRD | "Start with a rough idea, and an analyst turns it into a requirements document you approve." |
 | 0:40 to 0:50 | Workstations, one card online | "Your code stays on your workstations. The server never holds your keys." |
@@ -316,9 +318,9 @@ Used for the README clip, `docs/media/overview-teaser.mp4`. It shows the same pr
 
 **Full teaser narration, read straight through**
 
-> What if your software team never ships without asking you first?
+> What if your team of AI agents never did anything important without asking you first?
 >
-> This is Guildwise H Q. You describe the work as a card. Agents specify it, build it, review it and test it, on your own machines.
+> This is Guildwise H Q. You describe the work as a card. Out of the box, agents specify it, build it, review it and test it, on your own machines.
 >
 > When an agent needs a decision, it asks you on the Desk. You answer once, and the team carries on.
 >

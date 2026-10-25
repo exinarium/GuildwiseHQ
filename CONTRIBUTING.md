@@ -1,6 +1,6 @@
 # Contributing to Guildwise HQ
 
-Thank you for your interest. Contributions of code, documentation, bug reports and ideas are all welcome.
+Thank you for your interest. Guildwise HQ is a way to run an organization of AI agents, set up for software delivery by default. Contributions of code, documentation, bug reports and ideas are all welcome.
 
 Before you start:
 
