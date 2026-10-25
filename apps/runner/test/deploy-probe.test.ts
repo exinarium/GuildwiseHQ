@@ -358,8 +358,8 @@ exit 255`;
       'asks',
       'changed',
       'down',
-      'prod-server',
       'newbox',
+      'prod-server',
       'timeout',
     ]);
     expect(byAlias['prod-server']).toMatchObject({
