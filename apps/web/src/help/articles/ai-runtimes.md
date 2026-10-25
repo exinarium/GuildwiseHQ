@@ -21,6 +21,10 @@ A tile shows whether the program is installed (with the command to install it), 
 
 **Set key** encrypts the key in your browser for that workstation's runner, which keeps it. This needs HTTPS or localhost. A named account is your own key, so it is not capped. Organization keys and their monthly caps stay under **Settings, Model providers**: a project can also choose the organization's key as its account, and the cap still applies.
 
+## Sharing {#sharing}
+
+A named account belongs to one workstation and is never shared with others. To let several workstations use one key, set the organization key under **Settings, Model providers**: it is shared with the workstations you tick and its monthly cap applies.
+
 ## Make main {#make-main}
 
 **Make main** swaps a named account with the main account. Nothing is lost, and doing it again undoes it.

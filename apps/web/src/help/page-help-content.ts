@@ -946,6 +946,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'From a terminal',
         text: 'The command to run on the workstation instead, for headless machines.',
       },
+      {
+        name: 'AI runtime',
+        text: 'One tile per program or provider (Codex, the Gemini CLI, Anthropic, OpenAI and others): whether it is installed, who is signed in and whose key is in effect. Sign in runs the program\'s own login on the workstation, Set key stores a key for it, Add a named account makes another login or key, and Make main swaps a named account with the main one.',
+      },
     ],
     article: 'integrations',
   },
@@ -1080,7 +1084,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Removes the organization key from every workstation.',
       },
     ],
-    article: 'workstations-and-installer',
+    article: 'ai-runtimes#keys',
   },
   '/settings/org': {
     title: 'Organization',
