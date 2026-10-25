@@ -261,18 +261,22 @@ describe('the capability editor', () => {
 describe('My capabilities', () => {
   it('lists my packs with their state and creates a private one on my workstation', async () => {
     const user = userEvent.setup();
+    const fresh = myPack({
+      id: '0192f3a0-0000-7000-8000-0000000000c3',
+      name: 'fresh',
+      state: 'draft',
+      pinnedSha: null,
+      items: [],
+    });
+    let created = false;
     const calls = stub({
       ...owner,
-      'GET /api/my-capabilities': () => myPacks(),
+      'GET /api/my-capabilities': () => myPacks(created ? [myPack(), fresh] : [myPack()]),
       'GET /api/pack-assignments': () => ({ items: [] }),
-      'POST /api/my-capabilities': () => ({
-        pack: myPack({
-          id: '0192f3a0-0000-7000-8000-0000000000c3',
-          name: 'fresh',
-          state: 'draft',
-          pinnedSha: null,
-        }),
-      }),
+      'POST /api/my-capabilities': () => {
+        created = true;
+        return { pack: fresh };
+      },
     });
     wrap(<MyCapabilitiesTab />);
     const card = await screen.findByTestId('my-pack-mine');
@@ -291,6 +295,10 @@ describe('My capabilities', () => {
       visibility: 'private',
       workstationId: WS,
     });
+    // the new pack is listed with a way into the editor (it used to open "editing" with nothing to show)
+    const made = await screen.findByTestId('my-pack-fresh');
+    await user.click(within(made).getByRole('button', { name: 'Start writing' }));
+    expect(await screen.findByTestId('pack-editor')).toBeInTheDocument();
   });
 
   it('shares a private pack with the organization only after a confirmation, and says it needs a review', async () => {

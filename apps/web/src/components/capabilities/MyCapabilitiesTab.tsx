@@ -82,10 +82,8 @@ export function MyCapabilitiesTab() {
         <NewPackDialog
           workstations={q.data?.workstations ?? []}
           onClose={() => setCreating(false)}
-          onCreated={(id) => {
-            setCreating(false);
-            setEditing(id);
-          }}
+          // the new pack shows its "Start writing" button: opening the editor needs the (empty) tree that button sets up
+          onCreated={() => setCreating(false)}
         />
       )}
     </div>
