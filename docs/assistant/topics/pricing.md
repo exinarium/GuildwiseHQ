@@ -1,7 +1,7 @@
 ---
 title: Pricing
 summary: How much it costs and what the plans are, for how many people. Guildwise HQ is free. Self-host it, pay what you want for a commercial license, or use Guildwise Cloud from $30 per organization per month.
-keywords: [people, members, seats, team size, pricing, price, cost, free, how much, plan, cloud, yearly, monthly, per member, vat, license, commercial, pay what you want, support, training, invoice, cancel, backup, trial, refund, quote]
+keywords: [people, members, seats, team size, pricing, price, cost, free, how much, plan, cloud, yearly, monthly, per member, vat, license, commercial, pay what you want, customization, setup, support, invoice, cancel, backup, trial, refund, quote]
 order: 32
 ---
 
@@ -21,9 +21,9 @@ For a team of any number of people, per month: 1 member $30, 3 members $50, 5 me
 
 Pay what you want, once, from $5 (suggested $25, $50 or $100). You get a commercial license in your name, a certificate and the Commercial supporter badge. It is voluntary: Apache 2.0 already allows commercial use.
 
-## Support and training {#support}
+## Customization and setup support {#support}
 
-Custom workflow and agent development, and organizational planning, are quoted on request: use Contact us. There is no listed price. Advanced training is coming later. Cloud customers get community membership with free occasional webinars and training.
+Custom workflow and agent development, and organizational planning, are quoted on request: use Contact us. There is no listed price. Cloud customers get community membership with free occasional webinars and training.
 
 ## Backups and your data {#backups}
 

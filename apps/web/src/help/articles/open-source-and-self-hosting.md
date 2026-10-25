@@ -23,7 +23,7 @@ Run it with Docker Compose (the app, Postgres and a Caddy proxy) on your own ser
 
 ## What self-hosting does not include {#not-included}
 
-Hosting, backups, updates and support are yours to run when you self-host. Help with custom workflows, custom agent development and organizational planning is quoted on request: use Contact us where a hosted service offers it.
+Hosting, backups, updates and support are yours to run when you self-host. Customization and setup support (custom workflows, custom agent development and organizational planning) is quoted on request: use Contact us where a hosted service offers it.
 
 ## Supporting the project {#support}
 
