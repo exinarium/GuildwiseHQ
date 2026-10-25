@@ -1,19 +1,15 @@
-import { SUPPORT_KIND_LABELS } from '@aom/shared';
 import { ArrowLeft, BookOpen, GraduationCap, Play, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
-import { useMyTickets } from '../api/queries/support.ts';
 import { BlogSearchHits, HelpBlog } from '../components/blog/HelpBlog.tsx';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
 import { SectionVideo } from '../components/help/SectionVideo.tsx';
 import { SetupHelpCard, useSetupChecklistUi } from '../components/setup/SetupChecklist.tsx';
-import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
-import { MyRequest } from '../components/support/MyRequest.tsx';
-import { StatusBadge } from '../components/support/StatusBadge.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
 import { panelId, Tabs, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader, Panel } from '../components/ui.tsx';
 import { useAllWhatsNew, WhatsNewDialog } from '../components/whatsnew/WhatsNew.tsx';
+import { ext } from '../extension/index.ts';
 import { ARTICLES, articleBySlug, glossaryId, helpBase, helpPath, searchHelp } from '../help/articles.ts';
 import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
@@ -21,12 +17,12 @@ import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { videosForArticle } from '../lib/videos.ts';
 
-type Tab = 'help' | 'blog' | 'contact' | 'requests';
+/** Whether this build has a "Contact us" form (a hosted extension adds it; the open-source app has none). Read lazily: the extension may import this page. */
+const contactAvailable = () => !!ext.helpTabs?.some((t) => t.id === 'contact');
 
-function tabOf(pathname: string): Tab {
+function tabOf(pathname: string): string {
   if (pathname.startsWith('/help/blog')) return 'blog';
-  if (pathname.startsWith('/help/contact')) return 'contact';
-  if (pathname.startsWith('/help/requests')) return 'requests';
+  for (const t of ext.helpTabs ?? []) if (pathname.startsWith(`/help/${t.id}`)) return t.id;
   return 'help';
 }
 
@@ -35,8 +31,6 @@ export function Help() {
   const { pathname } = useLocation();
   const nav = useNavigate();
   const tab = tabOf(pathname);
-  const requests = useMyTickets();
-  const fresh = requests.data?.filter((t) => t.hasReply).length ?? 0;
   usePageTitle('Help');
 
   return (
@@ -50,21 +44,19 @@ export function Help() {
         tabs={[
           { id: 'help', label: 'Help centre', testId: 'help-tab-help' },
           { id: 'blog', label: 'Blog', testId: 'help-tab-blog' },
-          { id: 'contact', label: 'Contact us', testId: 'help-tab-contact' },
-          {
-            id: 'requests',
-            label: 'My requests',
-            testId: 'help-tab-requests',
-            badge: fresh > 0 ? <Badge tone="brand">{fresh} new</Badge> : undefined,
-          },
+          ...(ext.helpTabs ?? []).map((t) => ({
+            id: t.id,
+            label: t.label,
+            testId: t.testId ?? `help-tab-${t.id}`,
+            badge: t.Badge ? <t.Badge /> : undefined,
+          })),
         ]}
         className="mb-5"
       />
       <div role="tabpanel" id={panelId('help', tab)} aria-labelledby={tabId('help', tab)}>
         {tab === 'help' && <HelpCentre />}
         {tab === 'blog' && <HelpBlog slug={pathname.split('/')[3]} />}
-        {tab === 'contact' && <ContactTab />}
-        {tab === 'requests' && <RequestsTab />}
+        {ext.helpTabs?.map((t) => (tab === t.id ? <t.Component key={t.id} /> : null))}
       </div>
     </div>
   );
@@ -240,7 +232,7 @@ function Results({ q, base }: { q: string; base: string }) {
           title="No help article matches"
           description="Try fewer or different words, or browse the list of articles. If it is not here, write to us."
           action={
-            base === '/help' ? (
+            base === '/help' && contactAvailable() ? (
               <Link
                 to="/help/contact"
                 className="inline-flex h-9 items-center rounded-control bg-brand px-3.5 text-sm font-medium text-brand-fg hover:bg-brand-hover"
@@ -326,7 +318,7 @@ function Home({ base }: { base: string }) {
           </li>
         </ul>
       </section>
-      {base === '/help' && (
+      {base === '/help' && contactAvailable() && (
         <p className="text-sm text-muted">
           Not here?{' '}
           <Link to="/help/contact" className="font-medium text-brand-text underline-offset-2 hover:underline">
@@ -389,7 +381,7 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
               ))
           }
         />
-        {base === '/help' && (
+        {base === '/help' && contactAvailable() && (
           <p className="mt-8 border-t border-line pt-4 text-sm text-muted">
             Still stuck?{' '}
             <Link
@@ -467,71 +459,5 @@ function Glossary({ base }: { base: string }) {
         ))}
       </dl>
     </section>
-  );
-}
-
-function ContactTab() {
-  const [params] = useSearchParams();
-  const nav = useNavigate();
-  return (
-    <Panel>
-      <div className="max-w-2xl" data-testid="help-contact">
-        <h2 className="mb-1 text-lg font-semibold text-fg">Contact us</h2>
-        <p className="mb-4 text-sm text-muted">
-          We answer by email, and the answer also appears under My requests. Tell us what you were doing: the
-          form adds the page, the version and your browser.
-        </p>
-        <ContactForm
-          mode="member"
-          prefill={prefillFor(params.get('from'))}
-          canCapture
-          onCancel={() => nav('/help')}
-        />
-      </div>
-    </Panel>
-  );
-}
-
-function RequestsTab() {
-  const { id } = useParams();
-  const list = useMyTickets();
-  if (id) return <MyRequest id={id} />;
-  return (
-    <div data-testid="my-requests">
-      {list.isPending && <ListSkeleton label="Loading your requests" rows={3} />}
-      {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
-      {list.data?.length === 0 && (
-        <EmptyState
-          title="No requests yet"
-          description="When you write to us, your request and our answer appear here."
-          action={
-            <Link
-              to="/help/contact"
-              className="inline-flex h-9 items-center rounded-control bg-brand px-3.5 text-sm font-medium text-brand-fg hover:bg-brand-hover"
-            >
-              Contact us
-            </Link>
-          }
-        />
-      )}
-      <ul className="flex flex-col gap-2">
-        {list.data?.map((t) => (
-          <li key={t.id}>
-            <Link
-              to={`/help/requests/${t.id}`}
-              data-testid={`request-${t.ref}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-line bg-surface p-3 hover:bg-sunken"
-            >
-              <span className="font-mono text-xs text-subtle">{t.ref}</span>
-              <span className="min-w-0 flex-1 text-base font-medium text-fg">{t.subject}</span>
-              <Badge tone="neutral">{SUPPORT_KIND_LABELS[t.kind]}</Badge>
-              <StatusBadge status={t.status} />
-              {t.hasReply && <Badge tone="brand">New reply</Badge>}
-              <span className="text-xs text-subtle">{formatDateTime(t.lastMessageAt)}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

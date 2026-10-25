@@ -54,9 +54,9 @@ describe('the assistant knowledge, split by topic', () => {
     expect(index).toContain('Starter: $19');
     expect(index).toContain('<help_topics>');
     for (const t of loadTopics()) expect(index).toContain(t.title);
-    expect(index).not.toMatch(/ExampleCo/i);
+    expect(index).not.toMatch(/\(Pty\) Ltd/i); // no operating company in the pack
     expect(index).not.toContain('Maintainer'); // the notes above the first section stay out
-    for (const f of Object.values(buildTopicFiles())) expect(f).not.toMatch(/ExampleCo/i);
+    for (const f of Object.values(buildTopicFiles())) expect(f).not.toMatch(/\(Pty\) Ltd/i);
   });
 
   it('keeps every chunk small enough to attach: no topic is more than a quarter of the per-request budget alone', () => {

@@ -8,6 +8,7 @@ import {
   type CeoActionName,
 } from '@aom/shared';
 import { z } from 'zod';
+import type { AuthSession } from '../auth/sessions.ts';
 import {
   addBacklogItem,
   dropBacklogItem,
@@ -19,14 +20,16 @@ import {
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
-import type { AuthSession } from '../auth/sessions.ts';
 import { refuse, truncate } from './actions.ts';
 import type { ActionDef } from './types.ts';
 
 /** The CEO's list line: `<id> GWP [Open] High ★ ui,onboarding "Title" (owner | agent Ada on GWP-3) -> GWP-12`. */
 export function backlogLine(i: BacklogItemDto): string {
   const status = i.status === 'open' ? 'Open' : i.status === 'done' ? 'Done' : 'Dropped';
-  const source = i.source.kind === 'owner' ? 'owner' : `agent ${i.source.agentName}${i.source.cardRef ? ` on ${i.source.cardRef}` : ''}`;
+  const source =
+    i.source.kind === 'owner'
+      ? 'owner'
+      : `agent ${i.source.agentName}${i.source.cardRef ? ` on ${i.source.cardRef}` : ''}`;
   return `${i.id} ${i.projectKey} [${status}] ${BACKLOG_PRIORITY_LABEL[i.priority]}${i.flagged ? ' ★' : ''}${i.tags.length ? ` ${i.tags.join(',')}` : ''} "${i.title}" (${source})${i.cardRef ? ` -> ${i.cardRef}` : ''}`;
 }
 
@@ -118,7 +121,8 @@ const update: ActionDef<z.infer<typeof UpdateP>> = {
       throw e;
     });
     if (!item) return refuse(`backlog item ${p.item} not found`);
-    if (item.status !== 'open') return refuse(`"${item.title}" is ${item.status}: only an Open item can change`);
+    if (item.status !== 'open')
+      return refuse(`"${item.title}" is ${item.status}: only an Open item can change`);
     return {
       subjectKind: 'backlog_item',
       subjectId: item.id,
@@ -170,7 +174,11 @@ const send: ActionDef<z.infer<typeof SendP>> = {
             ? `"${item.title}" already became ${item.cardRef ?? 'a card'}: it cannot be sent again`
             : `"${item.title}" was dropped: it cannot be sent`,
         );
-      return { ...base, subjectLabel: `${item.projectKey}: ${truncate(item.title, 80)}`, data: { ids: [item.id] } };
+      return {
+        ...base,
+        subjectLabel: `${item.projectKey}: ${truncate(item.title, 80)}`,
+        data: { ids: [item.id] },
+      };
     }
     if (!p.project && !p.tag?.length && !p.priority?.length && p.flagged === undefined && !p.q)
       return refuse('name an item or give filters (project, tag, priority, flagged): a bare send is refused');
@@ -184,7 +192,9 @@ const send: ActionDef<z.infer<typeof SendP>> = {
     const items = await findBacklogItems(env.ctx, env.owner, env.orgId, p.project, filter);
     if (items.length === 0) return refuse('no Open backlog item matches');
     if (items.length > BACKLOG_SEND_MAX)
-      return refuse(`${items.length} items match; at most ${BACKLOG_SEND_MAX} are sent at once: narrow the filters`);
+      return refuse(
+        `${items.length} items match; at most ${BACKLOG_SEND_MAX} are sent at once: narrow the filters`,
+      );
     return {
       ...base,
       subjectLabel: `${items.length} backlog ${items.length === 1 ? 'item' : 'items'}`,

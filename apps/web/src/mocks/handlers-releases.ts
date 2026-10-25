@@ -227,24 +227,8 @@ export const releaseHandlers = [
     });
     return HttpResponse.json({
       releases: [
-        rel(
-          1,
-          '4f2c1ab0d2e4',
-          '0.9.2',
-          3,
-          'Ada',
-          '/opt/app/backups/production-before-4f2c1ab.sql.gz',
-          !back,
-        ),
-        rel(
-          2,
-          '9e1d2c3f4a5b',
-          '0.9.1',
-          12,
-          'Ada',
-          '/opt/app/backups/production-before-9e1d2c3.sql.gz',
-          back,
-        ),
+        rel(1, '4f2c1ab0d2e4', '0.9.2', 3, 'Ada', '/opt/app/backups/production-before-4f2c1ab.sql.gz', !back),
+        rel(2, '9e1d2c3f4a5b', '0.9.1', 12, 'Ada', '/opt/app/backups/production-before-9e1d2c3.sql.gz', back),
         rel(
           3,
           '5a5a5a5a5a5a',

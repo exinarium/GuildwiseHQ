@@ -14,12 +14,12 @@ import {
   type PatchBacklogItemRequest,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject, visibleProjectIds } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { orgRoleOf } from '../auth/org-context.ts';
 import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baIntakeIn } from './ba-intake.ts';
@@ -69,7 +69,12 @@ export function assertOpen(item: Row): void {
 }
 
 /** The item, only when the user can see its project (404 otherwise: project A's items never show through project B). */
-async function loadItem(db: Queryable, user: AuthSession['user'], itemId: string, lock = false): Promise<Row> {
+async function loadItem(
+  db: Queryable,
+  user: AuthSession['user'],
+  itemId: string,
+  lock = false,
+): Promise<Row> {
   const item = await one(db, `${ITEM_SELECT} WHERE b.id = $1${lock ? ' FOR UPDATE OF b' : ''}`, [itemId]);
   if (!item) throw notFound('backlog item not found');
   try {
@@ -103,7 +108,11 @@ export async function listBacklog(
   return { items: filterBacklog(dtos, filter), tags };
 }
 
-export async function getBacklogItem(ctx: Ctx, user: AuthSession['user'], itemId: string): Promise<BacklogItemDto> {
+export async function getBacklogItem(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  itemId: string,
+): Promise<BacklogItemDto> {
   return backlogItemDto(await loadItem(ctx.pool, user, itemId));
 }
 
@@ -349,7 +358,9 @@ export async function addBacklogSuggestionRpc(
       undefined,
       'a suggestion is recorded against the card you are working on; this conversation has no card',
     ];
-  const card = (await one(ctx.pool, 'SELECT id, ref, org_id, project_id FROM cards WHERE id=$1', [cardId])) as Row | null;
+  const card = (await one(ctx.pool, 'SELECT id, ref, org_id, project_id FROM cards WHERE id=$1', [
+    cardId,
+  ])) as Row | null;
   if (!card) return [false, undefined, 'the card you are working on no longer exists'];
   const agent = await one(ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [shift.agent_id]);
   if (!agent) return [false, undefined, 'unknown agent'];
@@ -396,9 +407,16 @@ export async function addBacklogSuggestionRpc(
     return { added: true as const, item };
   });
   if ('limit' in out)
-    return [false, undefined, `at most ${BACKLOG_SUGGEST_PER_SHIFT} suggestions per shift: mention the rest in your handoff`];
+    return [
+      false,
+      undefined,
+      `at most ${BACKLOG_SUGGEST_PER_SHIFT} suggestions per shift: mention the rest in your handoff`,
+    ];
   if (!out.added)
-    return [true, { added: false, message: 'Already on the backlog. The owner decides; continue your work.' }];
+    return [
+      true,
+      { added: false, message: 'Already on the backlog. The owner decides; continue your work.' },
+    ];
   return [
     true,
     {

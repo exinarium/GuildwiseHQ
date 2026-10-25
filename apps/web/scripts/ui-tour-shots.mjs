@@ -3,7 +3,7 @@
 // Same setup as ui-shots.mjs (a populated demo world behind the Vite dev server). The tour is replayed from Help, so the
 // demo user's saved tour state does not matter (the script leaves it completed).
 import { mkdirSync } from 'node:fs';
-import { chromium } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { chromium } from './e2e-deps.mjs';
 import { base, connect } from './ui-routes.mjs';
 
 const args = process.argv.slice(2);

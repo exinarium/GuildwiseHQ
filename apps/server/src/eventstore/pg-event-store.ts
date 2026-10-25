@@ -3,6 +3,7 @@ import type pg from 'pg';
 import type { Clock } from '../clock.ts';
 import { rows } from '../db/sql.ts';
 import { APPEND_LOCK_ID, type Tx, withTx } from '../db/tx.ts';
+import type { PreservedTable } from '../extension.ts';
 import { actingAgent } from './acting.ts';
 import {
   type AppendInput,
@@ -37,6 +38,8 @@ export type Interceptor = (tx: Tx, inputs: AppendInput[]) => Promise<AppendInput
 export class PgEventStore implements EventStore {
   private subscribers = new Set<Subscriber>();
   private interceptors: Interceptor[] = [];
+  /** Operational tables of the extensions that a projection rebuild must save and restore (set by createApp). */
+  extraSaved: PreservedTable[] = [];
 
   constructor(
     private readonly pool: pg.Pool,

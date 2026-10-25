@@ -259,66 +259,6 @@ describe('Help > Blog', () => {
   });
 });
 
-describe('blog writer panel', () => {
-  it('is off by default, switches on, and shows spend, topics and the last run', async () => {
-    const user = userEvent.setup();
-    wrap(<PlatformBlog />, '/platform/blog');
-    const panel = await screen.findByTestId('writer-body');
-    expect(within(panel).getByTestId('writer-state')).toHaveTextContent('Off');
-    expect(within(panel).getByTestId('writer-spend')).toHaveTextContent('$0.075 of $10.00');
-    expect(within(panel).getByTestId('writer-last')).toHaveTextContent('Written');
-    expect(within(panel).getByTestId('writer-topics')).toHaveValue(
-      'Topic one about agents\nTopic two about automation',
-    );
-    await user.click(within(panel).getByTestId('writer-toggle'));
-    await vi.waitFor(() =>
-      expect(
-        calls.some(
-          (c) => c.method === 'PATCH' && c.url.endsWith('/writer') && c.body?.includes('"enabled":true'),
-        ),
-      ).toBe(true),
-    );
-  });
-
-  it('asks for a price when the model has none, and saves it', async () => {
-    const user = userEvent.setup();
-    wrap(<PlatformBlog />, '/platform/blog');
-    const panel = await screen.findByTestId('writer-body');
-    await user.selectOptions(within(panel).getByTestId('writer-model'), 'claude-haiku-5-5');
-    expect(within(panel).getByTestId('writer-prices')).toHaveTextContent('not known');
-    await user.type(within(panel).getByTestId('writer-price-in'), '2');
-    await user.type(within(panel).getByTestId('writer-price-out'), '10');
-    await user.click(within(panel).getByTestId('writer-price-save'));
-    await vi.waitFor(() =>
-      expect(
-        calls.some(
-          (c) =>
-            c.method === 'PATCH' &&
-            c.body?.includes('"model":"claude-haiku-5-5"') &&
-            c.body.includes('"outputPerMTok":10'),
-        ),
-      ).toBe(true),
-    );
-  });
-
-  it('Write one now posts and links to the queued article; it is disabled while blocked', async () => {
-    const user = userEvent.setup();
-    wrap(<PlatformBlog />, '/platform/blog');
-    const panel = await screen.findByTestId('writer-body');
-    await user.click(within(panel).getByTestId('writer-now'));
-    const done = await screen.findByTestId('writer-now-result');
-    expect(done).toHaveTextContent('A first article about agents');
-    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/platform/blog/writer/run')).toBe(true);
-  });
-
-  it('explains why it will not run', async () => {
-    writer = { ...writer, blockedReason: 'The monthly cap is reached' };
-    wrap(<PlatformBlog />, '/platform/blog');
-    expect(await screen.findByTestId('writer-blocked')).toHaveTextContent('monthly cap is reached');
-    expect(screen.getByTestId('writer-now')).toBeDisabled();
-  });
-});
-
 describe('platform blog', () => {
   it('shows the queue with warnings and the reconnect alert, and the kill switch asks first', async () => {
     const user = userEvent.setup();

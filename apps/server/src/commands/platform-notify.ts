@@ -1,7 +1,7 @@
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { platformNoticeMail } from '../mail/templates.ts';
-import { flagSetting, NOTIFY_KEYS, sendQuietly, supportAddresses } from './support.ts';
+import { flagSetting, NOTIFY_KEYS, sendQuietly, supportAddresses } from './platform-settings.ts';
 
 /**
  * Optional mail to the support address(es) about what happens on the super admin console beyond tickets and Contact us

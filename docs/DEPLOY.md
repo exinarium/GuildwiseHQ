@@ -241,7 +241,7 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_HTTP_PORT` | `80` | Caddy HTTP port (for ACME challenges) |
 | `AOM_HTTPS_PORT` | `443` | Caddy HTTPS port |
 | `AOM_RUNNER_RELEASE_DIR` | `/app/release` in the image | Directory with `aom-runner-<version>.tgz` served to the workstation installers (`/api/runner/release`); the image builds it with `scripts/package-runner.sh` |
-| `AOM_SECRET_KEY` | generated on first use | Key that encrypts two-factor (TOTP) seeds at rest. **Set it in production** (any long random string) so a database dump alone cannot read the seeds; without it a random key is kept in the database. Changing it later invalidates enrolled authenticator apps, so keep it with your backups |
+| `AOM_SECRET_KEY` | **required in production** | Key that encrypts two-factor (TOTP) seeds, connected-account tokens and signed links at rest. With `NODE_ENV=production` (the Docker image) the server refuses to start without it; set any long random string (`openssl rand -base64 32`) and keep it with your backups. Changing it later invalidates enrolled authenticator apps sealed with the old value. A server that ran before without it keeps reading what the old database-held key sealed |
 
 ### Database
 

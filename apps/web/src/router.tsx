@@ -5,13 +5,13 @@ import { RequireAuth } from './components/Layout.tsx';
 import { PlatformShell } from './components/platform/PlatformShell.tsx';
 import { RouteError } from './components/RouteError.tsx';
 import { PageSkeleton } from './components/ui.tsx';
+import { ext } from './extension/index.ts';
 import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
 import { Automations } from './pages/Automations.tsx';
 import { Backlog } from './pages/Backlog.tsx';
-import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { BoardroomList } from './pages/Boardroom.tsx';
 import { BoardroomSession } from './pages/BoardroomSession.tsx';
@@ -21,7 +21,6 @@ import { CardNew } from './pages/CardNew.tsx';
 import { Ceo } from './pages/Ceo.tsx';
 import { CeoChat } from './pages/CeoChat.tsx';
 import { Chat } from './pages/Chat.tsx';
-import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { DeskActionConfirm } from './pages/DeskActionConfirm.tsx';
@@ -50,7 +49,6 @@ import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
 import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
-import { PlatformBilling } from './pages/platform/PlatformBilling.tsx';
 import { PlatformBlog } from './pages/platform/PlatformBlog.tsx';
 import { PlatformBlogPost } from './pages/platform/PlatformBlogPost.tsx';
 import { PlatformInbound } from './pages/platform/PlatformInbound.tsx';
@@ -58,17 +56,13 @@ import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
 import { PlatformRunners } from './pages/platform/PlatformRunners.tsx';
-import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
-import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
 import { PlatformTeam } from './pages/platform/PlatformTeam.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { Releases } from './pages/Releases.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
 import { Settings } from './pages/Settings.tsx';
-import { Signup } from './pages/Signup.tsx';
 import { Vaults } from './pages/Vaults.tsx';
-import { VerifyEmail } from './pages/VerifyEmail.tsx';
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
@@ -97,11 +91,9 @@ function InterestRedirect({ tab }: { tab?: string }) {
 
 export const routes = [
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
+  ...(ext.publicRoutes ?? []).map((r) => ({ errorElement: <RouteError />, ...r })),
   { path: '/forgot-password', element: <ForgotPassword />, errorElement: <RouteError /> },
   { path: '/reset-password/:token', element: <ResetPassword />, errorElement: <RouteError /> },
-  { path: '/signup', element: <Signup />, errorElement: <RouteError /> },
-  { path: '/verify-email/:token', element: <VerifyEmail />, errorElement: <RouteError /> },
-  { path: '/contact', element: <ContactPublic />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   // S-B1: the page a notification button opens; it signs the person in first and applies nothing until they press the button
   { path: '/m/desk/:token', element: <DeskActionConfirm />, errorElement: <RouteError /> },
@@ -110,7 +102,8 @@ export const routes = [
     errorElement: <RouteError />,
     children: [
       { path: '/', element: <Home /> },
-      { path: BILLING_GATE_PATH, element: null },
+      ...(ext.gatePath ? [{ path: ext.gatePath, element: null }] : []),
+      ...(ext.appRoutes ?? []),
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/archive', element: <Archive /> },
       { path: '/p/:projectKey/backlog', element: <Backlog /> },
@@ -150,9 +143,6 @@ export const routes = [
       { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },
       { path: '/help/glossary', element: <Help /> },
-      { path: '/help/contact', element: <Help /> },
-      { path: '/help/requests', element: <Help /> },
-      { path: '/help/requests/:id', element: <Help /> },
       { path: '/help/blog', element: <Help /> },
       { path: '/help/blog/:slug', element: <Help /> },
       { path: '/help/:slug', element: <Help /> },
@@ -179,12 +169,10 @@ export const routes = [
         element: <PlatformShell />,
         children: [
           { path: '/platform', element: <PlatformOrgs /> },
+          ...(ext.platformRoutes ?? []),
           { path: '/platform/orgs/:id', element: <PlatformOrgDetail /> },
           { path: '/platform/invitations', element: <PlatformInvitations /> },
           { path: '/platform/users', element: <PlatformUsers /> },
-          { path: '/platform/billing', element: <PlatformBilling /> },
-          { path: '/platform/support', element: <PlatformSupport /> },
-          { path: '/platform/support/:id', element: <PlatformSupportTicket /> },
           { path: '/platform/blog', element: <PlatformBlog /> },
           { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
           { path: '/platform/api-keys', element: <PlatformApiKeys /> },

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ServerExtension } from '../../src/extension.ts';
 import { createTestApp, type TestApp, uniqueEmail } from './app.ts';
 import { q } from './db.ts';
 import { FakeRunner } from './fake-runner.ts';
@@ -110,9 +111,16 @@ export async function createWorld(
      * (its runner announces `runs:3`).
      */
     integrationTests?: 'plain' | 'off' | 'local';
+    /** Server extensions to register (the hosted build's tests pass the cloud extension). */
+    extensions?: ServerExtension[];
   } = {},
 ): Promise<World> {
-  const t = await createTestApp({ env: opts.env, listen: opts.listen ?? true, lean: opts.lean });
+  const t = await createTestApp({
+    env: opts.env,
+    listen: opts.listen ?? true,
+    lean: opts.lean,
+    ...(opts.extensions ? { extensions: opts.extensions } : {}),
+  });
   const owner = await t.userSession(uniqueEmail('owner'));
   const proj = await ok<any>(
     t.req('POST', '/api/projects', {

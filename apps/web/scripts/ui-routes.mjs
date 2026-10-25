@@ -1,5 +1,5 @@
 // Shared by ui-shots.mjs and ui-a11y.mjs: logs in over the API and discovers the routes of the demo world.
-import { request } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { request } from './e2e-deps.mjs';
 
 export const base = process.env.BASE ?? 'http://127.0.0.1:5199';
 export const apiOrigin = process.env.ORIGIN ?? 'http://localhost:4611';

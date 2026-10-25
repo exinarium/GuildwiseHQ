@@ -355,7 +355,7 @@ async function acceptEvents(
         `${inv.org_name} is ${inv.org_status}: it cannot take new members now.`,
       );
     // The pending invitation already counts toward the limit: it only fails when the organization is over it.
-    await assertWithinLimit(tx, orgId, 'members', 0);
+    await assertWithinLimit(ctx, tx, orgId, 'members', 0);
     const projects = await rows<{ id: string }>(
       tx,
       `SELECT id FROM projects WHERE org_id=$1 AND kind='project' AND status='active' AND id = ANY($2::uuid[])`,

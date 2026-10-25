@@ -383,7 +383,7 @@ export async function rehomeAgent(
       `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
       [a.org_id, req.workstationId],
     );
-    if (!used) await assertWithinLimit(tx, a.org_id, 'workstations');
+    if (!used) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
     await ctx.store.append(
       [
         {

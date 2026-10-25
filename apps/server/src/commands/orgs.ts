@@ -656,7 +656,7 @@ export async function inviteOrgMember(
       )
     )
       throw conflict('invitation_pending', 'a pending invitation for this email exists; resend or revoke it');
-    await assertWithinLimit(tx, a.orgId, 'members');
+    await assertWithinLimit(ctx, tx, a.orgId, 'members');
     if (input.projectIds.length) {
       const ok = await rows<{ id: string }>(
         tx,

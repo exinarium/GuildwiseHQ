@@ -2,7 +2,7 @@ import type { RuntimeInfo } from '@aom/shared';
 
 /** Where the sandbox guidance lives (the heading "Windows: run the runner inside WSL2"). */
 export const SANDBOX_DOCS_URL =
-  'https://github.com/exinarium/agent-org-manager/blob/main/docs/RUNNER.md#windows-run-the-runner-inside-wsl2';
+  'https://github.com/exinarium/GuildwiseHQ/blob/main/docs/RUNNER.md#windows-run-the-runner-inside-wsl2';
 
 const CONSEQUENCE = 'an agent could read files your user can read, including the runner token.';
 

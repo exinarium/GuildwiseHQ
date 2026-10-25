@@ -2,13 +2,11 @@
 //   AOM_WEB_PORT=5188 VITE_MSW=1 vite   then   node apps/web/scripts/env-shots.mjs [outDir] [--only=a,b]
 // Every journey is a function of (page, shot) in `journeys`; shots are taken at 390 and 1440 (light; dark where asked).
 import { mkdirSync } from 'node:fs';
-import { chromium } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { chromium } from './e2e-deps.mjs';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:5188';
 const args = process.argv.slice(2);
-const out =
-  args.find((a) => !a.startsWith('--')) ??
-  '/path/to/guildwise/.claude/worktrees/screens/environments';
+const out = args.find((a) => !a.startsWith('--')) ?? '.dev/shots/environments';
 const only = (args.find((a) => a.startsWith('--only=')) ?? '').slice(7).split(',').filter(Boolean);
 const sizes = { m: { width: 390, height: 844 }, d: { width: 1440, height: 900 } };
 mkdirSync(out, { recursive: true });

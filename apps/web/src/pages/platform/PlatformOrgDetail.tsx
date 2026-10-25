@@ -10,7 +10,6 @@ import {
   useSetSimulation,
   useWipeSimulation,
 } from '../../api/queries/platform.ts';
-import { OrgBillingPanel } from '../../components/platform/OrgBillingPanel.tsx';
 import {
   Badge,
   Button,
@@ -25,6 +24,7 @@ import {
   TextInput,
   useToast,
 } from '../../components/ui.tsx';
+import { ext } from '../../extension/index.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { STATUS_TONE } from './PlatformOrgs.tsx';
 
@@ -212,7 +212,7 @@ export function PlatformOrgDetail() {
           emails are marked [Simulation].{' '}
           {o.simulation
             ? 'A simulation organization stays one until it is deleted: it cannot be switched back to a real organization. Use "Delete simulation organization" to remove it and all its data.'
-            : 'Only an empty organization (no projects, not even archived ones, and no active billing subscription) can be switched, and it cannot be switched back. To test with a populated setup, invite a new simulation organization instead.'}
+            : `Only an empty organization (no projects, not even archived ones${ext.planLimits ? ', and no active billing subscription' : ''}) can be switched, and it cannot be switched back. To test with a populated setup, invite a new simulation organization instead.`}
         </p>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex items-center gap-2.5 text-sm font-medium text-fg">
@@ -346,30 +346,34 @@ export function PlatformOrgDetail() {
 
       <form onSubmit={save} data-testid="platform-org-licence">
         <Panel title="Plan, limits and features">
-          <p className="mb-3 text-sm text-muted">
-            The Founding plan has no limits. Leave a limit empty for unlimited. Every change is recorded in
-            the audit log.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-4">
-            {LIMITS.map(([k, label]) => (
-              <TextInput
-                key={k}
-                label={label}
-                inputMode="numeric"
-                placeholder="Unlimited"
-                value={limitVal(k)}
-                onChange={(e) => setLimits({ ...(limits ?? {}), [k]: e.target.value.replace(/\D/g, '') })}
-              />
-            ))}
-          </div>
-          <div className="mt-3 max-w-xs">
-            <TextInput
-              label="Licence expires"
-              type="date"
-              value={license ?? (o.licenseExpiresAt ? o.licenseExpiresAt.slice(0, 10) : '')}
-              onChange={(e) => setLicense(e.target.value)}
-            />
-          </div>
+          {ext.planLimits && (
+            <>
+              <p className="mb-3 text-sm text-muted">
+                The Founding plan has no limits. Leave a limit empty for unlimited. Every change is recorded
+                in the audit log.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-4">
+                {LIMITS.map(([k, label]) => (
+                  <TextInput
+                    key={k}
+                    label={label}
+                    inputMode="numeric"
+                    placeholder="Unlimited"
+                    value={limitVal(k)}
+                    onChange={(e) => setLimits({ ...(limits ?? {}), [k]: e.target.value.replace(/\D/g, '') })}
+                  />
+                ))}
+              </div>
+              <div className="mt-3 max-w-xs">
+                <TextInput
+                  label="Licence expires"
+                  type="date"
+                  value={license ?? (o.licenseExpiresAt ? o.licenseExpiresAt.slice(0, 10) : '')}
+                  onChange={(e) => setLicense(e.target.value)}
+                />
+              </div>
+            </>
+          )}
           <fieldset className="mt-4 grid gap-3 sm:grid-cols-2">
             <legend className="mb-1 text-sm font-medium text-fg">Features</legend>
             {ORG_FEATURES.map((f) => (
@@ -420,7 +424,7 @@ export function PlatformOrgDetail() {
         </Panel>
       </form>
 
-      <OrgBillingPanel orgId={id} />
+      {ext.PlatformOrgPanels && <ext.PlatformOrgPanels orgId={id} />}
 
       <Panel title="Recent activity" padding="none">
         {o.recentAudit.length === 0 ? (

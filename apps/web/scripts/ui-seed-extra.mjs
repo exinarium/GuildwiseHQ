@@ -1,6 +1,6 @@
 // Adds what the guide's demo world lacks so the Phases and Interests screens are populated (idempotent).
 //   node apps/web/scripts/ui-seed-extra.mjs      (same env as ui-shots.mjs)
-import { request } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { request } from './e2e-deps.mjs';
 
 const origin = process.env.ORIGIN ?? 'http://localhost:4611';
 const api = await request.newContext({ baseURL: origin, extraHTTPHeaders: { Origin: origin } });

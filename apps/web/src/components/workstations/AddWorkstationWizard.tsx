@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, CircleDashed, Download, LifeBuoy } from 'luci
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useCreateInstaller, useInstallerStatus } from '../../api/queries/workstations.ts';
+import { ext } from '../../extension/index.ts';
 import {
   detectOs,
   guideSteps,
@@ -471,15 +472,17 @@ export function InstallFailure({
           <LifeBuoy aria-hidden="true" className="size-4" />
           Read the installer help
         </Link>
-        <Link
-          to="/help/contact?from=installer"
-          onClick={onClose}
-          className="inline-flex items-center gap-1 font-medium underline"
-          data-testid="install-contact"
-        >
-          <CircleAlert aria-hidden="true" className="size-4" />
-          Contact us
-        </Link>
+        {ext.helpTabs?.some((t) => t.id === 'contact') && (
+          <Link
+            to="/help/contact?from=installer"
+            onClick={onClose}
+            className="inline-flex items-center gap-1 font-medium underline"
+            data-testid="install-contact"
+          >
+            <CircleAlert aria-hidden="true" className="size-4" />
+            Contact us
+          </Link>
+        )}
       </p>
     </Callout>
   );

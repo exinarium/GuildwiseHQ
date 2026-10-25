@@ -1,7 +1,6 @@
 // Axe pass over every route in light and dark (WCAG 2 A/AA + 2.2 AA). Fails on serious and critical violations.
 //   node apps/web/scripts/ui-a11y.mjs [--only=board,desk] [--sizes=d,m]
-import { AxeBuilder } from '/path/to/guildwise/e2e/node_modules/@axe-core/playwright/dist/index.mjs';
-import { chromium } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { chromium, loadAxe } from './e2e-deps.mjs';
 import { base, connect } from './ui-routes.mjs';
 
 const args = process.argv.slice(2);
@@ -27,7 +26,7 @@ for (const sk of sizes)
       await p.goto(base + path);
       await p.waitForLoadState('networkidle').catch(() => undefined);
       await p.waitForTimeout(300);
-      const res = await new AxeBuilder({ page: p }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+      const res = await new (loadAxe())({ page: p }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
       console.log(
         name,
         sk,

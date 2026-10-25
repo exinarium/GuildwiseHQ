@@ -2,7 +2,6 @@ import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useOrg } from '../api/queries/orgs.ts';
 import { AuditTab } from '../components/orgsettings/AuditTab.tsx';
-import { BillingTab } from '../components/orgsettings/BillingTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
 import { GuestsTab } from '../components/orgsettings/GuestsTab.tsx';
 import { InvitationsTab } from '../components/orgsettings/InvitationsTab.tsx';
@@ -12,6 +11,7 @@ import { PlanTab } from '../components/orgsettings/PlanTab.tsx';
 import { ProjectLinksTab } from '../components/orgsettings/ProjectLinksTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
+import { ext } from '../extension/index.ts';
 import { OrgProvidersBody } from './OrgProviders.tsx';
 
 type TabId =
@@ -24,7 +24,7 @@ type TabId =
   | 'providers'
   | 'plan'
   | 'audit'
-  | 'billing';
+  | (string & {});
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
 export function OrgSettings() {
@@ -47,7 +47,12 @@ export function OrgSettings() {
           { id: 'audit', label: 'Audit log' },
         ]
       : []),
-    ...(role === 'owner' ? [{ id: 'billing', label: 'Billing' }] : []),
+    // tabs of the extension (the hosted build's Billing): Owner and Admins unless the extension says otherwise
+    ...(ext.orgSettingsTabs ?? [])
+      .filter((t) =>
+        (t.roles ?? ['owner', 'admin']).includes((role ?? 'member') as 'owner' | 'admin' | 'member'),
+      )
+      .map((t) => ({ id: t.id, label: t.label })),
   ];
   const wanted = (params.get('tab') ?? 'general') as TabId;
   const tab = tabs.some((t) => t.id === wanted) ? wanted : 'general';
@@ -87,7 +92,7 @@ export function OrgSettings() {
         {tab === 'providers' && manager && <OrgProvidersBody />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
         {tab === 'audit' && manager && <AuditTab />}
-        {tab === 'billing' && role === 'owner' && <BillingTab />}
+        {ext.orgSettingsTabs?.map((t) => (tab === t.id ? <t.Component key={t.id} /> : null))}
       </div>
     </div>
   );

@@ -2,13 +2,15 @@ import { ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { matchPath, Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { useCard } from '../../api/queries/cards.ts';
 import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
+import { useContact } from '../../extension/contact.tsx';
+import { ext } from '../../extension/index.ts';
 import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
@@ -22,7 +24,6 @@ import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
 import { PushPrompt } from '../push/PushPrompt.tsx';
 import { SetupChecklistProvider, SetupWidget } from '../setup/SetupChecklist.tsx';
-import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
 import { useTour } from '../tour/TourContext.tsx';
 import { cx } from '../ui/cx.ts';
@@ -78,14 +79,19 @@ export function backTargetFor(
   return null;
 }
 
+/** The extension's providers (the hosted build's Contact us dialog), or nothing. */
+function AppProviders({ children }: { children: ReactNode }) {
+  return ext.AppProviders ? <ext.AppProviders>{children}</ext.AppProviders> : <>{children}</>;
+}
+
 /** The signed-in application frame: dark sidebar (rail on tablets, drawer on phones), top bar, `main`. */
 export function AppShell({ name, live }: { name: string; live: string }) {
   return (
-    <ContactProvider>
+    <AppProviders>
       <AskDevOpsProvider>
         <Shell name={name} live={live} />
       </AskDevOpsProvider>
-    </ContactProvider>
+    </AppProviders>
   );
 }
 
@@ -393,7 +399,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               onChat: () => setChat(true),
               onAskDevOps: () => askDevOps(),
               onHelp: () => setHelp(true),
-              onContact: () => contact.open(),
+              ...(contact.available ? { onContact: () => contact.open() } : {}),
               onPageHelp: () => setPageHelp(true),
             }}
           />

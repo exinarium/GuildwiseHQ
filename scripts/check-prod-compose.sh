@@ -13,6 +13,7 @@ ENVFILE="$WORK/.env"
 ORIGIN="https://localhost:$HTTPS_PORT"
 cat > "$ENVFILE" <<ENV
 POSTGRES_PASSWORD=test-password-123
+AOM_SECRET_KEY=test-secret-key-0123456789abcdef
 AOM_DOMAIN=localhost
 AOM_PUBLIC_ORIGIN=$ORIGIN
 AOM_HTTP_PORT=$HTTP_PORT

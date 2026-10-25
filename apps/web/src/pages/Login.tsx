@@ -3,10 +3,10 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
-import { usePublicPlans, useResendVerification } from '../api/queries/billing.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { Button, Callout, TextInput } from '../components/ui.tsx';
+import { ext } from '../extension/index.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /** Only same-origin relative paths are honoured for `?next=`. */
@@ -14,6 +14,10 @@ export function safeNext(next: string | null): string {
   // a path on this origin only: `//host` and `/\host` are read by browsers as another site
   return next?.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/';
 }
+
+const Nothing = () => null;
+const LoginErrorExtra = ext.LoginErrorExtra ?? Nothing;
+const LoginFooter = ext.LoginFooter ?? Nothing;
 
 function failureText(err: unknown): string | null {
   if (!err) return null;
@@ -36,11 +40,7 @@ export function Login() {
   usePageTitle('Sign in');
   const me = useMe();
   const login = useLogin();
-  // Hidden until the server says sign-up is open (it is closed while payments are not configured).
-  const publicPlans = usePublicPlans();
-  const signupAvailable = publicPlans.isSuccess && publicPlans.data.signupAvailable !== false;
   const login2fa = useLogin2fa();
-  const resendVerification = useResendVerification();
   const [challenge, setChallenge] = useState<string | null>(null);
   const [recovery, setRecovery] = useState(false);
   const [code, setCode] = useState('');
@@ -219,19 +219,7 @@ export function Login() {
         {failure && (
           <Callout tone="danger" role="alert">
             {failure}
-            {login.error instanceof ApiError && login.error.code === 'email_not_verified' && (
-              <>
-                {' '}
-                <button
-                  type="button"
-                  className="font-medium underline"
-                  data-testid="resend-verification"
-                  onClick={() => resendVerification.mutate(email)}
-                >
-                  {resendVerification.isSuccess ? 'Sent: check your inbox' : 'Send the link again'}
-                </button>
-              </>
-            )}
+            <LoginErrorExtra error={login.error} email={email} />
           </Callout>
         )}
         <Button type="submit" variant="primary" size="lg" loading={login.isPending} className="w-full">
@@ -243,18 +231,68 @@ export function Login() {
           Forgot your password?
         </Link>
       </p>
-      {signupAvailable && (
-        <p className="mt-3 text-sm text-subtle">
-          New here?{' '}
-          <Link
-            to="/signup"
-            className="text-brand-text underline-offset-2 hover:underline"
-            data-testid="login-signup"
-          >
-            Start a 7-day free trial
-          </Link>
-        </p>
+      <LoginFooter />
+    </AuthFrame>
+  );
+
+  return (
+    <AuthFrame>
+      <div className="mb-7">
+        <h1 className="text-3xl font-semibold tracking-tight text-fg">Welcome back</h1>
+        <p className="mt-1.5 text-base text-muted">Sign in to your guild.</p>
+      </div>
+      {passwordReset && (
+        <Callout tone="success" className="mb-4" role="status">
+          Your password is changed. Sign in with the new one.
+        </Callout>
       )}
+      {expired && (
+        <Callout tone="info" className="mb-4" role="status">
+          Your session ended. Sign in to continue.
+        </Callout>
+      )}
+      <form onSubmit={submit} noValidate className="flex flex-col gap-4" aria-label="Sign in">
+        <TextInput
+          ref={emailRef}
+          label="Email"
+          type="email"
+          name="email"
+          autoComplete="username"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="you@company.com"
+          readOnly={login.isPending}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={errors.email}
+        />
+        <PasswordInput
+          ref={passRef}
+          label="Password"
+          name="password"
+          autoComplete="current-password"
+          capsHint
+          readOnly={login.isPending}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          error={errors.password}
+        />
+        {failure && (
+          <Callout tone="danger" role="alert">
+            {failure}
+            <LoginErrorExtra error={login.error} email={email} />
+          </Callout>
+        )}
+        <Button type="submit" variant="primary" size="lg" loading={login.isPending} className="w-full">
+          {login.isPending ? 'Signing in...' : 'Sign in'}
+        </Button>
+      </form>
+      <p className="mt-6 text-sm text-subtle">
+        <Link to="/forgot-password" className="text-brand-text underline-offset-2 hover:underline">
+          Forgot your password?
+        </Link>
+      </p>
       <p className="mt-6 text-sm text-subtle">
         By signing in you agree to the{' '}
         <a href="/terms" className="underline underline-offset-2 hover:no-underline">

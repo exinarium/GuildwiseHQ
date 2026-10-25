@@ -1,5 +1,3 @@
-import { type BillingTickResult, billingTick } from '../billing/engine.ts';
-import { blogWriterTick } from '../blog/writer/index.ts';
 import { cloudTick } from '../cloud/tick.ts';
 import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
@@ -22,11 +20,10 @@ import type { Ctx } from '../context.ts';
 import { reachabilityTick } from '../delivery/reachability.ts';
 import { governanceTick } from '../governance/offboarding.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
-import { licensingTick } from '../orgs/licensing.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
 
 const TICK_MS = 15_000;
-const LICENSING_MS = 5 * 60_000;
+const MAINTENANCE_MS = 5 * 60_000;
 
 /**
  * Fires due schedules every 15 s and on boot (docs/ARCHITECTURE.md section 10). Schedules always fire on time: the
@@ -36,13 +33,13 @@ const LICENSING_MS = 5 * 60_000;
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private licensingTimer: NodeJS.Timeout | null = null;
-  private billingTimer: NodeJS.Timeout | null = null;
+  private tickerTimers: NodeJS.Timeout[] = [];
+  /** Detached jobs in flight (one per job): they take minutes and must never hold up the schedules, so they are not on the chain. */
+  private detached = new Map<string, Promise<unknown>>();
   private chain: Promise<unknown> = Promise.resolve();
   private stopped = false;
   private kicked: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
-  /** The writer's run in flight: it takes minutes and must never hold up the schedules, so it is not on the chain. */
-  private writer: Promise<unknown> | null = null;
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -52,15 +49,19 @@ export class Scheduler {
       if (this.ctx.config.hygieneSchedule) void this.runHygiene().catch(() => {});
     }, TICK_MS);
     this.timer.unref();
-    this.licensingTimer = setInterval(() => void this.runLicensing().catch(() => {}), LICENSING_MS);
+    this.licensingTimer = setInterval(() => void this.runMaintenance().catch(() => {}), MAINTENANCE_MS);
     this.licensingTimer.unref();
-    if (this.ctx.config.billingJobs) {
-      this.billingTimer = setInterval(() => void this.runBilling().catch(() => {}), LICENSING_MS);
-      this.billingTimer.unref();
-      void this.runBilling().catch((err) => this.ctx.log.error({ err }, 'billing tick failed'));
+    // Background jobs of the extensions (billing renewals, trial expiry, ...), each on its own cadence.
+    for (const t of this.tickers()) {
+      if (t.enabled && !t.enabled(this.ctx)) continue;
+      const timer = setInterval(() => void this.runTicker(t.name).catch(() => {}), t.everyMs);
+      timer.unref();
+      this.tickerTimers.push(timer);
+      if (t.runOnBoot)
+        void this.runTicker(t.name).catch((err) => this.ctx.log.error({ err }, `${t.name} tick failed`));
     }
     this.unsubscribe = this.ctx.store.subscribe(() => this.kickTriggers());
-    void this.runLicensing().catch((err) => this.ctx.log.error({ err }, 'licensing tick failed'));
+    void this.runMaintenance().catch((err) => this.ctx.log.error({ err }, 'maintenance tick failed'));
     void this.run().catch((err) => this.ctx.log.error({ err }, 'scheduler failed'));
     if (this.ctx.config.hygieneSchedule)
       void this.runHygiene().catch((err) => this.ctx.log.error({ err }, 'hygiene scheduler failed'));
@@ -82,9 +83,14 @@ export class Scheduler {
     return next;
   }
 
-  /** Trial and licence ends suspend organizations; warnings go to their desks (every 5 minutes). */
-  runLicensing(): Promise<{ suspended: number; warned: number }> {
-    if (this.stopped) return Promise.resolve({ suspended: 0, warned: 0 });
+  /** The background jobs contributed by the registered extensions. */
+  private tickers() {
+    return this.ctx.ext.list.flatMap((e) => e.tickers ?? []);
+  }
+
+  /** Housekeeping every five minutes: old inbound mail text and idle persona chats go after their retention period. */
+  runMaintenance(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
     const next = this.chain.then(async () => {
       // The text of old inbound mail goes after its retention period (mail/inbound/prune.ts).
       await pruneMail(this.ctx).catch((err) => this.ctx.log.error({ err }, 'mail retention failed'));
@@ -92,27 +98,34 @@ export class Scheduler {
       await prunePersonaChats(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'persona chat retention failed'),
       );
-      return licensingTick(this.ctx);
     });
     this.chain = next.catch(() => {});
     return next;
   }
 
-  /** Renewals, retries, pauses, expiry notices and trial reminders (idempotent; AOM_BILLING_JOBS switches the timer off). */
-  runBilling(): Promise<BillingTickResult> {
-    const none: BillingTickResult = {
-      invoices: 0,
-      charged: 0,
-      failed: 0,
-      paused: 0,
-      ended: 0,
-      notices: 0,
-      signupsRemoved: 0,
-    };
-    if (this.stopped) return Promise.resolve(none);
-    const next = this.chain.then(() => billingTick(this.ctx));
+  /** Runs one extension job (billing, licensing, ...) now, serialized with the other jobs. Resolves to its result (undefined if unknown). */
+  runTicker(name: string): Promise<unknown> {
+    const t = this.tickers().find((x) => x.name === name);
+    if (this.stopped || !t) return Promise.resolve(undefined);
+    if (t.detached) {
+      // one run at a time; a call while it is running joins the run in flight
+      const running = this.detached.get(t.name);
+      if (running) return running;
+      const p = t
+        .run(this.ctx)
+        .catch((err) => this.ctx.log.error({ err }, `${t.name} failed`))
+        .finally(() => this.detached.delete(t.name));
+      this.detached.set(t.name, p);
+      return p;
+    }
+    const next = this.chain.then(() => t.run(this.ctx));
     this.chain = next.catch(() => {});
     return next;
+  }
+
+  /** Runs every extension job once (the test clock endpoint). */
+  async runTickers(): Promise<void> {
+    for (const t of this.tickers()) await this.runTicker(t.name);
   }
 
   /** One pass, serialized in-process. Returns the cards it created. */
@@ -165,20 +178,6 @@ export class Scheduler {
     await autoPublishDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog auto-publish failed'));
     await socialTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog social sharing failed'));
     await blogDigestTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog digest failed'));
-    this.runWriter();
-  }
-
-  /** Starts the server-side blog writer when a slot is due; one at a time, outside the chain. Resolves when it is done (tests). */
-  runWriter(): Promise<unknown> {
-    if (this.stopped) return Promise.resolve();
-    if (!this.writer) {
-      this.writer = blogWriterTick(this.ctx, this.ctx.blogWriter)
-        .catch((err) => this.ctx.log.error({ err }, 'blog writer failed'))
-        .finally(() => {
-          this.writer = null;
-        });
-    }
-    return this.writer;
   }
 
   /** The interests' run schedules, then their delivery schedules (digests to the desk within the quiet cap). */
@@ -212,10 +211,10 @@ export class Scheduler {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     if (this.licensingTimer) clearInterval(this.licensingTimer);
-    if (this.billingTimer) clearInterval(this.billingTimer);
+    for (const t of this.tickerTimers) clearInterval(t);
     if (this.kicked) clearTimeout(this.kicked);
     this.unsubscribe?.();
     await this.chain.catch(() => {});
-    await this.writer?.catch(() => {});
+    await Promise.allSettled([...this.detached.values()]);
   }
 }

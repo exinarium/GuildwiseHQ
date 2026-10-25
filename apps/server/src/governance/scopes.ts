@@ -6,8 +6,8 @@ import {
   type ScopeWarning,
 } from '@aom/shared';
 import { effectiveRegistry } from '../capabilities/registry.ts';
-import { conflict } from '../errors.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { conflict } from '../errors.ts';
 
 /** What an agent has, in the words packs use for the scopes they need (`shell`, `web`, `commit`, ...). */
 export async function agentScopeFacts(db: Queryable, agent: Row): Promise<AgentScopeFacts> {

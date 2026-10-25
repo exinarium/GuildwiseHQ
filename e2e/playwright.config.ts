@@ -16,8 +16,6 @@ export default defineConfig({
   use: { baseURL: BASE_URL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [
     { name: 'auth', testMatch: 'auth.spec.ts' },
-    { name: 'landing', testMatch: 'landing.spec.ts', dependencies: ['auth'] },
-    { name: 'mobile-public', testMatch: 'mobile-public.spec.ts', dependencies: ['auth'] },
     { name: 'pairing', testMatch: 'pairing.spec.ts', dependencies: ['auth'] },
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
     { name: 'desk', testMatch: 'desk.spec.ts', dependencies: ['core-loop'] },
@@ -67,8 +65,7 @@ export default defineConfig({
     { name: 'budgets', testMatch: 'budgets.spec.ts', dependencies: ['agent-projects'] },
     { name: 'org-chart', testMatch: 'org-chart.spec.ts', dependencies: ['budgets'] },
     { name: 'installer', testMatch: 'installer.spec.ts', dependencies: ['org-chart'] },
-    { name: 'support', testMatch: 'support.spec.ts', dependencies: ['installer'] },
-    { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['support'] },
+    { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['installer'] },
     // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the
     // iPhone 15 viewport, touch and user agent. Needs only the paired workstation and project TOY (pairing); the spec hires its own builders and reviewer.
     {

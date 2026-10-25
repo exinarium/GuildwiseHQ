@@ -2,6 +2,7 @@ packages:
   - packages/*
   - apps/*
   - e2e
+  - cloud/*
 
 allowBuilds:
   esbuild: true

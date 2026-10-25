@@ -78,12 +78,12 @@ describe('templates', () => {
       link,
     }),
   ];
-  it('every template goes through the layout and never names ExampleCo', () => {
+  it('every template goes through the layout and never names an operating company', () => {
     for (const m of all) {
       expect(m.html).toContain('prefers-color-scheme');
       expect(m.html).toContain('Many hands. One master.');
       expect(m.text).toContain('Many hands. One master.');
-      expect(`${m.html}${m.text}`.toLowerCase()).not.toContain('ExampleCo');
+      expect(`${m.html}${m.text}`.toLowerCase()).not.toContain('(pty) ltd');
     }
   });
   it('the acknowledgement carries the reference, what happens next and the response time', () => {

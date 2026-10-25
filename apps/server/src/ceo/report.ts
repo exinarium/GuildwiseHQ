@@ -242,9 +242,7 @@ export async function postCeoReport(
     `${input.report}${backlogText ? `\n${backlogText}` : ''}`,
     input.localDate,
     input.fallback,
-  ).catch((err) =>
-    ctx.log.error({ err }, 'ceo report mail failed'),
-  );
+  ).catch((err) => ctx.log.error({ err }, 'ceo report mail failed'));
 }
 
 async function sendReportMail(

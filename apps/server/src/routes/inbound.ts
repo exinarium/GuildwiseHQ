@@ -21,9 +21,9 @@ import {
 import { getMailThread, replyToMailThread } from '../commands/mail-reply.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError, notFound } from '../errors.ts';
+import { dispatchInbound } from '../mail/inbound/dispatch.ts';
 import { countInbound } from '../mail/inbound/ingest.ts';
 import { configuredProvider, webhookAuthorised } from '../mail/inbound/providers.ts';
-import { dispatchInbound } from '../mail/inbound/support.ts';
 import { BadInbound, type MultipartBody } from '../mail/inbound/types.ts';
 import { typed } from './util.ts';
 

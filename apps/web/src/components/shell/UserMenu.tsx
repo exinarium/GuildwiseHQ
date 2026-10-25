@@ -2,9 +2,9 @@ import type { UserAvatar as UserAvatarValue } from '@aom/shared';
 import * as DM from '@radix-ui/react-dropdown-menu';
 import { Laptop, LifeBuoy, LogOut, MessageCircleQuestion, Moon, Sun } from 'lucide-react';
 import { Link } from 'react-router';
+import { ext } from '../../extension/index.ts';
 import { type ThemeChoice, useTheme } from '../../lib/useTheme.ts';
 import { UserAvatar } from '../Face.tsx';
-import { useContact } from '../support/ContactDialog.tsx';
 import { cx } from '../ui/cx.ts';
 
 const THEMES: Array<{ id: ThemeChoice; label: string; icon: typeof Sun }> = [
@@ -34,7 +34,6 @@ export function UserMenu({
   onNavigate?: () => void;
 }) {
   const [theme, setTheme] = useTheme();
-  const contact = useContact();
   return (
     <DM.Root>
       <DM.Trigger
@@ -105,27 +104,7 @@ export function UserMenu({
               Help
             </Link>
           </DM.Item>
-          <DM.Item
-            onSelect={() => {
-              onNavigate?.();
-              contact.open();
-            }}
-            data-testid="menu-contact"
-            className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-[6px] px-3 text-sm text-fg outline-none data-[highlighted]:bg-sunken"
-          >
-            <MessageCircleQuestion aria-hidden="true" className="size-4 text-muted" />
-            Contact us
-          </DM.Item>
-          <DM.Item asChild>
-            <Link
-              to="/help/requests"
-              onClick={onNavigate}
-              data-testid="menu-requests"
-              className="flex min-h-9 items-center rounded-[6px] px-8 text-sm text-fg outline-none data-[highlighted]:bg-sunken"
-            >
-              My requests
-            </Link>
-          </DM.Item>
+          {ext.UserMenuItems && <ext.UserMenuItems {...(onNavigate ? { onNavigate } : {})} />}
           <DM.Separator className="my-1 h-px bg-line" />
           <DM.Item
             onSelect={onSignOut}

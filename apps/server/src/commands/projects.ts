@@ -58,7 +58,7 @@ export async function createProject(
     throw forbidden('only the organization Owner and Admins can create projects');
   const projectId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
-    await assertWithinLimit(tx, org.id, 'projects');
+    await assertWithinLimit(ctx, tx, org.id, 'projects');
     const workflowKey = input.workflowKey ?? ctx.config.defaultWorkflow;
     // `code-bugfix` runs only the bug cards a failed test files under a code card (Convert refuses it too)
     if (workflowKey === 'code-bugfix')
@@ -843,7 +843,7 @@ export async function restoreProject(
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId, { allowInterest: !!opts.interestId });
     if (p.status !== 'archived') throw conflict('not_archived', 'this project is not archived');
-    if (!opts.interestId) await assertWithinLimit(tx, p.org_id, 'projects');
+    if (!opts.interestId) await assertWithinLimit(ctx, tx, p.org_id, 'projects');
     await ctx.store.append(
       [
         ...(opts.interestId

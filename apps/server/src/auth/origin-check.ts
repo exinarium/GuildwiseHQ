@@ -9,8 +9,6 @@ const EXEMPT_PREFIXES = [
   '/api/test/',
   // The agent API is authenticated by a Bearer key only and ignores session cookies, so there is nothing to forge.
   '/api/v1/',
-  '/api/billing/payfast/itn',
-  '/api/billing/paystack/webhook',
   // The mail provider's inbound webhook: no cookie, no Origin; the shared secret is the credential.
   '/api/inbound/mail/',
   // Incoming webhooks of automations (#14): no cookie, no Origin; the secret is the credential.
@@ -29,11 +27,11 @@ export function originAllowed(config: Config, origin: string | undefined): boole
   return origin === config.publicOrigin || (config.extraOrigins ?? []).includes(origin);
 }
 
-export function checkOrigin(config: Config, req: FastifyRequest): void {
+export function checkOrigin(config: Config, req: FastifyRequest, extraExempt: readonly string[] = []): void {
   if (SAFE.has(req.method)) return;
   const path = req.url.split('?')[0] ?? '';
   if (!path.startsWith('/api/')) return;
-  if (EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return;
+  if (EXEMPT_PREFIXES.some((p) => path.startsWith(p)) || extraExempt.some((p) => path.startsWith(p))) return;
   if (!originAllowed(config, req.headers.origin)) {
     throw new HttpError(403, 'bad_origin', 'Origin header missing or not allowed');
   }
@@ -42,13 +40,13 @@ export function checkOrigin(config: Config, req: FastifyRequest): void {
 /** Mail programs POST the one-click unsubscribe as a form (RFC 8058); it carries a signed token and changes nothing else. */
 const isUnsubscribePost = (url: string): boolean => /^\/blog\/unsubscribe\//.test(url.split('?')[0] ?? '');
 
-export function checkContentType(req: FastifyRequest): void {
+export function checkContentType(req: FastifyRequest, formPostPaths: ReadonlySet<string> = new Set()): void {
   if (SAFE.has(req.method)) return;
   if (isUnsubscribePost(req.url)) return;
   // SendGrid Inbound Parse posts multipart/form-data; the shared secret (checked before the body is read) is the credential.
   if ((req.url.split('?')[0] ?? '') === '/api/inbound/mail/sendgrid') return;
-  // PayFast's notification is a form post.
-  if ((req.url.split('?')[0] ?? '') === '/api/billing/payfast/itn') return;
+  // An extension's webhook may be a form post (its own signature is the credential).
+  if (formPostPaths.has(req.url.split('?')[0] ?? '')) return;
   // A file upload is the raw body (the web app sends application/octet-stream), not JSON.
   const path = req.url.split('?')[0] ?? '';
   if (/^\/api\/cards\/[^/]+\/attachments$/.test(path) || path.startsWith('/api/runner/uploads/')) return;

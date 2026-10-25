@@ -223,7 +223,6 @@ describe('what is on this page', () => {
     expect(pageHelpFor('/p/TOY/board')?.pattern).toBe('/p/:projectKey/board');
     expect(pageHelpFor('/cards/TOY-7')?.pattern).toBe('/cards/:ref');
     expect(pageHelpFor('/cards/new')?.pattern).toBe('/cards/new');
-    expect(pageHelpFor('/help/requests/abc')?.pattern).toBe('/help/requests/:id');
     expect(pageHelpFor('/platform/orgs/1')?.pattern).toBe('/platform/orgs/:id');
   });
 });

@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
+import { ext } from '../extension/index.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
-import { BILLING_GATE_PATH, BillingGate } from '../pages/BillingGate.tsx';
 import { ChangePasswordRequired } from '../pages/ChangePasswordRequired.tsx';
 import { SecuritySetup } from '../pages/SecuritySetup.tsx';
 import { getSocket, useSocketState } from '../ws/socket.ts';
 import { AppShell } from './shell/AppShell.tsx';
-import { ContactProvider } from './support/ContactDialog.tsx';
 import { PageSkeleton } from './ui.tsx';
 
 /** The signed-in frame. `platform` is the platform administrator's area; everyone else gets the work shell. */
@@ -63,15 +62,13 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   // An Owner whose organization waits on a card (new sign-up) or was paused for payment sees one billing screen and
   // nothing else: every other address leads there, and there is no shell, tour, checklist or What's new.
   const gate = me.data.activeOrg?.gate ?? null;
-  if (gate) {
-    if (loc.pathname !== BILLING_GATE_PATH)
-      return <Navigate to={`${BILLING_GATE_PATH}${loc.search}`} replace />;
-    return (
-      <ContactProvider>
-        <BillingGate gate={gate} orgName={me.data.activeOrg?.name ?? ''} />
-      </ContactProvider>
-    );
+  const gatePath = ext.gatePath;
+  if (gate && ext.Gate && gatePath) {
+    if (loc.pathname !== gatePath) return <Navigate to={`${gatePath}${loc.search}`} replace />;
+    const Providers = ext.AppProviders;
+    const screen = <ext.Gate gate={gate} orgName={me.data.activeOrg?.name ?? ''} />;
+    return Providers ? <Providers>{screen}</Providers> : screen;
   }
-  if (loc.pathname === BILLING_GATE_PATH) return <Navigate to="/" replace />;
+  if (gatePath && loc.pathname === gatePath) return <Navigate to="/" replace />;
   return <AppShell name={me.data.user.displayName} live={socketState} />;
 }

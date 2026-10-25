@@ -419,7 +419,7 @@ describe('both vaults point at the same repository (the live UAT shape)', () => 
     const persV = await registerLegacyVault(t, {
       orgId: org5,
       kind: 'personal',
-      remoteUrl: 'ssh://git@GitHub.com/Exinarium/Agent-Vault/',
+      remoteUrl: 'ssh://git@GitHub.com/Example/Agent-Vault/',
     });
     const dirsBefore = await q(
       `SELECT key, vault_dir, vault_folder FROM projects WHERE org_id=$1 ORDER BY key`,

@@ -1,11 +1,10 @@
 import {
   Building2,
-  CircleDollarSign,
   CircleHelp,
   Download,
   KeyRound,
-  LifeBuoy,
   LogOut,
+  type LucideIcon,
   MailPlus,
   MailQuestion,
   Newspaper,
@@ -13,11 +12,11 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { useState } from 'react';
+import { type ComponentType, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
-import { usePlatformBillingSettings } from '../../api/queries/billing.ts';
 import { useBlogSummary } from '../../api/queries/blog.ts';
+import { ext } from '../../extension/index.ts';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { Logo } from '../Logo.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
@@ -25,19 +24,35 @@ import { cx } from '../ui/cx.ts';
 import { Button, Callout } from '../ui.tsx';
 import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 
-const NAV = [
-  { to: '/platform', label: 'Organizations', icon: Building2, end: true },
-  { to: '/platform/invitations', label: 'Invitations', icon: MailPlus, end: false },
-  { to: '/platform/users', label: 'Accounts', icon: Users, end: false },
-  { to: '/platform/billing', label: 'Billing', icon: CircleDollarSign, end: false },
-  { to: '/platform/support', label: 'Support', icon: LifeBuoy, end: false },
-  { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
-  { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
-  { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
-  { to: '/platform/team', label: 'Platform team', icon: Wrench, end: false },
-  { to: '/platform/inbound', label: 'Inbound mail', icon: MailQuestion, end: false },
-  { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
-];
+const CORE_NAV: Array<{ to: string; label: string; icon: LucideIcon; end: boolean; Badge?: ComponentType }> =
+  [
+    { to: '/platform', label: 'Organizations', icon: Building2, end: true },
+    { to: '/platform/invitations', label: 'Invitations', icon: MailPlus, end: false },
+    { to: '/platform/users', label: 'Accounts', icon: Users, end: false },
+    { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
+    { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
+    { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
+    { to: '/platform/team', label: 'Platform team', icon: Wrench, end: false },
+    { to: '/platform/inbound', label: 'Inbound mail', icon: MailQuestion, end: false },
+    { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
+  ];
+
+/** The core's entries with the extension's inserted after the item each names (default: at the end). */
+const NAV = (() => {
+  const items = [...CORE_NAV];
+  for (const x of ext.platformNav ?? []) {
+    const at = x.after ? items.findIndex((i) => i.to === x.after) : -1;
+    const item = {
+      to: x.to,
+      label: x.label,
+      icon: x.icon,
+      end: false,
+      ...(x.Badge ? { Badge: x.Badge } : {}),
+    };
+    items.splice(at >= 0 ? at + 1 : items.length, 0, item);
+  }
+  return items;
+})();
 
 const NO_NAV: ReadonlySet<string> = new Set();
 
@@ -47,7 +62,6 @@ export function PlatformShell() {
   const logout = useLogout();
   const [pageHelp, setPageHelp] = useState(false);
   const blog = useBlogSummary();
-  const unavailable = usePlatformBillingSettings().data?.paymentsUnavailable ?? null;
   return (
     <TourProvider navIds={NO_NAV} mobile={false}>
       <div className="flex min-h-dvh flex-col bg-canvas" data-testid="platform-shell">
@@ -79,6 +93,7 @@ export function PlatformShell() {
                 >
                   <n.icon aria-hidden="true" className="size-4" />
                   {n.label}
+                  {n.Badge && <n.Badge />}
                   {n.to === '/platform/blog' && (blog.data?.pending ?? 0) > 0 && (
                     <span
                       data-testid="blog-pending-badge"
@@ -118,13 +133,7 @@ export function PlatformShell() {
             </div>
           </div>
         </header>
-        {unavailable && (
-          <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6">
-            <Callout tone="warning" data-testid="payments-unavailable-banner">
-              {unavailable}
-            </Callout>
-          </div>
-        )}
+        {ext.PlatformBanner && <ext.PlatformBanner />}
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <Outlet />
         </main>

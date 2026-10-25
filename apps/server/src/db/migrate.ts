@@ -16,6 +16,12 @@ export class MigrationChecksumError extends Error {
 
 export interface MigrateOptions {
   dir?: string;
+  /**
+   * Migration sets of extensions (hosted billing, support, ...), applied after the core's `dir` in the order given.
+   * Each file keeps its own id (its filename); one `schema_migrations` table tracks them all, so a database that
+   * already applied a file under the core never re-runs it from an extension.
+   */
+  extraDirs?: string[];
   /** Run inside this schema (tests); defaults to the connection's search path. */
   schema?: string;
   log?: (msg: string) => void;
@@ -34,11 +40,24 @@ export function defaultMigrationsDir(): string {
   return found;
 }
 
+/** The migration files to consider, core first, then each extension set: `[file name, directory]`. */
+async function listMigrations(opts: MigrateOptions): Promise<Array<[string, string]>> {
+  const out: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const dir of [opts.dir ?? defaultMigrationsDir(), ...(opts.extraDirs ?? [])]) {
+    for (const f of (await readdir(dir)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort()) {
+      if (seen.has(f)) throw new Error(`migration ${f} exists in two migration sets`);
+      seen.add(f);
+      out.push([f, dir]);
+    }
+  }
+  return out;
+}
+
 /** Applies pending migrations; returns the applied file names. Aborts if an applied file changed. */
 export async function migrate(connectionString: string, opts: MigrateOptions = {}): Promise<string[]> {
-  const dir = opts.dir ?? defaultMigrationsDir();
   const log = opts.log ?? (() => {});
-  const files = (await readdir(dir)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+  const files = await listMigrations(opts);
   const client = new pg.Client({ connectionString });
   await client.connect();
   const applied: string[] = [];
@@ -58,7 +77,7 @@ export async function migrate(connectionString: string, opts: MigrateOptions = {
           )
         ).rows.map((r) => [r.version, r.checksum]),
       );
-      for (const file of files) {
+      for (const [file, dir] of files) {
         const body = await readFile(join(dir, file), 'utf8');
         const checksum = createHash('sha256').update(body).digest('hex');
         const prior = done.get(file);
@@ -100,8 +119,7 @@ export async function withPendingMigrations<T>(
   fn: (db: pg.ClientBase, pending: string[]) => Promise<T>,
   opts: MigrateOptions = {},
 ): Promise<{ result: T; pending: string[] }> {
-  const dir = opts.dir ?? defaultMigrationsDir();
-  const files = (await readdir(dir)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+  const files = await listMigrations(opts);
   const client = new pg.Client({ connectionString });
   await client.connect();
   try {
@@ -121,7 +139,7 @@ export async function withPendingMigrations<T>(
           : [],
       );
       const pending: string[] = [];
-      for (const file of files) {
+      for (const [file, dir] of files) {
         const body = await readFile(join(dir, file), 'utf8');
         const checksum = createHash('sha256').update(body).digest('hex');
         const prior = done.get(file);

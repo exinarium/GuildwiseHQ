@@ -201,22 +201,26 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
               Take the tour
             </Item>
           )}
-          <Item
-            value="action contact us support"
-            keywords={['help', 'bug', 'question', 'feature', 'billing', 'report', 'feedback']}
-            icon={MessageCircleQuestion}
-            onSelect={run(() => ctx.onContact?.())}
-          >
-            Contact us
-          </Item>
-          <Item
-            value="action my requests support tickets"
-            keywords={['help', 'replies', 'answers']}
-            icon={Inbox}
-            onSelect={go('/help/requests')}
-          >
-            My requests
-          </Item>
+          {ctx.onContact && (
+            <>
+              <Item
+                value="action contact us support"
+                keywords={['help', 'bug', 'question', 'feature', 'billing', 'report', 'feedback']}
+                icon={MessageCircleQuestion}
+                onSelect={run(() => ctx.onContact?.())}
+              >
+                Contact us
+              </Item>
+              <Item
+                value="action my requests support tickets"
+                keywords={['help', 'replies', 'answers']}
+                icon={Inbox}
+                onSelect={go('/help/requests')}
+              >
+                My requests
+              </Item>
+            </>
+          )}
           <Item
             value="action keyboard shortcuts help"
             keywords={['keys', 'hotkeys', '?']}

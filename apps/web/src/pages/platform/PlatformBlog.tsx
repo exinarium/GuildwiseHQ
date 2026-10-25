@@ -4,7 +4,6 @@ import { Link, useSearchParams } from 'react-router';
 import { usePlatformBlog } from '../../api/queries/blog.ts';
 import { BlogSettingsPanel } from '../../components/blog/BlogSettingsPanel.tsx';
 import { BlogTopicsPanel } from '../../components/blog/BlogTopicsPanel.tsx';
-import { BlogWriterPanel } from '../../components/blog/BlogWriterPanel.tsx';
 import { SocialPanel } from '../../components/blog/SocialPanel.tsx';
 import {
   Badge,
@@ -16,6 +15,7 @@ import {
   Panel,
   Tabs,
 } from '../../components/ui.tsx';
+import { ext } from '../../extension/index.ts';
 import { formatDateTime } from '../../lib/time.ts';
 
 const STATUS: Array<{ id: BlogStatus; label: string }> = [
@@ -57,7 +57,7 @@ export function PlatformBlog() {
     <>
       {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
       {d && <BlogSettingsPanel settings={d.settings} />}
-      <BlogWriterPanel />
+      {ext.PlatformBlogWriter && <ext.PlatformBlogWriter />}
       <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Status">
         <FilterChip pressed={!status} onClick={() => set(undefined)}>
           All
@@ -79,7 +79,7 @@ export function PlatformBlog() {
         <EmptyState
           icon={Newspaper}
           title="No posts here"
-          description="Switch the blog writer on under Writer above, or press Write one now. Outside tools can post through the blog API (see API keys)."
+          description={`${ext.PlatformBlogWriter ? 'Switch the blog writer on under Writer above, or press Write one now. ' : ''}Outside tools can post through the blog API (see API keys).`}
         />
       )}
       {d && d.posts.length > 0 && (

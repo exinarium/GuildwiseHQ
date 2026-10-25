@@ -608,41 +608,6 @@ describe('threading and replies', () => {
       ctx.mailer = saved;
     }
   });
-
-  it('support mail carries Message-ID and thread headers', async () => {
-    const sentMail: MailMessage[] = [];
-    const ctx = w.t.app.ctx;
-    const saved = ctx.mailer;
-    ctx.mailer = {
-      async send(m) {
-        sentMail.push(m);
-      },
-      close() {},
-    };
-    try {
-      const staff = await w.t.superAdminSession();
-      const created = await w.t.req('POST', '/api/support/tickets', {
-        cookie: w.owner.cookie,
-        body: { kind: 'question', subject: 'Help', message: 'How do I do a thing?', context: { page: '/x' } },
-      });
-      expect(created.status).toBe(201);
-      const ack = sentMail.find((m) => m.to === w.owner.email);
-      expect(ack?.messageId).toMatch(/^<support\.[0-9a-f-]+@/);
-      expect(ack?.inReplyTo).toBeUndefined();
-      await ok(
-        w.t.req('POST', `/api/platform/support/tickets/${created.body.id}/replies`, {
-          cookie: staff.cookie,
-          body: { body: 'Like this.' },
-        }),
-      );
-      const reply = sentMail.filter((m) => m.to === w.owner.email).at(-1);
-      expect(reply?.inReplyTo).toBe(ack?.messageId);
-      expect(reply?.references).toContain(ack?.messageId);
-      expect(reply?.messageId).not.toBe(ack?.messageId);
-    } finally {
-      ctx.mailer = saved;
-    }
-  });
 });
 
 describe('untrusted content in briefs', () => {

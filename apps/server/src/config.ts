@@ -70,6 +70,7 @@ const EnvSchema = z.object({
   AOM_MAIL_FROM: z.string().default('Guildwise HQ <noreply@aom.local>'),
   AOM_MIGRATE_ON_BOOT: bool(true),
   AOM_DATA_MIGRATIONS: bool(true),
+  NODE_ENV: z.string().optional(),
   AOM_SECRET_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
   AOM_SERVE_WEB: bool(false),
   AOM_WEB_DIST: z.string().optional(),
@@ -139,30 +140,6 @@ const EnvSchema = z.object({
   /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
   AOM_LINKEDIN_CLIENT_ID: z.string().optional(),
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
-  /** Billing: renewals, retries, expiry notices and trial reminders run on the scheduler. */
-  AOM_BILLING_JOBS: bool(true),
-  /** Staging only: allow the fake provider (no money taken) on an https public origin; otherwise payments are "not configured" and sign-up and cards are hidden (billing/guard.ts). */
-  AOM_ALLOW_FAKE_PAYMENTS: bool(false),
-  /** DEV ONLY, never set in production: lets `pnpm seed:dev` fill a local stack with test data. Reported by /api/public/plans as `devSeedAllowed` only on an http local-network origin with the fake provider. */
-  AOM_DEV_SEED: bool(false),
-  /** Which gateway: `paystack` (primary), `payfast` (fallback) or `fake`. Unset: Paystack when its keys are set, else PayFast when its keys are set, else fake (local and UAT). */
-  AOM_PAYMENT_PROVIDER: z.enum(['paystack', 'payfast', 'fake']).optional(),
-  AOM_PAYSTACK_SECRET_KEY: z.string().optional(),
-  AOM_PAYSTACK_PUBLIC_KEY: z.string().optional(),
-  /** The ZAR amount charged (and refunded) to save a card with Paystack. UNVERIFIED: Paystack's minimum for ZAR. */
-  AOM_PAYSTACK_CARD_CHECK_ZAR: z.coerce.number().min(1).max(1000).default(5),
-  /** Deprecated alias of AOM_PAYMENT_PROVIDER (`auto` = unset). */
-  AOM_BILLING_PROVIDER: z.enum(['auto', 'fake', 'payfast']).default('auto'),
-  AOM_PAYFAST_MERCHANT_ID: z.string().optional(),
-  AOM_PAYFAST_MERCHANT_KEY: z.string().optional(),
-  AOM_PAYFAST_PASSPHRASE: z.string().optional(),
-  AOM_PAYFAST_SANDBOX: bool(true),
-  /** The ZAR amount charged (and refunded) to save a card with PayFast tokenization. PayFast's minimum is R5.00. */
-  AOM_PAYFAST_CARD_CHECK_ZAR: z.coerce.number().min(5).max(1000).default(5),
-  /** Exchange rate source: a URL returning `{ rates: { ZAR } }` (default open.er-api.com); `off` uses only the fallback. */
-  AOM_FX_URL: z.string().default('https://open.er-api.com/v6/latest/USD'),
-  /** Used when the rate source is down and no daily rate is cached. */
-  AOM_FX_FALLBACK_ZAR: z.coerce.number().positive().default(18.5),
   /**
    * Simulation organizations: host their simulated workstation (a mock runner the server starts and supervises).
    * Unset: on, except under tests.
@@ -191,6 +168,8 @@ const EnvSchema = z.object({
 });
 
 export interface Config {
+  /** The environment this configuration was read from (extensions read their own settings from it). */
+  env: Readonly<Record<string, string | undefined>>;
   databaseUrl: string;
   port: number;
   host: string;
@@ -261,23 +240,8 @@ export interface Config {
   weeklyBriefing: boolean;
   linkedinClientId: string | undefined;
   linkedinClientSecret: string | undefined;
-  billingJobs: boolean;
-  allowFakePayments: boolean;
-  /** `AOM_DEV_SEED`: dev only (see billing/guard.ts `devSeedAllowed`). */
-  devSeed: boolean;
-  billingProvider: 'auto' | 'fake' | 'payfast' | 'paystack';
-  paystack: { secretKey: string | undefined; publicKey: string | undefined; cardCheckZar: number };
-  payfast: {
-    merchantId: string | undefined;
-    merchantKey: string | undefined;
-    passphrase: string | undefined;
-    sandbox: boolean;
-    cardCheckZar: number;
-  };
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
-  fxUrl: string;
-  fxFallbackZar: number;
   logLevel: string;
   /** Host the simulated workstations of simulation organizations (see src/simulation). */
   simulationHost: boolean;
@@ -298,8 +262,15 @@ export interface Config {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const e = EnvSchema.parse(env);
+  // Production must not run on the fallback key kept in the database: a dump of the database alone would then hold the
+  // key next to the data it protects (two-factor seeds, connected-account tokens, signed links).
+  if (e.NODE_ENV === 'production' && !e.AOM_SECRET_KEY)
+    throw new Error(
+      'AOM_SECRET_KEY is required in production: set it to a long random string (for example `openssl rand -base64 32`) and keep it with your backups.',
+    );
   const publicOrigin = e.AOM_PUBLIC_ORIGIN.replace(/\/+$/, '');
   return {
+    env: { ...env },
     databaseUrl: e.DATABASE_URL,
     port: e.AOM_PORT,
     host: e.AOM_HOST,
@@ -348,25 +319,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     weeklyBriefing: e.AOM_WEEKLY_BRIEFING,
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
-    billingJobs: e.AOM_BILLING_JOBS,
-    allowFakePayments: e.AOM_ALLOW_FAKE_PAYMENTS,
-    devSeed: e.AOM_DEV_SEED,
-    billingProvider: e.AOM_PAYMENT_PROVIDER ?? e.AOM_BILLING_PROVIDER,
-    paystack: {
-      secretKey: e.AOM_PAYSTACK_SECRET_KEY?.trim() || undefined,
-      publicKey: e.AOM_PAYSTACK_PUBLIC_KEY?.trim() || undefined,
-      cardCheckZar: e.AOM_PAYSTACK_CARD_CHECK_ZAR,
-    },
-    payfast: {
-      merchantId: e.AOM_PAYFAST_MERCHANT_ID?.trim() || undefined,
-      merchantKey: e.AOM_PAYFAST_MERCHANT_KEY?.trim() || undefined,
-      passphrase: e.AOM_PAYFAST_PASSPHRASE?.trim() || undefined,
-      sandbox: e.AOM_PAYFAST_SANDBOX,
-      cardCheckZar: e.AOM_PAYFAST_CARD_CHECK_ZAR,
-    },
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
-    fxUrl: e.AOM_FX_URL,
-    fxFallbackZar: e.AOM_FX_FALLBACK_ZAR,
     logLevel: e.LOG_LEVEL,
     simulationHost: e.AOM_SIMULATION_HOST,
     simulationDir: e.AOM_SIMULATION_DIR?.trim() || join(tmpdir(), 'aom-simulation'),

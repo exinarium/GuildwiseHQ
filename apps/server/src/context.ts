@@ -1,7 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { BillingRuntime } from './billing/runtime.ts';
 import type { SocialClient } from './blog/social-client.ts';
-import type { WriterClient } from './blog/writer/client.ts';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
 import type { SignalSweep } from './ceo/signals.ts';
 import type { ChatRelay } from './chat/relay.ts';
@@ -13,6 +11,7 @@ import type { Dispatcher } from './dispatcher/dispatcher.ts';
 import type { Reaper } from './dispatcher/reaper.ts';
 import type { Notifier } from './eventstore/notifier.ts';
 import type { PgEventStore } from './eventstore/pg-event-store.ts';
+import type { ExtensionHost } from './extension.ts';
 import type { Mailer } from './mail/mailer.ts';
 import type { PushService } from './push/notifier.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
@@ -32,8 +31,8 @@ export interface Ctx {
   mailer: Mailer;
   /** Facebook and LinkedIn (a fake in tests; nothing else reaches those networks). */
   social: SocialClient;
-  /** The Anthropic client of the blog writer (platform key; a fake in tests, null without a key). */
-  blogWriter: WriterClient | null;
+  /** Registered extensions (billing, support, ... in a hosted build; empty for a self-hosted server). */
+  ext: ExtensionHost;
   log: FastifyBaseLogger;
   /** Late-bound long-lived services (assigned by createApp before any request is served). */
   services: Services;
@@ -70,7 +69,6 @@ export interface Services {
   /** The Boardroom orchestrator: rounds, speaker choice, decision points, whiteboard and minutes. */
   board: BoardService;
   cloud: CloudServices;
-  billing: BillingRuntime;
   /** Web Push notifier (only when VAPID is configured). */
   push?: PushService;
 }

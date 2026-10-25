@@ -377,9 +377,7 @@ describe('ReleaseSheet', () => {
         return n === 1
           ? {
               message: 'Refused (run_in_progress): busy',
-              runs: [
-                { runId: U(9), target: 'prod-server', status: 'refused', refusal: 'run_in_progress' },
-              ],
+              runs: [{ runId: U(9), target: 'prod-server', status: 'refused', refusal: 'run_in_progress' }],
             }
           : { message: 'ok', runs: [{ runId: U(9), target: 'prod-server', status: 'queued' }] };
       },

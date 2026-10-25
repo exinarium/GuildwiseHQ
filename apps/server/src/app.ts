@@ -16,9 +16,7 @@ import {
 import type { AnthropicLike } from './assistant/service.ts';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { lookupSession, SESSION_COOKIE } from './auth/sessions.ts';
-import { createBillingRuntime } from './billing/runtime.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
-import type { WriterClient } from './blog/writer/client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { registerCeoReviewHook } from './ceo/review.ts';
 import { createRoutingInterceptor } from './ceo/routing.ts';
@@ -47,6 +45,7 @@ import { HttpError } from './errors.ts';
 import { Notifier } from './eventstore/notifier.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
+import { createExtensionHost, type ServerExtension } from './extension.ts';
 import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { withSimulationPrefix } from './mail/simulation.ts';
@@ -62,7 +61,6 @@ import { approvalRoutes } from './routes/approval.ts';
 import { assistantRoutes } from './routes/assistant.ts';
 import { authRoutes } from './routes/auth.ts';
 import { backlogRoutes } from './routes/backlog.ts';
-import { billingRoutes } from './routes/billing.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
@@ -103,6 +101,7 @@ import { outboundRoutes } from './routes/outbound.ts';
 import { packRoutes } from './routes/packs.ts';
 import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
+import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
@@ -118,7 +117,6 @@ import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
-import { supportRoutes } from './routes/support.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { vaultRoutes } from './routes/vaults.ts';
@@ -139,8 +137,8 @@ export interface BuildOptions {
   assistantClient?: AnthropicLike | null;
   /** Facebook and LinkedIn; tests pass a fake, nothing else reaches those networks. */
   social?: SocialClient;
-  /** The blog writer's Anthropic client (tests pass a fake or nothing; default: the real SDK when a key is set). */
-  blogWriterClient?: WriterClient | null;
+  /** Server extensions (billing, support, ...): none for a self-hosted server. See extension.ts. */
+  extensions?: ServerExtension[];
   clock?: Clock;
   /** Fastify logger: `false` silences it. Defaults to config.logLevel. */
   logger?: boolean;
@@ -217,7 +215,10 @@ export const requestLogSerializer = (req: {
  * attributes (hence `style-src 'unsafe-inline'`, no inline scripts), the browser talks to `/api` and `/api/ws` of the
  * same origin. Everything else (objects, framing, foreign forms, base tag) is shut.
  */
-export function contentSecurityPolicy(config: { publicOrigin: string; secureCookies: boolean }): string {
+export function contentSecurityPolicy(
+  config: { publicOrigin: string; secureCookies: boolean },
+  formActions: string[] = [],
+): string {
   let ws = '';
   try {
     const u = new URL(config.publicOrigin);
@@ -234,8 +235,8 @@ export function contentSecurityPolicy(config: { publicOrigin: string; secureCook
     `connect-src 'self'${ws ? ` ${ws}` : ''}`,
     "object-src 'none'",
     "base-uri 'self'",
-    // the card capture posts a form to PayFast's hosted page
-    "form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za",
+    // extensions may post forms to a hosted page (a payment gateway)
+    `form-action 'self'${formActions.length ? ` ${formActions.join(' ')}` : ''}`,
     "frame-ancestors 'none'",
     ...(config.secureCookies ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
@@ -277,20 +278,14 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     notifier,
     mailer,
     social: opts.social ?? createSocialClient(),
-    blogWriter:
-      opts.blogWriterClient !== undefined
-        ? opts.blogWriterClient
-        : config.anthropicApiKey
-          ? (new Anthropic({
-              apiKey: config.anthropicApiKey,
-              maxRetries: 1,
-              // an article with web searches takes a minute or two
-              timeout: 300_000,
-            }) as unknown as WriterClient)
-          : null,
+    ext: createExtensionHost(opts.extensions),
     log: app.log,
     services: {} as Ctx['services'],
   };
+  store.extraSaved = ctx.ext.list.flatMap((e) => e.preservedTables ?? []);
+  const rawBodyPaths = new Set(ctx.ext.list.flatMap((e) => e.rawBodyPaths ?? []));
+  const originExempt = ctx.ext.list.flatMap((e) => e.originExemptPrefixes ?? []);
+  const formPostPaths = new Set(ctx.ext.list.flatMap((e) => e.formPostPaths ?? []));
   store.intercept(createRoutingInterceptor(ctx));
   // Suspended and cancelled organizations are read-only for their users, whichever route a write came through.
   store.intercept(createOrgStatusInterceptor(ctx));
@@ -336,8 +331,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
 
   // JSON bodies: tolerate an empty body (clients that always send the header).
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
-    // Paystack signs the raw body: keep it for the webhook (only that route).
-    if (req.url.split('?')[0] === '/api/billing/paystack/webhook')
+    // A webhook signs the raw body: an extension asks to keep it (only for its own routes).
+    if (rawBodyPaths.has(req.url.split('?')[0] ?? ''))
       (req as unknown as { rawBody?: string }).rawBody = body as string;
     if (body === '' || body === undefined) return done(null, undefined);
     try {
@@ -349,8 +344,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     }
   });
 
-  // Form posts stay raw strings: the one-click unsubscribe of the weekly digest (RFC 8058, mail programs) and PayFast's
-  // ITN (its signature is checked over the fields in the order received). Nothing else reads forms.
+  // Form posts stay raw strings: the one-click unsubscribe of the weekly digest (RFC 8058, mail programs) and an extension's
+  // gateway notification (its signature is checked over the fields in the order received). Nothing else reads forms.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) =>
     done(null, body),
   );
@@ -359,10 +354,13 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   if (config.rateLimit) await app.register(rateLimit, { global: false, hook: 'preHandler' });
 
   app.addHook('onRequest', async (req) => {
-    checkOrigin(config, req);
-    checkContentType(req);
+    checkOrigin(config, req, originExempt);
+    checkContentType(req, formPostPaths);
   });
-  const csp = contentSecurityPolicy(config);
+  const csp = contentSecurityPolicy(
+    config,
+    ctx.ext.list.flatMap((e) => e.cspFormActions ?? []),
+  );
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('x-frame-options', 'DENY');
@@ -391,12 +389,12 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(adminRoutes(ctx));
   await app.register(orgRoutes(ctx));
   await app.register(platformRoutes(ctx));
+  await app.register(platformSettingsRoutes(ctx));
   await app.register(platformTeamRoutes(ctx));
   await app.register(workstationRoutes(ctx));
   await app.register(integrationRoutes(ctx));
   await app.register(installerRoutes(ctx));
   await app.register(cloudRoutes(ctx));
-  await app.register(supportRoutes(ctx));
   await app.register(projectRoutes(ctx));
   await app.register(projectWorkflowRoutes(ctx));
   await app.register(cardRoutes(ctx));
@@ -463,7 +461,10 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(blogPlatformRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
-  await app.register(billingRoutes(ctx));
+  for (const e of ctx.ext.list) {
+    await e.setup?.(ctx);
+    for (const r of e.routes ?? []) await app.register(r(ctx));
+  }
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -479,7 +480,6 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.sessions = new SessionTurns(ctx);
   ctx.services.discovery = new DiscoveryService(ctx);
   ctx.services.board = new BoardService(ctx);
-  ctx.services.billing = createBillingRuntime(config);
   await app.register(websocket, {
     options: {
       maxPayload: 8 * 1024 * 1024,
@@ -500,8 +500,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       // Time-dependent housekeeping (lease expiry, accept timeout) runs immediately instead of on the next tick.
       await ctx.services.reaper.run();
       await ctx.services.scheduler.run();
-      await ctx.services.scheduler.runLicensing();
-      await ctx.services.scheduler.runBilling();
+      await ctx.services.scheduler.runMaintenance();
+      await ctx.services.scheduler.runTickers();
       await ctx.services.signals.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };

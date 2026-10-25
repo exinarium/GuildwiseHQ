@@ -17,6 +17,11 @@ import { one } from '../db/sql.ts';
 async function key(ctx: Ctx): Promise<Buffer> {
   const env = ctx.config.secretKey;
   if (env) return createHash('sha256').update(env).digest();
+  return dbKey(ctx);
+}
+
+/** The key kept in `server_secrets`: what a server without `AOM_SECRET_KEY` used. Still readable once the variable is set. */
+async function dbKey(ctx: Ctx): Promise<Buffer> {
   const row = await one<{ value: string }>(
     ctx.pool,
     `SELECT value FROM server_secrets WHERE name='totp_key'`,
@@ -43,9 +48,24 @@ export async function encryptSecret(ctx: Ctx, plain: string): Promise<string> {
 export async function decryptSecret(ctx: Ctx, blob: string): Promise<string> {
   const [v, iv, tag, enc] = blob.split(':');
   if (v !== 'v1' || !iv || !tag || !enc) throw new Error('unknown secret format');
-  const d = createDecipheriv('aes-256-gcm', await key(ctx), Buffer.from(iv, 'base64url'));
-  d.setAuthTag(Buffer.from(tag, 'base64url'));
-  return Buffer.concat([d.update(Buffer.from(enc, 'base64url')), d.final()]).toString('utf8');
+  const open = async (k: Buffer): Promise<string> => {
+    const d = createDecipheriv('aes-256-gcm', k, Buffer.from(iv, 'base64url'));
+    d.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([d.update(Buffer.from(enc, 'base64url')), d.final()]).toString('utf8');
+  };
+  try {
+    return await open(await key(ctx));
+  } catch (err) {
+    // A server that switched from the database key to `AOM_SECRET_KEY` can still read what it wrote before. Only when
+    // a database key exists (a server that never had one does not create one here).
+    if (!ctx.config.secretKey) throw err;
+    const legacy = await one<{ value: string }>(
+      ctx.pool,
+      `SELECT value FROM server_secrets WHERE name='totp_key'`,
+    );
+    if (!legacy) throw err;
+    return open(Buffer.from(legacy.value, 'base64url'));
+  }
 }
 
 /** `<value>.<signature>`: a value that anyone can read but only this server can have made (unsubscribe links). */

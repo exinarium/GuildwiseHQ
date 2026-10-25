@@ -948,7 +948,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'AI runtime',
-        text: 'One tile per program or provider (Codex, the Gemini CLI, Anthropic, OpenAI and others): whether it is installed, who is signed in and whose key is in effect. Sign in runs the program\'s own login on the workstation, Set key stores a key for it, Add a named account makes another login or key, and Make main swaps a named account with the main one.',
+        text: "One tile per program or provider (Codex, the Gemini CLI, Anthropic, OpenAI and others): whether it is installed, who is signed in and whose key is in effect. Sign in runs the program's own login on the workstation, Set key stores a key for it, Add a named account makes another login or key, and Make main swaps a named account with the main one.",
       },
     ],
     article: 'integrations',
@@ -1057,7 +1057,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     intro:
       'A one-to-one chat with a persona that is not hired, on your own workstation. It can read skills and search the ledger and does nothing else.',
     controls: [
-      { name: 'Message box', text: 'Write and press Enter. A reply that cannot run now waits for your workstation.' },
+      {
+        name: 'Message box',
+        text: 'Write and press Enter. A reply that cannot run now waits for your workstation.',
+      },
       { name: 'Cost', text: 'What the chat has cost so far; it is part of the organization costs.' },
     ],
     article: 'capabilities#chat-with-a-persona',
@@ -1273,84 +1276,6 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'getting-started#page-help',
-  },
-  '/help/contact': {
-    title: 'Contact us',
-    intro:
-      'Write to the support team. Your name, email and organization go with the message, and you can see the page context first.',
-    controls: [
-      {
-        name: 'Subject',
-        text: 'A brief description of your issue or question.',
-      },
-      {
-        name: 'Category',
-        text: 'Choose what it is about: Bug report, Question, Feature request or Billing.',
-      },
-      {
-        name: 'Message',
-        text: 'Full details about what you experienced and what you expected.',
-      },
-      {
-        name: 'Screenshot (optional)',
-        text: 'A screenshot of the page you were on is captured first; remove it or upload another PNG, JPEG or WebP image up to 2.5 MB.',
-      },
-      {
-        name: 'What we send with your request',
-        text: 'Opens the page, app version, browser, screen size, time zone and recent errors that go along. You can leave the errors out.',
-      },
-      {
-        name: 'Send',
-        text: 'Send your message. It then shows under My requests, and the answer arrives by email.',
-      },
-    ],
-    article: 'writing-to-us#contact-us',
-  },
-  '/help/requests': {
-    title: 'My requests',
-    intro: 'All your support tickets and answers from the Guildwise HQ team. New replies appear as badges.',
-    controls: [
-      {
-        name: 'Request list',
-        text: 'All your support tickets with subject, category, status and whether there is a new reply.',
-      },
-      {
-        name: 'New reply badge',
-        text: "Shown on a request where the support team's reply is the last message and the request is not closed.",
-      },
-      {
-        name: 'Click to read',
-        text: 'Click any request to see the full conversation and support replies.',
-      },
-      {
-        name: 'Contact us link',
-        text: 'Jump to the Contact form if you need to send another message.',
-      },
-    ],
-    article: 'writing-to-us#my-requests',
-  },
-  '/help/requests/:id': {
-    title: 'Request thread',
-    intro: 'One support ticket and the full conversation between you and the Guildwise HQ team.',
-    controls: [
-      {
-        name: 'Your message',
-        text: 'What you wrote to support, with the date you sent it.',
-      },
-      {
-        name: 'Support reply',
-        text: 'The response from the support team with guidance, updates or a solution.',
-      },
-      {
-        name: 'Status badge',
-        text: 'Open (waiting for support response), Answered (support has replied) or Closed (resolved).',
-      },
-      {
-        name: 'Back to requests',
-        text: 'Return to the list of all your support tickets.',
-      },
-    ],
-    article: 'writing-to-us#my-requests',
   },
   '/ledger': {
     title: 'Ledger',
@@ -1731,68 +1656,6 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'organizations-and-roles#platform-area',
   },
-  '/platform/support': {
-    title: 'Support',
-    intro: 'Every Contact us request from every organization and from visitors.',
-    controls: [
-      {
-        name: 'Support address',
-        text: 'The mailbox that also receives every new request, Contact us message and follow-up.',
-      },
-      {
-        name: 'Also email me about',
-        text: 'Two optional switches, off until you turn them on: new organizations and sign-ups, and platform audit events.',
-      },
-      {
-        name: 'Landing-page assistant',
-        text: 'Turn the "Ask Guildwise" chat on the public landing page on or off, see today\'s messages and spend against the daily budget, and change the daily budget (US$2 by default).',
-      },
-      {
-        name: 'Status chips',
-        text: 'Filter by All, Open, Answered or Closed, with counts.',
-      },
-      {
-        name: 'Search',
-        text: 'Find a request by reference, subject, name, email or organization.',
-      },
-      {
-        name: 'Type filter',
-        text: 'Filter by Bug report, Question, Feature request or Billing.',
-      },
-      {
-        name: 'Request list',
-        text: 'Each request with who wrote, their organization, type, status and last message. Click one to open it.',
-      },
-    ],
-    article: 'writing-to-us#my-requests',
-  },
-  '/platform/support/:id': {
-    title: 'Support ticket',
-    intro: 'One request with the whole conversation, the page it came from and what the app sent along.',
-    controls: [
-      {
-        name: 'Request details',
-        text: 'Who wrote it, their organization, when it was sent, the page, version, browser, recent browser errors and the screenshot.',
-      },
-      {
-        name: 'Conversation',
-        text: "The person's message and every reply in time order.",
-      },
-      {
-        name: 'Reply',
-        text: 'Write the answer. It is emailed to the person and shows under their My requests.',
-      },
-      {
-        name: 'Send reply and Send and close',
-        text: 'Send the reply and mark the request answered, or send it and close the request.',
-      },
-      {
-        name: 'Mark open, answered or closed',
-        text: 'Change the status without writing a reply.',
-      },
-    ],
-    article: 'writing-to-us#my-requests',
-  },
   '/platform/blog': {
     title: 'Blog',
     intro:
@@ -1974,38 +1837,6 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'organizations-and-roles#platform-area',
-  },
-  '/platform/billing': {
-    title: 'Billing',
-    intro:
-      'The plan catalogue and the billing settings. Every change needs a reason and is written to the audit log.',
-    controls: [
-      {
-        name: 'Plans',
-        text: 'Edit each plan price (US dollars per month, VAT included) and its member, workstation and project limits. Empty means unlimited. Existing subscriptions keep their price. Unlimited is only assigned from an organization page.',
-      },
-      {
-        name: 'Add-on prices',
-        text: 'What a Business organization pays per extra member, workstation or project each month.',
-      },
-      {
-        name: 'Payment provider',
-        text: 'Which gateway is active (Paystack, PayFast or simulated) and whether it runs on test keys (sandbox) or live. The keys are set on the server, not here.',
-      },
-      {
-        name: 'Invoice details',
-        text: 'The company name, address and VAT number printed on every tax invoice. Placeholders until you enter the real ones.',
-      },
-      {
-        name: 'VAT percent',
-        text: 'The VAT contained in every price (15 for South Africa). It is taken out of the price, never added on top, and shown on every invoice.',
-      },
-      {
-        name: 'Exchange rate override',
-        text: 'Replaces the daily dollar-to-rand rate used when charging. Empty uses the daily rate.',
-      },
-    ],
-    article: 'billing-and-plans#platform',
   },
   '/platform/help': {
     title: 'Help',

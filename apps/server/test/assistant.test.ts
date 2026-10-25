@@ -343,7 +343,7 @@ describe('the committed knowledge pack', () => {
   it('has no private names and keeps the refusal rules in the system prompt', async () => {
     const { publicSystemText } = await import('../src/assistant/prompt.ts');
     const text = publicSystemText();
-    expect(text).not.toMatch(/ExampleCo/i);
+    expect(text).not.toMatch(/\(Pty\) Ltd/i);
     expect(text).toContain('Contact us');
     expect(text).toContain('English');
   });

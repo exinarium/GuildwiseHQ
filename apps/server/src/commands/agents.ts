@@ -327,7 +327,7 @@ export async function hireAgent(
       `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
       [orgId, req.workstationId],
     );
-    if (!uses) await assertWithinLimit(tx, orgId, 'workstations');
+    if (!uses) await assertWithinLimit(ctx, tx, orgId, 'workstations');
     if (extra.registerRole) await extra.registerRole(tx, orgId);
     const roleDef = await loadRole(tx, orgId, req.roleKey);
     if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);

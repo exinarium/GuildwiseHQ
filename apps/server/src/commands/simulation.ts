@@ -7,7 +7,6 @@ import {
   type WipeSimulationResponse,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
-import { assignSimulationBilling } from '../billing/engine.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -44,25 +43,16 @@ export async function setOrgSimulation(
         'A simulation organization stays one until it is deleted. Use "Delete simulation organization" to remove it.',
       );
     if (o.simulation && pace === o.simulation_pace) throw conflict('no_change', 'simulation is already on');
-    // A real organization can become a simulation only while it is empty: no project (archived ones count) and no
-    // live billing subscription.
+    // A real organization can become a simulation only while it is empty: no project (archived ones count), and
+    // nothing an extension holds for it (a live billing subscription).
     if (!o.simulation) {
       const project = await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 LIMIT 1', [orgId]);
-      const sub = await one(
-        tx,
-        `SELECT 1 FROM billing_subscriptions WHERE org_id=$1 AND status <> 'cancelled'`,
-        [orgId],
-      );
-      if (project || sub)
+      for (const e of ctx.ext.list)
+        await e.simulation?.assertCanEnable?.(tx, orgId, { hasProjects: !!project });
+      if (project)
         throw conflict(
           'simulation_not_empty',
-          `Only an empty organization can be switched to simulation: this one ${
-            project && sub
-              ? 'has projects (archived ones count) and a billing subscription'
-              : project
-                ? 'has projects (archived ones count)'
-                : 'has a billing subscription'
-          }. Create a new simulation organization instead.`,
+          'Only an empty organization can be switched to simulation: this one has projects (archived ones count). Create a new simulation organization instead.',
         );
     }
     await ctx.store.append(
@@ -86,8 +76,9 @@ export async function setOrgSimulation(
       ],
       { tx },
     );
-    // A simulation organization is never billed: its subscription, card and open invoices go (as for Unlimited).
-    if (req.enabled && !o.simulation) await assignSimulationBilling(ctx, tx, admin.user.id, orgId, meta);
+    // Extensions clean up their own state (a simulation organization is never billed).
+    if (req.enabled && !o.simulation)
+      for (const e of ctx.ext.list) await e.simulation?.onEnabled?.(ctx, tx, orgId, admin.user.id, meta);
   });
   ctx.services.simulation?.reconcile(orgId);
   ctx.services.dispatcher.trigger();

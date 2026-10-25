@@ -5,7 +5,7 @@
 // reached through the Vite dev server (AOM_API_TARGET=http://localhost:4611 AOM_WEB_PORT=5199 pnpm --filter @aom/web exec vite).
 // Env: BASE (default http://127.0.0.1:5199), ORIGIN (the API's public origin), EMAIL, PASSWORD.
 import { mkdirSync } from 'node:fs';
-import { chromium } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { chromium } from './e2e-deps.mjs';
 import { base, connect, email } from './ui-routes.mjs';
 
 const args = process.argv.slice(2);

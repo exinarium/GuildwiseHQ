@@ -1,6 +1,6 @@
 import type { LimitKind, OrgLimits, OrgUsage } from '@aom/shared';
+import type { Ctx } from '../context.ts';
 import { one, type Queryable } from '../db/sql.ts';
-import { conflict } from '../errors.ts';
 
 /**
  * Usage and limits of an organization (docs/design/organizations.md section 7.4). Limits are optional: the Founding
@@ -22,18 +22,9 @@ export async function orgUsage(db: Queryable, orgId: string): Promise<OrgUsage> 
   return r ?? { members: 0, projects: 0, agents: 0, workstations: 0 };
 }
 
-export async function orgLimits(db: Queryable, orgId: string): Promise<OrgLimits> {
-  const r = await one<{
-    max_members: number | null;
-    max_workstations: number | null;
-    max_projects: number | null;
-  }>(db, 'SELECT max_members, max_workstations, max_projects FROM organizations WHERE id=$1', [orgId]);
-  return {
-    maxMembers: r?.max_members ?? null,
-    maxWorkstations: r?.max_workstations ?? null,
-    maxAgents: null, // B11: plans never limit agents; the max_agents column is unused
-    maxProjects: r?.max_projects ?? null,
-  };
+/** The organization's limits, from the plan-limits provider (unlimited unless an extension supplies one). */
+export function orgLimits(ctx: Ctx, db: Queryable, orgId: string): Promise<OrgLimits> {
+  return ctx.ext.planLimits.limits(db, orgId);
 }
 
 const LIMIT_FIELD: Record<LimitKind, keyof OrgLimits> = {
@@ -41,12 +32,6 @@ const LIMIT_FIELD: Record<LimitKind, keyof OrgLimits> = {
   projects: 'maxProjects',
   agents: 'maxAgents',
   workstations: 'maxWorkstations',
-};
-const LIMIT_NOUN: Record<LimitKind, string> = {
-  members: 'members',
-  projects: 'projects',
-  agents: 'agents',
-  workstations: 'workstations',
 };
 
 /** How full each limit is: `null` max is unlimited. */
@@ -63,35 +48,14 @@ export function limitState(
 
 /**
  * Throws 409 `limit_reached` when adding `delta` of `kind` would exceed the organization's limit. Call it inside the
- * command's append transaction: it locks the organization row (`FOR UPDATE`) so two concurrent adds at `max - 1` cannot
- * both pass. An unlimited organization (no limit set) always passes.
+ * command's append transaction. Without a plan-limits extension every organization is unlimited and this never throws.
  */
-export async function assertWithinLimit(
+export function assertWithinLimit(
+  ctx: Ctx,
   tx: Queryable,
   orgId: string,
   kind: LimitKind,
   delta = 1,
 ): Promise<void> {
-  // Owner decision B11: plans never limit agents (the max_agents column is kept but ignored).
-  if (kind === 'agents') return;
-  const org = await one<Record<string, number | null>>(
-    tx,
-    'SELECT max_members, max_workstations, max_projects FROM organizations WHERE id=$1 FOR UPDATE',
-    [orgId],
-  );
-  if (!org) return;
-  const column = {
-    members: 'max_members',
-    projects: 'max_projects',
-    workstations: 'max_workstations',
-  }[kind];
-  const max = org[column] ?? null;
-  if (max === null) return;
-  const used = (await orgUsage(tx, orgId))[kind];
-  if (used + delta > max)
-    throw conflict(
-      'limit_reached',
-      `This organization has reached its limit of ${max} ${LIMIT_NOUN[kind]}.`,
-      { limit: kind, used, max },
-    );
+  return ctx.ext.planLimits.assertWithin(tx, orgId, kind, delta);
 }

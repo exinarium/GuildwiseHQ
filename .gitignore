@@ -10,3 +10,4 @@ release/
 .claude/worktrees/
 docs/guide/raw/
 media/videos/manifest.json
+dist-landing/
