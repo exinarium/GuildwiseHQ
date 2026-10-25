@@ -12,6 +12,18 @@
 
 ---
 
+## Watch
+
+[![Watch the Guildwise HQ overview: a tour of the whole product, 13 minutes](docs/media/overview-thumbnail.png)](https://guildwisehq.com/videos/overview.mp4)
+
+A 13-minute tour of the whole product: the team of agents, the board, your desk, Discovery and the Boardroom, workstations, budgets and releases. Narrated, with captions.
+
+[![A 45-second teaser of Guildwise HQ (animated preview, sped up)](docs/media/overview-teaser.gif)](https://guildwisehq.com/videos/overview-teaser.mp4)
+
+[Watch the 45-second teaser](https://guildwisehq.com/videos/overview-teaser.mp4). The same videos, and one short video for every screen, are in the app under Help.
+
+---
+
 ## What is Guildwise HQ?
 
 Guildwise HQ is a way to **run an organization of AI agents**. You hire agents into roles, give them work as cards on a board, and stay in charge: when an agent is unsure, or a step is risky, it asks you on your **Desk** and waits.
