@@ -3,6 +3,7 @@ import {
   AccountKeySchema,
   type AccountRuntimeView,
   accountUsable,
+  CLAUDE_MAIN_SWAP_CAPABILITY,
   type ClaudeAccountInfoSchema,
   isReservedAccountName,
   MAIN_ACCOUNT,
@@ -336,7 +337,11 @@ export function buildAiRuntimeTiles(input: {
       ...(a.limitedUntil ? { limitedUntil: a.limitedUntil } : {}),
       ...(a.email ? { email: a.email } : {}),
       ...(a.detail ? { detail: a.detail } : {}),
-      canPromote: !a.main && def.id !== 'claude-code',
+      // Claude Code: only an account with its own sign-in folder, on a runner that can swap (0.1.60)
+      canPromote:
+        !a.main &&
+        (def.id !== 'claude-code' ||
+          (a.source === 'config_dir' && input.capabilities.includes(CLAUDE_MAIN_SWAP_CAPABILITY))),
     }));
     // A runner that reports no accounts[] (older): its top-level login is the main account.
     if (r && !r.accounts)

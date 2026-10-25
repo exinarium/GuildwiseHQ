@@ -3,6 +3,7 @@ import {
   type AiRuntimesResponse,
   BACKEND_IDS,
   buildAiRuntimeTiles,
+  CLAUDE_MAIN_SWAP_CAPABILITY,
   DIRECT_MODEL_CAPABILITY,
   DIRECT_RUNTIME,
   normalizePrivateEndpoints,
@@ -279,11 +280,18 @@ export async function promoteAccount(
   await withAppendTx(ctx.pool, async (tx) => {
     await ownWorkstation(ctx, tx, user, workstationId);
     await requireAccountsRunner(tx, workstationId);
-    if (body.scope === 'claude-code')
-      throw unprocessable(
-        'not_supported',
-        'the main Claude Code account is the machine login or token: it is not swapped from here',
+    if (body.scope === 'claude-code') {
+      const c = await one(
+        tx,
+        'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+        [workstationId, CLAUDE_MAIN_SWAP_CAPABILITY],
       );
+      if (!c?.ok)
+        throw unprocessable(
+          'runner_too_old',
+          'update the runner on this workstation (0.1.60 or newer) to swap the main Claude account',
+        );
+    }
     // One at a time per workstation: a second click (or a second tab) while one is on its way would swap the accounts back.
     await exec(tx, 'SELECT pg_advisory_xact_lock(hashtext($1))', [`promote:${workstationId}`]);
     // a swap that never got an answer (the workstation stayed offline) stops blocking after ten minutes, and is not delivered later

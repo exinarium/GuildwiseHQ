@@ -7,6 +7,7 @@ import {
   CEO_FULL_POWER_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
   CLAUDE_ACCOUNTS_CAPABILITY,
+  CLAUDE_MAIN_SWAP_CAPABILITY,
   CommandPayloadSchemas,
   DELEGATE_GRANTS_FEATURE,
   DELIVERY_CAPABILITY,
@@ -58,6 +59,7 @@ import { ClaudeAccountRegistry } from './adapters/claude-accounts.ts';
 import { probeClaudeLogin } from './adapters/claude-auth.ts';
 import { sweepVertexKeys } from './adapters/claude-backend.ts';
 import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
+import { recoverClaudeMainSwap, swapClaudeMain } from './adapters/claude-main-swap.ts';
 import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { codexMainFolder, detectCodex } from './adapters/codex.ts';
 import { detectGemini, geminiMainFolder } from './adapters/gemini.ts';
@@ -432,6 +434,8 @@ export class Runner {
         ...(c.apiKey ? { apiKey: c.apiKey } : {}),
       };
     };
+    // a "Make main" swap that stopped half-way is finished before the accounts are read
+    recoverClaudeMainSwap(this.paths.root);
     this.claudeAccounts = new ClaudeAccountRegistry({
       home: homedir(),
       root: this.paths.root,
@@ -1198,7 +1202,8 @@ export class Runner {
   /**
    * "Make main" (`provider.account.promote`): a named account and the main account swap places. A login scope swaps the login
    * folders in this pairing's config; a key scope opens both sealed keys and seals them again under their new names with this
-   * runner's own key. Claude Code's main account is the machine login or token, which is not swapped from here.
+   * runner's own key. Claude Code swaps the model login of `~/.claude` and a named folder account (token accounts and a token
+   * or key as main cannot be swapped).
    */
   private promoteLogFile(): string {
     return join(this.paths.root, 'promote-applied.json');
@@ -1251,10 +1256,18 @@ export class Runner {
       return r.ok ? { ok: true } : { ok: false, error: r.error };
     }
     if (isKeyScope(scope)) return this.providers.promote(scope, key);
-    return {
-      ok: false,
-      error: 'the main Claude Code account is the machine login or token and is not swapped from here',
-    };
+    if (scope === 'claude-code')
+      return swapClaudeMain(key, {
+        home: homedir(),
+        root: this.paths.root,
+        registry: this.claudeAccounts,
+        machineScopeAllowed:
+          this.freshConfig().integrations.machineScopeFromWeb === 'primary' &&
+          (this.opts.isPrimaryPairing?.() ?? true),
+        busy: () => this.supervisor.size > 0 || this.chat.size > 0,
+        mainAuthMode: () => this.claudeAccounts.main.credential().authMode,
+      });
+    return { ok: false, error: `no accounts for ${scope}` };
   }
 
   /** The instructions note for granted plugin MCP servers that are not signed in on this workstation. */
@@ -1318,6 +1331,8 @@ export class Runner {
         PROVIDER_ACCOUNTS_CAPABILITY,
         // Asks the server before it hands a pack script to an agent that is gated on pack scripts (`pack.script.gate`).
         PACK_SCRIPT_GATE_CAPABILITY,
+        // "Make main" for Claude Code: a named folder account and the main login swap places.
+        CLAUDE_MAIN_SWAP_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).

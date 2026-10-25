@@ -308,6 +308,10 @@ function AccountRow({
         onOpenChange={setPromote}
         title={`Make ${a.key} the main ${tile.label} account?`}
         description={`${a.key} takes the place of the main account and the main account becomes ${a.key}: nothing is lost, and doing it again undoes it. Work that uses the main account (the CEO, DevOps, chats, projects without an account) moves with it.${
+          scope === 'claude-code'
+            ? ' Only the Claude sign-in changes places (plugin sign-ins and settings stay), and the workstation must be idle: no agent working.'
+            : ''
+        }${
           affected.length > 0
             ? ` Projects that name an account of ${tile.label} and change what they get: ${affected
                 .map((p) => `${p.projectKey} (${p.account === 'main' ? 'main account' : p.account})`)

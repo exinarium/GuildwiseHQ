@@ -16,6 +16,8 @@ export const ClaudeAccountKeySchema = AccountKeySchema.refine(
 
 /** Announced in hello.capabilities by runners that understand accounts (shift.start.account, claude.account.ensure). */
 export const CLAUDE_ACCOUNTS_CAPABILITY = 'claude-accounts:1';
+/** Announced by runners that can swap a named Claude account and the main account ("Make main"; runner 0.1.60). */
+export const CLAUDE_MAIN_SWAP_CAPABILITY = 'claude-main-swap:1';
 
 export const ClaudeAccountLoginSchema = z.enum(['ok', 'expired', 'none']);
 export const ClaudeAccountInfoSchema = z.object({

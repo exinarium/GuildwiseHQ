@@ -413,6 +413,35 @@ export class ClaudeAccountRegistry {
     this.persist();
   }
 
+  /**
+   * After "Make main" the two accounts changed logins: the login state and the usage limit belong to the login, so they move
+   * with it (a limit of the former main now applies to the account that holds that login).
+   */
+  swapStates(keyA: string, keyB: string): void {
+    const a = this.accountsByKey.get(keyA);
+    const b = this.accountsByKey.get(keyB);
+    if (!a || !b) return;
+    const snap = (x: ClaudeAccount) => ({
+      auth: x.auth.state,
+      limitedUntil: x.usage.limitedUntilMs,
+    });
+    const apply = (x: ClaudeAccount, s: ReturnType<typeof snap>) => {
+      if (s.auth === 'expired') x.auth.markExpired();
+      else if (s.auth === 'none') x.auth.markNone();
+      else x.auth.markOk();
+      if (s.limitedUntil !== undefined && s.limitedUntil > Date.now())
+        x.usage.markLimited(new Date(s.limitedUntil));
+      else x.usage.markOk();
+    };
+    const sa = snap(a);
+    const sb = snap(b);
+    apply(a, sb);
+    apply(b, sa);
+    a.watchedMtime = mtimeOf(a.credentialFile());
+    b.watchedMtime = mtimeOf(b.credentialFile());
+    this.persist();
+  }
+
   /** Main first, then the others by key. */
   list(): ClaudeAccount[] {
     this.refresh();

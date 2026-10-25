@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   CLAUDE_ACCOUNTS_CAPABILITY,
+  CLAUDE_MAIN_SWAP_CAPABILITY,
   DIRECT_MODEL_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -230,12 +231,36 @@ describe('Make main', () => {
     expect((await promote({ scope: 'openai', key: 'main' })).status).toBe(400);
     expect((await promote({ scope: 'openai', key: 'org' })).status).toBe(400);
     expect((await promote({ scope: 'nope', key: 'work' })).status).toBe(400);
+    // Claude Code can be swapped too, but only on a runner that says so (0.1.60)
     const cc = await promote({ scope: 'claude-code', key: 'work' });
     expect(cc.status).toBe(422);
+    expect(cc.body.error.code).toBe('runner_too_old');
     const other = await w.t.userSession(`other-${randomUUID().slice(0, 6)}@example.test`);
     expect((await promote({ scope: 'openai', key: 'work' }, other.cookie)).status).toBe(404);
     await setCaps(BASE_CAPS);
     expect((await promote({ scope: 'openai', key: 'work' })).status).toBe(422);
+    await setCaps([...BASE_CAPS, PROVIDER_ACCOUNTS_CAPABILITY]);
+  });
+});
+
+describe('Make main for Claude Code', () => {
+  const promote = (body: unknown) =>
+    call('POST', `/api/workstations/${w.workstationId}/accounts/promote`, body);
+
+  it('is sent to a runner that can swap, once at a time', async () => {
+    await setCaps([...BASE_CAPS, PROVIDER_ACCOUNTS_CAPABILITY, CLAUDE_MAIN_SWAP_CAPABILITY]);
+    const from = r.received.length;
+    const res = await promote({ scope: 'claude-code', key: 'work' });
+    expect(res.status).toBe(202);
+    const cmd = (await commandsOf('provider.account.promote', from))[0];
+    expect(cmd.payload).toMatchObject({ scope: 'claude-code', key: 'work' });
+    expect((await promote({ scope: 'claude-code', key: 'work' })).body.error.code).toBe('promote_pending');
+    r.send('command.result', { commandId: cmd.commandId, ok: true, result: { ok: true } });
+    await r.barrier();
+    await until(
+      async () =>
+        (await q(`SELECT status FROM runner_commands WHERE id=$1`, [cmd.commandId]))[0]?.status === 'done',
+    );
     await setCaps([...BASE_CAPS, PROVIDER_ACCOUNTS_CAPABILITY]);
   });
 });

@@ -3,6 +3,7 @@ import {
   ACCOUNT_SCOPES,
   accountScopeOf,
   buildAiRuntimeTiles,
+  CLAUDE_MAIN_SWAP_CAPABILITY,
   CommandPayloadSchemas,
   checkIntegrationRequest,
   choiceKeyUse,
@@ -191,6 +192,30 @@ describe('the tiles of Integrations > AI runtime', () => {
     },
   ] as never;
   const caps = ['claude-accounts:1', PROVIDER_ACCOUNTS_CAPABILITY];
+
+  it('offers Make main for a Claude folder account only on a runner that can swap, never for a token account', () => {
+    const rts = [
+      {
+        id: 'claude-code',
+        available: true,
+        accounts: [info('main', 'ok'), info('work', 'ok'), info('tok', 'ok', { source: 'token' as const })],
+      },
+    ] as never;
+    const claude = (capabilities: string[]) =>
+      buildAiRuntimeTiles({ runtimes: rts, capabilities })
+        .find((t) => t.id === 'claude-code')
+        ?.accounts.map((a) => [a.key, a.canPromote]);
+    expect(claude(caps)).toEqual([
+      ['main', false],
+      ['work', false],
+      ['tok', false],
+    ]);
+    expect(claude([...caps, CLAUDE_MAIN_SWAP_CAPABILITY])).toEqual([
+      ['main', false],
+      ['work', true],
+      ['tok', false],
+    ]);
+  });
 
   it('lists the login runtimes, opencode, and the providers, each with its accounts and status', () => {
     const tiles = buildAiRuntimeTiles({ runtimes, capabilities: caps });
