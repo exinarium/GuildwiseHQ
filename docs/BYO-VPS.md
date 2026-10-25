@@ -1,6 +1,6 @@
 # Bring your own VPS
 
-Run your agents on any Linux server you rent, with your own cloud account and your own Claude key. Guildwise HQ installs its runner there over SSH and pairs it for you. You pay the VPS company directly; Guildwise adds no charge. Companion to `docs/RUNNER.md` ("Cloud workstations") and `docs/DEPLOY.md`.
+Run your agents on any Linux server you rent, with your own cloud account and your own Claude key. Guildwise HQ installs its runner there over SSH and pairs it for you. You pay the VPS company directly; Guildwise adds no charge. Companion to `docs/RUNNER.md` ("Cloud workstations") and `docs/SELF-HOSTING.md`.
 
 ## What to rent
 

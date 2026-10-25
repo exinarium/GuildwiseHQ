@@ -19,7 +19,7 @@ import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
- * The platform blog (docs/design/blog-prd.md, owner decisions in docs/design/open-questions-2026-10-09.md): posts are
+ * The platform blog: posts are
  * event-sourced (`BlogPost*`), the moderation mode and the kill switch are platform settings.
  *
  * Moderation: every post enters `in_review`. For the first two weeks (until `autoPublishFrom`) the owner reviews each

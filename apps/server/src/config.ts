@@ -103,7 +103,7 @@ const EnvSchema = z.object({
   AOM_SUPPORT_EMAIL: z.string().optional(),
   /** From address of the support mails to the customer (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`. Unset: AOM_MAIL_FROM. */
   AOM_SUPPORT_FROM: z.string().optional(),
-  /** Inbound e-mail (docs/DEPLOY.md "Inbound e-mail"): the mail provider that posts to `/api/inbound/mail/<provider>`. Unset: no inbound mail. `fake` is for development and tests. */
+  /** Inbound e-mail (docs/SELF-HOSTING.md "Inbound e-mail"): the mail provider that posts to `/api/inbound/mail/<provider>`. Unset: no inbound mail. `fake` is for development and tests. */
   AOM_INBOUND_PROVIDER: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.enum(['postmark', 'sendgrid', 'fake']).optional(),
@@ -154,7 +154,7 @@ const EnvSchema = z.object({
   AOM_SIMULATION_RUNNER_BIN: z.string().optional(),
   /** How the simulated runner reaches this server. Unset: `http://127.0.0.1:<AOM_PORT>`. */
   AOM_SIMULATION_SERVER_URL: z.string().optional(),
-  /** Web Push (docs/DEPLOY.md "Web Push"): the VAPID key pair (`pnpm --filter @aom/server vapid:generate`) and a contact (`mailto:` or `https:`). All three must be set, else push is off. */
+  /** Web Push (docs/SELF-HOSTING.md "Web Push"): the VAPID key pair (`node dist/vapid-generate.mjs` in the app container) and a contact (`mailto:` or `https:`). All three must be set, else push is off. */
   AOM_VAPID_PUBLIC_KEY: z.string().optional(),
   AOM_VAPID_PRIVATE_KEY: z.string().optional(),
   AOM_VAPID_SUBJECT: z.string().optional(),

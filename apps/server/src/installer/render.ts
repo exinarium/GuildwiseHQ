@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { BRAND_NAME } from './brand.ts';
 
 /**
- * The workstation installers (docs/design/open-questions.md "Runner installer with a guided setup").
+ * The workstation installers.
  *
  * The scripts are real files under `templates/` (so they can be linted with shellcheck) and contain no placeholders:
  * a generated header assigns every per-install value from a safely quoted literal, and the fixed body only reads those

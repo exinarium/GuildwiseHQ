@@ -9,7 +9,7 @@ import { HttpError, notFound } from '../errors.ts';
 import { userActor } from './common.ts';
 
 /**
- * Super-admin managed API keys for the blog agents (docs/design/blog-prd.md section 7). A key is `gwk_` plus 32 random
+ * Super-admin managed API keys for the blog agents. A key is `gwk_` plus 32 random
  * bytes; only its sha256 is stored (a high-entropy secret needs no slow hash), the secret is shown once at creation.
  * Every request is logged (`blog_api_log`), which is both the audit trail and what the rate limits count.
  */

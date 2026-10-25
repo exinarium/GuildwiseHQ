@@ -1,6 +1,6 @@
 # Self-hosted production stack: app (API + web) + media (help videos) + Postgres + Caddy (HTTPS).
 #   cp .env.prod.example .env && edit it, then:  docker compose -f docker-compose.prod.yml up -d --build
-# See docs/DEPLOY.md.
+# See docs/SELF-HOSTING.md.
 services:
   postgres:
     image: postgres:18
@@ -29,21 +29,21 @@ services:
       AOM_PUBLIC_ORIGIN: ${AOM_PUBLIC_ORIGIN:?set AOM_PUBLIC_ORIGIN in .env}
       AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
       AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
-      # Inbound e-mail (platform owner's one-time set-up, docs/DEPLOY.md "Inbound e-mail"): all three, or none.
+      # Inbound e-mail (platform owner's one-time set-up, docs/SELF-HOSTING.md "Inbound e-mail"): all three, or none.
       AOM_INBOUND_PROVIDER: ${AOM_INBOUND_PROVIDER:-}
       AOM_INBOUND_DOMAIN: ${AOM_INBOUND_DOMAIN:-}
       AOM_INBOUND_SECRET: ${AOM_INBOUND_SECRET:-}
-      # Web Push (docs/DEPLOY.md "Web Push"): all three, or push stays off.
+      # Web Push (docs/SELF-HOSTING.md "Web Push"): all three, or push stays off.
       AOM_VAPID_PUBLIC_KEY: ${AOM_VAPID_PUBLIC_KEY:-}
       AOM_VAPID_PRIVATE_KEY: ${AOM_VAPID_PRIVATE_KEY:-}
       AOM_VAPID_SUBJECT: ${AOM_VAPID_SUBJECT:-}
       # Encrypts two-factor seeds and connected-account tokens at rest. REQUIRED: the server refuses to start in production
-      # without it (set a long random string in .env and keep it with your backups, see docs/DEPLOY.md).
+      # without it (set a long random string in .env and keep it with your backups, see docs/SELF-HOSTING.md).
       AOM_SECRET_KEY: ${AOM_SECRET_KEY:?set AOM_SECRET_KEY in .env (a long random string, e.g. openssl rand -base64 32)}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Simulation organizations keep their runner data and local repositories here (see docs/DEPLOY.md).
+      # Simulation organizations keep their runner data and local repositories here (see docs/SELF-HOSTING.md).
       AOM_SIMULATION_DIR: /data/simulation
-      # The help videos: the app forwards /videos/* to the media service (unset = no videos). docs/DEPLOY.md "Help videos".
+      # The help videos: the app forwards /videos/* to the media service (unset = no videos). The videos are served by the media service (docs/SELF-HOSTING.md, Troubleshooting).
       AOM_MEDIA_URL: ${AOM_MEDIA_URL:-http://media:80}
     volumes:
       - simulation:/data/simulation

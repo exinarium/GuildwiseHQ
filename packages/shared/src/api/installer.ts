@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { IsoTime } from './common.ts';
 
 /**
- * The "Add a workstation" wizard (docs/design/open-questions.md, "Runner installer with a guided setup").
+ * The "Add a workstation" wizard.
  * `POST /api/workstations/installers` makes a wizard session: a fresh one-time pairing code and short-lived script links.
  */
 export const InstallerOsSchema = z.enum(['linux', 'macos', 'windows']);

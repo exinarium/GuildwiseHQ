@@ -2,7 +2,7 @@
 
 Oct 6, 2026 · status: design; **Parts A (org-level agents), B (generic schedules), C (research stage and conversion) and D (org-level interests) built, 7 Oct 2026** (see Implementation status at the end) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n), `docs/design/interests.md` (built, superseded in part by this) and `docs/design/phases.md`
 
-This design implements the owner's "Model restructure" decisions in `docs/design/open-questions.md`:
+This design implements the "Model restructure" decisions:
 
 1. Interests replace feed projects and feed schedules.
 2. Schedules become generic cron jobs.

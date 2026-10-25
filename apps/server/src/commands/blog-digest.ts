@@ -7,7 +7,7 @@ import { blogSettings, listPublished } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
- * The weekly digest (docs/design/blog-prd.md section 11, owner decisions G4/G5).
+ * The weekly digest.
  *
  * - Due Mondays 08:00 Africa/Johannesburg (UTC+2, no daylight saving: 06:00 UTC). The digest id is the ISO week, so a
  *   week has at most one digest however often the tick runs or the server restarts.

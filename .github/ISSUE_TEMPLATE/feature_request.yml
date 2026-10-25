@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a feature or an improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Anyone can request a feature. For an open-ended idea, a [discussion](https://github.com/exinarium/GuildwiseHQ/discussions) is often the better first step.
+
+        The maintainer decides what is built and merged (see GOVERNANCE.md). Support is best-effort.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation and who is affected. Focus on the problem before the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should happen? A short example or a sketch of the screen or command helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you use today, or other designs.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web app
+        - Server or API
+        - Runner (workstation)
+        - Installer
+        - Self-hosting
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed secrets and personal data from this request.
+          required: true
+        - label: I am willing to discuss this request in the issue, and I understand it may not be accepted.
+          required: false

@@ -13,6 +13,7 @@ export default defineConfig({
     'ranking-migrate': 'scripts/ranking-migrate.ts',
     'ledger-cleanup': 'scripts/ledger-cleanup-2026-10.ts',
     'deploy-reset': 'scripts/deploy-reset.ts',
+    'vapid-generate': 'scripts/vapid-generate.ts',
   },
   format: ['esm'],
   outDir: 'dist',

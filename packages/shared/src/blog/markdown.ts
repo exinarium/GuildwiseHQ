@@ -1,5 +1,5 @@
 /**
- * The restricted Markdown of the blog (docs/design/blog-prd.md section 10). One parser for the server (public pages,
+ * The restricted Markdown of the blog. One parser for the server (public pages,
  * feed), the Help > Blog reader and the review preview, so all of them show identical output.
  *
  * No raw HTML is ever accepted: the source becomes an AST made only of the allow-listed nodes below, and `renderHtml`

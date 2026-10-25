@@ -7,7 +7,7 @@ import { deleteMailFor, waitForMail } from '../support/mail.ts';
 import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 import { makeVault, originFile, originHas, type VaultFixture } from '../support/vault.ts';
 
-// Projects ranked by drag and drop, and "personal" dropped (docs/design/open-questions.md). One Owner, one Member and one
+// Projects ranked by drag and drop, and "personal" dropped. One Owner, one Member and one
 // runner: the Owner orders the projects with the move buttons, the keyboard and a drag, the Member only looks, and the
 // one-off migration `no-personal-2026-10` runs through its CLI (dry run first) on a database that still has a personal
 // vault, personal projects and a personal interest: the order puts work first, the vault files are merged under

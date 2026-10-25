@@ -315,7 +315,7 @@ The sidebar gets a top-level "CEO" entry, and the desk has a "Talk to <name>" bu
 
 ### 6.2 CEO tasks
 
-When the owner asks for something with an outcome ("get P4-12 shipped by Friday", "hire a second tester for Flow-Web if it helps"), the CEO records it with `aom ceo task create` (allowed only in a `ceo_chat` turn, and the source message id is stored).
+When the owner asks for something with an outcome ("get P4-12 shipped by Friday", "hire a second tester for Demo-Web if it helps"), the CEO records it with `aom ceo task create` (allowed only in a `ceo_chat` turn, and the source message id is stored).
 
 - **Events:** `CeoTaskCreated {taskId, title, detail, sourceMessageId, dueAt?}`, `CeoTaskUpdated {status, note, links}` and `CeoTaskClosed`.
 - **Statuses:** `open | in_progress | waiting_owner | done | failed | cancelled`.

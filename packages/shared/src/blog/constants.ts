@@ -1,4 +1,4 @@
-/** The blog's fixed vocabulary and limits (docs/design/blog-prd.md section 5), shared by the API, the server pages and the UI. */
+/** The blog's fixed vocabulary and limits, shared by the API, the server pages and the UI. */
 
 export const BLOG_TAGS = [
   { key: 'ai-agents', label: 'AI agents' },
@@ -41,7 +41,7 @@ export const BLOG_LIMITS = {
 export const SOCIAL_NETWORKS = ['facebook', 'linkedin', 'x', 'bluesky'] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
-/** The server-side blog writer (docs/design/open-questions-2026-10-09.md, "Blog writer"). */
+/** The server-side blog writer. */
 export const BLOG_WRITER = {
   /** Selectable models. Only the first has built-in prices; any other needs a price set by the super admin. */
   models: ['claude-haiku-4-5', 'claude-haiku-5-5'] as const,

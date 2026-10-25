@@ -1,4 +1,4 @@
-/** "Send me the weekly blog digest": the opt-in at sign-up and invitation acceptance (docs/design/blog-prd.md section 11). */
+/** "Send me the weekly blog digest": the opt-in at sign-up and invitation acceptance. */
 export function DigestCheckbox({
   checked,
   onChange,

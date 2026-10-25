@@ -26,7 +26,7 @@ function tabOf(pathname: string): string {
   return 'help';
 }
 
-/** The help centre: articles, glossary, tour, Contact us and My requests (docs/design/open-questions.md). */
+/** The help centre: articles, glossary, tour, Contact us and My requests. */
 export function Help() {
   const { pathname } = useLocation();
   const nav = useNavigate();

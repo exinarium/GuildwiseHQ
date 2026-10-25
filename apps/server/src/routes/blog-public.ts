@@ -30,7 +30,7 @@ const PER_PAGE = 12;
 const CACHE_CONTROL = 'public, max-age=300';
 
 /**
- * The public blog (docs/design/blog-prd.md section 6): `/blog`, `/blog/:slug`, `/blog/tag/:tag`, the RSS feed, the
+ * The public blog: `/blog`, `/blog/:slug`, `/blog/tag/:tag`, the RSS feed, the
  * sitemap and robots.txt, rendered by the server per request and cached in memory. The cache key carries a version
  * (post count and latest change), so a publish or an unpublish shows at once without an invalidation hook.
  */

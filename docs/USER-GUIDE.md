@@ -1142,7 +1142,7 @@ You can start a project on any branch of any repository to try it, without leavi
 
 **Show technical details** keeps what developers set: free-text run instructions for the project and for each repository (they win over `BUILD.md`), the build guide, the stop time, whether the branch's code may use Docker (off by default; with it on, Docker steps run outside any sandbox, so only for projects you trust), the declared **services** (name, repository, folder, command, ports as `name:default:ENV_VAR`, health check, what it starts after, the path of an env file on the workstation), the saved plans of each computer, and, on every step, its real command, settings and stop command. Put secrets in an env file on the computer, never in the settings: only its path is stored.
 
-**Build guides above the repositories.** If your repositories sit side by side in one folder (for example `src/dcode/sources/`) with a `BUILD.md` in that folder, the workstation finds it too (it looks in the folders above each repository, up to your code folder, never in your home folder) and gives it to the DevOps engineer with the repository's own `BUILD.md`. The **Build guide** field under Your app, Notes for DevOps (technical details) takes the full path(s) of the guide(s) on the workstation instead, if you would rather name them. Git submodules are fetched into the run copy. Services can read your .NET user secrets (`~/.microsoft/usersecrets`), read-only.
+**Build guides above the repositories.** If your repositories sit side by side in one folder (for example `src/demo/sources/`) with a `BUILD.md` in that folder, the workstation finds it too (it looks in the folders above each repository, up to your code folder, never in your home folder) and gives it to the DevOps engineer with the repository's own `BUILD.md`. The **Build guide** field under Your app, Notes for DevOps (technical details) takes the full path(s) of the guide(s) on the workstation instead, if you would rather name them. Git submodules are fetched into the run copy. Services can read your .NET user secrets (`~/.microsoft/usersecrets`), read-only.
 
 **When it cannot run.** A failed environment stays on the board, the card and the Workstations page with its reason (the DevOps engineer's report) and a link to the DevOps request; press **Try again** (same repositories and branches) or **Dismiss**. When the DevOps engineer is stuck on something only you know, the panel says **Waiting for you** with its question and the options; answer on the DevOps request (Workstations page) or the desk and it carries on.
 
@@ -1582,7 +1582,7 @@ The **platform administrator** (also called the **super admin**) runs the Guildw
 
 ### 7.1 First sign-in and two-factor login
 
-A platform account is created on the server with a command (see `docs/DEPLOY.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, use **Forgot your password?** on the sign-in page like everyone else (your two-factor code is still asked), or another platform administrator can send you a reset link (7.4). If the second factor is lost too, an operator resets it on the server (`superadmin-reset-password --reset-two-factor`).
+A platform account is created on the server with a command (see `docs/SELF-HOSTING.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, use **Forgot your password?** on the sign-in page like everyone else (your two-factor code is still asked), or another platform administrator can send you a reset link (7.4). If the second factor is lost too, an operator resets it on the server (`superadmin-reset-password --reset-two-factor`).
 
 ![The platform area, Organizations](guide/assets/platform-orgs.jpg)
 
@@ -1654,7 +1654,7 @@ A **simulation organization** is a safe sandbox for testing (for example your fa
 - **No way back:** a simulation organization cannot be switched off. It stays a simulation until it is deleted, so test data can never turn into a real organization. Only the pace can change.
 - **Pace:** Fast (tests), Normal or Slow (demos, so people can watch cards move).
 - **Load demo scenario:** on an empty simulation organization it adds two projects with repositories, a team for each, cards at several priorities, two desk questions, a draft idea and a schedule. It refuses when the organization already has projects.
-- **Delete simulation organization:** removes the organization and everything in it, including its history. You type its name to confirm. Accounts that belong only to it are deleted so their email addresses can be used again; accounts that also belong elsewhere only leave this organization. The audit log keeps a short record. The server does not back up the database for you: on a live system take a backup first (`docs/DEPLOY.md`).
+- **Delete simulation organization:** removes the organization and everything in it, including its history. You type its name to confirm. Accounts that belong only to it are deleted so their email addresses can be used again; accounts that also belong elsewhere only leave this organization. The audit log keeps a short record. The server does not back up the database for you: on a live system take a backup first (`docs/SELF-HOSTING.md`).
 
 ### 7.9 Platform team: Guildwise repairs itself
 
@@ -1689,7 +1689,7 @@ Guildwise repairs itself with a normal team. You, the platform administrator, on
 
 ### 7.13 Inbound mail
 
-**Inbound mail** (platform menu) is the health page for the mail that organizations receive at their own Guildwise addresses (4.8, E-mail inbox). All of it arrives through one provider webhook. The **Provider** panel says whether inbound e-mail is configured ("Inbound e-mail is not set up" when it is not; the set-up is in `docs/DEPLOY.md`) and the **Last 24 hours** panel counts what was **Accepted**, **Skipped** (with the reasons), came to an **Unknown address** or was **Refused (bad credentials)**.
+**Inbound mail** (platform menu) is the health page for the mail that organizations receive at their own Guildwise addresses (4.8, E-mail inbox). All of it arrives through one provider webhook. The **Provider** panel says whether inbound e-mail is configured ("Inbound e-mail is not set up" when it is not; the set-up is in `docs/SELF-HOSTING.md`) and the **Last 24 hours** panel counts what was **Accepted**, **Skipped** (with the reasons), came to an **Unknown address** or was **Refused (bad credentials)**.
 
 ## 8. Everyday workflows
 
@@ -1979,7 +1979,7 @@ The platform area has its own menu: Organizations (7.2), Invitations (7.3), Acco
 ## Appendix B. More documentation
 
 - `docs/RUNNER.md`: the runner in depth (data folder, command-line, configuration, Windows and WSL2).
-- `docs/DEPLOY.md`: installing and running the Guildwise HQ server (for whoever hosts it).
+- `docs/SELF-HOSTING.md`: installing and running the Guildwise HQ server (for whoever hosts it).
 - `docs/SPEC.md`: the full product specification.
 - `docs/ARCHITECTURE.md`: technical design.
 - `docs/guide/Guildwise-HQ-User-Guide.pdf`: this guide with screenshots, as a PDF.

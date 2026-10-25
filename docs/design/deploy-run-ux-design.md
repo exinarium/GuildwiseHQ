@@ -1021,7 +1021,7 @@ decisions taken. The page redesign is `docs/design/environments-ux.md` (the API 
 section 13); this section records the backend and runner decisions.
 
 1. **The probe finds stacks wherever they are.** The remote probe only looked in `/opt` and `/srv` and dropped hinted folders elsewhere, so a stack
-   in `/home/administrator/dcode/flow5-full` had empty `composeFiles`, `folders`, `imageVars` and `urls`. The remote script now reads the compose
+   in `/home/administrator/demo/flow5-full` had empty `composeFiles`, `folders`, `imageVars` and `urls`. The remote script now reads the compose
    labels of every container (`working_dir`, `config_files`), the compose files of the usual names in those folders and in `$HOME/*/` and
    `$HOME/*/*/`, the key names of the `.env` next to each (never values, except the value of a key that names an image), and reports where it
    looked (`ProbeReport.checked`). Every path still passes `SAFE_PATH`; a folder the person typed (a hint) may now also be under `/home`, never a
@@ -1036,7 +1036,7 @@ section 13); this section records the backend and runner decisions.
    `packages/shared/test/fixtures/setup/methods/`; the generator version is unchanged (`setup-1.3`: scripts of the original method are byte
    for byte what they were). The method is derived from the steps (`updateMethodOf`), not stored.
 3. **The compose project name is used everywhere.** The database backup and the state look of a server script ran `docker compose -f <file>`
-   without `-p`, so for a stack whose project name is not its folder's name (P5: `dcode-flow5-remote` in `flow5-full`) they would have looked at
+   without `-p`, so for a stack whose project name is not its folder's name (P5: `demo-flow5-remote` in `flow5-full`) they would have looked at
    the wrong project. Both now pass `-p` when the setup names a project (scripts without a project name are unchanged).
 4. **Apps that run without Docker.** `SetupEnv.runtime = 'direct'`: one folder per version (`releases/<12 characters of the commit>`), a symlink
    switched in one step (`mv -T`, else `ln -sfn`), a restart by what was detected (systemd system or `--user`, pm2, or a command of the person's

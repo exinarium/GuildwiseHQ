@@ -2,7 +2,7 @@ import { blogTagLabel, type PublicBlogPost } from '@aom/shared';
 import { brandedMail, esc, type MailBlock } from './layout.ts';
 import type { MailMessage } from './mailer.ts';
 
-/** Mails of the blog: the weekly digest and the alert about a social network (docs/design/blog-prd.md). */
+/** Mails of the blog: the weekly digest and the alert about a social network. */
 
 const utm = (url: string, campaign: string) =>
   `${url}${url.includes('?') ? '&' : '?'}utm_source=digest&utm_medium=email&utm_campaign=${encodeURIComponent(campaign)}`;

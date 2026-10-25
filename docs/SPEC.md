@@ -509,8 +509,7 @@ A page under Organization that draws the organization as a tree: the manager (Ow
 
 ## Blog
 
-Guildwise HQ has a platform-level blog about AI agents and AI automation, run by the super admin (full requirements:
-`docs/design/blog-prd.md`; decisions: `docs/design/open-questions-2026-10-09.md`; API: `docs/BLOG-API.md`).
+Guildwise HQ has a platform-level blog about AI agents and AI automation, run by the super admin (API: `docs/BLOG-API.md`).
 
 - **Posts** have a slug, title, summary, restricted-Markdown body (no raw HTML), a branded cover per tag, 1 to 5 tags,
   sources, search texts and social captions. The byline is always "The Guildwise HQ team" and every article says it was

@@ -9,7 +9,7 @@ import {
 } from '@aom/shared';
 
 /**
- * Plain HTML templates of the public blog (docs/design/blog-prd.md section 6). Server-rendered per request (the
+ * Plain HTML templates of the public blog. Server-rendered per request (the
  * landing page is prerendered at build time and cannot follow a post every few hours). No JavaScript, no external
  * resources: the app's CSP (`script-src 'self'`, `img-src 'self' data:`) is respected, styles are one inline block.
  */

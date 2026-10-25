@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/exinarium/GuildwiseHQ/discussions
+    about: Ask how to do something, or talk through an idea before you open an issue.
+  - name: Security vulnerability
+    url: https://github.com/exinarium/GuildwiseHQ/security/advisories/new
+    about: Report a vulnerability privately. Never open a public issue for a security problem.

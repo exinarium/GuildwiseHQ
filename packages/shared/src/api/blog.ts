@@ -4,7 +4,7 @@ import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
 import { TOPIC_LIMITS, TOPIC_ORIGINS, TOPIC_STATUSES, TopicAreaSchema } from '../blog/topic.ts';
 import { IsoTime } from './common.ts';
 
-/** The blog and its agent API (docs/design/blog-prd.md, docs/BLOG-API.md). */
+/** The blog and its agent API. */
 
 export const BlogStatusSchema = z.enum(BLOG_STATUSES);
 export const BlogApiScopeSchema = z.enum(BLOG_API_SCOPES);

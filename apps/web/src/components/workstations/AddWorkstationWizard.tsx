@@ -36,7 +36,7 @@ const WHERE: Array<{ value: Where; label: string; sub: string }> = [
 ];
 
 /**
- * "Add a workstation" (docs/design/open-questions.md, "Runner installer with a guided setup"): pick the system, read
+ * "Add a workstation": pick the system, read
  * the plain-language steps, copy one command (or download the script) and watch the machine pair and report its
  * health checks. The command carries a short-lived link and a one-time pairing code; nothing long-lived.
  */

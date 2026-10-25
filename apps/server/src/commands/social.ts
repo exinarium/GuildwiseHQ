@@ -17,7 +17,7 @@ import { blogEnabled } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
- * Auto-share to the Facebook Page, the LinkedIn organization, X and Bluesky on publish (docs/design/blog-prd.md section 12).
+ * Auto-share to the Facebook Page, the LinkedIn organization, X and Bluesky on publish.
  *
  * - One `social_shares` row per post and network (primary key): a second post to the same network is impossible. The
  *   row is claimed (`posting`) before the call; a crash in between leaves it `posting`, which is turned into `failed`

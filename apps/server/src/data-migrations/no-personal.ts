@@ -9,7 +9,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import type { DataMigrationEnv } from './orgs.ts';
 
 /**
- * `no-personal-2026-10` (docs/design/open-questions.md "drop 'personal'; projects ranked by drag and drop"). Now that
+ * `no-personal-2026-10`. Now that
  * every user has an organization of their own, "personal" is gone:
  *
  * - **Ranking.** The projects of each organization get the order the dispatcher used to apply: work before personal,

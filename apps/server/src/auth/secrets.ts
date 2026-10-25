@@ -12,7 +12,7 @@ import { one } from '../db/sql.ts';
 /**
  * Encrypts small secrets (the TOTP seeds) at rest with AES-256-GCM. The key is `AOM_SECRET_KEY` (any string, hashed
  * to 32 bytes) when set, which keeps the seeds unreadable from a database dump alone. Without it a random key is
- * generated on first use and kept in `server_secrets` (documented in docs/DEPLOY.md: set the variable in production).
+ * generated on first use and kept in `server_secrets` (documented in docs/SELF-HOSTING.md: set the variable in production).
  */
 async function key(ctx: Ctx): Promise<Buffer> {
   const env = ctx.config.secretKey;

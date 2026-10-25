@@ -8,7 +8,7 @@ const kb = (n: number) =>
 
 /**
  * `/platform/inbound`: the inbound mail provider's status. The Postmark account, the receiving domain and the webhook
- * secret are set once by the platform owner (docs/DEPLOY.md "Inbound e-mail"); this page shows whether they are in
+ * secret are set once by the platform owner (docs/SELF-HOSTING.md "Inbound e-mail"); this page shows whether they are in
  * place and what has been arriving, without any organisation's mail.
  */
 export function PlatformInbound() {
@@ -28,7 +28,7 @@ export function PlatformInbound() {
               {health.data.provider ? '' : 'AOM_INBOUND_PROVIDER is not set. '}
               {health.data.domain ? '' : 'AOM_INBOUND_DOMAIN is not set. '}
               {health.data.secretSet ? '' : 'AOM_INBOUND_SECRET is not set. '}
-              Organisations cannot make inbox addresses until all three are. The steps are in docs/DEPLOY.md,
+              Organisations cannot make inbox addresses until all three are. The steps are in docs/SELF-HOSTING.md,
               "Inbound e-mail".
             </Callout>
           )}

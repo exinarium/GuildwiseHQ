@@ -36,7 +36,7 @@ const FILES: Record<string, ScriptKind> = {
 };
 
 /**
- * The runner installer (docs/design/open-questions.md "Runner installer with a guided setup"):
+ * The runner installer:
  *  - the wizard's own routes (signed in): create a session, follow its progress;
  *  - `/install/:token/*` (unauthenticated, the short-lived token is the credential): the generated scripts and the
  *    progress reports the scripts send;

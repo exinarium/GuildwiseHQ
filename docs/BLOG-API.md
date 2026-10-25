@@ -1,11 +1,11 @@
 # Blog agent API (`/api/v1`)
 
 The Guildwise HQ blog is a platform feature run by the super admin (Platform > Blog, Platform > API keys). Articles
-are written by the server-side blog writer (see "The blog writer" below); this API, with a Bearer key, is for outside tools. Requirements and decisions:
-`docs/design/blog-prd.md` and `docs/design/open-questions-2026-10-09.md` ("Blog"). The user-facing description is in
+are written by the server-side blog writer (see "The blog writer" below); this API, with a Bearer key, is for outside tools.
+ The user-facing description is in
 `docs/USER-GUIDE.md` section 7 and the in-app article "The blog and the weekly digest".
 
-In the examples `$API` is the public origin (for example `https://app.guildwisehq.com`) and `$KEY` is the key
+In the examples `$API` is the public origin (for example `https://guildwise.example.com`) and `$KEY` is the key
 (`gwk_...`).
 
 ## Keys
@@ -237,7 +237,7 @@ Mondays 08:00 Africa/Johannesburg, one mail per person for the posts published s
 there are none). Organization Owners get it unless they opted out; everyone else only if they ticked the box at sign-up or
 invitation acceptance, or in Settings. Users whose organizations are all suspended or cancelled are skipped. Every mail has
 an unsubscribe link (signed, no sign-in: opening it shows a page with an "Unsubscribe from the weekly digest" button and a "Keep me subscribed" link, and only the button, a POST, unsubscribes) and `List-Unsubscribe` / `List-Unsubscribe-Post` headers (the one-click POST of RFC 8058 keeps working for mail programs). Switch it off
-with `AOM_BLOG_DIGEST=false` or in Platform > Blog. See `docs/DEPLOY.md`.
+with `AOM_BLOG_DIGEST=false` or in Platform > Blog. See `docs/SELF-HOSTING.md`.
 
 ## Facebook, LinkedIn, X and Bluesky
 

@@ -14,7 +14,7 @@ const BUILD_REQUIRED = [
 ];
 
 /**
- * `code` version 6, the lean team workflow (Lean Team v3, docs/design/lean-team-v3-decisions.md). Rolled out like v3 to v5:
+ * `code` version 6, the lean team workflow (Lean Team v3). Rolled out like v3 to v5:
  * the resolver takes the newest active version of `code`, so every project on `code` starts its new cards on it; cards in
  * flight keep the version they are pinned to (the classic upgrade at review approval and finalize never crosses into it).
  * `leanTeam: true` is the capability flag the server and the web app read.

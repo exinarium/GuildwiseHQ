@@ -4,8 +4,7 @@ import { blueskyPost, xTweetText } from './social-text.ts';
 
 /**
  * The only code that talks to Facebook, LinkedIn, X and Bluesky. Everything else (and every test) goes through the `SocialClient`
- * interface, so no test ever reaches a real network. The versions below are pinned on purpose (docs/design/blog-prd.md
- * section 12): review them every 6 to 12 months.
+ * interface, so no test ever reaches a real network. The versions below are pinned on purpose: review them every 6 to 12 months.
  */
 export const GRAPH_VERSION = 'v21.0';
 export const LINKEDIN_VERSION = '202509';

@@ -1,0 +1,90 @@
+name: Bug report
+description: Something does not work the way the documentation says it should.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug.
+
+        **Do not report security vulnerabilities here.** Use the private reporter in [SECURITY.md](https://github.com/exinarium/GuildwiseHQ/blob/main/SECURITY.md).
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How do you run Guildwise HQ?
+      options:
+        - Self-hosted (Docker Compose)
+        - Guildwise Cloud (hosted)
+        - Development checkout
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag (for example 1.0.0), or the output of `git rev-parse --short HEAD`.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is affected?
+      options:
+        - Web app
+        - Server or API
+        - Runner (workstation)
+        - Installer
+        - Self-hosting (Docker, Caddy, configuration)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, browser, Node.js version, and the runtime involved (Claude Code, Codex CLI, Gemini CLI, opencode or a direct API).
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove tokens, pairing codes, passwords, e-mail addresses and IP addresses before you paste.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed secrets and personal data from this report.
+          required: true
+        - label: This is not a security vulnerability. Vulnerabilities go through SECURITY.md.
+          required: true

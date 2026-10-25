@@ -484,7 +484,7 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 
 #### Agent and vault settings
 - **maxConcurrentShifts** (default `4`): max agent shifts this workstation runs at once; a shift offered beyond it is rejected as `busy` and the card waits. The runner announces it in `hello`, the Workstations page shows `running of limit`, and the server caps it at `AOM_MAX_SHIFTS_PER_WORKSTATION` (default 16). This is the fallback: the workstation's owner can set **Shifts at once** (a number or Unlimited) on the Workstations page, and that choice replaces this value without a restart (see below). Restart the runner after changing the config value.
-- **Shifts at once from the Workstations page** (backlog #76). A runner that announces the `shift-limit:1` capability (releases after 0.1.20) takes the owner's choice from the server: it arrives in `welcome` (`limits.shiftLimit`: a number, `"unlimited"` or null) and, when changed while connected, as the `shifts.limit` command. The runner applies it to the next shift offered, with no restart, and keeps it in `server-limits.json` in its data directory so it holds after a restart before the server has answered. `limits.maxConcurrentShifts` is what the server enforces (the choice under the platform ceiling; unlimited is 100,000); the dispatcher also stops offering shifts to a full workstation. With no choice (null), or an older server that sends none, `maxConcurrentShifts` above is used, under what the server allows. An older runner ignores the choice and keeps its own value; the Workstations page says so. In a runner with several pairings, the machine limit (`pairings.json`) is the largest of the configured and the granted values unless it is set explicitly. Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
+- **Shifts at once from the Workstations page**. A runner that announces the `shift-limit:1` capability (releases after 0.1.20) takes the owner's choice from the server: it arrives in `welcome` (`limits.shiftLimit`: a number, `"unlimited"` or null) and, when changed while connected, as the `shifts.limit` command. The runner applies it to the next shift offered, with no restart, and keeps it in `server-limits.json` in its data directory so it holds after a restart before the server has answered. `limits.maxConcurrentShifts` is what the server enforces (the choice under the platform ceiling; unlimited is 100,000); the dispatcher also stops offering shifts to a full workstation. With no choice (null), or an older server that sends none, `maxConcurrentShifts` above is used, under what the server allows. An older runner ignores the choice and keeps its own value; the Workstations page says so. In a runner with several pairings, the machine limit (`pairings.json`) is the largest of the configured and the granted values unless it is set explicitly. Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
 - **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
 - **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
@@ -1209,7 +1209,7 @@ On top of that, Claude Code sessions run inside Claude Code's own sandbox and pe
 
 **Exception: the DevOps engineer.** The workstation's DevOps engineer (the agent with `isDevops`, built-in role `devops`)
 runs its shifts **and its chats** outside this sandbox by design, so that it can deploy to the local Docker stack
-(`docker compose -p aom-uat ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
+(`docker compose -p myapp ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
 See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
 ### Per-agent directories
@@ -1227,7 +1227,7 @@ The agent's `TMPDIR`/`TMP`/`TEMP` and `CLAUDE_CODE_TMPDIR` is `/tmp/aom-<10 hex>
 on Linux/macOS. It is a short path on purpose: Unix socket paths are limited to 108 bytes and Claude Code puts its
 sockets (`cc-socks/`, `claude-http-*.sock`) and `claude-<uid>/<cwd>/` temp there. Claude Code's sandboxed shell uses
 `claude-<uid>/` inside it as its `$TMPDIR`, which is where reviewers' and testers' build copies landed. On a machine
-where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (backlog #81, 24 GB tmpfs, about 21 GB of
+where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (24 GB tmpfs, about 21 GB of
 `/tmp/aom-*/claude-1000/*`).
 
 - **End of every shift** (done, crash, stop, timeout, rejected after start) and end of every chat: everything in the
@@ -1245,7 +1245,7 @@ where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (backlog #8
 
 ### Scratch retention (`scratch.*` in `config.json`)
 
-`agents/<id>/scratch/` is on disk and used to grow without limit (backlog #83: 200 GB of repository copies made by
+`agents/<id>/scratch/` is on disk and used to grow without limit (200 GB of repository copies made by
 reviewers and testers). The runner now prunes it. Only the top-level entries of the folder are judged, each as a unit
 (its age is the newest file inside it):
 
@@ -1390,7 +1390,7 @@ net10.0 projects build and run from `~/.dotnet` although `/usr/local/bin/dotnet`
 
 ### Commit identity
 
-Every commit the runner or an agent makes carries the owner's own name, so the work reads as the owner's (backlog #65).
+Every commit the runner or an agent makes carries the owner's own name, so the work reads as the owner's.
 One resolver (`src/git/identity.ts`) picks the identity, in this order:
 
 1. the project setting **Commit as** (name and e-mail, Project settings; arrives as `commitAs` in `shift.start`,
@@ -1435,7 +1435,7 @@ on `.git/config.lock`. A git command that still hits "could not lock" or `index.
 
 A safety net for worktrees nobody removed (a crash, a card cancelled while the runner was offline, a database that was
 reset). About 15 seconds after the first connection of the runner process, and again for every repository hygiene run
-(the server sends the command `worktrees.sweep`), and since backlog #83 every `scratch.sweepIntervalHours`, the runner:
+(the server sends the command `worktrees.sweep`), and every `scratch.sweepIntervalHours`, the runner:
 
 1. lists `worktrees/<KEY>-<project id prefix>/<REF>` and asks the server (`worktrees.query`) which of those paths still
    belong to a live card of this workstation (a card that is not done or cancelled, or is done with its finalize still
@@ -1578,7 +1578,7 @@ worktree and no `--resume`**: the working directory is the agent's scratch direc
 (`CEO`), and a review shift has 30 minutes, a wake 15. The runner announces the capability `ceo:1` in `hello`; the server
 sends a CEO shift only to a runner that has it (an older runner is shown "update the runner" on the CEO page).
 
-The CEO shift has a slot of its own (backlog #79): it does not count against `maxConcurrentShifts` (nor do card shifts count it),
+The CEO shift has a slot of its own: it does not count against `maxConcurrentShifts` (nor do card shifts count it),
 and only one CEO shift runs at a time (a second is refused `busy`: "a CEO shift is already running"). Before #79 a workstation
 running its limit of card shifts refused the CEO's shift every time. Every `shift.rejected` now carries a `detail` and is
 logged as `shift <id> rejected (<reason>): <detail>`; the server keeps the text on the batch (`ceo_batches.error`) and shows it
@@ -1878,7 +1878,7 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   out-of-scope discard skip a worktree with `MERGE_HEAD`), and the next architect shift inherits it.
 - **Commit, push, merge, fetch.** The agent keeps `git push*`, `git fetch*`, `git pull*`, `git remote*`, `git rebase*`,
   `git checkout*`, `git switch*` and `git reset --hard*` denied; it may `git add`, `git commit` and `git merge`.
-  `aom git push` (rpc `git.push`) is **always refused** (backlog #61: no card or agent branch is pushed unless the goal is a pull request, and then the runner pushes it at finalize); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
+  `aom git push` (rpc `git.push`) is **always refused** (no card or agent branch is pushed unless the goal is a pull request, and then the runner pushes it at finalize); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
   (`git.merge_main`) merges the latest `origin/<main>` into the card branch and leaves a conflict in the worktree;
   `aom git verify-merge` (`git.verify_merge`) checks that a resolution is complete (no merge in progress, no unmerged
   file, no conflict marker, HEAD is the merge commit). The rpcs work only in `investigate*` stages of card shifts.
@@ -1917,7 +1917,7 @@ earlier bare `Edit`/`Write` deny also beat the scratch allow, so a reviewer coul
 own scratch folder has no worktree deny.) The role smoke test checks this rule for every role on every runner start.
 
 A read-only worktree used to make **every** shell command of such a role fail with
-`bwrap: Can't create file <worktree>/.gitconfig: Read-only file system` (backlog #72). Real cause, reproduced with the
+`bwrap: Can't create file <worktree>/.gitconfig: Read-only file system`. Real cause, reproduced with the
 real Claude Code binary and bubblewrap (`apps/runner/test/claude-sandbox-real.test.ts`, which runs `claude -p` against a
 fake local API with the settings the runner generates): Claude Code 2.1.296 and later mounts `/dev/null` over its
 protected dotfile names in the working directory (`.gitconfig`, `.gitmodules`, `.bashrc`, `.bash_profile`, `.zshrc`,
@@ -1943,7 +1943,7 @@ Hotfix #78 (merges failed at Finalize with "could not create the integration wor
 .git/config: File exists"): Claude Code's sandbox protects `<gitDir>/config` together with `config.lock`,
 `config.worktree`, `config.worktree.lock` and `commondir` (strings of the claude 2.1.300 binary). bubblewrap creates a missing
 protected name on the host as an empty read-only file, and the stub outlives the sandbox. With agents running on a
-clone (dcode-flow-5: 6 shifts, `.git/config.lock` 0 bytes, `r--r--r--`, created while they ran) every git command that
+clone (demo-flow-5: 6 shifts, `.git/config.lock` 0 bytes, `r--r--r--`, created while they ran) every git command that
 writes `.git/config` failed, among them the tracking set-up of `git worktree add -B <branch> <path> origin/<x>` of the
 integration worktree. The sandbox deny on `config` and `hooks` stays (an agent must never write them). Fixes
 (`src/git/config-lock.ts`):
@@ -2058,7 +2058,7 @@ else cuts the branch from the working branch.
 
 ### Run a branch (supervised services)
 
-Backlog #58 (`docs/design/run-and-integration-tests.md`, phases 1 and 2). Someone presses **Run this branch** (card page) or
+(`docs/design/run-and-integration-tests.md`, phases 1 and 2). Someone presses **Run this branch** (card page) or
 **Run branch...** (the project's board); the server sends `run.start` and files a DevOps request of kind `run`. The runner
 and the DevOps engineer split the work:
 
@@ -2066,7 +2066,7 @@ and the DevOps engineer split the work:
   `worktrees/<KEY>-<project>/run-<env>/<repo>` (the local branch head, else `origin/<branch>`; `git worktree add --detach`, **no
   branch is created**, nothing is written into the repository). It answers the command with `ok:false` and the reason when the
   cap (`maxRunEnvironments`) is reached, there is no clone or the branch does not exist.
-- **Build guides (backlog #69).** The runner finds the guides itself and passes their text in the brief, nearest first and
+- **Build guides.** The runner finds the guides itself and passes their text in the brief, nearest first and
   without duplicates, each with its absolute path: the `BUILD.md` of the repository's project folder and root (as before), then
   every `BUILD.md` in the **folders above the clone**, up to and including the `repoRoots` entry that holds it (the organization
   source folder sits inside one), case-insensitively, never the home directory or anything above it, and nothing for a clone that
@@ -2142,7 +2142,7 @@ and the DevOps engineer split the work:
   repository ids) and answers with the error so the engineer can fix and resubmit in the same shift. The proposal is data:
   nothing it names runs or is saved until the user confirms it in the app.
   **The scan's shell is an allowlist** (final review; `scanSandboxBlock`): the whole real home, `/run/WSL`, `/run/user/<uid>`,
-  `/mnt/*/Users` and the Docker sockets are unreadable (so `~/.config` including `aom-uat`, browser profiles, shell history and
+  `/mnt/*/Users` and the Docker sockets are unreadable (so `~/.config`, browser profiles, shell history and
   every other project are gone without being listed), and only the scratch folder, the `aom` shim, the toolchain and each clone
   are opened again, read-only. Secret files (`.env*`, `*.env`, `*.pem`, `*.key`, `id_*`, `.npmrc`, `.pypirc`, `.netrc`, ...) are
   masked by path wherever the walk finds them, `build/` and `dist/` included (a clone over 400,000 entries is not opened at all;
@@ -2206,7 +2206,7 @@ and the DevOps engineer split the work:
   tester access (forwarders and `aom-env`, D6) is described under "Integration tests by the tester" below.
 - Not available on native Windows (the hello does not announce `runs:1`, `runs:2` or `runs:3` there).
 
-### Integration tests by the tester (backlog #59, `runs:3`)
+### Integration tests by the tester
 
 The project setting (Project settings > Run and test > Integration tests: `off`, `local`, `remote`) decides whether the `test` stage of workflow `code` v4 runs. With `local`, the server provisions a test environment per card and the tester works against it. Details of the design are in `docs/design/run-and-integration-tests.md` (sections 4 and 7, P3).
 
@@ -2882,7 +2882,7 @@ rm -rf ~/.aom-runner/agents/*/claude/cache
 
 - `apps/runner/README.md`: quick reference
 - `docs/USER-GUIDE.md`: manager features and agent hiring
-- `docs/DEPLOY.md`: server deployment
+- `docs/SELF-HOSTING.md`: server deployment
 - `docs/BYO-VPS.md`: running agents on a server you rent
 - `docs/ARCHITECTURE.md`: technical design and protocol
 

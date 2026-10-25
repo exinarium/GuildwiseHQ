@@ -50,7 +50,7 @@ function destinationOf(rel: string, into: string, lift: string[]): string {
 }
 
 /**
- * `vault.merge` (the "drop personal" migration, docs/design/open-questions.md): copies the files of the vault clone
+ * `vault.merge` (the "drop personal" migration): copies the files of the vault clone
  * `srcDir` into the clone `dir` under the folder `into`, except the folders in `lift`, which keep their own path (a
  * personal interest's `interests/<slug>/` lands in the organization vault's `interests/<slug>/`). Nothing is
  * overwritten: identical files are skipped, differing ones are reported as conflicts. Idempotent and safe to repeat after

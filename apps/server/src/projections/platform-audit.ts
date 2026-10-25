@@ -352,7 +352,7 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
-  // ---- blog (docs/design/blog-prd.md): every write is audited, API writes with the key as the actor
+  // ---- blog: every write is audited, API writes with the key as the actor
   BlogPostSubmitted: always(async (_tx, e) => {
     const p = ev<'BlogPostSubmitted'>(e).payload;
     return {

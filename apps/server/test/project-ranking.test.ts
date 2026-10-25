@@ -5,8 +5,7 @@ import { closeAdminPool, q } from './helpers/db.ts';
 import { ok, pairWorkstation } from './helpers/world.ts';
 
 /**
- * The organization ranks its projects (docs/design/open-questions.md "drop 'personal'; projects ranked by drag and
- * drop"): who may rank, what a ranking must name, where new projects go, what an interest is, and that a projection
+ * The organization ranks its projects: who may rank, what a ranking must name, where new projects go, what an interest is, and that a projection
  * rebuild reproduces it.
  */
 let t: TestApp;
