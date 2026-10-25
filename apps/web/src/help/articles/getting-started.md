@@ -7,6 +7,10 @@ order: 1
 
 When you sign in for the first time, Guildwise HQ shows you around and introduces the main areas you will work in. You can replay the tour any time from the Help page.
 
+## The overview video {#overview-video}
+
+If you want the whole picture first, the **Overview** video is a tour of about twelve minutes: the team of agents, the board, your desk, Discovery and the Boardroom, workstations, control and releases. The section videos in Help then teach each area in depth.
+
 ## The training video {#training-video}
 
 On the **Help** page, the **Getting started** video is a spoken tutorial of under three minutes. A friendly voice takes you from an empty organization to a team of agents at work while you watch it happen on screen:

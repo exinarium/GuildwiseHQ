@@ -42,9 +42,9 @@ afterEach(() => {
 });
 
 describe('the video registry', () => {
-  it('has 31 videos: Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
+  it('has 32 videos: the overview, Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
     const slugs = Object.keys(SECTION_VIDEOS);
-    expect(slugs).toHaveLength(31);
+    expect(slugs).toHaveLength(32);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 

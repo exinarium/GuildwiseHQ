@@ -17,7 +17,7 @@ export const CHAPTERS: NarratedChapter[] = [
     cues: [
       {
         id: 'c1-a',
-        text: 'Organizations lists every customer, with its plan and status. You see metadata, never their work.',
+        text: 'Organizations lists every organization on this server, with its status. You see metadata, never their work.',
       },
       {
         id: 'c1-b',
@@ -39,30 +39,6 @@ export const CHAPTERS: NarratedChapter[] = [
     title: 'Accounts',
     banner: 'Accounts',
     cues: [{ id: 'c3-a', text: 'Accounts lists everyone with an account, in every organization.' }],
-  },
-  {
-    title: 'Billing',
-    banner: 'Billing',
-    cues: [
-      {
-        id: 'c4-a',
-        text: 'Billing holds the payment provider, the plans and their prices, the add-ons, VAT and the invoice details.',
-      },
-    ],
-  },
-  {
-    title: 'Support and Blog',
-    banner: 'Support and Blog',
-    cues: [
-      {
-        id: 'c5-a',
-        text: 'Support is the inbox of every Contact us request. Your reply is emailed, and shows under the person’s My requests.',
-      },
-      {
-        id: 'c5-b',
-        text: 'Blog is where new posts wait for your review before they are published.',
-      },
-    ],
   },
   {
     title: 'Keys, runners, team and mail',
@@ -94,7 +70,7 @@ export const CHAPTERS: NarratedChapter[] = [
 export const OUTRO: Cue[] = [
   {
     id: 'outro-1',
-    text: 'That is the platform area: customers, money, support and the running system, kept apart from the work of each organization.',
+    text: 'That is the platform area: organizations, accounts and the running system, kept apart from the work of each organization.',
   },
 ];
 

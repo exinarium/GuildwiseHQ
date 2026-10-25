@@ -4,7 +4,7 @@ import type { Cue, NarratedChapter } from './types.ts';
 export const INTRO: Cue[] = [
   {
     id: 'intro-1',
-    text: 'Help is at the bottom of the sidebar. It has the articles, the glossary, the blog, and a way to reach a person.',
+    text: 'Help is at the bottom of the sidebar. It has the articles, the glossary and the blog.',
   },
 ];
 
@@ -34,20 +34,6 @@ export const CHAPTERS: NarratedChapter[] = [
     ],
   },
   {
-    title: 'Contact us and My requests',
-    banner: 'Contact us and My requests',
-    cues: [
-      {
-        id: 'c3-a',
-        text: 'When the articles are not enough, Contact us sends a question, a problem or an idea to the Guildwise team.',
-      },
-      {
-        id: 'c3-b',
-        text: 'My requests keeps everything you sent, with the answers. A new reply is marked, so you do not miss it.',
-      },
-    ],
-  },
-  {
     title: 'Page help and the tour',
     banner: 'Page help and the tour',
     cues: [
@@ -66,7 +52,7 @@ export const CHAPTERS: NarratedChapter[] = [
 export const OUTRO: Cue[] = [
   {
     id: 'outro-1',
-    text: 'That is Help. Search first, and write to us when you need a person.',
+    text: 'That is Help. Search first, and replay the tour whenever you like.',
   },
 ];
 

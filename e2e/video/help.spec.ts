@@ -7,8 +7,8 @@ import { platformLogin } from './platform.ts';
 import { demoApi } from './seed.ts';
 
 /**
- * The Help video (sidebar section 23): search the articles, the glossary, what's new, the blog, Contact us and My
- * requests, the "?" page help and the tour.
+ * The Help video (sidebar section 23): search the articles, the glossary, what's new, the blog,
+ * the "?" page help and the tour.
  * Output: media/videos/help.{webm,mp4,vtt,json}
  *   e2e/video/record.sh help
  */
@@ -63,23 +63,6 @@ test('record the help video', async ({ browser }) => {
   });
   expect(pub.ok(), await pub.text()).toBeTruthy();
 
-  const ticket = await api.post('/api/support/tickets', {
-    data: {
-      kind: 'question',
-      subject: 'Can a reviewer work on two projects?',
-      message: 'We have a second project for the mobile app. Can Linus review the cards of both projects?',
-      context: { page: '/agents', appVersion: '1.0.0', browser: 'Chrome 141', viewport: '1280x720' },
-    },
-  });
-  expect(ticket.status(), await ticket.text()).toBe(201);
-  const ticketId = ((await ticket.json()) as { id: string }).id;
-  const reply = await platform.api.post(`/api/platform/support/tickets/${ticketId}/replies`, {
-    headers: platform.headers,
-    data: {
-      body: 'Hi Alex. Yes: open Agents, choose Allowed projects on Linus and tick both projects. He then takes review cards from either board.',
-    },
-  });
-  expect(reply.ok(), await reply.text()).toBeTruthy();
   await platform.ctx.close();
 
   const prepared = prepareVideo({
@@ -135,20 +118,6 @@ test('record the help video', async ({ browser }) => {
   });
 
   await chapter(3);
-  await narrate('c3-a', async () => {
-    await click(page, page.getByTestId('help-tab-contact'));
-    await pause(1500);
-  });
-  await narrate('c3-b', async () => {
-    await click(page, page.getByTestId('help-tab-requests'));
-    const row = page.locator('[data-testid^="request-"]').first();
-    await expect(row).toContainText('New reply');
-    await pause(1200);
-    await click(page, row);
-    await expect(page.getByText('tick both projects')).toBeVisible();
-  });
-
-  await chapter(4);
   await narrate('c4-a', async () => {
     await click(page, page.getByTestId('page-help-button'));
     await expect(page.getByTestId('page-help')).toBeVisible();

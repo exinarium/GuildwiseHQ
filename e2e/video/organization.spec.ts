@@ -141,7 +141,6 @@ test('record the organization video', async ({ browser }) => {
     await click(page, tab('Plan & limits'));
     await expect(page.getByTestId('plan-summary')).toBeVisible();
     await pause(2000);
-    await tab('Billing').hover();
   });
   await narrate('outro-1', async () => {
     await click(page, tab('General'));

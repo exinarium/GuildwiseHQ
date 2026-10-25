@@ -26,7 +26,16 @@ export interface SectionVideoEntry {
 
 export const GETTING_STARTED_SLUG = 'getting-started';
 
+/** The overview: a twelve-minute tour of the whole product (video/overview-script.md). It is not tied to a sidebar entry. */
+export const OVERVIEW_SLUG = 'overview';
+
 export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
+  [OVERVIEW_SLUG]: {
+    title: 'Guildwise HQ: a tour of the whole product',
+    nav: null,
+    help: 'getting-started#overview-video',
+    published: true,
+  },
   [GETTING_STARTED_SLUG]: {
     title: 'Getting started with Guildwise HQ',
     nav: null,

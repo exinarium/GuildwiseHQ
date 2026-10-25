@@ -197,7 +197,7 @@ export function mux(
 }
 
 /** An MP4 copy (H.264 + AAC, fast start) of the finished WebM: plays on iPhone, Android and in-app browsers. */
-export function toMp4(src: string, dest: string): void {
+export function toMp4(src: string, dest: string, crf = '23'): void {
   execFileSync(
     findFfmpeg(),
     [
@@ -217,7 +217,7 @@ export function toMp4(src: string, dest: string): void {
       '-preset',
       'slow',
       '-crf',
-      '23',
+      crf,
       '-c:a',
       'aac',
       '-b:a',

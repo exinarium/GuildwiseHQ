@@ -76,6 +76,7 @@ The pipeline lives in `e2e/video/` (V-0 is done, see below):
 | 26 | `boardroom` | Boardroom | 2:05 | recorded |
 | 27 | `capabilities` | Capabilities | 2:15 | recorded |
 | 28 | `ai-runtimes` | Integrations > AI runtime and Settings > Model providers | 2:00 | recorded |
+| 30 | `overview` | Overview of the whole product (video/overview-script.md; teaser: `overview-teaser`) | 12:52 | recorded |
 | 29 | `governance` | Approvals, What it may do, audit export, offboarding | 2:00 | recorded |
 
 ## Videos

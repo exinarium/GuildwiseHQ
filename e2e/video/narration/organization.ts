@@ -73,7 +73,7 @@ export const CHAPTERS: NarratedChapter[] = [
     cues: [
       {
         id: 'c6-a',
-        text: 'Plan and limits shows your plan, what you use, and the limits that apply. The Owner also sees Billing.',
+        text: 'Plan and limits shows your plan, what you use, and the limits that apply.',
       },
     ],
   },

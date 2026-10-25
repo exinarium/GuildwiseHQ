@@ -21,6 +21,8 @@ const PACE = Number(process.env.AOM_VIDEO_PACE ?? 1); // pauses between actions;
 export const pause = (ms: number) => sleep(ms * PACE);
 const GAP = 0.7; // seconds of quiet after every passage
 const MAX_BYTES = 20 * 1024 * 1024;
+/** AOM_VIDEO_DRY=1: runs the walk-through without waiting for the voice and writes nothing (to debug a spec fast). */
+const DRY = process.env.AOM_VIDEO_DRY === '1';
 
 export interface VideoScript {
   /** File name stem: `media/videos/<slug>.*`. Must match the key in apps/web/src/lib/videos.ts. */
@@ -31,6 +33,10 @@ export interface VideoScript {
   cues: Cue[];
   /** The chapter list shown under the video. `chapter(n)` marks chapter n and shows its banner. */
   chapters: NarratedChapter[];
+  /** A long video may exceed the 20 MB of a section video: the limit in MB (default 20) and the encoder quality (higher is smaller). */
+  maxMb?: number;
+  webmCrf?: string;
+  mp4Crf?: string;
 }
 
 export interface Prepared {
@@ -110,6 +116,7 @@ export async function startRecording(
     const end = start + s.duration;
     timeline.push({ id, text: textOf.get(id) ?? '', start, end, file: s.file });
     if (actions) await actions();
+    if (DRY) return;
     const rest = end + GAP - now();
     if (rest > 0) await sleep(rest * 1000);
   };
@@ -122,6 +129,11 @@ export async function startRecording(
 
   const finish = async () => {
     const duration = Math.round(now() * 10) / 10;
+    if (DRY) {
+      await ctx.close();
+      console.log(`dry run finished after ${duration}s (the voice was not waited for)`);
+      return duration;
+    }
     const video = page.video();
     await ctx.close();
     const raw = await video?.path();
@@ -134,15 +146,19 @@ export async function startRecording(
         raw as string,
         timeline.map((c) => ({ file: c.file, start: c.start })),
         dest,
+        script.webmCrf,
       );
     } catch (e) {
       copyFileSync(raw as string, dest);
       throw new Error(`the narration could not be mixed in (is ffmpeg set up? see setup-voice.sh): ${e}`);
     }
     const bytes = statSync(dest).size;
-    expect(bytes, 'the video must stay under 20 MB').toBeLessThan(MAX_BYTES);
-    toMp4(dest, `${base}.mp4`);
-    expect(statSync(`${base}.mp4`).size, 'the MP4 must stay under 20 MB').toBeLessThan(MAX_BYTES);
+    const limit = (script.maxMb ?? 20) * 1024 * 1024 || MAX_BYTES;
+    expect(bytes, `the video must stay under ${script.maxMb ?? 20} MB`).toBeLessThan(limit);
+    toMp4(dest, `${base}.mp4`, script.mp4Crf);
+    expect(statSync(`${base}.mp4`).size, `the MP4 must stay under ${script.maxMb ?? 20} MB`).toBeLessThan(
+      limit,
+    );
     writeFileSync(`${base}.vtt`, vtt(timeline));
     writeFileSync(
       `${base}.json`,

@@ -19,32 +19,6 @@ test.afterAll(async () => {
   await pool.end();
 });
 
-const BODY = (topic: string) =>
-  [
-    `This post is about ${topic}. A team of AI agents works best with clear cards, a short feedback loop and a person`,
-    'who decides what matters. Below are the habits we see in the teams that get the most out of their agents.',
-    '',
-    '## Start small',
-    '',
-    'Pick one project and one repository. Hire a lean team and send it three small cards. Read what comes back, and',
-    'write down what you would change: that list becomes the ledger your agents follow from then on.',
-    '',
-    '## Answer quickly',
-    '',
-    'Questions on the Desk hold work up. A team whose owner answers within the hour finishes cards in half the time of',
-    'a team whose owner answers once a day. Turn on push notifications, and let the CEO answer what it can.',
-    '',
-    '## Look at the numbers',
-    '',
-    'Metrics and Costs show where time and money go. A card that bounces between review and build twice is a card that',
-    'was too large or too vague. Split it, and the next one will go through in one round.',
-    '',
-    '## Keep the ledger current',
-    '',
-    'Every answer you give can become a ledger entry. Agents read the ledger before they ask, so a decision made once is',
-    'not asked again. Retire entries that no longer hold, and your team keeps making the choices you would make.',
-  ].join('\n');
-
 /** Clicks the platform menu entry `name` (the menu scrolls sideways when it does not fit). */
 const open = async (page: Page, name: string) => {
   await click(
@@ -62,49 +36,18 @@ test('record the platform area video', async ({ browser }) => {
     `UPDATE organizations SET name='Northwind Traders' WHERE owner_user_id=(SELECT id FROM users WHERE email=$1)`,
     [nora.email],
   );
-  const ticket = await owner.post('/api/support/tickets', {
-    data: {
-      kind: 'question',
-      subject: 'Can a reviewer work on two projects?',
-      message: 'We have a second project for the mobile app. Can Linus review the cards of both projects?',
-      context: { page: '/agents', appVersion: '1.0.0', browser: 'Chrome 141', viewport: '1280x720' },
-    },
-  });
-  expect(ticket.status(), await ticket.text()).toBe(201);
-
+  // a self-hosted server gives its organizations the Unlimited plan (assigned by the platform administrator)
+  await q(`UPDATE organizations SET plan='unlimited'`);
   const platform = await platformLogin(browser);
   const { api, headers } = platform;
   const inv = await api.post('/api/platform/invitations', {
     headers,
-    data: { email: 'hana@demo.local', proposedOrgName: 'Harbor Cafe', plan: 'founding', status: 'active' },
+    data: { email: 'hana@demo.local', proposedOrgName: 'Harbor Cafe', status: 'active' },
   });
   expect(inv.ok(), await inv.text()).toBeTruthy();
-  for (const [slug, title, publish] of [
-    ['start-small-with-ai-agents', 'Start small: your first week with a team of AI agents', true],
-    ['answer-the-desk-quickly', 'Why answering the Desk quickly doubles your throughput', false],
-  ] as const) {
-    const post = await api.post('/api/platform/blog/posts', {
-      headers,
-      data: {
-        slug,
-        title,
-        summary:
-          'Practical habits from teams that get the most out of their AI agents: small cards, quick answers and a look at the numbers.',
-        bodyMarkdown: BODY(title.toLowerCase()),
-        coverImage: { defaultKey: 'ai-agents', alt: 'A team of agents around a board' },
-        tags: ['ai-agents', 'how-to'],
-      },
-    });
-    expect(post.status(), await post.text()).toBe(201);
-    if (publish) {
-      const id = ((await post.json()) as { id: string }).id;
-      const pub = await api.post(`/api/platform/blog/posts/${id}/publish`, { headers });
-      expect(pub.ok(), await pub.text()).toBeTruthy();
-    }
-  }
   const key = await api.post('/api/platform/api-keys', {
     headers,
-    data: { name: 'Blog writer', scopes: ['blog:read', 'blog:write'] },
+    data: { name: 'Release bot', scopes: ['blog:read'] },
   });
   expect(key.status(), await key.text()).toBe(201);
 
@@ -156,36 +99,9 @@ test('record the platform area video', async ({ browser }) => {
   });
 
   await chapter(4);
-  await narrate('c4-a', async () => {
-    await open(page, 'Billing');
-    await expect(page.getByText('Plans').first()).toBeVisible();
-    await pause(1500);
-    await page.mouse.wheel(0, 500);
-  });
-
-  await chapter(5);
-  await narrate('c5-a', async () => {
-    await open(page, 'Support');
-    await expect(page.getByTestId('support-inbox')).toContainText('Can a reviewer work on two projects?');
-    await pause(1200);
-    // the inbox sits under the notification settings
-    await page.getByTestId('support-inbox').scrollIntoViewIfNeeded();
-    await page.mouse.wheel(0, 250);
-  });
-  await narrate('c5-b', async () => {
-    await open(page, 'Blog');
-    const draft = page.getByText('Why answering the Desk quickly').first();
-    await expect(draft).toBeVisible();
-    await pause(800);
-    // the posts are listed under the blog's switch and digest settings
-    await draft.scrollIntoViewIfNeeded();
-    await page.mouse.wheel(0, 200);
-  });
-
-  await chapter(6);
   await narrate('c6-a', async () => {
     await open(page, 'API keys');
-    await expect(page.getByTestId('keys-table')).toContainText('Blog writer');
+    await expect(page.getByTestId('keys-table')).toContainText('Release bot');
   });
   await narrate('c6-b', async () => {
     await open(page, 'Runners');
@@ -199,7 +115,7 @@ test('record the platform area video', async ({ browser }) => {
     await expect(page.getByRole('heading', { name: 'Inbound mail' }).first()).toBeVisible();
   });
 
-  await chapter(7);
+  await chapter(5);
   await narrate('c7-a', async () => {
     await open(page, 'Audit log');
     await expect(page.getByRole('heading', { name: 'Audit log' }).first()).toBeVisible();
