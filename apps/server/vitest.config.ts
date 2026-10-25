@@ -10,8 +10,10 @@ export default defineConfig({
     globalSetup: ['test/global-setup.ts'],
     // All suites share the aom_test database; run files one at a time.
     fileParallelism: false,
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    // The shared CI runners are several times slower than a developer machine: the long multi-turn session tests
+    // (a boardroom with several seats, intake batches) need more room there. Failures still fail, only later.
+    testTimeout: process.env.CI ? 120_000 : 30_000,
+    hookTimeout: process.env.CI ? 120_000 : 30_000,
     env: {
       // Tests must only ever touch aom_test.
       DATABASE_URL: TEST_DB,

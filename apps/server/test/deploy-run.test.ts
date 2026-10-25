@@ -665,6 +665,13 @@ describe('the workstation refuses or fails: answers, never retries', () => {
       },
     });
     await until(async () => (await run(id)).status === 'refused', 4000, 'refused');
+    // the desk notice is raised right after the run is marked refused
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM desk_items WHERE subkind='deploy_secret' AND status='open'`)).length > 0,
+      4000,
+      'desk notice',
+    );
     const [n] = await q(`SELECT title FROM desk_items WHERE subkind='deploy_secret' AND status='open'`);
     expect(n!.title).toContain('P5_PROD_DEPLOY_KEY');
   });

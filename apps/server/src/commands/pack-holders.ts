@@ -485,11 +485,20 @@ export async function applyPackCredentialResult(
   // the ciphertext is emptied whatever the answer was
   await exec(
     ctx.pool,
-    `UPDATE pack_credential_shares SET ciphertext=NULL, status=$3, error=$4, updated_at=$5 WHERE pack_id=$1 AND workstation_id=$2`,
-    [packId, workstationId, stored ? 'stored' : 'failed', error, ctx.clock.now()],
+    `UPDATE pack_credential_shares SET ciphertext=NULL WHERE pack_id=$1 AND workstation_id=$2`,
+    [packId, workstationId],
   );
+  const setStatus = () =>
+    exec(
+      ctx.pool,
+      `UPDATE pack_credential_shares SET status=$3, error=$4, updated_at=$5 WHERE pack_id=$1 AND workstation_id=$2`,
+      [packId, workstationId, stored ? 'stored' : 'failed', error, ctx.clock.now()],
+    );
   const p = await one(ctx.pool, 'SELECT * FROM packs WHERE id=$1 AND removed_at IS NULL', [packId]);
-  if (!p) return;
+  if (!p) {
+    await setStatus();
+    return;
+  }
   await ctx.store.append([
     packEvent(
       'PackCredentialStored',
@@ -505,6 +514,9 @@ export async function applyPackCredentialResult(
       { workstationId },
     ),
   ]);
+  // The share shows `stored` only once the fact (and the fingerprint on the pack) is recorded, so a reader that
+  // sees the status also sees the fingerprint.
+  await setStatus();
   // the credential is here: the list can now clone the pack
   if (stored) {
     const { queuePacksSync } = await import('./packs.ts');
