@@ -55,7 +55,8 @@ export async function baTaskPass(
     `SELECT t.* FROM ba_tasks t JOIN projects p ON p.id = t.project_id AND p.status = 'active'
        JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE t.status = 'queued' AND NOT ${projectHeldSql('p', '$1')}
-      ORDER BY (t.kind = 'batch_intake'), t.created_at, t.id`,
+      ORDER BY (t.kind = 'batch_intake'), t.created_at,
+               (SELECT i.position FROM intake_batch_items i WHERE i.id = t.batch_item_id) NULLS LAST, t.id`,
     [now],
   );
   const started: BaTaskDispatch[] = [];
