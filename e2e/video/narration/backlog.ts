@@ -54,7 +54,7 @@ export const CHAPTERS: NarratedChapter[] = [
 export const OUTRO: Cue[] = [
   {
     id: 'outro-1',
-    text: 'That is the backlog. Keep ideas here, and send them on when you are ready.',
+    text: 'That is the backlog. Keep ideas here as long as you like, and send them on to your business analyst when you are ready. Even dropped ideas can still be found again.',
   },
 ];
 

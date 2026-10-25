@@ -56,7 +56,7 @@ export const CHAPTERS: NarratedChapter[] = [
 export const OUTRO: Cue[] = [
   {
     id: 'outro-1',
-    text: 'Earlier intakes and batches stay listed on the Intake page, so you can pick any conversation up again.',
+    text: 'Earlier intakes and batches stay listed on the Intake page, so you can pick any conversation up again whenever you need to.',
   },
 ];
 

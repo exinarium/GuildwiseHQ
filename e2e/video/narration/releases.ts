@@ -52,7 +52,10 @@ export const CHAPTERS: NarratedChapter[] = [
 ];
 
 export const OUTRO: Cue[] = [
-  { id: 'outro-1', text: 'That is Releases: one place to decide what goes live.' },
+  {
+    id: 'outro-1',
+    text: 'That is Releases: one place to decide what goes live, and to see what is waiting to go out. Open any release to read what it contains.',
+  },
 ];
 
 export const allCues = (): Cue[] => [...INTRO, ...CHAPTERS.flatMap((c) => c.cues), ...OUTRO];

@@ -71,6 +71,12 @@ The pipeline lives in `e2e/video/` (V-0 is done, see below):
 | 22 | `organization` | Organization | 1:30 | to record |
 | 23 | `help` | Help | 1:00 | to record |
 | P | `platform-area` | Platform area | 2:00 | to record |
+| 24 | `discovery` | Discovery | 1:45 | recorded |
+| 25 | `documents` | Documents | 1:05 | recorded |
+| 26 | `boardroom` | Boardroom | 2:05 | recorded |
+| 27 | `capabilities` | Capabilities | 2:15 | recorded |
+| 28 | `ai-runtimes` | Integrations > AI runtime and Settings > Model providers | 2:00 | recorded |
+| 29 | `governance` | Approvals, What it may do, audit export, offboarding | 2:00 | recorded |
 
 ## Videos
 
@@ -537,6 +543,50 @@ Each entry has the same fields. "Linked from" names the guide chapter, the tour 
 - **Linked from:** guide chapter 7; platform tour step `welcome`; Help `organizations-and-roles#platform-area`.
 - **Re-record when:** any platform page changes.
 
+### 24. Discovery
+
+- **Slug:** `discovery`. **Title:** Discovery: from an idea to a PRD. **Section:** Discovery (sidebar, Work).
+- **Scope in:** `New discovery` (title, starting idea, project, `How should the analyst work?`: Facilitator, Partner, Ideate for me; the `CEO` choices; `Time limit`; `Cost limit in USD (optional)`), the question card with its quick answers, the phase stepper and the panel, a proposal and `Apply`, the PRD in the `Draft` panel, `Validate against the checklist`, `Approve`, `Hand to BA`, `Pause`.
+- **Scope out:** the Boardroom hand-over (`Pull into PRD`), documents list, time-up choices (`Extend`, `Wrap up now`).
+- **Prerequisites and test data:** a mock workstation with an analyst (Ana) and a BA (Ben); the mock analyst asks its fixed run of questions (about invoicing), so the title and idea are an invoicing idea.
+- **Linked from:** Help `discovery#start`; the tour step and page help of Discovery.
+- **Re-record when:** the New discovery dialog or the session page layout changes.
+
+### 25. Documents
+
+- **Slug:** `documents`. **Title:** Documents. **Section:** Documents (sidebar, Knowledge).
+- **Scope in:** the list (newest first), the kind chips (`PRD`, `Minutes`, ...) and the status chips, opening a PRD, the version picker, `Approve` (with the copy to the project vault), `Reopen`, the link back to `All documents`.
+- **Prerequisites and test data:** a project with a mock workstation (its project vault), three documents created through the API: an approved brief, a PRD with two versions in review, draft minutes.
+- **Linked from:** Help `discovery#documents`; page help of Documents.
+
+### 26. Boardroom
+
+- **Slug:** `boardroom`. **Title:** Boardroom: a debate with a Chair. **Section:** Boardroom (sidebar, Work).
+- **Scope in:** `New boardroom` (topic, brief, format, the fixed Optimist and Devil's Advocate, library personas, a persona cast from a brief, `Suggest a cast`, `Round cap`, cost and time limit, models), the sealed first round, the whiteboard, the Chair's decision point with an `@` mention and `Decide`, a note added, voted and moved, `End session`, the minutes, `Pull into PRD`.
+- **Prerequisites and test data:** a mock workstation with an analyst (for the PRD session). The mock Chair pauses for a decision through the runner switch `AOM_MOCK_BOARD_DECIDE=1` (so the topic does not carry the test markers); the mock step is 7 s so the sealed round can be seen.
+- **Linked from:** Help `boardroom#start`; the tour step and page help of Boardroom.
+
+### 27. Capabilities
+
+- **Slug:** `capabilities`. **Title:** Capabilities and packs. **Section:** Capabilities (sidebar, Knowledge; Settings > Capabilities).
+- **Scope in:** the `Registry` and its filters, the `Starter gallery`, `Add a pack by git URL` (and the private repository box), `Review and approve` with the flagged script, `Hire from this pack`, `My capabilities` (`New pack`, `Start writing`, the editor that checks as you type, `Save to workstation`), `Project skills` (`Mark reviewed`, `Block`), `Skill grants`.
+- **Prerequisites and test data:** a local git repository stands in for the public one: a `git` wrapper first on the runner's PATH maps `https://github.com/acme/release-skills.git` to it (the runner clones packs in an isolated git environment; `AOM_PACKS_ALLOW_LOCAL=1`). A skill is pushed to the toy repository (`.claude/skills/release-checklist`) and a card is run so the runner reads the project's skills.
+- **Linked from:** Help `capabilities#packs`; the tour step and page help of Capabilities.
+
+### 28. AI runtimes and model providers
+
+- **Slug:** `ai-runtimes`. **Title:** AI runtimes and model providers. **Section:** Integrations > AI runtime and Settings > Model providers (no sidebar entry of its own: the registry entry has `nav: null` and `paths: ['/settings/providers']`).
+- **Scope in:** the tiles (installed or not with the install command, signed in, key in effect), `Sign in` / `Sign in again`, `Set key`, `Add a named account`, `Make main`, `Allow projects to use my accounts`, the link to `Settings, Model providers`, the organization key (`Set key`, workstations that get it, `Monthly cap (USD)`, `Not shared`, `Revoke`).
+- **Prerequisites and test data:** Codex is reported as installed with one signed-in main account by writing the runner's runtime report into the database (the mock runner has no Codex); the key flows are real with an obviously fake key (`sk-ant-demo-...`).
+- **Linked from:** Help `ai-runtimes#accounts`; page help of Model providers.
+
+### 29. Governance
+
+- **Slug:** `governance`. **Title:** Governance: approvals, grants, audit and offboarding. **Section:** none of its own (`nav: null`): Desk notifications, Agents, Organization.
+- **Scope in:** the approval buttons of a notification and the confirm page they open (`Approve`; once, 15 minutes, only for you), `What it may do` on an agent's card, `Approval gates` (`Ask me before: merge and push`), Organization > `Audit log` (`Download`, CSV), removing a member (`Remove from organization`, the offboarding checklist and its report).
+- **Prerequisites and test data:** a DevOps approval on the Desk; the notification link is made with the server's own signing key (the recording browser has no push service); a second member (Jamie Lee) to remove.
+- **Linked from:** Help `organizations-and-roles#audit-log`.
+
 ## Re-record map
 
 Each section belongs to exactly one video. G is also re-recorded for the five sections whose first-run flow it shows.
@@ -566,6 +616,12 @@ Each section belongs to exactly one video. G is also re-recorded for the five se
 | 21 | Settings | `settings` | never |
 | 22 | Organization | `organization` | never |
 | 23 | Help | `help` | the Get started button or the tour entry point changes |
+| 24 | Discovery | `discovery` | never |
+| 25 | Documents | `documents` | never |
+| 26 | Boardroom | `boardroom` | never |
+| 27 | Capabilities | `capabilities` | never |
+| 28 | AI runtimes, Model providers | `ai-runtimes` | never |
+| 29 | Governance | `governance` | never |
 | P | Platform area | `platform-area` | never |
 
 A change to the sidebar itself (labels, order, a new entry) re-records G and every video whose first beat opens a changed entry.
@@ -575,3 +631,6 @@ A change to the sidebar itself (labels, order, a new entry) re-records G and eve
 1. Grouping: one video per section (the owner's decision), so 24 section videos plus G. The earlier plan of 17 grouped videos is dropped.
 2. Platform area: recorded as its own video (`platform-area`).
 3. Order of recording: Getting started first, then by how often the section changes.
+4. All 25 earlier videos were re-recorded with the Kokoro `af_heart` voice at the default speed against the current UI (2026-10-25). All 31 videos are published.
+5. The two cross-cutting videos (`ai-runtimes`, `governance`) have no sidebar entry, so they are not in the tour. They show in their Help article (`videosForArticle` no longer needs a nav id) and, for `ai-runtimes`, behind `Watch the video` on the Model providers page (`paths` in the registry). Decided by default (the owner was asleep).
+6. A pack is shown from a local git repository mapped to a public-looking https URL by a `git` wrapper on the recorded runner's PATH; the mock Chair has a runner switch (`AOM_MOCK_BOARD_DECIDE=1`) instead of topic markers. Neither touches product code.
