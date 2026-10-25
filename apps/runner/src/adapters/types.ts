@@ -218,6 +218,11 @@ export interface ChatStartInput {
   toolchainReadDirs?: string[];
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
   readOnly: boolean;
+  /**
+   * An @mention that works (owner decision 2026-10-25): `cwd` is the card's working folder, writable, and the session's tools are
+   * the agent's own permissions as the server cut them (edit, shell), under the shift policy. Claude Code only.
+   */
+  work?: boolean;
   /** The DevOps engineer's chat: the guard hook's inputs (no approved commands: off-workstation work goes through a request). */
   devopsGuard?: DevopsGuardInput;
   /** What the server told the agent about this conversation (card, project, M7: the intake). */

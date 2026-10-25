@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildClaudeChatCommand } from '../src/adapters/claude-code.ts';
-import { buildChatSettings, buildDevopsChatSettings } from '../src/adapters/claude-policy.ts';
+import {
+  buildChatSettings,
+  buildDevopsChatSettings,
+  buildMentionWorkSettings,
+} from '../src/adapters/claude-policy.ts';
 import { ClaudeStreamParser } from '../src/adapters/claude-stream-parser.ts';
 import { MockAdapter } from '../src/adapters/mock.ts';
 import type { ChatStartInput, RuntimeEvent } from '../src/adapters/types.ts';
@@ -441,5 +445,91 @@ describe('claude code chat adapter', () => {
     expect(events[0]).toEqual({ kind: 'session', runtimeSessionId: 'c4a7a1de-0b53-4d4c-9d0e-5e3f1a2b3c4d' });
     expect(events.at(-1)).toEqual({ kind: 'final', text: 'Hello, manager' });
     expect(parser.usage()).toMatchObject({ inputTokens: 12, outputTokens: 4, cacheReadTokens: 100 });
+  });
+});
+
+describe('an @mention that works', () => {
+  const run = async (over: Record<string, unknown>, tools: string[], withWorktree = true) => {
+    const seen: { input?: ChatStartInput } = {};
+    h = await startHarness();
+    const wt = join(h.dataDir, 'worktrees', 'TOY', 'TOY-1');
+    if (withWorktree) {
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, 'a.txt'), 'x');
+    }
+    const chatAdapter = h.runner.chat.deps.adapters.get('mock') as MockAdapter;
+    const orig = chatAdapter.startChat.bind(chatAdapter);
+    chatAdapter.startChat = async (input: ChatStartInput) => {
+      seen.input = input;
+      return orig(input);
+    };
+    const msg = chatStart('fix the typo', {
+      agent: agent({ runtime: 'claude-code', permissions: { ...builder.permissions, allowedTools: tools } }),
+      context: { projectKey: 'TOY', cardRef: 'TOY-1' },
+      ...over,
+    });
+    // the claude-code adapter is not installed here: the mock stands in for the session, the run-mode is what is checked
+    h.runner.chat.deps.adapters.set('claude-code', chatAdapter);
+    h.server.send('chat.start', msg);
+    return { seen, msg, wt };
+  };
+
+  it('works in the card folder, writable, when the server granted edit or shell', async () => {
+    const { seen, msg, wt } = await run({ mentionWork: true }, ['read', 'edit', 'shell']);
+    await h?.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+    expect(seen.input?.cwd).toBe(wt);
+    expect(seen.input?.work).toBe(true);
+    expect(seen.input?.readOnly).toBe(false);
+  });
+
+  it('stays read only without the flag, or when the permissions hold no edit and no shell', async () => {
+    const a = await run({}, ['read', 'edit', 'shell']);
+    await h?.server.waitFor('chat.done', (d) => d.chatId === a.msg.chatId);
+    expect(a.seen.input?.work).toBeUndefined();
+    expect(a.seen.input?.readOnly).toBe(true);
+    await h?.stop();
+    const b = await run({ mentionWork: true }, ['read']);
+    await h?.server.waitFor('chat.done', (d) => d.chatId === b.msg.chatId);
+    expect(b.seen.input?.work).toBeUndefined();
+    expect(b.seen.input?.readOnly).toBe(true);
+  });
+
+  it('refuses when the card folder is not on this workstation, instead of working somewhere else', async () => {
+    const { msg } = await run({ mentionWork: true }, ['read', 'edit'], false);
+    const err = await h?.server.waitFor('chat.error', (e) => e.chatId === msg.chatId);
+    expect(err?.error).toMatch(/working folder is not on this workstation/);
+  });
+});
+
+describe('the settings of an @mention that works', () => {
+  const perms = (over: Partial<(typeof builder)['permissions']> = {}) => ({
+    ...builder.permissions,
+    allowedTools: ['read', 'edit', 'shell'],
+    ...over,
+  });
+
+  it('allows edit and shell in the card folder, denies web, MCP and moving the branch, whatever the role', () => {
+    const s = buildMentionWorkSettings(perms(), policyCtx(), POLICY_PATHS);
+    expect(s.permissions.allow).toEqual(expect.arrayContaining(['Read', 'Bash']));
+    expect(s.permissions.allow.some((r) => r.startsWith('Edit(//data/worktrees/'))).toBe(true);
+    expect(s.permissions.deny).toEqual(expect.arrayContaining(['WebFetch', 'WebSearch', 'mcp__*']));
+    // a builder may switch branches in its own shifts; a comment may not
+    expect(s.permissions.deny.some((r) => /checkout|switch/.test(r))).toBe(true);
+  });
+
+  it('a shell-only role cannot change files (the worktree is read only to its sandbox), an edit-only role has no shell', () => {
+    const shellOnly = buildMentionWorkSettings(
+      perms({ allowedTools: ['read', 'shell'], mayCommit: false }),
+      policyCtx(),
+      POLICY_PATHS,
+    );
+    expect(shellOnly.permissions.deny.some((r) => r.startsWith('Edit(//data/worktrees/'))).toBe(true);
+    const editOnly = buildMentionWorkSettings(
+      perms({ allowedTools: ['read', 'edit'] }),
+      policyCtx(),
+      POLICY_PATHS,
+    );
+    expect(editOnly.permissions.deny).toContain('Bash');
+    expect(editOnly.permissions.allow).not.toContain('Bash');
   });
 });

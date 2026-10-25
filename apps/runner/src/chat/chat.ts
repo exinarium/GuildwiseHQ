@@ -1106,8 +1106,21 @@ export class ChatManager {
     // A card in context: read its worktree (if this workstation has it) without being able to change it.
     const wt = chatWorktree(paths, msg.context);
     const devops = msg.agent.isDevops === true; // G-Q1: runs as the user, unsandboxed, like its shifts
-    const readOnly = !devops && !!wt && existsSync(wt);
-    const cwd = readOnly && wt ? wt : sandbox.scratch;
+    const hasWt = !devops && !!wt && existsSync(wt);
+    // An @mention that may work (the server granted edit and/or shell): the card's folder is writable for this turn. Claude Code
+    // only; the card's folder must be on this workstation, otherwise the mention cannot do what it was given tools for.
+    const asksWork = msg.mentionWork === true && !devops && msg.agent.runtime === 'claude-code';
+    const workTools = msg.agent.permissions.allowedTools.some((t) => t === 'edit' || t === 'shell');
+    if (asksWork && workTools && !hasWt) {
+      this.error(
+        msg,
+        "the card's working folder is not on this workstation, so the agent cannot work on it from a comment",
+      );
+      return;
+    }
+    const work = asksWork && workTools && hasWt;
+    const readOnly = hasWt && !work;
+    const cwd = hasWt && wt ? wt : sandbox.scratch;
     // Repositories this chat may read (read-only): the project's reference repositories, and when there is no card
     // worktree here also the project's own clones (a chat about the project, or about a card not started here). The
     // DevOps engineer reads anywhere anyway. Only clones this runner found itself are opened.
@@ -1124,7 +1137,7 @@ export class ChatManager {
               },
               msg.context.localReadRepos,
             )
-          ).filter((r) => !readOnly || r.kind !== 'project');
+          ).filter((r) => !(readOnly || work) || r.kind !== 'project');
     // A role that reads the organization's code (the architect) also reads the organization source folder, read-only.
     const orgId = msg.context.orgId;
     const fromFolder =
@@ -1223,6 +1236,7 @@ export class ChatManager {
       agent: msg.agent,
       env,
       readOnly,
+      ...(work ? { work: true } : {}),
       readDirs: folders.map((f) => f.path),
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,

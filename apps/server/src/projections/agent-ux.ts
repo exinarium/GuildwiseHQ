@@ -17,9 +17,19 @@ export const agentUxProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'CardMentionRequested'>).payload;
     await exec(
       tx,
-      `INSERT INTO card_mentions (id, org_id, project_id, card_id, agent_id, requested_by, comment_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [p.mentionId, p.orgId, p.projectId, p.cardId, p.agentId, p.requestedBy, p.commentId, e.createdAt],
+      `INSERT INTO card_mentions (id, org_id, project_id, card_id, agent_id, requested_by, comment_id, created_at, work)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [
+        p.mentionId,
+        p.orgId,
+        p.projectId,
+        p.cardId,
+        p.agentId,
+        p.requestedBy,
+        p.commentId,
+        e.createdAt,
+        p.work === true,
+      ],
     );
   },
   CardMentionEnded: async (tx, e) => {

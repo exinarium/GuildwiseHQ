@@ -26,6 +26,7 @@ import {
   isKeyScope,
   LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
+  MENTION_WORK_CAPABILITY,
   normalizeRemoteUrl,
   PACK_AUTHORING_CAPABILITY,
   PACK_CREDENTIALS_BOUND_CAPABILITY,
@@ -1336,6 +1337,8 @@ export class Runner {
         CLAUDE_MAIN_SWAP_CAPABILITY,
         // A chat about a project's card runs on the account the project chose (`chat.start.account`).
         CHAT_ACCOUNTS_CAPABILITY,
+        // An @mention may edit and run commands in the card's folder when the server granted it (`chat.start.mentionWork`).
+        MENTION_WORK_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).

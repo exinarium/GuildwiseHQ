@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   isOrgManager,
   MENTION_LIMITS,
+  MENTION_WORK_CAPABILITY,
+  MENTION_WORK_HOLD_MS,
   type MentionableAgentDto,
   type MentionPolicy,
   type MentionResult,
@@ -9,6 +11,7 @@ import {
   mentionHandles,
   mentionRefusalText,
   mentionTaskPrompt,
+  mentionToolsFor,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -26,12 +29,52 @@ import { cardMessage, orgScope, userActor } from './common.ts';
  * - Owners and Admins of the organization: any active hired agent that may work on the card's project;
  * - other project members: only agents whose manager enabled "Members may mention this agent" (`agent_mention_policy`), a
  *   grant that is off by default.
- * A mention is always a read-only task (a chat turn about the card); it never edits, runs commands or delegates.
+ * A mention is a small task (a chat turn about the card). It may edit and run commands only within what the commenter may grant
+ * (Owners and Admins: the role's edit and shell; everyone else: reading only) and when the card's working folder is free; it never
+ * delegates, browses or reaches MCP servers. The agent's approval gates apply as for any of its work.
  */
 
 interface AgentRow extends Row {
   id: string;
   name: string;
+}
+
+/**
+ * What a mention may do (owner decision 2026-10-25). The ceiling is what the commenter may grant: an Owner or Admin grants the
+ * role's edit and shell, anyone else nothing beyond reading. Then the card has to be free to work on: a claimed card is a shift's
+ * working folder, a running work mention holds it too, and the workstation needs a runner that announced `mention-work:1` (and a
+ * Claude Code agent: the other runtimes stay read-only). Returns the tools to grant, or none with the reason a role that could
+ * work was held to reading.
+ */
+async function workGrant(
+  ctx: Ctx,
+  card: Row,
+  agent: Row,
+  manager: boolean,
+): Promise<{ tools: string[]; commit: boolean; reason?: string }> {
+  const none = (reason?: string) => ({ tools: [] as string[], commit: false, ...(reason ? { reason } : {}) });
+  const roleTools = mentionToolsFor((agent.permissions?.allowedTools as string[] | undefined) ?? [], {
+    work: true,
+  }).filter((t) => t !== 'read');
+  if (roleTools.length === 0) return none(); // a role that never edits or runs commands
+  if (!manager) return none(); // the commenter cannot grant tools
+  if (agent.runtime !== 'claude-code') return none('only Claude Code agents can work from a comment');
+  const caps = await one(
+    ctx.pool,
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+    [agent.workstation_id],
+  );
+  if (!((caps?.capabilities as string[] | undefined) ?? []).includes(MENTION_WORK_CAPABILITY))
+    return none('the runner on its workstation is too old to work from a comment');
+  if (card.claim_id)
+    return none('a shift holds this card right now, so its working folder cannot be changed from a comment');
+  const busy = await one(
+    ctx.pool,
+    `SELECT 1 FROM card_mentions WHERE card_id=$1 AND work AND status='running' AND created_at > $2 LIMIT 1`,
+    [card.id, new Date(ctx.clock.now().getTime() - MENTION_WORK_HOLD_MS)],
+  );
+  if (busy) return none('another agent is already working on this card from a comment');
+  return { tools: roleTools, commit: agent.permissions?.mayCommit === true };
 }
 
 /** The agents of the card's organization that can be asked at all: active, not DevOps or the CEO, allowed on the project. */
@@ -145,12 +188,15 @@ export async function handleMentions(
       refuse(handle, agent.name, 'too many mentions this hour; try again later');
       continue;
     }
+    const grant = await workGrant(ctx, card, agent, manager);
     const prompt = mentionTaskPrompt({
       agentName: agent.name,
       commenterName: user.displayName,
       cardRef: card.ref,
       cardTitle: card.title,
       comment: body,
+      ...(grant.tools.length > 0 ? { access: { tools: grant.tools, commit: grant.commit } } : {}),
+      ...(grant.reason ? { readOnlyReason: grant.reason } : {}),
     });
     const r = await ctx.services.chat.startMention({
       userId: user.id,
@@ -159,6 +205,7 @@ export async function handleMentions(
       commentId,
       mentionId: randomUUID(),
       prompt,
+      ...(grant.tools.length > 0 ? { work: { tools: grant.tools } } : {}),
     });
     if (r.ok) {
       started++;

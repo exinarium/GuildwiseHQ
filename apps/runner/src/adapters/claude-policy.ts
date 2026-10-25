@@ -721,6 +721,23 @@ export function buildCeoSettings(
   return s;
 }
 
+/**
+ * An @mention that may work: the shift policy of the agent's (already clamped) permissions in the card's working folder, with
+ * branch moving denied whatever the role is (a comment never switches the card's branch). No web, no MCP, no browser: the server
+ * did not grant them and the permissions here say so.
+ */
+export function buildMentionWorkSettings(
+  p: AgentPermissions,
+  ctx: ClaudePolicyContext,
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
+  extraAllow: string[] = [],
+): ClaudeSettings {
+  const s = buildShiftSettings(p, ctx, paths, 'mention');
+  s.permissions.allow = [...new Set([...s.permissions.allow, ...extraAllow])];
+  s.permissions.deny = [...new Set([...s.permissions.deny, 'WebFetch', 'WebSearch', 'mcp__*'])];
+  return s;
+}
+
 /** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */
 export function buildChatSettings(
   readOnly: boolean,

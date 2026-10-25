@@ -11,6 +11,7 @@ import {
   DIRECT_RUNTIME,
   MENTION_LIMITS,
   type ModelChoice,
+  mentionToolsFor,
   type ReadRepo,
   type RunnerToServerOf,
   type ServerToBrowser,
@@ -89,7 +90,7 @@ interface Inflight {
   /** A CEO owner or order turn: its state is also persisted in `ceo_turns`, so it survives a restart of the server. */
   ceo?: CeoInflightInfo;
   /** An @agent mention in a card comment (S-B2): `threadId` is the card, the answer is posted as a comment in its thread. */
-  mention?: { mentionId: string; cardId: string; projectId: string; commentId: string };
+  mention?: { mentionId: string; cardId: string; projectId: string; commentId: string; work?: boolean };
 }
 
 /** What a terminal chat frame produced, for the notification after the transaction committed. */
@@ -118,6 +119,8 @@ export class ChatRelay {
   /** Running (or being started) mentions per comment and per card; checked and taken in one synchronous step. */
   private readonly mentionsByComment = new Map<string, number>();
   private readonly mentionsByCard = new Map<string, number>();
+  /** Cards a mention is working on (edit/shell) right now: one at a time, taken in the same synchronous step as the slot. */
+  private readonly workingCards = new Set<string>();
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -134,7 +137,8 @@ export class ChatRelay {
     if (this.byThread.get(c.threadId) === c.chatId) this.byThread.delete(c.threadId);
   }
 
-  private releaseMentionSlot(m: { commentId: string; cardId: string }): void {
+  private releaseMentionSlot(m: { commentId: string; cardId: string; work?: boolean }): void {
+    if (m.work) this.workingCards.delete(m.cardId);
     for (const [map, key] of [
       [this.mentionsByComment, m.commentId],
       [this.mentionsByCard, m.cardId],
@@ -373,14 +377,16 @@ export class ChatRelay {
     const baseSpec = await agentSpecFor(ctx, row);
     // Read-only is enforced in what is sent, not only in the prompt: the tools, writable paths, commits, browser and
     // organization-wide reads of a mention's turn are cut down to reading the card's project.
+    // A mention that may work (the commenter could grant edit/shell and the role has them) keeps the role's edit and shell, its
+    // writable paths and its commit right; it never gets the web, a browser, MCP servers or organization-wide reads.
+    const mentionWork = c.mention?.work === true;
     const agentSpec = isMention
       ? {
           ...baseSpec,
           permissions: {
             ...baseSpec.permissions,
-            allowedTools: baseSpec.permissions.allowedTools.filter((t) => t === 'read'),
-            writableGlobs: [],
-            mayCommit: false,
+            allowedTools: mentionToolsFor(baseSpec.permissions.allowedTools, { work: mentionWork }),
+            ...(mentionWork ? {} : { writableGlobs: [], mayCommit: false }),
             browser: false,
             readOrgRepos: false,
           },
@@ -404,6 +410,7 @@ export class ChatRelay {
         ...(playbookGrants.length ? { playbookGrants } : {}),
         ...(delegation ? { delegation } : {}),
         ...(opts.account ? { account: { key: opts.account } } : {}),
+        ...(mentionWork ? { mentionWork: true } : {}),
       },
       ctx.clock.now(),
     );
@@ -1139,6 +1146,8 @@ export class ChatRelay {
     commentId: string;
     mentionId: string;
     prompt: string;
+    /** The tools the commenter may grant and the role allows (edit, shell); absent: read only. */
+    work?: { tools: string[] };
   }): Promise<{ ok: true; chatId: string } | { ok: false; reason: string }> {
     const { ctx } = this;
     const { card, agent } = a;
@@ -1146,7 +1155,9 @@ export class ChatRelay {
     if (this.byThread.has(card.id))
       return { ok: false, reason: 'an agent is already answering on this card' };
     // Check and take the slot in one synchronous step (no await in between), so concurrent mentions cannot all pass.
-    const slot = { commentId: a.commentId, cardId: card.id };
+    const slot = { commentId: a.commentId, cardId: card.id, ...(a.work ? { work: true } : {}) };
+    if (a.work && this.workingCards.has(card.id))
+      return { ok: false, reason: 'another agent is already working on this card from a comment' };
     if (
       (this.mentionsByComment.get(slot.commentId) ?? 0) >= MENTION_LIMITS.perComment ||
       (this.mentionsByCard.get(slot.cardId) ?? 0) >= MENTION_LIMITS.perComment
@@ -1154,6 +1165,7 @@ export class ChatRelay {
       return { ok: false, reason: 'agents are already answering on this card; try again in a moment' };
     this.mentionsByComment.set(slot.commentId, (this.mentionsByComment.get(slot.commentId) ?? 0) + 1);
     this.mentionsByCard.set(slot.cardId, (this.mentionsByCard.get(slot.cardId) ?? 0) + 1);
+    if (a.work) this.workingCards.add(card.id);
     const state = { registered: false };
     try {
       const refusal = await this.mentionPreflight(card, agent);
@@ -1237,7 +1249,15 @@ export class ChatRelay {
   }
 
   private async runMention(
-    a: { userId: string; card: Row; agent: Row; commentId: string; mentionId: string; prompt: string },
+    a: {
+      userId: string;
+      card: Row;
+      agent: Row;
+      commentId: string;
+      mentionId: string;
+      prompt: string;
+      work?: { tools: string[] };
+    },
     state: { registered: boolean },
   ): Promise<{ ok: true; chatId: string } | { ok: false; reason: string }> {
     const { ctx } = this;
@@ -1270,6 +1290,7 @@ export class ChatRelay {
         cardId: card.id,
         projectId: card.project_id,
         commentId: a.commentId,
+        ...(a.work ? { work: true } : {}),
       },
     };
     this.inflight.set(chatId, c);
@@ -1288,6 +1309,7 @@ export class ChatRelay {
               agentId: agent.id,
               requestedBy: a.userId,
               commentId: a.commentId,
+              ...(a.work ? { work: true } : {}),
             },
           },
           actor: userActor(a.userId),

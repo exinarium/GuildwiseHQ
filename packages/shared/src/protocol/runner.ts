@@ -1648,6 +1648,12 @@ export const ChatStartSchema = msg('chat.start', {
   attemptId: z.string().max(80).optional(),
   /** The account of the project this chat's card belongs to (absent: main). Only sent to a runner announcing `chat-accounts:1`. */
   account: z.object({ key: AccountKeySchema }).optional(),
+  /**
+   * An @mention that may work (docs: owner decision 2026-10-25): the agent's permissions are the ones the commenter may grant
+   * (edit, shell), and the chat works in the card's working folder instead of only reading it. Only sent to a runner announcing
+   * `mention-work:1`; the runner works only when the permissions also hold edit or shell.
+   */
+  mentionWork: z.boolean().optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

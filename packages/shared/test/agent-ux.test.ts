@@ -13,6 +13,7 @@ import {
   mentionHandles,
   mentionQueryAt,
   mentionTaskPrompt,
+  mentionToolsFor,
   parseAgentDraft,
   STARTER_GALLERY,
 } from '../src/index.ts';
@@ -56,6 +57,33 @@ describe('mentions', () => {
     expect(p).toContain('Pat mentioned you in a comment on card TOY-1 "Login"');
     expect(p).toContain('cannot edit files, run commands');
     expect(p.endsWith('@una what is left?')).toBe(true);
+  });
+
+  it('tells an agent that may work what it may do, and a held-back one why it only reads', () => {
+    const base = {
+      agentName: 'Una',
+      commenterName: 'Pat',
+      cardRef: 'TOY-1',
+      cardTitle: 'Login',
+      comment: 'fix it',
+    };
+    const edit = mentionTaskPrompt({ ...base, access: { tools: ['edit', 'shell'], commit: false } });
+    expect(edit).toContain('You may edit files and run commands in this card');
+    expect(edit).toContain('Do not commit, push, merge');
+    expect(edit).not.toContain('cannot edit files');
+    expect(mentionTaskPrompt({ ...base, access: { tools: ['edit'], commit: true } })).toContain(
+      'You may commit on the card branch',
+    );
+    const held = mentionTaskPrompt({ ...base, readOnlyReason: 'a shift holds this card right now' });
+    expect(held).toContain('cannot edit files');
+    expect(held).toContain('(a shift holds this card right now)');
+  });
+
+  it("gives a mention reading, and the role's edit and shell only when the commenter may grant them", () => {
+    const role = ['read', 'edit', 'shell', 'web', 'mcp:github'];
+    expect(mentionToolsFor(role, { work: false })).toEqual(['read']);
+    expect(mentionToolsFor(role, { work: true })).toEqual(['read', 'edit', 'shell']);
+    expect(mentionToolsFor(['read'], { work: true })).toEqual(['read']);
   });
 });
 

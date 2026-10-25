@@ -40,6 +40,7 @@ import {
   buildCeoSettings,
   buildChatSettings,
   buildDevopsChatSettings,
+  buildMentionWorkSettings,
   buildShiftSettings,
   type ClaudePolicyContext,
   type ClaudeSettings,
@@ -1002,15 +1003,21 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         )
       : input.agent.roleKey === 'ceo'
         ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-        : buildChatSettings(
-            input.readOnly,
-            [
-              ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-              ...used.map((u) => `mcp__${u.name}`),
-            ],
-            this.policy(chatInput, input.cwd, true),
-            input.sandbox,
-          );
+        : input.work
+          ? buildMentionWorkSettings(
+              input.agent.permissions,
+              this.policy(chatInput, input.cwd, false),
+              input.sandbox,
+            )
+          : buildChatSettings(
+              input.readOnly,
+              [
+                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                ...used.map((u) => `mcp__${u.name}`),
+              ],
+              this.policy(chatInput, input.cwd, true),
+              input.sandbox,
+            );
     const withSkills = this.prepareSubagents(
       dir,
       this.prepareSkills(dir, chatInput, chatSettings),
@@ -1027,6 +1034,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (bk) Object.assign(cmd.env, bk.env);
     const parser = new ClaudeStreamParser();
     const hooks = bk ? {} : this.sessionHooks(dir, parser, account);
+    // A mention that works leaves the same git lock leftovers a shift does: removed when the clone's last session ends.
+    const releaseRepo = input.work ? holdSandboxRepo(gitDirsOf(input.cwd)) : undefined;
     return spawnSession({
       bin: cmd.bin,
       args: cmd.args,
@@ -1043,7 +1052,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
-      ...(bk ? { onExit: async () => bk.cleanup() } : {}),
+      ...(bk || releaseRepo
+        ? {
+            onExit: async (r: Parameters<NonNullable<typeof hooks.onExit>>[0]) => {
+              try {
+                await ('onExit' in hooks ? hooks.onExit?.(r) : undefined);
+              } finally {
+                releaseRepo?.();
+                bk?.cleanup();
+              }
+            },
+          }
+        : {}),
     });
   }
 

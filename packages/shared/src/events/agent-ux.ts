@@ -22,6 +22,8 @@ export const agentUxEvents = [
       agentId: Id,
       requestedBy: Id,
       commentId: Id,
+      /** The mention may edit and run commands in the card's working folder (the commenter could grant it). */
+      work: z.boolean().optional(),
     }),
   ),
   /** The mention is over: the agent's answer was posted, or the run failed. */

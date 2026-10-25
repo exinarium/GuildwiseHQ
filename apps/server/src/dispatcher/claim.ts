@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { branchName, getStage, MAIN_ACCOUNT, streamId } from '@aom/shared';
+import { branchName, getStage, MAIN_ACCOUNT, MENTION_WORK_HOLD_MS, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from '../commands/stop-loss.ts';
@@ -87,6 +87,15 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       if (Number(active?.n) >= a.capacity) return null;
     }
     if (!(await isCandidate(tx, view, args.cardId, ctx.clock.now()))) return null;
+    // An agent is working in this card's folder from a comment (@mention): the card waits for the next pass.
+    if (
+      await one(
+        tx,
+        `SELECT 1 FROM card_mentions WHERE card_id=$1 AND work AND status='running' AND created_at > $2 LIMIT 1`,
+        [args.cardId, new Date(ctx.clock.now().getTime() - MENTION_WORK_HOLD_MS)],
+      )
+    )
+      return null;
     // Stop-loss on shifts: a card that used its shift budget is parked for its architect instead of going round again.
     {
       const row = await one(tx, 'SELECT * FROM cards WHERE id=$1', [args.cardId]);
