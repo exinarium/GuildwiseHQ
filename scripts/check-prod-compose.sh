@@ -42,8 +42,10 @@ grep -q '"ok":true' "$WORK/health.json"
 dc logs app | grep -q "applied .* migration" && echo "migrations applied on boot"
 
 # The help videos come from the media container through the app: manifest, and a Range request (seeking).
-"${CURL[@]}" "$ORIGIN/videos/manifest.json" | grep -q '"videos"'
-SLUG="$("${CURL[@]}" "$ORIGIN/videos/manifest.json" | sed -n 's/.*"path": "\/videos\/\([a-z0-9-]*\)\.mp4".*/\1/p' | head -1)"
+# (read the manifest into a variable first: `curl | grep -q` fails with curl exit 23 under pipefail when grep exits early)
+MANIFEST="$("${CURL[@]}" "$ORIGIN/videos/manifest.json")"
+grep -q '"videos"' <<<"$MANIFEST"
+SLUG="$(sed -n 's/.*"path": "\/videos\/\([a-z0-9-]*\)\.mp4".*/\1/p' <<<"$MANIFEST" | head -1)"
 if [ -n "$SLUG" ]; then
   "${CURL[@]}" -s -o /dev/null -D "$WORK/range.txt" -H 'Range: bytes=0-99' "$ORIGIN/videos/$SLUG.mp4"
   grep -qi '^HTTP/[0-9.]* 206' "$WORK/range.txt" && grep -qi '^content-range: bytes 0-99/' "$WORK/range.txt"
