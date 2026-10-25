@@ -15,7 +15,7 @@ Sidebar, **Discovery**, **New discovery** (any member).
 2. Give it a **title** and, if you like, a starting idea, a project and the **workstation** it runs on (one of yours).
 3. Choose how the analyst should work: **Facilitator** (it asks, you answer), **Partner** (it also brings its own ideas, labelled as its own) or **Ideate for me** (it puts ideas and drafts on the table and you choose).
 4. Choose a **CEO** option if your organization has a CEO: **Just me**, **With the CEO** (after each question the CEO proposes an answer) or **CEO prepares first** (the CEO and the analyst work through the questions, then you review every answer).
-5. Optionally set a **time limit** and a **cost limit** (both empty means no limit), the **CEO turn cap** for "CEO prepares first" (default 12, 2 to 40), pick where to start (brainstorm, stress-test, brief or PRD) and click **Start**.
+5. Optionally set a **time limit** and a **cost limit** (both empty means no limit), the **CEO pre-draft turns** for "CEO prepares first" (default 12, 2 to 40), pick where to start (brainstorm, stress-test, brief or PRD) and click **Start**.
 
 The session is yours: you manage it. Other participants can talk, add notes and see it; an Owner or Admin who is in it can override you.
 

@@ -23,7 +23,7 @@ A tile shows whether the program is installed (with the command to install it), 
 
 ## Sharing {#sharing}
 
-A named account belongs to one workstation and is never shared with others. To let several workstations use one key, set the organization key under **Settings, Model providers**: it is shared with the workstations you tick and its monthly cap applies.
+A named account belongs to one workstation and spends its owner's own key or login. **Allow projects to use my accounts** (on the AI runtime section, off by default) lets projects you are not a member of pick your named accounts; with it off, only projects you are a member of may, and the others wait or use the main account. To let several workstations use one key, set the organization key under **Settings, Model providers**: it goes to the workstations you tick and its monthly cap applies.
 
 ## Make main {#make-main}
 
