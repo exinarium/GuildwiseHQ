@@ -14,6 +14,7 @@
       "!pnpm-lock.yaml",
       "!docs",
       "!packages/shared/src/capabilities/builtin-data.ts",
+      "!packages/shared/test/fixtures/setup/setup.json",
       "!.claude"
     ]
   },
