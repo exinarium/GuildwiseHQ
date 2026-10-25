@@ -405,7 +405,7 @@ export async function runOffboardingIn(
     for (const w of f.workstations)
       await unlinkWorkstationIn(ctx, tx, actorId, w.id as string, userId, 'admin');
 
-  // 8-9. ownership: sessions and organization packs go to the person who removes them
+  // 8-9. ownership: sessions and organization packs go to the Owner (not the Admin who removes them)
   if (f.ownedSessions.length || f.ownedOrgPacks.length)
     events.push({
       streamId: streamId.org(orgId),
