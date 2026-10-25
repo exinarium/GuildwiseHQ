@@ -1,7 +1,9 @@
 <product_facts>
 ## What it is
 
-Guildwise HQ is a management layer for a crew of AI coding agents. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
+Guildwise HQ is a way to run an organization of AI agents: roles, a lean team, a board, a decision desk, approval gates, budgets and an audit trail, on your own machines and AI accounts. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
+
+It comes set up for software delivery by default: the starting roles, workflows and cards are built for it. It does not stop there. The same organization can run other work you hand to agents: packs add skills, personas and playbooks (for example a product brief, a brainstorm, release notes, a weekly status or an incident follow-up), Discovery takes an idea to an approved brief or PRD, the Boardroom lets personas and agents debate a question, and Documents keeps the briefs, PRDs and minutes. You can write your own roles, workflows and playbooks. Do not claim more than this: the product does not ship ready-made setups for non-software fields.
 
 Tagline: "You manage. They work." The landing page also says "Many hands, one master."
 
@@ -9,7 +11,7 @@ Guildwise HQ is being released as free and open source under Apache 2.0, with th
 
 ## Who it is for
 
-The person who manages the agents: the one who sets the standard, answers the hard questions and signs off the result. It does not replace developers. You need a code repository for the agents to work in, but you do not need to know git: by default cards speak in plain results ("Your change is live on main") and Guildwise HQ takes care of branches. Each person can turn on an expert mode in Settings to see branch names and the git controls. A guided installer sets up a workstation, and a Get started checklist, a guided tour and a three-minute training video walk through the first project.
+The person who manages the agents: the one who sets the standard, answers the hard questions and signs off the result. It does not replace your people. For the default software setup you need a code repository for the agents to work in, but you do not need to know git: by default cards speak in plain results ("Your change is live on main") and Guildwise HQ takes care of branches. Each person can turn on an expert mode in Settings to see branch names and the git controls. A guided installer sets up a workstation, and a Get started checklist, a guided tour and a three-minute training video walk through the first project.
 
 ## How it works
 

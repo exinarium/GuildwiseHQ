@@ -32,6 +32,9 @@ describe('the assistant knowledge, split by topic', () => {
     const all = buildIndexPack() + Object.values(buildTopicFiles()).join('\n');
     expect(all).toContain('does not include backups');
     expect(all).not.toMatch(/creativ360/i);
+    expect(all).not.toMatch(/AI coding agents/i);
+    expect(all).toMatch(/organization of AI agents/i);
+    expect(all).toMatch(/set up for software delivery by default/i);
     expect(all).not.toMatch(/advanced training|paid training/i);
     expect(all).toMatch(/customization and setup support/i);
     expect(all).not.toMatch(/unlimited plan/i);
