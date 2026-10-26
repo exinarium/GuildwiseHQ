@@ -6,7 +6,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [1.0.0] - 2026-10-26
 
-The first public release of Guildwise HQ, a way to run an organization of AI agents (set up for software delivery by default), under the Apache License 2.0. The earlier development history is private and is not part of this repository.
+The first public release of Guildwise HQ, a way to run an organization of AI agents (set up for software delivery by default), under the Apache License 2.0. The repository keeps the development history, with the parts specific to the hosted service removed.
 
 ### Summary of what ships
 
