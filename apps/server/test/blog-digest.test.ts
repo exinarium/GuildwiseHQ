@@ -23,11 +23,16 @@ async function publishNow(title: string) {
   const { post } = await submitPost(t.app.ctx, blogContent(slug, { title }), { userId: sa.id }, 'draft');
   await publishPost(t.app.ctx, post.id, { userId: sa.id });
 }
-/** Moves the clock to the next Monday 08:00 Africa/Johannesburg (06:00 UTC) plus `afterMin` minutes. */
+/**
+ * Moves the clock to the next Monday 08:00 Africa/Johannesburg (06:00 UTC) plus `afterMin` minutes. On a Monday before
+ * that time "next" is today: a week later the posts just published would fall before the digest's one-week cutoff and the
+ * digest would be skipped (it failed in CI on a Monday at 05:46 UTC).
+ */
 function toMonday(afterMin = 5) {
   const now = t.clock.now();
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 6, afterMin));
-  d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7 || 7));
+  const days = (8 - d.getUTCDay()) % 7;
+  d.setUTCDate(d.getUTCDate() + (days === 0 && d.getTime() <= now.getTime() ? 7 : days));
   t.clock.advance(d.getTime() - now.getTime());
 }
 
