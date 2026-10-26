@@ -13,6 +13,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, rows } from '../db/sql.ts';
+import { withTx } from '../db/tx.ts';
 import { forbidden } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -129,20 +130,29 @@ export async function dispatchGraphCommand(
   const built = await graphIndexPayload(ctx.pool, projectId, repoId);
   if (!built) return false;
   // An update is never merged into another request: each merge brings its own card ref and title for the work layer, and
-  // updates are cheap (changed files only). A full index is only asked once while one waits.
-  if (!update) {
+  // updates are cheap (changed files only). A full index is only asked once while one waits. The check and the insert run
+  // under one lock per repository and workstation: the hello pass and the vault-registered handler both get here at the
+  // same moment on a first connect, and without it each saw no waiting command and queued its own.
+  const command = update ? 'graph.update' : 'graph.index';
+  const body = { ...built.payload, ...(update ?? {}) } as unknown as Record<string, unknown>;
+  const queued = await withTx(ctx.pool, async (tx) => {
+    if (update) {
+      await enqueueRunnerCommand(tx, built.workstationId, command, body);
+      return true;
+    }
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `graph.index:${repoId}:${built.workstationId}`,
+    ]);
     const pending = await one(
-      ctx.pool,
+      tx,
       `SELECT 1 FROM runner_commands WHERE type='graph.index' AND status IN ('pending','sent')
           AND payload->>'repoId' = $1 AND workstation_id = $2`,
       [repoId, built.workstationId],
     );
-    if (pending) return true;
-  }
-  await enqueueRunnerCommand(ctx.pool, built.workstationId, update ? 'graph.update' : 'graph.index', {
-    ...built.payload,
-    ...(update ?? {}),
-  } as unknown as Record<string, unknown>);
+    if (!pending) await enqueueRunnerCommand(tx, built.workstationId, command, body);
+    return !pending;
+  });
+  if (!queued) return true;
   void Promise.resolve(ctx.services.gateway.deliverPending(built.workstationId)).catch(() => undefined);
   return true;
 }
