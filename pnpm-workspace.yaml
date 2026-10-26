@@ -18,3 +18,12 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/provider-utils@5.0.67'
   - '@ai-sdk/provider@4.0.33'
   - ai@7.0.150
+
+# Transitive dependencies with published security fixes that their parents have not picked up yet.
+overrides:
+  shell-quote: '>=1.11.0'
+  '@vitest/mocker': '>=4.1.12 <5'
+  'fast-uri@>=3 <4': '^3.1.9'
+  'fast-uri@>=4 <5': '^4.2.3'
+  'esbuild@>=0.27.3 <0.28.1': '^0.28.1'
+  'undici@>=8 <8.12.2': '^8.12.2'
