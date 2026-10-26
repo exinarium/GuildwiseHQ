@@ -4,6 +4,20 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-26
+
+### Security
+
+- Resolved all open security advisories: 21 Dependabot alerts (5 high, 15 moderate, 1 low) and the further findings from `pnpm audit`, which now reports no known vulnerabilities. Upgrades include nodemailer 10.2.1, @fastify/static 10.1.7, fastify 5.12.6, undici 8.12.2, zod 4.6.6, vite 7.3.7 and vitest 4.1.12, plus `overrides` for transitive packages (shell-quote, fast-uri, esbuild, @vitest/mocker).
+
+### Fixed
+
+- Runner: the outbox no longer throws when its data directory is removed while a shift or chat is still finishing. Nothing is persisted, the frame is sent best-effort, and a warning is logged, instead of an unhandled rejection that could stop the runner.
+
+### Changed
+
+- The site assistant's open-source facts (repository, self-hosting, license) are on by default.
+
 ## [1.0.0] - 2026-10-26
 
 The first public release of Guildwise HQ, a way to run an organization of AI agents (set up for software delivery by default), under the Apache License 2.0. The repository keeps the development history, with the parts specific to the hosted service removed.
