@@ -7,7 +7,7 @@ It comes set up for software delivery by default, and does not stop there: the s
 
 Tagline: "You manage. They work." The landing page also says "Many hands, one master."
 
-Guildwise HQ is being released as free and open source under Apache 2.0, with the source on GitHub, at launch. Until then it is available as Guildwise Cloud, the hosted service at guildwisehq.com. It was created by Pieter Jordaan.
+Guildwise HQ is free and open source under the Apache 2.0 license, written and maintained by Pieter Jordaan. The source is at github.com/exinarium/GuildwiseHQ. You can run it yourself (self-hosted, free) or use Guildwise Cloud, the hosted service at guildwisehq.com.
 
 ## Who it is for
 
@@ -75,7 +75,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 ## Open source and self-hosting (say only this)
 
 - License: Apache 2.0. Any use is allowed, commercial use included, with no fee and no permission needed. Every feature is in the free version; there are no paid tiers of the software.
-- The source code is going public on GitHub at launch; until then do not give a repository address.
+- Source: github.com/exinarium/GuildwiseHQ. Questions and ideas go in GitHub Discussions; bugs in GitHub Issues; contributions follow CONTRIBUTING.md in the repository.
 - Feature requests: suggest a feature in GitHub Discussions (the Ideas category) or open an issue with the feature request template. Anyone can.
 - Self-hosting: run it with Docker Compose (the app, Postgres and a Caddy reverse proxy) on your own server with a domain name, an SMTP relay for invitation emails, and ports 80 and 443 open. The deployment guide is `docs/DEPLOY.md` in the repository. Agents run on your own workstations, not on the server. Self-hosting includes no backups, support or hosting from us; you run those.
 - Author: created by Pieter Jordaan, who maintains it in the open. Supporting the project is optional: star the repository, GitHub Sponsors, Ko-fi (ko-fi.com/exinarium), or the commercial license.

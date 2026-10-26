@@ -84,9 +84,9 @@ export function parseArticle(slug: string, raw: string): Article {
 
 /**
  * Whether the repository is public. While false, the facts say the code is being released at launch and give no repository
- * address. Flip it in the launch commit and rebuild the pack (`assistant:pack`); `--open-source-live` builds it for one run.
+ * address. It is true now that the repository is public; flip it and rebuild the pack (`assistant:pack`); `--open-source-live` builds it for one run.
  */
-export const OPEN_SOURCE_LIVE = false;
+export const OPEN_SOURCE_LIVE = true;
 
 /** Keeps `{{#oss}}..{{/oss}}` when live and `{{^oss}}..{{/oss}}` when not. */
 export function applyOpenSource(text: string, live: boolean): string {
