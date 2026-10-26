@@ -144,7 +144,8 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
   send(type: RunnerToServerType, payload: Record<string, unknown>): string {
     const frame = makeEnvelope(type, payload);
     if (isAckedFromRunner(type)) {
-      this.opts.outbox.add(frame);
+      if (!this.opts.outbox.add(frame))
+        this.log.warn(`could not persist ${type} to the outbox; sending it best-effort`);
       if (this.ready) this.raw(frame);
     } else if (this.ready) {
       this.raw(frame);

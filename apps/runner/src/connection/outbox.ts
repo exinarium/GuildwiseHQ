@@ -35,11 +35,26 @@ export class Outbox {
     return readdirSync(this.dir).find((f) => f.endsWith(`-${id}.json`));
   }
 
-  add(frame: { id: string; type: string } & Record<string, unknown>): void {
+  /**
+   * Persists a frame. Returns false (instead of throwing) when the file cannot be written, for example because the
+   * data directory was removed underneath a runner that is shutting down: callers are often async tails (a shift
+   * wrapping up) where a throw would surface as an unhandled rejection and take the process down.
+   */
+  add(frame: { id: string; type: string } & Record<string, unknown>): boolean {
     const name = `${String(this.seq++).padStart(12, '0')}-${frame.id}.json`;
     const tmp = join(this.dir, `${name}.tmp`);
-    writeFileSync(tmp, JSON.stringify(frame));
-    renameSync(tmp, join(this.dir, name));
+    try {
+      writeFileSync(tmp, JSON.stringify(frame));
+      renameSync(tmp, join(this.dir, name));
+      return true;
+    } catch {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        // nothing to clean up
+      }
+      return false;
+    }
   }
 
   ack(id: string): boolean {

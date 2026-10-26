@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Outbox } from '../src/connection/outbox.ts';
@@ -7,6 +8,16 @@ cleanupTmp();
 const frame = (id: string, type = 'shift.report') => ({ v: 1, id, type, ts: '2026-10-03T12:00:00.000Z' });
 
 describe('outbox', () => {
+  it('does not throw when its directory was removed underneath it', () => {
+    const dir = join(tmp(), 'outbox');
+    const o = new Outbox(dir);
+    expect(o.add(frame('1'))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+    expect(() => o.add(frame('2'))).not.toThrow();
+    expect(o.add(frame('3'))).toBe(false);
+    expect(o.list()).toEqual([]);
+  });
+
   it('persists entries in creation order and deletes on ack', () => {
     const dir = join(tmp(), 'outbox');
     const o = new Outbox(dir);
