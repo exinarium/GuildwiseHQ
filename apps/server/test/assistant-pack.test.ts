@@ -66,7 +66,7 @@ describe('the assistant knowledge, split by topic', () => {
     expect(approxTokens(buildIndexPack())).toBeGreaterThan(3000); // the facts are all there
     // above the model's minimum cacheable prefix, and a quarter of what the single pack cost on every request
     expect(always).toBeGreaterThan(4096);
-    expect(always).toBeLessThan(6000);
+    expect(always).toBeLessThan(6500); // the open-source facts (repository, licence, self-hosting) are part of the live pack
   });
 
   it('carries the curated facts and an index line for every help article, and no private company name', () => {
