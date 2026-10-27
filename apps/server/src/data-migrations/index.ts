@@ -12,6 +12,7 @@ import { migrateGuidedMode } from './guided-mode.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migratePackSkillKeys } from './pack-skill-keys.ts';
 import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateReporterRetired } from './reporter-retired.ts';
@@ -57,6 +58,11 @@ export {
 } from './no-personal.ts';
 export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
+export {
+  migratePackSkillKeys,
+  PACK_SKILL_KEYS_MIGRATION,
+  type PackSkillKeysReport,
+} from './pack-skill-keys.ts';
 export {
   migrateProjectVaults,
   PROJECT_VAULTS_MIGRATION,
@@ -110,6 +116,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'stranded-test-cards-2026-10', run: (env) => migrateStrandedTestCards(env) },
   { name: 'delegation-explicit-2026-10', run: (env) => migrateDelegationExplicit(env) },
   { name: 'suspicious-roles-2026-10', run: (env) => migrateSuspiciousRoles(env) },
+  { name: 'pack-skill-keys-2026-10', run: (env) => migratePackSkillKeys(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

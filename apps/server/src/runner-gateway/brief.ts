@@ -20,6 +20,7 @@ import {
   VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
 } from '@aom/shared';
+import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { briefAttachments } from '../commands/card-attachments.ts';
 import { workflowView } from '../commands/cards.ts';
@@ -60,9 +61,13 @@ export function agentSpec(a: Row): AgentRuntimeSpec {
   };
 }
 
-/** The agent as its runner sees it, with `browser` off when the organization has the browser-tools feature switched off. */
+/**
+ * The agent as its runner sees it: its skills with the ones its role's extension adds (the runner builds the capability index
+ * and the runtime's skills folder from this list, in shifts and chats alike), and `browser` off when the organization has
+ * the browser-tools feature switched off.
+ */
 export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> {
-  let spec = agentSpec(a);
+  let spec: AgentRuntimeSpec = { ...agentSpec(a), skills: await effectiveAgentSkills(ctx.pool, a) };
   // S-B1 gate `pack_scripts`: the runner asks the server before it hands this agent a pack script.
   if (await isGated(ctx.pool, a.id, 'pack_scripts')) spec = { ...spec, packScriptsGated: true };
   if (!spec.permissions.browser) return spec;
@@ -297,7 +302,7 @@ export async function buildBrief(
       instructions: role.definition.instructions,
       coreRules: role.definition.coreRules,
       extensions: mergedInstr || undefined,
-      skills: [...new Set([...(agent.skills as string[]), ...(extension?.skills ?? [])])],
+      skills: await effectiveAgentSkills(ctx.pool, agent),
     },
     ...(['test', 'qa_steps'].includes(stage.id) && riskOf(card)
       ? { reviewRisk: riskOf(card) as NonNullable<ReturnType<typeof riskOf>> }

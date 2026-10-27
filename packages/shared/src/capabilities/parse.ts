@@ -425,6 +425,30 @@ export function resolveCapabilityRef<T extends { kind: CapabilityKind; key: stri
 }
 
 /**
+ * The skill key a registry knows for a name written by hand. A pack's skills are keyed `<pack>:<key>`, so a bare `prd` typed
+ * into a hire or an extension never matches one. When nothing else in the registry has the bare key and exactly one pack has a
+ * skill of that name, its full key is returned. Anything else (already a full key, a built-in or vault key, a name two packs
+ * share, a name nothing has) is returned as written: a key that is not in the registry stays plain text.
+ */
+export function qualifySkillKey(
+  ref: string,
+  all: readonly Pick<CapabilityMeta, 'kind' | 'key' | 'source'>[],
+): string {
+  const key = ref.trim();
+  if (!key || isPackedKey(key)) return key;
+  const skills = all.filter((c) => c.kind === 'skill');
+  if (skills.some((c) => c.key === key)) return key;
+  const hits = skills.filter((c) => c.source === 'pack' && c.key.slice(c.key.indexOf(':') + 1) === key);
+  return hits.length === 1 ? (hits[0] as { key: string }).key : key;
+}
+
+/** `qualifySkillKey` for a list, without duplicates (two spellings of one skill become one entry). */
+export const qualifySkillKeys = (
+  refs: readonly string[],
+  all: readonly Pick<CapabilityMeta, 'kind' | 'key' | 'source'>[],
+): string[] => [...new Set(refs.map((r) => qualifySkillKey(r, all)).filter(Boolean))];
+
+/**
  * The index an agent sees in its instructions for the capabilities its role names: name and description only, plus how to
  * load one. Unknown names are listed as unavailable so a typo in a role is visible.
  */

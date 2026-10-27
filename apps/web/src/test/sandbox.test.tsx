@@ -319,6 +319,25 @@ describe('hire form', () => {
     await user.click(within(form).getByRole('button', { name: 'Hire' }));
     await waitFor(() => expect(hired).toMatchObject({ name: 'Fern', workstationId: WS_OK }));
   });
+
+  it("an empty Skills box hires with the role's skills", async () => {
+    const { user, form } = await openHire();
+    await user.selectOptions(within(form).getByLabelText('Workstation'), WS_OK);
+    await user.type(within(form).getByLabelText('Name'), 'Sage');
+    await user.click(within(form).getByRole('button', { name: 'Hire' }));
+    await waitFor(() => expect(hired).toMatchObject({ name: 'Sage' }));
+    // sending [] would hire with no skills at all
+    expect(hired).not.toHaveProperty('skills');
+  });
+
+  it('sends typed skills as typed', async () => {
+    const { user, form } = await openHire();
+    await user.selectOptions(within(form).getByLabelText('Workstation'), WS_OK);
+    await user.type(within(form).getByLabelText('Name'), 'Rowan');
+    await user.type(within(form).getByLabelText(/Skills/), 'bmad-prd, git');
+    await user.click(within(form).getByRole('button', { name: 'Hire' }));
+    await waitFor(() => expect(hired).toMatchObject({ name: 'Rowan', skills: ['bmad-prd', 'git'] }));
+  });
 });
 
 describe('hire form: where the new agent may work', () => {

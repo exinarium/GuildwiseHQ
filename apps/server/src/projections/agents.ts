@@ -96,11 +96,12 @@ export const agentProjectors: Record<string, Projector> = {
   },
   AgentPermissionsRebased: async (tx, e) => {
     const p = (e.event as EventOf<'AgentPermissionsRebased'>).payload;
-    await exec(tx, 'UPDATE agents SET role_version=$2, permissions=$3 WHERE id=$1', [
-      p.agentId,
-      p.toRoleVersion,
-      JSON.stringify(p.permissions),
-    ]);
+    // older events carry no skills: the agent keeps the ones it had
+    await exec(
+      tx,
+      'UPDATE agents SET role_version=$2, permissions=$3, skills=COALESCE($4::text[], skills) WHERE id=$1',
+      [p.agentId, p.toRoleVersion, JSON.stringify(p.permissions), p.skills ?? null],
+    );
   },
   AgentRetired: async (tx, e) => {
     const p = (e.event as EventOf<'AgentRetired'>).payload;

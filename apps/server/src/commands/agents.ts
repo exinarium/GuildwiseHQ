@@ -22,6 +22,7 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
+import { qualifiedSkillKeys } from '../capabilities/agent-skills.ts';
 import { isOthersPrivateRole, loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -371,6 +372,10 @@ export async function hireAgent(
       req.acknowledgeUnsandboxed,
       { roleKey: roleDef.key, permissions: roleDef.definition.permissions, model: req.model ?? dm.model },
     );
+    // Skills named in the hire (typed by hand) are stored as the registry knows them: a bare pack skill name gets its pack.
+    const skills = req.skills
+      ? await qualifiedSkillKeys(tx, orgId, req.skills, { projectId: anchor ?? null, userId: user.id })
+      : roleDef.definition.skills;
     await ctx.store.append(
       [
         {
@@ -392,7 +397,7 @@ export async function hireAgent(
               runtime: req.runtime ?? dm.runtime,
               model: req.model ?? dm.model,
               effort: req.effort ?? dm.effort,
-              skills: req.skills ?? roleDef.definition.skills,
+              skills,
               permissions: extra.permissions ?? roleDef.definition.permissions,
               capacity: req.capacity,
               isDevops: false,

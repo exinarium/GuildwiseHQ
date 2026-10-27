@@ -6,6 +6,7 @@ import {
   type ServerToRunnerOf,
   type ShiftBrief,
 } from '@aom/shared';
+import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import { graphScopeFor } from '../commands/graph.ts';
 import { buildBatchTask } from '../commands/intake-batch.ts';
@@ -186,7 +187,7 @@ export async function buildBaTaskShiftStart(
       name: role.definition.name,
       instructions: role.definition.instructions,
       coreRules: role.definition.coreRules,
-      skills: agent.skills,
+      skills: await effectiveAgentSkills(ctx.pool, agent),
     },
     handoffs: [],
     reviewComments: [],
