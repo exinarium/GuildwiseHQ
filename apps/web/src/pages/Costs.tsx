@@ -3,6 +3,7 @@ import { Download } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { costsCsvUrl, useCosts, useUpdateCostSettings } from '../api/queries/costs.ts';
+import { useProjects } from '../api/queries/projects.ts';
 import { BudgetMeter } from '../components/BudgetMeter.tsx';
 import { DayBars, ShareBar } from '../components/CostCharts.tsx';
 import { GraphContextPanel } from '../components/GraphContextPanel.tsx';
@@ -143,6 +144,7 @@ export function Costs() {
   const range = preset === 'custom' ? custom : presetRange(preset);
   const query: CostsQuery = { ...range, ...(projectId ? { projectId } : {}) };
   const q = useCosts(query);
+  const projects = useProjects();
 
   if (q.isPending)
     return (
@@ -161,7 +163,11 @@ export function Costs() {
   const r = q.data;
   const cur = r.currency;
   const empty = r.totals.shifts === 0;
-  const projectsForFilter = [...new Map(r.byProject.map((p) => [p.projectId, p])).values()];
+  // Every active project, plus any in the report that are not (archived ones with spend), so the selected one never vanishes.
+  const byId = new Map<string, { projectId: string; key: string; name: string }>();
+  for (const p of projects.data ?? []) byId.set(p.id, { projectId: p.id, key: p.key, name: p.name });
+  for (const p of r.byProject) if (!byId.has(p.projectId)) byId.set(p.projectId, p);
+  const projectsForFilter = [...byId.values()];
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
