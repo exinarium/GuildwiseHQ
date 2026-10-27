@@ -20,9 +20,11 @@ export function Settings() {
   const digest = useDigestPreference();
   const setDigest = useSetDigestPreference();
   const [picking, setPicking] = useState(false);
-  const zone = reporting.data?.timezone ?? me.data?.user.timezone ?? null;
+  // Your own zone (what saving writes); the daily report follows the Owner's zone, shown separately.
+  const zone = me.data?.user.timezone ?? null;
+  const isOwner = me.data?.activeOrg?.role === 'owner';
 
-  if (reporting.isPending)
+  if (me.isPending)
     return (
       <div className="mx-auto max-w-2xl">
         <PageSkeleton label="Loading settings" />
@@ -34,7 +36,7 @@ export function Settings() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <PageHeader title="Settings" sub="Your picture, notifications, time zone and security." />
-      <ErrorBox error={reporting.error ?? setZone.error} />
+      <ErrorBox error={setZone.error} />
 
       {me.data?.user && (
         <Panel>
@@ -123,10 +125,15 @@ export function Settings() {
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Your time zone</h2>
-        <p className="mt-1 mb-3 text-sm text-muted">
-          Your CEO's daily report is written at {prefs?.dailyAt} on your clock (change the time under the
-          CEO's Reporting settings). We took the zone from your browser the first time you signed in. Until a
-          zone is set, reports use UTC.
+        <p className="mt-1 mb-3 text-sm text-muted" data-testid="timezone-help">
+          {isOwner
+            ? 'Times on your account show in this zone.'
+            : 'Your zone sets how times show on your account.'}
+          {prefs &&
+            (isOwner
+              ? ` Your CEO's daily report is written at ${prefs.dailyAt} on your clock (change the time on the Reporting & alerts tab on the CEO's page).`
+              : ` The CEO's daily report follows the Owner's zone (${prefs.effectiveTimezone}) and is written at ${prefs.dailyAt}.`)}{' '}
+          We took the zone from your browser the first time you signed in. Until a zone is set, times use UTC.
         </p>
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <Select
