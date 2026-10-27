@@ -17,7 +17,8 @@ import { getLastProjectKey } from '../../lib/lastProject.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
-import { Button, Callout, Dialog, ErrorBox, Select, TextInput } from '../ui.tsx';
+import { Button, Callout, Dialog, ErrorBox, Segmented, Select, TextInput } from '../ui.tsx';
+import { HirePackAgentForm } from './HirePackAgentForm.tsx';
 import { type Access, ProjectAccessEditor } from './ProjectAccess.tsx';
 
 /** The hire form. With a `draft` (from "Describe the agent you need" or a starter persona) the role is the reviewed draft. */
@@ -69,6 +70,8 @@ export function HireDialog({
   const [skills, setSkills] = useState('');
   const [name, setName] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** Where the agent comes from: a built-in role (the default), or an agent of an approved pack. */
+  const [source, setSource] = useState<'role' | 'pack'>('role');
   /** The workstation+runtime the unsandboxed confirmation was given for: choosing another asks again. */
   const [ackedFor, setAckedFor] = useState('');
 
@@ -196,195 +199,216 @@ export function HireDialog({
       title="Hire agent"
       description="Hire an agent onto one of your workstations."
     >
-      <form onSubmit={submit} noValidate aria-label="Hire agent" className="flex flex-col gap-3">
-        {draft && (
-          <div
-            className="rounded-control border border-line bg-sunken px-3 py-2 text-sm"
-            data-testid="hire-draft-role"
-          >
-            <p className="font-medium text-fg">New role: {draft.name}</p>
-            <p className="text-muted">{draft.purpose}</p>
-            <p className="text-xs text-subtle">
-              It may {draft.permissions.allowedTools.join(', ')}. It works in chats, sessions and when
-              mentioned; it does not take cards from the board.
-            </p>
-          </div>
-        )}
-        {!draft && (
-          <Select
-            label="Role"
-            value={effectiveRoleKey}
-            onChange={(e) => setRoleKey(e.target.value)}
-            error={errors.role}
-            hint={role?.department ? `Department: ${role.department}` : undefined}
-          >
-            {hireable.map((r) => (
-              <option key={r.definition.key} value={r.definition.key}>
-                {r.definition.name}
-              </option>
-            ))}
-          </Select>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select label="Seniority" value={effectiveSeniority} onChange={(e) => setSeniority(e.target.value)}>
-            {(role?.seniorityLevels ?? []).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Workstation"
-            value={effectiveStation}
-            onChange={(e) => setWorkstationId(e.target.value)}
-            error={errors.workstation}
-          >
-            {activeStations.length === 0 && <option value="">No workstation paired</option>}
-            {activeStations.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} {w.connected ? '(connected)' : '(offline)'}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Runtime"
-            value={runtime || role?.defaultModel.runtime || ''}
-            onChange={(e) => setRuntime(e.target.value)}
-            error={errors.runtime}
-          >
-            {runtimeOptions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </Select>
-          <div>
-            <TextInput
-              label="Model"
-              placeholder={role?.defaultModel.model}
-              value={model}
-              list="hire-model-suggestions"
-              onChange={(e) => setModel(e.target.value)}
-            />
-            <datalist id="hire-model-suggestions">
-              {modelSuggestions.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </div>
-          <Select label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
-            <option value="">
-              Default{role?.defaultModel.effort ? ` (${role.defaultModel.effort})` : ''}
-            </option>
-            {['low', 'medium', 'high'].map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {runtimeProblem && (
-          <Callout tone="danger" role="alert" data-testid="hire-runtime-problem">
-            This role cannot run on {effectiveRuntime}: {runtimeProblem}
-          </Callout>
-        )}
-        {modelCaution && (
-          <Callout tone="warning" data-testid="hire-model-caution">
-            {modelCaution}
-          </Callout>
-        )}
-        <div>
-          <ProjectAccessEditor
-            value={effectiveAccess}
-            onChange={setAccess}
-            projects={projects.data ?? []}
-            canAny={canAny}
-            idPrefix="hire"
+      {!draft && (
+        <div className="mb-3" data-testid="hire-source">
+          <Segmented
+            label="Where the agent comes from"
+            value={source}
+            onChange={setSource}
+            options={[
+              { value: 'role', label: 'Built-in role' },
+              { value: 'pack', label: 'From a pack' },
+            ]}
           />
-          {errors.access && (
-            <p role="alert" className="mt-1 text-sm font-medium text-danger">
-              {errors.access}
-            </p>
-          )}
         </div>
-        <TextInput
-          label="Skills"
-          hint={
-            draft
-              ? 'Comma separated, optional'
-              : "Comma separated, optional. Leave empty for the role's skills; what you type replaces them."
-          }
-          value={skills}
-          onChange={(e) => setSkills(e.target.value)}
-        />
-        <div>
-          <TextInput
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            error={errors.name}
-            maxLength={60}
-          />
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="name-suggestions">
-            <select
-              aria-label="Name theme"
-              data-testid="name-theme"
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
-              className="rounded border border-control bg-surface px-1 py-0.5 text-xs"
+      )}
+      {!draft && source === 'pack' ? (
+        <HirePackAgentForm onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
+      ) : (
+        <form onSubmit={submit} noValidate aria-label="Hire agent" className="flex flex-col gap-3">
+          {draft && (
+            <div
+              className="rounded-control border border-line bg-sunken px-3 py-2 text-sm"
+              data-testid="hire-draft-role"
             >
-              {NAME_THEMES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
+              <p className="font-medium text-fg">New role: {draft.name}</p>
+              <p className="text-muted">{draft.purpose}</p>
+              <p className="text-xs text-subtle">
+                It may {draft.permissions.allowedTools.join(', ')}. It works in chats, sessions and when
+                mentioned; it does not take cards from the board.
+              </p>
+            </div>
+          )}
+          {!draft && (
+            <Select
+              label="Role"
+              value={effectiveRoleKey}
+              onChange={(e) => setRoleKey(e.target.value)}
+              error={errors.role}
+              hint={role?.department ? `Department: ${role.department}` : undefined}
+            >
+              {hireable.map((r) => (
+                <option key={r.definition.key} value={r.definition.key}>
+                  {r.definition.name}
                 </option>
               ))}
-            </select>
-            <span className="text-xs text-subtle">Suggestions:</span>
-            {suggestions.data?.map((n) => (
-              <button
-                type="button"
-                key={n}
-                onClick={() => setName(n)}
-                className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-sunken"
-              >
-                {n}
-              </button>
-            ))}
-            <button type="button" onClick={() => setNonce((n) => n + 1)} className="text-xs underline">
-              More
-            </button>
-          </div>
-        </div>
-        {unsandboxed && station && (
-          <div className="flex flex-col gap-2" data-testid="hire-unsandboxed">
-            <SandboxWarning testId="hire-sandbox-warning" role="alert" lead="Warning:">
-              {agentWarning(station.name, sandboxReasonOf(station.runtimes, effectiveRuntime))}
-            </SandboxWarning>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={ackUnsandboxed}
-                onChange={(e) => setAckedFor(e.target.checked ? ackKey : '')}
-                aria-describedby={errors.sandbox ? 'hire-sandbox-error' : undefined}
-                className="mt-1"
+            </Select>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select
+              label="Seniority"
+              value={effectiveSeniority}
+              onChange={(e) => setSeniority(e.target.value)}
+            >
+              {(role?.seniorityLevels ?? []).map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Workstation"
+              value={effectiveStation}
+              onChange={(e) => setWorkstationId(e.target.value)}
+              error={errors.workstation}
+            >
+              {activeStations.length === 0 && <option value="">No workstation paired</option>}
+              {activeStations.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name} {w.connected ? '(connected)' : '(offline)'}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Runtime"
+              value={runtime || role?.defaultModel.runtime || ''}
+              onChange={(e) => setRuntime(e.target.value)}
+              error={errors.runtime}
+            >
+              {runtimeOptions.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </Select>
+            <div>
+              <TextInput
+                label="Model"
+                placeholder={role?.defaultModel.model}
+                value={model}
+                list="hire-model-suggestions"
+                onChange={(e) => setModel(e.target.value)}
               />
-              <span>I understand this agent runs without an OS sandbox on {station.name}</span>
-            </label>
-            {errors.sandbox && (
-              <p id="hire-sandbox-error" role="alert" className="text-sm text-danger">
-                {errors.sandbox}
+              <datalist id="hire-model-suggestions">
+                {modelSuggestions.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </div>
+            <Select label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
+              <option value="">
+                Default{role?.defaultModel.effort ? ` (${role.defaultModel.effort})` : ''}
+              </option>
+              {['low', 'medium', 'high'].map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {runtimeProblem && (
+            <Callout tone="danger" role="alert" data-testid="hire-runtime-problem">
+              This role cannot run on {effectiveRuntime}: {runtimeProblem}
+            </Callout>
+          )}
+          {modelCaution && (
+            <Callout tone="warning" data-testid="hire-model-caution">
+              {modelCaution}
+            </Callout>
+          )}
+          <div>
+            <ProjectAccessEditor
+              value={effectiveAccess}
+              onChange={setAccess}
+              projects={projects.data ?? []}
+              canAny={canAny}
+              idPrefix="hire"
+            />
+            {errors.access && (
+              <p role="alert" className="mt-1 text-sm font-medium text-danger">
+                {errors.access}
               </p>
             )}
           </div>
-        )}
-        <ErrorBox error={hire.error ?? hireDraft.error} />
-        <div className="flex justify-end gap-2">
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={hire.isPending || hireDraft.isPending}>
-            Hire
-          </Button>
-        </div>
-      </form>
+          <TextInput
+            label="Skills"
+            hint={
+              draft
+                ? 'Comma separated, optional'
+                : "Comma separated, optional. Leave empty for the role's skills; what you type replaces them."
+            }
+            value={skills}
+            onChange={(e) => setSkills(e.target.value)}
+          />
+          <div>
+            <TextInput
+              label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              error={errors.name}
+              maxLength={60}
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="name-suggestions">
+              <select
+                aria-label="Name theme"
+                data-testid="name-theme"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                className="rounded border border-control bg-surface px-1 py-0.5 text-xs"
+              >
+                {NAME_THEMES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-subtle">Suggestions:</span>
+              {suggestions.data?.map((n) => (
+                <button
+                  type="button"
+                  key={n}
+                  onClick={() => setName(n)}
+                  className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-sunken"
+                >
+                  {n}
+                </button>
+              ))}
+              <button type="button" onClick={() => setNonce((n) => n + 1)} className="text-xs underline">
+                More
+              </button>
+            </div>
+          </div>
+          {unsandboxed && station && (
+            <div className="flex flex-col gap-2" data-testid="hire-unsandboxed">
+              <SandboxWarning testId="hire-sandbox-warning" role="alert" lead="Warning:">
+                {agentWarning(station.name, sandboxReasonOf(station.runtimes, effectiveRuntime))}
+              </SandboxWarning>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={ackUnsandboxed}
+                  onChange={(e) => setAckedFor(e.target.checked ? ackKey : '')}
+                  aria-describedby={errors.sandbox ? 'hire-sandbox-error' : undefined}
+                  className="mt-1"
+                />
+                <span>I understand this agent runs without an OS sandbox on {station.name}</span>
+              </label>
+              {errors.sandbox && (
+                <p id="hire-sandbox-error" role="alert" className="text-sm text-danger">
+                  {errors.sandbox}
+                </p>
+              )}
+            </div>
+          )}
+          <ErrorBox error={hire.error ?? hireDraft.error} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" variant="primary" disabled={hire.isPending || hireDraft.isPending}>
+              Hire
+            </Button>
+          </div>
+        </form>
+      )}
     </Dialog>
   );
 }

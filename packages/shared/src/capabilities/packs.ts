@@ -173,6 +173,15 @@ export const PackSnapshotSchema = z.object({
   sha: PackShaSchema,
   /** Hash over every capability's hash: the value the owner approves and the runner re-checks before each use. */
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  /**
+   * The same hash over the capabilities read before the Claude Code plugin layout was (every item but those with `layout: 'plugin'`);
+   * present only when the pack has such items. A pack approved at this hash keeps working, without the plugin items, until the
+   * Owner approves the full `contentHash`. A runner that cannot read the layout reports this value as its `contentHash`.
+   */
+  legacyContentHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   /** `bmad` only in snapshots reported before the generic reading; new ones say `generic`. */
   adapter: z.enum(['generic', 'bmad']),
   items: z.array(PackItemSchema).max(MAX_PACK_ITEMS),
@@ -439,8 +448,9 @@ export interface PluginFile {
  * `commands/*.md` (slash commands, frontmatter optional) at any depth, so `plugins/<p>/agents/x.md` and a root `agents/x.md`
  * both count. Files inside a skill folder, below an excluded folder (tests, docs, vendored code), in `personas/` or in the
  * root `.claude/agents` or listed by the manifest (read by their own rules) are left out. The key is the file name. When several files have the same key
- * (two plugins both ship `reviewer.md`), those that sit in a plugin folder are keyed `<plugin>-<name>` so every one is kept
- * and the result does not depend on the order the files were listed in; a file at the root keeps its plain key.
+ * (two plugins both ship `reviewer.md`), those that sit in a plugin folder are keyed `<plugin path>-<name>` (the whole path, so
+ * the key depends on the file alone) and the result does not depend on the order the files were listed in; a file at the root keeps
+ * its plain key.
  * `taken` are keys of the same kind that other rules already produced.
  */
 export function discoverPluginLayout(
@@ -450,6 +460,25 @@ export function discoverPluginLayout(
 ): { agents: PluginFile[]; commands: PluginFile[]; skipped: string[] } {
   const raw: Array<PluginFile & { kind: 'agents' | 'commands' }> = [];
   const skipped: string[] = [];
+  // Only what is part of a Claude Code plugin is read: a `.claude-plugin/plugin.json` in the plugin folder or above it, a
+  // marketplace file at the root, or root-level folders next to a root `.claude-plugin/`. An ordinary repository's
+  // `commands/` or `agents/` folder (a CLI's source, say) is not a plugin and stays unread.
+  const pluginDirs = new Set<string>();
+  let marketplace = false;
+  let rootMarker = false;
+  for (const p of Object.keys(tree)) {
+    if (p === '.claude-plugin/marketplace.json') marketplace = true;
+    if (p.startsWith('.claude-plugin/')) rootMarker = true;
+    const m = /^(?:(.*)\/)?\.claude-plugin\/plugin\.json$/.exec(p);
+    if (m) pluginDirs.add(m[1] ?? '');
+  }
+  const inPlugin = (pluginPath: string): boolean => {
+    if (marketplace) return true;
+    if (pluginPath === '' && rootMarker) return true;
+    const segs = pluginPath ? pluginPath.split('/') : [];
+    for (let n = segs.length; n >= 0; n--) if (pluginDirs.has(segs.slice(0, n).join('/'))) return true;
+    return false;
+  };
   for (const [path, text] of Object.entries(tree).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const parts = path.split('/');
     if (parts.length < 2 || parts.some((x) => SKIPPED_SEGMENTS.has(x))) continue;
@@ -458,6 +487,8 @@ export function discoverPluginLayout(
     if (!base.toLowerCase().endsWith('.md') || (folder !== 'agents' && folder !== 'commands')) continue;
     if (path.startsWith('.claude/agents/') || taken.paths?.has(path)) continue;
     if (skillRoots.some((d) => path.startsWith(`${d}/`))) continue;
+    const pluginPath = parts.slice(0, -2).join('/');
+    if (!inPlugin(pluginPath)) continue;
     const key = slugKey(base.slice(0, -3));
     if (!key || /^(readme|changelog|contributing|license)$/.test(key)) continue;
     if (folder === 'agents') {
@@ -470,17 +501,27 @@ export function discoverPluginLayout(
         continue;
       }
     }
-    const plugin = parts.length >= 3 ? slugKey(parts[parts.length - 3] as string) : '';
-    raw.push({ kind: folder, key, path, text, plugin });
+    raw.push({ kind: folder, key, path, text, plugin: pluginPath });
   }
   const resolve = (kind: 'agents' | 'commands', occupied: ReadonlySet<string>): PluginFile[] => {
     const list = raw.filter((r) => r.kind === kind);
     const count = new Map<string, number>();
     for (const r of list) count.set(r.key, (count.get(r.key) ?? 0) + 1);
-    return list.map(({ kind: _k, ...r }) => {
+    const used = new Set<string>();
+    const out = list.map(({ kind: _k, ...r }) => {
       const clash = (count.get(r.key) ?? 0) > 1 || occupied.has(r.key);
-      if (!clash || !r.plugin) return r;
-      const key = slugKey(`${r.plugin}-${r.key}`);
+      // The key of a clashing file is derived from its whole plugin path, so it does not depend on how many other files
+      // clash or in what order they were listed; a file at the root keeps its plain key.
+      let key = clash && r.plugin ? slugKey(`${r.plugin}-${r.key}`) : r.key;
+      // a cut key could meet another one: tell them apart by a short hash of the path (still deterministic)
+      if (clash && r.plugin && key.length >= 60)
+        key = `${key.slice(0, 55).replace(/-+$/, '')}-${sha256Hex(r.path).slice(0, 6)}`;
+      return { ...r, key };
+    });
+    return out.map((r) => {
+      let key = r.key;
+      if (used.has(key)) key = `${key.slice(0, 55).replace(/-+$/, '')}-${sha256Hex(r.path).slice(0, 6)}`;
+      used.add(key);
       return { ...r, key };
     });
   };
@@ -523,7 +564,7 @@ export function commandToPlaybookFiles(key: string, text: string): Record<string
 export function inPack(
   pack: string,
   e: ParsedCapability,
-  extra: { tags?: string[]; icon?: string } = {},
+  extra: { tags?: string[]; icon?: string; layout?: 'plugin' } = {},
 ): ParsedCapability {
   const hasScripts = Object.keys(e.files).some(isScriptPath);
   return {
@@ -533,6 +574,7 @@ export function inPack(
     ...(hasScripts ? { hasScripts: true } : {}),
     ...(extra.tags?.length ? { tags: extra.tags } : {}),
     ...(extra.icon ? { icon: extra.icon } : {}),
+    ...(extra.layout ? { layout: extra.layout } : {}),
   } as ParsedCapability;
 }
 
@@ -549,7 +591,7 @@ const HYPHEN_KEY = /[a-z0-9]+(?:-[a-z0-9]+)+/g;
 export function agentInfoOf(
   e: ParsedCapability,
   packSkillKeys: ReadonlySet<string>,
-): { displayName?: string; skillRefs?: string[] } {
+): { displayName?: string; skillRefs?: string[]; declaredSkills?: string[] } {
   let displayName: string | undefined;
   const clean = (v: unknown): string | undefined => {
     if (typeof v !== 'string') return undefined;
@@ -572,7 +614,9 @@ export function agentInfoOf(
   }
   const refs = new Set<string>();
   const own = e.key.includes(':') ? e.key.slice(e.key.indexOf(':') + 1) : e.key;
-  if (e.kind === 'persona') for (const s of e.meta.skills ?? []) if (packSkillKeys.has(s)) refs.add(s);
+  const declared = new Set<string>();
+  if (e.kind === 'persona')
+    for (const s of e.meta.skills ?? []) if (packSkillKeys.has(s)) declared.add(s), refs.add(s);
   for (const [path, text] of Object.entries(e.files)) {
     if (isScriptPath(path) || text.length > 256 * 1024) continue;
     for (const t of text.match(HYPHEN_KEY) ?? []) if (t !== own && packSkillKeys.has(t)) refs.add(t);
@@ -580,6 +624,7 @@ export function agentInfoOf(
   return {
     ...(displayName ? { displayName } : {}),
     ...(refs.size ? { skillRefs: [...refs].sort().slice(0, 40) } : {}),
+    ...(declared.size ? { declaredSkills: [...declared].sort().slice(0, 40) } : {}),
   };
 }
 
@@ -736,14 +781,18 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
   for (const a of plugin.agents) {
     try {
       const e = parsePersona(a.key, claudeAgentToPersonaText(a.key, a.text));
-      entries.push(inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined }));
+      entries.push(
+        inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined, layout: 'plugin' }),
+      );
     } catch (err) {
       issues.push({ path: a.path, message: msg(err) });
     }
   }
   for (const c of plugin.commands) {
     try {
-      entries.push(inPack(input.name, parsePlaybook(c.key, commandToPlaybookFiles(c.key, c.text))));
+      entries.push(
+        inPack(input.name, parsePlaybook(c.key, commandToPlaybookFiles(c.key, c.text)), { layout: 'plugin' }),
+      );
     } catch (err) {
       issues.push({ path: c.path, message: msg(err) });
     }
@@ -891,6 +940,8 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
     ...(e.tags?.length ? { tags: e.tags } : {}),
     ...(declaredScopesOf(e).length ? { scopes: declaredScopesOf(e) } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
+    ...(e.layout ? { layout: e.layout } : {}),
+    ...(e.declaredSkills?.length ? { declaredSkills: e.declaredSkills } : {}),
     ...(e.displayName ? { displayName: e.displayName } : {}),
     ...(e.skillRefs?.length ? { skillRefs: e.skillRefs } : {}),
     ...(e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
@@ -914,6 +965,14 @@ export function packSnapshotContentHash(snapshot: Pick<PackSnapshot, 'items'>): 
   return packContentHash(snapshot.items);
 }
 
+/** The hash of a snapshot's items without the plugin-layout ones (what a runner that cannot read that layout computes). */
+export function packSnapshotLegacyHash(snapshot: Pick<PackSnapshot, 'items'>): string {
+  return packContentHash(snapshot.items.filter((i) => i.layout !== 'plugin'));
+}
+
+/** Most bytes a snapshot's JSON may take: the runner connection accepts 8 MiB a message, and this travels in one. */
+export const PACK_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024;
+
 export function packSnapshotOf(input: {
   name: string;
   ref: string;
@@ -921,12 +980,22 @@ export function packSnapshotOf(input: {
   index: PackIndexResult;
 }): PackSnapshot {
   const { index } = input;
-  return {
+  const build = (filesPerItem: number, descriptionMax: number): PackSnapshot => ({
     ref: input.ref,
     sha: input.sha,
     contentHash: packContentHash(index.entries),
+    ...(index.entries.some((e) => e.layout === 'plugin')
+      ? { legacyContentHash: packContentHash(index.entries.filter((e) => e.layout !== 'plugin')) }
+      : {}),
     adapter: index.adapter,
-    items: index.entries.slice(0, MAX_PACK_ITEMS).map((e) => packItemOf(e, input.name)),
+    items: index.entries.slice(0, MAX_PACK_ITEMS).map((e) => {
+      const it = packItemOf(e, input.name);
+      return {
+        ...it,
+        description: it.description.slice(0, descriptionMax),
+        files: it.files.slice(0, filesPerItem),
+      };
+    }),
     issues: index.issues
       .slice(0, 100)
       .map((i) => ({ path: i.path.slice(0, 300), message: i.message.slice(0, 500) })),
@@ -934,7 +1003,19 @@ export function packSnapshotOf(input: {
     license: index.license,
     copyright: index.copyright,
     hasScripts: index.hasScripts,
-  };
+  });
+  // The hashes cover every file; the lists of files and the descriptions are for the review screen, so a very large pack gets
+  // shorter lists rather than a message the connection would refuse.
+  for (const [files, desc] of [
+    [300, 1024],
+    [60, 600],
+    [12, 300],
+    [3, 160],
+  ] as const) {
+    const snap = build(files, desc);
+    if (JSON.stringify(snap).length <= PACK_SNAPSHOT_MAX_BYTES) return snap;
+  }
+  return build(0, 120);
 }
 
 // -------------------------------------------------------------------------------------------------------- untrusted text

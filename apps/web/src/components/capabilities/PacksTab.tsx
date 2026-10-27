@@ -29,6 +29,7 @@ import {
 } from '../ui.tsx';
 import { shortSha } from './badges.tsx';
 import { HirePackDialog } from './HirePackDialog.tsx';
+import { PackTeamSection } from './PackTeamSection.tsx';
 import { TrustReview } from './TrustReview.tsx';
 import { UpdateReview } from './UpdateReview.tsx';
 
@@ -329,6 +330,7 @@ function PackCard({ pack }: { pack: PackDto }) {
   const [newRef, setNewRef] = useState('');
   const [confirm, setConfirm] = useState<'remove' | 'revoke' | 'scripts' | null>(null);
   const [hiring, setHiring] = useState(false);
+  const [team, setTeam] = useState(false);
   const project = projects.data?.find((p) => p.id === pack.projectId);
   const ready = pack.status === 'ready';
   const err = check.error ?? revoke.error ?? scripts.error ?? remove.error;
@@ -497,9 +499,19 @@ function PackCard({ pack }: { pack: PackDto }) {
             </Button>
           </>
         )}
-        {pack.trusted && (
+        {pack.trusted && pack.visibility === 'private' && (
           <Button variant="primary" onClick={() => setHiring(true)} data-testid="hire-from-pack">
             Hire from this pack…
+          </Button>
+        )}
+        {pack.trusted && pack.visibility !== 'private' && (
+          <Button
+            variant="primary"
+            aria-expanded={team}
+            onClick={() => setTeam(!team)}
+            data-testid="pack-team-toggle"
+          >
+            {team ? 'Hide the team' : 'Team and hiring…'}
           </Button>
         )}
         <HoldersButton pack={pack} />
@@ -508,6 +520,7 @@ function PackCard({ pack }: { pack: PackDto }) {
           Remove
         </Button>
       </div>
+      {team && pack.trusted && <PackTeamSection packId={pack.id} packName={pack.name} />}
       {reviewing && <TrustReview pack={pack} onClose={() => setReviewing(false)} />}
       {hiring && <HirePackDialog packId={pack.id} packName={pack.name} onClose={() => setHiring(false)} />}
       {updating && <UpdateReview pack={pack} onClose={() => setUpdating(false)} />}

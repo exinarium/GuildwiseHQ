@@ -41,6 +41,14 @@ Members can hire too, for projects they are on and on their own workstation. Own
 
 On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *ACME · analyst · v1.2.0*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
 
+## Agents of a pack on your desk {#pack-agents}
+
+A pack can bring whole agents, not only skills. A persona file (`agents/*.md`, `personas/*.md`) is an agent by itself. Many packs keep their agents as plain skills with no marker: on the pack, open **Team and hiring**, tick **Agent** next to such a skill and **Save marks**. Tick **Playbook** instead for a skill that is a guided workflow (a skill is one or the other); it then shows in the **/** menu and starts a guided session. Both are Owner and Admin choices, and what the pack finds on its own shows as *found in the pack*. Use the search box: a big pack can hold a few hundred skills, grouped by the first word of their name.
+
+A pack agent works on a **seat**, which is one of your built-in roles (analyst, BA, planner, architect, builder, pre-reviewer, reviewer, tester, researcher, writer) or **Own role**. The seat decides what it may do, its gates and the steps it takes on a card; the pack agent brings its name, its way of working and its skills. It joins the agents you already have on that seat; nobody is replaced. The CEO and DevOps are never seats. An **Own role** agent works in chats and sessions only.
+
+There are three ways to hire. **Agents > Hire agent > Built-in role** hires one agent of a role, as always. **From a pack** hires one agent of an approved pack: pick the pack, the agent, its seat (the page suggests one), the name and the skills. **Hire the whole pack…** (Owner and Admin) shows a table of every agent: tick the ones you want, set the seat and how many of each (up to five), and the workstation for the batch. Nothing is ticked if the pack is large, and the page shows *Adds N agents* against your plan before you confirm. The hire is all or nothing. The agent's card shows *Amelia · acme agent*; if the pack loses its approval the card says so and the agent keeps working.
+
 ## Starter gallery {#starter-gallery}
 
 **Settings > Capabilities > Starter gallery** lists a few built-in personas and playbooks worth trying first, each with a one-line outcome: product brief, brainstorm, release notes, weekly status, pull request triage, incident follow-up, and personas such as the Analyst, the Security reviewer and the Cost hawk. A new organization also sees it at the top of **Agents** until something is hired or started.

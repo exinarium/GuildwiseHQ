@@ -14,5 +14,7 @@ export const PackProvenanceSchema = z.object({
   visibility: z.enum(['org', 'private']).default('org'),
   /** A private pack's owner: a role made from it is the owner's alone (listed and hired by nobody else). */
   ownerUserId: z.uuid().optional(),
+  /** `agent`: the role of its own of a pack agent hired without a seat (holds no pack text). Absent: made from a persona's text. */
+  roleKind: z.literal('agent').optional(),
 });
 export type PackProvenance = z.infer<typeof PackProvenanceSchema>;

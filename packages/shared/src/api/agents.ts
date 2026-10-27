@@ -59,7 +59,7 @@ export const AgentDtoSchema = z.object({
   packAgent: PackPersonaRefSchema.nullable().optional(),
   provenance: PackProvenanceSchema.extend({
     label: z.string(),
-    warning: z.enum(['revoked', 'removed']).nullable().default(null),
+    warning: z.enum(['revoked', 'removed', 'missing']).nullable().default(null),
   })
     .nullable()
     .optional(),

@@ -68,6 +68,13 @@ const MetaExtras = {
   displayName: z.string().max(100).optional(),
   /** Plain keys of the pack's other skills this one's files name (a hire offers them as the agent's skills). Metadata only. */
   skillRefs: z.array(z.string().max(64)).max(40).optional(),
+  /**
+   * `plugin`: read from the Claude Code plugin layout (`agents/`, `commands/`). Such items are left out of `legacyContentHash`, so a
+   * pack approved before they were read keeps working (without them) until the Owner approves them.
+   */
+  layout: z.literal('plugin').optional(),
+  /** A persona's own `skills:` list, limited to skills of the same pack: the default skills of a hire. */
+  declaredSkills: z.array(z.string().max(64)).max(40).optional(),
   /** A pack skill the Owner marked as a playbook is listed as one; this says it is loaded as a skill (`aom skill show <key>`). */
   loadAs: z.literal('skill').optional(),
   /** A persona's declared tools (advisory; read when it is hired from a pack to map a permission preset). */
@@ -191,6 +198,8 @@ interface Base {
   /** See `MetaExtras`: a pack agent's own name and the pack skills its files name. */
   displayName?: string;
   skillRefs?: string[];
+  declaredSkills?: string[];
+  layout?: 'plugin';
   /** Path of the file that carries the frontmatter, relative to the capability root (`SKILL.md`, `<key>.md`, `workflow.md`). */
   main: string;
   /** Every file of the capability, by path relative to its root. */

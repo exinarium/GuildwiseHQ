@@ -16,6 +16,7 @@ import {
   PackUrlSchema,
   type ProjectCapabilitiesReport,
   packSnapshotContentHash,
+  packSnapshotLegacyHash,
   type RunnerToServerOf,
   type SetPackWorkstationsRequest,
   streamId,
@@ -633,7 +634,9 @@ export async function trustPack(
     const r = await load(tx, who, id, true);
     if (!r.pinned_sha)
       throw conflict('pack_pending', 'the pack has not been fetched yet: there is nothing to approve');
-    if (r.pinned_sha !== req.sha || r.content_hash !== req.contentHash)
+    // the approved hash, or (a pack approved before the plugin layout was read) the full hash of the snapshot that lists it
+    const fullHash = (r.snapshot as PackSnapshot | null)?.contentHash;
+    if (r.pinned_sha !== req.sha || (r.content_hash !== req.contentHash && fullHash !== req.contentHash))
       throw conflict('pack_changed', 'the pack changed since you reviewed it: review it again');
     await ctx.store.append(
       [
@@ -741,7 +744,9 @@ export async function applyPacksReport(
   // The server never takes a reported content hash on trust: it is recomputed from the snapshot's own items, and a snapshot
   // whose hash does not match them is dropped.
   const snapshotOk = (s: PackSnapshot | undefined): s is PackSnapshot =>
-    !!s && packSnapshotContentHash(s) === s.contentHash;
+    !!s &&
+    packSnapshotContentHash(s) === s.contentHash &&
+    (s.legacyContentHash === undefined || packSnapshotLegacyHash(s) === s.legacyContentHash);
   // An authored revision is named by its content hash: a snapshot whose sha is something else is not one of ours.
   const authoredOk = (s: PackSnapshot): boolean => !authored || s.sha === s.contentHash;
   // The workstation is waiting (for the member's opt-in, a credential, the files): a fact, not a failure.
@@ -783,10 +788,25 @@ export async function applyPacksReport(
           );
       }
     } else if (m.snapshot.sha === r.pinned_sha) {
-      if (m.snapshot.contentHash !== r.content_hash)
+      // What the files may hash to: the approved hash; for a pack approved before the Claude Code plugin layout was read, the
+      // plugin-free hash a new runner also reports (`legacyContentHash`) and the one an older runner computes as its whole hash.
+      const stored = r.snapshot as PackSnapshot | null;
+      const sameAsApproved =
+        m.snapshot.contentHash === r.content_hash ||
+        (m.snapshot.legacyContentHash !== undefined && m.snapshot.legacyContentHash === r.content_hash) ||
+        (m.snapshot.legacyContentHash === undefined &&
+          !!stored?.legacyContentHash &&
+          m.snapshot.contentHash === stored.legacyContentHash);
+      if (!sameAsApproved)
         out.push(
           mk('PackIntegrityFailed', { ...base, expected: r.content_hash, actual: m.snapshot.contentHash }),
         );
+      else if (
+        m.snapshot.legacyContentHash === r.content_hash &&
+        m.snapshot.contentHash !== r.content_hash &&
+        stored?.contentHash !== m.snapshot.contentHash
+      )
+        out.push(mk('PackLayoutRead', { ...base, snapshot: m.snapshot }));
       else if (
         r.status !== 'ready' ||
         r.error ||

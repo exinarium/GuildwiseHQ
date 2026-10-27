@@ -46,7 +46,7 @@ export const PACK_SEAT_RULES: ReadonlyArray<{ seat: PackSeatKey; words: readonly
   { seat: 'tester', words: ['qa', 'test', 'tester', 'testing', 'quality'] },
   { seat: 'reviewer', words: ['review', 'reviewer'] },
   { seat: 'researcher', words: ['research', 'researcher'] },
-  { seat: 'builder', words: ['developer', 'dev', 'engineer', 'coder', 'programmer'] },
+  { seat: 'builder', words: ['developer', 'dev', 'engineer', 'coder', 'programmer', 'builder'] },
 ];
 
 const tokensOf = (s: string): string[] =>
@@ -61,12 +61,13 @@ function hasWord(tokens: string[], words: readonly string[]): boolean {
   return words.some((w) => joined.includes(` ${w} `) || joined.includes(` ${w}s `));
 }
 
-/** The seat suggested for a pack agent: its name and key first, its description only when those say nothing. */
+/**
+ * The seat suggested for a pack agent, from its name and key. A description alone never suggests a seat (a sentence such as
+ * "reviews the work of the engineers" says too little, and a wrong guess could preselect a seat with more rights): `own`.
+ */
 export function suggestSeat(a: { key: string; name: string; description?: string }): PackSeat {
   const named = tokensOf(`${a.name} ${a.key}`);
   for (const r of PACK_SEAT_RULES) if (hasWord(named, r.words)) return r.seat;
-  const described = tokensOf(a.description ?? '');
-  for (const r of PACK_SEAT_RULES) if (hasWord(described, r.words)) return r.seat;
   return 'own';
 }
 
@@ -85,16 +86,14 @@ export const PackPersonaRefSchema = z.object({
   packId: z.uuid(),
   packName: z.string().max(40),
   /** The key inside the pack, without the pack prefix. */
-  key: z.string().max(130),
+  key: z.string().max(64),
   kind: z.enum(['persona', 'skill']),
   /** The pack agent's own name when it was hired (the agent's name may differ: it is de-duplicated or typed). */
   name: z.string().max(100),
   /** The pinned commit at hire time (information only: the agent follows the pack's trusted commit). */
   sha: z.string().max(64),
-  hash: z
-    .string()
-    .regex(/^[0-9a-f]{64}$/)
-    .optional(),
+  /** Hash of the pack agent's files at hire time. */
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
   ref: z.string().max(200).nullable().default(null),
 });
 export type PackPersonaRef = z.infer<typeof PackPersonaRefSchema>;
@@ -173,8 +172,10 @@ export const PackTeamAgentDtoSchema = z.object({
   description: z.string(),
   icon: z.string().nullable(),
   suggestedSeat: PackSeatSchema,
-  /** Skills of this pack the agent's files name: the default skills of a hire (the hirer may untick). */
+  /** Skills of this pack the agent's files name. Only a hint for the form to pre-tick: they are NOT granted unless sent. */
   skillRefs: z.array(z.string()),
+  /** The persona's own `skills:` list (limited to this pack): what a hire gets besides the seat's skills when `skills` is omitted. */
+  defaultSkills: z.array(z.string()),
   /** The skill key the agent is itself (kind skill): it is always part of the agent's skills. */
   agentSkill: z.string().nullable(),
   /** Agents already hired from this one (active). */
@@ -215,7 +216,7 @@ export const PackAgentHireItemSchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   seniority: Seniority.optional(),
   model: z.string().min(1).max(100).optional(),
-  /** Skills of the same pack (keys without prefix) the agent gets besides its seat's. Default: the ones the agent's files name. */
+  /** Skills of the same pack (keys without prefix) the agent gets besides its seat's. Default: the persona's declared skills. */
   skills: z.array(z.string().min(1).max(64)).max(40).optional(),
   /** Hire this agent several times (names are de-duplicated). */
   count: z.number().int().min(1).max(5).default(1),
@@ -253,6 +254,10 @@ export type HirePackAgentsResponse = z.infer<typeof HirePackAgentsResponseSchema
 
 // ------------------------------------------------------------------------------------------------ the role of its own
 
+/** The key of the role of its own of a pack agent: the older hire-from-pack key, in a namespace of its own (`-agent`). */
+export const ownRoleKey = (packName: string, key: string): string =>
+  `${roleKeyForPackPersona(packName, key).slice(0, 54).replace(/-+$/, '')}-agent`;
+
 /**
  * The role of a pack agent that takes no seat (`own`): chat and sessions only, no workflow stage. Unlike the role of the older
  * "hire from pack" it holds none of the pack's text: its instructions are ours, and the agent loads the pack agent itself with
@@ -267,8 +272,6 @@ export function roleForPackAgent(i: {
   hash: string;
   sha: string;
   ref: string | null;
-  /** The persona's declared tools (a skill declares none: read only). */
-  tools?: readonly string[] | undefined;
   version: number;
 }): RoleDefinition {
   const provenance = PackProvenanceSchema.parse({
@@ -279,9 +282,10 @@ export function roleForPackAgent(i: {
     sha: i.sha,
     hash: i.hash,
     visibility: 'org',
+    roleKind: 'agent',
   });
   return {
-    key: roleKeyForPackPersona(i.packName, i.key, { visibility: 'org', packId: i.packId }),
+    key: ownRoleKey(i.packName, i.key),
     version: i.version,
     name: humaniseKey(i.key).slice(0, 80),
     purpose: `An agent from the ${i.packName} pack (${provenanceLabel(provenance)}), for chats and sessions.`,
@@ -294,7 +298,8 @@ export function roleForPackAgent(i: {
     ],
     seniorityLevels: ['senior', 'junior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
-    permissions: permissionsForPersona(i.tools ? [...i.tools] : undefined, { mayWiden: true }).permissions,
+    // read only: a pack's declared tools never widen a role, and the agent's own permissions can only narrow it
+    permissions: permissionsForPersona(undefined, { mayWiden: false }).permissions,
     skills: [],
     claimableStages: [],
     source: provenance,

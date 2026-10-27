@@ -56,6 +56,15 @@ export const packEvents = [
     'PackRefResolved',
     z.object({ packId: Id, orgId: Id, workstationId: Id, snapshot: PackSnapshotSchema }),
   ),
+  /**
+   * A runner that reads the Claude Code plugin layout saw a pack that was approved before that layout was read (same commit, the
+   * approved `contentHash` equals the snapshot's `legacyContentHash`). The snapshot replaces the review snapshot so the new items
+   * are listed; the approval is untouched, and they stay unusable until the Owner approves the snapshot's full `contentHash`.
+   */
+  defineEvent(
+    'PackLayoutRead',
+    z.object({ packId: Id, orgId: Id, workstationId: Id, snapshot: PackSnapshotSchema }),
+  ),
   defineEvent(
     'PackUpdateAvailable',
     z.object({

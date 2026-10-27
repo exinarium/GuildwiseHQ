@@ -75,12 +75,36 @@ export const packProjectors: Record<string, Projector> = {
       tx,
       `UPDATE pack_workstation_state SET integrity_failed=false, updated_at=$4
         WHERE pack_id=$1 AND workstation_id=$5
-          AND EXISTS (SELECT 1 FROM packs WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$2 AND content_hash=$3)`,
-      [p.packId, p.snapshot.sha, p.snapshot.contentHash, e.createdAt, p.workstationId],
+          AND EXISTS (SELECT 1 FROM packs WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$2 AND content_hash IN ($3, $6))`,
+      [
+        p.packId,
+        p.snapshot.sha,
+        p.snapshot.contentHash,
+        e.createdAt,
+        p.workstationId,
+        p.snapshot.legacyContentHash ?? p.snapshot.contentHash,
+      ],
     );
     await exec(tx, `UPDATE packs SET status='ready', error=NULL WHERE id=$1 AND removed_at IS NULL`, [
       p.packId,
     ]);
+  },
+
+  PackLayoutRead: async (tx, e) => {
+    const p = (e.event as EventOf<'PackLayoutRead'>).payload;
+    // only the same commit, and only while the approved hash is the one the plugin-free reading gives: nothing else moves
+    await exec(
+      tx,
+      `UPDATE packs SET snapshot=$2, has_scripts=$3
+        WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$4 AND content_hash=$5`,
+      [
+        p.packId,
+        JSON.stringify(p.snapshot),
+        p.snapshot.hasScripts,
+        p.snapshot.sha,
+        p.snapshot.legacyContentHash ?? '',
+      ],
+    );
   },
 
   PackUpdateAvailable: async (tx, e) => {
@@ -125,7 +149,8 @@ export const packProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'PackTrusted'>).payload;
     await exec(
       tx,
-      `UPDATE packs SET trusted=true, trusted_sha=$2, trusted_hash=$3, trusted_by=$4, trusted_at=$5
+      `UPDATE packs SET trusted=true, trusted_sha=$2, trusted_hash=$3, trusted_by=$4, trusted_at=$5,
+              content_hash=CASE WHEN snapshot->>'contentHash' = $3 THEN $3 ELSE content_hash END
         WHERE id=$1 AND removed_at IS NULL`,
       [p.packId, p.sha, p.contentHash, p.trustedBy, e.createdAt],
     );

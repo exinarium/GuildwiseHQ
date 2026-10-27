@@ -514,7 +514,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Hire agent',
-        text: 'Hire an agent: role, seniority, workstation, runtime, model and effort, which projects it may work on, skills and a name.',
+        text: 'Hire an agent: role, seniority, workstation, runtime, model and effort, which projects it may work on, skills and a name. Choose From a pack to hire an agent of an approved pack onto one of your roles.',
       },
       {
         name: 'Project filter',
@@ -1081,8 +1081,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Write skills, personas and playbooks. Private ones stay on your workstation and only you see them; organization ones are reviewed by an Owner or Admin. Export as a git-ready folder any time.',
       },
       {
+        name: 'Team and hiring',
+        text: 'On an approved pack: tick Agent or Playbook for each skill (Owners and Admins), and hire the whole pack from a review table, each agent on a seat of your choice. Nothing is hired until you tick it.',
+      },
+      {
         name: 'Hire from this pack',
-        text: 'Turn a persona of an approved pack into an agent, tagged with where it came from. Add all agents at once from the review list.',
+        text: 'For your private packs: turn a persona into an agent, tagged with where it came from.',
       },
       {
         name: 'Registry',
