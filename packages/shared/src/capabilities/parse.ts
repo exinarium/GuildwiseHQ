@@ -73,7 +73,7 @@ const MetaExtras = {
    * pack approved before they were read keeps working (without them) until the Owner approves them.
    */
   layout: z.literal('plugin').optional(),
-  /** The plugin folder an item of a Claude Code plugin belongs to (`backend-development`), for grouping a large marketplace. */
+  /** The plugin folder an item of a Claude Code plugin belongs to (`backend-development`), for grouping a large marketplace. Display only: it is never used for a key, a permission or a decision. */
   group: z.string().max(64).optional(),
   /** A persona's own `skills:` list, limited to skills of the same pack: the default skills of a hire. */
   declaredSkills: z.array(z.string().max(64)).max(40).optional(),

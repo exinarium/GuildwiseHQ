@@ -495,7 +495,13 @@ esac
 
   private indexDir(d: PackDesired, dir: string, sha: string, ref: string): Loaded {
     const { tree, stamps, truncated } = readPackTree(dir);
-    const index = indexPack({ name: d.name, adapter: d.adapter, tree });
+    // a pack made in the editor is named by its content hash and has the editor's layout only
+    const index = indexPack({
+      name: d.name,
+      adapter: d.adapter,
+      tree,
+      pluginLayout: d.source !== 'authored',
+    });
     if (truncated)
       index.issues.push({
         path: '.',
@@ -848,7 +854,7 @@ esac
           issues: issues.slice(0, 50).map((i) => ({ path: i.path, message: i.message })),
         };
       const d = l0.desired;
-      const index = indexPack({ name: d.name, adapter: 'generic', tree: clean });
+      const index = indexPack({ name: d.name, adapter: 'generic', tree: clean, pluginLayout: false });
       if (!index.entries.length)
         return { ok: false, error: 'the pack has no skill, persona or playbook yet', issues: [] };
       const contentHash = packSnapshotOf({ name: d.name, ref: 'v0', sha: 'a'.repeat(64), index }).contentHash;
@@ -963,7 +969,7 @@ esac
       )
         return { stored: false, error: 'the files are not a valid pack' };
       const d = l.desired;
-      const index = indexPack({ name: d.name, adapter: 'generic', tree: clean });
+      const index = indexPack({ name: d.name, adapter: 'generic', tree: clean, pluginLayout: false });
       const hash = packSnapshotOf({ name: d.name, ref: 'v0', sha: 'a'.repeat(64), index }).contentHash;
       // the files must be exactly what the server pinned, and the revision is named by that hash
       if (hash !== p.contentHash || p.sha !== hash)

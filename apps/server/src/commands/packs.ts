@@ -3,6 +3,7 @@ import {
   type AddPackRequest,
   diffPackSnapshots,
   isOrgManager,
+  MAX_PACK_ITEMS,
   PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
   type PackCredentialShares,
@@ -19,6 +20,7 @@ import {
   packSnapshotLegacyHash,
   type RunnerToServerOf,
   type SetPackWorkstationsRequest,
+  scriptsMayHaveChanged,
   streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
@@ -606,7 +608,11 @@ export async function acceptPackUpdate(ctx: Ctx, who: Who, id: string, sha: stri
             contentHash: up.contentHash,
             acceptedBy: who.userId,
             keepTrust: trustedNow,
-            scriptsReset: (diff.scriptsAdded?.length ?? 0) + (diff.scriptsChanged?.length ?? 0) > 0,
+            scriptsReset: scriptsMayHaveChanged(
+              { scriptsAdded: diff.scriptsAdded ?? [], scriptsChanged: diff.scriptsChanged ?? [] },
+              r.snapshot as PackSnapshot | null,
+              up,
+            ),
           },
           who.orgId,
           id,
@@ -794,19 +800,22 @@ export async function applyPacksReport(
       const sameAsApproved =
         m.snapshot.contentHash === r.content_hash ||
         (m.snapshot.legacyContentHash !== undefined && m.snapshot.legacyContentHash === r.content_hash) ||
+        // an older runner, only while the approval is still the plugin-free one
         (m.snapshot.legacyContentHash === undefined &&
           !!stored?.legacyContentHash &&
+          stored.legacyContentHash === r.content_hash &&
           m.snapshot.contentHash === stored.legacyContentHash);
       if (!sameAsApproved)
         out.push(
           mk('PackIntegrityFailed', { ...base, expected: r.content_hash, actual: m.snapshot.contentHash }),
         );
-      else if (
-        m.snapshot.legacyContentHash === r.content_hash &&
-        m.snapshot.contentHash !== r.content_hash &&
-        stored?.contentHash !== m.snapshot.contentHash
-      )
-        out.push(mk('PackLayoutRead', { ...base, snapshot: m.snapshot }));
+      else if (layoutSnapshot(r, stored, m.snapshot, fromAdder))
+        out.push(
+          mk('PackLayoutRead', {
+            ...base,
+            snapshot: layoutSnapshot(r, stored, m.snapshot, fromAdder) as PackSnapshot,
+          }),
+        );
       else if (
         r.status !== 'ready' ||
         r.error ||
@@ -836,7 +845,7 @@ export async function applyPacksReport(
             contentHash: m.snapshot.contentHash,
             acceptedBy: r.owner_user_id,
             keepTrust: false,
-            scriptsReset: diff.scriptsAdded.length + diff.scriptsChanged.length > 0,
+            scriptsReset: scriptsMayHaveChanged(diff, r.snapshot as PackSnapshot, m.snapshot),
           }),
         );
         if (approve)
@@ -883,6 +892,39 @@ export async function applyPacksReport(
       await relayAuthoredBundles(ctx, msg.packId);
     }
   }
+}
+
+/**
+ * The snapshot to store when a runner that reads the Claude Code plugin layout reports a pack approved before that layout was
+ * read: once, from the workstation that pinned the pack, and only from the plain old snapshot (its hash is the approved one and
+ * it lists no plugin item). What was reviewed stays exactly as stored; only the new plugin items are taken from the report, and
+ * only under keys the stored items do not use. Anything else (another holder, a pack approved at its full hash, a second
+ * report) changes nothing.
+ */
+export function layoutSnapshot(
+  r: Row,
+  stored: PackSnapshot | null,
+  reported: PackSnapshot,
+  fromAdder: boolean,
+): PackSnapshot | null {
+  if (!fromAdder || !stored) return null;
+  if (stored.contentHash !== r.content_hash || stored.items.some((i) => i.layout === 'plugin')) return null;
+  if (reported.legacyContentHash !== r.content_hash || reported.contentHash === r.content_hash) return null;
+  const have = new Set(stored.items.map((i) => `${i.kind}:${i.key}`));
+  const added = reported.items.filter((i) => i.layout === 'plugin' && !have.has(`${i.kind}:${i.key}`));
+  if (!added.length) return null;
+  const merged: PackSnapshot = {
+    ...stored,
+    contentHash: reported.contentHash,
+    legacyContentHash: reported.legacyContentHash,
+    items: [...stored.items, ...added].slice(0, MAX_PACK_ITEMS),
+    hasScripts: stored.hasScripts || added.some((i) => i.hasScripts),
+  };
+  // the merged items must hash to what the runner reported, or the report is not a reading of this pack
+  return packSnapshotContentHash(merged) === merged.contentHash &&
+    packSnapshotLegacyHash(merged) === merged.legacyContentHash
+    ? merged
+    : null;
 }
 
 async function holdsContent(

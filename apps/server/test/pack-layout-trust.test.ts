@@ -1,5 +1,6 @@
 import { indexPack, PACKS_CAPABILITY, type PackSnapshot, packSnapshotOf } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { layoutSnapshot } from '../src/commands/packs.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
@@ -103,7 +104,37 @@ describe('a pack trusted before the plugin layout was read', () => {
     await report(newSnap());
   });
 
-  it('approving the full hash unlocks the new items, and an older runner still passes', async () => {
+  it('only the pinning workstation, and only once, from the plain old snapshot, can add the new items', () => {
+    const old = oldSnap();
+    const full = newSnap();
+    const row = { content_hash: old.contentHash } as never;
+    // the pinning workstation, plain old snapshot: accepted, and what was reviewed stays as it was
+    const merged = layoutSnapshot(row, old, full, true);
+    expect(merged?.contentHash).toBe(full.contentHash);
+    expect(merged?.items.filter((i) => i.layout !== 'plugin')).toEqual(old.items);
+    // another holder
+    expect(layoutSnapshot(row, old, full, false)).toBeNull();
+    // a second report once the plugin items are stored
+    expect(layoutSnapshot(row, merged as PackSnapshot, full, true)).toBeNull();
+    // a pack approved at its full hash: a fabricated "legacy" reading changes nothing
+    const fake = { ...full, legacyContentHash: full.contentHash };
+    expect(layoutSnapshot({ content_hash: full.contentHash } as never, full, fake, true)).toBeNull();
+    // items relabelled as plugin-free, or a plugin item under a key the reviewed items use
+    const relabelled = {
+      ...full,
+      items: full.items.map((i) => (i.key === 'lay:helper' ? { ...i, description: 'poisoned' } : i)),
+    };
+    expect(
+      layoutSnapshot(row, old, relabelled, true)?.items.find((i) => i.key === 'lay:helper')?.description,
+    ).not.toBe('poisoned');
+    const clash = {
+      ...full,
+      items: full.items.map((i) => (i.key === 'lay:guide' ? { ...i, key: 'lay:helper' } : i)),
+    };
+    expect(layoutSnapshot(row, old, clash, true)).toBeNull();
+  });
+
+  it('approving the full hash unlocks the new items; an older runner cannot serve the full approval', async () => {
     const s = newSnap();
     await owner('POST', `/api/packs/${packId}/trust`, { sha: s.sha, contentHash: s.contentHash });
     const reg = (await owner('GET', '/api/capabilities')).items.filter(
@@ -115,8 +146,9 @@ describe('a pack trusted before the plugin layout was read', () => {
       contentHash: s.contentHash,
     });
     const before = await failures();
+    // an older runner computes the plugin-free hash, which the full approval no longer covers
     await report(oldSnap());
-    expect(await failures()).toBe(before);
+    expect(await failures()).toBe(before + 1);
     expect((await owner('GET', `/api/packs/${packId}/team`)).pendingPluginItems).toBe(0);
   });
 });

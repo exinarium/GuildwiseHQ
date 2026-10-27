@@ -96,7 +96,7 @@ export const packProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE packs SET snapshot=$2, has_scripts=$3
-        WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$4 AND content_hash=$5`,
+        WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$4 AND content_hash=$5 AND snapshot->>'contentHash' = content_hash`,
       [
         p.packId,
         JSON.stringify(p.snapshot),

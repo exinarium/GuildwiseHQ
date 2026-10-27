@@ -192,6 +192,11 @@ export const PackSnapshotSchema = z.object({
   /** The copyright line of the pack's LICENSE (`Copyright (c) 2025 Example Maintainers`), shown with the licence as attribution. */
   copyright: z.string().max(200).nullable().default(null),
   hasScripts: z.boolean(),
+  /**
+   * The file lists or descriptions of items were cut short to keep the snapshot small: a diff against it cannot see every file,
+   * so an update across it re-asks about scripts (`scriptsMayHaveChanged`).
+   */
+  trimmed: z.boolean().optional(),
 });
 export type PackSnapshot = z.infer<typeof PackSnapshotSchema>;
 
@@ -214,6 +219,16 @@ export const PackDiffSchema = z.object({
   hasChanges: z.boolean(),
 });
 export type PackDiff = z.infer<typeof PackDiffSchema>;
+
+/**
+ * Whether an update may add or change a script: the diff says so, or either snapshot has cut file lists (`trimmed`) so the diff
+ * cannot be trusted to have seen every file. Switches the pack's scripts off again when true.
+ */
+export const scriptsMayHaveChanged = (
+  diff: Pick<PackDiff, 'scriptsAdded' | 'scriptsChanged'>,
+  prev: Pick<PackSnapshot, 'trimmed'> | null | undefined,
+  next: Pick<PackSnapshot, 'trimmed'> | null | undefined,
+): boolean => diff.scriptsAdded.length + diff.scriptsChanged.length > 0 || !!prev?.trimmed || !!next?.trimmed;
 
 const itemId = (i: { kind: string; key: string }): string => `${i.kind}:${i.key}`;
 
@@ -239,6 +254,8 @@ export function diffPackSnapshots(
       diff.addedCapabilities.push({ id, name: n.name });
       diff.counts.filesAdded += n.files.length;
       for (const f of n.files) if (f.script) diff.scriptsAdded.push(`${id}/${f.path}`);
+      // the flag of the capability comes from all its files, the list above only from the part that was kept
+      if (n.hasScripts && !n.files.some((f) => f.script)) diff.scriptsAdded.push(`${id}/*`);
       continue;
     }
     if (o.hash === n.hash) continue;
@@ -262,6 +279,8 @@ export function diffPackSnapshots(
       }
     }
     for (const p of of.keys()) if (!nf.has(p)) c.removedFiles.push(p);
+    if (n.hasScripts && !diff.scriptsAdded.concat(diff.scriptsChanged).some((x) => x.startsWith(`${id}/`)))
+      diff.scriptsChanged.push(`${id}/*`);
     diff.counts.filesAdded += c.addedFiles.length;
     diff.counts.filesRemoved += c.removedFiles.length;
     diff.counts.filesChanged += c.changedFiles.length;
@@ -704,7 +723,13 @@ function copyrightOf(license: string): string | null {
  * What does not fit is a plain skill. A bad capability becomes an issue and is skipped; the rest is returned. `adapter` is
  * accepted for packs stored with the retired `bmad` value and changes nothing.
  */
-export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: PackTree }): PackIndexResult {
+export function indexPack(input: {
+  name: string;
+  adapter?: PackAdapterId;
+  tree: PackTree;
+  /** Read the Claude Code plugin layout (default). Off for a pack made in the capability editor, whose hash is its name. */
+  pluginLayout?: boolean;
+}): PackIndexResult {
   const tree: PackTree = {};
   for (const [p, t] of Object.entries(input.tree)) {
     const path = normalise(p);
@@ -786,12 +811,23 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     }
   }
   // Claude Code plugin layout: `agents/*.md` are personas, `commands/*.md` one-step playbooks (see `discoverPluginLayout`).
+  const plain = (k: string): string => (k.startsWith(`${input.name}:`) ? k.slice(input.name.length + 1) : k);
   const plugin = discoverPluginLayout(
-    tree,
+    input.pluginLayout === false ? {} : tree,
     found.skills.map((x) => x.dir),
     {
-      agents: new Set(found.personas.map((x) => x.key)),
-      commands: new Set(found.playbooks.map((x) => x.key)),
+      // keys the other rules produced (personas, skills that are agents, manifest agents; playbooks and manifest playbooks)
+      agents: new Set([
+        ...entries.filter((e) => e.kind === 'persona').map((e) => plain(e.key)),
+        ...(manifest?.agents ?? []).map(
+          (a) => a.key ?? (a.file.split('/').pop() ?? '').replace(/\.md$/i, ''),
+        ),
+      ]),
+      commands: new Set([
+        ...entries.filter((e) => e.kind === 'playbook').map((e) => plain(e.key)),
+        ...found.playbooks.map((x) => x.key),
+        ...(manifest?.playbooks ?? []).map((m) => m.key ?? m.dir.split('/').pop() ?? ''),
+      ]),
       // files the manifest lists under agents: are read there, with its overrides
       paths: new Set(
         (manifest?.agents ?? []).map((a) => safePackPath(a.file)).filter((x): x is string => !!x),
@@ -1007,6 +1043,10 @@ export function packSnapshotLegacyHash(snapshot: Pick<PackSnapshot, 'items'>): s
 /** Most bytes a snapshot's JSON may take: the runner connection accepts 8 MiB a message, and this travels in one. */
 export const PACK_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024;
 
+const utf8 = new TextEncoder();
+/** The size of a value as JSON on the wire (UTF-8 bytes, not UTF-16 units). */
+const wireBytes = (v: unknown): number => utf8.encode(JSON.stringify(v)).length;
+
 export function packSnapshotOf(input: {
   name: string;
   ref: string;
@@ -1014,42 +1054,56 @@ export function packSnapshotOf(input: {
   index: PackIndexResult;
 }): PackSnapshot {
   const { index } = input;
-  const build = (filesPerItem: number, descriptionMax: number): PackSnapshot => ({
-    ref: input.ref,
-    sha: input.sha,
-    contentHash: packContentHash(index.entries),
-    ...(index.entries.some((e) => e.layout === 'plugin')
-      ? { legacyContentHash: packContentHash(index.entries.filter((e) => e.layout !== 'plugin')) }
-      : {}),
-    adapter: index.adapter,
-    items: index.entries.slice(0, MAX_PACK_ITEMS).map((e) => {
+  const build = (filesPerItem: number, descriptionMax: number, lean: boolean): PackSnapshot => {
+    let cut = false;
+    const items = index.entries.slice(0, MAX_PACK_ITEMS).map((e) => {
       const it = packItemOf(e, input.name);
+      const total = Object.keys(e.files).length;
+      const files = it.files.slice(0, filesPerItem);
+      if (total > files.length || it.description.length > descriptionMax || lean) cut = true;
+      const { skillRefs: _r, declaredSkills: _d, tools: _t, ...rest } = it;
       return {
-        ...it,
+        ...(lean ? rest : it),
         description: it.description.slice(0, descriptionMax),
-        files: it.files.slice(0, filesPerItem),
+        files,
       };
-    }),
-    issues: index.issues
-      .slice(0, 100)
-      .map((i) => ({ path: i.path.slice(0, 300), message: i.message.slice(0, 500) })),
-    notes: index.notes.slice(0, 60).map((n) => n.slice(0, 300)),
-    license: index.license,
-    copyright: index.copyright,
-    hasScripts: index.hasScripts,
-  });
+    });
+    return {
+      ref: input.ref,
+      sha: input.sha,
+      contentHash: packContentHash(index.entries),
+      ...(index.entries.some((e) => e.layout === 'plugin')
+        ? { legacyContentHash: packContentHash(index.entries.filter((e) => e.layout !== 'plugin')) }
+        : {}),
+      adapter: index.adapter,
+      items,
+      issues: index.issues
+        .slice(0, 100)
+        .map((i) => ({ path: i.path.slice(0, 300), message: i.message.slice(0, 500) })),
+      notes: index.notes.slice(0, 60).map((n) => n.slice(0, 300)),
+      license: index.license,
+      copyright: index.copyright,
+      hasScripts: index.hasScripts,
+      ...(cut || index.entries.length > MAX_PACK_ITEMS ? { trimmed: true } : {}),
+    };
+  };
   // The hashes cover every file; the lists of files and the descriptions are for the review screen, so a very large pack gets
-  // shorter lists rather than a message the connection would refuse.
-  for (const [files, desc] of [
-    [300, 1024],
-    [60, 600],
-    [12, 300],
-    [3, 160],
+  // shorter lists rather than a message the connection would refuse. The last step also drops the advisory lists (tools and
+  // skill hints); what the rest of a snapshot can hold is bounded per item, so if even that is too big the pack is refused
+  // with a clear error instead of a message that would be cut off.
+  for (const [files, desc, lean] of [
+    [300, 1024, false],
+    [60, 600, false],
+    [12, 300, false],
+    [3, 160, false],
+    [0, 120, true],
   ] as const) {
-    const snap = build(files, desc);
-    if (JSON.stringify(snap).length <= PACK_SNAPSHOT_MAX_BYTES) return snap;
+    const snap = build(files, desc, lean);
+    if (wireBytes(snap) <= PACK_SNAPSHOT_MAX_BYTES) return snap;
   }
-  return build(0, 120);
+  throw new Error(
+    `the pack has too many capabilities (${index.entries.length}) to review as one snapshot: split it into smaller packs`,
+  );
 }
 
 // -------------------------------------------------------------------------------------------------------- untrusted text
