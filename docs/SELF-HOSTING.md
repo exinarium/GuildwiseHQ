@@ -229,6 +229,8 @@ Exit codes of `guildwise-runner start`: `0` stopped by a signal; `2` the server 
   ```
 
   On Linux, copy it to `/etc/ca-certificates/extra/` and run `update-ca-certificates`. On macOS, open it and add it to the Keychain. On Windows, install it into the trusted root store.
+
+  The workstation runner is a Node program and does not use the system store. Point it at the file with `NODE_EXTRA_CA_CERTS`: for pairing, `NODE_EXTRA_CA_CERTS=/path/to/root.crt guildwise-runner pair ...`; for the installed service, a systemd drop-in (`systemctl --user edit aom-runner`) with `Environment=NODE_EXTRA_CA_CERTS=/path/to/root.crt`. Without it the runner cannot connect or update itself.
 - The bundled Caddy configuration sends HSTS for every host except `localhost`.
 - If you put your own reverse proxy in front, keep the `Host` header, pass WebSocket upgrades (`/api/ws`, `/api/runner/ws`), and do not strip the security headers. `/sw.js` must not be cached.
 - To open the app from a second address (for example a LAN IP), list it in `AOM_EXTRA_ORIGINS`, then restart. Only list origins you control.

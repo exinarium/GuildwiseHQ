@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-27
+
+Runner 0.1.62. Workstations update themselves; pack agents on seats need 0.1.62.
+
 ### Added
 
 - CEO: a new signal flags a high-risk card (review risk "high") that has waited more than 24 hours for approval, counted from when it started waiting. Report only; it does not wake the CEO unless you add it to the urgent signals.
@@ -23,11 +27,12 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - The in-app Help and page help were checked against the current app and updated section by section.
 - Removed the unused CEO cooling-off setting (`delayMinutes`); saved policies that contain it still load.
 - The retired `.aom/test-env.json` is no longer read.
+- Self-hosting: a runner connecting to a server with a private certificate authority needs `NODE_EXTRA_CA_CERTS` (docs/SELF-HOSTING.md).
 
 ### Fixed
 
 - A bare skill key that is a playbook or a persona (`release`) is no longer rewritten to a pack skill of the same name when skills are qualified, and the key migration keeps it.
-- Skills given to an agent: the skills added to a role with Extend now reach every agent on the role, in chats, sessions and card shifts alike, as loadable skills in the `# Capabilities` index and the runtime's skills folder. Before, chats got only the skills stored on the agent at hire, and card shifts listed the extension's skills as plain text only.
+- Skills given to an agent (thanks to @Creative2911, #1): the skills added to a role with Extend now reach every agent on the role, in chats, sessions and card shifts alike, as loadable skills in the `# Capabilities` index and the runtime's skills folder. Before, chats got only the skills stored on the agent at hire, and card shifts listed the extension's skills as plain text only.
 - A bare pack skill name typed into the hire form or a role extension (`bmad-prd`) is stored as the pack's full key (`bmad-method:bmad-prd`) when exactly one pack has it, instead of showing as "not found in the registry". The data migration `pack-skill-keys-2026-10` does the same for existing agents and extensions.
 - Hiring with an empty Skills box gives the agent its role's skills (the form sent an empty list, which hired with none).
 - An agent's skills follow its role: a new role version brings its new skills, and the agent's own additions and removals stay (`AgentPermissionsRebased` carries the skills).
