@@ -87,7 +87,7 @@ export function slugify(input: string, max = 40): string {
   return s.slice(0, max).replace(/-+$/g, '');
 }
 
-/** `<prefix><ref-lowercase>-<slug(title, 40)>`, e.g. `aom/web-12-add-login-page` (section 13.5). */
+/** `<prefix><ref-lowercase>-<slug(title, 40)>`, e.g. `guildwise/web-12-add-login-page` (section 13.5). */
 export function branchName(prefix: string, ref: string, title: string): string {
   const slug = slugify(title, 40);
   return `${prefix}${ref.toLowerCase()}${slug ? `-${slug}` : ''}`;

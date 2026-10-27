@@ -14,18 +14,24 @@ import { isSafeGitRef } from '../safe.ts';
 export const RUNNER_OWNED_BRANCH_PREFIXES = [
   'guildwise/saved-work/',
   'conflict/',
+  'guildwise/integration/',
+  /** Temporary integration branches of runners before the rename. */
   'aom-integration/',
 ] as const;
-/** Agent card branches (the default branch prefix; a project can choose another one). */
-export const CARD_BRANCH_PREFIX = 'aom/';
+/** Agent card branches (the default branch prefix of new projects; a project can choose another one). */
+export const CARD_BRANCH_PREFIX = 'guildwise/';
+/** The default card branch prefix before the rename: projects created earlier keep it. */
+export const LEGACY_CARD_BRANCH_PREFIX = 'aom/';
+/** Every default card branch prefix, current first. */
+export const CARD_BRANCH_PREFIXES = [CARD_BRANCH_PREFIX, LEGACY_CARD_BRANCH_PREFIX] as const;
 
 /** A branch the runner owns: never the agent's doing, never a candidate working branch. */
 export const isRunnerOwnedBranch = (name: string): boolean =>
   RUNNER_OWNED_BRANCH_PREFIXES.some((p) => name.startsWith(p));
 
-/** A branch that is not a sensible working branch: runner-owned, or an agent card branch (`aom/`). */
+/** A branch that is not a sensible working branch: runner-owned, or an agent card branch (`guildwise/`, legacy `aom/`). */
 export const isNotWorkingBranchCandidate = (name: string): boolean =>
-  isRunnerOwnedBranch(name) || name.startsWith(CARD_BRANCH_PREFIX);
+  isRunnerOwnedBranch(name) || CARD_BRANCH_PREFIXES.some((p) => name.startsWith(p));
 
 // ------------------------------------------------------------------------------------------- cadence
 
@@ -121,8 +127,8 @@ export const HygieneRepoSpecSchema = z.object({
   /** Where `workingBranch` came from: the active phase, or the repository. */
   branchSource: z.enum(['phase', 'repo']).nullable(),
   phaseRef: z.string().optional(),
-  /** The project's agent-branch prefix (`aom/`): only branches under it are ever deleted. */
-  branchPrefix: z.string().default('aom/'),
+  /** The project's agent-branch prefix (`guildwise/`, or `aom/` for older projects): only branches under it are ever deleted. */
+  branchPrefix: z.string().default(CARD_BRANCH_PREFIX),
   /** Branches of finished or cancelled cards: deleted locally when merged into the working branch. */
   finishedBranches: z.array(z.string()).default([]),
   /** The repository's main branch when the project named one (a branch whose patches are all there counts as migrated). */

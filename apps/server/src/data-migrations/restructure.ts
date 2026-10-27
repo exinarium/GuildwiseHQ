@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   ALL_INTEREST_KINDS,
+  CARD_BRANCH_PREFIX,
   type DeliverySpec,
   defaultWindowHours,
   type FeedVerdict,
@@ -473,7 +474,7 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
             key: plans[n]?.key as string,
             name: s.name,
             workflowKey: 'feed',
-            branchPrefix: 'aom/',
+            branchPrefix: CARD_BRANCH_PREFIX,
             workingBranch: 'main',
             subCategories: [],
             vaultFolder: null,
@@ -758,7 +759,7 @@ async function migrateResearchOnly(tx: Queryable, c: OrgCtx, i: Row): Promise<vo
           key,
           name: i.name,
           workflowKey: 'feed',
-          branchPrefix: 'aom/',
+          branchPrefix: CARD_BRANCH_PREFIX,
           workingBranch: 'main',
           subCategories: [],
           vaultFolder: null,

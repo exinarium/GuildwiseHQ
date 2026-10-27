@@ -3,7 +3,7 @@ import { type CommitAs, isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
-import { withIntegrationWorktree } from './integration.ts';
+import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -87,7 +87,7 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
           repoPath,
           dir: join(input.integrationDir, `${input.ref}-sync`),
           root: input.integrationDir,
-          tempBranch: `aom-integration/${input.ref.toLowerCase()}-sync`,
+          tempBranch: integrationBranchName(`${input.ref.toLowerCase()}-sync`),
           startPoint: `origin/${working}`,
         },
         async (integration): Promise<SyncMainOutcome | 'retry'> => {

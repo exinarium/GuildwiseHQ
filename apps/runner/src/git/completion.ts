@@ -5,7 +5,7 @@ import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
-import { withIntegrationWorktree } from './integration.ts';
+import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
@@ -76,7 +76,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   for (const ref of [
     p.branchName,
     p.baseBranch,
-    `aom-integration/${p.ref.toLowerCase()}`,
+    integrationBranchName(p.ref.toLowerCase()),
     ...(p.remoteBranch ? [p.remoteBranch] : []),
     ...(p.prBranchPrefix && p.ticket ? [`${p.prBranchPrefix}/${p.ticket}`] : []),
   ])
@@ -224,7 +224,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
 
   const env = commitEnv(await requireCommitIdentity(repoPath, p.commitAs));
   const integration = join(input.integrationDir, p.ref);
-  const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
+  const tempBranch = integrationBranchName(p.ref.toLowerCase());
   const result = await withIntegrationWorktree(
     { repoPath, dir: integration, root: input.integrationDir, tempBranch, startPoint },
     async (): Promise<FinalizeResult> => {

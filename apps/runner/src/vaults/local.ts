@@ -7,22 +7,25 @@ import { join, resolve, sep } from 'node:path';
  * commits. The marker file tells the runner the folder is a vault it created (and keeps `readVaultContext` and the sync
  * code from treating an arbitrary folder as one).
  */
-export const LOCAL_VAULT_MARKER = '.aom-local-vault';
+export const LOCAL_VAULT_MARKER = '.guildwise-local-vault';
+/** The marker earlier runners wrote: still recognised when reading. */
+export const LEGACY_LOCAL_VAULT_MARKER = '.aom-local-vault';
 
 /** Creates the folder and its marker. Idempotent. */
 export function ensureLocalVault(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  const marker = join(dir, LOCAL_VAULT_MARKER);
-  if (!existsSync(marker))
+  if (!hasMarker(dir))
     writeFileSync(
-      marker,
-      `${JSON.stringify({ kind: 'aom-local-vault', createdAt: new Date().toISOString() })}\n`,
+      join(dir, LOCAL_VAULT_MARKER),
+      `${JSON.stringify({ kind: 'guildwise-local-vault', createdAt: new Date().toISOString() })}\n`,
     );
 }
 
-/** Is `dir` a local vault folder (and not a clone)? */
-export const isLocalVaultDir = (dir: string): boolean =>
-  existsSync(join(dir, LOCAL_VAULT_MARKER)) && !existsSync(join(dir, '.git'));
+const hasMarker = (dir: string): boolean =>
+  existsSync(join(dir, LOCAL_VAULT_MARKER)) || existsSync(join(dir, LEGACY_LOCAL_VAULT_MARKER));
+
+/** Is `dir` a local vault folder (and not a clone)? Either marker counts. */
+export const isLocalVaultDir = (dir: string): boolean => hasMarker(dir) && !existsSync(join(dir, '.git'));
 
 /**
  * A project vault that got a remote repository after it was a local folder: the folder is set aside (never deleted: the

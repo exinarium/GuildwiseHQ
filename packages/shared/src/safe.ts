@@ -18,7 +18,7 @@ export function isSafeGitRef(ref: string): boolean {
   return ref.split('/').every((c) => c !== '' && !c.startsWith('.') && !c.endsWith('.lock'));
 }
 
-/** A branch prefix such as `aom/` (or empty): `<prefix>x` must be a valid ref. */
+/** A branch prefix such as `guildwise/` (or empty): `<prefix>x` must be a valid ref. */
 export function isSafeBranchPrefix(prefix: string): boolean {
   return prefix === '' || isSafeGitRef(`${prefix}x`);
 }
@@ -117,7 +117,7 @@ export const RemoteUrlSchema = z.string().superRefine((v, ctx) => {
 export const GitRefSchema = z.string().refine(isSafeGitRef, { message: 'not a valid git branch name' });
 export const BranchPrefixSchema = z
   .string()
-  .refine(isSafeBranchPrefix, { message: 'not a valid branch prefix (for example "aom/")' });
+  .refine(isSafeBranchPrefix, { message: 'not a valid branch prefix (for example "guildwise/")' });
 export const PrBranchPrefixSchema = z.string().refine(isSafePrBranchPrefix, {
   message:
     'not a valid branch prefix (letters, digits, . _ - and /, at most 40 characters, for example "pieter")',

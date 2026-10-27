@@ -7,6 +7,7 @@ import { readVaultContext } from '../src/vaults/context.ts';
 import {
   ensureLocalVault,
   isLocalVaultDir,
+  LEGACY_LOCAL_VAULT_MARKER,
   LOCAL_VAULT_MARKER,
   localVaultWarning,
   setAsideLocalVault,
@@ -54,6 +55,25 @@ const write = (path: string, content: string, over: Record<string, unknown> = {}
     commitMessage: 'msg',
     ...over,
   });
+
+describe('local vault marker', () => {
+  it('writes .guildwise-local-vault and accepts the legacy .aom-local-vault when reading', () => {
+    expect(LOCAL_VAULT_MARKER).toBe('.guildwise-local-vault');
+    const root = tmp('aom-local-vault-');
+    const fresh = join(root, 'fresh');
+    ensureLocalVault(fresh);
+    expect(existsSync(join(fresh, '.guildwise-local-vault'))).toBe(true);
+    expect(existsSync(join(fresh, '.aom-local-vault'))).toBe(false);
+    expect(isLocalVaultDir(fresh)).toBe(true);
+    const old = join(root, 'old');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, LEGACY_LOCAL_VAULT_MARKER), '{}\n');
+    expect(isLocalVaultDir(old)).toBe(true);
+    ensureLocalVault(old); // an existing legacy marker is not duplicated
+    expect(existsSync(join(old, '.guildwise-local-vault'))).toBe(false);
+    expect(isLocalVaultDir(join(root, 'none'))).toBe(false);
+  });
+});
 
 describe('local vaults (project-graphs design section 3)', () => {
   it('configure creates the folder with its marker and reports its path; nothing is cloned, synced or timed', async () => {

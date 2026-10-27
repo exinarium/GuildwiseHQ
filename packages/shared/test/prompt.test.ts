@@ -369,10 +369,18 @@ describe('renderHandoffs', () => {
 describe('runner-owned branches', () => {
   it('recognises the branches the runner creates and agent card branches', async () => {
     const { isRunnerOwnedBranch, isNotWorkingBranchCandidate } = await import('../src/index.ts');
-    for (const b of ['guildwise/saved-work/2026-10-10', 'conflict/a', 'aom-integration/b'])
+    for (const b of [
+      'guildwise/saved-work/2026-10-10',
+      'guildwise/integration/web-1',
+      'conflict/a',
+      'aom-integration/b',
+    ])
       expect(isRunnerOwnedBranch(b)).toBe(true);
     expect(isRunnerOwnedBranch('aom/web-1-x')).toBe(false);
+    expect(isRunnerOwnedBranch('guildwise/web-1-x')).toBe(false);
     expect(isNotWorkingBranchCandidate('aom/web-1-x')).toBe(true);
+    expect(isNotWorkingBranchCandidate('guildwise/web-1-x')).toBe(true);
+    expect(isNotWorkingBranchCandidate('guildwise/integration/web-1')).toBe(true);
     expect(isNotWorkingBranchCandidate('main')).toBe(false);
     expect(isNotWorkingBranchCandidate('release/aom')).toBe(false);
   });
