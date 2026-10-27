@@ -72,9 +72,15 @@ export function Vaults() {
           title="No vault yet"
           description="A vault is a git repository of markdown notes your agents read. Decisions and standing orders are written to it."
           action={
-            <Button variant="primary" onClick={() => setRegistering(true)}>
-              Register a vault
-            </Button>
+            canRegister ? (
+              <Button variant="primary" onClick={() => setRegistering(true)}>
+                Register a vault
+              </Button>
+            ) : (
+              <p className="text-sm text-muted" data-testid="vault-ask-admin">
+                Ask an Owner or Admin to register one.
+              </p>
+            )
           }
         />
       )}

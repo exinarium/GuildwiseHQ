@@ -5,7 +5,9 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { answerText, choiceFor, defaultOption, deskKindLabel, sortDeskItems } from '../lib/desk.ts';
-import { AgentAnsweredBy, agentAnswerLabel, DeskItem } from '../pages/Desk.tsx';
+import { canUseIntake } from '../lib/intake.ts';
+import { AgentAnsweredBy, agentAnswerLabel, Desk, DeskItem } from '../pages/Desk.tsx';
+import { jsonRes, meFor } from './ceo-fixtures.tsx';
 
 const base: DeskItemDto = {
   id: '0192f3a0-0000-7000-8000-000000000001',
@@ -290,5 +292,66 @@ describe('answers by agents', () => {
   it('shows the CEO badge on an answered item', () => {
     render(<AgentAnsweredBy item={answered('ceo')} />);
     expect(screen.getByTestId('answered-by').textContent).toContain('CEO decision · Johnny');
+  });
+});
+
+describe('the Intake button on the desk', () => {
+  const org = (role: 'owner' | 'admin' | 'member', features: Record<string, boolean> = {}) => ({
+    role,
+    features,
+  });
+
+  it('canUseIntake: Owner and Admin with integrations on; never a Member, a missing org or integrations off', () => {
+    expect(canUseIntake(org('owner'))).toBe(true);
+    expect(canUseIntake(org('admin'))).toBe(true);
+    expect(canUseIntake(org('owner', { integrations: true }))).toBe(true);
+    expect(canUseIntake(org('member'))).toBe(false);
+    expect(canUseIntake(org('owner', { integrations: false }))).toBe(false);
+    expect(canUseIntake(org('admin', { integrations: false }))).toBe(false);
+    expect(canUseIntake(null)).toBe(false);
+    expect(canUseIntake(undefined)).toBe(false);
+  });
+
+  function renderDesk(role: 'owner' | 'admin' | 'member', features: Record<string, boolean> = {}) {
+    const me = meFor(role);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/auth/me') return jsonRes({ ...me, activeOrg: { ...me.activeOrg, features } });
+        if (url.startsWith('/api/desk'))
+          return jsonRes({
+            items: [],
+            counts: { open: 0, blocking: 0, urgent: 0, ceoDecisions: 0 },
+          });
+        return jsonRes({});
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <Desk />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it.each(['owner', 'admin'] as const)('shows it to the %s', async (role) => {
+    renderDesk(role);
+    expect(await screen.findByTestId('intake-button')).toBeTruthy();
+  });
+
+  it('hides it from a Member', async () => {
+    renderDesk('member');
+    await screen.findByTestId('desk-counts');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('intake-button')).toBeNull();
+  });
+
+  it('hides it from everyone when integrations are off', async () => {
+    renderDesk('owner', { integrations: false });
+    await screen.findByTestId('desk-counts');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('intake-button')).toBeNull();
   });
 });

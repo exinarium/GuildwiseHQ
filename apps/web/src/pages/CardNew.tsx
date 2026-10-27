@@ -93,9 +93,17 @@ export function CardNew() {
     ...(research && !enabledExtra.some((w) => w.key === research.key) ? [research] : []),
   ];
 
+  // `?type=research` (the research tab's links) preselects a card type, if the project or an offered workflow runs it.
+  const typeParam = params.get('type');
+  const initialType =
+    typeParam && [...workflow.cardTypes, ...extras.flatMap((w) => w.cardTypes)].some((t) => t === typeParam)
+      ? typeParam
+      : undefined;
+
   return (
     <CardNewForm
       key={project.id}
+      initialType={initialType}
       projectId={project.id}
       projectKey={project.key}
       projectKeys={projects.data.map((p) => p.key)}
@@ -125,6 +133,7 @@ export function CardNewForm({
   mockUi = false,
   designDefault = false,
   projectDefault,
+  initialType,
 }: {
   projectId: string;
   projectKey: string;
@@ -142,11 +151,15 @@ export function CardNewForm({
   designDefault?: boolean;
   /** How the project lands finished work (the default a new card follows). */
   projectDefault?: CompletionAction | undefined;
+  /** The card type to start on (from `?type=`); the first type of the project's workflow when absent. */
+  initialType?: string | undefined;
 }) {
   const nav = useNavigate();
   const create = useCreateCard();
   const toast = useToast();
-  const [v, setV] = useState<CardFormValues>(() => emptyForm(projectWorkflow.cardTypes[0] ?? ''));
+  const [v, setV] = useState<CardFormValues>(() =>
+    emptyForm(initialType ?? projectWorkflow.cardTypes[0] ?? ''),
+  );
   const [picked, setPicked] = useState<{ type: string; key: string } | null>(null);
   // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
   // When the project enabled more than one workflow for the type, the default (or the user's pick) decides.

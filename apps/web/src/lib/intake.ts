@@ -1,5 +1,16 @@
-import type { DeskItemDto, EscalationStep, IntakeDto } from '@aom/shared';
+import type { DeskItemDto, EscalationStep, IntakeDto, MeResponse } from '@aom/shared';
 import { type ExternalRef, parseExternalRef } from '@aom/shared';
+
+/**
+ * Whether the signed-in user may use intake: the server needs an Owner or Admin in an organization whose plan has
+ * integrations. The sidebar, the desk, the palette and every link to /intake follow this.
+ */
+export function canUseIntake(
+  org: Pick<NonNullable<MeResponse['activeOrg']>, 'role' | 'features'> | null | undefined,
+): boolean {
+  if (!org) return false;
+  return (org.role === 'owner' || org.role === 'admin') && org.features?.integrations !== false;
+}
 
 /** What the Intake form will treat the input as: a Jira key, a GitHub issue, or a plain description. */
 export function describeSource(text: string): { label: string; ref: ExternalRef | null } {

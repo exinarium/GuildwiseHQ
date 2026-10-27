@@ -13,6 +13,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
+import { useMe } from '../api/queries/auth.ts';
 import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
@@ -67,6 +68,7 @@ import {
   sortDeskItems,
 } from '../lib/desk.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
+import { canUseIntake } from '../lib/intake.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
@@ -111,6 +113,7 @@ function DeskSkeleton() {
 }
 
 export function Desk() {
+  const me = useMe();
   const open = useDesk({ status: 'open' });
   const closed = useDesk({ status: 'closed' });
   const [chatOpen, setChatOpen] = useState(false);
@@ -194,9 +197,11 @@ export function Desk() {
         actions={
           <>
             <Button onClick={() => setShowLedger(true)}>Add to ledger</Button>
-            <Button data-testid="intake-button" onClick={() => nav('/intake')}>
-              Intake
-            </Button>
+            {canUseIntake(me.data?.activeOrg) && (
+              <Button data-testid="intake-button" onClick={() => nav('/intake')}>
+                Intake
+              </Button>
+            )}
             <Button onClick={() => setChatOpen(true)}>
               <MessageSquare aria-hidden="true" className="size-4" />
               Chat

@@ -65,16 +65,28 @@ function renderWith(ui: React.ReactNode, path = '/') {
 
 describe('Settings: time zone (the BA no longer reports to you)', () => {
   let prefs = { dailyAt: '08:00', timezone: 'Africa/Johannesburg' as string | null };
+  let mine: MeResponse = me('Africa/Johannesburg');
+  let reportingFails = false;
+  const asRole = (role: 'owner' | 'admin' | 'member', timezone: string | null) => {
+    mine = {
+      ...me(timezone),
+      activeOrg: { id: U(9), name: 'Acme', role, status: 'active', plan: 'p', planName: 'P', features: {} },
+    } as unknown as MeResponse;
+  };
   beforeEach(() => {
     prefs = { dailyAt: '08:00', timezone: 'Africa/Johannesburg' };
+    reportingFails = false;
+    asRole('owner', 'Africa/Johannesburg');
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const m = init?.method ?? 'GET';
       const body = init?.body ? JSON.parse(String(init.body)) : {};
-      if (url.endsWith('/reporting') && m === 'PUT') prefs = { ...prefs, ...body };
+      if (url.endsWith('/auth/me')) return json(mine);
       if (url.endsWith('/auth/timezone') && m === 'PUT') {
-        prefs = { ...prefs, timezone: body.timezone };
-        return json(me(body.timezone));
+        mine = { ...mine, user: { ...mine.user, timezone: body.timezone } };
+        return json(mine);
       }
+      if (url.endsWith('/reporting') && reportingFails) return json({ error: 'boom' }, 500);
+      if (url.endsWith('/reporting') && m === 'PUT') prefs = { ...prefs, ...body };
       return json({ ...prefs, effectiveTimezone: prefs.timezone ?? 'UTC', canEdit: true });
     });
   });
@@ -87,22 +99,53 @@ describe('Settings: time zone (the BA no longer reports to you)', () => {
     expect(screen.queryByText(/Your BA reports to you/)).toBeNull();
   });
 
-  it('edits the time zone; the text names the CEO daily report time', async () => {
+  it('Owner: shows their own zone, and the text names the CEO daily report time on their clock', async () => {
     renderWith(<Settings />);
     const zone = (await screen.findByTestId('timezone')) as HTMLSelectElement;
-    expect(zone.value).toBe('Africa/Johannesburg');
-    expect(screen.getByText(/daily report is written at 08:00 on your clock/)).toBeTruthy();
+    await waitFor(() => expect(zone.value).toBe('Africa/Johannesburg'));
+    await waitFor(() =>
+      expect(screen.getByTestId('timezone-help').textContent).toMatch(
+        /daily report is written at 08:00 on your clock.*Reporting & alerts tab on the CEO's page/,
+      ),
+    );
     await userEvent.selectOptions(zone, 'UTC');
     await waitFor(() => expect(bodyOf('PUT', '/auth/timezone')).toEqual({ timezone: 'UTC' }));
   });
 
-  it('offers the browser zone when it differs', async () => {
+  it("non-Owner: shows their own zone, not the Owner's, and says the report follows the Owner's zone", async () => {
+    asRole('member', 'Europe/Amsterdam');
+    renderWith(<Settings />);
+    const zone = (await screen.findByTestId('timezone')) as HTMLSelectElement;
+    await waitFor(() => expect(zone.value).toBe('Europe/Amsterdam'));
+    await waitFor(() => {
+      const help = screen.getByTestId('timezone-help').textContent ?? '';
+      expect(help).toContain("follows the Owner's zone (Africa/Johannesburg)");
+      expect(help).toContain('written at 08:00');
+      expect(help).not.toContain('on your clock');
+    });
+  });
+
+  it('still shows the zone picker when the reporting settings fail to load', async () => {
+    reportingFails = true;
+    renderWith(<Settings />);
+    const zone = (await screen.findByTestId('timezone')) as HTMLSelectElement;
+    expect(zone.value).toBe('Africa/Johannesburg');
+    expect(screen.getByTestId('timezone-help').textContent).not.toMatch(/daily report/);
+  });
+
+  it('offers the browser zone when it differs from your own zone', async () => {
+    asRole('member', 'Europe/Amsterdam');
     const fmt = vi
       .spyOn(Intl, 'DateTimeFormat')
       .mockImplementation(
         () =>
           ({ resolvedOptions: () => ({ timeZone: 'Europe/Amsterdam' }) }) as unknown as Intl.DateTimeFormat,
       );
+    const { unmount } = renderWith(<Settings />);
+    await screen.findByTestId('timezone');
+    expect(screen.queryByTestId('use-browser-zone')).toBeNull();
+    unmount();
+    asRole('member', 'Africa/Johannesburg');
     renderWith(<Settings />);
     const use = await screen.findByTestId('use-browser-zone');
     expect(use.textContent).toContain('Europe/Amsterdam');

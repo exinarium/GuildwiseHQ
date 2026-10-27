@@ -11,6 +11,7 @@ import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
 import { useContact } from '../../extension/contact.tsx';
 import { ext } from '../../extension/index.ts';
+import { canUseIntake } from '../../lib/intake.ts';
 import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
@@ -129,7 +130,7 @@ function Shell({ name, live }: { name: string; live: string }) {
     canManage,
     features: org?.features ?? {},
   });
-  const intakeOn = canManage && org?.features?.integrations !== false;
+  const intakeOn = canUseIntake(org);
   const intake = intakeOn
     ? { to: '/intake', label: 'Intake' }
     : { to: project ? `/cards/new?project=${project.key}` : '/cards/new', label: 'New' };

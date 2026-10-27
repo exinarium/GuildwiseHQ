@@ -291,6 +291,50 @@ describe('the Costs page', () => {
     expect(calls.some((c) => c.url.endsWith('/api/costs'))).toBe(true);
   });
 
+  describe('project filter', () => {
+    const proj = (n: number, key: string, name: string) => ({
+      id: U(n),
+      orgId: U(1),
+      key,
+      name,
+      workflowKey: 'code',
+      branchPrefix: 'aom',
+      status: 'active',
+      myRole: 'owner',
+    });
+    const projects = () => ({
+      projects: [proj(5, 'TOY', 'Toy'), proj(6, 'NEWS', 'AI news'), proj(8, 'IDLE', 'No spend yet')],
+    });
+    const scoped = (c: { url: string }) =>
+      c.url.includes(`projectId=${U(5)}`)
+        ? report({ byProject: [report().byProject[0] as CostsReport['byProject'][number]] })
+        : report();
+
+    it('lists projects without spend, and keeps the others after one is selected', async () => {
+      const user = userEvent.setup();
+      const calls = stub({ '/api/costs': scoped, '/api/projects': projects });
+      wrap(<Costs />);
+      const select = await screen.findByLabelText('Project');
+      await waitFor(() => expect(within(select).getByRole('option', { name: /IDLE/ })).toBeInTheDocument());
+      await user.selectOptions(select, U(5));
+      await waitFor(() => expect(calls.some((c) => c.url.includes(`projectId=${U(5)}`))).toBe(true));
+      await waitFor(() => expect(screen.getAllByTestId('costs-project-row')).toHaveLength(1));
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['All projects', 'TOY Toy', 'NEWS AI news', 'IDLE No spend yet']);
+      expect((select as HTMLSelectElement).value).toBe(U(5));
+    });
+
+    it('falls back to the projects in the report (archived ones with spend) when the active list is missing them', async () => {
+      stub({ '/api/costs': () => report() });
+      wrap(<Costs />);
+      const select = await screen.findByLabelText('Project');
+      expect(within(select).getAllByRole('option')).toHaveLength(3);
+    });
+  });
+
   it('changes the range and keeps it in the export link; saves the currency', async () => {
     const user = userEvent.setup();
     const calls = stub({ '/api/costs': () => report(), '/api/costs/settings': () => ({}) });

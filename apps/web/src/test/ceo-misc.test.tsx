@@ -38,6 +38,10 @@ describe('navigation', () => {
     expect(lit('/p/SHOP/backlog')).toEqual(['backlog']);
     expect(lit('/p/SHOP/environments')).toEqual(['environments']);
     expect(lit('/p/SHOP/research')).toEqual(['research']);
+    // Project pages without an entry of their own keep the Board lit.
+    expect(lit('/p/SHOP/archive')).toEqual(['board']);
+    expect(lit('/p/SHOP/phases/3')).toEqual(['board']);
+    expect(lit('/p/SHOP/feed')).toEqual(['board']);
   });
   it("highlights only Integrations on a workstation's Integrations page, and Workstations elsewhere under it", () => {
     const { sections, footer } = buildNav({ projectKey: 'SHOP', canManage: true });

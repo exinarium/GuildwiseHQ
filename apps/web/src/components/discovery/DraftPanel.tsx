@@ -2,8 +2,10 @@ import type { DiscoveryDoc, DiscoveryStateDto } from '@aom/shared';
 import { FileText } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { useMe } from '../../api/queries/auth.ts';
 import { useHandToBa, useRequestDraft, useRequestValidation } from '../../api/queries/discovery.ts';
 import { useChangeDocumentStatus, useDocument, useDocumentVersion } from '../../api/queries/documents.ts';
+import { canUseIntake } from '../../lib/intake.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { Markdown } from '../chat/Markdown.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, Spinner } from '../ui.tsx';
@@ -73,6 +75,7 @@ function DocBlock({
   state: DiscoveryStateDto;
   canManage: boolean;
 }) {
+  const me = useMe();
   const id = state.threadId;
   const status = useChangeDocumentStatus(doc.id);
   const validate = useRequestValidation(id);
@@ -171,7 +174,7 @@ function DocBlock({
             Handed off. Waiting for a BA to come online; the intake starts on its own.
           </p>
         )}
-        {doc.status === 'handed_off' && state.config.intakeId && (
+        {doc.status === 'handed_off' && state.config.intakeId && canUseIntake(me.data?.activeOrg) && (
           <Link
             to={`/intake/${state.config.intakeId}`}
             className="inline-flex h-9 items-center rounded-control border border-control px-3 text-sm font-medium hover:bg-sunken"
