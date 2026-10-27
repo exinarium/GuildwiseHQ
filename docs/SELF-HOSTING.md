@@ -174,7 +174,7 @@ The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Cod
 
 ### Pair by hand
 
-1. In the app, open **Workstations > Pair workstation** and copy the one-time code. It is valid for 10 minutes and for one pairing attempt.
+1. In the app, open **Workstations > Pair with a code** and copy the one-time code. It is valid for 10 minutes and for one pairing attempt.
 2. On the workstation:
 
    ```bash

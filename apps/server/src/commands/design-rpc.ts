@@ -42,7 +42,7 @@ const errText = (err: unknown): string => {
   return err instanceof Error ? err.message : String(err);
 };
 
-/** The organization the BA designs for: the owner who is chatting with their own BA (nobody else changes it). */
+/** The organization the BA designs for: the Owner or Admin who is chatting with the BA (nobody else changes it). */
 async function designerOf(
   ctx: Ctx,
   shift: Row,

@@ -1,5 +1,5 @@
 ### Your desk
-Desk items and kinds, the decision desk, blocking, answering questions, standing orders, the ledger.
+Desk items and kinds, your desk, blocking, answering questions, standing orders, the ledger.
 - Desk items: Each item shows:
 - CEO decisions: If you have a CEO, the things it decided for you appear under CEO decisions at the bottom of the desk (and under the CEO decisions filter). They are information: no notification, not blocking, and not counted in the open total.…
 - Blocking: An item is blocking when cards cannot move until you answer it. For example, a large merge waits for your approval, or an agent needs a decision before it can continue.

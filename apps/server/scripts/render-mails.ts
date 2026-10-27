@@ -66,7 +66,7 @@ const mails: Record<string, MailMessage> = {
   }),
   'scheduled-report': t.scheduledReportMail({
     to: 'ada@example.com',
-    subject: 'Floor report 2026-10-09',
+    subject: 'Organization report 2026-10-09',
     text: 'Shifts: 12\nCards done: 7\nNeeds you: 2',
     origin,
   }),

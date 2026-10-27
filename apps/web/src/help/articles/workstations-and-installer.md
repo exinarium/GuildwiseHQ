@@ -43,7 +43,7 @@ Choose whichever your organization provided. You can choose later and run `claud
 
 Only needed when the guided setup is not an option:
 
-1. Go to **Workstations** and click **Pair workstation** (or **Pair it with a code instead** in the Add a workstation window).
+1. Go to **Workstations** and click **Pair with a code** (or **Pair it with a code instead** in the Add a workstation window).
 2. Click **Generate pairing code** and copy the command it shows. The code (`XXXX-XXXX`) is valid for 10 minutes.
 3. On the computer, download or build the runner.
 4. Run the pair command, add your repository folders (`aom-runner repos add`), and start the runner as a service.

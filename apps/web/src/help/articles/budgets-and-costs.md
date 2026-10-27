@@ -13,7 +13,7 @@ You can see costs in several places:
 
 - **Project settings**: the month's spend in the header and a **Monthly budget** panel with a progress bar.
 - **Board header**: (e.g., "$9.00 of $10.00 this month") and a banner when near or over budget; each waiting card also says so in a [warning banner](/help/board-and-cards#reading-the-board).
-- **HR board**: each agent's cost this month and in total.
+- **Agents page**: each agent's cost this month and in total.
 - **A phase or a card**: what its shifts and BA work cost.
 - **Interests**: the spend and budget of the interest.
 - **The CEO's daily report**: a Spend section listing projects, cost and budget.

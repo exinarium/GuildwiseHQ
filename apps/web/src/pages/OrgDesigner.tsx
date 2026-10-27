@@ -664,7 +664,7 @@ function DepartmentsTab({ cat, projectId }: { cat: OrgCatalogueResponse; project
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        A department groups the roles and workflows of one function, so the HR board and the boards can be
+        A department groups the roles and workflows of one function, so the Agents page and the boards can be
         filtered by it.
       </p>
       {cat.canEdit && (
@@ -708,7 +708,9 @@ function DesignTab({ cat }: { cat: OrgCatalogueResponse }) {
   const [agentId, setAgentId] = useState('');
   const chosen = agentId || bas[0]?.id || '';
   if (!cat.canEdit)
-    return <p className="text-sm text-subtle">Only the organization owner designs with the BA.</p>;
+    return (
+      <p className="text-sm text-subtle">Only the organization's Owner and Admins design with the BA.</p>
+    );
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
@@ -719,7 +721,7 @@ function DesignTab({ cat }: { cat: OrgCatalogueResponse }) {
         <p className="text-sm text-subtle" data-testid="no-ba">
           Hire a business analyst on the{' '}
           <Link to="/agents?hire=ba" className="underline">
-            HR board
+            Agents page
           </Link>{' '}
           first.
         </p>

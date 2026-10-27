@@ -69,6 +69,13 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.28 Releases](#428-releases)
   - [4.29 Metrics](#429-metrics)
   - [4.30 Your settings](#430-your-settings)
+- [Discovery: from an idea to a PRD](#discovery-from-an-idea-to-a-prd)
+- [Boardroom: a debate with a Chair](#boardroom-a-debate-with-a-chair)
+  - [Choosing providers and models for Discovery and Boardroom](#choosing-providers-and-models-for-discovery-and-boardroom)
+  - [Other runtimes and model providers for agents](#other-runtimes-and-model-providers-for-agents)
+  - [Capabilities and packs](#capabilities-and-packs)
+  - [Starter gallery](#starter-gallery)
+  - [Playbooks and the / menu](#playbooks-and-the--menu)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -113,6 +120,7 @@ This guide is for people who have never worked with AI agents before. You do not
 - [Appendix B. More documentation](#appendix-b-more-documentation)
 
 <!-- /toc -->
+
 
 
 
@@ -306,7 +314,7 @@ A workstation is the computer where your agents will work. The guided installer 
 4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask to restart once. The installer carries on by itself when you sign in again.
 5. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
 
-**Pair with a code.** If you would rather not paste the long command, use **Pair workstation** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
+**Pair with a code.** If you would rather not paste the long command, use **Pair with a code** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
 
 ![The installer wizard, step 1: choose the computer](guide/assets/installer-choose.jpg)
 
@@ -724,7 +732,7 @@ Every shift records what it used (input, output and cache tokens and the model).
 - the **Costs** page (Owners and Admins): spend by project, agent, model and day for any date range, with an **Export CSV** button;
 - the **project settings** and the **board header** ("$9.00 of $10.00 this month");
 - each **agent card**, each **card** and each **phase**;
-- the **CEO's daily report** (older floor reports stay on the desk).
+- the **CEO's daily report** (older organization reports stay on the desk).
 
 ![The Costs page](guide/assets/costs.jpg)
 
@@ -753,7 +761,7 @@ against the one card in five that ran without it (the holdout, chosen by a hash 
 project's first index). For each group it shows the cards, the median billed input tokens with the middle half, and the
 median searching before the first edit and the median number of search calls. Only numbers are kept.
 
-The panel states a saving (for example "used 25% fewer billed input tokens", with the likely range) only when all of these
+The panel states a saving (the panel then states the measured difference in billed input tokens, with the likely range) only when all of these
 hold:
 
 - at least 10 finished cards in each group;
@@ -845,7 +853,7 @@ An **automation** (called a schedule before October 2026) is *a trigger and one 
 - **Ask the CEO** to look at something and put the answer on your desk as a notice (schedules that were made with "Ask the BA" now ask the CEO).
 - **Poll GitHub or Jira issues** and send each new one into **intake**.
 - **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
-- **E-mail a digest**: choose **Floor report (organization)** (the organization-wide facts of the day) or **Project summary**, at a time you choose. There is no interests digest here: an interest delivers its own digest (4.9).
+- **E-mail a digest**: choose **Organization report (the day's facts)** (the organization-wide facts of the day) or **Project summary**, at a time you choose. There is no interests digest here: an interest delivers its own digest (4.9).
 
 ![The automation wizard](guide/assets/schedule-wizard.jpg)
 
@@ -1160,7 +1168,7 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 ![The Reporting & alerts tab of the CEO page](guide/assets/ceo-reporting.jpg)
 
-**Where it runs.** The CEO lives on the Owner's most recently seen workstation that serves the organization (the one that last connected). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
+**Where it runs.** The CEO lives on the Owner's most recently seen workstation that serves the organization (the one that last connected). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until the CEO has a workstation the page says "Add a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
 **There is no training period.** The CEO decides what your policy allows from day one; the Owner reviews and corrects what it did (see **CEO decisions** on the Desk and the **Correct** buttons below). Organizations that had a CEO in training were graduated when this shipped.
 

@@ -253,7 +253,7 @@ export class DiscoveryService {
       if (!ceo)
         throw badRequest(
           'no_ceo',
-          'This organization has no CEO that can take part: choose "Owner only", or appoint a CEO first.',
+          'This organization has no CEO that can take part: choose "Owner only", or try again once your CEO is set up.',
         );
     }
     if (req.model && !isKnownChoice(req.model))

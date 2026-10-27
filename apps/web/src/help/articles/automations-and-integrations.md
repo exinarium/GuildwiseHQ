@@ -43,7 +43,7 @@ An action is what happens:
 - **Ask the CEO**: free-text instructions for your CEO (read-only; it reads the ledger, desk, vault and its snapshot) and the answer arrives as a notice on your desk. Older schedules that said "Ask the BA" now ask the CEO.
 - **Poll GitHub issues** or **Poll Jira issues**: new issues go into intake with the BA, one conversation each.
 - **Send a webhook**: POST JSON to a URL. Supports generic JSON, Slack incoming webhooks, Microsoft Teams. Signed and retried on failure.
-- **E-mail a digest**: the floor report (whole organization) or a project summary, sent at the time you set.
+- **E-mail a digest**: the organization report (whole organization) or a project summary, sent at the time you set.
 
 ## How a scan works {#how-a-scan-works}
 
@@ -69,7 +69,7 @@ When creating a webhook, the automation shows its secret once: the key for the s
 
 Use **Send test** to send a test delivery now (logged but never retried, not counted as a run).
 
-**E-mail digests**: the floor report or a project summary, sent from the site's mail account at the time you set.
+**E-mail digests**: the organization report or a project summary, sent from the site's mail account at the time you set.
 
 ## History {#history}
 

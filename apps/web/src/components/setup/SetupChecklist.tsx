@@ -144,7 +144,7 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
           className="inline-flex h-8 shrink-0 items-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
         >
           {step.id === 'workstation'
-            ? 'Pair'
+            ? 'Add'
             : step.id === 'team'
               ? 'Hire'
               : step.id === 'ba'

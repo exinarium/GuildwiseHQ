@@ -99,7 +99,7 @@ export function Workstations() {
         actions={
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
             <Button variant="secondary" className="max-sm:min-h-11" onClick={() => setPairOpen(true)}>
-              Pair workstation
+              Pair with a code
             </Button>
             <Button
               variant="primary"
@@ -441,7 +441,7 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
           setCopied(false);
         }
       }}
-      title="Pair workstation"
+      title="Pair with a code"
       description="Generate a one-time code, then run the command on the machine that will host your agents."
     >
       {!code && (

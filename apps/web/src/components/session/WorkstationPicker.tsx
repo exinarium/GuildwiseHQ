@@ -24,7 +24,7 @@ export function WorkstationPicker({
   if (!pending && list.length === 0)
     return (
       <p className="text-sm text-warning" role="status" data-testid="no-workstation">
-        You have no workstation yet. Pair one first: a session runs on your own workstation.
+        You have no workstation yet. Add a workstation first: a session runs on your own workstation.
       </p>
     );
   return (

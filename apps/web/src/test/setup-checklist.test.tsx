@@ -42,7 +42,7 @@ const base = (): SetupChecklist => ({
   steps: [
     step('project', 'Create your first project', { done: true, link: null }),
     step('repository', 'Add its repository', { actionable: false, link: null }),
-    step('workstation', 'Pair a workstation'),
+    step('workstation', 'Add a workstation'),
     step('team', 'Hire your team', { missing: ['reviewer', 'tester'] }),
     step('ba', 'Talk to the business analyst'),
   ] as SetupChecklist['steps'],

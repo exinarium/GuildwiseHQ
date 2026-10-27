@@ -157,7 +157,7 @@ describe('the CEO chat: full power, queue, permissions, confirmations', () => {
     ['on', 'Full power is on'],
     ['off', 'Full power is off on Pieter laptop: run `aom-runner ceo full-power on` there'],
     ['unknown', 'Messages wait until it is back'],
-    ['unbound', 'Pair a workstation to talk to Cora'],
+    ['unbound', 'Add a workstation to talk to Cora'],
   ] as const)('says what full power %s means', async (st, text) => {
     stubApi('owner', chatRoutes(state({ fullPower: { state: st, workstationName: 'Pieter laptop' } })));
     wrap(<ChatPanel threadId={THREAD} />);

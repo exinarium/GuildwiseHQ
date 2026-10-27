@@ -61,7 +61,7 @@ Until your organization is set up, the sidebar shows a **Get started** button wi
 
 1. **Create your first project.**
 2. **Add its repository** (the code repository the agents work in).
-3. **Pair a workstation**: the machine that runs your agents. It can be your own computer, a server (VPS) or a GitHub Codespace (see [Workstations and the installer](/help/workstations-and-installer#add-a-workstation) and [Cloud workstations](/help/cloud-workstations)). Its DevOps engineer is hired for you.
+3. **Add a workstation**: the machine that runs your agents. It can be your own computer, a server (VPS) or a GitHub Codespace (see [Workstations and the installer](/help/workstations-and-installer#add-a-workstation) and [Cloud workstations](/help/cloud-workstations)). Its DevOps engineer is hired for you.
 4. **Hire your team**: a business analyst, a builder, a reviewer and a tester (see [Agents](/help/agents#hiring)).
 5. **Talk to the business analyst**: describe something you need, in a chat or an intake, and it turns it into cards (see [Chat with agents](/help/chat-with-agents#asking-the-ba)).
 

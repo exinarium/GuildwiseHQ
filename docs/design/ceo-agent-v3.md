@@ -347,7 +347,7 @@ New `apps/server/src/ceo/notify.ts`:
   - the **live browser WebSocket** (a toast in the app; a new `/api/ws` frame `ceo.notice`);
   - an optional **outgoing webhook** (Slack or Teams) through an existing automation integration.
 - **Quiet hours:** urgent-only e-mail during quiet hours.
-- **Web push** does not exist. It is listed as later (P3), since the briefing and auth notices hit the same gap.
+- **Web push** did not exist when this was written; it does now (`apps/server/src/push`). The CEO escalation level (`ceo` in `ChainLevel`, `apps/server/src/commands/escalation.ts`) exists too.
 
 ### 6.5 Desk integration
 

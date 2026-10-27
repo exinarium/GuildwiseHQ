@@ -1,6 +1,6 @@
 ---
 title: Your desk
-summary: Desk items and kinds, the decision desk, blocking, answering questions, standing orders, the ledger.
+summary: Desk items and kinds, your desk, blocking, answering questions, standing orders, the ledger.
 keywords: [desk, question, approval, blocking, standing order, ledger]
 order: 8
 ---

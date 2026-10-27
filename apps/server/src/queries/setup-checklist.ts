@@ -101,7 +101,7 @@ export async function getSetupChecklist(
     },
     {
       id: 'workstation',
-      title: 'Pair a workstation',
+      title: 'Add a workstation',
       hint: 'The machine that runs your agents: your own computer, a VPS or a GitHub Codespace. A DevOps engineer for it is hired automatically.',
       done: !!ws,
       actionable: true,
