@@ -110,7 +110,7 @@ export function AuthorityTab({ status }: { status: CeoStatusDto }) {
     setDraft((d) => {
       if (!d) return d;
       const n = clonePolicy(d);
-      n.classes[c] = { mode, delayMinutes: n.classes[c]?.delayMinutes ?? 0 };
+      n.classes[c] = { mode };
       return n;
     });
   const setDesk = (k: string, mode: CeoMode) =>
