@@ -30,7 +30,7 @@ The server checks the floor every minute without using tokens. The CEO only work
 
 **Repository hygiene problem** (DevOps could not resolve a conflict after two attempts, missing clone, etc.): you hear about it in the daily report under Failures. See [Repository hygiene](/help/devops-and-hygiene#hygiene).
 
-**High-risk card waiting** (a card the reviewer rated high risk has waited more than 24 hours for the owner's approval or for a merge approval): you hear about it in the daily report under stuck cards. The CEO only reports it; it never approves or escalates by itself. Cards with no risk call (older runners, or after a rework round) do not count.
+**High-risk card waiting** (a card the reviewer rated high risk has waited more than 24 hours for the owner's approval or for a merge approval): you hear about it in the daily report under stuck cards. The CEO only reports it; it never approves or escalates by itself. Cards with no risk call (older runners, or after a rework round) do not count, and custom approval steps you add in the workflow builder are not covered.
 
 **Budget** (a project used 80% of its monthly budget, or 100% and paused): at 80% it is in the daily report (the desk also gets a Budget warning); at 100% you get an urgent desk item at once.
 
@@ -48,7 +48,7 @@ The report lists:
 5. Repeated approvals.
 6. Failures, including interests that cannot run.
 7. Open DevOps requests.
-8. **High-risk merges**: cards the reviewer rated high risk that finished since the last report (left out when there are none).
+8. **High-risk cards finished**: cards the reviewer rated high risk that finished (merge, PR or push) since the last report (left out when there are none).
 9. **Spend** and **Interests highlights**.
 
 Click **The facts behind this report** to see the same data straight from the server. Discuss it in the CEO chat. If the CEO cannot run, the server posts a template report with the same facts.

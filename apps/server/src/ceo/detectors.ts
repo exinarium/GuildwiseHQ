@@ -381,17 +381,23 @@ export async function detectBudgets(db: Queryable, now: Date): Promise<Detected[
  * A card the reviewer rated high risk (`cards.review_risk.level = 'high'`, report only) that has waited longer than
  * `REPORTER.highRiskWaitHours` on a manager or owner approval: the owner-approval stage, or a finalize (merge, push, PR)
  * that is awaiting approval. Only `high` counts: `unknown` (older runners) and NULL (reset on rework) never raise it.
- * Normal urgency, no automatic action. The clock is the card's last change (`updated_at`), which is when it began to wait.
+ * Normal urgency, no automatic action. The clock is when the card last entered `waiting` (`card_transitions`), so edits while it waits do not restart it.
+ * Custom workflow approval steps are not covered.
  */
 export async function detectHighRiskWaiting(db: Queryable, now: Date): Promise<Detected[]> {
+  // Custom workflow approval steps are not covered: only the built-in owner approval and finalize approval.
   const cutoff = new Date(now.getTime() - REPORTER.highRiskWaitHours * 3600_000);
   const list = await rows(
     db,
-    `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, c.updated_at, c.stage, c.finalize_state, p.key
-       FROM cards c JOIN projects p ON p.id = c.project_id
-      WHERE c.status = 'waiting' AND p.status = 'active'
-        AND (c.stage = 'owner_approval' OR c.finalize_state = 'awaiting_approval')
-        AND c.review_risk->>'level' = 'high' AND c.updated_at < $1`,
+    `SELECT * FROM (
+       SELECT c.id, c.ref, c.title, c.org_id, c.project_id, c.stage, c.finalize_state, p.key,
+              COALESCE((SELECT max(t.at) FROM card_transitions t WHERE t.card_id = c.id AND t.to_status = 'waiting'),
+                       c.updated_at) AS waiting_since
+         FROM cards c JOIN projects p ON p.id = c.project_id
+        WHERE c.status = 'waiting' AND p.status = 'active'
+          AND (c.stage = 'owner_approval' OR c.finalize_state = 'awaiting_approval')
+          AND c.review_risk->>'level' = 'high') w
+      WHERE waiting_since < $1`,
     [cutoff],
   );
   return list.map((c) => ({
@@ -402,7 +408,7 @@ export async function detectHighRiskWaiting(db: Queryable, now: Date): Promise<D
     urgency: 'normal' as const,
     count: 1,
     subject: {
-      title: `${c.ref} is rated high risk and has waited ${hours(now.getTime() - new Date(c.updated_at).getTime())} hours for approval`,
+      title: `${c.ref} is rated high risk and has waited ${hours(now.getTime() - new Date(c.waiting_since).getTime())} hours for approval`,
       detail:
         c.finalize_state === 'awaiting_approval'
           ? 'Waiting for approval to merge'
@@ -411,7 +417,7 @@ export async function detectHighRiskWaiting(db: Queryable, now: Date): Promise<D
       cardRef: c.ref,
       projectKey: c.key,
     },
-    evidence: { waitingSince: iso(c.updated_at), cardTitle: c.title, stage: c.stage },
+    evidence: { waitingSince: iso(c.waiting_since), cardTitle: c.title, stage: c.stage },
   }));
 }
 

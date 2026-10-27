@@ -263,10 +263,12 @@ export const FloorDigestSchema = z.object({
       note: z.string().nullable(),
     }),
   ),
-  /** Cards that finished since the last report with a high review risk (only `high` counts, not unknown or none). */
+  /** Cards that finished (merge, PR or push) since the last report with a high review risk (only `high` counts, not unknown or none). */
   highRiskMerges: z
     .array(z.object({ ref: z.string(), title: z.string(), projectKey: z.string(), analysis: z.string() }))
     .default([]),
+  /** How many more high-risk cards finished than the list shows. */
+  highRiskMergesMore: z.number().int().nonnegative().default(0),
   /** Failed shifts and other failures since the last report, by card. */
   failures: z.array(z.object({ ref: z.string(), title: z.string(), failedShifts: z.number().int() })),
   /**
@@ -494,13 +496,12 @@ export function renderFloorReportFallback(d: FloorDigest): string {
   // (a digest stored before this section existed has no such field)
   const highRisk = d.highRiskMerges ?? [];
   if (highRisk.length) {
-    out.push('', '## High-risk merges');
+    out.push('', '## High-risk cards finished');
     out.push(
-      list(
-        d.highRiskMerges.map(
-          (m) => `${m.ref} ${m.title} (${m.projectKey})${m.analysis ? `: ${m.analysis}` : ''}`,
-        ),
-      ),
+      list([
+        ...highRisk.map((m) => `${m.ref} ${m.title} (${m.projectKey})${m.analysis ? `: ${m.analysis}` : ''}`),
+        ...(d.highRiskMergesMore ? [`and ${d.highRiskMergesMore} more`] : []),
+      ]),
     );
   }
   out.push('', '## Spend');
