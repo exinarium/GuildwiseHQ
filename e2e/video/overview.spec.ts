@@ -31,7 +31,7 @@ const soft = async (what: string, fn: () => Promise<void>) => {
   try {
     await fn();
   } catch (e) {
-    console.warn(`overview: skipped "${what}": ${String(e).split('\n')[0]}`);
+    console.warn(`overview: SKIPPED soft step "${what}": ${String(e).split('\n')[0]}`);
   }
 };
 
@@ -73,29 +73,10 @@ async function clearCard(page: Page) {
   await pause(700);
 }
 
-/** The start of each chapter in the script (video/overview-script.md), in seconds: the pace the tour keeps. */
-const CHAPTER_START = [0, 45, 120, 170, 270, 330, 435, 510, 585, 645, 705, 750, 772];
-
-/**
- * Lets the screen breathe until chapter `n` (1-based) is due, the way the script paces it: the pointer glides slowly
- * over the page (at most `maxSec`), so the picture stays alive while nobody speaks.
- */
-async function holdUntilChapter(page: Page, now: () => number, n: number, maxSec = 40) {
-  const end = now() + Math.min(maxSec, Math.max(0, (CHAPTER_START[n - 1] ?? 0) - 1 - now()));
-  const pts: Array<[number, number]> = [
-    [700, 300],
-    [900, 460],
-    [520, 520],
-    [800, 200],
-  ];
-  let i = 0;
-  while (now() + 4 < end) {
-    const [x, y] = pts[i++ % pts.length] as [number, number];
-    await page.mouse.move(x, y, { steps: 90 });
-    await pause(1500);
-  }
-  const rest = end - now();
-  if (rest > 0) await new Promise((r) => setTimeout(r, rest * 1000));
+/** A short beat between chapters (the pointer rests); the chapter times come from the real timeline, not a script. */
+async function beat(page: Page, ms = 1000) {
+  await page.mouse.move(640, 360, { steps: 20 });
+  await pause(ms);
 }
 
 /** Invites `email` to Acme and accepts it through the link in the mail. */
@@ -312,7 +293,10 @@ test('record the overview video', async ({ browser }) => {
   const platformCookies = (await platform.api.storageState()).cookies;
 
   // ---- voice and camera ----------------------------------------------------------------------------------------------
-  const { page, narrate, chapter, now, finish } = await startRecording(prepared, browser, api);
+  const { page, narrate, chapter, finish } = await startRecording(prepared, browser, api);
+  // an optional screen that is not there must cost seconds, not Playwright's 30 s default
+  page.setDefaultTimeout(5000);
+  page.setDefaultNavigationTimeout(30_000);
   const nav = page.getByRole('navigation', { name: 'Main' });
   const link = (name: string | RegExp) =>
     nav.getByRole('link', typeof name === 'string' ? { name, exact: true } : { name });
@@ -322,7 +306,7 @@ test('record the overview video', async ({ browser }) => {
   // ---- 1. Welcome ---------------------------------------------------------------------------------------------------
   await page.goto('/p/SHOP/board');
   await expect(page.getByTestId('board')).toBeVisible();
-  await pause(3000);
+  await pause(1000);
   await narrate('intro-1', async () => {
     await pause(1500);
     const logo = nav.locator('img, svg').first();
@@ -343,7 +327,7 @@ test('record the overview video', async ({ browser }) => {
   await narrate('c1-d');
 
   // ---- 2. A team of agents ------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 2);
+  await beat(page);
   await chapter(2);
   await narrate('c2-a', async () => {
     await click(page, link(/^Agents/));
@@ -370,7 +354,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 3. Organization -----------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 3);
+  await beat(page);
   await chapter(3);
   await narrate('c3-a', async () => {
     await click(page, page.getByTestId('nav-organization'));
@@ -387,7 +371,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 4. The board ---------------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 4);
+  await beat(page);
   await chapter(4);
   const chip = (name: string | RegExp) =>
     page.getByRole('group', { name: 'Filters' }).getByRole('button', { name });
@@ -413,6 +397,8 @@ test('record the overview video', async ({ browser }) => {
     await pause(1800);
     await click(page, chip('Blocked'));
     await soft('approval chip', async () => {
+      // the chip only exists while a card waits for an approval (the demo has none): skip at once when absent
+      if ((await chip(/^Waiting for my approval/).count()) === 0) throw new Error('no card waits for approval');
       await click(page, chip(/^Waiting for my approval/));
       await pause(1500);
       await click(page, chip(/^Waiting for my approval/));
@@ -431,7 +417,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 5. Your desk ---------------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 5);
+  await beat(page);
   await chapter(5);
   const itemEl = page.getByTestId(`desk-item-${qId}`);
   await narrate('c5-a', async () => {
@@ -462,7 +448,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 6. Discovery and the Boardroom -----------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 6);
+  await beat(page);
   await chapter(6);
   const dialog = page.getByRole('dialog');
   await narrate('c6-a', async () => {
@@ -527,7 +513,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 7. Agents, CEO, org chart ------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 7);
+  await beat(page);
   await chapter(7);
   await narrate('c7-a', async () => {
     await click(page, link(/^Agents/));
@@ -571,7 +557,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 8. Workstations ----------------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 8);
+  await beat(page);
   await chapter(8);
   await narrate('c8-a', async () => {
     await click(page, link(/^Workstations/));
@@ -625,7 +611,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 9. Control ----------------------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 9);
+  await beat(page);
   await chapter(9);
   await narrate('c9-a', async () => {
     await click(page, link(/^Costs/));
@@ -660,7 +646,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 10. Releases, environments, integrations ----------------------------------------------------------------------
-  await holdUntilChapter(page, now, 10);
+  await beat(page);
   await chapter(10);
   await narrate('c10-a', async () => {
     await click(page, link(/^Releases/));
@@ -687,7 +673,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 11. Run it yourself, or let us host it ----------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 11);
+  await beat(page);
   await chapter(11);
   await narrate('c11-a', async () => {
     await titleCard(page, 'Free and open source', [
@@ -707,7 +693,7 @@ test('record the overview video', async ({ browser }) => {
   });
 
   // ---- 12. Closing ---------------------------------------------------------------------------------------------------------------
-  await holdUntilChapter(page, now, 12);
+  await beat(page);
   await chapter(12);
   await narrate('c12-a', async () => {
     await ctx.clearCookies();
@@ -720,8 +706,7 @@ test('record the overview video', async ({ browser }) => {
     await titleCard(page, 'Guildwise HQ. Free and open source.', ['github.com/exinarium/GuildwiseHQ']);
     await pause(3500);
   });
-  await holdUntilChapter(page, now, 13, 20);
-  await pause(1500);
+  await pause(1000);
 
   await finish();
 });
