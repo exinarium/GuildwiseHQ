@@ -145,6 +145,9 @@ const SCRIPT_EXT = /\.(sh|bash|zsh|fish|py|rb|pl|php|js|mjs|cjs|ts|ps1|bat|cmd|e
 export const isScriptPath = (path: string): boolean =>
   path.split('/').slice(0, -1).includes('scripts') || SCRIPT_EXT.test(path);
 
+/** Most capabilities one pack snapshot lists (a plugin marketplace has some 200 agents, 150 skills and 100 commands). */
+export const MAX_PACK_ITEMS = 1000;
+
 export const PackFileSchema = z.object({
   path: z.string().max(300),
   size: z.number().int().min(0),
@@ -171,7 +174,7 @@ export const PackSnapshotSchema = z.object({
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
   /** `bmad` only in snapshots reported before the generic reading; new ones say `generic`. */
   adapter: z.enum(['generic', 'bmad']),
-  items: z.array(PackItemSchema).max(500),
+  items: z.array(PackItemSchema).max(MAX_PACK_ITEMS),
   issues: z.array(PackIssueSchema).max(100).default([]),
   /** What the adapter left out or changed, in words (for example "agents/x.md: not found"). */
   notes: z.array(z.string().max(300)).max(60).default([]),
@@ -411,6 +414,110 @@ export function discoverCapabilities(tree: PackTree): {
   return { skills: skillDirs(tree), personas, playbooks };
 }
 
+/** A file name or folder name as a capability key: lowercase letters and digits joined by single hyphens, at most 64 characters. */
+export function slugKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+}
+
+/** A Claude Code plugin's file: a subagent (`agents/<k>.md`) or a slash command (`commands/<k>.md`). */
+export interface PluginFile {
+  key: string;
+  path: string;
+  text: string;
+  /** The folder above `agents/` or `commands/`, as a key (`plugins/code-review/agents/x.md` is `code-review`); empty at the root. */
+  plugin: string;
+}
+
+/**
+ * The Claude Code plugin layout, read generically: `agents/*.md` (subagents with frontmatter `name` and `description`) and
+ * `commands/*.md` (slash commands, frontmatter optional) at any depth, so `plugins/<p>/agents/x.md` and a root `agents/x.md`
+ * both count. Files inside a skill folder, below an excluded folder (tests, docs, vendored code), in `personas/` or in the
+ * root `.claude/agents` or listed by the manifest (read by their own rules) are left out. The key is the file name. When several files have the same key
+ * (two plugins both ship `reviewer.md`), those that sit in a plugin folder are keyed `<plugin>-<name>` so every one is kept
+ * and the result does not depend on the order the files were listed in; a file at the root keeps its plain key.
+ * `taken` are keys of the same kind that other rules already produced.
+ */
+export function discoverPluginLayout(
+  tree: PackTree,
+  skillRoots: readonly string[],
+  taken: { agents: ReadonlySet<string>; commands: ReadonlySet<string>; paths?: ReadonlySet<string> },
+): { agents: PluginFile[]; commands: PluginFile[]; skipped: string[] } {
+  const raw: Array<PluginFile & { kind: 'agents' | 'commands' }> = [];
+  const skipped: string[] = [];
+  for (const [path, text] of Object.entries(tree).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const parts = path.split('/');
+    if (parts.length < 2 || parts.some((x) => SKIPPED_SEGMENTS.has(x))) continue;
+    const base = parts[parts.length - 1] as string;
+    const folder = parts[parts.length - 2];
+    if (!base.toLowerCase().endsWith('.md') || (folder !== 'agents' && folder !== 'commands')) continue;
+    if (path.startsWith('.claude/agents/') || taken.paths?.has(path)) continue;
+    if (skillRoots.some((d) => path.startsWith(`${d}/`))) continue;
+    const key = slugKey(base.slice(0, -3));
+    if (!key || /^(readme|changelog|contributing|license)$/.test(key)) continue;
+    if (folder === 'agents') {
+      try {
+        const { data } = splitFrontmatter(text);
+        if (typeof data.name !== 'string' || !data.name.trim() || typeof data.description !== 'string')
+          throw new Error('no name and description');
+      } catch {
+        skipped.push(path);
+        continue;
+      }
+    }
+    const plugin = parts.length >= 3 ? slugKey(parts[parts.length - 3] as string) : '';
+    raw.push({ kind: folder, key, path, text, plugin });
+  }
+  const resolve = (kind: 'agents' | 'commands', occupied: ReadonlySet<string>): PluginFile[] => {
+    const list = raw.filter((r) => r.kind === kind);
+    const count = new Map<string, number>();
+    for (const r of list) count.set(r.key, (count.get(r.key) ?? 0) + 1);
+    return list.map(({ kind: _k, ...r }) => {
+      const clash = (count.get(r.key) ?? 0) > 1 || occupied.has(r.key);
+      if (!clash || !r.plugin) return r;
+      const key = slugKey(`${r.plugin}-${r.key}`);
+      return { ...r, key };
+    });
+  };
+  return { agents: resolve('agents', taken.agents), commands: resolve('commands', taken.commands), skipped };
+}
+
+/**
+ * A Claude Code command (`commands/<k>.md`) as a one-step playbook: the command's text is the single step, so the facilitator
+ * loads it with `aom skill show playbook:<key>` and follows it. The command's own frontmatter (`description`,
+ * `allowed-tools`, `argument-hint`, `model`) is advisory and dropped from the step: it never widens anything.
+ */
+export function commandToPlaybookFiles(key: string, text: string): Record<string, string> {
+  let description = '';
+  let body = text;
+  let hint = '';
+  try {
+    const f = splitFrontmatter(text);
+    body = f.body;
+    if (typeof f.data.description === 'string') description = f.data.description.trim();
+    if (typeof f.data['argument-hint'] === 'string') hint = f.data['argument-hint'].trim();
+  } catch {
+    // no frontmatter: the whole file is the command
+  }
+  if (!description)
+    description =
+      body
+        .split('\n')
+        .find((l) => l.trim() && !l.startsWith('#'))
+        ?.trim() ?? '';
+  description = (description || `Command ${key}`).replace(/\s+/g, ' ').slice(0, 300);
+  const title = titleCase(key);
+  const workflow = `---\n${stringifyYaml({ name: key, description }).trimEnd()}\n---\n# ${title}\n\nA command imported from a plugin, run as a one-step playbook. Do step 1 (\`steps/step-01-${key}.md\`). Where the step names \`$ARGUMENTS\`, use what the person asked for${hint ? ` (${hint})` : ''}.\n`;
+  return {
+    'workflow.md': workflow,
+    [`steps/step-01-${key}.md`]: body.trim() ? body : `# ${title}\n\n${description}\n`,
+  };
+}
+
 /** Marks an entry as belonging to a pack: namespaced key, script flag, labels. */
 export function inPack(
   pack: string,
@@ -477,9 +584,11 @@ function copyrightOf(license: string): string | null {
 /**
  * Indexes the text files of a pack into capabilities, the same way for every pack:
  *  - skills: folders with a `SKILL.md`, anywhere (except tests, docs and vendored code);
- *  - personas: `personas/*.md`, `.claude/agents/*.md` (Claude Code subagents), the files an optional manifest (`pack.yaml` or
+ *  - personas: `personas/*.md`, `.claude/agents/*.md` and `agents/*.md` at any depth (Claude Code subagents, also in a plugin
+ *    folder such as `plugins/<p>/agents/`), the files an optional manifest (`pack.yaml` or
  *    `pack.json`, see `pack-manifest.ts`) lists under `agents:`, and a skill whose frontmatter says `metadata.kind: agent`;
- *  - playbooks: `playbooks/<key>/workflow.md` folders (with `steps/`), and the folders the manifest lists under `playbooks:`.
+ *  - playbooks: `playbooks/<key>/workflow.md` folders (with `steps/`), the folders the manifest lists under `playbooks:`, and
+ *    `commands/*.md` at any depth (Claude Code slash commands, each a one-step playbook);
  * What does not fit is a plain skill. A bad capability becomes an issue and is skipped; the rest is returned. `adapter` is
  * accepted for packs stored with the retired `bmad` value and changes nothing.
  */
@@ -555,6 +664,40 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
       entries.push(inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined }));
     } catch (err) {
       issues.push({ path: p.path, message: msg(err) });
+    }
+  }
+  // Claude Code plugin layout: `agents/*.md` are personas, `commands/*.md` one-step playbooks (see `discoverPluginLayout`).
+  const plugin = discoverPluginLayout(
+    tree,
+    found.skills.map((x) => x.dir),
+    {
+      agents: new Set(found.personas.map((x) => x.key)),
+      commands: new Set(found.playbooks.map((x) => x.key)),
+      // files the manifest lists under agents: are read there, with its overrides
+      paths: new Set(
+        (manifest?.agents ?? []).map((a) => safePackPath(a.file)).filter((x): x is string => !!x),
+      ),
+    },
+  );
+  if (plugin.skipped.length)
+    notes.push(
+      `${plugin.skipped.length} file(s) under agents/ without a name and description were skipped (${plugin.skipped
+        .slice(0, 3)
+        .join(', ')}${plugin.skipped.length > 3 ? ', ...' : ''})`,
+    );
+  for (const a of plugin.agents) {
+    try {
+      const e = parsePersona(a.key, claudeAgentToPersonaText(a.key, a.text));
+      entries.push(inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined }));
+    } catch (err) {
+      issues.push({ path: a.path, message: msg(err) });
+    }
+  }
+  for (const c of plugin.commands) {
+    try {
+      entries.push(inPack(input.name, parsePlaybook(c.key, commandToPlaybookFiles(c.key, c.text))));
+    } catch (err) {
+      issues.push({ path: c.path, message: msg(err) });
     }
   }
   for (const a of manifest?.agents ?? []) {
@@ -725,7 +868,7 @@ export function packSnapshotOf(input: {
     sha: input.sha,
     contentHash: packContentHash(index.entries),
     adapter: index.adapter,
-    items: index.entries.slice(0, 500).map((e) => packItemOf(e, input.name)),
+    items: index.entries.slice(0, MAX_PACK_ITEMS).map((e) => packItemOf(e, input.name)),
     issues: index.issues
       .slice(0, 100)
       .map((i) => ({ path: i.path.slice(0, 300), message: i.message.slice(0, 500) })),
