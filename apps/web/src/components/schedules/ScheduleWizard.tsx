@@ -1154,8 +1154,9 @@ function ActionFields({
             isManager={isManager}
           />
           <p className="text-sm text-muted">
-            Every request is signed: <code>X-AOM-Signature</code> is <code>sha256=</code> and the HMAC of{' '}
-            <code>timestamp.body</code> with the schedule's secret, which is shown once after you create it. A
+            Every request is signed: <code>X-Guildwise-Signature</code> is <code>sha256=</code> and the HMAC of{' '}
+            <code>timestamp.body</code> with the schedule's secret, which is shown once after you create it
+            (<code>X-AOM-Signature</code> is still sent with the same value until October 2027). A
             failed delivery is retried up to five times.
           </p>
         </div>

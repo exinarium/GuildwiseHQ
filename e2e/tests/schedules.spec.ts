@@ -259,9 +259,9 @@ test('an event trigger with a signed Slack webhook: the card is finalized, the h
   const body = JSON.parse(hit?.body ?? '{}');
   expect(body).toEqual({ text: `${c.ref} was finalized in SCH`, mrkdwn: true });
   const ts = String(hit?.headers['x-aom-timestamp']);
-  expect(hit?.headers['x-aom-signature']).toBe(
-    `sha256=${createHmac('sha256', secret).update(`${ts}.${hit?.body}`).digest('hex')}`,
-  );
+  const expectedSig = `sha256=${createHmac('sha256', secret).update(`${ts}.${hit?.body}`).digest('hex')}`;
+  expect(hit?.headers['x-guildwise-signature']).toBe(expectedSig);
+  expect(hit?.headers['x-aom-signature']).toBe(expectedSig);
   // once: the same event never runs the schedule twice
   await new Promise((r) => setTimeout(r, 4000));
   expect(hits.length).toBe(before + 1);
