@@ -617,7 +617,7 @@ describe('e-mail digests', () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]).toMatchObject({ to: w.owner.email });
       expect(sent[0]?.subject).toMatch(/^Floor \d{4}-\d\d-\d\d$/);
-      expect(sent[0]?.text).toContain('# Organization report');
+      expect(sent[0]?.text).toContain('# Daily report');
       const ps = await ok<any>(
         create({
           name: 'Project digest',

@@ -1133,7 +1133,7 @@ function ActionFields({
               onChange={(e) => set({ digest: e.target.value as WizardState['digest'] })}
             >
               <option value="">No digest</option>
-              <option value="floor_report">Organization report (the day's facts)</option>
+              <option value="floor_report">Daily report (the day's facts)</option>
               <option value="project_summary">Project summary</option>
             </Select>
           </div>
@@ -1168,7 +1168,7 @@ function ActionFields({
             value={s.emailDigest}
             onChange={(e) => set({ emailDigest: e.target.value as WizardState['emailDigest'] })}
           >
-            <option value="floor_report">Organization report (the day's facts)</option>
+            <option value="floor_report">Daily report (the day's facts)</option>
             <option value="project_summary">Project summary</option>
           </Select>
           {s.emailDigest === 'project_summary' && (

@@ -38,7 +38,7 @@ export async function applyMcpServersReport(ctx: Ctx, workstationId: string, rep
   );
 }
 
-/** What the user's own active workstations that may serve the organization report, one entry per server name. */
+/** What the user's own active workstations that may serve the daily report, one entry per server name. */
 export async function mcpServerCandidates(
   db: Queryable,
   userId: string,

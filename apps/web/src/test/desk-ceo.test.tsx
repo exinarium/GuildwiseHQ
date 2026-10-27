@@ -240,7 +240,7 @@ describe('the desk: the CEO daily report', () => {
     ]);
     show(report);
     expect(screen.getByText('Two cards moved. One hire is recommended.')).toBeInTheDocument();
-    expect(screen.getByTestId('desk-kind')).toHaveTextContent('CEO report');
+    expect(screen.getByTestId('desk-kind')).toHaveTextContent('Daily report');
     const block = screen.getByTestId('ceo-report');
     expect(within(block).getByTestId('ceo-report-scores')).toHaveTextContent('agreed 6 of 8');
     const rows = within(block).getAllByTestId('ceo-report-action');

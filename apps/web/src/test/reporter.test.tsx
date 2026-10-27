@@ -274,8 +274,8 @@ const base: DeskItemDto = {
   subkind: 'floor_report',
   status: 'open',
   routedTo: 'manager',
-  title: 'Organization report 2026-11-10',
-  body: '# Organization report\n\nOne card needs you first.',
+  title: 'Daily report 2026-11-10',
+  body: '# Daily report\n\nOne card needs you first.',
   doing: '',
   options: [],
   recommendation: null,
@@ -297,12 +297,12 @@ const base: DeskItemDto = {
   createdAt: '2026-11-10T06:00:00.000Z',
 };
 
-describe('the floor report on the desk', () => {
+describe('the older daily report on the desk', () => {
   it('is labelled, shows the BA narrative, the six sections and the link to the standing chat', () => {
     const item: DeskItemDto = { ...base, floor: digest, chatThreadId: U(60) };
     renderWith(<DeskItem item={item} now={Date.parse('2026-11-10T07:00:00.000Z')} />);
-    expect(deskKindLabel(item)).toBe('Organization report');
-    expect(screen.getByTestId('desk-kind').textContent).toBe('Organization report');
+    expect(deskKindLabel(item)).toBe('Daily report');
+    expect(screen.getByTestId('desk-kind').textContent).toBe('Daily report');
     expect(screen.getByText(/One card needs you first/)).toBeTruthy();
     const report = within(screen.getByTestId('floor-report'));
     for (const h of [
