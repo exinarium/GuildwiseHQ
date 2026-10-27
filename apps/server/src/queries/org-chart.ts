@@ -1,4 +1,5 @@
 import type { OrgChart, OrgChartAgent, OrgChartStatus } from '@aom/shared';
+import { ceoActive } from '../ceo/state.ts';
 import { orgCostCtx, spendBriefs } from '../costs/index.ts';
 import type { Queryable } from '../db/sql.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
@@ -79,7 +80,9 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
   const spend = await spendBriefs(db, cost, now, 'agent', ids);
 
   const ceoAgent = list.find((a) => a.role_key === 'ceo' && a.status === 'active');
-  const ceoUp = ceoAgent && !ceoAgent.paused_at ? ceoAgent : undefined;
+  // The same CEO the routing asks (commands/escalation.ts nextRoute): enabled, not paused, with an active agent.
+  const ceoOn = await ceoActive(db, orgId);
+  const ceoUp = ceoOn ? list.find((a) => a.id === ceoOn.agentId) : undefined;
   const bas = list.filter((a) => a.role_key === 'ba' && !a.is_devops && a.status === 'active');
   const seniorsOf = (a: Row) =>
     list.filter(
@@ -100,7 +103,7 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
     else if (mine.length) status = 'working';
     else if (stuck.length) status = 'blocked';
     const seniors = a.is_devops || a.role_key === 'ba' || a.role_key === 'ceo' ? [] : seniorsOf(a);
-    // peer -> BA -> CEO -> desk; a step nobody can take is skipped (the CEO also when it is paused).
+    // peer -> CEO when active (the BA is skipped then, as in the routing) -> else BA -> desk; a step nobody can take is skipped.
     const up = ceoUp
       ? { level: 'ceo' as const, agentIds: [ceoUp.id as string] }
       : { level: 'desk' as const, agentIds: [] };
@@ -111,7 +114,7 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
           ? up
           : a.seniority === 'junior' && seniors.length
             ? { level: 'peer' as const, agentIds: seniors.map((s) => s.id as string) }
-            : bas.length
+            : !ceoUp && bas.length
               ? { level: 'ba' as const, agentIds: bas.map((b) => b.id as string) }
               : up;
     return {
