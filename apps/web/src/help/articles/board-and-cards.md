@@ -9,7 +9,7 @@ The board is your view of all work in a project. Cards move left to right throug
 
 ## Reading the board {#reading-the-board}
 
-The board shows one column per stage (for a Code project: Spec, To do, Rework, In progress, Blocked, Review, Test, Docs, Finalize and Done). Empty columns fold into a small strip; click one to open it. At the top you can search cards, filter by **Blocked**, **Rework** or **Unassigned**, and filter by priority. Each card tile shows:
+The board shows one column per stage (for a Code project: Spec, To do, Rework, In progress, Blocked, Review, Test, Docs, Finalize and Done). Empty columns fold into a small strip; click one to open it. At the top you can search cards, filter by **Blocked**, **Rework** or **Unassigned**, and filter by priority. **Waiting for my QA** and **Waiting for my approval** appear when some card on the board has a QA or approval step; each shows how many of those cards wait for you. Each card tile shows:
 
 - **Card reference** (e.g., `TOY-1`): a unique label for the card, and how long ago it last changed.
 - **Title**.
@@ -24,6 +24,10 @@ The board shows one column per stage (for a Code project: Spec, To do, Rework, I
   - **Repository problem** (for example a conflict while updating, or a failed login) on the card's repository, linking to the project's repository settings. See [repository hygiene](/help/devops-and-hygiene#hygiene).
   - **Monthly budget** nearly used up, used up (new work waits), or overridden, linking to the budget settings for Owners and Admins. See [Budgets and costs](/help/budgets-and-costs#monthly-budgets).
   - Plus the "nobody can take this card" and backing-off messages described below. Tap the arrow on a banner for the full reason.
+
+**Board actions.** The header offers, where the project allows it: **Run branch** (projects with repositories), **Run regression** (projects with a test stage), **Convert to project** (research projects, Owner and Admins), **Pause project**, **Archive** and the project settings gear.
+
+**Pause project** (Owner and Admins, while the project runs) stops anything new from starting on the project. Shifts already running finish; cards keep their place in the queue. You can give a reason, which shows on the project's banner. **Resume project** on the banner starts it again.
 
 The card type (feature, bug, support, refactor, docs, regression) shows on the card's own page.
 

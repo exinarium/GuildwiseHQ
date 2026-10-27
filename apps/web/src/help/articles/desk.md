@@ -5,23 +5,23 @@ keywords: [desk, question, approval, blocking, standing order, ledger]
 order: 8
 ---
 
-The **desk** is where every question and approval reaches you. Cards that wait on a question do not move forward until you answer. The **Desk** page shows every item waiting for you, with filters (**All**, **Blocking**, **Questions**, **Approvals**, **Notices**) and a sort order (Priority, Oldest, Newest). Items are grouped as **Needs you first**, **Blocking work**, **Decisions** and **Heads-up**.
+The **desk** is where every question and approval reaches you. Cards that wait on a question do not move forward until you answer. The **Desk** page shows every item waiting for you, with filters (**All**, **Blocking**, **Questions**, **Approvals**, **Notices**, **Handled by CEO** and **CEO decisions**) and a sort order (Priority, Oldest, Newest). Items are grouped as **Needs you first**, **Blocking work**, **Decisions** and **Heads-up**.
 
 ## Desk items {#desk-items}
 
 Each item shows:
 
-- **What kind it is**: a label like Question, DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have, see [Who approves](/help/devops-and-hygiene#devops-engineer)), Merge approval, Outbound update, Escalation, Create repository, Budget paused, Phase done or Vault conflict.
+- **What kind it is**: a kind badge (Question, Approval, Escalation, Alert or Rating) and, where it is more specific, a label such as DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have, see [Who approves](/help/devops-and-hygiene#devops-engineer)), Merge approval, Outbound update, Posting failed, Create repository, Budget warning, Budget paused, Phase done, Vault conflict, CEO report or CEO decision.
 - **Who asked**: the agent and its role.
 - **What they are doing**: which card or project.
 - **The question**: with options and a recommendation.
 - **How many cards are blocked**: a count of cards waiting on this answer, and the item's age.
 
-The desk also has the filters **Handled by CEO** and **CEO decisions**. A question that has a recommendation offers **Accept recommendation**, which answers with exactly what is recommended. The CEO's daily report arrives as a **Daily report** item.
+The desk also has the filters **Handled by CEO** and **CEO decisions**. A question or escalation that has a recommendation from the CEO offers **Accept recommendation**, which answers with exactly what is recommended (not offered for vault conflicts). The CEO's daily report arrives as a **CEO report** item; older BA reports stay as **Organization report** items. See [Questions from agents and escalation](/help/your-ceo#escalation).
 
 Alerts, approvals and notices also have **Ask DevOps about this**, which opens a request to the DevOps engineer with the item attached.
 
-Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your BA reviews it first (if you have routing on; with a CEO it reviews them first).
+Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your CEO reviews it first. The CEO never blocks an item: if it has not looked within 10 minutes, the item reaches you unchanged.
 
 ## CEO decisions {#ceo-decisions}
 
@@ -45,7 +45,8 @@ To answer a desk item:
 1. Find the item on the desk.
 2. Choose an option (the recommended one is pre-selected) and/or type your own text in the note box. Typed text replaces the option's text.
 3. Pick what to **Add to ledger as** (see below).
-4. Click **Answer**.
+4. Optional, Owner only, when you have a CEO: tick **Remember this for the CEO** to have the CEO keep the answer as a rule. Proposed rules wait on the CEO's **Memory** tab for your **Keep** or **Drop** (see [Your CEO](/help/your-ceo#memory)).
+5. Click **Answer**.
 
 Your answer is recorded in the ledger (shared with future agents), the card is unblocked, and the asking agent's next shift includes your answer. **Dismiss** closes the item without an answer and tells the asker you declined.
 

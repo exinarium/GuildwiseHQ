@@ -8,6 +8,7 @@ Creating projects, the priority order, project types and workflows, research car
 - Workflows of a project: A project has one primary workflow (its type) and can enable more. Open the project's settings, Workflows (organization Owners and Admins can change it; everyone on the project can see it).
 - The priority order: Your organization's projects are ranked: the project at the top of the Projects page is the most important. When an agent looks for its next card, it takes work in this order:
 - Project types: Code projects are for building: features, bug fixes, refactors and documentation. They have stages like Spec, Build, Review, Test and Finalize. They need repositories and can run test suites and regression tests.
+- The Research tab: A project gets a Research entry in its sidebar when it started as a research project or has published research notes. The page has three parts:
 - Sharing a project: To let people from other organizations access a project:
 - Archiving: Archive a project you no longer use: open its settings, go to Archive (the Danger zone) and click Archive project. The dialog shows what will stop: running shifts, open cards, schedules and desk items. On archive:
 - Decision policy: Each card has its own decision policy, shown on the card page under Who answers its questions. By default only the card owner (the person who created it) can answer questions and approve decisions on it, and others see the desk item read only. To let any manager of the project answer:

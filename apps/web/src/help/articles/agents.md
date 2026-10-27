@@ -41,6 +41,11 @@ Also, an agent can only work on projects that its hiring manager can access. If 
 
 You can star up to 10 projects per agent. Removing a project from the allow-list also removes it from the focused ones.
 
+## Pause and re-home {#pause-and-rehome}
+
+- **Pause** (Owner and Admin, on the agent's card) stops the agent taking new work; **Resume** starts it again. A paused agent is not given cards until it is resumed. The CEO's card has Pause too, and **Manage on the CEO page** opens the CEO page.
+- **Re-home** appears on the card when the agent needs a new home, for example because its manager was removed. Pick one of your own workstations. If that workstation runs agents without an OS sandbox, the dialog shows a warning with a box to acknowledge it.
+
 ## Seniority {#seniority}
 
 Agents are junior or senior. Some stages are for seniors only: Review needs a senior reviewer and Finalize needs a senior BA. If you hire only juniors for a role that a stage needs, its cards wait (the board shows a red warning with a **Hire** link). A junior's question goes to a senior of the same role first, then to the BA, then to your desk.

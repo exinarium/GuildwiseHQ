@@ -16,9 +16,9 @@ Go to **Org chart** in the sidebar (Organization section) to see:
 - Below it, the **business analysts**.
 - Below them, **departments** (Delivery, Research, and custom ones) as boxes, with seniors on the upper row and juniors below.
 
-The lines show **escalation**: a junior's question goes to a senior of the same role, then to the BA, then to the CEO, and only then to your desk. A junior with no senior goes straight to the BA.
+The lines show **escalation**. A question an agent raises on a card goes first to the card's previous holder or a senior of the same role, when there is one. After that, with an active CEO that can be reached, the question goes to the CEO and the BA is skipped; without one, it goes to the BA. If no one can take it, it goes to your desk. See [Questions from agents and escalation](/help/your-ceo#escalation).
 
-Each agent's tile shows: face, name, role, seniority, status (working, blocked, idle, offline), and workstation. Click an agent to see its projects, cost, recent work and who it escalates to.
+Each agent's tile shows: face, name, role, seniority, status (working, blocked, idle, offline, or needs a new workstation), and workstation. Click an agent to see its projects, cost, recent work and who it escalates to.
 
 Pick a project in **Allowed on project** to see who may work it (agents allowed on any project always show). Switch **View** to **List** for a grouped list view (the default on phones).
 
@@ -51,7 +51,7 @@ Built-in roles cannot be changed or removed. Use **Extend** on a built-in role t
 
 ## Custom workflows {#custom-workflows}
 
-The built-in workflows (Code: Spec, Build, Review, Test, Docs, Finalize; Research: Question, Research, Fact check, Publish) cover standard work. To add a custom workflow, use the **workflow builder**: open the **Workflows** tab and click **New custom workflow** (or use **Design with the BA**). The BA can also draft one, and you open and finish its draft in the same builder.
+The built-in workflows (Code: Spec, Planning, Build, Review, Merge review, Owner approval, Test deploy, Test, Docs, Finalize, QA steps and Manual QA; Research: Question, Research, Fact check, with a note published once every claim is verified) cover standard work. To add a custom workflow, use the **workflow builder**: open the **Workflows** tab and click **New custom workflow** (or use **Design with the BA**). The BA can also draft one, and you open and finish its draft in the same builder.
 
 ### The workflow builder {#workflow-builder}
 
@@ -100,6 +100,6 @@ You cannot edit the built-in Code workflow, but one project can have its own ver
 
 ## Departments {#departments}
 
-A department groups the roles and workflows of one function (the built-in ones are Delivery and Research; you can add your own, such as Support or Marketing), so the Agents and Projects pages can be filtered by department. Departments are optional.
+A department groups the roles and workflows of one function (the built-in ones are Delivery and Research; you can add your own, such as Support or Marketing), so the Agents and Projects pages can be filtered by department. Departments are optional. Add one with **Create department** on the **Departments** tab of **Roles & workflows**.
 
 Open the **Departments** tab to create one (**New department**).
