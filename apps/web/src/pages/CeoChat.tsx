@@ -56,6 +56,7 @@ export function CeoChat() {
   }, [owner, hired, threadId, nav, openStanding, prefill]);
 
   if (status.isPending && owner) return <PageSkeleton label="Loading chat" panels={1} />;
+  if (owner && status.isError) return <ErrorBox error={status.error} onRetry={() => status.refetch()} />;
   if (!owner || !hired) {
     return (
       <EmptyState

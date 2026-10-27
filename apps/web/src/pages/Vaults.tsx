@@ -214,7 +214,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           <li className="pt-3 text-subtle">
             {vault.storage === 'local'
               ? 'The folder is created on the workstation that holds it.'
-              : 'Pair a workstation to sync this vault.'}
+              : 'Add a workstation to sync this vault.'}
           </li>
         )}
         {vault.workstations.map((w) => (
