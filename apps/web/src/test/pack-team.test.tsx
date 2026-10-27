@@ -438,6 +438,7 @@ describe('agent tag', () => {
     kind: 'persona' as const,
     name: 'Amelia',
     sha: 'abc1234',
+    hash: '0'.repeat(64),
     ref: null,
   };
   it('reads "<pack agent> · <pack> agent"', () => {
