@@ -4,6 +4,36 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- CEO: a new signal flags a high-risk card (review risk "high") that has waited more than 24 hours for approval, counted from when it started waiting. Report only; it does not wake the CEO unless you add it to the urgent signals.
+- CEO: the daily report lists the day's high-risk cards finished (merged, PR or push).
+- Runner: `guildwise-runner` is installed alongside `aom-runner`; both names run the same command.
+- Webhooks: outgoing signed webhooks carry `X-Guildwise-Signature`. `X-AOM-Signature` is still sent with the same value until October 2027.
+
+### Changed
+
+- New projects use `guildwise/` card branches (existing projects keep their prefix), and the runner's temporary integration branches are `guildwise/integration/<card>`. Branch cleanup recognises the old and new names.
+- New local vaults are marked `.guildwise-local-vault` (the old marker is still written for one release and both are read); agent commits to vault repositories use `agents.guildwise.invalid`.
+- New environment setups default to `~/guildwise-backups`. Deploy scripts' markers are read under both their old and new names, ahead of renaming them in a later release.
+- One name for the CEO's report: "Daily report", on the desk, in the e-mail digest option and subject, and in the Help.
+- Wording: "Add a workstation" (with "Pair with a code" for pairing codes) everywhere; the BA designs the organization with the Owner and Admins; "Agents page" instead of "HR board".
+- The in-app Help and page help were checked against the current app and updated section by section.
+- Removed the unused CEO cooling-off setting (`delayMinutes`); saved policies that contain it still load.
+- The retired `.aom/test-env.json` is no longer read.
+
+### Fixed
+
+- Reopening a published research card marks its publication superseded: the Research tab, phase completion and interest counts no longer count it, and publishing again leaves one live note.
+- Reopening a bug card that was cancelled after a test failure puts its parent back to waiting when the parent is still queued or claimed in Test; otherwise both cards get a warning and the parent is left as it is.
+- Media: a paused video is no longer cut after 30 seconds. Only real upstream silence (30 seconds) cuts a stream; a client that makes no progress for 10 minutes is closed. An upstream error mid-stream ends the response instead of throwing.
+- Costs: the project filter lists every project, not only the selected one.
+- Settings: you see and set your own time zone; non-Owners are told the daily report follows the Owner's zone.
+- Intake and vault registration are offered only to people who may use them (desk, palette, empty board, discovery, Vaults).
+- New research card from the Research tab starts on the research type.
+- The org chart draws escalation to the CEO when one is active, as the routing does.
+- CEO chat shows the error when the CEO status cannot be loaded, instead of "not set up yet".
+
 ## [1.0.1] - 2026-10-26
 
 ### Security
