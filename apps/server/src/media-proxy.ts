@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { pipeline, Transform } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 /**
@@ -20,8 +21,12 @@ const RESPONSE_HEADERS = [
 ] as const;
 /** Time to reach the media service and get its response headers. */
 export const MEDIA_CONNECT_TIMEOUT_MS = 2_000;
-/** A body that stalls this long is cut. */
-const MEDIA_IDLE_TIMEOUT_MS = 30_000;
+/** A body the media service itself stops sending for this long is cut. */
+export const MEDIA_IDLE_TIMEOUT_MS = 30_000;
+/** A stream the client has paused (not reading) this long is closed; the browser re-requests a Range on resume. */
+export const MEDIA_PAUSE_MAX_MS = 10 * 60_000;
+/** How often the body watchdog looks. */
+export const MEDIA_WATCHDOG_TICK_MS = 5_000;
 const SAFE_PATH = /^\/videos\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SAFE_QUERY = /^\?[A-Za-z0-9_=&.-]*$/;
 
@@ -42,6 +47,17 @@ export interface MediaLimits {
   /** Requests per rolling minute per address; 0 = no limit. */
   ratePerMin: number;
 }
+/** Body timers; injectable so tests run fast. */
+export interface MediaTiming {
+  idleMs: number;
+  pauseMaxMs: number;
+  tickMs: number;
+}
+export const DEFAULT_MEDIA_TIMING: MediaTiming = {
+  idleMs: MEDIA_IDLE_TIMEOUT_MS,
+  pauseMaxMs: MEDIA_PAUSE_MAX_MS,
+  tickMs: MEDIA_WATCHDOG_TICK_MS,
+};
 export const DEFAULT_MEDIA_LIMITS: MediaLimits = { maxConcurrentPerIp: 8, ratePerMin: 240 };
 
 /** Per-address concurrency and rate. In memory; an address with nothing running and nothing in the last minute is forgotten. */
@@ -94,7 +110,9 @@ export function registerMediaProxy(
   app: FastifyInstance,
   mediaUrl: string | undefined,
   limits: MediaLimits = DEFAULT_MEDIA_LIMITS,
+  timing: Partial<MediaTiming> = {},
 ): void {
+  const { idleMs, pauseMaxMs, tickMs } = { ...DEFAULT_MEDIA_TIMING, ...timing };
   const base = mediaUrl ? new URL(mediaUrl) : null;
   const limiter = createMediaLimiter(limits);
   const client = base?.protocol === 'https:' ? https : http;
@@ -126,7 +144,14 @@ export function registerMediaProxy(
       }
       return new Promise<void>((resolve) => {
         let settled = false;
+        let streaming = false;
+        let watchdog: NodeJS.Timeout | undefined;
+        const stopWatchdog = () => {
+          if (watchdog) clearInterval(watchdog);
+          watchdog = undefined;
+        };
         const done = () => {
+          stopWatchdog();
           if (!settled) {
             settled = true;
             slot.release();
@@ -144,7 +169,9 @@ export function registerMediaProxy(
             timeout: MEDIA_CONNECT_TIMEOUT_MS,
           },
           (res) => {
-            up.setTimeout(MEDIA_IDLE_TIMEOUT_MS);
+            // The socket idle timer only guards connect + headers. A paused video stops reading (backpressure), so
+            // a quiet socket is not a dead upstream: the body is watched by the watchdog below instead.
+            up.setTimeout(0);
             const status = res.statusCode ?? 502;
             if (![200, 206, 304, 416].includes(status)) {
               res.resume();
@@ -153,6 +180,7 @@ export function registerMediaProxy(
                 : fail(reply, 503, 'media_unavailable', 'the media service is not available'));
               return done();
             }
+            streaming = true;
             reply.code(status);
             for (const h of RESPONSE_HEADERS) {
               const v = res.headers[h];
@@ -164,12 +192,74 @@ export function registerMediaProxy(
               done();
             });
             res.once('error', () => undefined);
-            void reply.send(req.method === 'HEAD' ? undefined : res);
-            if (req.method === 'HEAD') res.resume();
+            if (req.method === 'HEAD') {
+              void reply.send(undefined);
+              res.resume();
+              return;
+            }
+            // A pass-through lets us see when upstream chunks arrive without consuming them (a 'data' listener on
+            // `res` would start it flowing before Fastify pipes it, and lose bytes).
+            let lastChunk = Date.now();
+            let heldSince: number | null = null;
+            let lastWritten = 0;
+            const meter = new Transform({
+              transform(chunk, _enc, cb) {
+                lastChunk = Date.now();
+                cb(null, chunk);
+              },
+            });
+            pipeline(res, meter, () => undefined);
+            void reply.send(meter);
+            reply.raw.once('finish', stopWatchdog);
+            watchdog = setInterval(() => {
+              const now = Date.now();
+              // Bytes that reached the client's socket since the last tick: a slow reader is progress, not a pause.
+              const written = reply.raw.socket?.bytesWritten ?? 0;
+              const progressed = written > lastWritten;
+              lastWritten = written;
+              // Held up by the client (paused / not draining): not upstream silence, but not forever either.
+              if (
+                res.isPaused() ||
+                meter.readableFlowing === false ||
+                meter.writableNeedDrain ||
+                reply.raw.writableNeedDrain
+              ) {
+                if (progressed) heldSince = now;
+                else heldSince ??= now;
+                lastChunk = now;
+                if (now - heldSince > pauseMaxMs) {
+                  stopWatchdog();
+                  up.destroy();
+                  reply.raw.destroy();
+                }
+                return;
+              }
+              heldSince = null;
+              // (a finished upstream cannot go silent: only the pause cap above applies to it)
+              if (!res.complete && now - lastChunk > idleMs) {
+                stopWatchdog();
+                up.destroy(new Error('media timeout'));
+                reply.raw.destroy();
+              }
+            }, tickMs);
+            watchdog.unref();
           },
         );
+        // The client left before the headers came: stop the upstream request now, not at the connect timeout.
+        reply.raw.once('close', () => {
+          if (!streaming) {
+            done();
+            up.destroy();
+          }
+        });
         up.on('timeout', () => up.destroy(new Error('media timeout')));
         up.on('error', (err) => {
+          stopWatchdog();
+          if (streaming) {
+            // cut mid-body: the answer is already on its way, end it (truncated) instead of writing an error page
+            reply.raw.destroy();
+            return done();
+          }
           if (settled || reply.sent) return;
           req.log.warn({ err: err.message }, 'media service unavailable');
           void fail(reply, 503, 'media_unavailable', 'the media service is not available');

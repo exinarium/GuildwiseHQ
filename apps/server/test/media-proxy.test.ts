@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
+import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createMediaLimiter, mediaTarget } from '../src/media-proxy.ts';
+import { createMediaLimiter, mediaTarget, registerMediaProxy } from '../src/media-proxy.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
 import { closeAdminPool } from './helpers/db.ts';
 
@@ -278,5 +281,208 @@ describe('the /videos limits per address (security review finding 15)', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe('the /videos body timers (paused videos are not cut)', () => {
+  const BIG = 24 * 1024 * 1024;
+  const SMALL = 4 * 1024 * 1024; // fully received by the proxy while the client reads nothing
+  const IDLE = 300;
+  const PAUSE_MAX = 1500;
+  const bigByte = (i: number) => i % 251;
+  const bigBuf = Buffer.alloc(BIG);
+  for (let i = 0; i < BIG; i++) bigBuf[i] = bigByte(i);
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+
+  let up: http.Server;
+  let upUrl: string;
+  const upSockets = new Set<import('node:net').Socket>();
+  let upReqsOpen = 0;
+  let proxy: ReturnType<typeof Fastify>;
+  let proxyPort: number;
+
+  beforeAll(async () => {
+    up = http.createServer((req, res) => {
+      upReqsOpen++;
+      res.on('close', () => upReqsOpen--);
+      if (req.url?.startsWith('/videos/stall')) {
+        res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '1000000' });
+        res.write(Buffer.alloc(100, 1)); // then silence
+        return;
+      }
+      if (req.url?.startsWith('/videos/small')) {
+        res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': String(SMALL) });
+        res.end(Buffer.alloc(SMALL, 3));
+        return;
+      }
+      const m = /^bytes=(\d+)-(\d*)$/.exec(String(req.headers.range ?? ''));
+      const from = m ? Number(m[1]) : 0;
+      const body = bigBuf.subarray(from);
+      res.writeHead(m ? 206 : 200, {
+        'content-type': 'video/mp4',
+        'content-length': String(body.length),
+        ...(m ? { 'content-range': `bytes ${from}-${BIG - 1}/${BIG}` } : {}),
+      });
+      Readable.from([body], { objectMode: false }).pipe(res);
+    });
+    up.keepAliveTimeout = 50; // idle pooled sockets from the proxy's agent go away quickly
+    up.on('connection', (sock) => {
+      upSockets.add(sock);
+      sock.on('close', () => upSockets.delete(sock));
+    });
+    await new Promise<void>((r) => up.listen(0, '127.0.0.1', r));
+    upUrl = `http://127.0.0.1:${(up.address() as AddressInfo).port}`;
+    proxy = Fastify({ logger: false });
+    registerMediaProxy(
+      proxy,
+      upUrl,
+      { maxConcurrentPerIp: 1, ratePerMin: 0 },
+      { idleMs: IDLE, pauseMaxMs: PAUSE_MAX, tickMs: 25 },
+    );
+    await proxy.listen({ port: 0, host: '127.0.0.1' });
+    proxyPort = (proxy.server.address() as AddressInfo).port;
+  });
+  afterAll(async () => {
+    await proxy.close();
+    up.closeAllConnections();
+    await new Promise((r) => up.close(r));
+  });
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const open = (path: string, headers: http.OutgoingHttpHeaders = {}) =>
+    new Promise<http.IncomingMessage>((resolve, reject) => {
+      const agent = new http.Agent({ keepAlive: false });
+      http.get({ host: '127.0.0.1', port: proxyPort, path, headers, agent }, resolve).on('error', reject);
+    });
+  const status = (path: string) =>
+    new Promise<number>((resolve, reject) => {
+      http
+        .get({ host: '127.0.0.1', port: proxyPort, path, agent: false }, (r) => {
+          r.resume();
+          r.on('close', () => resolve(r.statusCode ?? 0));
+        })
+        .on('error', reject);
+    });
+  const untilClosed = (r: http.IncomingMessage) =>
+    new Promise<{ complete: boolean }>((resolve) => {
+      r.on('error', () => undefined);
+      // the socket closes when the proxy cuts the stream, even while the paused client still holds unread bytes
+      r.socket.on('close', () => resolve({ complete: r.complete }));
+    });
+  const collect = (r: http.IncomingMessage) =>
+    new Promise<Buffer>((resolve) => {
+      const parts: Buffer[] = [];
+      r.on('data', (c: Buffer) => parts.push(c));
+      r.on('error', () => undefined);
+      r.on('close', () => resolve(Buffer.concat(parts)));
+    });
+  const waitFor = async (cond: () => boolean, ms = 3000) => {
+    const t = Date.now();
+    while (!cond() && Date.now() - t < ms) await sleep(20);
+    expect(cond()).toBe(true);
+  };
+
+  it('cuts a body when the media service itself goes silent for longer than the idle time', async () => {
+    const r = await open('/videos/stall.mp4');
+    expect(r.statusCode).toBe(200);
+    const t = Date.now();
+    const end = await untilClosed(r.resume());
+    expect(end.complete).toBe(false);
+    expect(Date.now() - t).toBeGreaterThanOrEqual(IDLE - 50);
+    await waitFor(() => upReqsOpen === 0);
+    expect(await status('/videos/big.mp4?x=1')).toBe(200); // slot was freed
+  });
+
+  it('does not cut a client that stopped reading before the pause cap, and closes it (slot freed) after', async () => {
+    const t = Date.now();
+    const r = await open('/videos/big.mp4');
+    expect(r.statusCode).toBe(200);
+    r.pause();
+    await sleep(IDLE * 3); // well past idle, before the cap
+    expect(upReqsOpen).toBe(1); // still being served
+    expect(await status('/videos/big.mp4')).toBe(429); // slot still held
+    // (a paused client only sees the close once it reads again, so watch the proxy side)
+    await waitFor(() => upReqsOpen === 0, PAUSE_MAX + 2000);
+    expect(Date.now() - t).toBeGreaterThanOrEqual(PAUSE_MAX - 100);
+    expect(await status('/videos/big.mp4')).toBe(200); // slot freed
+    const end = untilClosed(r);
+    r.resume();
+    expect((await end).complete).toBe(false); // truncated: the browser re-requests a Range
+    await waitFor(() => upSockets.size === 0);
+  });
+
+  it('closes a small, fully-received body that the client never reads once the pause cap is over', async () => {
+    const r = await open('/videos/small.mp4');
+    expect(r.statusCode).toBe(200);
+    r.pause();
+    await sleep(IDLE * 2);
+    expect(await status('/videos/big.mp4')).toBe(429); // slot still held
+    const t = Date.now();
+    let freed = false;
+    while (!freed && Date.now() - t < PAUSE_MAX + 2000) {
+      await sleep(100);
+      freed = (await status('/videos/small.mp4?p=1')) === 200;
+    }
+    expect(freed).toBe(true);
+    r.destroy();
+  });
+
+  it('a slow but steady reader is not cut even when the total time is over the pause cap', async () => {
+    const r = await open('/videos/big.mp4');
+    expect(r.statusCode).toBe(200);
+    const parts: Buffer[] = [];
+    const t = Date.now();
+    r.on('error', () => undefined);
+    r.on('data', (c: Buffer) => parts.push(c));
+    const closed = new Promise((res) => r.on('close', res));
+    let n = 0;
+    while (!r.complete && (Date.now() - t < PAUSE_MAX + 800 || n < 6)) {
+      r.pause();
+      await sleep(PAUSE_MAX / 3); // each pause is shorter than the cap
+      r.resume();
+      await sleep(40);
+      n++;
+    }
+    r.resume();
+    await closed;
+    const body = Buffer.concat(parts);
+    expect(r.complete).toBe(true);
+    expect(sha(body)).toBe(sha(bigBuf));
+  }, 20_000);
+
+  it('a client that resumes after more than the idle time gets the rest of the body intact', async () => {
+    const r = await open('/videos/big.mp4');
+    r.pause();
+    await sleep(IDLE * 3);
+    const got = collect(r);
+    r.resume();
+    const body = await got;
+    expect(r.complete).toBe(true);
+    expect(body.length).toBe(BIG);
+    expect(sha(body)).toBe(sha(bigBuf));
+    await waitFor(() => upReqsOpen === 0);
+  });
+
+  it('a Range 206 survives a pause longer than the idle time', async () => {
+    const from = 5_000_000;
+    const r = await open('/videos/big.mp4', { range: `bytes=${from}-` });
+    expect(r.statusCode).toBe(206);
+    r.pause();
+    await sleep(IDLE * 3);
+    const got = collect(r);
+    r.resume();
+    const body = await got;
+    expect(r.complete).toBe(true);
+    expect(sha(body)).toBe(sha(bigBuf.subarray(from)));
+    await waitFor(() => upReqsOpen === 0);
+  });
+
+  it('leaks nothing: every upstream connection and request is gone once the streams are over', async () => {
+    const r = await open('/videos/big.mp4');
+    await collect(r);
+    const s = await open('/videos/stall.mp4');
+    await untilClosed(s.resume());
+    await waitFor(() => upReqsOpen === 0);
+    await waitFor(() => upSockets.size === 0);
   });
 });
