@@ -1,6 +1,7 @@
 export * from './authoring.ts';
 export * from './builtin.ts';
 export * from './pack-manifest.ts';
+export * from './pack-team.ts';
 export * from './pack-wire.ts';
 export * from './packs.ts';
 export * from './parse.ts';

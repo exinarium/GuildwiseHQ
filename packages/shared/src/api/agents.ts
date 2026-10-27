@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AvatarStyleSchema } from '../avatars/index.ts';
+import { PackPersonaRefSchema } from '../capabilities/pack-team.ts';
 import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AgentChangesSchema } from '../events/agent.ts';
 import { SandboxStateSchema } from '../protocol/runner.ts';
@@ -51,6 +52,11 @@ export const AgentDtoSchema = z.object({
    * R3a: hired from a pack persona (`ACME · analyst · v1.2.0`). `warning`: the pack's approval was withdrawn (`revoked`) or the
    * pack was removed; the agent keeps its role version and its work, and shows a warning.
    */
+  /**
+   * Hired from a pack onto a seat: the pack agent it works as. `provenance` is filled too (the same tag and warning), so the
+   * HR board shows "hired from <pack>" with no extra code; `packAgent` adds what is specific to a seat.
+   */
+  packAgent: PackPersonaRefSchema.nullable().optional(),
   provenance: PackProvenanceSchema.extend({
     label: z.string(),
     warning: z.enum(['revoked', 'removed']).nullable().default(null),

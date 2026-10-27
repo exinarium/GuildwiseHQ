@@ -61,6 +61,15 @@ const MetaExtras = {
   /** S-B1: scopes the capability declares it needs. */
   scopes: z.array(z.string().max(40)).max(20).optional(),
   icon: z.string().max(60).optional(),
+  /**
+   * A pack agent's own name (a skill's `customize.toml` `[agent] name`, or `metadata.name|title|displayName`), when it has one.
+   * Metadata only, derived by the reader; not part of any hash.
+   */
+  displayName: z.string().max(100).optional(),
+  /** Plain keys of the pack's other skills this one's files name (a hire offers them as the agent's skills). Metadata only. */
+  skillRefs: z.array(z.string().max(64)).max(40).optional(),
+  /** A pack skill the Owner marked as a playbook is listed as one; this says it is loaded as a skill (`aom skill show <key>`). */
+  loadAs: z.literal('skill').optional(),
   /** A persona's declared tools (advisory; read when it is hired from a pack to map a permission preset). */
   tools: z.array(z.string().max(60)).max(30).optional(),
   /** Where a project-repository capability lives in its checkout (`.claude/skills/<name>`), for the review list. */
@@ -179,6 +188,9 @@ interface Base {
   scopes?: string[];
   /** A persona's icon, for the pickers (the metadata does not carry the prompt). */
   icon?: string;
+  /** See `MetaExtras`: a pack agent's own name and the pack skills its files name. */
+  displayName?: string;
+  skillRefs?: string[];
   /** Path of the file that carries the frontmatter, relative to the capability root (`SKILL.md`, `<key>.md`, `workflow.md`). */
   main: string;
   /** Every file of the capability, by path relative to its root. */

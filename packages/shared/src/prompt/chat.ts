@@ -1,3 +1,4 @@
+import { handlesNote, packAgentSection } from '../capabilities/pack-team.ts';
 import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 import { renderCeoChatSection } from './ceo.ts';
@@ -33,15 +34,16 @@ function renderChatVaultSection(v: ChatVaultNotes): string | undefined {
  * browser. The agent answers in the conversation; it does not claim cards or report outcomes. Pure and deterministic.
  */
 export function renderChatInstructions(
-  agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
+  agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority' | 'packAgent'>,
   ctx: ChatContext,
   opts: { jiraSkill?: string; readFolders?: ReadableFolder[]; vault?: ChatVaultNotes } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
-    `You are ${agent.name}, a ${agent.seniority} ${agent.roleKey} working for the manager you are chatting with. Names are handles, not personas: do not roleplay, answer plainly.`,
+    `You are ${agent.name}, a ${agent.seniority} ${agent.roleKey} working for the manager you are chatting with. ${handlesNote(agent, 'do not roleplay, answer plainly.')}`,
   );
+  out.push(...packAgentSection(agent));
   out.push('# This conversation');
   const where: string[] = [];
   if (ctx.projectKey) where.push(`project ${ctx.projectKey}`);

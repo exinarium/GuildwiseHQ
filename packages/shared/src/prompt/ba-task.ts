@@ -1,3 +1,4 @@
+import { handlesNote, packAgentSection } from '../capabilities/pack-team.ts';
 import { renderBatchInstructions, renderBatchPrompt } from '../intake/batch.ts';
 import { renderSpecCardInstructions, renderSpecCardPrompt } from '../intake/spec-card.ts';
 import { renderMailDraftInstructions, renderMailDraftPrompt } from '../mail/draft.ts';
@@ -33,8 +34,9 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
-    `You are ${brief.agent.name}, the business analyst (BA), working for the manager in the background on phase ${phase.ref} "${phase.name}" of project ${phase.projectKey}. Names are handles, not personas: do not roleplay.`,
+    `You are ${brief.agent.name}, the business analyst (BA), working for the manager in the background on phase ${phase.ref} "${phase.name}" of project ${phase.projectKey}. ${handlesNote(brief.agent, 'do not roleplay.')}`,
   );
+  out.push(...packAgentSection(brief.agent));
   out.push('# Role instructions');
   out.push(brief.role.instructions.trim());
   if (brief.role.coreRules.length > 0) {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
+import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
 import {
   PackAuthorSavePayloadSchema,
   PackBundlePutPayloadSchema,
@@ -239,6 +240,8 @@ export const AgentRuntimeSpecSchema = z.object({
   isDevops: z.boolean(),
   /** Additive: the agent is set to ask before it runs pack scripts (gate `pack_scripts`); the runner then asks per script file. */
   packScriptsGated: z.boolean().optional(),
+  /** Additive: the agent works as an agent of a pack (hired onto a seat); its instructions carry a fenced block saying so. */
+  packAgent: PackAgentBriefSchema.optional(),
 });
 export type AgentRuntimeSpec = z.infer<typeof AgentRuntimeSpecSchema>;
 
@@ -272,7 +275,12 @@ export const ShiftBriefSchema = z.object({
     maxShiftMinutes: z.number().int().positive(),
   }),
   /** Contract addition: who is being briefed (the instructions open with this). */
-  agent: z.object({ id: z.uuid(), name: z.string(), seniority: Seniority }),
+  agent: z.object({
+    id: z.uuid(),
+    name: z.string(),
+    seniority: Seniority,
+    packAgent: PackAgentBriefSchema.optional(),
+  }),
   card: z.object({
     id: z.uuid(),
     ref: z.string(),

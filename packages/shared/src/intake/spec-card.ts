@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { handlesNote, type PackAgentBrief, packAgentSection } from '../capabilities/pack-team.ts';
 import { renderUntrusted } from '../prompt/untrusted.ts';
 
 /**
@@ -125,7 +126,10 @@ export function specCardBriefOutcomes() {
 }
 
 export function renderSpecCardInstructions<O extends { id: string; label: string }>(
-  brief: { agent: { name: string }; role: { instructions: string; coreRules: string[] } },
+  brief: {
+    agent: { name: string; packAgent?: PackAgentBrief | undefined };
+    role: { instructions: string; coreRules: string[] };
+  },
   task: SpecCardTask,
   outcomes: readonly O[],
   commandFor: (o: O) => string,
@@ -133,8 +137,9 @@ export function renderSpecCardInstructions<O extends { id: string; label: string
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
-    `You are ${brief.agent.name}, the ${task.by === 'architect' ? 'architect' : 'business analyst (BA)'}, working in the background on card ${task.ref} of project ${task.projectKey}. Names are handles, not personas: do not roleplay.`,
+    `You are ${brief.agent.name}, the ${task.by === 'architect' ? 'architect' : 'business analyst (BA)'}, working in the background on card ${task.ref} of project ${task.projectKey}. ${handlesNote(brief.agent, 'do not roleplay.')}`,
   );
+  out.push(...packAgentSection(brief.agent));
   out.push('# Role instructions');
   out.push(brief.role.instructions.trim());
   if (brief.role.coreRules.length > 0) {

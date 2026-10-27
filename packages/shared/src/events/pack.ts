@@ -120,6 +120,44 @@ export const packEvents = [
     }),
   ),
   defineEvent('PackRemoved', z.object({ packId: Id, orgId: Id, removedBy: Id })),
+  /**
+   * The Owner or an Admin said which of the pack's skills are agents and which are playbooks (keys without the pack prefix).
+   * Full lists: the last event wins, so the projection replays to the same state. Metadata only; the skills' text stays in the pack.
+   */
+  defineEvent(
+    'PackItemsClassified',
+    z.object({
+      packId: Id,
+      orgId: Id,
+      agents: z.array(z.string().min(1).max(64)).max(300),
+      playbooks: z.array(z.string().min(1).max(64)).max(300),
+      by: Id,
+    }),
+  ),
+  /**
+   * Agents were hired from a pack onto roles (one call: one agent or the whole team). The agents carry their own `AgentHired`
+   * events; this one ties them together for the HR board ("hired from <pack>").
+   */
+  defineEvent(
+    'PackTeamHired',
+    z.object({
+      hireId: Id,
+      packId: Id,
+      orgId: Id,
+      by: Id,
+      mode: z.enum(['agents', 'team']),
+      agents: z
+        .array(
+          z.object({
+            agentId: Id,
+            name: z.string().max(100),
+            key: z.string().max(130),
+            seat: z.string().max(80),
+          }),
+        )
+        .max(300),
+    }),
+  ),
   /** The capabilities of a project's checkout, as a runner last saw them (metadata only). */
   defineEvent(
     'ProjectCapabilitiesReported',

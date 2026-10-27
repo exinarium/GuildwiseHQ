@@ -19,6 +19,7 @@ import {
   RegistryMetaSchema,
   splitFrontmatter,
 } from './parse.ts';
+import { parseTomlLite, tomlString, tomlTable } from './toml-lite.ts';
 
 /**
  * External capability packs (docs/design/discovery-boardroom-registry.md "Phase E as built"): a git repository, pinned to
@@ -535,6 +536,53 @@ export function inPack(
   } as ParsedCapability;
 }
 
+/** A key as it is written in text: lowercase words joined by hyphens, at least two words (a bare word is too common to mean a skill). */
+const HYPHEN_KEY = /[a-z0-9]+(?:-[a-z0-9]+)+/g;
+
+/**
+ * What a hire needs to know about a pack agent without reading its text on the server: its own name (a root-level `*.toml`
+ * with an `[agent]` table that has `name` or `title`, or `metadata.name|title|displayName` in the SKILL.md), and which of the
+ * pack's other skills its files name verbatim (`skill = "bmad-prd"` in a menu, a `skills:` list in a subagent, a backticked key
+ * in the text). Generic: it looks at conventions, not at any one pack. Both are metadata (not hashed); a wrong guess costs
+ * the hirer one unticked box.
+ */
+export function agentInfoOf(
+  e: ParsedCapability,
+  packSkillKeys: ReadonlySet<string>,
+): { displayName?: string; skillRefs?: string[] } {
+  let displayName: string | undefined;
+  const clean = (v: unknown): string | undefined => {
+    if (typeof v !== 'string') return undefined;
+    const t = v.replace(/\s+/g, ' ').trim();
+    return t && t.length <= 100 ? t : undefined;
+  };
+  if (e.kind === 'skill') {
+    const m = e.meta.metadata ?? {};
+    displayName = clean(m.displayName) ?? clean(m.name) ?? clean(m.title);
+    if (!displayName)
+      for (const [path, text] of Object.entries(e.files).sort(([a], [b]) => a.localeCompare(b))) {
+        if (path.includes('/') || !path.toLowerCase().endsWith('.toml') || text.length > 64 * 1024) continue;
+        const agent = tomlTable(parseTomlLite(text).agent);
+        const n = clean(tomlString(agent?.name)) ?? clean(tomlString(agent?.title));
+        if (n) {
+          displayName = n;
+          break;
+        }
+      }
+  }
+  const refs = new Set<string>();
+  const own = e.key.includes(':') ? e.key.slice(e.key.indexOf(':') + 1) : e.key;
+  if (e.kind === 'persona') for (const s of e.meta.skills ?? []) if (packSkillKeys.has(s)) refs.add(s);
+  for (const [path, text] of Object.entries(e.files)) {
+    if (isScriptPath(path) || text.length > 256 * 1024) continue;
+    for (const t of text.match(HYPHEN_KEY) ?? []) if (t !== own && packSkillKeys.has(t)) refs.add(t);
+  }
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(refs.size ? { skillRefs: [...refs].sort().slice(0, 40) } : {}),
+  };
+}
+
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
@@ -785,6 +833,14 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     return true;
   });
   entries.sort((a, b) => (a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind)));
+  const skillKeys = new Set(
+    entries.filter((e) => e.kind === 'skill').map((e) => e.key.slice(input.name.length + 1)),
+  );
+  entries = entries.map((e) =>
+    e.kind === 'skill' || e.kind === 'persona'
+      ? ({ ...e, ...agentInfoOf(e, skillKeys) } as ParsedCapability)
+      : e,
+  );
   const licenseText = tree.LICENSE ?? tree['LICENSE.md'] ?? tree['LICENSE.txt'] ?? '';
   const license = /^\s*(MIT License|Apache License|BSD|ISC License|Mozilla Public License|GNU )/im.exec(
     licenseText,
@@ -835,6 +891,8 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
     ...(e.tags?.length ? { tags: e.tags } : {}),
     ...(declaredScopesOf(e).length ? { scopes: declaredScopesOf(e) } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
+    ...(e.displayName ? { displayName: e.displayName } : {}),
+    ...(e.skillRefs?.length ? { skillRefs: e.skillRefs } : {}),
     ...(e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
     files: Object.entries(e.files)
       .sort(([a], [b]) => a.localeCompare(b))

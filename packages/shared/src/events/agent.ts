@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AvatarSeedSchema, AvatarStyleSchema } from '../avatars/index.ts';
+import { PackPersonaRefSchema } from '../capabilities/pack-team.ts';
 import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { defineEvent, Id } from './define.ts';
@@ -63,6 +64,8 @@ export const agentEvents = [
       avatarStyle: AvatarStyleSchema.optional(),
       /** R3a: hired from a pack persona; shown as a tag on the HR board, the agent page and chats. */
       provenance: PackProvenanceSchema.optional(),
+      /** Hired from a pack onto a seat: the pack agent this agent works as (name, persona and skills come from it). */
+      packPersona: PackPersonaRefSchema.optional(),
     }),
   ),
   defineEvent(

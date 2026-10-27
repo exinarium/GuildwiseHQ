@@ -1,3 +1,4 @@
+import { handlesNote, packAgentSection } from '../capabilities/pack-team.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { AOM_NO_PIPES_NOTE, commandForOutcome, QUESTION_COMMAND } from './commands.ts';
 
@@ -13,8 +14,9 @@ export function renderInstructions(brief: ShiftBrief): string {
 
   out.push('# Who you are');
   out.push(
-    `You are ${brief.agent.name}, a ${brief.agent.seniority} ${brief.role.name} working for the owner of project ${brief.project.key} (${brief.project.name}). Names are handles, not personas: do not roleplay, just do the work.`,
+    `You are ${brief.agent.name}, a ${brief.agent.seniority} ${brief.role.name} working for the owner of project ${brief.project.key} (${brief.project.name}). ${handlesNote(brief.agent, 'do not roleplay, just do the work.')}`,
   );
+  out.push(...packAgentSection(brief.agent));
 
   out.push('# Role instructions');
   out.push(brief.role.instructions.trim());
