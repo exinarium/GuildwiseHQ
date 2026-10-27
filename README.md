@@ -14,9 +14,9 @@
 
 ## Watch
 
-[![Watch the Guildwise HQ overview: a tour of the whole product, 13 minutes](docs/media/overview-thumbnail.png)](https://guildwisehq.com/videos/overview.mp4)
+[![Watch the Guildwise HQ overview: a tour of the whole product, 9 minutes](docs/media/overview-thumbnail.png)](https://guildwisehq.com/videos/overview.mp4)
 
-A 13-minute tour of the whole product: the team of agents, the board, your desk, Discovery and the Boardroom, workstations, budgets and releases. Narrated, with captions.
+A 9-minute tour of the whole product: the team of agents, the board, your desk, Discovery and the Boardroom, workstations, budgets and releases. Narrated, with captions.
 
 [![A 45-second teaser of Guildwise HQ (animated preview, sped up)](docs/media/overview-teaser.gif)](https://guildwisehq.com/videos/overview-teaser.mp4)
 
@@ -191,7 +191,7 @@ Sign in as the organization owner. Then:
 2. Sign in to Claude on that workstation, either with `claude` (your subscription) or with an API key.
 3. Choose the folders that hold your code. The runner finds the repositories in them.
 
-To pair by hand instead, create a one-time code under **Workstations > Pair workstation** (it is valid for 10 minutes) and run:
+To pair by hand instead, create a one-time code under **Workstations > Pair with a code** (it is valid for 10 minutes) and run:
 
 ```bash
 guildwise-runner pair --server https://guildwise.example.com --code XXXX-XXXX --name "Desktop"
