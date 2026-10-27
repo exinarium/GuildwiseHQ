@@ -271,7 +271,9 @@ describe('deploy.move on two fake servers', () => {
     expect(r.exists('new-box', 'db.sql')).toBe(false); // psql never ran
     expect(readFileSync(join(r.state('new-box'), 'calls.log'), 'utf8')).not.toContain('--single-transaction');
     expect(r.exists('old-box', 'up-app')).toBe(true);
-    expect(readdirSync(r.app).filter((n) => n.startsWith('.aom-restore') || n.startsWith('.guildwise-restore'))).toEqual([]); // the temporary file is gone
+    expect(
+      readdirSync(r.app).filter((n) => n.startsWith('.aom-restore') || n.startsWith('.guildwise-restore')),
+    ).toEqual([]); // the temporary file is gone
   });
 
   it('a gzip stream cut in the middle is refused too', async () => {
