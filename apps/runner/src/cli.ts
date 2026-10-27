@@ -59,7 +59,7 @@ import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
 import { detectServiceMode, scheduleRestart } from './update/apply.ts';
-import { detectLayout } from './update/layout.ts';
+import { detectLayout, ensureGuildwiseAlias } from './update/layout.ts';
 import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -201,6 +201,8 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   let finish: (code: number) => void = () => undefined;
   const layout = mock ? null : detectLayout(process.argv[1]);
   const serviceMode = layout ? detectServiceMode(layout) : null;
+  if (layout && ensureGuildwiseAlias(layout))
+    log.info('added the guildwise-runner command next to aom-runner');
   /** The safe-mode pin the server sent before the updater existed (welcome comes first). */
   let pendingPin: string | null = null;
   const host = new RunnerHost({
