@@ -157,7 +157,8 @@ describe('classification', () => {
       { key: full('crew-prd'), workstationId: w.workstationId },
       201,
     );
-    const cfg = (await q('SELECT session_config FROM threads WHERE id=$1', [run.threadId]))[0]?.session_config;
+    const cfg = (await q('SELECT session_config FROM threads WHERE id=$1', [run.threadId]))[0]
+      ?.session_config;
     expect(cfg.playbookRun).toMatchObject({ key: full('crew-prd') });
   });
 });
@@ -214,14 +215,14 @@ describe('a pack agent on a seat', () => {
     );
     maryId = res.agents[0].agentId;
     expect(res.agents[0]).toMatchObject({ name: 'Mary', roleKey: 'analyst', seat: 'analyst', kind: 'skill' });
-    const row = (await agents()).find((a) => a.id === maryId);
+    const row = (await agents()).find((a) => a.id === maryId) as any;
     expect(row).toMatchObject({ role_key: 'analyst', name: 'Mary', status: 'active' });
     // role version, permissions and model come from the seat role
     const role = (
       await q(
         `SELECT version, definition FROM role_definitions WHERE key='analyst' AND org_id IS NULL ORDER BY version DESC LIMIT 1`,
       )
-    )[0];
+    )[0] as any;
     expect(row.role_version).toBe(role.version);
     expect(row.permissions).toEqual(role.definition.permissions);
     expect(row.model).toBe(role.definition.defaultModel.model);
@@ -419,13 +420,13 @@ describe('the whole pack at once', () => {
     // the role of its own holds none of the pack's text, and claims no stage
     const role = (
       await q(`SELECT definition FROM role_definitions WHERE org_id=$1 AND key=$2`, [w.owner.id, ux])
-    )[0].definition;
+    )[0]?.definition;
     expect(role.claimableStages).toEqual([]);
     expect(role.instructions).not.toContain('Sally');
     expect(role.source).toMatchObject({ packId });
     const ev = await q(`SELECT payload FROM events WHERE type='PackTeamHired' ORDER BY seq DESC LIMIT 1`);
-    expect(ev[0].payload).toMatchObject({ packId, mode: 'team', hireId: res.hireId });
-    expect(ev[0].payload.agents).toHaveLength(5);
+    expect(ev[0]?.payload).toMatchObject({ packId, mode: 'team', hireId: res.hireId });
+    expect(ev[0]?.payload.agents).toHaveLength(5);
     // hiring the persona onto its own role uses the persona's declared tools (read only here), never more
     const tester = (await agents()).find(
       (a) => a.id === res.agents.find((x: { key: string }) => x.key === 'test-runner').agentId,
