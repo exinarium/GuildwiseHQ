@@ -115,10 +115,10 @@ function pickAction(brief: Brief, index: number): Action {
 
 function buildWork(brief: Brief): void {
   const round = brief.card.reworkRound + 1;
-  mkdirSync('aom-mock', { recursive: true });
-  writeFileSync(join('aom-mock', `${brief.card.ref}.txt`), `round ${round}\n${brief.card.title}\n`);
+  mkdirSync('.guildwise-mock', { recursive: true });
+  writeFileSync(join('.guildwise-mock', `${brief.card.ref}.txt`), `round ${round}\n${brief.card.title}\n`);
   writeFileSync(
-    join('aom-mock', `${brief.card.ref}.test.txt`),
+    join('.guildwise-mock', `${brief.card.ref}.test.txt`),
     `unit-test-like file for ${brief.card.ref}, round ${round}\n`,
   );
   sh('git', ['add', '-A']);
@@ -2239,8 +2239,8 @@ async function main(): Promise<number> {
   }
   if (stage === 'build') buildWork(brief);
   if (action === 'edit_outside_scope') {
-    mkdirSync('aom-mock', { recursive: true });
-    writeFileSync(join('aom-mock', 'outside-scope.txt'), 'edited outside the role scope\n');
+    mkdirSync('.guildwise-mock', { recursive: true });
+    writeFileSync(join('.guildwise-mock', 'outside-scope.txt'), 'edited outside the role scope\n');
   }
   if (action === 'no_report') {
     emit({ kind: 'final', text: 'mock finished without reporting' });

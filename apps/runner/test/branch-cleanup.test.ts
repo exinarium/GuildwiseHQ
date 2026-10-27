@@ -72,6 +72,25 @@ const localHeads = (repo: TestRepo) =>
   sh(repo.clone, 'git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads']).split('\n');
 
 describe('hygiene removes the branches of finished cards', () => {
+  it.each([
+    ['guildwise/', 'guildwise/toy-1-a'],
+    ['aom/', 'aom/toy-1-a'],
+    ['guildwise/', 'aom/toy-1-a'],
+    ['aom/', 'guildwise/toy-1-a'],
+    ['aom/', 'guildwise/integration/toy-1'],
+    ['guildwise/', 'aom-integration/toy-1'],
+  ])(
+    'recognises the branch under both the new and the legacy names (project prefix %s, branch %s)',
+    async (prefix, branch) => {
+      const repo = makeRepo();
+      pushedBranch(repo, branch, 'a.txt');
+      sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge a', branch]);
+      const { result } = await hygieneRepo(spec(repo, [card(1, branch)], { branchPrefix: prefix }));
+      expect(result.cleaned.map((c) => c.branch)).toEqual([branch]);
+      expect(localHeads(repo)).not.toContain(branch);
+    },
+  );
+
   it('deletes a merged branch from origin and the clone, and says why', async () => {
     const repo = makeRepo();
     pushedBranch(repo, 'aom/toy-1-a', 'a.txt');

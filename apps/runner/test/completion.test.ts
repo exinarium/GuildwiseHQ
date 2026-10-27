@@ -88,7 +88,39 @@ describe('completion: merge', () => {
     // the local clone's main (checked out, clean) fast-forwarded; no integration worktree is left behind
     expect(readFileSync(join(repo.clone, 'thing.txt'), 'utf8')).toBe('thing\n');
     expect(sh(repo.clone, 'git', ['worktree', 'list'])).not.toContain('integration');
-    expect(sh(repo.clone, 'git', ['branch', '--list', 'aom-integration/*'])).toBe('');
+    expect(sh(repo.clone, 'git', ['branch', '--list', 'aom-integration/*', 'guildwise/integration/*'])).toBe(
+      '',
+    );
+  });
+
+  it('merges through guildwise/integration/<ref> and sweeps a leftover aom-integration/<ref>', async () => {
+    const { repo, path } = await cardWorktree();
+    sh(repo.clone, 'git', ['branch', 'aom-integration/toy-1', 'main']);
+    sh(repo.clone, 'git', ['branch', 'aom-integration/other-9', 'main']);
+    // the temporary branch exists while the merge runs: watch for it from a post-merge hook
+    // the integration worktree exists while the push is authorised: look at its branch then
+    let during = '';
+    const p = payload(repo, path, 'merge');
+    const r = await executeCompletion({
+      payload: p,
+      repoPath: repo.clone,
+      worktreePath: path,
+      worktreesDir: '/',
+      integrationDir: join(tmp(), 'integration'),
+      pr: new FakePr({}),
+      auth: async () => {
+        during = sh(repo.clone, 'git', ['worktree', 'list']);
+        return { args: [], env: {} };
+      },
+    });
+    expect(r.ok).toBe(true);
+    expect(during).toContain('[guildwise/integration/toy-1]');
+    expect(during).not.toContain('[aom-integration/');
+    const left = sh(repo.clone, 'git', ['branch', '--list', 'aom-integration/*', 'guildwise/integration/*']);
+    expect(left).not.toContain('guildwise/integration');
+    expect(left).not.toContain('aom-integration/toy-1');
+    // only the branch of this card's own temp name is swept; others belong to the hygiene run
+    expect(left).toContain('aom-integration/other-9');
   });
 
   it('is idempotent: running it again reports the same merge commit', async () => {

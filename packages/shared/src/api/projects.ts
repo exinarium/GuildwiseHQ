@@ -15,6 +15,7 @@ import {
   ForgeKindSchema,
   GitAccessMethodSchema,
 } from '../forge/index.ts';
+import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
@@ -347,7 +348,7 @@ export const CreateProjectRequestSchema = z.object({
   name: z.string().min(1).max(120),
   /** Absent: the server's default workflow (lean team for new projects). */
   workflowKey: z.string().min(1).optional(),
-  branchPrefix: BranchPrefixSchema.default('aom/'),
+  branchPrefix: BranchPrefixSchema.default(CARD_BRANCH_PREFIX),
   workingBranch: GitRefSchema.default('main'),
   subCategories: z.array(z.string()).default([]),
   vaultFolder: VaultFolderSchema.nullable().default(null),

@@ -28,7 +28,7 @@ status.json          written by `start` (pid, connected, active shifts), read by
 outbox/              pending acked messages, one JSON file per message id
 bin/aom, bin/aom.cmd shims (prepended to PATH inside shifts)
 agents/<agentId>/    home/ (agent HOME + .gitconfig identity), claude/ (CLAUDE_CONFIG_DIR), scratch/
-worktrees/<KEY>/<REF>/   git worktrees on branch aom/<ref>-<slug>
+worktrees/<KEY>/<REF>/   git worktrees on branch <prefix><ref>-<slug> (default `guildwise/`, `aom/` for older projects)
 vaults/<vaultId>/    local vault folders (storage "local": not synced; the owner backs them up)
 graph-cache/<repoKey>/   project graph indexer cache (rebuildable)
 mock-state/          per card+stage attempt counters used by the mock script
@@ -99,7 +99,7 @@ Exit codes: 0 recorded, 1 error or rejected report (the reason, including post-s
 
 ## Mock script format
 
-The mock adapter runs `mock-agent`, which drives the real `aom` CLI. Behaviour per stage by default: `build` writes `aom-mock/<ref>.txt` and `<ref>.test.txt`, commits, `aom handoff`; `review` approves (score 4); `test` passes; other stages report the first success outcome.
+The mock adapter runs `mock-agent`, which drives the real `aom` CLI. Behaviour per stage by default: `build` writes `.guildwise-mock/<ref>.txt` and `<ref>.test.txt`, commits, `aom handoff`; `review` approves (score 4); `test` passes; other stages report the first success outcome.
 
 Override with `card.fields.mock` (`MockScriptSchema` in `@aom/shared`): `{ "<stage>": ["<action>", ...] }`, consumed by attempt index (how many shifts of that card and stage ran before; missing entries mean `ok`). Actions:
 
@@ -111,7 +111,7 @@ Override with `card.fields.mock` (`MockScriptSchema` in `@aom/shared`): `{ "<sta
 | `crash` | exits 1 immediately | `crashed` |
 | `hang` | never exits; stopped at `maxShiftMinutes` | `timeout` |
 | `no_report` | does the work, exits 0 without reporting | `no_report` |
-| `edit_outside_scope` | writes `aom-mock/outside-scope.txt`, then reports `ok`; a reviewer or tester is stopped by the guard | `no_report` plus `guardViolations` (reviewer: `reviewer_modified_code`) |
+| `edit_outside_scope` | writes `.guildwise-mock/outside-scope.txt`, then reports `ok`; a reviewer or tester is stopped by the guard | `no_report` plus `guardViolations` (reviewer: `reviewer_modified_code`) |
 
 Example: `{"review": ["changes", "ok"]}` bounces the first review and approves the second. Emits a progress line every 100 ms and usage `{inputTokens: 1000, outputTokens: 200}`.
 

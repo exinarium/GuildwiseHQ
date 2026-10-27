@@ -110,34 +110,20 @@ describe('default environment checker', () => {
     });
   });
 
-  it('with Docker up and no health file the environment is fine', async () => {
+  it('with Docker up and no further checks the environment is fine', async () => {
     const check = defaultEnvChecker({ dockerOk: async () => ({ ok: true, detail: '' }) });
     expect(await check({ msg: msg(), worktree: tmp(), paths })).toBeNull();
   });
 
-  it('a declared health URL must answer 2xx, else the app is not deployed', async () => {
+  it('a retired .aom/test-env.json is ignored', async () => {
     const dir = tmp();
     mkdirSync(join(dir, '.aom'));
     writeFileSync(
       join(dir, '.aom', 'test-env.json'),
       JSON.stringify({ healthUrl: 'http://app.test/health' }),
     );
-    const make = (status: number | Error) =>
-      defaultEnvChecker({
-        dockerOk: async () => ({ ok: true, detail: '' }),
-        fetch: (async () => {
-          if (status instanceof Error) throw status;
-          return new Response('', { status });
-        }) as typeof fetch,
-      });
-    expect(await make(200)({ msg: msg(), worktree: dir, paths })).toBeNull();
-    expect(await make(503)({ msg: msg(), worktree: dir, paths })).toMatchObject({
-      problem: 'app_not_deployed',
-      detail: 'http://app.test/health answered 503',
-    });
-    expect(await make(new Error('ECONNREFUSED'))({ msg: msg(), worktree: dir, paths })).toMatchObject({
-      problem: 'app_not_deployed',
-    });
+    const check = defaultEnvChecker({ dockerOk: async () => ({ ok: true, detail: '' }) });
+    expect(await check({ msg: msg(), worktree: dir, paths })).toBeNull();
   });
 
   it('the mock runtime never touches Docker', async () => {

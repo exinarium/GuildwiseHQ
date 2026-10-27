@@ -130,12 +130,7 @@ import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/
 import type { TargetSecrets } from '../secrets/targets.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import { e2eAreasSection } from '../testing/e2e-areas.ts';
-import {
-  defaultEnvChecker,
-  type EnvChecker,
-  legacyEnvFileNote,
-  needsTestEnvironment,
-} from '../testing/environment.ts';
+import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
@@ -1146,14 +1141,6 @@ export class ShiftSupervisor {
     // The tester's environment: where the app is, which suites to run, how to reach it from the sandbox.
     if (hasEnv && testEnv)
       texts.instructions += `\n${environmentNote(testEnv, testEnv.envId ? this.deps.runs?.testEnvironment(testEnv.envId) : null)}\n`;
-    else if (msg.kind === 'card' && needsTestEnvironment(msg) && s.worktree) {
-      // `.aom/test-env.json` is retired (D12): still read for this version, then ignored. Say so once, to the owner.
-      const note = legacyEnvFileNote(s.worktree.path);
-      if (note) {
-        this.addProgress(s, 'status', note);
-        this.log.warn(`${msg.brief.card.ref}: ${note}`);
-      }
-    }
     // Delegation (R3b): only an agent that was granted targets is told about `aom delegate`, and only a Claude Code agent gets
     // native subagents (the same targets, in its own process). The work a child shares with this shift is its working directory.
     s.delegateWork = {

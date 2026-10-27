@@ -309,7 +309,7 @@ CREATE TABLE projects (
   name               text NOT NULL,
   workflow_key       text NOT NULL DEFAULT 'code',     -- default workflow for new cards
   rank               integer,                          -- the organization's ranking (1 = most important); NULL for an interest's project (migration 1322)
-  branch_prefix      text NOT NULL DEFAULT 'aom/',
+  branch_prefix      text NOT NULL DEFAULT 'aom/',    -- default is 'guildwise/' since migration 2700; existing rows are unchanged
   working_branch     text NOT NULL DEFAULT 'main',
   sub_categories     text[] NOT NULL DEFAULT '{}',
   vault_folder       text,                             -- projects/<name> inside the organization vault
@@ -1777,7 +1777,7 @@ Deterministic, no tokens; it exercises the real `aom` CLI and IPC path. `start()
 
 | Stage | Default behaviour |
 | --- | --- |
-| build | writes `aom-mock/<ref>.txt` (round number + title), adds a unit-test-like file `aom-mock/<ref>.test.txt`, `git commit`, then `aom handoff --note "mock build round N"` |
+| build | writes `.guildwise-mock/<ref>.txt` (round number + title), adds a unit-test-like file `.guildwise-mock/<ref>.test.txt`, `git commit`, then `aom handoff --note "mock build round N"` |
 | review | `aom review approve --score 4 --note "mock approve"` |
 | test | `aom test pass --evidence "mock: 1 passed"` |
 | docs / finalize / research / feed stages | the stage's first success outcome with a mock note (feed: 2 fake digest items with `https://example.test/...` URLs) |
@@ -1809,7 +1809,7 @@ An adapter for another coding agent implements the same interface; its `writeIns
 
 ### 13.3 Private sandbox (`sandbox/sandbox.ts`)
 
-`agents/<agentId>/{home,claude,scratch}` created on first shift (the OS-level sandbox that confines these directories is described in 12.2 and docs/RUNNER.md); `home/.gitconfig` sets `user.name = "<AgentName> (aom)"`, `user.email = "<agentId>@agents.aom.invalid"`, so commits are attributed to the agent. Everything the runtime accumulates (transcripts, memory, caches) lives under this directory. `agent.wipe` deletes `agents/<agentId>` recursively (and for re-homing, the old workstation's copy is simply abandoned and wiped if that runner ever reconnects).
+`agents/<agentId>/{home,claude,scratch}` created on first shift (the OS-level sandbox that confines these directories is described in 12.2 and docs/RUNNER.md); `home/.gitconfig` sets `user.name = "<AgentName> (aom)"`, `user.email = "<agentId>@agents.guildwise.invalid"`, so commits are attributed to the agent. Everything the runtime accumulates (transcripts, memory, caches) lives under this directory. `agent.wipe` deletes `agents/<agentId>` recursively (and for re-homing, the old workstation's copy is simply abandoned and wiped if that runner ever reconnects).
 
 ### 13.4 Reporting: the `aom` CLI (chosen) over local IPC
 
@@ -1850,7 +1850,7 @@ Runner-attached data: for build outcomes the runner computes `diffStats` with `g
 
 ### 13.5 Worktrees and branches (`git/worktrees.ts`)
 
-- Branch: `<project.branch_prefix><ref-lowercase>-<slug(title, 40)>`, e.g. `aom/web-12-add-login-page`. Fixed on first claim and stored on the card.
+- Branch: `<project.branch_prefix><ref-lowercase>-<slug(title, 40)>`, e.g. `guildwise/web-12-add-login-page` (`guildwise/` is the default prefix of new projects; projects created before the rename keep `aom/`). Fixed on first claim and stored on the card.
 - Path: `<dataDir>/worktrees/<PROJECTKEY>-<project id[:8]>/<REF>` (keys are unique per organization only, so the project id keeps same-keyed projects of two organizations apart on one workstation; worktrees created under the old `<PROJECTKEY>/<REF>` path are reused through the path the server recorded). Paths from the server are confined to `<dataDir>/worktrees` and refs are validated before any git call.
 - First claim (`mode:'create'`): `git -C <repo> fetch origin <base>` (skipped if no `origin`), then `git -C <repo> worktree add -b <branch> <path> origin/<base>` (or `<base>` if no remote). Base = repo `working_branch` or project `working_branch`, never another card's branch. `CardClaimed` sets `home_workstation_id`.
 - Later stages and rework (`mode:'reuse'`): verify the path exists and is on the branch; if missing but the branch exists, `git worktree add <path> <branch>`; if both missing → `shift.rejected{worktree_failed}` and a desk escalation.

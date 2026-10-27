@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CARD_BRANCH_PREFIX,
   type CreateInterestRequest,
   canEditInterest,
   type DeliverySpec,
@@ -205,7 +206,7 @@ export async function createInterest(
             key,
             name: req.name,
             workflowKey: 'feed',
-            branchPrefix: 'aom/',
+            branchPrefix: CARD_BRANCH_PREFIX,
             workingBranch: 'main',
             subCategories: [],
             vaultFolder: null,

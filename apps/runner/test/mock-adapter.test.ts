@@ -53,7 +53,7 @@ describe('mock adapter through the real aom CLI', () => {
     expect(br?.diffStats).toMatchObject({ files: 2 });
     expect(br?.riskTier).toBe('small');
     const wt = worktreeOf(h);
-    expect(existsSync(join(wt, 'aom-mock', 'TOY-1.txt'))).toBe(true);
+    expect(existsSync(join(wt, '.guildwise-mock', 'TOY-1.txt'))).toBe(true);
     expect(sh(wt, 'git', ['branch', '--show-current'])).toBe('aom/toy-1-add-greeting');
     expect(sh(wt, 'git', ['log', '-1', '--format=%an'])).toBe('Workstation Owner');
     const started = h.server.of('shift.started').find((m) => m.shiftId === b.shiftId);

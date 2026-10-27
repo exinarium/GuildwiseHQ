@@ -360,8 +360,8 @@ agents/
 cache/                          package caches shared by all agents of this runner (nuget, npm, pnpm, pip, gradle, maven, ...)
 worktrees/
   <PROJECT>-<number>/
-    aom/toy-1-...               git worktrees on branch aom/<ref>-<slug>
-    aom/toy-2-...
+    guildwise/toy-1-...         git worktrees on branch <prefix><ref>-<slug> (default prefix `guildwise/`; projects created before the rename keep `aom/`)
+    guildwise/toy-2-...
     run-<envId8>/<repo>/        detached run worktrees of a run environment (no branch)
 runs/
   <envId>/                      one run environment ("Run a branch"): state.json, <service>.log (+ .1), steps/
@@ -1884,7 +1884,7 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   file, no conflict marker, HEAD is the merge commit). The rpcs work only in `investigate*` stages of card shifts.
 - **Merge latest main first** (`git/sync-main.ts`, `prepare.syncMain`). Before the card worktree is created, under the
   per-clone lock (shared with the merge completion): fetch `origin/<main>` and `origin/<working>`; when main is not
-  already in the working branch, merge it (`--no-ff`) in a throwaway integration worktree and push the working branch
+  already in the working branch, merge it (`--no-ff`) in a throwaway integration worktree (branch `guildwise/integration/<ref>-sync`; a leftover `aom-integration/<ref>-sync` of an older runner is deleted with it) and push the working branch
   (one retry when it moved). On a conflict, a protected branch (`isProtectedBranchRejection`) or another failed push the
   card branch is cut normally and takes the merge inside its worktree: clean, or a conflict left for the architect, or
   aborted (`skipped_conflict`) when the shift is not the architect's. The result is reported in `shift.started.syncMain`.
@@ -1975,7 +1975,7 @@ schedule off) and on "Run hygiene now", the server sends the DevOps engineer a r
 repositories: local path, remote and working branch (the active phase's, else the repository's). The engineer runs
 `aom hygiene run`; the runner's own git code, running as your user with your git credentials, then for each repository:
 
-- fetches `origin`, lists the branches (agent branches `aom/...` left out);
+- fetches `origin`, lists the branches (agent branches under the project's prefix, `guildwise/...` or the legacy `aom/...`, left out);
 - **working branch not confirmed** (`project_repos.working_branch` is empty): does nothing else. It does not commit,
   pull or push. The uncommitted files and the branches are reported, and the server asks you on the desk which branch is
   the working branch (the answer is stored on the repository and in the ledger, so it is not asked again);
@@ -1989,7 +1989,7 @@ repositories: local path, remote and working branch (the active phase's, else th
   (`saved_work`) that tells you where your work is;
 - **a repository with a running card shift** (a worktree of the clone belongs to a running shift) is skipped and
   reported as "deferred": hygiene moves refs in the `.git` the shift shares, so it waits for the next run. The
-  post-shift guard additionally ignores housekeeping refs (`conflict/*`, `aom-integration/*`, and the `guildwise/saved-work/*` of older runners)
+  post-shift guard additionally ignores housekeeping refs (`conflict/*`, `guildwise/integration/*`, the legacy `aom-integration/*`, and the `guildwise/saved-work/*` of older runners)
   and branches whose new commits are all on a remote-tracking ref or were there at shift start (a pull); a commit on
   another branch that is on no remote ref is still `commits_on_other_branch`;
 - **a working branch the remote rewrote** (force-push; an earlier value of `origin/<branch>`, read from its reflog,
@@ -2006,11 +2006,11 @@ repositories: local path, remote and working branch (the active phase's, else th
   a clean tree falls back to a rebase that is aborted on conflict), and pushes what is unpushed;
 - **on another branch**: leaves the working tree alone, moves the working branch forward from `origin` and pushes it
   when it is only ahead;
-- deletes local `aom/...` branches of finished cards that are merged into the working branch and not checked out in a
+- deletes local `guildwise/...` (or legacy `aom/...`) branches of finished cards that are merged into the working branch and not checked out in a
   worktree, and runs `git worktree prune`;
 - **removes the branches of finished cards** (`devops/branch-cleanup.ts`; the project setting "Remove finished card
   branches", default on, empties the list the server sends). For each done or cancelled card (a reopened card is not in
-  the list) whose branch starts with `aom/`, `aom-integration/` or the project's prefix, and is not the working or
+  the list) whose branch starts with `guildwise/`, `guildwise/integration/`, the legacy `aom/` or `aom-integration/`, or the project's prefix, and is not the working or
   main branch: a pull request that is still open keeps it; otherwise it goes when (a) every tip (local and origin) is
   contained in the working branch, (b) every commit's patch is already in the working branch or main (`git cherry`, so
   rebased and cherry-picked work counts), or (c) the card's pull request was merged (the runner asks its
@@ -2048,7 +2048,7 @@ declined", GH013 and the like) the same way: the card branch is pushed and a pul
 to `pr` with a note on the card. Nothing is forced. Hosts other than GitHub are covered by the rejected-push path only.
 
 **When a card branch reaches origin.** Only when the completion action needs it: `pr` (the pull request needs the
-branch) and the protected-branch fallback above (a pull request); a pull request branch goes out as `<prefix>/<ticket>`, never under the `aom/` card name. (The retired `push_branch` action is refused.) With `merge` the runner merges the
+branch) and the protected-branch fallback above (a pull request); a pull request branch goes out as `<prefix>/<ticket>`, never under the `guildwise/` (or legacy `aom/`) card name. (The retired `push_branch` action is refused.) With `merge` the runner merges the
 card branch into the working branch in a local integration worktree and pushes only the working branch; the card branch
 never leaves the workstation. The architect's `aom git push` is refused for every card (with the reason): its design commits stay in the
 worktree until finalize, and are pushed only if the card ends in a pull request. Hygiene removes
@@ -2536,7 +2536,7 @@ graph/
 
 ### Local vaults
 
-A vault with storage `local` is a plain folder at `<data dir>/vaults/<vaultId>`, marked by a `.aom-local-vault` file. It has
+A vault with storage `local` is a plain folder at `<data dir>/vaults/<vaultId>`, marked by a `.guildwise-local-vault` file (a `.aom-local-vault` written by an older runner is still recognised). It has
 no remote, no sync and no commits.
 
 - The runner logs one warning per folder: the folder is not synced, so the owner backs it up. If the folder sits under
@@ -2746,9 +2746,9 @@ one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump shou
 A tester shift needs something to test against. Two cases:
 
 - **A test environment for the card** (integration tests are on for the project, runner capability `runs:3`): the server starts the card's commit on this workstation before it hands the card to a tester (section "Integration tests by the tester" below). `shift.start` then carries `brief.environment`; the runner checks that environment is `healthy` on this workstation and rejects the shift with `environment_not_ready` / `run_failed` when it is not (the server then asks the DevOps engineer and parks the card). Docker is not checked.
-- **No environment** (the project has integration tests off, a runner without `runs:3`, suite and regression cards): as before. Before a tester shift starts, the runner checks that Docker is installed and responsive (`docker info`) and, if `.aom/test-env.json` exists in the repository root, that the app's health endpoint answers with a 2xx.
+- **No environment** (the project has integration tests off, a runner without `runs:3`, suite and regression cards): as before. Before a tester shift starts, the runner checks that Docker is installed and responsive (`docker info`).
 
-**`.aom/test-env.json` is retired** (design D12): `{"healthUrl": "http://localhost:3000/health"}` is still read in this version, and a shift that finds the file notes that it is deprecated (the health check now comes from the run plan, Project settings > Run and test). It is ignored from the next version on; the file can be deleted from the repository. It is never required.
+**`.aom/test-env.json` is retired** (design D12): the runner no longer reads it. The health check comes from the run plan (Project settings > Run and test); the file can be deleted from the repository.
 
 **Mock mode** (testing): the card's `fields.mockEnv` field names a problem (`"docker_missing"` or `"app_not_deployed"`). The mock persists the problem in `.aom-runner/mock-state/` until fixed by mock DevOps.
 

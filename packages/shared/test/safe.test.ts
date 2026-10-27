@@ -171,3 +171,13 @@ describe('project path', () => {
     expect(AddRepoRequestSchema.safeParse({ ...base, projectPath: '../app' }).success).toBe(false);
   });
 });
+
+describe('card branch prefix default', () => {
+  it('a new project defaults to guildwise/; an explicit legacy aom/ is kept', () => {
+    const d = CreateProjectRequestSchema.parse({ key: 'WEB', name: 'w' });
+    expect(d.branchPrefix).toBe('guildwise/');
+    expect(
+      CreateProjectRequestSchema.parse({ key: 'WEB', name: 'w', branchPrefix: 'aom/' }).branchPrefix,
+    ).toBe('aom/');
+  });
+});

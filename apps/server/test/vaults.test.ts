@@ -129,7 +129,7 @@ describe('registering vaults', () => {
     );
     expect(p.identity).toEqual({
       name: expect.stringMatching(/ \(aom\)$/),
-      email: expect.stringMatching(/@agents\.aom\.invalid$/),
+      email: expect.stringMatching(/@agents\.guildwise\.invalid$/),
     });
     expect(p.workstationName).toBe('Desk');
     expect(p.vaults.map((v: any) => v.kind).sort()).toEqual(['org']);

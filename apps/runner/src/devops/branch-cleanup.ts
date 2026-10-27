@@ -1,5 +1,10 @@
 import { realpathSync } from 'node:fs';
-import { type HygieneRepoResult, type HygieneRepoSpec, isSafeGitRef } from '@aom/shared';
+import {
+  CARD_BRANCH_PREFIXES,
+  type HygieneRepoResult,
+  type HygieneRepoSpec,
+  isSafeGitRef,
+} from '@aom/shared';
 import { git, revParse } from '../git/git.ts';
 
 /**
@@ -8,8 +13,8 @@ import { git, revParse } from '../git/git.ts';
  *
  * A card branch is removed, from origin, the clone and its worktree, only when ALL of these hold:
  * - the server says the card is done or cancelled (`spec.finishedCards`; a reopened card is not in the list);
- * - the name sits under a Guildwise prefix (the project's branch prefix, `aom/`, `aom-integration/`), and is not the
- *   working or main branch;
+ * - the name sits under a Guildwise prefix (the project's branch prefix, `guildwise/`, the legacy `aom/`, the
+ *   runner's integration branches), and is not the working or main branch;
  * - its pull request, when it had one, is not open;
  * - and its work is somewhere else: (a) every tip is contained in the working branch, or (b) every commit's patch is
  *   already in the working branch or main (rebased, cherry-picked, squashed per commit), or (c) the pull request was
@@ -49,7 +54,11 @@ const real = (p: string): string => {
   }
 };
 
-const GUILDWISE_PREFIXES = ['aom/', 'aom-integration/'];
+const GUILDWISE_PREFIXES: readonly string[] = [
+  ...CARD_BRANCH_PREFIXES,
+  'guildwise/integration/',
+  'aom-integration/',
+];
 
 const hasGuildwisePrefix = (branch: string, projectPrefix: string): boolean =>
   [...GUILDWISE_PREFIXES, ...(projectPrefix ? [projectPrefix] : [])].some(

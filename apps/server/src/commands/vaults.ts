@@ -338,7 +338,7 @@ export async function configureCommand(
     vaults: await vaultConfigsFor(db, ws.user_id, ws.id),
     identity: {
       name: `${devops?.name ?? 'DevOps'} (aom)`,
-      email: `${devops?.id ?? ws.id}@agents.aom.invalid`,
+      email: `${devops?.id ?? ws.id}@agents.guildwise.invalid`,
     },
     workstationName: ws.name,
     resume,

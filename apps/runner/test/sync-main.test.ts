@@ -203,7 +203,9 @@ describe('integration worktree hygiene', () => {
     const t = setup();
     t.push('main', 'm.txt', 'm\n', 'main moves');
     await syncMainIntoWorking(t.input());
-    const branches = (await git(t.repo.clone, ['branch', '--list', 'aom-integration/*'])).stdout.trim();
+    const branches = (
+      await git(t.repo.clone, ['branch', '--list', 'aom-integration/*', 'guildwise/integration/*'])
+    ).stdout.trim();
     expect(branches).toBe('');
     expect(existsSync(join(t.input().integrationDir, 'TOY-1-sync'))).toBe(false);
   });

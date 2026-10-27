@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
-import { closeAdminPool } from './helpers/db.ts';
+import { closeAdminPool, q } from './helpers/db.ts';
 import { ok } from './helpers/world.ts';
 
 let t: TestApp;
@@ -27,7 +27,7 @@ describe('projects', () => {
       key: 'WEB',
       workflowKey: 'code',
       workingBranch: 'main',
-      branchPrefix: 'aom/',
+      branchPrefix: 'guildwise/',
       myRole: 'owner',
       status: 'active',
     });
@@ -37,6 +37,19 @@ describe('projects', () => {
     expect(list.projects[0].cardCounts).toEqual({ open: 0, blocked: 0 });
     const me = await ok<any>(t.req('GET', '/api/auth/me', { cookie: a.cookie }));
     expect(me.visibleProjectIds).toEqual([r.body.project.id]);
+  });
+
+  it('a project created with the legacy aom/ prefix keeps it; the database default is guildwise/', async () => {
+    const r = await t.req('POST', '/api/projects', {
+      cookie: a.cookie,
+      body: { key: 'OLD', name: 'Old', branchPrefix: 'aom/' },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.project.branchPrefix).toBe('aom/');
+    const col = await q(
+      `SELECT column_default FROM information_schema.columns WHERE table_name='projects' AND column_name='branch_prefix'`,
+    );
+    expect(col[0]?.column_default).toContain('guildwise/');
   });
 
   it('rejects bad keys, duplicate keys per org, unknown workflows', async () => {
