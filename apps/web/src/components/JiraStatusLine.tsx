@@ -44,7 +44,7 @@ export function JiraStatusLine({ w }: { w: WorkstationDto }) {
         <p className="mt-2 text-subtle">
           {s?.state === 'refused' && s.detail ? `${s.detail}. ` : ''}
           Agents read the files attached to a Jira ticket through this runner. On the workstation run{' '}
-          <code className="font-mono text-xs">aom-runner jira-connect</code>; the API token stays there.
+          <code className="font-mono text-xs">guildwise-runner jira-connect</code>; the API token stays there.
         </p>
       )}
     </div>

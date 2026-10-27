@@ -44,7 +44,7 @@ describe('config', () => {
   });
 
   it('missing config explains how to pair', () => {
-    expect(() => loadConfig(join(tmp(), 'nope.json'))).toThrow(/aom-runner pair/);
+    expect(() => loadConfig(join(tmp(), 'nope.json'))).toThrow(/guildwise-runner pair/);
   });
 
   it('mock override enables the mock runtime without touching other settings', () => {

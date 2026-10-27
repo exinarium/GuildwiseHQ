@@ -46,7 +46,9 @@ Only needed when the guided setup is not an option:
 1. Go to **Workstations** and click **Pair with a code** (or **Pair it with a code instead** in the Add a workstation window).
 2. Click **Generate pairing code** and copy the command it shows. The code (`XXXX-XXXX`) is valid for 10 minutes.
 3. On the computer, download or build the runner.
-4. Run the pair command, add your repository folders (`aom-runner repos add`), and start the runner as a service.
+4. Run the pair command, add your repository folders (`guildwise-runner repos add`), and start the runner as a service.
+
+The runner command is `guildwise-runner`; the older name `aom-runner` still works.
 
 See the installer's help links for your system's commands. On Windows, install the runner inside WSL2 (Ubuntu): that is the only way to get a sandbox.
 
@@ -54,7 +56,7 @@ See the installer's help links for your system's commands. On Windows, install t
 
 While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows **ok**, **warn** or **fail**. A **fail** means something is missing or broken and the line says what. A **warn** (Docker, yt-dlp) is optional.
 
-Afterwards, a workstation's card on the **Workstations** page shows its name and runner version, whether it is **Connected** or **Offline**, and an **Unpair** button. Click the name to expand it: its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, its repositories, its git hosts and the DevOps engineer panel. To run the checks again, run `aom-runner doctor` on that computer.
+Afterwards, a workstation's card on the **Workstations** page shows its name and runner version, whether it is **Connected** or **Offline**, and an **Unpair** button. Click the name to expand it: its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, its repositories, its git hosts and the DevOps engineer panel. To run the checks again, run `guildwise-runner doctor` on that computer.
 
 ## Shifts at once {#shifts-at-once}
 
@@ -82,10 +84,10 @@ Each repository of a project has a git host: GitHub, GitLab, Bitbucket Cloud, Az
 
 Open the workstation card on the **Workstations** page: **Git hosts** shows Connected, Not connected (no token saved), Token refused (hover for the HTTP status and the likely missing scope) or Could not check (the host could not be reached) for each host. Click **Connect** for the one command to run in a terminal on that workstation:
 
-- `aom-runner git-connect github` opens a browser to sign in (GitHub CLI).
-- `aom-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.
-- `aom-runner git-connect bitbucket-cloud` asks for your Atlassian e-mail and an API token (old app passwords no longer work).
-- `aom-runner git-connect azure-devops` uses a **Microsoft Entra service principal** if the workstation has one (the best way for a team; see below), or your Azure sign-in (`az login`). As a fallback, add `--organization <name>` to paste a personal access token. Use a token for one organization: global tokens stop working on 1 December 2026.
+- `guildwise-runner git-connect github` opens a browser to sign in (GitHub CLI).
+- `guildwise-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.
+- `guildwise-runner git-connect bitbucket-cloud` asks for your Atlassian e-mail and an API token (old app passwords no longer work).
+- `guildwise-runner git-connect azure-devops` uses a **Microsoft Entra service principal** if the workstation has one (the best way for a team; see below), or your Azure sign-in (`az login`). As a fallback, add `--organization <name>` to paste a personal access token. Use a token for one organization: global tokens stop working on 1 December 2026.
 - Add `--ssh` to any of them to use an SSH key instead of a token (see below).
 
 Then click **Check again**. The DevOps engineer can walk you through any of these in a chat (**Ask DevOps** on the workstation). It can start a browser sign-in for you and show you the web address and code to enter; it never asks for or types a token. When a token is needed it tells you to run the command above yourself or to use the **Connect** helper.
@@ -96,9 +98,9 @@ Then click **Check again**. The DevOps engineer can walk you through any of thes
 2. Choose the key: **a key made by the runner** (click **Save and create key**; the public key appears with the place to add it: GitHub *Settings, SSH and GPG keys*, GitLab *User settings, SSH keys*, Bitbucket *Personal settings, SSH keys*, Azure DevOps *User settings, SSH public keys*), **a key file I already have** (its full path on the workstation; it is not copied), or **my ssh-agent**.
 3. Click **Check SSH**. Optionally paste a repository address to test with the real thing. You get one state: *SSH works*, *The host refused the key* (add the public key on the host), *Host key changed*, *Host not reachable* (a firewall may block port 22), *No key yet* or *ssh is not installed*.
 
-In a terminal, the same is `aom-runner git-connect github --ssh` (add `--key-file <path>` or `--agent`; `--check` tests it). A repository can use the other method: the owner picks **Access** under the repository in the project settings, and the workstation switches that clone between https and ssh by itself. The private key never leaves the workstation and agents never read it.
+In a terminal, the same is `guildwise-runner git-connect github --ssh` (add `--key-file <path>` or `--agent`; `--check` tests it). A repository can use the other method: the owner picks **Access** under the repository in the project settings, and the workstation switches that clone between https and ssh by itself. The private key never leaves the workstation and agents never read it.
 
-**Jira.** Below the git hosts the workstation card has a **Jira** line: *Connected as ...*, *Not connected* or *Refused*. Agents use it to read the files attached to a Jira ticket through your workstation (see [Intake and outbox](/help/intake-and-outbox#jira-attachments)). To connect, run `aom-runner jira-connect` in a terminal on that workstation: it asks for your Jira address, e-mail and an API token, checks them with Jira and saves them on that computer (`secrets/jira.json`, readable by you only); the page only learns the state.
+**Jira.** Below the git hosts the workstation card has a **Jira** line: *Connected as ...*, *Not connected* or *Refused*. Agents use it to read the files attached to a Jira ticket through your workstation (see [Intake and outbox](/help/intake-and-outbox#jira-attachments)). To connect, run `guildwise-runner jira-connect` in a terminal on that workstation: it asks for your Jira address, e-mail and an API token, checks them with Jira and saves them on that computer (`secrets/jira.json`, readable by you only); the page only learns the state.
 
 SSH only covers git itself. Pull requests, branch rules and the repository list still need the token or CLI login: with SSH only, finishing a card pushes the branch and you or the manager open the pull request by hand, and Project settings says so under the repository.
 

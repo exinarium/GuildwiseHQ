@@ -21,7 +21,7 @@ export function fullPowerText(fp: CeoChatStateDto['fullPower'], ceoName: string)
     case 'on':
       return `Full power is on: ${ceoName} works as you on ${ws}.`;
     case 'off':
-      return `Full power is off on ${ws}: run \`aom-runner ceo full-power on\` there. Until then ${ceoName} answers with restricted tools.`;
+      return `Full power is off on ${ws}: run \`guildwise-runner ceo full-power on\` there. Until then ${ceoName} answers with restricted tools.`;
     case 'unknown':
       return `${ws} is offline, so full power cannot be checked. Messages wait until it is back.`;
     default:

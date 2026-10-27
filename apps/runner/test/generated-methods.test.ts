@@ -294,6 +294,24 @@ describe('build on the server', () => {
     expect(statSync(src).isDirectory()).toBe(true);
     expect(w.calls('server').filter((c) => / build /.test(c))).toHaveLength(1);
   });
+
+  it.each(['.aom-complete', '.guildwise-complete'])(
+    'files already on the server with a %s marker are not sent again',
+    (marker) => {
+      const w = world();
+      writeFileSync(
+        join(w.appDir, 'compose.yaml'),
+        `services:\n  demo-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
+      );
+      const src = join(w.appDir, 'guildwise-src', SHORT);
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, marker), '');
+      const r = run(w, script(flow(w, { method: 'build_on_server' })));
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).toContain(`the files of ${SHORT} are already on the server`);
+      expect(existsSync(join(src, 'app.js'))).toBe(false);
+    },
+  );
 });
 
 describe('a stack that was started another way is not restarted (M3), and a source that is not git is not sent (m11)', () => {

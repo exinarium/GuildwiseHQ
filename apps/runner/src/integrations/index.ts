@@ -84,7 +84,7 @@ type Entry = Omit<AuditEntry, 'result' | 'detail'>;
 
 const REFUSED = {
   allowWebOff:
-    'Turned off on this workstation. Run `aom-runner integrations allow-web on` there to allow it.',
+    'Turned off on this workstation. Run `guildwise-runner integrations allow-web on` there to allow it.',
   machineScope: (primary: string) =>
     `This sign-in is shared by every pairing on this machine. Connect it from ${primary} or from a terminal on the workstation.`,
 };

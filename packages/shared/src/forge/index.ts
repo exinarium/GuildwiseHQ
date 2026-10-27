@@ -416,5 +416,5 @@ export function defaultHost(provider: ConnectableForge): string {
 
 /** The command a user runs on the workstation to connect a provider. */
 export function connectCommand(provider: ConnectableForge): string {
-  return `aom-runner git-connect ${provider}${provider === 'azure-devops' ? ' --organization <your-organization>' : ''}`;
+  return `guildwise-runner git-connect ${provider}${provider === 'azure-devops' ? ' --organization <your-organization>' : ''}`;
 }

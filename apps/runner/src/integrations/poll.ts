@@ -102,7 +102,7 @@ export class IntegrationPoller {
 
   private async jira(p: IntegrationRunPayload): Promise<PolledIssue[]> {
     const cfg = jiraOf(this.opts.jira);
-    if (!cfg) throw new Error('no Jira credentials on this workstation: run `aom-runner jira-connect`');
+    if (!cfg) throw new Error('no Jira credentials on this workstation: run `guildwise-runner jira-connect`');
     const base = cfg.baseUrl.replace(/\/+$/, '');
     const auth = cfg.email
       ? `Basic ${Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString('base64')}`

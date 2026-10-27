@@ -220,7 +220,7 @@ trap 'exit 130' INT
 # step 1: put the approved version in its own new folder and build it there
 RELEASE="$APP_DIR/releases/$SHORT"
 if remote "$RELEASE" <<'AOM_REMOTE' >/dev/null 2>&1
-[ -f "$1/.aom-complete" ]
+[ -f "$1/.aom-complete" ] || [ -f "$1/.guildwise-complete" ]
 AOM_REMOTE
 then
   say "the files of $SHORT are already in $RELEASE"

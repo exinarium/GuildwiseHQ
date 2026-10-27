@@ -160,6 +160,7 @@ install_runner_release() {
       step_ok "The installed runner ${before} is newer than this server's ${RELEASE_VERSION}: kept as it is"
       mkdir -p "${BIN_DIR}"
       ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/aom-runner" 2>/dev/null || true
+      ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/guildwise-runner" 2>/dev/null || true
       return
     fi
   elif have aom-runner && [ "$(command -v aom-runner)" != "${BIN_DIR}/aom-runner" ]; then
@@ -192,6 +193,8 @@ install_runner_release() {
   switch_current "${target}/aom-runner"
   mkdir -p "${BIN_DIR}"
   ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/aom-runner"
+  # `guildwise-runner` is the name people type; `aom-runner` stays as an alias (the launcher resolves symlinks)
+  ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/guildwise-runner"
   ln -sfn "${RUNNER_ROOT}/current/dist/aom.mjs" "${BIN_DIR}/aom" 2>/dev/null || true
 }
 
@@ -260,7 +263,7 @@ add_repo_folders() {
     fi
     runner repos add "${d}" >/dev/null 2>&1 && { good "Watching ${d} for git projects"; added=$((added + 1)); }
   done
-  [ "${added}" -gt 0 ] || step_warn "No code folder added yet. Add one later with: aom-runner repos add ~/src"
+  [ "${added}" -gt 0 ] || step_warn "No code folder added yet. Add one later with: guildwise-runner repos add ~/src"
   report "Code folders" ok "${dirs}"
 }
 
@@ -317,9 +320,9 @@ sign_in_to_claude() {
       local key
       key="$(ask_secret "Paste the API key (it is stored only on this computer, readable only by you):")" || key=""
       if [ -n "${key}" ] && save_api_key "${key}"; then step_ok "API key saved to ${DATA_DIR}/config.json (mode 600)"
-      else step_warn "No key saved. Add one later with \`aom-runner\` config (authMode api_key) or run \`claude\` to sign in."; fi
+      else step_warn "No key saved. Add one later with \`guildwise-runner\` config (authMode api_key) or run \`claude\` to sign in."; fi
       ;;
-    s|S) step_warn "Sign-in skipped. Run \`claude\` any time to sign in; \`aom-runner doctor\` shows the state." ;;
+    s|S) step_warn "Sign-in skipped. Run \`claude\` any time to sign in; \`guildwise-runner doctor\` shows the state." ;;
     *)
       say "    Claude will open now. Choose \"Claude account with subscription\", finish in the browser,"
       say "    then type /exit to come back here."

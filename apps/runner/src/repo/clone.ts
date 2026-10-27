@@ -154,7 +154,8 @@ export class RepoCloner {
       return {
         ok: false,
         state: 'needs_manager',
-        error: 'this workstation has no repository folder: run `aom-runner repos add <path>` and try again',
+        error:
+          'this workstation has no repository folder: run `guildwise-runner repos add <path>` and try again',
       };
     mkdirSync(rootDir, { recursive: true });
     const root = realpathSync(rootDir);

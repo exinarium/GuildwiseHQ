@@ -145,12 +145,12 @@ export function claudeAccountLoginText(
   if (problem === 'needs_owner')
     return {
       title: `Claude account ${account} must be set up on ${workstation}`,
-      body: `The runner on ${workstation} may not change your home folder from the web. On that machine run \`aom-runner accounts add ${account}\` and then \`aom-runner accounts login ${account}\`. ${effect}`,
+      body: `The runner on ${workstation} may not change your home folder from the web. On that machine run \`guildwise-runner accounts add ${account}\` and then \`guildwise-runner accounts login ${account}\`. ${effect}`,
     };
   if (problem === 'failed')
     return {
       title: `Claude account ${account} could not be set up on ${workstation}`,
-      body: `${opts.detail ?? 'The runner could not create the account.'} Run \`aom-runner accounts add ${account}\` on ${workstation}, then \`aom-runner accounts login ${account}\`. ${effect}`,
+      body: `${opts.detail ?? 'The runner could not create the account.'} Run \`guildwise-runner accounts add ${account}\` on ${workstation}, then \`guildwise-runner accounts login ${account}\`. ${effect}`,
     };
   const what = problem === 'expired' ? 'login has expired' : 'has not been signed in yet';
   return {

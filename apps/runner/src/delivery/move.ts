@@ -117,6 +117,8 @@ fi
 const READ_FILE = 'cat -- "$1"';
 
 /** args: PATH MODE; the content arrives on stdin. An identical file is fine, a different one is never overwritten. */
+// TODO(rename markers): rename the temp-file prefixes written below (.aom-new, .aom-restore, .aom-tmp) after the next release;
+// see doneFunction in packages/shared/src/delivery/setup-compile.ts. Nothing reads them back: each script removes its own file.
 const WRITE_FILE = `set -eu
 f=$1; mode=$2
 dir=$(dirname "$f")

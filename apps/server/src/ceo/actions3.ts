@@ -202,7 +202,7 @@ const invokeOrder: ActionDef<z.infer<typeof InvokeOrderP>> = {
     if (!(await workstationFullPower(env.ctx.pool, ws.id)))
       return {
         ...base,
-        refuse: `full power is off on ${ws.name} (\`aom-runner ceo full-power on\`): act in restricted mode and ask the owner`,
+        refuse: `full power is off on ${ws.name} (\`guildwise-runner ceo full-power on\`): act in restricted mode and ask the owner`,
       };
     return {
       ...eventBase,

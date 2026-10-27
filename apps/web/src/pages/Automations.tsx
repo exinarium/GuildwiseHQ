@@ -182,8 +182,8 @@ function SecretNotice({
     <Callout tone="info" data-testid="webhook-secret">
       <p className="font-medium">Signing secret of "{name}"</p>
       <p className="mt-1 text-sm">
-        Copy it now: it is shown only this once. Your receiver checks the <code>X-AOM-Signature</code> header
-        against it.
+        Copy it now: it is shown only this once. Your receiver checks the <code>X-Guildwise-Signature</code>{' '}
+        header against it (<code>X-AOM-Signature</code> is still sent with the same value until October 2027).
       </p>
       <p
         className="mt-2 rounded-control bg-sunken px-2 py-1.5 font-mono text-sm break-all text-fg"

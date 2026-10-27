@@ -9,7 +9,7 @@ The **CEO** is built into every organization: you do not hire or appoint it, and
 
 ## Full power in your own chat {#full-power}
 
-When **you** talk to the CEO it is a real Claude Code session on your workstation: your own settings, skills and tools, your home directory and no Guildwise sandbox. This is enabled only after you run `aom-runner ceo full-power on` on that machine (the Overview says "Full power is off on <workstation>" until then). Events, other agents and your team can never start such a turn; the CEO's background work stays restricted. Where the runtime needs a permission it does not have, you or an Admin get a desk question, **Authorize this execution**: authorize once, for this turn, or deny; no answer in 10 minutes is a deny. A phone notification only points to that desk item.
+When **you** talk to the CEO it is a real Claude Code session on your workstation: your own settings, skills and tools, your home directory and no Guildwise sandbox. This is enabled only after you run `guildwise-runner ceo full-power on` on that machine (the Overview says "Full power is off on <workstation>" until then). Events, other agents and your team can never start such a turn; the CEO's background work stays restricted. Where the runtime needs a permission it does not have, you or an Admin get a desk question, **Authorize this execution**: authorize once, for this turn, or deny; no answer in 10 minutes is a deny. A phone notification only points to that desk item.
 
 ## Pick the model per message {#model}
 

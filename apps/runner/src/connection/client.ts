@@ -78,7 +78,7 @@ export interface ClientEvents {
  */
 /** What the runner says when the server tells it the workstation was unpaired. */
 export const UNPAIRED_MESSAGE =
-  'this workstation was unpaired in the web app: its runner token no longer works. Run `aom-runner pair` with a new code to use this machine again.';
+  'this workstation was unpaired in the web app: its runner token no longer works. Run `guildwise-runner pair` with a new code to use this machine again.';
 
 export class RunnerClient extends EventEmitter<ClientEvents> {
   private ws: WebSocket | null = null;
@@ -297,7 +297,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
           ? 'another runner connected for this workstation'
           : code === WS_CLOSE.forbidden && reason === UNPAIRED_CLOSE_REASON
             ? UNPAIRED_MESSAGE
-            : 'the server rejected the runner token (unpaired workstation? run `aom-runner pair` again)';
+            : 'the server rejected the runner token (unpaired workstation? run `guildwise-runner pair` again)';
       this.emit('fatal', code, why);
       return;
     }

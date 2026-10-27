@@ -41,7 +41,7 @@ async function fakeJira(goodToken: string) {
   };
 }
 
-describe('aom-runner jira-connect', () => {
+describe('guildwise-runner jira-connect', () => {
   it('checks the token with Jira, stores it in secrets/ (0600) and not in config.json; status, wrong token and disconnect', async () => {
     const server = await FakeServer.start();
     const jira = await fakeJira('right-token');

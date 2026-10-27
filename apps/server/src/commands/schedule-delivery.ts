@@ -75,7 +75,7 @@ async function assertResolvesPublic(ctx: Ctx, u: URL): Promise<void> {
     throw badRequest('private_url', 'the webhook host resolves to a private address');
 }
 
-/** `X-AOM-Signature`: `sha256=` + hex HMAC of `<timestamp>.<body>` with the webhook's secret. */
+/** `X-Guildwise-Signature` (and the legacy `X-AOM-Signature`, sent until 27 Oct 2027): `sha256=` + hex HMAC of `<timestamp>.<body>` with the webhook's secret. */
 export const signWebhook = (secret: string, timestamp: string, body: string): string =>
   `sha256=${createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')}`;
 
@@ -109,7 +109,14 @@ async function postWebhook(
         'x-aom-event': d.event,
         'x-aom-delivery': runId,
         'x-aom-timestamp': timestamp,
-        ...(secret ? { 'x-aom-signature': signWebhook(secret, timestamp, d.body) } : {}),
+        // `x-aom-signature` is the legacy name of `x-guildwise-signature` (same value). Receivers have until
+        // 27 Oct 2027 to switch; remove the legacy header on or after that date.
+        ...(secret
+          ? (() => {
+              const signature = signWebhook(secret, timestamp, d.body);
+              return { 'x-guildwise-signature': signature, 'x-aom-signature': signature };
+            })()
+          : {}),
       },
       body: d.body,
     });

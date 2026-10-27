@@ -939,7 +939,7 @@ export function sandboxDoctorLines(
       'In an admin PowerShell: wsl --install -d Ubuntu   (then reboot and create the Linux user)',
       'In Ubuntu: sudo apt update && sudo apt install -y git gh bubblewrap socat curl',
       'Install Node 22 (nvm install 22) and Claude Code (npm i -g @anthropic-ai/claude-code), then clone repos under ~/ (not /mnt/c)',
-      'Install and pair the runner inside Ubuntu (aom-runner pair ...), then run it as a systemd user service',
+      'Install and pair the runner inside Ubuntu (guildwise-runner pair ...), then run it as a systemd user service',
       'Full steps: docs/RUNNER.md, "Windows: run the runner inside WSL2"',
       'Opt-in without sandbox (not recommended): runtimes["claude-code"] { "sandbox": "best_effort", "allowUnsandboxed": true } in config.json',
     ].entries())

@@ -114,7 +114,7 @@ export class AgentGit {
         message: [
           `${FORGE_LABELS[provider]} needs a secret (${why}). Do not ask for it in this chat and do not type one yourself.`,
           'Tell the user to do ONE of these:',
-          `- in a terminal on this workstation, run: aom-runner git-connect ${provider}${host !== defaultHost(provider) ? ` --host ${host}` : ''}  (it asks for the token and keeps it on this machine);`,
+          `- in a terminal on this workstation, run: guildwise-runner git-connect ${provider}${host !== defaultHost(provider) ? ` --host ${host}` : ''}  (it asks for the token and keeps it on this machine);`,
           '- or open Workstations in the app and use the Connect helper for this git host.',
           'The steps for the user:',
           ...connectSteps(provider, host),
@@ -229,7 +229,7 @@ export class AgentGit {
         message: [
           `The ${label} sign-in is waiting for the user. Show them this, exactly, and ask them to finish it in their browser:`,
           text ||
-            '(no URL printed yet: run `aom git status` in a moment, or ask the user to run `aom-runner git-connect ' +
+            '(no URL printed yet: run `aom git status` in a moment, or ask the user to run `guildwise-runner git-connect ' +
               provider +
               '`)',
           `When they say it is done, check with: aom git status ${provider}`,

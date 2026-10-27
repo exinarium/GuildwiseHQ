@@ -236,7 +236,7 @@ describe('the repository picker', () => {
       result: {
         ok: false,
         repos: [],
-        error: 'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`',
+        error: 'not connected to Azure DevOps: run `guildwise-runner git-connect azure-devops`',
       },
     });
     await settle();

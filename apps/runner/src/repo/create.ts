@@ -103,7 +103,7 @@ export class RepoCreator {
     if (!root)
       return {
         ok: false,
-        error: 'this workstation has no repository root: run `aom-runner repos add <path>` first',
+        error: 'this workstation has no repository root: run `guildwise-runner repos add <path>` first',
       };
     if (!existsSync(root)) return { ok: false, error: `the repository root ${root} does not exist` };
     const realRoot = realpathSync(root);
@@ -247,7 +247,7 @@ export class RepoCreator {
     if (!root)
       return {
         ok: false,
-        error: 'this workstation has no repository root: run `aom-runner repos add <path>` first',
+        error: 'this workstation has no repository root: run `guildwise-runner repos add <path>` first',
       };
     if (!existsSync(root)) return { ok: false, error: `the repository root ${root} does not exist` };
     const realRoot = realpathSync(root);
@@ -275,7 +275,7 @@ export class RepoCreator {
     if (status && status.state !== 'connected')
       return {
         ok: false,
-        error: `this workstation is not connected to ${kind} (${status.detail ?? 'run `aom-runner git-connect`'})`,
+        error: `this workstation is not connected to ${kind} (${status.detail ?? 'run `guildwise-runner git-connect`'})`,
       };
     const repo = p.name.split('/').pop() as string;
     const t = this.targetFor(repo);

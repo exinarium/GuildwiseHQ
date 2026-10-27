@@ -83,7 +83,7 @@ export class SshIntegration implements IntegrationAdapter {
   async remove(instance: string): Promise<Outcome> {
     return {
       error:
-        'SSH keys are managed from Workstations, Git hosts (or `aom-runner git-connect <provider> --ssh-key`).',
+        'SSH keys are managed from Workstations, Git hosts (or `guildwise-runner git-connect <provider> --ssh-key`).',
       code: 'unsupported',
       status: await this.status(instance),
     };

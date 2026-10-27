@@ -59,7 +59,7 @@ import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
 import { detectServiceMode, scheduleRestart } from './update/apply.ts';
-import { detectLayout } from './update/layout.ts';
+import { detectLayout, ensureGuildwiseAlias } from './update/layout.ts';
 import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -71,7 +71,7 @@ const mockEnabled = (flag?: boolean) => flag === true || process.env.AOM_RUNNER_
 
 const pairingOpt = [
   '--pairing <id|name>',
-  'which pairing of this machine (see `aom-runner pairings`); default: the first, or all for `repos add`',
+  'which pairing of this machine (see `guildwise-runner pairings`); default: the first, or all for `repos add`',
 ] as const;
 
 /** The pairings a command works on: the one named by --pairing, else all of them. */
@@ -82,7 +82,7 @@ function selectPairings(opts: { dataDir?: string; pairing?: string }): {
   const root = resolveDataDir(opts.dataDir);
   const index = loadIndex(root);
   if (index.pairings.length === 0)
-    throw new Error(`No runner config at ${runnerPaths(root).config}. Run \`aom-runner pair\` first.`);
+    throw new Error(`No runner config at ${runnerPaths(root).config}. Run \`guildwise-runner pair\` first.`);
   return { root, entries: opts.pairing ? [findPairing(index, opts.pairing)] : index.pairings };
 }
 
@@ -131,7 +131,9 @@ async function pair(opts: {
     console.log(
       `${r.replaced ? 'Replaced the earlier pairing for' : 'Added next to the existing pairings:'} ${r.entry.id} (${r.count} pairing${r.count === 1 ? '' : 's'} on this machine; the others are untouched). A running runner starts it within a few seconds.`,
     );
-  console.log('Next: `aom-runner repos add <path>` for your code folders, then `aom-runner start`.');
+  console.log(
+    'Next: `guildwise-runner repos add <path>` for your code folders, then `guildwise-runner start`.',
+  );
 }
 
 /** Pair if needed (idempotent), then run. For servers and containers nobody sits at. */
@@ -162,7 +164,7 @@ async function authSet(
   for await (const chunk of process.stdin) value += String(chunk);
   value = value.trim();
   if (!value)
-    throw new Error(`Pipe the ${kind} in: \`read -rs K; printf %s "$K" | aom-runner auth ${kind}\``);
+    throw new Error(`Pipe the ${kind} in: \`read -rs K; printf %s "$K" | guildwise-runner auth ${kind}\``);
   const { root, entries } = selectPairings(opts);
   for (const e of entries) {
     // secrets/claude.json (mode 0600): a running runner reads it at the next session start, so no restart is needed
@@ -199,6 +201,8 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   let finish: (code: number) => void = () => undefined;
   const layout = mock ? null : detectLayout(process.argv[1]);
   const serviceMode = layout ? detectServiceMode(layout) : null;
+  if (layout && ensureGuildwiseAlias(layout))
+    log.info('added the guildwise-runner command next to aom-runner');
   /** The safe-mode pin the server sent before the updater existed (welcome comes first). */
   let pendingPin: string | null = null;
   const host = new RunnerHost({
@@ -289,7 +293,9 @@ function printStatus(root: string, entry: PairingEntry, heading: boolean): void 
   console.log(`data dir:     ${paths.root}`);
   console.log(`server:       ${config.serverUrl}`);
   console.log(`workstation:  ${config.workstationId}`);
-  console.log(`repo roots:   ${config.repoRoots.join(', ') || '(none; use `aom-runner repos add <path>`)'}`);
+  console.log(
+    `repo roots:   ${config.repoRoots.join(', ') || '(none; use `guildwise-runner repos add <path>`)'}`,
+  );
   console.log(`mock runtime: ${config.runtimes.mock?.enabled ? 'enabled' : 'disabled'}`);
   if (existsSync(paths.status)) {
     const s = JSON.parse(readFileSync(paths.status, 'utf8')) as {
@@ -327,7 +333,7 @@ function pairingsList(opts: { dataDir?: string }): void {
   const root = resolveDataDir(opts.dataDir);
   const index = loadIndex(root);
   if (index.pairings.length === 0) {
-    console.log('Not paired. Pair with `aom-runner pair --server <url> --code <code>`.');
+    console.log('Not paired. Pair with `guildwise-runner pair --server <url> --code <code>`.');
     return;
   }
   for (const e of index.pairings) {
@@ -502,7 +508,7 @@ async function rotateToken(opts: { dataDir?: string; pairing?: string }): Promis
   const config = loadConfig(paths.config);
   if (runnerAlive(paths.status))
     throw new Error(
-      'the runner is running: stop it first (`aom-runner rotate-token` replaces its credentials)',
+      'the runner is running: stop it first (`guildwise-runner rotate-token` replaces its credentials)',
     );
   const token = await requestRotatedToken({ url: toWsUrl(config.serverUrl), token: config.runnerToken });
   saveConfig(paths.config, { ...config, runnerToken: token });
@@ -559,7 +565,7 @@ function orgFolderList(opts: { dataDir?: string; pairing?: string }): void {
   const list = Object.entries(config.orgSourceFolders);
   if (list.length === 0)
     console.log(
-      'No organization source folder is set. Use `aom-runner org-folder set <organization-id> <path>`.',
+      'No organization source folder is set. Use `guildwise-runner org-folder set <organization-id> <path>`.',
     );
   for (const [org, folder] of list) console.log(`${org}\t${folder}`);
 }
@@ -568,7 +574,7 @@ async function reposList(opts: { dataDir?: string; pairing?: string }): Promise<
   const config = loadConfig(pairingPaths(opts).config);
   const repos = await scanRepos(config.repoRoots);
   if (repos.length === 0)
-    console.log('No repositories found. Add a folder with `aom-runner repos add <path>`.');
+    console.log('No repositories found. Add a folder with `guildwise-runner repos add <path>`.');
   for (const r of repos) console.log(`${r.localPath}\t${r.remoteUrl}\t${r.headBranch ?? '(detached)'}`);
 }
 
@@ -659,7 +665,7 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
   if (opts.status) {
     const s = await first.jira.status();
     if (s.state === 'not_connected' && !current) {
-      console.log('Jira: not connected. Run `aom-runner jira-connect`.');
+      console.log('Jira: not connected. Run `guildwise-runner jira-connect`.');
       process.exitCode = 1;
       return;
     }
@@ -893,7 +899,7 @@ async function gitConnectSsh(
         `\nNew repositories on ${host} are cloned over ${defaultMethod === 'ssh' ? 'SSH' : 'https'} on this workstation. A repository can override this in its project settings.`,
       );
     console.log(
-      'SSH covers git (clone, fetch, push). Pull requests, branch rules and the repository list still need the API token or CLI login (aom-runner git-connect ' +
+      'SSH covers git (clone, fetch, push). Pull requests, branch rules and the repository list still need the API token or CLI login (guildwise-runner git-connect ' +
         provider +
         ').',
     );
@@ -1026,7 +1032,9 @@ async function accountsLogin(key: string, opts: { dataDir?: string; pairing?: st
   const { env } = headlessAdapters(paths);
   const account = env.claudeAccounts?.get(key);
   if (!account?.configDir)
-    throw new Error(`No config-dir account "${key}" here. Run \`aom-runner accounts add ${key}\` first.`);
+    throw new Error(
+      `No config-dir account "${key}" here. Run \`guildwise-runner accounts add ${key}\` first.`,
+    );
   const clean: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: account.configDir };
   delete clean.CLAUDE_CODE_OAUTH_TOKEN;
   delete clean.ANTHROPIC_API_KEY;
@@ -1051,7 +1059,8 @@ function accountsRemove(key: string, opts: { dataDir?: string; pairing?: string 
 
 /** `aom-runner integrations allow-web on|off`: the local switch for credentials and sign-ins submitted from the web. */
 function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?: string }): void {
-  if (value !== 'on' && value !== 'off') throw new Error('use: aom-runner integrations allow-web on|off');
+  if (value !== 'on' && value !== 'off')
+    throw new Error('use: guildwise-runner integrations allow-web on|off');
   const { root, entries } = selectPairings(opts);
   for (const e of entries) {
     const file = entryConfigPath(root, e);
@@ -1069,7 +1078,7 @@ function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?:
 /** `aom-runner ceo full-power on|off|status`: the local switch for the CEO's full-power turns (the Owner's own Claude Code). */
 function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string }): void {
   if (value !== 'on' && value !== 'off' && value !== 'status')
-    throw new Error('use: aom-runner ceo full-power on|off|status');
+    throw new Error('use: guildwise-runner ceo full-power on|off|status');
   const { root, entries } = selectPairings(opts);
   for (const e of entries) {
     const file = entryConfigPath(root, e);
@@ -1087,7 +1096,7 @@ function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string 
   }
   if (value !== 'status')
     console.log(
-      'Restart the runner (`aom-runner start`, or restart its service) so the server learns the change; until then the old state is announced.',
+      'Restart the runner (`guildwise-runner start`, or restart its service) so the server learns the change; until then the old state is announced.',
     );
 }
 

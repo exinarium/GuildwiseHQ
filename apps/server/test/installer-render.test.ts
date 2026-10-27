@@ -164,3 +164,13 @@ describe('script quality', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('command names', () => {
+  it('the Linux and macOS installers link both guildwise-runner and its alias aom-runner', () => {
+    for (const os of ['linux', 'macos'] as const) {
+      const script = renderBash(os, base);
+      expect(script, os).toContain('"${BIN_DIR}/guildwise-runner"');
+      expect(script, os).toContain('"${BIN_DIR}/aom-runner"');
+    }
+  });
+});

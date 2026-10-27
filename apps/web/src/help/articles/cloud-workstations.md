@@ -52,7 +52,7 @@ Every cloud workstation shows an **estimated monthly cost**. For a VPS it is the
 
 The recommended way is **your own Anthropic API key**. It stays on the cloud machine; Guildwise never receives or stores it.
 
-- On a **VPS**: log in with SSH once and run `read -rs K; printf %s "$K" | aom-runner auth api-key`, then `systemctl --user restart aom-runner`.
+- On a **VPS**: log in with SSH once and run `read -rs K; printf %s "$K" | guildwise-runner auth api-key`, then `systemctl --user restart aom-runner`.
 - In a **Codespace**: add the key as the Codespaces secret `ANTHROPIC_API_KEY`.
 
 You may also use your **Claude subscription**. This is meant for one person's own use, and many agents working in parallel can run into its limits, so Guildwise shows an "individual use" warning. For a team, use an API key.

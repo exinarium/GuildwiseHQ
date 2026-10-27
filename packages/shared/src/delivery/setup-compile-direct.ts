@@ -299,7 +299,7 @@ function directStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         ...stepNumberComment(i, 'put the approved version in its own new folder and build it there'),
         'RELEASE="$APP_DIR/releases/$SHORT"',
         'if remote "$RELEASE" <<\'AOM_REMOTE\' >/dev/null 2>&1',
-        '[ -f "$1/.aom-complete" ]',
+        '[ -f "$1/.aom-complete" ] || [ -f "$1/.guildwise-complete" ]',
         QUIET,
         'then',
         '  say "the files of $SHORT are already in $RELEASE"',
@@ -325,6 +325,7 @@ function directStep(s: DeployStep, i: number, env: SetupEnv): string[] {
           QUIET,
         ]),
         '  remote "$RELEASE" <<\'AOM_REMOTE\'',
+        // TODO(rename markers): rename the written markers after the next release (see doneFunction in setup-compile.ts)
         'touch "$1/.aom-complete"',
         QUIET,
         'fi',

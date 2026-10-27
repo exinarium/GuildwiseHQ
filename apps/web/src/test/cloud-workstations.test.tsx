@@ -124,7 +124,7 @@ describe('cloud workstations', () => {
     ];
     wrap();
     const card = await screen.findByTestId('cloud-Studio VPS');
-    expect(screen.getByTestId('vps-next-step')).toHaveTextContent('aom-runner auth api-key');
+    expect(screen.getByTestId('vps-next-step')).toHaveTextContent('guildwise-runner auth api-key');
     expect(card).not.toHaveTextContent('Wake');
     expect(screen.queryByTestId('docker-notice')).toBeNull();
   });

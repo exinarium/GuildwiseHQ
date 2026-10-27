@@ -63,7 +63,7 @@ Automations can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier
 
 **GitHub and Jira polling**: polls for new issues and brings them into intake.
 
-**Webhooks**: send signed JSON to any URL. Every request includes a signature header (`X-AOM-Signature: sha256=<hmac-sha256 of "timestamp.body">`, with the timestamp in `X-AOM-Timestamp`). Failed deliveries (5xx, 429, 408, network error) are retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all. Other 4xx errors are final.
+**Webhooks**: send signed JSON to any URL. Every request includes a signature header (`X-Guildwise-Signature: sha256=<hmac-sha256 of "timestamp.body">`, with the timestamp in `X-AOM-Timestamp`; verify this header. `X-AOM-Signature` is still sent with the same value until October 2027). Failed deliveries (5xx, 429, 408, network error) are retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all. Other 4xx errors are final.
 
 When creating a webhook, the automation shows its secret once: the key for the signature. Click **New secret** to replace it.
 

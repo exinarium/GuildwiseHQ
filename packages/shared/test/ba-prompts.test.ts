@@ -33,7 +33,7 @@ describe('BA prompts (#47, #49, #52)', () => {
     const text = `${ba?.instructions}\n${JIRA_SKILL_MD}`;
     expect(text).toContain('aom source read --ref <KEY>');
     expect(text).toContain('aom source attachments <KEY>');
-    expect(text).toContain('aom-runner jira-connect');
+    expect(text).toContain('guildwise-runner jira-connect');
     expect(JIRA_SKILL_MD).toMatch(/Atlassian MCP server/);
   });
 
@@ -42,7 +42,7 @@ describe('BA prompts (#47, #49, #52)', () => {
       intake,
     } as ChatContext);
     expect(text).toContain('aom source read --ref <KEY or owner/repo#n>');
-    expect(text).toContain('aom-runner jira-connect');
+    expect(text).toContain('guildwise-runner jira-connect');
     expect(text).toMatch(/Do not read source code and never ask the manager for repository/);
     expect(text).not.toMatch(/completion action \(pr, push_branch or merge/);
     expect(text).not.toMatch(/cardType, completionAction/);

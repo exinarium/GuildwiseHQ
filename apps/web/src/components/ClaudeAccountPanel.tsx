@@ -48,12 +48,12 @@ export function stationStatus(
     case 'needs_owner':
       return {
         tone: 'bad',
-        text: `Needs setup on the machine: run "aom-runner accounts add ${key}" and then "aom-runner accounts login ${key}".`,
+        text: `Needs setup on the machine: run "guildwise-runner accounts add ${key}" and then "guildwise-runner accounts login ${key}".`,
       };
     case 'failed':
       return {
         tone: 'bad',
-        text: `Could not be set up. Run "aom-runner accounts add ${key}" on the machine.`,
+        text: `Could not be set up. Run "guildwise-runner accounts add ${key}" on the machine.`,
       };
     case 'awaiting_login':
       return {

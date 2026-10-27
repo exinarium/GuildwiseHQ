@@ -481,7 +481,8 @@ describe('outgoing webhooks', () => {
     const body = JSON.parse(hit?.body ?? '{}');
     expect(body).toMatchObject({ '@type': 'MessageCard', text: 'Hello from TOY' });
     const ts = String(hit?.headers['x-aom-timestamp']);
-    expect(hit?.headers['x-aom-signature']).toBe(sign(s.webhookSecret, ts, hit?.body ?? ''));
+    expect(hit?.headers['x-guildwise-signature']).toBe(sign(s.webhookSecret, ts, hit?.body ?? ''));
+    expect(hit?.headers['x-aom-signature']).toBe(hit?.headers['x-guildwise-signature']);
     expect(hit?.headers['x-aom-event']).toBe('schedule.run');
     const runs = (await ok<any>(owner('GET', `/api/schedules/${s.id}/runs`))).runs;
     expect(runs[0]).toMatchObject({
@@ -495,9 +496,9 @@ describe('outgoing webhooks', () => {
     expect(rot.webhookSecret).not.toBe(s.webhookSecret);
     await ok(owner('POST', `/api/schedules/${s.id}/run`), 201);
     const again = received.at(-1);
-    expect(again?.headers['x-aom-signature']).toBe(
-      sign(rot.webhookSecret, String(again?.headers['x-aom-timestamp']), again?.body ?? ''),
-    );
+    const rotSig = sign(rot.webhookSecret, String(again?.headers['x-aom-timestamp']), again?.body ?? '');
+    expect(again?.headers['x-guildwise-signature']).toBe(rotSig);
+    expect(again?.headers['x-aom-signature']).toBe(rotSig);
   });
 
   it('a Slack hook gets a text field; the test button sends one signed test and is not retried', async () => {

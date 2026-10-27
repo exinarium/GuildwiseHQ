@@ -18,7 +18,7 @@ const stub = () => {
   return { calls, fetchImpl };
 };
 
-describe('aom-runner up', () => {
+describe('guildwise-runner up', () => {
   it('pairs with GUILDWISE_PAIR_CODE once and is a no-op the second time', async () => {
     const dataDir = tmp();
     const { calls, fetchImpl } = stub();

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readBundleFromDir } from '../src/delivery/bundle.ts';
-import { parseEnvFile } from '../src/delivery/exec.ts';
+import { DEPLOY_LINE, parseEnvFile } from '../src/delivery/exec.ts';
 import { deliveryWorld, FOLDER, P5_FIXTURE } from './delivery-fixture.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
@@ -277,5 +277,16 @@ describe('deploy.exec (docs/design/ceo-front-door.md 9.5)', () => {
     ).toMatchObject({
       refused: 'hash_mismatch',
     });
+  });
+});
+
+describe('deploy marker line', () => {
+  it('accepts the current AOM-DEPLOY marker and the new GUILDWISE-DEPLOY marker', () => {
+    const json = '{"commit":"abc1234","url":"http://localhost:5500","version":"v1"}';
+    for (const name of ['AOM-DEPLOY', 'GUILDWISE-DEPLOY']) {
+      const m = DEPLOY_LINE.exec(`${name} ${json}`);
+      expect(m?.[1], name).toBe(json);
+    }
+    expect(DEPLOY_LINE.exec(`OTHER-DEPLOY ${json}`)).toBeNull();
   });
 });

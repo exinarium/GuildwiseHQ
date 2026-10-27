@@ -168,7 +168,7 @@ describe('repo.clone', () => {
     });
     const r = await cloner.run(payload('/tmp/whatever.git'));
     expect(r).toMatchObject({ ok: false, state: 'needs_manager' });
-    expect(r.error).toContain('aom-runner repos add');
+    expect(r.error).toContain('guildwise-runner repos add');
   });
 
   it('two requests for the same repository at once clone it once', async () => {

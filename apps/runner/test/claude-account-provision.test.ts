@@ -310,8 +310,8 @@ describe('claude.account.ensure: runner-owned folders only', () => {
     const before = e.bashrc();
     const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
     expect(r.state).toBe('needs_owner');
-    expect(r.detail).toContain('aom-runner accounts add work');
-    expect(r.detail).toContain('aom-runner accounts login work');
+    expect(r.detail).toContain('guildwise-runner accounts add work');
+    expect(r.detail).toContain('guildwise-runner accounts login work');
     expect(existsSync(join(e.home, '.claude-gw-work'))).toBe(false);
     expect(e.bashrc()).toBe(before);
     expect(loadConfig(e.configPath).runtimes['claude-code'].accounts).toEqual([]);

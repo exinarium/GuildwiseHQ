@@ -13,7 +13,7 @@ const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');
 const run = (args: string[], env: Record<string, string> = {}) =>
   execa(process.execPath, [tsx, cli, ...args], { reject: false, env: { ...env }, extendEnv: true });
 
-describe('aom-runner cli', () => {
+describe('guildwise-runner cli', () => {
   it('pair stores config with mode 0600, repos add/list work, status and doctor run', async () => {
     const server = await FakeServer.start();
     const dir = tmp();

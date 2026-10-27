@@ -3,10 +3,13 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 /**
@@ -143,5 +146,34 @@ export function installedVersions(layout: InstallLayout): string[] {
     );
   } catch {
     return [];
+  }
+}
+
+/**
+ * Runners installed before `guildwise-runner` existed update themselves and never re-run the installer, so they would lack
+ * the `guildwise-runner` link. Where the installer's `aom-runner` link (`~/.local/bin`, as in installer templates/common.sh)
+ * points at this install's launcher, add `guildwise-runner` beside it. Best effort: never throws, idempotent, and it
+ * never replaces an existing file or link. Returns true when it made the link.
+ */
+export function ensureGuildwiseAlias(
+  layout: InstallLayout,
+  binDir = join(homedir(), '.local', 'bin'),
+): boolean {
+  try {
+    const launcher = join(layout.current, 'aom-runner');
+    const old = join(binDir, 'aom-runner');
+    const alias = join(binDir, 'guildwise-runner');
+    if (!lstatSync(old).isSymbolicLink()) return false;
+    if (readlinkSync(old) !== launcher) return false;
+    try {
+      lstatSync(alias);
+      return false;
+    } catch {
+      // missing: create it
+    }
+    symlinkSync(launcher, alias);
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -192,7 +192,7 @@ describe('Jira attachments downloaded by the runner', () => {
   it('says plainly when the runner has no Jira login or Jira refuses it', async () => {
     const none = new JiraAdapter({ config: undefined });
     const deps = { jira: () => none, scratch: tmp('scratch-'), allowed: [DCPL] };
-    await expect(listJiraAttachments(deps, DCPL)).rejects.toThrow(/aom-runner jira-connect/);
+    await expect(listJiraAttachments(deps, DCPL)).rejects.toThrow(/guildwise-runner jira-connect/);
     const { adapter } = adapterFor(TICKET, { status: 401 });
     await expect(listJiraAttachments({ ...deps, jira: () => adapter }, DCPL)).rejects.toThrow(
       /refused the saved credentials/,

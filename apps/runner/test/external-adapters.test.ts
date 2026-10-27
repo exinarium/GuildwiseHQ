@@ -147,7 +147,7 @@ describe("Jira adapter readSource (the runner's own Jira connection)", () => {
   it('says how to connect when there are no credentials', async () => {
     const err = await new JiraAdapter().readSource({ system: 'jira', key: 'ABC-1' }).catch((e) => e);
     expect(err).toBeInstanceOf(SourceReadError);
-    expect(err.message).toMatch(/Jira is not connected on this workstation.*aom-runner jira-connect/);
+    expect(err.message).toMatch(/Jira is not connected on this workstation.*guildwise-runner jira-connect/);
   });
 
   it('reports a refused login and a missing ticket', async () => {

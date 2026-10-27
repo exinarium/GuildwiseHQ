@@ -157,7 +157,7 @@ export class AzureDevOpsForge implements Forge {
     const a = await this.auth(urlOrg);
     if (!a)
       throw new ForgeUnavailableError(
-        'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`',
+        'not connected to Azure DevOps: run `guildwise-runner git-connect azure-devops`',
       );
     return jsonCall<T>(this.env.fetch, url, { ...init, headers: { authorization: a.header } });
   }
@@ -171,7 +171,7 @@ export class AzureDevOpsForge implements Forge {
         ...base,
         state: 'not_connected',
         detail:
-          'Use a Microsoft Entra service principal (set the AZURE_TENANT_ID, AZURE_CLIENT_ID and client credential variables, or `az login --service-principal`), or run `aom-runner git-connect azure-devops --organization <name>` and paste a personal access token (Code: read and write).',
+          'Use a Microsoft Entra service principal (set the AZURE_TENANT_ID, AZURE_CLIENT_ID and client credential variables, or `az login --service-principal`), or run `guildwise-runner git-connect azure-devops --organization <name>` and paste a personal access token (Code: read and write).',
       };
     const org = this.org(a);
     if (!org)
@@ -232,7 +232,7 @@ export class AzureDevOpsForge implements Forge {
     const org = this.org(a);
     if (!org)
       throw new Error(
-        'choose an Azure DevOps organization: `aom-runner git-connect azure-devops --organization <name>`',
+        'choose an Azure DevOps organization: `guildwise-runner git-connect azure-devops --organization <name>`',
       );
     const res = await this.call<{ value: AzRepo[] }>(
       `https://${this.host}/${encodeURIComponent(org)}/_apis/git/repositories?${API}`,

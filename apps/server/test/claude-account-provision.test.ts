@@ -196,8 +196,8 @@ describe('answers and sign-in notices', () => {
     await setAccount('work');
     await answerEnsure('work', { key: 'work', state: 'needs_owner', aliasAdded: false });
     let open = await notices('claude_account_login');
-    expect(open[0]?.body).toContain('aom-runner accounts add work');
-    expect(open[0]?.body).toContain('aom-runner accounts login work');
+    expect(open[0]?.body).toContain('guildwise-runner accounts add work');
+    expect(open[0]?.body).toContain('guildwise-runner accounts login work');
 
     await setAccount('work');
     await answerEnsure('work', {

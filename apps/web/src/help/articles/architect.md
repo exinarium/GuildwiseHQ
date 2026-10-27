@@ -40,4 +40,4 @@ Open **Workstations**, expand your workstation and find the row **Organisation s
 - Pick one of the folders the workstation offers, or type a path, then press **Set folder**. **Clear** removes it.
 - The row shows the folder (or "not set"), how many repositories it holds and whether it is **ok** or **invalid**, with the reason.
 - The workstation checks the folder itself and can refuse it: it must sit inside one of its repository folders (not be that folder), and never be your home folder, the runner's own folder or a credentials folder such as `~/.ssh`.
-- The same can be done on the machine with `aom-runner org-folder set|clear|list`.
+- The same can be done on the machine with `guildwise-runner org-folder set|clear|list`.

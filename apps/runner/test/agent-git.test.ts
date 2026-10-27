@@ -121,7 +121,7 @@ describe('aom git status / connect (the runner drives the login for the DevOps e
         result: { state: string; message: string };
       };
       expect(r.result.state, provider).toBe('needs_secret');
-      expect(r.result.message).toContain(`aom-runner git-connect ${provider}`);
+      expect(r.result.message).toContain(`guildwise-runner git-connect ${provider}`);
       expect(r.result.message).toMatch(/Do not ask for it in this chat/);
       expect(r.result.message).toMatch(/Connect helper/);
     }

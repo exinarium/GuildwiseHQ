@@ -2,7 +2,7 @@
 
 The Guildwise HQ runner: a small Node process that runs on a workstation, connects out to the server over a WebSocket and runs agent shifts (Claude Code or the token-free mock runtime) inside git worktrees. It ships two binaries:
 
-- `aom-runner`: pair, start, status, doctor, repos, graph-check.
+- `guildwise-runner`: pair, start, status, doctor, repos, graph-check. The older name `aom-runner` is kept as an alias.
 - `aom`: the command an agent runs inside a shift to read its card and report back (talks to the runner over a local, per-shift-token HTTP endpoint).
 
 Requires Node 22 and git >= 2.40. Design: `docs/ARCHITECTURE.md` sections 11 to 13.
@@ -55,9 +55,9 @@ workstation. Design: `docs/design/project-graphs.md`. Operator notes: `docs/RUNN
 2. On the machine:
 
 ```
-aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
-aom-runner repos add ~/src            # folders scanned (depth 3) for git repos that have an `origin`
-aom-runner start                      # foreground; run it under systemd/launchd/Task Scheduler
+guildwise-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
+guildwise-runner repos add ~/src            # folders scanned (depth 3) for git repos that have an `origin`
+guildwise-runner start                      # foreground; run it under systemd/launchd/Task Scheduler
 ```
 
 `pair` writes `config.json` (mode 0600) and keeps existing `repoRoots`/runtime settings when re-pairing. `start` connects, sends `hello` (repos, runtimes, active shifts), heartbeats every 15 s (the server's `welcome.heartbeatSec`), reconnects with full-jitter backoff (1 s up to 30 s) and resends the outbox after every reconnect or process restart. Exit codes: 0 on SIGINT/SIGTERM, 2 if the server rejects the token (re-pair), 3 if another runner connected for the same workstation.
@@ -67,9 +67,9 @@ Restart behaviour: running shifts are persisted in `active-shifts/` and resumed 
 Other commands:
 
 ```
-aom-runner status                     # config summary and whether a runner process is alive
-aom-runner doctor                     # node, git >= 2.40, claude, docker, repos, GET /api/health
-aom-runner repos add <path> | repos list
+guildwise-runner status                     # config summary and whether a runner process is alive
+guildwise-runner doctor                     # node, git >= 2.40, claude, docker, repos, GET /api/health
+guildwise-runner repos add <path> | repos list
 ```
 
 Enable the mock runtime (CI, development) with `pair --mock`, `start --mock`, `AOM_RUNNER_MOCK=1`, or `"runtimes": {"mock": {"enabled": true}}` in `config.json`. `AOM_RUNNER_MAX_SHIFT_MS` overrides `maxShiftMinutes` (milliseconds; useful to test the `hang` action).

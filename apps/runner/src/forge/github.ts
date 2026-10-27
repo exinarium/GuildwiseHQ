@@ -58,13 +58,13 @@ export class GitHubForge implements Forge {
         ...base,
         state: 'unavailable',
         detail:
-          'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com, then run `aom-runner git-connect github`.',
+          'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com, then run `guildwise-runner git-connect github`.',
       };
     if (who.exitCode !== 0)
       return {
         ...base,
         state: 'not_connected',
-        detail: `Run \`gh auth login --web${this.host !== 'github.com' ? ` --hostname ${this.host}` : ''}\` (or \`aom-runner git-connect github\`) on this workstation.`,
+        detail: `Run \`gh auth login --web${this.host !== 'github.com' ? ` --hostname ${this.host}` : ''}\` (or \`guildwise-runner git-connect github\`) on this workstation.`,
       };
     return { ...base, state: 'connected', method: 'cli', account: who.stdout.trim().slice(0, 200) };
   }

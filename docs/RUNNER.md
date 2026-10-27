@@ -29,10 +29,10 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 4. installs Claude Code (`npm install -g @anthropic-ai/claude-code`);
 5. optionally installs yt-dlp (asks, default yes) and Docker (asks, default no);
 6. downloads `aom-runner-<version>.tgz` from the app, verifies its sha256 against the value embedded in the script and unpacks it to `~/.local/share/guildwise/runner/<version>` (`current` points at the active version; `~/.local/bin/aom-runner` and `aom` link to it);
-7. pairs (`aom-runner pair`) with the workstation the one-time code belongs to. A machine that already has a runner (any server or organization) keeps it: the installer upgrades it only if the server offers a newer version, and the new code pairs it with the new workstation instead of failing or installing a second copy; a code that was already used (the same command run again) is reported and the existing pairing stays;
-8. asks which folders hold your code (suggests `~/src`) and runs `aom-runner repos add` for each;
+7. pairs (`guildwise-runner pair`) with the workstation the one-time code belongs to. A machine that already has a runner (any server or organization) keeps it: the installer upgrades it only if the server offers a newer version, and the new code pairs it with the new workstation instead of failing or installing a second copy; a code that was already used (the same command run again) is reported and the existing pairing stays;
+8. asks which folders hold your code (suggests `~/src`) and runs `guildwise-runner repos add` for each;
 9. walks you through the `claude` sign-in: subscription (browser login, usage counts against your plan) or API key (stored in `config.json`, mode 0600), or later;
-10. installs the systemd **user service** `aom-runner` (unit in `~/.config/systemd/user`, `PATH` set to the Node and Claude directories), enables lingering (`loginctl enable-linger`) so it survives logout and starts at boot, waits for the runner to connect and runs `aom-runner doctor`, streaming each line to the wizard.
+10. installs the systemd **user service** `aom-runner` (unit in `~/.config/systemd/user`, `PATH` set to the Node and Claude directories), enables lingering (`loginctl enable-linger`) so it survives logout and starts at boot, waits for the runner to connect and runs `guildwise-runner doctor`, streaming each line to the wizard.
 
 Without a running systemd (a container, or WSL without `systemd=true`) the unit file is still written, the runner is started in the background with `~/.local/share/guildwise/runner/start-runner.sh` and the summary says so.
 
@@ -96,7 +96,7 @@ macOS needs none of this: it uses the built-in Seatbelt sandbox and no extra ins
    runner up from Windows login, add a Task Scheduler task "At log on" that runs
    `wsl.exe -d Ubuntu -- sleep infinity`.
 
-`aom-runner doctor` prints the sandbox state and, on native Windows, these steps again. The Workstations page shows an
+`guildwise-runner doctor` prints the sandbox state and, on native Windows, these steps again. The Workstations page shows an
 amber warning for any workstation whose runtime reports `unsandboxed`, and why when it reports `unavailable`.
 
 ### Native Windows (unsandboxed, not recommended)
@@ -250,7 +250,7 @@ The `current` switch is atomic: a new symlink is created next to it and renamed 
 **Rollback.** The marker `update-pending` holds a 5 minute deadline. The new version deletes it (and prunes old versions) the first time any pairing completes the handshake with the server. Two things can roll back:
 
 - *The new version runs but does not connect.* When the deadline passes, the in-process watchdog first checks that the server answers HTTP at all; if it does, `current` is switched back to `previous`, `update-failed` is written and the runner restarts. If the server is down it keeps waiting (an outage is not the update's fault).
-- *The new version cannot even start (crash loop).* The `aom-runner` launcher script of the new version checks, on `aom-runner start`, whether it is the version named in `update-pending` and the deadline has passed; if so it switches `current` back, writes `update-failed` and runs the previous version instead.
+- *The new version cannot even start (crash loop).* The `guildwise-runner` launcher script of the new version checks, on `guildwise-runner start`, whether it is the version named in `update-pending` and the deadline has passed; if so it switches `current` back, writes `update-failed` and runs the previous version instead.
 
 After a rollback the failed version is not tried again on this machine (`update-failed`); a newer release is. The Workstations page then shows "Update rolled back".
 
@@ -269,7 +269,7 @@ After a rollback the failed version is not tried again on this machine (`update-
 The Owner's own chat with the CEO can run as a real Claude Code session on the Owner's workstation (docs/design/ceo-front-door.md
 sections 3 and 5). It is a cap the machine owner holds against any server:
 
-- **Opt in locally:** `aom-runner ceo full-power on` (`off`, `status`). It sets `ceo.fullPower` in `config.json`; restart the
+- **Opt in locally:** `guildwise-runner ceo full-power on` (`off`, `status`). It sets `ceo.fullPower` in `config.json`; restart the
   runner so `hello` announces the `ceo-full-power:1` capability. Without it, an owner turn runs in the restricted CEO profile and
   the reply says "Full power is off on this workstation" (`chat.done.degraded = full_power_off`); an order turn is refused.
 - **Who decides:** the server sets `ceoMode` (`owner` or `order`) on `chat.start`. The runner honours it only for the CEO agent, only
@@ -295,13 +295,13 @@ sections 3 and 5). It is a cap the machine owner holds against any server:
 
 The user chooses where agents run (**Add a workstation**: My computer, A VPS (SSH), GitHub Codespaces). The runner makes outbound connections only, so a cloud machine needs no open port. Guide for a server you rent: `docs/BYO-VPS.md`. Design and server side: `docs/ARCHITECTURE.md` 11.4.
 
-### `aom-runner up`: pair if needed, then run
+### `guildwise-runner up`: pair if needed, then run
 
 ```
-GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" aom-runner up
+GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" guildwise-runner up
 ```
 
-Idempotent and safe at every boot. If the data directory already has a (not disabled) pairing for the server, it only starts (the single-use code is ignored). Otherwise it pairs with `GUILDWISE_PAIR_CODE` (or `--code`), or, inside a Codespace the server created, **enrolls** with `CODESPACE_NAME` and `GITHUB_TOKEN` (which GitHub sets in every codespace): `POST /api/runner/enroll`, no code needed. Then it runs like `aom-runner start`. Flags: `--server`, `--code`, `--name`, `--mock`, `--data-dir`.
+Idempotent and safe at every boot. If the data directory already has a (not disabled) pairing for the server, it only starts (the single-use code is ignored). Otherwise it pairs with `GUILDWISE_PAIR_CODE` (or `--code`), or, inside a Codespace the server created, **enrolls** with `CODESPACE_NAME` and `GITHUB_TOKEN` (which GitHub sets in every codespace): `POST /api/runner/enroll`, no code needed. Then it runs like `guildwise-runner start`. Flags: `--server`, `--code`, `--name`, `--mock`, `--data-dir`.
 
 ### Claude credentials on a cloud workstation
 
@@ -309,13 +309,13 @@ The server never receives or stores a Claude credential.
 
 - `ANTHROPIC_API_KEY` in the environment of `up` (a Codespaces secret) is written into this machine's `config.json` (mode 0600, `authMode: api_key`).
 - `CLAUDE_CODE_OAUTH_TOKEN` likewise (`authMode: oauth`; a subscription token, individual use).
-- `aom-runner auth api-key` / `aom-runner auth oauth-token` read the value from stdin and store it in `secrets/claude.json` (mode 0600): `read -rs K; printf %s "$K" | aom-runner auth api-key`. A running runner uses it from the next session; no restart is needed.
+- `guildwise-runner auth api-key` / `guildwise-runner auth oauth-token` read the value from stdin and store it in `secrets/claude.json` (mode 0600): `read -rs K; printf %s "$K" | guildwise-runner auth api-key`. A running runner uses it from the next session; no restart is needed.
 - From the web: the Integrations page can do the same without a terminal (API key, a token made elsewhere, or `claude setup-token` driven by the runner). See "Integrations (connect from the web)".
 - The default recommended in the app is the customer's own API key; a subscription login is allowed with an "individual use" warning.
 
-### `aom-runner devcontainer [path] --server <url>`
+### `guildwise-runner devcontainer [path] --server <url>`
 
-Prints a `devcontainer.json` for the repository at `path` (default `.`), with dev container features chosen from the toolchain detection (`src/toolchain/stacks.ts`: .NET, Python, Go, Rust, Java, Ruby, PHP on top of Node, git and the GitHub CLI). Its `postStartCommand` is `curl -fsSL <server>/api/runner/codespaces-bootstrap.sh | bash`: that script (served by the server, no secret in it) installs the runner release (checksum verified) into `~/.aom-runner-install` and starts `aom-runner up` in the background. Docker is not offered in a Codespace. `runArgs` carries `--security-opt seccomp=unconfined` so the agent sandbox (bubblewrap) can create user namespaces; confirm it works in your codespace with `aom-runner doctor`.
+Prints a `devcontainer.json` for the repository at `path` (default `.`), with dev container features chosen from the toolchain detection (`src/toolchain/stacks.ts`: .NET, Python, Go, Rust, Java, Ruby, PHP on top of Node, git and the GitHub CLI). Its `postStartCommand` is `curl -fsSL <server>/api/runner/codespaces-bootstrap.sh | bash`: that script (served by the server, no secret in it) installs the runner release (checksum verified) into `~/.aom-runner-install` and starts `guildwise-runner up` in the background. Docker is not offered in a Codespace. `runArgs` carries `--security-opt seccomp=unconfined` so the agent sandbox (bubblewrap) can create user namespaces; confirm it works in your codespace with `guildwise-runner doctor`.
 
 ### Sleeping and waking
 
@@ -328,17 +328,17 @@ One runner process on a machine can be paired with more than one workstation: fo
 Note that you do **not** need a second pairing for a second organization of the same account: a workstation is owned by a user, not by an organization, and already serves every organization that user belongs to (each organization gets its own DevOps engineer on it, and projects of any of those organizations share it). A second pairing is for a different account or server.
 
 ```sh
-aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Acme desk"   # the first pairing
-aom-runner pair --server https://hq.client.example --code YYYY-YYYY --name "Client desk" # adds a second; the first is untouched
-aom-runner pairings                      # id, name, server, workstation id, state, data directory
-aom-runner status [--pairing <id|name>]  # one block per pairing
-aom-runner unpair "Client desk" [--purge] # forget it on this machine
+guildwise-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Acme desk"   # the first pairing
+guildwise-runner pair --server https://hq.client.example --code YYYY-YYYY --name "Client desk" # adds a second; the first is untouched
+guildwise-runner pairings                      # id, name, server, workstation id, state, data directory
+guildwise-runner status [--pairing <id|name>]  # one block per pairing
+guildwise-runner unpair "Client desk" [--purge] # forget it on this machine
 ```
 
 - **What a pairing is.** `pairings.json` in the data directory lists them (`id`, `label`, `dir`, `serverUrl`, `workstationId`). The installer's pairing command is the same `pair`: running the install command on a machine that already has a runner keeps that runner, upgrades it only when the server offers a newer version, and **adds** the new workstation as another pairing. The same server and the same workstation name again is a re-pair of that pairing (new credentials, settings and data kept). `--pairing` takes the id, the name, the workstation id or an unambiguous prefix.
 - **Where things live.** The first pairing stays in the data directory itself (`config.json`, `agents/`, `worktrees/`, `vaults/`, `outbox/`, `logs/`), exactly where a single-pairing runner always kept it. Later pairings live in `pairings/<id>/` with the same layout. A data directory from before pairings is migrated in place on first use: only `pairings.json` is created around it, nothing is moved or rewritten, and an older runner that ignores the index keeps working on the first pairing.
-- **Isolation per pairing.** Own `config.json` (server, token, Jira token, Claude API key or OAuth token), own agent homes, worktrees, vault clones, integration worktrees, outbox, outbound records, logs and status file, and its own IPC server and shift tokens. Nothing a shift of one pairing can reach is shared with another pairing's directory, and each connects to its server with its own token. A new pairing inherits only non-secret settings from the first one (code folders, concurrency limit, sandbox and runtime options); credentials are never copied (an API key or OAuth token setting falls back to the machine's own `claude` login), so give it its own with `aom-runner` config under `pairings/<id>/config.json` if it needs one. Code folders added with `aom-runner repos add` go to every pairing unless `--pairing` names one (a repository checked out once can be seen by several pairings; their worktrees are separate).
-- **One process, one connection per pairing.** `aom-runner start` (the service) runs one connection per pairing in the same process; it does not multiplex. A pairing added or removed with `pair`/`unpair`, or re-paired, is picked up by the running process within about five seconds without disconnecting the others. If the server unpairs one workstation, only that pairing stops (it is marked `unpaired` in `pairings.json` and is not retried); the process exits only when no pairing is left, with the usual exit code 0 for an unpair, and a service manager is not asked to restart a runner that cannot work.
+- **Isolation per pairing.** Own `config.json` (server, token, Jira token, Claude API key or OAuth token), own agent homes, worktrees, vault clones, integration worktrees, outbox, outbound records, logs and status file, and its own IPC server and shift tokens. Nothing a shift of one pairing can reach is shared with another pairing's directory, and each connects to its server with its own token. A new pairing inherits only non-secret settings from the first one (code folders, concurrency limit, sandbox and runtime options); credentials are never copied (an API key or OAuth token setting falls back to the machine's own `claude` login), so give it its own with `guildwise-runner` config under `pairings/<id>/config.json` if it needs one. Code folders added with `guildwise-runner repos add` go to every pairing unless `--pairing` names one (a repository checked out once can be seen by several pairings; their worktrees are separate).
+- **One process, one connection per pairing.** `guildwise-runner start` (the service) runs one connection per pairing in the same process; it does not multiplex. A pairing added or removed with `pair`/`unpair`, or re-paired, is picked up by the running process within about five seconds without disconnecting the others. If the server unpairs one workstation, only that pairing stops (it is marked `unpaired` in `pairings.json` and is not retried); the process exits only when no pairing is left, with the usual exit code 0 for an unpair, and a service manager is not asked to restart a runner that cannot work.
 - **Concurrency budget.** The machine's shift limit is shared: a pairing may run its own `maxConcurrentShifts` (and what its server allows) as long as the pairings together stay under the machine limit, which is `maxConcurrentShifts` in `pairings.json` or, when unset, the largest per-pairing limit. First come, first served: when the limit is reached a shift offered to another pairing is rejected as `busy` and its card waits, exactly as at the per-workstation limit. There is no reservation per pairing.
 - **Not supported.** Two runner processes on the same data directory (use one process); the same workstation paired twice on the same server under different names (it would connect twice and the second supersedes the first, exit code 3 for that pairing only).
 
@@ -386,8 +386,8 @@ The runner config is stored in `config.json` (mode 0600: readable/writable by ow
 ### Viewing and checking config
 
 ```sh
-aom-runner status             # shows config summary and process state
-aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos, server
+guildwise-runner status             # shows config summary and process state
+guildwise-runner doctor             # checks node, git, claude, docker, yt-dlp, repos, server
 ```
 
 ### Config file format
@@ -434,7 +434,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **runnerToken** (required): WebSocket auth token (keep secret, stored mode 0600)
 
 #### Repositories
-- **orgSourceFolders** (object, default `{}`): `{ "<organization id>": "<folder>" }`. Every git repository under the folder is readable (read-only, secret files blocked) by the architect of that organization, in card shifts and chats. The folder must sit **inside** one of the `repoRoots` (not be a root itself) and may never be, contain or lie in the home directory, the runner's data directory or a credentials folder (`~/.ssh`, ...); real paths are compared, so a symlink cannot lead out. Set it with `aom-runner org-folder set <organization-id> <path>` (also `clear` and `list`) or, for the workstation's owner, with the **Organisation source folder** row on the Workstations page (the `org.folder` command, below); the runner reads it again at every shift, so no restart is needed. Both go through the same check (`changeOrgFolder` in `org-folder.ts`), so the runner remains the authority. See "The architect: organization source folder, git and the main merge".
+- **orgSourceFolders** (object, default `{}`): `{ "<organization id>": "<folder>" }`. Every git repository under the folder is readable (read-only, secret files blocked) by the architect of that organization, in card shifts and chats. The folder must sit **inside** one of the `repoRoots` (not be a root itself) and may never be, contain or lie in the home directory, the runner's data directory or a credentials folder (`~/.ssh`, ...); real paths are compared, so a symlink cannot lead out. Set it with `guildwise-runner org-folder set <organization-id> <path>` (also `clear` and `list`) or, for the workstation's owner, with the **Organisation source folder** row on the Workstations page (the `org.folder` command, below); the runner reads it again at every shift, so no restart is needed. Both go through the same check (`changeOrgFolder` in `org-folder.ts`), so the runner remains the authority. See "The architect: organization source folder, git and the main merge".
 - **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3). It only says where repositories are found and cloned; it does not let agents read them (see "Reference repositories and other read-only folders")
 
 #### Runtimes
@@ -474,7 +474,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 #### External integrations
 
 **Jira** (posting approved updates, and downloading ticket attachments for agents; optional). Set it up with
-`aom-runner jira-connect` (see "Jira on the runner" below): the token is then stored in `secrets/jira.json`, not here.
+`guildwise-runner jira-connect` (see "Jira on the runner" below): the token is then stored in `secrets/jira.json`, not here.
 The older `jira` block in `config.json` is still read when there is no `secrets/jira.json`:
 - **baseUrl** (required): Jira server URL
 - **email** (optional): Jira Cloud username (if provided, use basic auth)
@@ -497,7 +497,7 @@ file has no credential.
 
 **OAuth token (recommended for Claude Code):**
 1. Run `claude setup-token` to get a token (or let the Integrations page do it: "Sign in with your Claude subscription")
-2. `printf %s "$TOKEN" | aom-runner auth oauth-token` (stored in `secrets/claude.json`; no restart needed). The older form, in `config.json`, still works:
+2. `printf %s "$TOKEN" | guildwise-runner auth oauth-token` (stored in `secrets/claude.json`; no restart needed). The older form, in `config.json`, still works:
    ```json
    { "runtimes": { "claude-code": { "authMode": "oauth", "oauthToken": "..." } } }
    ```
@@ -508,24 +508,24 @@ The token from `claude setup-token` is the most robust choice: it does not expir
 **Jira API token:**
 1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
 2. Create a token and copy it
-3. Run `aom-runner jira-connect` (base URL, your Atlassian e-mail, the token; see "Jira on the runner").
+3. Run `guildwise-runner jira-connect` (base URL, your Atlassian e-mail, the token; see "Jira on the runner").
    Writing `{ "jira": { "baseUrl": "...", "email": "...", "apiToken": "..." } }` into config.json still works
    but keeps the token in the main config file; prefer the command.
 
 **Git hosts (pull requests, repository list and creation):** the git host is chosen per project repository (GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or plain git). Connect each one you use, on this workstation, with
 
 ```
-aom-runner git-connect github                 # runs `gh auth login --web`
-aom-runner git-connect gitlab [--host git.example.com]   # `glab auth login`, or paste a personal access token
-aom-runner git-connect bitbucket-cloud        # Atlassian e-mail + API token (app passwords no longer work)
-aom-runner git-connect azure-devops           # uses a Microsoft Entra service principal from the environment, or `az login`; or --organization acme and a PAT (fallback)
-aom-runner git-connect <provider> --ssh       # SSH instead of a token: create ~/.ssh/aom_<provider>, print the public key and where to add it, make SSH this workstation's default, then check it
-aom-runner git-connect <provider> --ssh --key-file ~/.ssh/id_ed25519   # use a key you already have (not copied, only its path is kept)
-aom-runner git-connect <provider> --ssh --agent                        # use your ssh-agent / ~/.ssh/config
-aom-runner git-connect <provider> --check [<repo-url>]                 # does SSH work? (git ls-remote on the repo, else ssh -T); exit 1 if not
-aom-runner git-connect <provider> --default https                      # keep tokens / the CLI login as the default for new clones
-aom-runner git-connect <provider> --status    # connected or not
-aom-runner git-connect <provider> --disconnect  # forget a saved token
+guildwise-runner git-connect github                 # runs `gh auth login --web`
+guildwise-runner git-connect gitlab [--host git.example.com]   # `glab auth login`, or paste a personal access token
+guildwise-runner git-connect bitbucket-cloud        # Atlassian e-mail + API token (app passwords no longer work)
+guildwise-runner git-connect azure-devops           # uses a Microsoft Entra service principal from the environment, or `az login`; or --organization acme and a PAT (fallback)
+guildwise-runner git-connect <provider> --ssh       # SSH instead of a token: create ~/.ssh/aom_<provider>, print the public key and where to add it, make SSH this workstation's default, then check it
+guildwise-runner git-connect <provider> --ssh --key-file ~/.ssh/id_ed25519   # use a key you already have (not copied, only its path is kept)
+guildwise-runner git-connect <provider> --ssh --agent                        # use your ssh-agent / ~/.ssh/config
+guildwise-runner git-connect <provider> --check [<repo-url>]                 # does SSH work? (git ls-remote on the repo, else ssh -T); exit 1 if not
+guildwise-runner git-connect <provider> --default https                      # keep tokens / the CLI login as the default for new clones
+guildwise-runner git-connect <provider> --status    # connected or not
+guildwise-runner git-connect <provider> --disconnect  # forget a saved token
 ```
 
 **SSH instead of an API token.** Some owners already have SSH keys and do not want to create tokens. Per git host the runner keeps the *default access method for new clones* (`https` with the token or CLI login, or `ssh`) and which key to use: one it generated (`~/.ssh/aom_<provider>`, ed25519, no passphrase), a key file you name, or your ssh-agent. This is kept in `<data dir>/secrets/git-ssh.json` (paths and the last check result only, no key material). A repository can override the default (project settings, Repositories, Access); the web app sends `repo.access` and the runner changes the clone's `origin` between `https://github.com/acme/web.git` and `git@github.com:acme/web.git` (Bitbucket `git@bitbucket.org:ws/repo.git`, Azure DevOps `git@ssh.dev.azure.com:v3/org/project/repo`, GitLab `git@host:group/sub/repo.git`; for Bitbucket Data Center the ssh port is not in the https address, so add the repository with its ssh URL).
@@ -541,13 +541,13 @@ The command prints the steps, reads a token without echoing it and checks it aga
 1. In the Microsoft Entra admin center register an application (the service principal) and create a client secret (or, for workload identity, a federated credential). Note the tenant id, the application (client) id and the secret.
 2. In Azure DevOps open Organization settings, Users, Add users, and add the service principal with Basic access; add it to the project (Project settings, Permissions) with at least Contributor on the repositories the runner uses. The organization must be connected to the same Entra tenant (Organization settings, Microsoft Entra).
 3. On the workstation set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` in the runner's environment (the systemd unit, the scheduled task or the devcontainer env; never in a project file). For workload identity set `AZURE_FEDERATED_TOKEN_FILE` (the projected token path) instead of the secret. Optionally set `AZURE_DEVOPS_ORGANIZATION` to your organization name so the repository list and status know which one to use.
-4. Restart the runner and run `aom-runner git-connect azure-devops --status`: it reports `connected` with method `service-principal`. The runner asks `login.microsoftonline.com` for an access token for Azure DevOps (resource `499b84ac-1321-427f-aa17-267ca6975798`), caches it until shortly before it expires, and gives git the same token through the environment of the git process only; the secret never reaches an agent, the server or a log.
+4. Restart the runner and run `guildwise-runner git-connect azure-devops --status`: it reports `connected` with method `service-principal`. The runner asks `login.microsoftonline.com` for an access token for Azure DevOps (resource `499b84ac-1321-427f-aa17-267ca6975798`), caches it until shortly before it expires, and gives git the same token through the environment of the git process only; the secret never reaches an agent, the server or a log.
 
 Fallbacks stay supported: a PAT for one organization (`git-connect azure-devops --organization acme`, scope Code: Read & write and Project and Team: Read), and `az login` (interactive, `--use-device-code`, or `az login --service-principal -u <client id> -p <secret> --tenant <tenant>`), which the adapter picks up through `az account get-access-token`.
 
-**Agents and `aom git`.** The DevOps engineer (in a chat or a DevOps request) can run `aom git status [<provider>]` and `aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <h>]`. The runner drives the login on this workstation: a browser or device-code sign-in (`gh auth login --web`, `glab auth login --web`, `az login --use-device-code`) prints a URL and a code that the agent shows to the user; the login keeps running on the workstation, the git status is reported again when it ends, and `aom git status` shows the result. A login that needs a secret (a GitLab or Bitbucket token, an Azure DevOps PAT) is never started: the command says so and the agent tells the user to run `aom-runner git-connect <provider>` in a terminal or use the app's Connect helper. Nothing in this path accepts, prints or stores a secret; the verbs are refused for every agent except the DevOps engineer.
+**Agents and `aom git`.** The DevOps engineer (in a chat or a DevOps request) can run `aom git status [<provider>]` and `aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <h>]`. The runner drives the login on this workstation: a browser or device-code sign-in (`gh auth login --web`, `glab auth login --web`, `az login --use-device-code`) prints a URL and a code that the agent shows to the user; the login keeps running on the workstation, the git status is reported again when it ends, and `aom git status` shows the result. A login that needs a secret (a GitLab or Bitbucket token, an Azure DevOps PAT) is never started: the command says so and the agent tells the user to run `guildwise-runner git-connect <provider>` in a terminal or use the app's Connect helper. Nothing in this path accepts, prints or stores a secret; the verbs are refused for every agent except the DevOps engineer.
 
-The `gh` CLI is required for GitHub for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`aom-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. For GitLab, Azure DevOps and Bitbucket Cloud the same request carries `provider` (and `host` for a self-managed GitLab or GitHub Enterprise); the runner creates the repository through that provider's adapter with the login saved by `git-connect`, then clones, makes the first commit and pushes with the same credential, and the server adds it to the project with that provider as its git host. The desk item names the git host. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
+The `gh` CLI is required for GitHub for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`guildwise-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. For GitLab, Azure DevOps and Bitbucket Cloud the same request carries `provider` (and `host` for a self-managed GitLab or GitHub Enterprise); the runner creates the repository through that provider's adapter with the login saved by `git-connect`, then clones, makes the first commit and pushes with the same credential, and the server adds it to the project with that provider as its git host. The desk item names the git host. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
 
 Without a login for the repository's host (or on plain git) finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. Finalize with action `merge` first asks the host whether the working branch allows direct pushes; when it is protected (or the push is refused by a branch policy) the runner pushes the card branch and opens a pull request instead, with a desk notice. See the BA's `aom finalize` command (the action is the card's own; agents never choose it).
 
@@ -555,8 +555,8 @@ Without a login for the repository's host (or on plain git) finalize with action
 
 **Rotate runner token** (invalidates old token):
 ```sh
-aom-runner rotate-token    # runner must be stopped
-aom-runner start           # restart with new token
+guildwise-runner rotate-token    # runner must be stopped
+guildwise-runner start           # restart with new token
 ```
 
 ### Claude accounts (more than one subscription)
@@ -566,12 +566,12 @@ A project can run its tickets on its own Claude subscription, for example `work`
 below. Org work (CEO, DevOps, chats) always uses the main account.
 
 ```
-aom-runner accounts list                                # every account: login and usage state, folder, e-mail
-aom-runner accounts add work                            # create (or check) ~/.claude-gw-work, register it, add the alias
-aom-runner accounts add work --config-dir ~/work-claude # use a folder you name, as it is
-printf %s "$TOKEN" | aom-runner accounts add work --oauth-token   # a token instead of a folder (also --api-key)
-aom-runner accounts login work                          # claude auth login in this terminal, in the account's folder
-aom-runner accounts remove work                         # unregister only; folder, alias and sign-in are kept
+guildwise-runner accounts list                                # every account: login and usage state, folder, e-mail
+guildwise-runner accounts add work                            # create (or check) ~/.claude-gw-work, register it, add the alias
+guildwise-runner accounts add work --config-dir ~/work-claude # use a folder you name, as it is
+printf %s "$TOKEN" | guildwise-runner accounts add work --oauth-token   # a token instead of a folder (also --api-key)
+guildwise-runner accounts login work                          # claude auth login in this terminal, in the account's folder
+guildwise-runner accounts remove work                         # unregister only; folder, alias and sign-in are kept
 ```
 
 **The default folder and alias.** `accounts add <key>` uses `~/.claude-gw-<key>` (Windows: `%USERPROFILE%\.claude-gw-<key>`),
@@ -591,7 +591,7 @@ hand to remove the aliases.
 **The runner never adopts what it did not create.** Your own `~/.claude-work` and its `claude-work` alias are never used,
 changed or read as an account. `accounts add work` makes `~/.claude-gw-work` and `claude-gw-work` next to them. A default
 folder that already exists without the marker is left alone: the account reports `failed`, and the message names
-`aom-runner accounts add <key> --config-dir <dir>` as the deliberate way to register it. Folders inside the runner data
+`guildwise-runner accounts add <key> --config-dir <dir>` as the deliberate way to register it. Folders inside the runner data
 directory, inside `~/.claude` (main) or outside your home directory are refused.
 
 **An explicit folder.** `--config-dir <dir>` (or a `configDir` you write in `config.json`) is used as it is and may already
@@ -674,7 +674,7 @@ named account and no key command with an account name, and pauses or falls back 
 ### Start command
 
 ```sh
-aom-runner start [--mock] [--data-dir <path>]
+guildwise-runner start [--mock] [--data-dir <path>]
 ```
 
 Connects to the server and listens for work. Runs in foreground (Ctrl+C to stop).
@@ -699,15 +699,15 @@ Shift state is persisted in `active-shifts/` and resumed when the runner restart
 ### Status command
 
 ```sh
-aom-runner status [--data-dir <path>]
+guildwise-runner status [--data-dir <path>]
 ```
 
-Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox). With several pairings it prints one block per pairing (`--pairing <id|name>` picks one); `aom-runner pairings` lists them in one line each.
+Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox). With several pairings it prints one block per pairing (`--pairing <id|name>` picks one); `guildwise-runner pairings` lists them in one line each.
 
 ### Troubleshooting
 
 ```sh
-aom-runner doctor [--data-dir <path>]
+guildwise-runner doctor [--data-dir <path>]
 ```
 
 Checks prerequisites and connectivity:
@@ -735,10 +735,10 @@ The runner respects these environment variables:
 | `AOM_ALLOW_LOCAL_REMOTES` | Set to `1` to accept `file://` and path git remotes (tests only; production refuses them) |
 | `AOM_CLAUDE_SMOKE` | Set to `1` to run the real-Claude smoke test (spends tokens) |
 | `AOM_CLAUDE_SMOKE_MODEL` | Smoke test model (default `opus`; try `haiku` to save tokens) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`); stored by `aom-runner up` |
-| `ANTHROPIC_API_KEY` | The customer's API key; stored by `aom-runner up` in the runner config |
-| `GUILDWISE_SERVER`, `GUILDWISE_PAIR_CODE`, `GUILDWISE_NAME` | Used by `aom-runner up` for unattended pairing |
-| `CODESPACE_NAME`, `GITHUB_TOKEN` | Set by GitHub inside a Codespace; `aom-runner up` enrolls with them |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`); stored by `guildwise-runner up` |
+| `ANTHROPIC_API_KEY` | The customer's API key; stored by `guildwise-runner up` in the runner config |
+| `GUILDWISE_SERVER`, `GUILDWISE_PAIR_CODE`, `GUILDWISE_NAME` | Used by `guildwise-runner up` for unattended pairing |
+| `CODESPACE_NAME`, `GITHUB_TOKEN` | Set by GitHub inside a Codespace; `guildwise-runner up` enrolls with them |
 
 ## The `aom` command (inside a shift)
 
@@ -1507,7 +1507,7 @@ bubblewrap socat`; on Ubuntu 24.04+ see the AppArmor note in the Claude Code san
 WSL2; see "Windows: run the runner inside WSL2"); `claude` must be 2.1.257 or newer.
 
 Effective sandbox state, reported per runtime in `hello` (and again whenever a re-probe changes it), shown by
-`aom-runner doctor` and in the web UI:
+`guildwise-runner doctor` and in the web UI:
 
 | State | Meaning |
 |---|---|
@@ -1676,10 +1676,10 @@ workstation, with the owner's own API token, and hands the agent local files.
 **Connect (once per workstation, by the owner):**
 
 ```
-aom-runner jira-connect                     # asks for the base URL, your e-mail and the API token (hidden)
-aom-runner jira-connect --status            # connected as ..., or why not (exit code 1 when not connected)
-aom-runner jira-connect --disconnect        # removes the saved credentials
-aom-runner jira-connect --base-url https://yourcompany.atlassian.net --email you@company.com   # token on stdin
+guildwise-runner jira-connect                     # asks for the base URL, your e-mail and the API token (hidden)
+guildwise-runner jira-connect --status            # connected as ..., or why not (exit code 1 when not connected)
+guildwise-runner jira-connect --disconnect        # removes the saved credentials
+guildwise-runner jira-connect --base-url https://yourcompany.atlassian.net --email you@company.com   # token on stdin
 ```
 
 Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and use your Atlassian
@@ -1706,7 +1706,7 @@ aom source attachment DCPL-4276 --all               # every file
 
 `aom source read` is `GET /rest/api/2/issue/<KEY>` with the saved connection; the text comes back wrapped as untrusted
 content (the ticket is data, not instructions). Without a connection it answers "Jira is not connected on this
-workstation: ask the manager to run `aom-runner jira-connect`". The runner downloads with its own credentials and writes to `<agent scratch>/attachments/<KEY>/<file>`, then prints the
+workstation: ask the manager to run `guildwise-runner jira-connect`". The runner downloads with its own credentials and writes to `<agent scratch>/attachments/<KEY>/<file>`, then prints the
 local paths. The scratch directory is a working directory of the agent, so the Read tool opens them (Claude Code shows
 images, SVG and text read as text). Rules:
 
@@ -2300,7 +2300,7 @@ involved), so it is deterministic and tested; every command it runs is logged.
 The server queues `repo.clone` on every active workstation of the project's members. The runner (`src/repo/clone.ts`):
 uses a clone it already has (anywhere under the repository folders, matched by the normalized remote); refuses to touch a
 non-empty folder that is not that clone; probes the remote (`git ls-remote`, again with gh's credential helper for https
-hosts); then clones into the **first repository folder** (`aom-runner repos add`), the same place `repo.create` uses. If the
+hosts); then clones into the **first repository folder** (`guildwise-runner repos add`), the same place `repo.create` uses. If the
 manager chose **Create a new repository** and the remote does not exist, the runner creates it with `gh repo create`
 (the same `RepoCreator` as the approved `aom repo create`: private or public as chosen, a first commit on the working
 branch, then a clone) on ONE workstation; the others clone it afterwards. When the cause is access (no `gh` login, no SSH
@@ -2374,7 +2374,7 @@ Windows the runner must be elevated), install (a package manager usable with the
    agent's context. "Forget it" deletes the file.
 
 Limits, stated plainly: the browser trusts the public key the server gives it, so a malicious server could substitute its own
-key; compare the key id shown on the page with `aom-runner doctor` on the machine if you do not trust the server. The DevOps
+key; compare the key id shown on the page with `guildwise-runner doctor` on the machine if you do not trust the server. The DevOps
 engineer is unsandboxed (previous sections) and runs as the runner user, so a prompt-injected DevOps agent can read the
 `secrets` folder like it can read `config.json`; the alternative (the OS keychain) is no stronger against a same-user process.
 Windows has no sudo: the runner must run elevated and no password is stored.
@@ -2574,7 +2574,7 @@ indexed, no graph is offered to agents, and the organization graph is not built.
 ### Checking a packaged runner
 
 ```
-aom-runner graph-check <repo> [--out <dir>]
+guildwise-runner graph-check <repo> [--out <dir>]
 ```
 
 Indexes a clone into a scratch folder (or `--out`) and prints the file, node, edge and module counts, the time and the commit.
@@ -2681,7 +2681,7 @@ state read-only and the page says which command to run instead. Every command-li
 `auth`) and uses the same adapters, so the page and the terminal agree and a change made in one shows in the other within seconds.
 
 **How a secret gets from the browser to the runner.** The browser seals the values with the runner's public key (the key whose id
-`aom-runner doctor` prints, shown on the page): a random AES-256-GCM key encrypts the fields, RSA-OAEP-256 wraps that key, and the
+`guildwise-runner doctor` prints, shown on the page): a random AES-256-GCM key encrypts the fields, RSA-OAEP-256 wraps that key, and the
 authenticated data binds the envelope to one workstation, request, kind, instance and operation. The server relays the ciphertext
 in the durable command queue and cannot read it; it empties the payload when the runner answers (or after ten minutes) and never
 logs it. The runner opens it, refuses an expired envelope (10 minutes), one already used (the seen refs survive a restart), another
@@ -2690,9 +2690,9 @@ An active, malicious server could still serve altered page code or swap the publ
 places and why you can turn web connect off.
 
 **Local policy** (`config.json`, `integrations`; commands below):
-- `aom-runner integrations` lists the status of every integration (the same facts the page shows) and the policy.
-- `aom-runner integrations allow-web off|on` refuses (or accepts again) every credential and sign-in submitted from the web on this workstation. Test stays allowed.
-- Machine-wide logins (`~/.claude`, `gh`, MCP sign-ins) belong to the whole machine, not to one pairing. From the web they can be changed only by the machine's primary pairing (the first one, or the one named with `aom-runner integrations machine-admin <pairing>`); `machineScopeFromWeb: "never"` in `config.json` turns that off completely. The tile shows why an action is disabled.
+- `guildwise-runner integrations` lists the status of every integration (the same facts the page shows) and the policy.
+- `guildwise-runner integrations allow-web off|on` refuses (or accepts again) every credential and sign-in submitted from the web on this workstation. Test stays allowed.
+- Machine-wide logins (`~/.claude`, `gh`, MCP sign-ins) belong to the whole machine, not to one pairing. From the web they can be changed only by the machine's primary pairing (the first one, or the one named with `guildwise-runner integrations machine-admin <pairing>`); `machineScopeFromWeb: "never"` in `config.json` turns that off completely. The tile shows why an action is disabled.
 
 **Claude from the web.** "Sign in with your Claude subscription" runs `claude setup-token` in a pseudo-terminal made with `script(1)`
 (Linux and macOS; native Windows has none, so the tile shows the command). The page shows the sign-in link; the owner signs in
@@ -2726,10 +2726,10 @@ one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump shou
 
 **Credentials stay on the machine:**
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
-- Claude token or API key: `secrets/claude.json` (mode 0600; written by the Integrations page and `aom-runner auth`; `config.json` is the fallback)
+- Claude token or API key: `secrets/claude.json` (mode 0600; written by the Integrations page and `guildwise-runner auth`; `config.json` is the fallback)
 - Claude credentials: stored in the agent's `CLAUDE_CONFIG_DIR` (mode 0700) as a copy of your `~/.claude/.credentials.json` (or of an additional account's `<configDir>/.credentials.json`; the sandbox denies reading the real file to shell commands; Claude Code itself reads it). Token accounts keep their token in `secrets/claude-accounts/<key>.json` (mode 0600)
-- Jira token: stored by `aom-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
-- Git hosts: the `gh` / `glab` logins, or tokens saved by `aom-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
+- Jira token: stored by `guildwise-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
+- Git hosts: the `gh` / `glab` logins, or tokens saved by `guildwise-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
 
 - Values typed on the Integrations page travel sealed (see below); `secrets/integration-seen.json` holds the refs of used envelopes (no values); `logs/integrations.jsonl` records who changed what (time, kind, operation, result; no values)
@@ -2777,15 +2777,15 @@ Runs one real builder shift on a toy repo and asserts a handoff was recorded.
 ### Check runner status and logs
 
 ```sh
-aom-runner status                         # shows process and connection state
-aom-runner doctor                         # checks prerequisites
+guildwise-runner status                         # shows process and connection state
+guildwise-runner doctor                         # checks prerequisites
 tail -f ~/.aom-runner/logs/runner.log     # watch runner events
 tail -f ~/.aom-runner/logs/shifts/*.jsonl # watch specific shifts
 ```
 
 ### Runner is not connecting
 
-1. Check `aom-runner doctor` output for server connectivity
+1. Check `guildwise-runner doctor` output for server connectivity
 2. Verify `config.json` has the correct `serverUrl`
 3. Check the server is running: `curl https://aom.example.com/api/health`
 4. Check the firewall allows WebSocket connections to the server
@@ -2848,7 +2848,7 @@ A Claude subscription has a session limit (5 hours) and a weekly limit. When one
   state stays and the probe is tried again. A real session that succeeds (a chat, for example) also ends the pause at once.
 - **Chats** that hit the limit answer *The Claude usage limit on this workstation has been reached ... work again at ...* instead
   of an error. The limit is kept in `claude-accounts-state.json` across a restart. Additional accounts have their own limit:
-  `aom-runner accounts list` shows each one (see "Claude accounts").
+  `guildwise-runner accounts list` shows each one (see "Claude accounts").
 
 
 ### Shift did not complete
