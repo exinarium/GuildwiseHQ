@@ -436,9 +436,13 @@ export function qualifySkillKey(
 ): string {
   const key = ref.trim();
   if (!key || isPackedKey(key)) return key;
-  const skills = all.filter((c) => c.kind === 'skill');
-  if (skills.some((c) => c.key === key)) return key;
-  const hits = skills.filter((c) => c.source === 'pack' && c.key.slice(c.key.indexOf(':') + 1) === key);
+  // A bare key that any kind of capability has (a built-in playbook or persona such as `release`, a vault skill) is that
+  // capability's name: rewriting it to a pack skill of the same name would change what the owner meant, and the key
+  // migration would make that permanent. So every kind counts here, not only skills.
+  if (all.some((c) => c.key === key)) return key;
+  const hits = all.filter(
+    (c) => c.kind === 'skill' && c.source === 'pack' && c.key.slice(c.key.indexOf(':') + 1) === key,
+  );
   return hits.length === 1 ? (hits[0] as { key: string }).key : key;
 }
 

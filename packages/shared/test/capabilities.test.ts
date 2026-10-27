@@ -164,6 +164,18 @@ describe('qualifySkillKey: a hand-typed name to the key the registry knows', () 
     expect(qualifySkillKey('retro', reg)).toBe('retro');
     expect(qualifySkillKey('nope', reg)).toBe('nope');
   });
+  it('keeps a bare key that is a playbook, persona or other kind, even when a pack skill has the same name', () => {
+    const r = [
+      { kind: 'playbook' as const, key: 'release', source: 'builtin' as const },
+      { kind: 'persona' as const, key: 'analyst', source: 'org-vault' as const },
+      { kind: 'skill' as const, key: 'acme:release', source: 'pack' as const },
+      { kind: 'skill' as const, key: 'acme:analyst', source: 'pack' as const },
+      { kind: 'skill' as const, key: 'acme:prd', source: 'pack' as const },
+    ];
+    expect(qualifySkillKey('release', r)).toBe('release');
+    expect(qualifySkillKey('analyst', r)).toBe('analyst');
+    expect(qualifySkillKey('prd', r)).toBe('acme:prd');
+  });
   it('a list loses duplicates and empty entries', () => {
     expect(qualifySkillKeys(['bmad-prd', 'bmad-method:bmad-prd', '', 'nope'], reg)).toEqual([
       'bmad-method:bmad-prd',

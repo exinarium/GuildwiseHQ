@@ -33,8 +33,10 @@ export async function qualifiedSkillKeys(
   opts: { projectId?: string | null; userId?: string | null } = {},
 ): Promise<string[]> {
   if (keys.every((k) => isPackedKey(k.trim()))) return [...new Set(keys.map((k) => k.trim()))];
+  // All kinds: a bare key that is a playbook or persona must stay as written (see `qualifySkillKey`). Packs that are not
+  // approved (yet) are included on purpose: the key is a stable name, an unapproved pack's skill is simply not granted
+  // until it is usable, and leaving it out would let the same bare name flip to another pack's skill once approved.
   const reg = await effectiveRegistry(db, orgId, {
-    kind: 'skill',
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     ...(opts.userId ? { userId: opts.userId } : {}),
   });

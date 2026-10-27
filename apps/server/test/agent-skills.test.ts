@@ -27,13 +27,15 @@ const SYSTEM = { kind: 'system', id: null } as const;
 const PACK = 'bmad-method';
 const EXTENDED = ['bmad-deep-recon', 'bmad-product-brief', 'bmad-prd', 'bmad-brainstorming'];
 const SKILLS = ['bmad-agent-analyst', ...EXTENDED, 'bmad-review'];
+// pack skills named like a built-in playbook and a built-in persona
+const COLLIDING = ['brainstorm', 'cost-hawk'];
 const full = (k: string) => `${PACK}:${k}`;
 
 const skill = (name: string) =>
   `---\nname: ${name}\ndescription: The ${name} skill, written for this test.\n---\n\n# ${name}\n\nDo the work.\n`;
 const tree = (): Record<string, string> => ({
   LICENSE: 'MIT License\n\nCopyright (c) 2025 Example Maintainers\n',
-  ...Object.fromEntries(SKILLS.map((s) => [`skills/${s}/SKILL.md`, skill(s)])),
+  ...Object.fromEntries([...SKILLS, ...COLLIDING].map((s) => [`skills/${s}/SKILL.md`, skill(s)])),
 });
 
 let w: World;
@@ -125,6 +127,14 @@ describe('the skills an agent is given', () => {
       skills: ['bmad-review', 'no-such-skill', full('bmad-review')],
     });
     expect(await skillsOf(typed.id)).toEqual([full('bmad-review'), 'no-such-skill']);
+  });
+
+  it('a bare key that is a built-in playbook or persona is not rewritten to a pack skill of the same name', async () => {
+    const typed = await w.hire('Collideb', 'builder', 'senior', {
+      skills: ['brainstorm', 'cost-hawk', 'bmad-prd'],
+    });
+    expect(await skillsOf(typed.id)).toEqual(['brainstorm', 'cost-hawk', full('bmad-prd')]);
+    expect(packMeta.map((i) => i.key)).toEqual(expect.arrayContaining(COLLIDING.map(full)));
   });
 
   it('an extension saved with a bare pack skill name stores the full key', async () => {
