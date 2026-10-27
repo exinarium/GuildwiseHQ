@@ -40,6 +40,7 @@ import {
   Skeleton,
 } from '../components/ui.tsx';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
+import { canUseIntake } from '../lib/intake.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
 import { priorityLabel } from '../lib/priority.ts';
@@ -428,7 +429,11 @@ export function Board() {
               New card
             </ButtonLink>
           }
-          secondaryAction={<ButtonLink to="/intake">Start an intake</ButtonLink>}
+          secondaryAction={
+            canUseIntake(me.data?.activeOrg) ? (
+              <ButtonLink to="/intake">Start an intake</ButtonLink>
+            ) : undefined
+          }
         />
       )}
       {board.data && (cards.length > 0 || phaseId) && <BoardView board={board.data} filter={filter} />}

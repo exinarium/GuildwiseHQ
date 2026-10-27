@@ -21,8 +21,10 @@ import {
 import { type ReactNode, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAgents } from '../../api/queries/agents.ts';
+import { useMe } from '../../api/queries/auth.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { useCardSearch } from '../../api/queries/search.ts';
+import { canUseIntake } from '../../lib/intake.ts';
 import { useTheme } from '../../lib/useTheme.ts';
 import { AgentAvatar } from '../Face.tsx';
 import type { NavSection } from '../shell/nav-config.ts';
@@ -80,6 +82,7 @@ const GroupHeading = ({ children }: { children: ReactNode }) => (
 /** The body is mounted only while the palette is open, so the lists load on demand. */
 function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void }) {
   const nav = useNavigate();
+  const me = useMe();
   const tour = useTour();
   const [query, setQuery] = useState('');
   const [theme, setTheme] = useTheme();
@@ -142,14 +145,16 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
           >
             New card
           </Item>
-          <Item
-            value="action start intake"
-            keywords={['jira', 'github', 'ticket', 'import']}
-            icon={FileText}
-            onSelect={go('/intake')}
-          >
-            Start an intake
-          </Item>
+          {canUseIntake(me.data?.activeOrg) && (
+            <Item
+              value="action start intake"
+              keywords={['jira', 'github', 'ticket', 'import']}
+              icon={FileText}
+              onSelect={go('/intake')}
+            >
+              Start an intake
+            </Item>
+          )}
           <Item
             value="action chat with an agent"
             keywords={['talk', 'message']}

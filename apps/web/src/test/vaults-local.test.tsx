@@ -57,24 +57,28 @@ const localVault = {
   ],
 };
 
+let role = 'owner';
+let vaultList: unknown[] = [localVault];
+let ownsProject = true;
 beforeEach(() => {
+  role = 'owner';
+  vaultList = [localVault];
+  ownsProject = true;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
-      if (url === '/api/auth/me') return json(me);
-      if (url === '/api/vaults') return json({ vaults: [localVault] });
+      if (url === '/api/auth/me') return json({ ...me, activeOrg: { ...me.activeOrg, role } });
+      if (url === '/api/vaults') return json({ vaults: vaultList });
       if (url === '/api/projects')
         return json({
-          projects: [
-            {
-              id: localVault.projectId,
-              key: 'TOY',
-              name: 'Toy',
-              myRole: 'owner',
-              status: 'active',
-              kind: 'project',
-            },
-          ],
+          projects: (ownsProject ? [1] : []).map(() => ({
+            id: localVault.projectId,
+            key: 'TOY',
+            name: 'Toy',
+            myRole: 'owner',
+            status: 'active',
+            kind: 'project',
+          })),
         });
       return json({});
     }),
@@ -99,5 +103,35 @@ describe('Vaults page: local vaults (project-graphs design section 3)', () => {
     expect(screen.queryByRole('button', { name: /^Edit /i })).toBeNull();
     // the project can still be given a git repository
     expect(screen.getByRole('button', { name: 'Register a vault' })).toBeTruthy();
+  });
+
+  const renderVaults = () =>
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Vaults />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+  it('offers an Owner or Admin the empty-state action to register a vault', async () => {
+    vaultList = [];
+    role = 'admin';
+    renderVaults();
+    expect(await screen.findByText('No vault yet')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Register a vault' }).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('vault-ask-admin')).toBeNull();
+  });
+
+  it('tells a Member to ask an Owner or Admin instead of offering the action', async () => {
+    vaultList = [];
+    role = 'member';
+    ownsProject = false;
+    renderVaults();
+    expect(await screen.findByText('No vault yet')).toBeTruthy();
+    expect(screen.getByTestId('vault-ask-admin').textContent).toBe('Ask an Owner or Admin to register one.');
+    expect(screen.queryByRole('button', { name: 'Register a vault' })).toBeNull();
   });
 });
