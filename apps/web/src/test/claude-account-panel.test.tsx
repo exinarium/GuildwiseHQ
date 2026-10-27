@@ -175,7 +175,7 @@ describe('Claude account panel (project settings)', () => {
     expect(text('Server')).toMatch(/Sign-in needed: the account has not been signed in yet/);
     expect(text('Cloud')).toMatch(/Provisioning/);
     expect(text('Old')).toMatch(/Runner too old: update it to 0.1.33/);
-    expect(text('Locked')).toMatch(/aom-runner accounts add work/);
+    expect(text('Locked')).toMatch(/guildwise-runner accounts add work/);
 
     const server = rows.find((r) => r.textContent?.startsWith('Server')) as HTMLElement;
     expect(within(server).getByTestId('claude-account-signin')).toHaveAttribute(

@@ -77,7 +77,7 @@ export class RunnerHost {
     const index = loadIndex(this.opts.root);
     if (index.pairings.length === 0)
       throw new Error(
-        `No runner config at ${runnerPaths(this.opts.root).config}. Run \`aom-runner pair\` first.`,
+        `No runner config at ${runnerPaths(this.opts.root).config}. Run \`guildwise-runner pair\` first.`,
       );
     this.lastStamp = this.stamp();
     await this.sync();

@@ -405,7 +405,7 @@ export class ClaudeCodeIntegration implements IntegrationAdapter {
     if (!removed && s.state === 'connected' && s.method !== 'default_login')
       return {
         error:
-          'This credential is in the runner config.json, not in the secrets folder. Remove it there (or run `aom-runner auth` again).',
+          'This credential is in the runner config.json, not in the secrets folder. Remove it there (or run `guildwise-runner auth` again).',
         code: 'unsupported',
         status: s,
       };

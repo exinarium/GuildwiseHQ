@@ -93,7 +93,7 @@ describe('integration registry', () => {
     expect(integrationScope(claude, 'default_login')).toBe('machine');
     expect(integrationScope(gh, 'token')).toBe('machine');
     expect(integrationCli(gh, 'github.example.com')).toBe(
-      'aom-runner git-connect github --host github.example.com',
+      'guildwise-runner git-connect github --host github.example.com',
     );
   });
 

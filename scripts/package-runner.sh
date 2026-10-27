@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the workstation runner as a self-contained tarball: release/aom-runner-<version>.tgz
-# Contents: aom-runner/{aom-runner, aom-runner.cmd, dist/ (with dist/grammars), node_modules/, package.json, README.md, THIRD_PARTY_NOTICES}
+# Contents: aom-runner/{aom-runner, aom-runner.cmd, guildwise-runner.cmd, dist/ (with dist/grammars), node_modules/, package.json, README.md, THIRD_PARTY_NOTICES}
 # Requires: pnpm, node >= 22, npm and network access (to install production dependencies).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -25,7 +25,7 @@ const deps = { ...p.dependencies };
 delete deps["@aom/shared"];
 const out = {
   name: "aom-runner", version: process.argv[1], type: "module", private: true,
-  bin: { "aom-runner": "./dist/aom-runner.mjs", aom: "./dist/aom.mjs" },
+  bin: { "guildwise-runner": "./dist/aom-runner.mjs", "aom-runner": "./dist/aom-runner.mjs", aom: "./dist/aom.mjs" },
   engines: { node: ">=22" }, dependencies: deps,
 };
 require("fs").writeFileSync(process.argv[2], JSON.stringify(out, null, 2) + "\n");
@@ -69,6 +69,7 @@ exec node "$HERE/dist/aom-runner.mjs" "$@"
 LAUNCH
 chmod +x "$PKG/aom-runner" "$PKG/dist/"*.mjs
 printf '@echo off\r\nnode "%%~dp0dist\\aom-runner.mjs" %%*\r\n' > "$PKG/aom-runner.cmd"
+cp "$PKG/aom-runner.cmd" "$PKG/guildwise-runner.cmd"  # alias; on Linux and macOS the installer links both names to the aom-runner launcher
 
 mkdir -p "$OUT"
 tar -C "$STAGE" -czf "$OUT/aom-runner-$VERSION.tgz" aom-runner

@@ -272,7 +272,7 @@ describe('Integrations page: tiles', () => {
     );
     expect(ids).toEqual(['group-ai', 'group-git', 'group-tracker', 'group-mcp']);
     expect(within(screen.getByTestId('tile-jira')).getByTestId('tile-terminal')).toHaveTextContent(
-      'aom-runner jira-connect',
+      'guildwise-runner jira-connect',
     );
   });
 });
@@ -350,7 +350,7 @@ describe('Integrations page: disabled reasons', () => {
     const tile = screen.getByTestId('tile-jira');
     expect(within(tile).getByRole('button', { name: 'Replace' })).toBeDisabled();
     expect(within(tile).getByTestId('tile-blocked')).toHaveTextContent(
-      'until then run aom-runner jira-connect',
+      'until then run guildwise-runner jira-connect',
     );
   });
 
@@ -360,7 +360,7 @@ describe('Integrations page: disabled reasons', () => {
     });
     const first = page();
     expect(await screen.findByTestId('web-off-banner')).toHaveTextContent(
-      'Turned off on this workstation (aom-runner integrations allow-web on)',
+      'Turned off on this workstation (guildwise-runner integrations allow-web on)',
     );
     expect(within(screen.getByTestId('tile-jira')).getByRole('button', { name: 'Connect' })).toBeDisabled();
     first.unmount();
@@ -791,7 +791,9 @@ describe('Chooser and deep links', () => {
     await user.click(await screen.findByRole('button', { name: 'Connect' }));
     const link = await screen.findByTestId('connect-on-integrations-github');
     expect(link.getAttribute('href')).toContain(`/workstations/${WS}/integrations?focus=github&connect=1`);
-    expect(screen.getByTestId('from-terminal-github')).toHaveTextContent('aom-runner git-connect github');
+    expect(screen.getByTestId('from-terminal-github')).toHaveTextContent(
+      'guildwise-runner git-connect github',
+    );
   });
 
   it('JiraStatusLine links to the Jira tile', () => {

@@ -35,7 +35,7 @@ The recommended way is your own Anthropic API key. It stays on the server; Guild
 
 ```bash
 ssh deploy@your-server
-read -rs K; printf %s "$K" | aom-runner auth api-key
+read -rs K; printf %s "$K" | guildwise-runner auth api-key
 systemctl --user restart aom-runner
 ```
 
@@ -44,7 +44,7 @@ A subscription login also works (`claude`, then follow the prompts). It is meant
 ## Add your code
 
 ```bash
-aom-runner repos add ~/src
+guildwise-runner repos add ~/src
 ```
 
 The DevOps engineer clones the project repositories onto the server when you add a repository in the project settings. Set up the git host connection (SSH key or token) on the server as you would on a laptop.
@@ -68,7 +68,7 @@ A VPS can run Docker, so it can be the target of Docker deploys: install Docker 
 For provisioning scripts, cloud-init or a boot unit, the runner pairs by itself when started with a one-time code from the Workstations page (Pair with a code):
 
 ```bash
-GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" aom-runner up
+GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" guildwise-runner up
 ```
 
-`aom-runner up` is safe to run at every boot: if the machine is already paired with that server it just connects (the single-use code is ignored). `ANTHROPIC_API_KEY` in the environment is stored in the runner's config (mode 0600) the same way as `aom-runner auth api-key`.
+`guildwise-runner up` is safe to run at every boot: if the machine is already paired with that server it just connects (the single-use code is ignored). `ANTHROPIC_API_KEY` in the environment is stored in the runner's config (mode 0600) the same way as `guildwise-runner auth api-key`.

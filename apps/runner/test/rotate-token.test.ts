@@ -13,7 +13,7 @@ const tsx = join(dirname(createRequire(import.meta.url).resolve('tsx/package.jso
 const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');
 const run = (args: string[]) => execa(process.execPath, [tsx, cli, ...args], { reject: false });
 
-describe('aom-runner rotate-token', () => {
+describe('guildwise-runner rotate-token', () => {
   it('asks the server for a new token over the authenticated socket', async () => {
     const server = await FakeServer.start();
     try {

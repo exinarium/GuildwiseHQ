@@ -276,7 +276,7 @@ export function unregisterAccount(configPath: string, key: string): boolean {
 }
 
 const ownerCommands = (key: string) =>
-  `aom-runner accounts add ${key}, then aom-runner accounts login ${key}`;
+  `guildwise-runner accounts add ${key}, then guildwise-runner accounts login ${key}`;
 
 /** Handles `claude.account.ensure`. Never throws for an expected problem: the result says what to do. */
 export async function ensureClaudeAccount(
@@ -322,7 +322,7 @@ export async function ensureClaudeAccount(
       aliasAdded: false,
       ...(aliasConflict ? { aliasConflict } : {}),
       detail:
-        `${shown} already exists and was not created by Guildwise, so it was left alone. Sign in there yourself, or register it on purpose: aom-runner accounts add ${key} --config-dir ${shown}`.slice(
+        `${shown} already exists and was not created by Guildwise, so it was left alone. Sign in there yourself, or register it on purpose: guildwise-runner accounts add ${key} --config-dir ${shown}`.slice(
           0,
           600,
         ),

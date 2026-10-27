@@ -46,7 +46,7 @@ export class JiraAdapter implements ExternalAdapter {
     const c = this.creds();
     if (!c)
       throw new SourceReadError(
-        'Jira is not connected on this workstation: ask the manager to run `aom-runner jira-connect`',
+        'Jira is not connected on this workstation: ask the manager to run `guildwise-runner jira-connect`',
       );
     const key = ref.key;
     const res = await this.send(
@@ -55,7 +55,7 @@ export class JiraAdapter implements ExternalAdapter {
     );
     if (res.status === 401 || res.status === 403)
       throw new SourceReadError(
-        `Jira refused the saved credentials (HTTP ${res.status}): the manager must run \`aom-runner jira-connect\` again`,
+        `Jira refused the saved credentials (HTTP ${res.status}): the manager must run \`guildwise-runner jira-connect\` again`,
       );
     if (res.status === 404)
       throw new SourceReadError(`Jira has no ticket ${key} (or this account cannot see it)`);
@@ -123,7 +123,7 @@ export class JiraAdapter implements ExternalAdapter {
     const c = this.creds();
     if (!c)
       throw new PostError(
-        'no Jira credentials on this workstation: run `aom-runner jira-connect` (the API token stays on this machine), then retry',
+        'no Jira credentials on this workstation: run `guildwise-runner jira-connect` (the API token stays on this machine), then retry',
       );
     const { base, auth } = c;
     return {
@@ -176,7 +176,7 @@ export class JiraAdapter implements ExternalAdapter {
     const c = this.creds();
     if (!c)
       throw new SourceReadError(
-        'this workstation has no Jira credentials: ask the manager to run `aom-runner jira-connect` on it (the API token stays on the machine and is never shown to you)',
+        'this workstation has no Jira credentials: ask the manager to run `guildwise-runner jira-connect` on it (the API token stays on the machine and is never shown to you)',
       );
     return c;
   }
@@ -190,7 +190,7 @@ export class JiraAdapter implements ExternalAdapter {
     });
     if (res.status === 401 || res.status === 403)
       throw new SourceReadError(
-        `Jira refused the saved credentials (HTTP ${res.status}): the manager must run \`aom-runner jira-connect\` again`,
+        `Jira refused the saved credentials (HTTP ${res.status}): the manager must run \`guildwise-runner jira-connect\` again`,
       );
     if (res.status === 404)
       throw new SourceReadError(`Jira has no ticket ${key} (or this account cannot see it)`);

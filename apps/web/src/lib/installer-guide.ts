@@ -105,7 +105,7 @@ export function whatItDoes(os: InstallerOs): string[] {
     'Pairs it with your account using a one-time code that expires in 30 minutes.',
     'Asks which folders hold your code (suggests ~/src).',
     'Starts the runner as a background service that comes back after a restart.',
-    'Runs the runner health check (aom-runner doctor) and reports it to this page.',
+    'Runs the runner health check (guildwise-runner doctor) and reports it to this page.',
   ];
   if (os === 'windows')
     return [

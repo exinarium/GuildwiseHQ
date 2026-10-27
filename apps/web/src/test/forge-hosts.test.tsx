@@ -142,7 +142,7 @@ describe('Workstations page: git hosts', () => {
       within(within(panel).getByTestId('git-azure-devops')).getByRole('button', { name: 'Connect' }),
     );
     const helper = await screen.findByTestId('connect-azure-devops');
-    expect(helper).toHaveTextContent('aom-runner git-connect azure-devops');
+    expect(helper).toHaveTextContent('guildwise-runner git-connect azure-devops');
     expect(helper).toHaveTextContent('2026-12-01');
     expect(within(helper).queryByLabelText(/token|password/i)).toBeNull();
     await user.click(within(helper).getByRole('button', { name: 'Check again' }));
@@ -356,7 +356,7 @@ describe('SSH instead of a token', () => {
     );
     expect(panel).toHaveTextContent('Personal settings, SSH keys');
     expect(within(panel).getByTestId('ssh-detail-bitbucket-cloud')).toHaveTextContent('refused the key');
-    expect(panel).toHaveTextContent('aom-runner git-connect bitbucket-cloud --ssh');
+    expect(panel).toHaveTextContent('guildwise-runner git-connect bitbucket-cloud --ssh');
     // The page never offers a field for the private key itself.
     expect(within(panel).queryByLabelText(/passphrase|private key content/i)).toBeNull();
 

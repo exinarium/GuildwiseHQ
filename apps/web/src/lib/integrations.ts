@@ -68,7 +68,7 @@ export function blockReason(
     return `Update to runner >= ${instance !== '' && kind.minRunnerForInstance ? kind.minRunnerForInstance : kind.minRunner} to connect from here; until then run ${integrationCli(kind, instance)}`;
   if (!runner.connected) return `${ctx.workstationName} is offline.`;
   const p = runner.policy;
-  if (p && !p.allowWeb) return 'Turned off on this workstation (aom-runner integrations allow-web on)';
+  if (p && !p.allowWeb) return 'Turned off on this workstation (guildwise-runner integrations allow-web on)';
   if (scope === 'machine' && p && (!p.primaryPairing || p.machineScopeFromWeb === 'never'))
     return 'This sign-in is shared by every pairing on this machine; connect it from the machine’s primary pairing or from a terminal.';
   return null;

@@ -42,7 +42,7 @@ export class BitbucketCloudForge implements Forge {
     const t = this.cred();
     if (!t?.user)
       throw new ForgeUnavailableError(
-        'not connected to Bitbucket: run `aom-runner git-connect bitbucket-cloud`',
+        'not connected to Bitbucket: run `guildwise-runner git-connect bitbucket-cloud`',
       );
     return jsonCall<T>(this.env.fetch, `${API}${path}`, {
       ...init,
@@ -60,7 +60,7 @@ export class BitbucketCloudForge implements Forge {
         state: 'not_connected',
         problem: 'no_token',
         detail:
-          'No token saved. Run `aom-runner git-connect bitbucket-cloud` and paste an Atlassian API token (scopes: repository read/write, pull request read/write).',
+          'No token saved. Run `guildwise-runner git-connect bitbucket-cloud` and paste an Atlassian API token (scopes: repository read/write, pull request read/write).',
       };
     if (!t.user)
       // Pushing over https only needs the token; pull requests and the repository list also need the e-mail.
@@ -69,7 +69,7 @@ export class BitbucketCloudForge implements Forge {
         state: 'connected',
         method: 'token',
         detail:
-          'Pushing works. No Atlassian e-mail is saved, so pull requests cannot be opened: run `aom-runner git-connect bitbucket-cloud` again.',
+          'Pushing works. No Atlassian e-mail is saved, so pull requests cannot be opened: run `guildwise-runner git-connect bitbucket-cloud` again.',
       };
     // `/user` needs the account scope, which the documented token (repository and pull request scopes) may lack, so a
     // refusal there is re-checked with a call those scopes allow before the token is called bad.
@@ -100,7 +100,7 @@ export class BitbucketCloudForge implements Forge {
         state: 'not_connected',
         problem: 'token_refused',
         detail:
-          `Bitbucket refused the saved token (${errText(err)}). ${hint} Run \`aom-runner git-connect bitbucket-cloud\` again (scopes: repository read/write, pull request read/write).`.slice(
+          `Bitbucket refused the saved token (${errText(err)}). ${hint} Run \`guildwise-runner git-connect bitbucket-cloud\` again (scopes: repository read/write, pull request read/write).`.slice(
             0,
             400,
           ),

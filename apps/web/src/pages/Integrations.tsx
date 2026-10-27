@@ -84,7 +84,7 @@ function KeyLine({ keyId, name }: { keyId: string | null; name: string }) {
     <p className="text-sm text-muted" data-testid="key-line">
       Secrets are encrypted in this browser for this workstation, key{' '}
       <code className="font-mono text-xs">{keyId}</code>.{' '}
-      <code className="font-mono text-xs">aom-runner doctor</code> shows the same id.
+      <code className="font-mono text-xs">guildwise-runner doctor</code> shows the same id.
     </p>
   );
 }
@@ -176,7 +176,7 @@ export function Integrations() {
         )}
         {!old && page.runner.policy && !page.runner.policy.allowWeb && (
           <Callout tone="info" data-testid="web-off-banner">
-            Turned off on this workstation (aom-runner integrations allow-web on)
+            Turned off on this workstation (guildwise-runner integrations allow-web on)
           </Callout>
         )}
         {offline && !old && (

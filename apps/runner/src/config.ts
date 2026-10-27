@@ -257,7 +257,7 @@ export const RunnerConfigSchema = z.object({
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;
 
 export function loadConfig(path: string): RunnerConfig {
-  if (!existsSync(path)) throw new Error(`No runner config at ${path}. Run \`aom-runner pair\` first.`);
+  if (!existsSync(path)) throw new Error(`No runner config at ${path}. Run \`guildwise-runner pair\` first.`);
   return RunnerConfigSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
 

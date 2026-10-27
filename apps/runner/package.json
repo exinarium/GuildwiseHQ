@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "guildwise-runner": "./dist/aom-runner.mjs",
     "aom-runner": "./dist/aom-runner.mjs",
     "aom": "./dist/aom.mjs"
   },

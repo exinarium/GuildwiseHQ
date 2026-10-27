@@ -12,11 +12,11 @@ Here are solutions to common day-to-day problems in Guildwise HQ.
 The runner process stopped or the connection timed out. On that computer, check the state:
 
 ```
-aom-runner status               # shows process state and connection
-aom-runner doctor               # checks node, git, claude, docker, server connectivity
+guildwise-runner status               # shows process state and connection
+guildwise-runner doctor               # checks node, git, claude, docker, server connectivity
 ```
 
-The guided installer runs the runner as a service. Restart it with `systemctl --user restart aom-runner` (Linux, and WSL2 on Windows) or by logging out and in again (macOS, where it starts at login). If you run the runner by hand, `aom-runner start` runs it in the foreground. The log is in `~/.aom-runner/logs/runner.log`.
+The guided installer runs the runner as a service. Restart it with `systemctl --user restart aom-runner` (Linux, and WSL2 on Windows) or by logging out and in again (macOS, where it starts at login). If you run the runner by hand, `guildwise-runner start` runs it in the foreground. The log is in `~/.aom-runner/logs/runner.log`.
 
 ## An agent finished but I do not see a handoff {#no-handoff}
 
@@ -31,8 +31,8 @@ The shift may have run past its time limit (an hour by default; the server stops
 When rotating the runner's token to refresh the connection:
 
 1. Stop the runner: `systemctl --user stop aom-runner` (or press Ctrl+C if you run it in a terminal).
-2. Rotate the token: `aom-runner rotate-token`.
-3. Start it again: `systemctl --user start aom-runner` (or `aom-runner start`).
+2. Rotate the token: `guildwise-runner rotate-token`.
+3. Start it again: `systemctl --user start aom-runner` (or `guildwise-runner start`).
 
 ## Vault sync is paused with a conflict {#vault-conflict}
 

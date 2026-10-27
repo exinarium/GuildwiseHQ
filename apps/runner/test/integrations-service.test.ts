@@ -414,7 +414,7 @@ describe('local policy (D8)', () => {
     });
     const r = await t.connect('jira', '', 'token', { baseUrl: 'https://a.net', token: 'abc-123-456' });
     expect(r).toMatchObject({ code: 'allow_web_off' });
-    expect(r.error).toContain('aom-runner integrations allow-web on');
+    expect(r.error).toContain('guildwise-runner integrations allow-web on');
     expect(
       await t.service.handle('integration.begin', {
         sessionId: 's1',

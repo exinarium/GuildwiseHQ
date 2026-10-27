@@ -157,7 +157,7 @@ export function SshPanel({
   const [repoUrl, setRepoUrl] = useState('');
   const base = { workstationId: w.id, provider, ...(host ? { host } : {}) };
   const check = ssh?.check;
-  const cmd = `aom-runner git-connect ${provider} --ssh`;
+  const cmd = `guildwise-runner git-connect ${provider} --ssh`;
   const keyOk = key !== 'path' || keyPath.trim().length > 0;
   return (
     <div
@@ -314,7 +314,7 @@ export function GitConnectionsPanel({ w }: { w: WorkstationDto }) {
       {!w.git || w.git.connections.length === 0 ? (
         <p className="text-subtle">
           Not reported yet (needs a current runner). Run{' '}
-          <code className="font-mono text-xs">aom-runner git-connect github</code> to set one up.
+          <code className="font-mono text-xs">guildwise-runner git-connect github</code> to set one up.
         </p>
       ) : null}
       <ul className="flex flex-col gap-2">

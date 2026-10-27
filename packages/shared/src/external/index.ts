@@ -107,7 +107,7 @@ export const JIRA_SKILL_MD = `# Skill: read a Jira ticket
 Use this to read one Jira ticket during intake. It is read-only: never create, edit, comment on or transition a ticket. Your shell has no network, so you read through the workstation's own Jira connection.
 
 1. Read the ticket: \`aom source read --ref <KEY>\` prints the fields (summary, type, status, priority, labels, components, reporter), the description, the comments and the links (blocks, is blocked by, relates to, the parent epic). Attachments: \`aom source attachments <KEY>\` lists them and \`aom source attachment <KEY> --all\` downloads them into your scratch directory.
-2. If the runner says Jira is not connected, ask the manager to run \`aom-runner jira-connect\` on this workstation. Do not ask for credentials. Only if that cannot be done, fall back to the Atlassian MCP server when your runtime offers one.
+2. If the runner says Jira is not connected, ask the manager to run \`guildwise-runner jira-connect\` on this workstation. Do not ask for credentials. Only if that cannot be done, fall back to the Atlassian MCP server when your runtime offers one.
 3. Linked issues and the parent epic feed the dependency graph: read them with the same command.
 4. Note the Jira project key (the part before the dash). It usually identifies the Guildwise HQ project.
 5. If the ticket cannot be read (no connection, no access), say so plainly in the conversation; never invent ticket content.

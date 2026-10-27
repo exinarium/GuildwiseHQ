@@ -18,7 +18,7 @@ const run = (args: string[], input?: string, home = '/nonexistent-aom-home') =>
     ...(input ? { input } : {}),
   });
 
-describe('aom-runner integrations and auth', () => {
+describe('guildwise-runner integrations and auth', () => {
   it('lists the integrations, switches the web policy, and `auth` writes secrets/claude.json without touching config.json', async () => {
     const server = await FakeServer.start();
     const dir = tmp();
@@ -60,7 +60,7 @@ describe('aom-runner integrations and auth', () => {
   }, 60_000);
 });
 
-describe('aom-runner ceo full-power', () => {
+describe('guildwise-runner ceo full-power', () => {
   it('is off by default; on and off change only config.ceo.fullPower; status shows it; a bad value fails', async () => {
     const server = await FakeServer.start();
     const dir = tmp();

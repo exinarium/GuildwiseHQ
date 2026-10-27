@@ -202,7 +202,7 @@ export async function checkSsh(
   if (key.keyPath && !existsSync(key.keyPath))
     return {
       state: 'no_key',
-      detail: `The key ${key.keyPath} does not exist. Create it with "aom-runner git-connect ${q.provider ?? '<provider>'} --ssh" or choose another key.`,
+      detail: `The key ${key.keyPath} does not exist. Create it with "guildwise-runner git-connect ${q.provider ?? '<provider>'} --ssh" or choose another key.`,
     };
   mkdirSync(dirname(ssh.knownHosts), { recursive: true, mode: 0o700 });
   if (q.repoUrl) {

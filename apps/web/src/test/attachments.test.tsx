@@ -214,7 +214,7 @@ describe('Jira on the Workstations page', () => {
 
     const none = wrap(<JiraStatusLine w={ws({ status: { state: 'not_connected' }, checkedAt: null })} />);
     expect(screen.getByText('Not connected')).toBeTruthy();
-    expect(screen.getByText('aom-runner jira-connect')).toBeTruthy();
+    expect(screen.getByText('guildwise-runner jira-connect')).toBeTruthy();
     none.unmount();
 
     wrap(

@@ -156,7 +156,7 @@ There is no self-service sign-up on a self-hosted install. Invitations (or `admi
 
 ## 6. Workstations (runners)
 
-Agents run on workstations, not on the server. A workstation runs the **runner**, `aom-runner`, which connects out to the server.
+Agents run on workstations, not on the server. A workstation runs the **runner**, `guildwise-runner`, which connects out to the server.
 
 ### Install with the guided installer (recommended)
 
@@ -170,7 +170,7 @@ curl -fsSL 'https://guildwise.example.com/install/<short-lived-token>/install.sh
 - The link works for 30 minutes. It embeds a single-use pairing code, not a long-lived secret.
 - Re-running the installer upgrades the runner and keeps existing pairings.
 
-The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Code, asks which folders hold your code, runs `aom-runner repos add` for each, walks you through the Claude sign-in, and installs a user service (`aom-runner` on systemd, a launchd agent on macOS).
+The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Code, asks which folders hold your code, runs `guildwise-runner repos add` for each, walks you through the Claude sign-in, and installs a user service (`guildwise-runner` on systemd, a launchd agent on macOS).
 
 ### Pair by hand
 
@@ -178,25 +178,25 @@ The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Cod
 2. On the workstation:
 
    ```bash
-   aom-runner pair --server https://guildwise.example.com --code XXXX-XXXX --name "Desktop"
-   aom-runner repos add ~/src ~/work
-   aom-runner start
+   guildwise-runner pair --server https://guildwise.example.com --code XXXX-XXXX --name "Desktop"
+   guildwise-runner repos add ~/src ~/work
+   guildwise-runner start
    ```
 
 ### Unattended pairing (scripts, cloud-init)
 
 ```bash
-GUILDWISE_SERVER=https://guildwise.example.com GUILDWISE_PAIR_CODE=XXXX-XXXX GUILDWISE_NAME="Build server" aom-runner up
+GUILDWISE_SERVER=https://guildwise.example.com GUILDWISE_PAIR_CODE=XXXX-XXXX GUILDWISE_NAME="Build server" guildwise-runner up
 ```
 
-`aom-runner up` is safe to run at every boot. If the machine is already paired with that server, it just connects.
+`guildwise-runner up` is safe to run at every boot. If the machine is already paired with that server, it just connects.
 
 ### Claude sign-in on the workstation
 
 ```bash
 claude                                                  # subscription login, follow the prompts
 # or, with an API key kept in the runner's config (mode 0600):
-read -rs K; printf %s "$K" | aom-runner auth api-key
+read -rs K; printf %s "$K" | guildwise-runner auth api-key
 systemctl --user restart aom-runner
 ```
 
@@ -206,18 +206,18 @@ A subscription login is meant for one person's use. Parallel agents can hit its 
 
 - Linux: systemd user unit `aom-runner`. Enable lingering (`loginctl enable-linger $USER`) so it survives logout.
 - macOS: launchd agent `com.guildwisehq.runner`.
-- Otherwise: `aom-runner start` in a terminal or your own service manager.
+- Otherwise: `guildwise-runner start` in a terminal or your own service manager.
 - The runner log is `~/.aom-runner/logs/runner.log` (the data directory is `~/.aom-runner`, or `AOM_RUNNER_HOME`). On Linux the journal also has it: `journalctl --user -u aom-runner`.
 
 ### Check a workstation
 
 ```bash
-aom-runner status      # config summary, connection state, active shifts
-aom-runner doctor      # Node, Git, Claude CLI, Docker, server reachability
-aom-runner pairings    # one line per pairing
+guildwise-runner status      # config summary, connection state, active shifts
+guildwise-runner doctor      # Node, Git, Claude CLI, Docker, server reachability
+guildwise-runner pairings    # one line per pairing
 ```
 
-Exit codes of `aom-runner start`: `0` stopped by a signal; `2` the server rejected the token (pair again); `3` another runner is already connected to the same workstation.
+Exit codes of `guildwise-runner start`: `0` stopped by a signal; `2` the server rejected the token (pair again); `3` another runner is already connected to the same workstation.
 
 ## 7. HTTPS and domains
 
@@ -369,7 +369,7 @@ Browser-side encryption needs a secure context. Open the app over HTTPS, or over
 
 **Runner does not connect, or disconnects often**
 
-- On the workstation: `aom-runner doctor` and `aom-runner status`.
+- On the workstation: `guildwise-runner doctor` and `guildwise-runner status`.
 - Exit code `2`: the token was rejected. Pair the workstation again.
 - Exit code `3`: another runner is connected to the same workstation. Stop the other one.
 - Outbound WebSocket on port 443 must not be blocked by a firewall or proxy.

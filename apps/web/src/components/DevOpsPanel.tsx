@@ -257,7 +257,7 @@ function SudoPassword({ w }: { w: WorkstationDto }) {
         Only needed when sudo asks for a password on this machine. It is encrypted here with a key only this
         runner holds, stored on the runner alone and used for the DevOps engineer's commands only. It is never
         shown again and never written to a log.
-        {sudo?.keyId ? ` Key ${sudo.keyId} (the same as \`aom-runner doctor\` shows).` : ''}
+        {sudo?.keyId ? ` Key ${sudo.keyId} (the same as \`guildwise-runner doctor\` shows).` : ''}
       </p>
       <SecureContextNotice className="mt-1" />
       <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-end">

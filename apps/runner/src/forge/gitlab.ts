@@ -65,7 +65,9 @@ export class GitLabForge implements Forge {
   private async authed<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
     const t = await this.token();
     if (!t)
-      throw new ForgeUnavailableError(`not connected to ${this.host}: run \`aom-runner git-connect gitlab\``);
+      throw new ForgeUnavailableError(
+        `not connected to ${this.host}: run \`guildwise-runner git-connect gitlab\``,
+      );
     return this.api<T>(path, t.token, init);
   }
 
@@ -78,7 +80,7 @@ export class GitLabForge implements Forge {
         ...base,
         state: 'not_connected',
         detail:
-          'Run `aom-runner git-connect gitlab` (it runs `glab auth login` or saves a personal access token).',
+          'Run `guildwise-runner git-connect gitlab` (it runs `glab auth login` or saves a personal access token).',
       };
     try {
       const u = await this.api<{ username?: string }>('/user', t.token);

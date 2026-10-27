@@ -140,7 +140,9 @@ function CloudCard({ c, canManage }: { c: CloudWorkstation; canManage: boolean }
           <p className="mt-2 text-sm text-muted" data-testid="vps-next-step">
             Last step: sign in to Claude on the server. Connect with SSH and run{' '}
             <code className="rounded bg-sunken px-1">
-              {c.authMode === 'api_key' ? 'read -rs K; printf %s "$K" | aom-runner auth api-key' : 'claude'}
+              {c.authMode === 'api_key'
+                ? 'read -rs K; printf %s "$K" | guildwise-runner auth api-key'
+                : 'claude'}
             </code>
             . Guildwise never sees it. A VPS is always on; start and stop it at your VPS company.
           </p>

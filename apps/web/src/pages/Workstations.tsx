@@ -80,7 +80,7 @@ function useOpenRows(userId: string | undefined): [Set<string>, (id: string, ope
 }
 
 export function pairCommand(code: string, origin: string = location.origin): string {
-  return `aom-runner pair --server ${origin} --code ${code} --name "My workstation"`;
+  return `guildwise-runner pair --server ${origin} --code ${code} --name "My workstation"`;
 }
 
 export function Workstations() {
@@ -483,7 +483,8 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
             {copied ? 'Copied' : 'Copy command'}
           </Button>
           <p className="text-xs text-subtle">
-            Then run <code className="font-mono">aom-runner start</code>. This page updates when it connects.
+            Then run <code className="font-mono">guildwise-runner start</code>. This page updates when it
+            connects. The older name <code className="font-mono">aom-runner</code> still works too.
           </p>
         </div>
       )}

@@ -194,10 +194,12 @@ Sign in as the organization owner. Then:
 To pair by hand instead, create a one-time code under **Workstations > Pair workstation** (it is valid for 10 minutes) and run:
 
 ```bash
-aom-runner pair --server https://guildwise.example.com --code XXXX-XXXX --name "Desktop"
-aom-runner repos add ~/src
-aom-runner start
+guildwise-runner pair --server https://guildwise.example.com --code XXXX-XXXX --name "Desktop"
+guildwise-runner repos add ~/src
+guildwise-runner start
 ```
+
+`aom-runner` still works as an alias for `guildwise-runner`.
 
 ### 8. HTTPS
 
@@ -243,7 +245,7 @@ pnpm db:migrate
 pnpm dev                       # server on :4600, web app on :5173
 ```
 
-Repository layout: `apps/server` (Fastify, Postgres, event sourced), `apps/web` (React), `apps/runner` (the workstation runner, `aom-runner`), `packages/shared` (schemas and shared logic), `e2e` (Playwright). The `@aom/*` package names, the `aom` command and the `AOM_*` variables keep their original names. The server and the web app have extension points that default to no-ops, so a hosted service can plug in billing, sign-up and support without a fork (`docs/ARCHITECTURE.md`, section 40). Tests, scripts and project rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Repository layout: `apps/server` (Fastify, Postgres, event sourced), `apps/web` (React), `apps/runner` (the workstation runner, `guildwise-runner`), `packages/shared` (schemas and shared logic), `e2e` (Playwright). The `@aom/*` package names, the `aom` command and the `AOM_*` variables keep their original names. The server and the web app have extension points that default to no-ops, so a hosted service can plug in billing, sign-up and support without a fork (`docs/ARCHITECTURE.md`, section 40). Tests, scripts and project rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

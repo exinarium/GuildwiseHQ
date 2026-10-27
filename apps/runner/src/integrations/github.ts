@@ -130,11 +130,11 @@ export class GitHubIntegration implements IntegrationAdapter {
       pty: false,
       cwd: this.env.sessionCwd,
       parse: parseGhDevice(host),
-      terminalHint: `aom-runner git-connect github --host ${host}`,
+      terminalHint: `guildwise-runner git-connect github --host ${host}`,
       finish: async ({ exitCode }) => {
         if (exitCode !== 0)
           return {
-            error: `The GitHub sign-in did not finish. Use the terminal: aom-runner git-connect github --host ${host}`,
+            error: `The GitHub sign-in did not finish. Use the terminal: guildwise-runner git-connect github --host ${host}`,
           };
         await this.env.exec.run(this.gh(), ['auth', 'setup-git', '--hostname', host], { timeoutMs: 30_000 });
         this.env.touchRecheck();
