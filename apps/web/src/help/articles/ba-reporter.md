@@ -1,7 +1,7 @@
 ---
 title: The daily report and what is watched
 summary: What your CEO triages, the signals the server watches for, the daily report, scheduled tasks and the time zone.
-keywords: [CEO, BA, reporter, business analyst, daily report, floor report, organization report, signal, routing]
+keywords: [CEO, BA, reporter, business analyst, daily report, signal, routing]
 order: 13
 ---
 
@@ -39,7 +39,7 @@ A signal appears once however long it lasts and clears by itself when the cause 
 
 ## The daily report {#floor-report}
 
-At **08:00 on your clock** (change it on the CEO page, **Reporting & alerts** tab), the CEO writes your daily report (only on days with something to say; urgent notices never wait). On your desk the item is labelled **CEO report**; older BA reports stay on the desk as **Organization report** items.
+At **08:00 on your clock** (change it on the CEO page, **Reporting & alerts** tab), the CEO writes your daily report (only on days with something to say; urgent notices never wait). On your desk the item is labelled **Daily report**; older daily reports, written by the BA, stay on the desk with the same label.
 
 The report lists:
 1. What needs you.
@@ -54,7 +54,7 @@ The report lists:
 
 Click **The facts behind this report** to see the same data straight from the server. Discuss it in the CEO chat. If the CEO cannot run, the server posts a template report with the same facts.
 
-Older organization reports and BA reports stay on your desk and in their chat as they were; nothing new is written there.
+Older daily reports, written by the BA, stay on your desk and in their chat as they were; nothing new is written there.
 
 ## Scheduled tasks {#scheduled-tasks}
 

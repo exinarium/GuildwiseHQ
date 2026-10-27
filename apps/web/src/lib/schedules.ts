@@ -135,7 +135,7 @@ export const ACTION_TILES: Array<{
   {
     id: 'email',
     label: 'E-mail a digest',
-    description: 'A summary e-mail: the organization report or a project summary.',
+    description: 'A summary e-mail: the daily report or a project summary.',
   },
 ];
 

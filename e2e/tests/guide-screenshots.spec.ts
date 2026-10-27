@@ -1665,14 +1665,14 @@ step('schedules and integrations', async () => {
     },
   });
   await post({
-    name: 'Floor report by e-mail',
+    name: 'Daily report by e-mail',
     trigger: { kind: 'cron', cron: '0 17 * * 5', timezone: 'Africa/Johannesburg' },
     action: {
       kind: 'integration',
       integration: 'email',
       operation: 'digest',
       to: [PIETER.email],
-      subject: 'Floor report of the week',
+      subject: 'Daily report of the week',
       digest: 'floor_report',
     },
   });

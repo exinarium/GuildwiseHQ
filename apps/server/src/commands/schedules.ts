@@ -491,7 +491,7 @@ async function validate(
         if (a.digest === 'floor_report' && project)
           throw badRequest(
             'org_level_digest',
-            'the floor report covers the organization: leave the project out',
+            'the daily report covers the organization: leave the project out',
           );
         if (a.digest === 'project_summary' && !project)
           throw badRequest('project_required', 'a project summary needs a project');
@@ -503,7 +503,7 @@ async function validate(
         if (a.digest === 'floor_report' && project)
           throw badRequest(
             'org_level_digest',
-            'the floor report covers the organization: leave the project out',
+            'the daily report covers the organization: leave the project out',
           );
         if (a.digest === 'project_summary' && !project)
           throw badRequest('project_required', 'a project summary needs a project');

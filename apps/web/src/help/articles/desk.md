@@ -11,13 +11,13 @@ The **desk** is where every question and approval reaches you. Cards that wait o
 
 Each item shows:
 
-- **What kind it is**: a kind badge (Question, Approval, Escalation, Alert or Rating) and, where it is more specific, a label such as DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have, see [Who approves](/help/devops-and-hygiene#devops-engineer)), Merge approval, Outbound update, Posting failed, Create repository, Budget warning, Budget paused, Phase done, Vault conflict, CEO report or CEO decision.
+- **What kind it is**: a kind badge (Question, Approval, Escalation, Alert or Rating) and, where it is more specific, a label such as DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have, see [Who approves](/help/devops-and-hygiene#devops-engineer)), Merge approval, Outbound update, Posting failed, Create repository, Budget warning, Budget paused, Phase done, Vault conflict, Daily report or CEO decision.
 - **Who asked**: the agent and its role.
 - **What they are doing**: which card or project.
 - **The question**: with options and a recommendation.
 - **How many cards are blocked**: a count of cards waiting on this answer, and the item's age.
 
-The desk also has the filters **Handled by CEO** and **CEO decisions**. A question or escalation that has a recommendation from the CEO offers **Accept recommendation**, which answers with exactly what is recommended (not offered for vault conflicts). The CEO's daily report arrives as a **CEO report** item; older BA reports stay as **Organization report** items. See [Questions from agents and escalation](/help/your-ceo#escalation).
+The desk also has the filters **Handled by CEO** and **CEO decisions**. A question or escalation that has a recommendation from the CEO offers **Accept recommendation**, which answers with exactly what is recommended (not offered for vault conflicts). The CEO's daily report arrives as a **Daily report** item; older daily reports, written by the BA, stay on the desk with the same label. See [Questions from agents and escalation](/help/your-ceo#escalation).
 
 Alerts, approvals and notices also have **Ask DevOps about this**, which opens a request to the DevOps engineer with the item attached.
 
