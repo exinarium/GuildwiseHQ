@@ -14,11 +14,19 @@ export const LEGACY_LOCAL_VAULT_MARKER = '.aom-local-vault';
 /** Creates the folder and its marker. Idempotent. */
 export function ensureLocalVault(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  if (!hasMarker(dir))
+  if (!hasMarker(dir)) {
+    const createdAt = new Date().toISOString();
     writeFileSync(
       join(dir, LOCAL_VAULT_MARKER),
-      `${JSON.stringify({ kind: 'guildwise-local-vault', createdAt: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ kind: 'guildwise-local-vault', createdAt })}\n`,
     );
+    // TODO(next release): stop writing the legacy marker. It is written for one release so that a workstation rolled
+    // back to a runner before the rename still recognises the vault.
+    writeFileSync(
+      join(dir, LEGACY_LOCAL_VAULT_MARKER),
+      `${JSON.stringify({ kind: 'aom-local-vault', createdAt })}\n`,
+    );
+  }
 }
 
 const hasMarker = (dir: string): boolean =>

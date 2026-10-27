@@ -10,6 +10,7 @@ const LEGACY_INTEGRATION_BRANCH_PREFIX = 'aom-integration/';
 
 export const integrationBranchName = (key: string): string => `${INTEGRATION_BRANCH_PREFIX}${key}`;
 
+/** TODO(next release): remove this and the legacy prefix above. */
 /** Deletes the leftover `aom-integration/<key>` branch of an older runner (best effort: a checked-out one stays). */
 async function dropLegacyBranch(repoPath: string, tempBranch: string): Promise<void> {
   if (!tempBranch.startsWith(INTEGRATION_BRANCH_PREFIX)) return;

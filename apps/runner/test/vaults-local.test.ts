@@ -57,13 +57,13 @@ const write = (path: string, content: string, over: Record<string, unknown> = {}
   });
 
 describe('local vault marker', () => {
-  it('writes .guildwise-local-vault and accepts the legacy .aom-local-vault when reading', () => {
+  it('writes both markers (legacy one for a release) and accepts either when reading', () => {
     expect(LOCAL_VAULT_MARKER).toBe('.guildwise-local-vault');
     const root = tmp('aom-local-vault-');
     const fresh = join(root, 'fresh');
     ensureLocalVault(fresh);
     expect(existsSync(join(fresh, '.guildwise-local-vault'))).toBe(true);
-    expect(existsSync(join(fresh, '.aom-local-vault'))).toBe(false);
+    expect(existsSync(join(fresh, '.aom-local-vault'))).toBe(true);
     expect(isLocalVaultDir(fresh)).toBe(true);
     const old = join(root, 'old');
     mkdirSync(old, { recursive: true });
