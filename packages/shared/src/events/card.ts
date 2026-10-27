@@ -298,6 +298,11 @@ export const cardEvents = [
   ),
   defineEvent('ChildCardResolved', z.object({ cardId: Id, childCardId: Id, toStage: z.literal('test') })),
   /**
+   * A bug child (`origin 'test_failure'`) that had resolved or been cancelled was reopened while its parent was still
+   * in the Test stage and not finished: the parent waits for the child again (status `waiting`, stage unchanged).
+   */
+  defineEvent('ParentCardRewaited', z.object({ cardId: Id, childCardId: Id })),
+  /**
    * A `subworkflow` stage started a child card (docs/design/workflow-builder.md section 4). Appended with the child's
    * `CardCreated{origin:'subworkflow', parentCardId: cardId}`. `workflowVersion` is the version the child is pinned to.
    */

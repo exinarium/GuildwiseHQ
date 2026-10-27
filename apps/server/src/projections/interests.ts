@@ -153,7 +153,7 @@ export const interestProjectors: Record<string, Projector> = {
                 CASE WHEN c.status = 'cancelled' THEN 'cancelled'
                      WHEN c.status = 'done' THEN
                        CASE WHEN EXISTS (SELECT 1 FROM digest_items d WHERE d.card_id = c.id)
-                              OR EXISTS (SELECT 1 FROM research_publications r WHERE r.card_id = c.id)
+                              OR EXISTS (SELECT 1 FROM research_publications r WHERE r.card_id = c.id AND r.superseded_at IS NULL)
                             THEN 'published' ELSE 'nothing' END
                      WHEN c.stage = 'curate' THEN 'curating'
                      WHEN c.stage = 'scan' AND c.status = 'claimed' THEN 'scanning'
@@ -161,7 +161,7 @@ export const interestProjectors: Record<string, Projector> = {
                 NULL,
                 CASE WHEN c.status = 'done'
                      THEN (SELECT count(*) FROM digest_items d WHERE d.card_id = c.id)
-                        + (SELECT count(*) FROM research_publications r WHERE r.card_id = c.id)
+                        + (SELECT count(*) FROM research_publications r WHERE r.card_id = c.id AND r.superseded_at IS NULL)
                      ELSE NULL END,
                 c.created_at,
                 CASE WHEN c.status IN ('done','cancelled') THEN COALESCE(c.finalized_at, c.updated_at) ELSE NULL END

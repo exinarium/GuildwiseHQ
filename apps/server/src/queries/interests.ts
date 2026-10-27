@@ -98,7 +98,7 @@ async function statsFor(db: Queryable, ids: string[], now: Date): Promise<Map<st
         WHERE c.interest_id = ANY($1::uuid[]) GROUP BY c.interest_id
      ), pubs AS (
        SELECT c.interest_id, count(*) AS published FROM research_publications rp JOIN cards c ON c.id = rp.card_id
-        WHERE c.interest_id = ANY($1::uuid[]) GROUP BY c.interest_id
+        WHERE rp.superseded_at IS NULL AND c.interest_id = ANY($1::uuid[]) GROUP BY c.interest_id
      )
      SELECT i.id, l.id AS last_id, l.kind AS last_kind, l.status AS last_status, l.found AS last_found,
             l.published AS last_published, l.started_at AS last_at, l.ref AS last_ref,
@@ -296,7 +296,7 @@ export async function interestDetail(
   const pubs = await rows(
     db,
     `SELECT rp.id, rp.card_id, c.ref, rp.title, rp.vault_path, rp.created_at FROM research_publications rp
-       JOIN cards c ON c.id = rp.card_id WHERE c.interest_id = $1 ORDER BY rp.event_seq DESC LIMIT 20`,
+       JOIN cards c ON c.id = rp.card_id WHERE rp.superseded_at IS NULL AND c.interest_id = $1 ORDER BY rp.event_seq DESC LIMIT 20`,
     [id],
   );
   const members = await rows(
@@ -461,7 +461,7 @@ export async function interestRunDetail(
   const notes = await rows(
     db,
     `SELECT rp.id, rp.card_id, c.ref, rp.title, rp.vault_path, rp.created_at FROM research_publications rp
-       JOIN cards c ON c.id = rp.card_id WHERE rp.card_id = $1 ORDER BY rp.event_seq`,
+       JOIN cards c ON c.id = rp.card_id WHERE rp.card_id = $1 AND rp.superseded_at IS NULL ORDER BY rp.event_seq`,
     [run.card_id],
   );
   const shifts = await rows(

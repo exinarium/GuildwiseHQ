@@ -720,6 +720,17 @@ export const cardProjectors: Record<string, Projector> = {
     await moveTo(tx, e, p.cardId, p.toStage);
   },
 
+  /** A reopened bug child puts its parent (still in Test) back to waiting. */
+  ParentCardRewaited: async (tx, e) => {
+    const p = ev<'ParentCardRewaited'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1 AND stage='test'`, [
+        p.cardId,
+        e.createdAt,
+      ]),
+    );
+  },
+
   RebaseConflict: async (tx, e) => {
     const p = ev<'RebaseConflict'>(e).payload;
     await moveTo(tx, e, p.cardId, 'build', `rework_round = rework_round + 1`);
@@ -816,6 +827,12 @@ export const cardProjectors: Record<string, Projector> = {
                   claimed_at=NULL, lease_expires_at=NULL,
                   retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1`,
           [p.cardId, p.toStage, p.status, e.createdAt],
+        );
+        // Reopening undoes the research publication: the note stays in the vault and in history, but is no longer live.
+        await exec(
+          tx,
+          `UPDATE research_publications SET superseded_at=$2 WHERE card_id=$1 AND superseded_at IS NULL`,
+          [p.cardId, e.createdAt],
         );
         const who = await one<{ display_name: string }>(tx, 'SELECT display_name FROM users WHERE id=$1', [
           p.by,
