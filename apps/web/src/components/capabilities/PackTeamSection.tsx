@@ -1,8 +1,9 @@
-import type { PackTeamResponse } from '@aom/shared';
+import type { PackDto, PackTeamResponse } from '@aom/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { usePackTeam, useSetClassification } from '../../api/queries/pack-team.ts';
 import { Badge, Button, Callout, ErrorBox, ListSkeleton, TextInput, useToast } from '../ui.tsx';
 import { HirePackTeamDialog } from './HirePackTeamDialog.tsx';
+import { TrustReview } from './TrustReview.tsx';
 
 type TeamSkill = PackTeamResponse['skills'][number];
 
@@ -12,22 +13,28 @@ const GROUP_PAGE = 40;
 const MIN_GROUP = 3;
 
 /**
- * Groups skills by the first word of their key (`backend-development-api-design` goes under `backend`): a pack of plugin
- * folders usually names its skills after the plugin. A prefix that fewer than three skills share falls under "Other".
+ * Groups skills by the plugin folder the pack reports (`group`); a skill without one is grouped by the first word of its key
+ * (`backend-development-api-design` goes under `backend`) when at least three share it, else under "Other".
  */
 export function groupSkills(skills: readonly TeamSkill[]): Array<{ name: string; items: TeamSkill[] }> {
   const by = new Map<string, TeamSkill[]>();
-  for (const s of skills) {
-    const head = s.key.includes('-') ? s.key.split('-')[0] : '';
-    by.set(head ?? '', [...(by.get(head ?? '') ?? []), s]);
-  }
-  const groups: Array<{ name: string; items: TeamSkill[] }> = [];
+  const guessed = new Map<string, TeamSkill[]>();
   const other: TeamSkill[] = [];
-  for (const [name, items] of by) {
-    if (name && items.length >= MIN_GROUP) groups.push({ name, items });
+  for (const s of skills) {
+    if (s.group) by.set(s.group, [...(by.get(s.group) ?? []), s]);
+    else {
+      const head = s.key.includes('-') ? (s.key.split('-')[0] ?? '') : '';
+      if (head) guessed.set(head, [...(guessed.get(head) ?? []), s]);
+      else other.push(s);
+    }
+  }
+  for (const [name, items] of guessed) {
+    if (items.length >= MIN_GROUP && !by.has(name)) by.set(name, items);
     else other.push(...items);
   }
-  groups.sort((a, b) => a.name.localeCompare(b.name));
+  const groups = [...by]
+    .map(([name, items]) => ({ name, items }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   if (other.length) groups.push({ name: 'Other', items: other.sort((a, b) => a.key.localeCompare(b.key)) });
   return groups;
 }
@@ -39,7 +46,16 @@ const matches = (s: TeamSkill, needle: string) =>
  * The Team part of a pack (Settings > Capabilities > Packs): what the pack supplies as agents, the Owner's toggles that say
  * which skills are agents and which are playbooks, and the way into "Hire the whole pack". Only for a pack that is approved.
  */
-export function PackTeamSection({ packId, packName }: { packId: string; packName: string }) {
+export function PackTeamSection({
+  packId,
+  packName,
+  pack,
+}: {
+  packId: string;
+  packName: string;
+  /** For the review that approves what waits (the pack card passes it). */
+  pack?: PackDto;
+}) {
   const q = usePackTeam(packId);
   const save = useSetClassification(packId);
   const toast = useToast();
@@ -49,6 +65,7 @@ export function PackTeamSection({ packId, packName }: { packId: string; packName
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [more, setMore] = useState<Record<string, number>>({});
   const [hiring, setHiring] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const data = q.data;
 
   // the draft follows the server's lists (first load, and after a save)
@@ -117,6 +134,24 @@ export function PackTeamSection({ packId, packName }: { packId: string; packName
           Hire the whole pack…
         </Button>
       </div>
+      {data.pendingPluginItems > 0 && (
+        <Callout
+          tone="warning"
+          data-testid="pending-plugin-items"
+          actions={
+            pack ? (
+              <Button size="sm" variant="primary" onClick={() => setReviewing(true)}>
+                Review and approve
+              </Button>
+            ) : undefined
+          }
+        >
+          {data.pendingPluginItems} agent{data.pendingPluginItems === 1 ? '' : 's'}/command
+          {data.pendingPluginItems === 1 ? '' : 's'} in this pack need approval: approve the pack again to use{' '}
+          {data.pendingPluginItems === 1 ? 'it' : 'them'}.
+        </Callout>
+      )}
+      {reviewing && pack && <TrustReview pack={pack} onClose={() => setReviewing(false)} />}
       <p className="text-sm text-muted">
         Agents of this pack join the agents you already have, each on a role (a seat) that decides what it may
         do. A persona (<code>agents/*.md</code>, <code>personas/*.md</code>) is an agent by itself

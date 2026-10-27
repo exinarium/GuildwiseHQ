@@ -32,9 +32,17 @@ export function PackProvenance({ agent }: { agent: Pick<AgentDto, 'provenance' |
         <Badge
           tone="amber"
           data-testid="pack-provenance-warning"
-          title="The agent keeps its role version and its work"
+          title={
+            warning === 'missing'
+              ? 'A pack update dropped this agent. It keeps working as before, but the pack no longer describes it.'
+              : 'The agent keeps its role version and its work'
+          }
         >
-          {warning === 'removed' ? 'pack removed' : 'pack no longer approved'}
+          {warning === 'removed'
+            ? 'pack removed'
+            : warning === 'missing'
+              ? 'no longer in the pack'
+              : 'pack no longer approved'}
         </Badge>
       )}
     </span>

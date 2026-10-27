@@ -12,6 +12,7 @@ import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/s
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
 import { Button, Callout, ListSkeleton, Select, TextInput } from '../ui.tsx';
+import { hireSkills, PackAgentSkills } from './PackAgentSkills.tsx';
 import { type Access, ProjectAccessEditor } from './ProjectAccess.tsx';
 
 const MAX_LISTED = 100;
@@ -65,7 +66,6 @@ export function HirePackAgentForm({ onDone, onCancel }: { onDone: () => void; on
   const seat: PackSeat = seatPick || chosen?.suggestedSeat || 'own';
   const seatRole = roles.data?.find((r) => r.definition.key === seat)?.definition;
   const name = nameEdit ?? chosen?.name ?? '';
-  const refs = skillPick ?? chosen?.skillRefs ?? [];
 
   const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user?.id && w.status === 'active');
   const station = mine.find((w) => w.id === (workstationId || mine[0]?.id));
@@ -124,7 +124,7 @@ export function HirePackAgentForm({ onDone, onCancel }: { onDone: () => void; on
           ...(name.trim() !== chosen.name ? { name: name.trim() } : {}),
           ...(seniority ? { seniority: seniority as 'junior' | 'senior' } : {}),
           ...(model.trim() ? { model: model.trim() } : {}),
-          ...(skillPick ? { skills: skillPick } : {}),
+          skills: hireSkills(chosen, skillPick),
         },
       ],
       workstationId: station.id,
@@ -277,39 +277,13 @@ export function HirePackAgentForm({ onDone, onCancel }: { onDone: () => void; on
               </datalist>
             </div>
           </div>
-          {chosen && (chosen.agentSkill || chosen.skillRefs.length > 0) && (
-            <fieldset className="flex flex-col gap-1 text-sm" data-testid="pack-agent-skills">
-              <legend className="font-medium">Skills</legend>
-              {chosen.agentSkill && (
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="size-4"
-                    checked
-                    disabled
-                    aria-label={`Skill ${chosen.agentSkill} (always)`}
-                  />
-                  <code>{chosen.agentSkill}</code>
-                  <span className="text-xs text-subtle">the agent itself, always</span>
-                </label>
-              )}
-              {chosen.skillRefs.map((k) => (
-                <label key={k} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="size-4"
-                    checked={refs.includes(k)}
-                    onChange={(e) =>
-                      setSkillPick(
-                        e.target.checked ? [...new Set([...refs, k])] : refs.filter((x) => x !== k),
-                      )
-                    }
-                    aria-label={`Skill ${k}`}
-                  />
-                  <code>{k}</code>
-                </label>
-              ))}
-            </fieldset>
+          {chosen && (
+            <PackAgentSkills
+              agent={chosen}
+              picked={skillPick}
+              onChange={setSkillPick}
+              testId="pack-agent-skills"
+            />
           )}
           <div>
             <ProjectAccessEditor

@@ -71,6 +71,8 @@ export const PACK_HIRE_ERRORS: Record<string, string> = {
   unknown_skill: 'The pack no longer has one of these skills. Reload the pack and try again.',
   unknown_project: 'One of the chosen projects does not exist.',
   too_many: 'You can hire at most 60 agents at once. Untick some.',
+  runner_too_old: "This workstation's runner is too old for pack agents: update it to 0.1.62 or later.",
+  project_pack: 'This pack belongs to one project: give the agent access to that project.',
   invalid_agent: 'One of these pack agents cannot be hired. Untick it.',
   builtin_key: 'One of these pack agents has a name that belongs to a built-in role. Untick it.',
 };

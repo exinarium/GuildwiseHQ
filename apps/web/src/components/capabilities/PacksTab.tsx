@@ -520,7 +520,7 @@ function PackCard({ pack }: { pack: PackDto }) {
           Remove
         </Button>
       </div>
-      {team && pack.trusted && <PackTeamSection packId={pack.id} packName={pack.name} />}
+      {team && pack.trusted && <PackTeamSection packId={pack.id} packName={pack.name} pack={pack} />}
       {reviewing && <TrustReview pack={pack} onClose={() => setReviewing(false)} />}
       {hiring && <HirePackDialog packId={pack.id} packName={pack.name} onClose={() => setHiring(false)} />}
       {updating && <UpdateReview pack={pack} onClose={() => setUpdating(false)} />}

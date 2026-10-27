@@ -155,6 +155,11 @@ export function SlashMenu({
                     <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                       /{c.key}
                       <span className="text-xs font-normal text-subtle">{c.kind}</span>
+                      {c.packName && (
+                        <span className="text-xs font-normal text-subtle" data-testid={`slash-pack-${c.key}`}>
+                          from {c.packName}
+                        </span>
+                      )}
                       {c.visibility === 'private' && (
                         <span className="inline-flex items-center gap-0.5 text-xs font-normal text-subtle">
                           <Lock aria-hidden="true" className="size-3" /> private

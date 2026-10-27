@@ -29,7 +29,9 @@ const agentDto = (key: string, name: string, over: Record<string, unknown> = {})
   icon: null,
   suggestedSeat: 'own',
   skillRefs: [],
+  defaultSkills: [],
   agentSkill: null,
+  group: null,
   hiredAgentIds: [],
   marked: false,
   ...over,
@@ -42,9 +44,11 @@ const teamBody = (over: Record<string, unknown> = {}) => ({
   agents: [
     agentDto('mary', 'Mary', {
       suggestedSeat: 'analyst',
-      skillRefs: ['brainstorm'],
+      skillRefs: ['brainstorm', 'review-pr'],
+      defaultSkills: ['brainstorm'],
       agentSkill: 'agent-mary',
       kind: 'skill',
+      group: 'core',
     }),
     agentDto('dev', 'Dev', { suggestedSeat: 'builder' }),
     agentDto('muse', 'Muse'),
@@ -55,6 +59,7 @@ const teamBody = (over: Record<string, unknown> = {}) => ({
     { key: 'agent-mary', name: 'Mary', description: 'Analyst', class: 'agent', marked: false },
     { key: 'ship', name: 'Ship it', description: 'Release', class: 'playbook', marked: true },
   ],
+  pendingPluginItems: 0,
   classification: { agents: [], playbooks: ['ship'] },
   ...over,
 });
@@ -336,13 +341,17 @@ describe('hire the whole pack', () => {
     expect(within(mary).getByLabelText('Skill agent-mary (always)')).toBeDisabled();
     expect(within(mary).getByText('Hired as Mary, Mary 2, Mary 3')).toBeInTheDocument();
     expect(screen.getByTestId('adds-n')).toHaveTextContent('Adds 4 agents');
-    await user.click(within(mary).getByLabelText('Skill brainstorm'));
+    // the default skill is ticked, the one the agent only mentions is not
+    expect(within(mary).getByLabelText('Skill brainstorm')).toBeChecked();
+    expect(within(mary).getByLabelText('Skill review-pr')).not.toBeChecked();
+    expect(within(mary).getByText('mentioned by the agent')).toBeInTheDocument();
+    await user.click(within(mary).getByLabelText('Skill review-pr'));
     await user.click(screen.getByRole('checkbox', { name: 'Hire Dev' }));
     await user.click(screen.getByTestId('confirm-team-hire'));
     await screen.findByTestId('hired-list');
     expect(last('POST', '/team/hire')?.body).toMatchObject({
       workstationId: WS,
-      items: [{ key: 'mary', seat: 'reviewer', count: 3, skills: [] }],
+      items: [{ key: 'mary', seat: 'reviewer', count: 3, skills: ['brainstorm', 'review-pr'] }],
     });
     expect(last('POST', '/team/hire')?.body.items[0]).not.toHaveProperty('name');
     expect(screen.getByTestId('to-agents')).toHaveAttribute('href', '/agents');
@@ -388,6 +397,71 @@ describe('hire the whole pack', () => {
     postResponse = json({ error: { code: 'name_taken', message: 'x' } }, 409);
     await user.click(screen.getByTestId('confirm-team-hire'));
     expect(await screen.findByTestId('team-hire-error')).toHaveTextContent('already has one of these names');
+  });
+});
+
+describe('plugin items, groups and new errors', () => {
+  it('groups skills by the reported plugin folder, falling back to the first word', () => {
+    const mk = (key: string, group: string | null) => ({
+      key,
+      name: key,
+      description: '',
+      class: 'skill' as const,
+      marked: false,
+      group,
+    });
+    const g = groupSkills([
+      mk('a', 'backend'),
+      mk('b', 'backend'),
+      mk('web-a', null),
+      mk('web-b', null),
+      mk('web-c', null),
+      mk('solo', null),
+    ]);
+    expect(g.map((x) => [x.name, x.items.length])).toEqual([
+      ['backend', 2],
+      ['web', 3],
+      ['Other', 1],
+    ]);
+  });
+
+  it('tells the Owner how many plugin items wait for approval and opens the review', async () => {
+    team = teamBody({ pendingPluginItems: 3 });
+    wrap(
+      <PackTeamSection
+        packId={PACK}
+        packName="acme"
+        pack={{ id: PACK, name: 'acme', url: 'u', ref: 'main', trusted: true } as never}
+      />,
+    );
+    const n = await screen.findByTestId('pending-plugin-items');
+    expect(n).toHaveTextContent('3 agents/commands in this pack need approval');
+    await userEvent.click(within(n).getByRole('button', { name: 'Review and approve' }));
+    expect(await screen.findByTestId('trust-review')).toBeInTheDocument();
+  });
+
+  it('filters the hire table by plugin folder', async () => {
+    team = teamBody({
+      agents: [agentDto('a1', 'Ann', { group: 'backend' }), agentDto('b1', 'Bob', { group: 'frontend' })],
+    });
+    const user = userEvent.setup();
+    wrap(<HirePackTeamDialog packId={PACK} packName="acme" onClose={() => {}} />);
+    await screen.findByTestId('team-row-a1');
+    await user.selectOptions(screen.getByTestId('team-hire-group'), 'frontend');
+    expect(screen.queryByTestId('team-row-a1')).toBeNull();
+    expect(screen.getByTestId('team-row-b1')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['runner_too_old', 409, 'update it to 0.1.62 or later'],
+    ['project_pack', 400, 'give the agent access to that project'],
+  ])('explains %s', async (code, status, text) => {
+    wrap(<HirePackTeamDialog packId={PACK} packName="acme" onClose={() => {}} />);
+    await screen.findByTestId('team-row-mary');
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Hire Mary' })).toBeChecked());
+    postResponse = json({ error: { code, message: 'x' } }, status as number);
+    await userEvent.click(screen.getByTestId('confirm-team-hire'));
+    expect(await screen.findByTestId('team-hire-error')).toHaveTextContent(text as string);
   });
 });
 
@@ -453,6 +527,10 @@ describe('agent tag', () => {
     unmount();
     wrap(<PackProvenance agent={{ packAgent: ref, provenance: { ...prov, warning: 'removed' } as never }} />);
     expect(screen.getByTestId('pack-provenance-warning')).toHaveTextContent('pack removed');
+  });
+  it('shows the warning for an agent the pack update dropped', () => {
+    wrap(<PackProvenance agent={{ packAgent: ref, provenance: { ...prov, warning: 'missing' } as never }} />);
+    expect(screen.getByTestId('pack-provenance-warning')).toHaveTextContent('no longer in the pack');
   });
   it('keeps the older tag for a persona turned into a role', () => {
     wrap(<PackProvenance agent={{ provenance: prov as never }} />);

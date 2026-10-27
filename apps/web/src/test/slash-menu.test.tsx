@@ -25,6 +25,7 @@ const ITEMS: SlashCommand[] = [
     name: 'Create Epics and Stories',
     description: 'Break a PRD into epics',
     source: 'pack',
+    packName: 'sample',
     canStartSession: true,
   },
   {
@@ -112,6 +113,9 @@ describe('the / menu of a chat composer', () => {
     );
     expect(screen.getByTestId('slash-skill-interview-techniques')).toBeInTheDocument();
     expect(screen.getByTestId('slash-playbook-mine:secret-play')).toHaveTextContent('private');
+    // an item of a pack says which pack
+    expect(screen.getByTestId('slash-pack-sample:create-epics-and-stories')).toHaveTextContent('from sample');
+    expect(screen.queryByTestId('slash-pack-prd')).toBeNull();
   });
 
   it('searches as you type, on the key, the name and the description', async () => {

@@ -15,6 +15,7 @@ import { packHireMessage, useHirePackTeam, usePackTeam } from '../../api/queries
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
+import { hireSkills, PackAgentSkills } from '../agents/PackAgentSkills.tsx';
 import { type Access, ProjectAccessEditor } from '../agents/ProjectAccess.tsx';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
@@ -46,7 +47,7 @@ interface Row {
   name: string;
   seniority: string;
   model: string;
-  /** Ticked skills of the agent's `skillRefs`; null: all of them. */
+  /** Ticked extra skills; null: the agent's default skills. */
   skills: string[] | null;
 }
 
@@ -82,6 +83,7 @@ export function HirePackTeamDialog({
   const [initFor, setInitFor] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [shown, setShown] = useState(PAGE);
+  const [group, setGroup] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [workstationId, setWorkstationId] = useState('');
   const [runtime, setRuntime] = useState('');
@@ -153,8 +155,16 @@ export function HirePackTeamDialog({
   const ticked = agents.filter((a) => rowOf(a).on);
   const total = ticked.reduce((n, a) => n + rowOf(a).count, 0);
   const needle = search.trim().toLowerCase();
+  // the plugin folders of a marketplace pack: pick one to narrow the table
+  const groups = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const a of agents) if (a.group) n.set(a.group, (n.get(a.group) ?? 0) + 1);
+    return [...n].sort((x, y) => x[0].localeCompare(y[0]));
+  }, [agents]);
   const visible = agents.filter(
-    (a) => !needle || `${a.key} ${a.name} ${a.description}`.toLowerCase().includes(needle),
+    (a) =>
+      (!group || a.group === group) &&
+      (!needle || `${a.key} ${a.name} ${a.description}`.toLowerCase().includes(needle)),
   );
 
   const runtimeOptions = [
@@ -208,7 +218,7 @@ export function HirePackTeamDialog({
         ...(r.name.trim() ? { name: r.name.trim() } : {}),
         ...(r.seniority ? { seniority: r.seniority as 'junior' | 'senior' } : {}),
         ...(r.model.trim() ? { model: r.model.trim() } : {}),
-        ...(r.skills ? { skills: r.skills } : {}),
+        skills: hireSkills(a, r.skills),
       };
     });
     hire.mutate(
@@ -323,6 +333,26 @@ export function HirePackTeamDialog({
                   data-testid="team-hire-search"
                 />
               </div>
+              {groups.length > 0 && (
+                <div className="w-56">
+                  <Select
+                    label="Plugin folder"
+                    value={group}
+                    onChange={(e) => {
+                      setGroup(e.target.value);
+                      setShown(PAGE);
+                    }}
+                    data-testid="team-hire-group"
+                  >
+                    <option value="">All ({agents.length})</option>
+                    {groups.map(([g, n]) => (
+                      <option key={g} value={g}>
+                        {g} ({n})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <Button
                 size="sm"
                 onClick={() => setAll((a) => a.suggestedSeat !== OWN)}
@@ -363,7 +393,6 @@ export function HirePackTeamDialog({
                 const r = rowOf(a);
                 const seatRole = roleOf(r.seat);
                 const open = expanded === a.key;
-                const refs = r.skills ?? a.skillRefs;
                 return (
                   <li
                     key={a.key}
@@ -463,45 +492,12 @@ export function HirePackTeamDialog({
                             onChange={(e) => patch(a.key, { model: e.target.value })}
                           />
                         </div>
-                        <fieldset className="flex flex-col gap-1 text-sm" data-testid={`skills-${a.key}`}>
-                          <legend className="font-medium">Skills</legend>
-                          {a.agentSkill && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                className="size-4"
-                                checked
-                                disabled
-                                aria-label={`Skill ${a.agentSkill} (always)`}
-                              />
-                              <code>{a.agentSkill}</code>
-                              <span className="text-xs text-subtle">the agent itself, always</span>
-                            </label>
-                          )}
-                          {a.skillRefs.map((k) => (
-                            <label key={k} className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                className="size-4"
-                                checked={refs.includes(k)}
-                                onChange={(e) =>
-                                  patch(a.key, {
-                                    skills: e.target.checked
-                                      ? [...new Set([...refs, k])]
-                                      : refs.filter((x) => x !== k),
-                                  })
-                                }
-                                aria-label={`Skill ${k}`}
-                              />
-                              <code>{k}</code>
-                            </label>
-                          ))}
-                          {a.skillRefs.length === 0 && !a.agentSkill && (
-                            <p className="text-xs text-muted">
-                              None named in its files. It gets the skills of its seat.
-                            </p>
-                          )}
-                        </fieldset>
+                        <PackAgentSkills
+                          agent={a}
+                          picked={r.skills}
+                          onChange={(v) => patch(a.key, { skills: v })}
+                          testId={`skills-${a.key}`}
+                        />
                       </div>
                     )}
                   </li>
