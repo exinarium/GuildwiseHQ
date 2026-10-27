@@ -49,7 +49,7 @@ describe('exclusive claim', () => {
     const winner = results.find(Boolean)!;
     expect(winner.worktree).toMatchObject({
       created: true,
-      branchName: expect.stringMatching(/^aom\/toy-\d+-contended$/),
+      branchName: expect.stringMatching(/^guildwise\/toy-\d+-contended$/),
       baseBranch: 'main',
       homeWorkstationId: w.workstationId,
     });
