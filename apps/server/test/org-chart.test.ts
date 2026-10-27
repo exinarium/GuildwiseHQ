@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
+import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, markOnline, ok, pairWorkstation, type World } from './helpers/world.ts';
 
@@ -61,6 +62,23 @@ describe('org chart', () => {
     expect(bea.escalatesTo).toEqual({ level: 'desk', agentIds: [] });
     const devops = c.agents.find((a: any) => a.isDevops);
     expect(devops.escalatesTo.level).toBe('desk');
+  });
+
+  it('sends seniors and the BA to an active CEO, as the routing does (the BA is skipped then)', async () => {
+    const ceoId = await appoint(w);
+    try {
+      const c = await chart();
+      const sam = byName(c, 'Sam');
+      expect(byName(c, 'Jo').escalatesTo).toEqual({ level: 'peer', agentIds: [sam.id] });
+      expect(sam.escalatesTo).toEqual({ level: 'ceo', agentIds: [ceoId] });
+      expect(byName(c, 'Rae').escalatesTo).toEqual({ level: 'ceo', agentIds: [ceoId] });
+      expect(byName(c, 'Bea').escalatesTo).toEqual({ level: 'ceo', agentIds: [ceoId] });
+      // a paused CEO is skipped: back to the BA
+      await q(`UPDATE agents SET paused_at=now() WHERE id=$1`, [ceoId]);
+      expect(byName(await chart(), 'Sam').escalatesTo.level).toBe('ba');
+    } finally {
+      await q(`UPDATE agents SET status='retired', paused_at=NULL WHERE id=$1`, [ceoId]);
+    }
   });
 
   it('keeps each workstation with its DevOps engineer apart from the agents', async () => {
