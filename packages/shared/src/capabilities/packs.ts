@@ -444,6 +444,41 @@ export interface PluginFile {
 }
 
 /**
+ * Whether a folder is part of a Claude Code plugin: a `.claude-plugin/plugin.json` in the plugin folder or above it, a
+ * marketplace file at the root, or the root itself next to a root `.claude-plugin/`. An ordinary repository's `commands/` or
+ * `agents/` folder (a CLI's source, say) is not a plugin and stays unread.
+ */
+export function pluginScope(tree: PackTree): (pluginPath: string) => boolean {
+  const pluginDirs = new Set<string>();
+  let marketplace = false;
+  let rootMarker = false;
+  for (const p of Object.keys(tree)) {
+    if (p === '.claude-plugin/marketplace.json') marketplace = true;
+    if (p.startsWith('.claude-plugin/')) rootMarker = true;
+    const m = /^(?:(.*)\/)?\.claude-plugin\/plugin\.json$/.exec(p);
+    if (m) pluginDirs.add(m[1] ?? '');
+  }
+  return (pluginPath) => {
+    if (marketplace) return true;
+    if (pluginPath === '' && rootMarker) return true;
+    const segs = pluginPath ? pluginPath.split('/') : [];
+    for (let n = segs.length; n >= 0; n--) if (pluginDirs.has(segs.slice(0, n).join('/'))) return true;
+    return false;
+  };
+}
+
+/** The plugin folder name a pack item belongs to for grouping (`plugins/backend/agents/x.md` is `backend`), else undefined. */
+export function pluginGroupOf(path: string, inPlugin: (pluginPath: string) => boolean): string | undefined {
+  const parts = path.split('/');
+  const i = parts.findIndex(
+    (x, n) => n >= 1 && n <= parts.length - 2 && ['agents', 'commands', 'skills'].includes(x),
+  );
+  if (i < 1) return undefined;
+  const plugin = parts.slice(0, i).join('/');
+  return inPlugin(plugin) ? slugKey(parts[i - 1] as string).slice(0, 64) || undefined : undefined;
+}
+
+/**
  * The Claude Code plugin layout, read generically: `agents/*.md` (subagents with frontmatter `name` and `description`) and
  * `commands/*.md` (slash commands, frontmatter optional) at any depth, so `plugins/<p>/agents/x.md` and a root `agents/x.md`
  * both count. Files inside a skill folder, below an excluded folder (tests, docs, vendored code), in `personas/` or in the
@@ -460,25 +495,8 @@ export function discoverPluginLayout(
 ): { agents: PluginFile[]; commands: PluginFile[]; skipped: string[] } {
   const raw: Array<PluginFile & { kind: 'agents' | 'commands' }> = [];
   const skipped: string[] = [];
-  // Only what is part of a Claude Code plugin is read: a `.claude-plugin/plugin.json` in the plugin folder or above it, a
-  // marketplace file at the root, or root-level folders next to a root `.claude-plugin/`. An ordinary repository's
-  // `commands/` or `agents/` folder (a CLI's source, say) is not a plugin and stays unread.
-  const pluginDirs = new Set<string>();
-  let marketplace = false;
-  let rootMarker = false;
-  for (const p of Object.keys(tree)) {
-    if (p === '.claude-plugin/marketplace.json') marketplace = true;
-    if (p.startsWith('.claude-plugin/')) rootMarker = true;
-    const m = /^(?:(.*)\/)?\.claude-plugin\/plugin\.json$/.exec(p);
-    if (m) pluginDirs.add(m[1] ?? '');
-  }
-  const inPlugin = (pluginPath: string): boolean => {
-    if (marketplace) return true;
-    if (pluginPath === '' && rootMarker) return true;
-    const segs = pluginPath ? pluginPath.split('/') : [];
-    for (let n = segs.length; n >= 0; n--) if (pluginDirs.has(segs.slice(0, n).join('/'))) return true;
-    return false;
-  };
+  // Only what is part of a Claude Code plugin is read (see `pluginScope`).
+  const inPlugin = pluginScope(tree);
   for (const [path, text] of Object.entries(tree).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const parts = path.split('/');
     if (parts.length < 2 || parts.some((x) => SKIPPED_SEGMENTS.has(x))) continue;
@@ -564,7 +582,7 @@ export function commandToPlaybookFiles(key: string, text: string): Record<string
 export function inPack(
   pack: string,
   e: ParsedCapability,
-  extra: { tags?: string[]; icon?: string; layout?: 'plugin' } = {},
+  extra: { tags?: string[]; icon?: string; layout?: 'plugin'; group?: string | undefined } = {},
 ): ParsedCapability {
   const hasScripts = Object.keys(e.files).some(isScriptPath);
   return {
@@ -575,6 +593,7 @@ export function inPack(
     ...(extra.tags?.length ? { tags: extra.tags } : {}),
     ...(extra.icon ? { icon: extra.icon } : {}),
     ...(extra.layout ? { layout: extra.layout } : {}),
+    ...(extra.group ? { group: extra.group } : {}),
   } as ParsedCapability;
 }
 
@@ -693,6 +712,7 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     tree[path] = t;
   }
   const found = discoverCapabilities(tree);
+  const inPluginScope = pluginScope(tree);
   const issues: CapabilityIssue[] = [];
   const notes: string[] = [];
   let entries: ParsedCapability[] = [];
@@ -707,6 +727,10 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     return t.length
       ? inPack(input.name, { ...e, hash: manifestHash(e.files, t) }, { tags: t, ...(icon ? { icon } : {}) })
       : inPack(input.name, e, icon ? { icon } : {});
+  };
+  const withGroup = (e: ParsedCapability, dir: string): ParsedCapability => {
+    const group = pluginGroupOf(`${dir}/SKILL.md`, inPluginScope);
+    return group ? ({ ...e, group } as ParsedCapability) : e;
   };
   const skillTags = new Map<string, string[]>();
   const skillScopes = new Map<string, string[]>();
@@ -739,11 +763,13 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
         const e = parsePersona(s.key, claudeAgentToPersonaText(s.key, s.files['SKILL.md'] as string, {}));
         if (Object.keys(s.files).length > 1)
           notes.push(`${s.dir}: declares itself an agent; only its SKILL.md is used as the persona`);
-        entries.push(labelled(e, skillTags.get(s.dir), e.kind === 'persona' ? e.meta.icon : undefined));
+        entries.push(
+          withGroup(labelled(e, skillTags.get(s.dir), e.kind === 'persona' ? e.meta.icon : undefined), s.dir),
+        );
         addScopes(e, skillScopes.get(s.dir));
       } else {
         const sk = parseSkill(s.key, s.files);
-        entries.push(labelled(sk, skillTags.get(s.dir)));
+        entries.push(withGroup(labelled(sk, skillTags.get(s.dir)), s.dir));
         addScopes(sk, skillScopes.get(s.dir));
       }
     } catch (err) {
@@ -782,7 +808,11 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     try {
       const e = parsePersona(a.key, claudeAgentToPersonaText(a.key, a.text));
       entries.push(
-        inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined, layout: 'plugin' }),
+        inPack(input.name, e, {
+          icon: e.kind === 'persona' ? e.meta.icon : undefined,
+          layout: 'plugin',
+          group: pluginGroupOf(a.path, inPluginScope),
+        }),
       );
     } catch (err) {
       issues.push({ path: a.path, message: msg(err) });
@@ -791,7 +821,10 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
   for (const c of plugin.commands) {
     try {
       entries.push(
-        inPack(input.name, parsePlaybook(c.key, commandToPlaybookFiles(c.key, c.text)), { layout: 'plugin' }),
+        inPack(input.name, parsePlaybook(c.key, commandToPlaybookFiles(c.key, c.text)), {
+          layout: 'plugin',
+          group: pluginGroupOf(c.path, inPluginScope),
+        }),
       );
     } catch (err) {
       issues.push({ path: c.path, message: msg(err) });
@@ -941,6 +974,7 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
     ...(declaredScopesOf(e).length ? { scopes: declaredScopesOf(e) } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
     ...(e.layout ? { layout: e.layout } : {}),
+    ...(e.group ? { group: e.group } : {}),
     ...(e.declaredSkills?.length ? { declaredSkills: e.declaredSkills } : {}),
     ...(e.displayName ? { displayName: e.displayName } : {}),
     ...(e.skillRefs?.length ? { skillRefs: e.skillRefs } : {}),

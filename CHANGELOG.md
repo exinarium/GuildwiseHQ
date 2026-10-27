@@ -11,7 +11,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - Runner: `guildwise-runner` is installed alongside `aom-runner`; both names run the same command.
 - Webhooks: outgoing signed webhooks carry `X-Guildwise-Signature`. `X-AOM-Signature` is still sent with the same value until October 2027.
 - Packs: agents can be hired from an approved pack onto the built-in roles as their seat (analyst, BA, planner, architect, builder, pre-reviewer, reviewer, tester, researcher, writer), one at a time or the whole pack at once (all or nothing, Owners and Admins). They keep the pack agent's name and approach, join the agents already there, and the role's rules, gates and permissions are unchanged. Owners and Admins mark which skills of a pack are agents and which are playbooks. Pack agents without a seat get a role of their own that holds none of the pack's text. API in docs/ARCHITECTURE.md section 38.14; migration 2710.
-- Packs: the Claude Code plugin layout is read (`agents/*.md` as personas, `commands/*.md` as one-step playbooks, at any depth); a pack may list 1000 capabilities. Needs runner 0.1.62; a pack with such folders needs review again.
+- Packs: the Claude Code plugin layout is read (`agents/*.md` as personas, `commands/*.md` as one-step playbooks, at any depth); a pack may list 1000 capabilities. Needs runner 0.1.62. Only folders that belong to a Claude Code plugin are read. A pack approved before keeps working without these items until the Owner approves them.
 
 ### Changed
 

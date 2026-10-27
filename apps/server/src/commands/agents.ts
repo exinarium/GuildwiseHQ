@@ -311,143 +311,139 @@ export async function hireAgentIn(
   extra: HireExtra,
   agentId: string,
 ): Promise<{ orgId: string; roleKey: string; skills: string[]; name: string }> {
-  let result: { orgId: string; roleKey: string; skills: string[]; name: string } | undefined;
-  {
-    // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
-    const ws = await one(
-      tx,
-      `SELECT id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
-      [req.workstationId, user.id, org.id],
-    );
-    if (!ws) throw notFound('workstation not found');
-    let orgId = org.id;
-    let role: Awaited<ReturnType<typeof projectRole>> = null;
-    // The agent belongs to the organization of the project it is hired for, or of the first project it is allowed on
-    // (a guest hires into the organization that shared the project with them).
-    const anchor = req.projectId ?? req.allowedProjectIds?.[0];
-    if (anchor) {
-      const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [anchor]);
-      role = await projectRole(tx, user.id, anchor);
-      if (!p || !role) throw notFound('project not found');
-      if (p.status === 'archived')
-        throw conflict('project_archived', 'this project is archived; unarchive it to hire');
-      orgId = p.org_id;
-    }
-    const orgRole = await orgRoleOf(tx, user.id, orgId);
-    // Where the agent may work: an explicit list (or null: any project), else the alias project, else any project.
-    const allowed: string[] | null =
-      req.allowedProjectIds !== undefined ? req.allowedProjectIds : req.projectId ? [req.projectId] : null;
-    const allowedList = allowed === null ? null : [...new Set(allowed)];
-    if (allowedList) await assertProjectsOfOrg(tx, orgId, allowedList);
-    const focus = [...new Set(req.focusProjectIds ?? [])];
-    assertFocusInside(focus, allowedList);
-    if (focus.length) await assertProjectsOfOrg(tx, orgId, focus);
-    if (
-      !canHireAgentInOrg({
-        orgRole,
-        projectScoped: allowedList !== null && allowedList.length > 0,
-        projectMember: allowedList !== null && (await memberOfAll(tx, user.id, allowedList)),
-      })
-    ) {
-      throw forbidden('you cannot hire agents here');
-    }
-    // A workstation the organization does not use yet counts as one more (the DevOps engineer does not count).
-    const uses = await one(
-      tx,
-      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
-      [orgId, req.workstationId],
-    );
-    if (!uses) await assertWithinLimit(ctx, tx, orgId, 'workstations');
-    if (extra.registerRole) await extra.registerRole(tx, orgId);
-    const roleKey = extra.roleKeyOf ? await extra.roleKeyOf(tx, orgId) : req.roleKey;
-    const roleDef = await loadRole(tx, orgId, roleKey);
-    if (!roleDef) throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
-    // a role made from someone's private pack is that person's alone
-    if (isOthersPrivateRole(roleDef.definition.source, user.id))
-      throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
-    if (roleDef.definition.key === DEVOPS_ROLE_KEY)
-      throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
-    if (roleDef.definition.key === 'ceo')
-      throw badRequest(
-        'invalid_role',
-        'the CEO is built in: every organization has one, and it cannot be hired',
-      );
-    if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
-      throw badRequest(
-        'invalid_seniority',
-        `${roleDef.definition.name} is available as: ${roleDef.definition.seniorityLevels.join(', ')}`,
-      );
-    }
-    if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [orgId, req.name])) {
-      throw conflict(
-        'name_taken',
-        `the name '${req.name}' is already used in this organization (retired agents keep their names)`,
-      );
-    }
-    // Without an explicit runtime, an agent hired on the simulated workstation (or in a simulation organization) is a mock
-    // agent: the simulated runner has no model to call, and real model names there only produce failing shifts.
-    const simulated =
-      !!ws.simulation_org_id ||
-      !!(await one(tx, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId]));
-    const dm =
-      req.runtime === undefined && simulated
-        ? { ...roleDef.definition.defaultModel, runtime: 'mock' as const, model: 'mock' }
-        : roleDef.definition.defaultModel;
-    const unsandboxedAck = await sandboxGate(
-      ctx,
-      tx,
-      user.id,
-      req.workstationId,
-      req.runtime ?? dm.runtime,
-      req.acknowledgeUnsandboxed,
-      { roleKey: roleDef.key, permissions: roleDef.definition.permissions, model: req.model ?? dm.model },
-    );
-    // Skills named in the hire (typed by hand) are stored as the registry knows them: a bare pack skill name gets its pack.
-    const base = req.skills
-      ? await qualifiedSkillKeys(tx, orgId, req.skills, { projectId: anchor ?? null, userId: user.id })
-      : roleDef.definition.skills;
-    const skills = [...new Set([...base, ...(extra.addSkills ?? [])])];
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.agent(agentId),
-          event: {
-            type: 'AgentHired',
-            payload: {
-              agentId,
-              orgId,
-              ...(req.projectId ? { projectId: req.projectId } : {}),
-              allowedProjectIds: allowedList,
-              ...(focus.length ? { focusProjectIds: focus } : {}),
-              hiredByUserId: user.id,
-              workstationId: req.workstationId,
-              name: req.name,
-              roleKey: roleDef.key,
-              roleVersion: roleDef.version,
-              seniority: req.seniority,
-              runtime: req.runtime ?? dm.runtime,
-              model: req.model ?? dm.model,
-              effort: req.effort ?? dm.effort,
-              skills,
-              permissions: extra.permissions ?? roleDef.definition.permissions,
-              capacity: req.capacity,
-              isDevops: false,
-              avatarSeed: randomAvatarSeed(),
-              avatarStyle: DEFAULT_AVATAR_STYLE,
-              ...(unsandboxedAck ? { unsandboxedAck } : {}),
-              ...(extra.provenance ? { provenance: extra.provenance } : {}),
-              ...(extra.packPersona ? { packPersona: extra.packPersona } : {}),
-            },
-          },
-          actor: userActor(user.id),
-          scope: orgScope(orgId),
-        },
-      ],
-      { tx },
-    );
-    result = { orgId, roleKey: roleDef.key, skills, name: req.name };
+  // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
+  const ws = await one(
+    tx,
+    `SELECT id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
+    [req.workstationId, user.id, org.id],
+  );
+  if (!ws) throw notFound('workstation not found');
+  let orgId = org.id;
+  let role: Awaited<ReturnType<typeof projectRole>> = null;
+  // The agent belongs to the organization of the project it is hired for, or of the first project it is allowed on
+  // (a guest hires into the organization that shared the project with them).
+  const anchor = req.projectId ?? req.allowedProjectIds?.[0];
+  if (anchor) {
+    const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [anchor]);
+    role = await projectRole(tx, user.id, anchor);
+    if (!p || !role) throw notFound('project not found');
+    if (p.status === 'archived')
+      throw conflict('project_archived', 'this project is archived; unarchive it to hire');
+    orgId = p.org_id;
   }
-  return result as { orgId: string; roleKey: string; skills: string[]; name: string };
+  const orgRole = await orgRoleOf(tx, user.id, orgId);
+  // Where the agent may work: an explicit list (or null: any project), else the alias project, else any project.
+  const allowed: string[] | null =
+    req.allowedProjectIds !== undefined ? req.allowedProjectIds : req.projectId ? [req.projectId] : null;
+  const allowedList = allowed === null ? null : [...new Set(allowed)];
+  if (allowedList) await assertProjectsOfOrg(tx, orgId, allowedList);
+  const focus = [...new Set(req.focusProjectIds ?? [])];
+  assertFocusInside(focus, allowedList);
+  if (focus.length) await assertProjectsOfOrg(tx, orgId, focus);
+  if (
+    !canHireAgentInOrg({
+      orgRole,
+      projectScoped: allowedList !== null && allowedList.length > 0,
+      projectMember: allowedList !== null && (await memberOfAll(tx, user.id, allowedList)),
+    })
+  ) {
+    throw forbidden('you cannot hire agents here');
+  }
+  // A workstation the organization does not use yet counts as one more (the DevOps engineer does not count).
+  const uses = await one(
+    tx,
+    `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
+    [orgId, req.workstationId],
+  );
+  if (!uses) await assertWithinLimit(ctx, tx, orgId, 'workstations');
+  if (extra.registerRole) await extra.registerRole(tx, orgId);
+  const roleKey = extra.roleKeyOf ? await extra.roleKeyOf(tx, orgId) : req.roleKey;
+  const roleDef = await loadRole(tx, orgId, roleKey);
+  if (!roleDef) throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
+  // a role made from someone's private pack is that person's alone
+  if (isOthersPrivateRole(roleDef.definition.source, user.id))
+    throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
+  if (roleDef.definition.key === DEVOPS_ROLE_KEY)
+    throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
+  if (roleDef.definition.key === 'ceo')
+    throw badRequest(
+      'invalid_role',
+      'the CEO is built in: every organization has one, and it cannot be hired',
+    );
+  if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
+    throw badRequest(
+      'invalid_seniority',
+      `${roleDef.definition.name} is available as: ${roleDef.definition.seniorityLevels.join(', ')}`,
+    );
+  }
+  if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [orgId, req.name])) {
+    throw conflict(
+      'name_taken',
+      `the name '${req.name}' is already used in this organization (retired agents keep their names)`,
+    );
+  }
+  // Without an explicit runtime, an agent hired on the simulated workstation (or in a simulation organization) is a mock
+  // agent: the simulated runner has no model to call, and real model names there only produce failing shifts.
+  const simulated =
+    !!ws.simulation_org_id ||
+    !!(await one(tx, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId]));
+  const dm =
+    req.runtime === undefined && simulated
+      ? { ...roleDef.definition.defaultModel, runtime: 'mock' as const, model: 'mock' }
+      : roleDef.definition.defaultModel;
+  const unsandboxedAck = await sandboxGate(
+    ctx,
+    tx,
+    user.id,
+    req.workstationId,
+    req.runtime ?? dm.runtime,
+    req.acknowledgeUnsandboxed,
+    { roleKey: roleDef.key, permissions: roleDef.definition.permissions, model: req.model ?? dm.model },
+  );
+  // Skills named in the hire (typed by hand) are stored as the registry knows them: a bare pack skill name gets its pack.
+  const base = req.skills
+    ? await qualifiedSkillKeys(tx, orgId, req.skills, { projectId: anchor ?? null, userId: user.id })
+    : roleDef.definition.skills;
+  const skills = [...new Set([...base, ...(extra.addSkills ?? [])])];
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.agent(agentId),
+        event: {
+          type: 'AgentHired',
+          payload: {
+            agentId,
+            orgId,
+            ...(req.projectId ? { projectId: req.projectId } : {}),
+            allowedProjectIds: allowedList,
+            ...(focus.length ? { focusProjectIds: focus } : {}),
+            hiredByUserId: user.id,
+            workstationId: req.workstationId,
+            name: req.name,
+            roleKey: roleDef.key,
+            roleVersion: roleDef.version,
+            seniority: req.seniority,
+            runtime: req.runtime ?? dm.runtime,
+            model: req.model ?? dm.model,
+            effort: req.effort ?? dm.effort,
+            skills,
+            permissions: extra.permissions ?? roleDef.definition.permissions,
+            capacity: req.capacity,
+            isDevops: false,
+            avatarSeed: randomAvatarSeed(),
+            avatarStyle: DEFAULT_AVATAR_STYLE,
+            ...(unsandboxedAck ? { unsandboxedAck } : {}),
+            ...(extra.provenance ? { provenance: extra.provenance } : {}),
+            ...(extra.packPersona ? { packPersona: extra.packPersona } : {}),
+          },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(orgId),
+      },
+    ],
+    { tx },
+  );
+  return { orgId, roleKey: roleDef.key, skills, name: req.name };
 }
 
 /**

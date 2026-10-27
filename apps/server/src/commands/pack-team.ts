@@ -12,9 +12,9 @@ import {
   type PackSnapshot,
   type PackTeamAgentDto,
   type PackTeamResponse,
-  permissionsForPersona,
   RoleDefinitionSchema,
   roleForPackAgent,
+  runnerAtLeast,
   type Seniority,
   streamId,
   suggestSeat,
@@ -32,7 +32,7 @@ import { assertWithinLimit } from '../orgs/limits.ts';
 import { hireAgentIn } from './agents.ts';
 import { orgScope, userActor } from './common.ts';
 import { BUILTIN_ROLE_KEYS, BUILTIN_WORKFLOW_KEYS, nextVersion } from './designer.ts';
-import { isTrustedRow, packEvent } from './pack-support.ts';
+import { isTrustedRow, packEvent, pluginItemAwaiting } from './pack-support.ts';
 
 /**
  * Pack agents on seats and the whole team of a pack (docs/ARCHITECTURE.md section 38.14). A pack agent is a persona, or a skill
@@ -43,10 +43,16 @@ import { isTrustedRow, packEvent } from './pack-support.ts';
 
 const MAX_INSTANCES = 60;
 
+/** The first runner that reads the pack agent fields of a brief. */
+export const MIN_RUNNER_FOR_PACK_SEATS = '0.1.62';
+
 const shortKey = (packName: string, key: string): string =>
   key.startsWith(`${packName}:`) ? key.slice(packName.length + 1) : key;
 
-/** Organization packs only: a private pack's agents keep the older "hire from pack" (they need the owner's grant to be loaded). */
+/**
+ * Organization packs only: a private pack's agents keep the older "hire from pack" (they need the owner's grant to be loaded).
+ * A pack added to one project is visible only to people on that project, like in the registry.
+ */
 async function orgPack(db: Queryable, who: Who, packId: string): Promise<Row> {
   const p = await one(
     db,
@@ -54,6 +60,16 @@ async function orgPack(db: Queryable, who: Who, packId: string): Promise<Row> {
     [packId, who.orgId],
   );
   if (!p) throw notFound('pack not found');
+  if (p.scope === 'project') {
+    const on = p.project_id
+      ? await one(
+          db,
+          `SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,
+          [p.project_id, who.userId],
+        )
+      : null;
+    if (!on) throw notFound('pack not found');
+  }
   return p;
 }
 
@@ -71,16 +87,26 @@ export interface PackAgentDescriptor {
   marked: boolean;
 }
 
-/** A name that is safe to put in a prompt: letters, digits, spaces and a little punctuation, at most 60 characters. */
+/**
+ * The default name of a pack agent, as it enters "You are <name>" in unfenced instructions: at most three plain words of letters
+ * and digits (a first name, a title). Anything else a pack puts there (sentences, punctuation, line breaks, an instruction) is
+ * not used: the name is made from the key, which is lowercase letters, digits and hyphens.
+ */
 export function safeAgentName(raw: string, fallback: string): string {
-  const t = raw
-    .replace(/[^\p{L}\p{N} ._'()-]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 60)
-    .trim();
-  return t || fallback;
+  const t = raw.trim();
+  const words = t.split(/ +/);
+  const plain = /^[\p{L}\p{N}][\p{L}\p{N}.'-]*$/u;
+  if (t.length > 0 && t.length <= 30 && words.length <= 3 && words.every((w) => plain.test(w))) return t;
+  return fallback.split(' ').slice(0, 3).join(' ').slice(0, 30).trim() || 'Agent';
 }
+
+/** What a hire gets besides the seat's skills when the request names none: the persona's own declared skills of this pack. */
+const defaultSkillsOf = (
+  a: PackAgentDescriptor,
+  skillKeys: ReadonlySet<string>,
+  agentKeys: ReadonlySet<string>,
+): string[] =>
+  (a.item.declaredSkills ?? []).filter((k) => skillKeys.has(k) && !agentKeys.has(k) && k !== a.key);
 
 /** The pack's agents: its personas, and the skills the Owner marked as agents. */
 export function packAgentsOf(p: Row): PackAgentDescriptor[] {
@@ -88,6 +114,7 @@ export function packAgentsOf(p: Row): PackAgentDescriptor[] {
   const marked = new Set(classificationOf(p).agents);
   const out: PackAgentDescriptor[] = [];
   for (const i of items) {
+    if (pluginItemAwaiting(p, i)) continue;
     const key = shortKey(p.name, i.key);
     if (i.kind === 'persona') out.push({ key, kind: 'persona', item: i, name: i.name, marked: false });
     else if (i.kind === 'skill' && marked.has(key))
@@ -180,9 +207,11 @@ export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<Pack
         skillRefs: (a.item.skillRefs ?? []).filter(
           (k) => skillKeys.has(k) && !agentKeys.has(k) && k !== a.key,
         ),
+        defaultSkills: defaultSkillsOf(a, skillKeys, agentKeys),
         agentSkill: a.kind === 'skill' ? a.key : null,
         hiredAgentIds: hired.filter((h) => h.key === a.key).map((h) => h.id as string),
         marked: a.marked,
+        group: a.item.group ?? null,
       }))
     : [];
   return {
@@ -192,21 +221,25 @@ export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<Pack
     seats: PACK_SEAT_KEYS.map((key) => ({ key, name: SEAT_NAMES.get(key) ?? key })),
     agents,
     skills: show
-      ? skillItems.map((i) => {
-          const key = shortKey(p.name, i.key);
-          return {
-            key,
-            name: i.displayName ?? i.name,
-            description: i.description,
-            class: cls.agents.includes(key)
-              ? ('agent' as const)
-              : cls.playbooks.includes(key)
-                ? ('playbook' as const)
-                : ('skill' as const),
-            marked: cls.agents.includes(key) || cls.playbooks.includes(key),
-          };
-        })
+      ? skillItems
+          .filter((i) => !pluginItemAwaiting(p, i))
+          .map((i) => {
+            const key = shortKey(p.name, i.key);
+            return {
+              key,
+              name: i.displayName ?? i.name,
+              description: i.description,
+              class: cls.agents.includes(key)
+                ? ('agent' as const)
+                : cls.playbooks.includes(key)
+                  ? ('playbook' as const)
+                  : ('skill' as const),
+              marked: cls.agents.includes(key) || cls.playbooks.includes(key),
+              group: i.group ?? null,
+            };
+          })
       : [],
+    pendingPluginItems: items.filter((i) => pluginItemAwaiting(p, i)).length,
     classification: cls,
   };
 }
@@ -221,7 +254,6 @@ async function ensureOwnRole(
   userId: string,
   p: Row,
   a: PackAgentDescriptor,
-  hirerMayWiden: boolean,
 ): Promise<string> {
   const snap = snapshotOf(p) as PackSnapshot;
   const def = roleForPackAgent({
@@ -232,14 +264,15 @@ async function ensureOwnRole(
     hash: a.item.hash,
     sha: p.pinned_sha,
     ref: snap.ref ?? null,
-    tools: a.kind === 'persona' ? a.item.tools : undefined,
     version: 1,
   });
   if ((BUILTIN_ROLE_KEYS as readonly string[]).includes(def.key))
     throw badRequest('builtin_key', `'${def.key}' is a built-in role: rename the pack`);
   const existing = await loadRole(tx, orgId, def.key);
   if (existing) {
-    if (existing.definition.source?.packId === p.id) return existing.definition.key;
+    // only a role of this kind: the older hire-from-pack makes roles that hold a persona's text, and they are not reused here
+    if (existing.definition.source?.packId === p.id && existing.definition.source?.roleKind === 'agent')
+      return existing.definition.key;
     throw conflict(
       'role_key_taken',
       `a role '${def.key}' already exists and was not made from this pack: rename the pack and try again`,
@@ -254,7 +287,6 @@ async function ensureOwnRole(
   }).filter((i) => i.severity === 'error');
   if (issues.length)
     throw badRequest('invalid_agent', `"${a.key}" cannot become a role: ${issues[0]?.message}`);
-  void hirerMayWiden;
   await ctx.store.append(
     [
       {
@@ -302,12 +334,23 @@ export async function hirePackAgents(
   const hireId = randomUUID();
   const agents: HirePackAgentsResponse['agents'] = [];
   await withAppendTx(ctx.pool, async (tx) => {
-    const p = await one(
-      tx,
-      `SELECT * FROM packs WHERE id=$1 AND org_id=$2 AND removed_at IS NULL AND visibility='org' FOR SHARE`,
-      [packId, who.orgId],
-    );
-    if (!p) throw notFound('pack not found');
+    const p = await orgPack(tx, who, packId);
+    if (p.scope === 'project' && !(req.allowedProjectIds ?? []).includes(p.project_id))
+      throw badRequest(
+        'project_pack',
+        'this pack belongs to one project: hire for that project (allowedProjectIds)',
+      );
+    // The seat's instructions and the brief block need a runner that knows them; an older one would hire an agent that ignores them.
+    const ws = await one(tx, 'SELECT runner_version FROM workstations WHERE id=$1 AND user_id=$2', [
+      req.workstationId,
+      user.id,
+    ]);
+    if (!ws) throw notFound('workstation not found');
+    if (!runnerAtLeast(ws.runner_version, MIN_RUNNER_FOR_PACK_SEATS))
+      throw conflict(
+        'runner_too_old',
+        `the runner on that workstation (${ws.runner_version ?? 'unknown'}) is older than ${MIN_RUNNER_FOR_PACK_SEATS}: update it, or choose another workstation`,
+      );
     if (!p.pinned_sha || !isTrustedRow(p))
       throw conflict('pack_not_trusted', 'the pack has to be approved before agents can be hired from it');
     const snap = snapshotOf(p) as PackSnapshot;
@@ -329,9 +372,8 @@ export async function hirePackAgents(
       if (!a) throw badRequest('unknown_agent', `the pack has no agent "${it.key}"`);
       for (const s of it.skills ?? [])
         if (!skillKeys.has(s)) throw badRequest('unknown_skill', `the pack has no skill "${s}"`);
-      const chosen =
-        it.skills ??
-        (a.item.skillRefs ?? []).filter((k) => skillKeys.has(k) && !available.has(k) && k !== a.key);
+      // Omitted: the persona's own declared skills. What the files merely mention (`skillRefs`) is a hint for the form, never granted.
+      const chosen = it.skills ?? defaultSkillsOf(a, skillKeys, new Set(available.keys()));
       const skills = [
         ...new Set([...(a.kind === 'skill' ? [a.key] : []), ...chosen].map((k) => `${p.name}:${k}`)),
       ];
@@ -366,7 +408,7 @@ export async function hirePackAgents(
             throw conflict('name_taken', `the name '${it.name}' is already used in this organization`);
           taken.add(it.name.toLowerCase());
           name = it.name;
-        } else name = free(it.name ? safeAgentName(it.name, defaultName) : defaultName);
+        } else name = free(it.name ?? defaultName);
         const ref: PackPersonaRef = {
           packId: p.id,
           packName: p.name,
@@ -399,14 +441,9 @@ export async function hirePackAgents(
           {
             packPersona: ref,
             addSkills: skills,
+            // the role of its own is read only, and so is the agent: a pack's declared tools never widen anything
             ...(own
-              ? {
-                  roleKeyOf: async (t: Tx, orgId: string) =>
-                    ensureOwnRole(ctx, t, orgId, user.id, p, a, manager),
-                  permissions: permissionsForPersona(a.kind === 'persona' ? a.item.tools : undefined, {
-                    mayWiden: manager,
-                  }).permissions,
-                }
+              ? { roleKeyOf: async (t: Tx, orgId: string) => ensureOwnRole(ctx, t, orgId, user.id, p, a) }
               : {}),
           },
           agentId,

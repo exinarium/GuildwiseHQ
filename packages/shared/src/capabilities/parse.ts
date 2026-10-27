@@ -73,6 +73,8 @@ const MetaExtras = {
    * pack approved before they were read keeps working (without them) until the Owner approves them.
    */
   layout: z.literal('plugin').optional(),
+  /** The plugin folder an item of a Claude Code plugin belongs to (`backend-development`), for grouping a large marketplace. */
+  group: z.string().max(64).optional(),
   /** A persona's own `skills:` list, limited to skills of the same pack: the default skills of a hire. */
   declaredSkills: z.array(z.string().max(64)).max(40).optional(),
   /** A pack skill the Owner marked as a playbook is listed as one; this says it is loaded as a skill (`aom skill show <key>`). */
@@ -200,6 +202,7 @@ interface Base {
   skillRefs?: string[];
   declaredSkills?: string[];
   layout?: 'plugin';
+  group?: string;
   /** Path of the file that carries the frontmatter, relative to the capability root (`SKILL.md`, `<key>.md`, `workflow.md`). */
   main: string;
   /** Every file of the capability, by path relative to its root. */

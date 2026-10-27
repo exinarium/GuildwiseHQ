@@ -67,6 +67,16 @@ async function usablePackFor(db: Queryable, userId: string, orgId: string, packI
 const shortKey = (packName: string, key: string): string =>
   key.startsWith(`${packName}:`) ? key.slice(packName.length + 1) : key;
 
+/** Skills the Owner marked as agents: hirable from the pack too (on a seat). */
+const markedAgentCount = (p: Row): number => {
+  const marked = new Set(
+    ((p.classification as { agents?: string[] } | null)?.agents ?? []).map((k) => `${p.name}:${k}`),
+  );
+  return ((p.snapshot as PackSnapshot | null)?.items ?? []).filter(
+    (i) => i.kind === 'skill' && marked.has(i.key),
+  ).length;
+};
+
 const personaItems = (p: Row): PackItem[] =>
   ((p.snapshot as PackSnapshot | null)?.items ?? []).filter((i) => i.kind === 'persona');
 
@@ -103,7 +113,7 @@ export async function listHirablePacks(ctx: Ctx, who: Who): Promise<HirablePacks
       .map((p) => ({
         id: p.id as string,
         name: p.name as string,
-        personaCount: personaItems(p).length,
+        personaCount: personaItems(p).length + markedAgentCount(p),
         visibility: p.visibility as 'org' | 'private',
       }))
       .filter((p) => p.personaCount > 0),
@@ -389,6 +399,12 @@ export async function ensureRole(
   if ((BUILTIN_ROLE_KEYS as readonly string[]).includes(key))
     throw badRequest('builtin_key', `'${key}' is a built-in role: rename the pack`);
   const existing = await loadRole(tx as never, orgId, key);
+  // a role of its own (a pack agent hired without a seat, holding no pack text) is never taken for the role of a persona
+  if (existing?.definition.source?.roleKind === 'agent')
+    throw conflict(
+      'role_key_taken',
+      `a role '${key}' already exists and was not made from this persona: rename the pack and try again`,
+    );
   if (existing?.definition.source?.hash === read.hash && existing.definition.source.packId === p.id)
     return existing.definition;
   // A pack adds versions only to a role that IS its own. A role of the same key that came from another pack, from the role

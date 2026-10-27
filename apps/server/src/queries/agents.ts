@@ -5,7 +5,7 @@ import { iso, type Row, rows } from '../db/sql.ts';
 export function toAgentDto(
   a: Row,
   active: Array<{ cardId: string; ref: string; title: string }>,
-  warning: 'revoked' | 'removed' | null = null,
+  warning: 'revoked' | 'removed' | 'missing' | null = null,
 ): AgentDto {
   const seat = a.pack_persona as PackPersonaRef | null | undefined;
   // An agent on a seat has no role made from the pack, but it shows the same tag and the same warning as one that has.
@@ -18,7 +18,7 @@ export function toAgentDto(
           capability: seat.key,
           ref: seat.ref ?? null,
           sha: seat.sha,
-          hash: seat.hash ?? '0'.repeat(64),
+          hash: seat.hash,
           visibility: 'org',
         } satisfies PackProvenance)
       : null);
@@ -124,19 +124,23 @@ export async function listAgents(
   const packs = packIds.length
     ? await rows(
         ctx.pool,
-        `SELECT id, removed_at, visibility, pinned_sha, content_hash, trusted, trusted_sha, trusted_hash FROM packs WHERE id = ANY($1::uuid[])`,
+        `SELECT id, removed_at, visibility, pinned_sha, content_hash, trusted, trusted_sha, trusted_hash,
+                ARRAY(SELECT i->>'key' FROM jsonb_array_elements(COALESCE(snapshot->'items','[]'::jsonb)) i) AS item_keys
+           FROM packs WHERE id = ANY($1::uuid[])`,
         [packIds],
       )
     : [];
-  const warningOf = (a: Row): 'revoked' | 'removed' | null => {
+  const warningOf = (a: Row): 'revoked' | 'removed' | 'missing' | null => {
     const id = (a.provenance?.packId ?? a.pack_persona?.packId) as string | undefined;
     if (!id) return null;
     const p = packs.find((x) => x.id === id);
     if (!p || p.removed_at) return 'removed';
     if (p.visibility === 'private') return null;
-    return p.trusted && p.trusted_sha === p.pinned_sha && p.trusted_hash === p.content_hash
-      ? null
-      : 'revoked';
+    if (!(p.trusted && p.trusted_sha === p.pinned_sha && p.trusted_hash === p.content_hash)) return 'revoked';
+    // an agent on a seat follows the pack: when an update dropped the pack agent it works as, say so
+    const seat = a.pack_persona as PackPersonaRef | null | undefined;
+    if (seat && !(p.item_keys as string[]).includes(`${seat.packName}:${seat.key}`)) return 'missing';
+    return null;
   };
   return list
     .filter((a) => !department || a.department === department)

@@ -39,11 +39,9 @@ describe('suggested seats', () => {
     it(`${key} -> ${seat}`, () => {
       expect(suggestSeat({ key, name, ...(description ? { description } : {}) })).toBe(seat);
     });
-  it('uses the description only when the name says nothing, and never suggests ceo or devops', () => {
-    expect(suggestSeat({ key: 'helper', name: 'Helper', description: 'Reviews pull requests' })).toBe(
-      'reviewer',
-    );
-    expect(suggestSeat({ key: 'dev-ops', name: 'Ops', description: 'engineer' })).toBe('builder');
+  it('never suggests a seat from the description alone, nor ceo or devops', () => {
+    expect(suggestSeat({ key: 'helper', name: 'Helper', description: 'Reviews pull requests' })).toBe('own');
+    expect(suggestSeat({ key: 'x', name: 'Builder' })).toBe('builder');
     expect(PACK_SEAT_KEYS).not.toContain('ceo');
     expect(PACK_SEAT_KEYS).not.toContain('devops');
   });
@@ -92,6 +90,7 @@ describe('the pack agent block and the handles line', () => {
     kind: 'skill',
     name: 'Mary',
     sha: 'a'.repeat(40),
+    hash: 'b'.repeat(64),
     ref: null,
   });
   it('is fenced and says the role wins', () => {
@@ -156,6 +155,7 @@ describe('new optional fields stay replay-safe', () => {
         kind: 'skill',
         name: 'Mary',
         sha: 'a'.repeat(40),
+        hash: 'b'.repeat(64),
       },
     };
     const r = DomainEventSchema.safeParse({ type: 'AgentHired', payload: withPack });

@@ -182,6 +182,8 @@ export const PackTeamAgentDtoSchema = z.object({
   hiredAgentIds: z.array(z.uuid()),
   /** A skill the Owner marked as an agent (as against a persona or a skill that declares itself one). */
   marked: z.boolean(),
+  /** The plugin folder the agent belongs to (`backend-development`) for grouping a large marketplace; null for other layouts. */
+  group: z.string().nullable(),
 });
 export type PackTeamAgentDto = z.infer<typeof PackTeamAgentDtoSchema>;
 
@@ -201,8 +203,14 @@ export const PackTeamResponseSchema = z.object({
       /** The skill's own class: `agent` (marked or declared), `playbook` (marked), else `skill`. */
       class: z.enum(['agent', 'playbook', 'skill']),
       marked: z.boolean(),
+      group: z.string().nullable(),
     }),
   ),
+  /**
+   * Items read from the Claude Code plugin layout that wait for the Owner's approval (a pack approved before that layout was read
+   * keeps working without them): approve the pack's current content hash to unlock them. 0 when nothing waits.
+   */
+  pendingPluginItems: z.number().int().default(0),
   classification: PackClassificationSchema,
 });
 export type PackTeamResponse = z.infer<typeof PackTeamResponseSchema>;

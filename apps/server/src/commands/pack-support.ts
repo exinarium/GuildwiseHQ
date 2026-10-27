@@ -78,3 +78,12 @@ export async function packWorkstations(
 export const isTrustedRow = (r: Row): boolean =>
   r.visibility === 'private' ||
   (!!r.trusted && r.trusted_sha === r.pinned_sha && r.trusted_hash === r.content_hash);
+
+/**
+ * An item of the Claude Code plugin layout in a pack that was approved before that layout was read: it is listed, but waits for the
+ * Owner to approve the pack's current content hash (`PackLayoutRead`). Private packs need no approval.
+ */
+export const pluginItemAwaiting = (p: Row, item: { layout?: string | undefined }): boolean =>
+  item.layout === 'plugin' &&
+  p.visibility !== 'private' &&
+  p.trusted_hash !== (p.snapshot as { contentHash?: string } | null)?.contentHash;

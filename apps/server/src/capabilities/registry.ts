@@ -9,6 +9,7 @@ import {
   isPackedKey,
   mergeRegistry,
   type PackItem,
+  type PackSnapshot,
   type ParsedCapability,
   type RunnerToServerOf,
   streamId,
@@ -91,6 +92,7 @@ async function packItems(db: Queryable, orgId: string, projectId?: string, userI
   }> = [];
   for (const p of packs) {
     const u = packUsable(p as never);
+    const snapshotHash = (p.snapshot as PackSnapshot | null)?.contentHash;
     // Skills the Owner marked as playbooks are listed as playbooks (loaded as skills: `loadAs`), so the `/` menu and a guided
     // session treat them like any playbook. Metadata only; the skill's files and key are untouched.
     const asPlaybook = new Set<string>(
@@ -102,10 +104,13 @@ async function packItems(db: Queryable, orgId: string, projectId?: string, userI
         i.kind === 'skill' && asPlaybook.has(i.key)
           ? { ...(meta as CapabilityMeta), kind: 'playbook', loadAs: 'skill' }
           : (meta as CapabilityMeta);
+      // A pack approved before the Claude Code plugin layout was read keeps working without the items of that layout; they wait
+      // for the Owner to approve the full hash of the snapshot that lists them.
+      const awaiting = i.layout === 'plugin' && p.visibility !== 'private' && p.trusted_hash !== snapshotHash;
       out.push({
         meta: listed,
-        usable: u.usable,
-        ...(u.reason ? { reason: u.reason } : {}),
+        usable: u.usable && !awaiting,
+        ...(u.reason ? { reason: u.reason } : awaiting ? { reason: 'untrusted' as const } : {}),
         packId: p.id,
         sha: p.pinned_sha,
         visibility: p.visibility as 'org' | 'private',

@@ -9,6 +9,7 @@ export const skillMd = (name: string) =>
 export function smallMarketplace(): Record<string, string> {
   return {
     LICENSE: 'MIT License\n\nCopyright (c) 2025 Example Maintainers\n',
+    '.claude-plugin/marketplace.json': '{"name":"market","plugins":[]}',
     'agents/root-helper.md': subagent(
       'root-helper',
       'A helper at the root.',
@@ -39,7 +40,10 @@ export function smallMarketplace(): Record<string, string> {
 
 /** About what github.com/wshobson/agents holds: 200 agents, 100 skills, 80 commands over 60 plugins. */
 export function bigMarketplace(): Record<string, string> {
-  const tree: Record<string, string> = { LICENSE: 'MIT License\n\nCopyright (c) 2025 Example\n' };
+  const tree: Record<string, string> = {
+    LICENSE: 'MIT License\n\nCopyright (c) 2025 Example\n',
+    '.claude-plugin/marketplace.json': '{"plugins":[]}',
+  };
   for (let i = 0; i < 60; i++) {
     const p = `plugin-${i}`;
     for (let a = 0; a < 3; a++)

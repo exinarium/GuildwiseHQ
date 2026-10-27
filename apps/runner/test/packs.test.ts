@@ -325,6 +325,7 @@ describe('git packs', () => {
 
 describe('a pack agent on a seat (plugin layout and agent skills)', () => {
   const tree = {
+    'plugins/qa/.claude-plugin/plugin.json': '{}',
     'plugins/qa/agents/test-runner.md':
       '---\nname: test-runner\ndescription: Runs tests.\n---\n\nYou run tests.\n',
     'plugins/qa/commands/run-suite.md': '---\ndescription: Run the suite\n---\n# Run\n\nRun it.\n',
@@ -363,6 +364,46 @@ describe('a pack agent on a seat (plugin layout and agent skills)', () => {
     expect(readFileSync(join(dest, 'skills/sample-crew-agent-analyst/SKILL.md'), 'utf8')).toMatch(
       /UNTRUSTED CONTENT/,
     );
+  });
+});
+
+describe('a pack approved before the plugin layout was read', () => {
+  const tree = {
+    'skills/old/SKILL.md': '---\nname: old\ndescription: Old.\n---\nx\n',
+    '.claude-plugin/plugin.json': '{}',
+    'agents/guide.md': '---\nname: guide\ndescription: Guides.\n---\n\nYou guide.\n',
+    'commands/go.md': '# Go\n\nGo.\n',
+  };
+  async function loaded(trusted: 'legacy' | 'full' | 'other') {
+    const remote = makeRemote(tree);
+    const a = manager();
+    await a.m.sync([desired(remote.url)]);
+    const snap = a.reports.find((x) => x.state === 'resolved')?.snapshot;
+    if (!snap?.legacyContentHash) throw new Error('no legacy hash');
+    const hash =
+      trusted === 'legacy' ? snap.legacyContentHash : trusted === 'full' ? snap.contentHash : 'f'.repeat(64);
+    await a.m.sync([
+      desired(remote.url, { pinnedSha: snap.sha, trusted: { sha: snap.sha, contentHash: hash } }),
+    ]);
+    return { a, snap, reg: new CapabilityRegistry({ packs: a.m }) };
+  }
+  it('keeps serving what was approved, without the plugin items, and flags no integrity failure', async () => {
+    const { a, reg } = await loaded('legacy');
+    expect(a.reports.some((x) => x.state === 'integrity')).toBe(false);
+    expect(a.m.summary()[0]).toMatchObject({ usable: true, integrity: 'ok' });
+    expect(reg.show('skill:sample:old').ok).toBe(true);
+    expect(reg.show('persona:sample:guide').ok).toBe(false);
+    expect(reg.show('playbook:sample:go').ok).toBe(false);
+  });
+  it('serves the plugin items once the full hash is approved', async () => {
+    const { reg } = await loaded('full');
+    expect(reg.show('persona:sample:guide').ok).toBe(true);
+    expect(reg.show('playbook:sample:go').ok).toBe(true);
+  });
+  it('still refuses files that match neither hash', async () => {
+    const { a, reg } = await loaded('other');
+    expect(a.m.summary()[0]).toMatchObject({ usable: false, integrity: 'mismatch' });
+    expect(reg.show('skill:sample:old').ok).toBe(false);
   });
 });
 

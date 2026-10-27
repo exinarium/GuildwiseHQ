@@ -52,6 +52,8 @@ export const SlashCommandSchema = z.object({
    * (`aom skill show <key>`; one step), so a chat instruction for it uses that ref (`playbookChatInstruction`'s `loadAs`).
    */
   loadAs: z.literal('skill').optional(),
+  /** The pack the capability comes from (its name), when it comes from one. */
+  packName: z.string().optional(),
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 

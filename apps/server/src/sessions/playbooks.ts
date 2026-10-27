@@ -91,6 +91,7 @@ export async function slashCommands(
         : {}),
       canStartSession: i.kind === 'playbook',
       ...(i.loadAs ? { loadAs: i.loadAs } : {}),
+      ...(i.pack ? { packName: i.pack } : {}),
     });
   }
   // playbooks first, then skills; each by name

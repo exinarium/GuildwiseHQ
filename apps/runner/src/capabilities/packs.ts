@@ -532,8 +532,7 @@ esac
   /** Compares the indexed content with what the owner approved. */
   private judge(l: Loaded): Loaded {
     const t = l.desired.trusted;
-    if (t && l.snapshot && l.sha === t.sha && l.snapshot.contentHash !== t.contentHash)
-      l.integrity = 'mismatch';
+    if (t && l.snapshot && l.sha === t.sha && this.approval(l) === 'none') l.integrity = 'mismatch';
     // an authored revision is named by its content hash: files that no longer hash to their own name were changed by hand
     else if (l.desired.source === 'authored' && l.snapshot && l.sha && l.snapshot.contentHash !== l.sha)
       l.integrity = 'mismatch';
@@ -546,7 +545,28 @@ esac
     // a private pack of its owner needs no review: it is theirs, on their workstation
     if (l.desired.visibility === 'private') return !l.desired.pinnedSha || l.sha === l.desired.pinnedSha;
     const t = l.desired.trusted;
-    return !!(t && l.sha === t.sha && l.snapshot.contentHash === t.contentHash);
+    return !!(t && l.sha === t.sha && this.approval(l) !== 'none');
+  }
+
+  /**
+   * How the owner's approval covers the files on disk: `full` (the hash of everything this reader sees), `legacy` (approved
+   * before the Claude Code plugin layout was read: the hash without the items of that layout, which are then not served until the
+   * owner approves the full hash), or `none`.
+   */
+  private approval(l: Loaded): 'full' | 'legacy' | 'none' {
+    const t = l.desired.trusted;
+    if (!t || !l.snapshot) return 'none';
+    if (l.snapshot.contentHash === t.contentHash) return 'full';
+    if (l.snapshot.legacyContentHash && l.snapshot.legacyContentHash === t.contentHash) return 'legacy';
+    return 'none';
+  }
+
+  /** The indexed entries this workstation may serve for a pack: all, or without the plugin-layout ones awaiting approval. */
+  private servable(l: Loaded): ParsedCapability[] {
+    const all = l.index?.entries ?? [];
+    return l.desired.visibility !== 'private' && this.approval(l) === 'legacy'
+      ? all.filter((e) => e.layout !== 'plugin')
+      : all;
   }
 
   /**
@@ -900,7 +920,7 @@ esac
     this.verify(l);
     if (!this.usable(l) || !l.index)
       return { ok: false, error: 'the pack is not approved or its files changed on this workstation' };
-    const e = l.index.entries.find((x) => x.kind === 'persona' && x.key === `${l.desired.name}:${key}`);
+    const e = this.servable(l).find((x) => x.kind === 'persona' && x.key === `${l.desired.name}:${key}`);
     if (!e?.files[e.main]) return { ok: false, error: `the pack has no persona "${key}"` };
     return { ok: true, text: e.files[e.main], hash: e.hash, sha: l.sha as never };
   }
@@ -1000,7 +1020,7 @@ esac
       if (l.desired.scope === 'project' && l.desired.projectId !== (projectId ?? null)) continue;
       this.verify(l);
       if (!this.usable(l) || !l.index) continue;
-      for (const e of l.index.entries) {
+      for (const e of this.servable(l)) {
         if (l.desired.scriptsEnabled || !e.hasScripts) {
           out.push(e);
           continue;
