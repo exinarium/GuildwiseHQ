@@ -286,6 +286,7 @@ describe('the /videos limits per address (security review finding 15)', () => {
 
 describe('the /videos body timers (paused videos are not cut)', () => {
   const BIG = 24 * 1024 * 1024;
+  const SMALL = 4 * 1024 * 1024; // fully received by the proxy while the client reads nothing
   const IDLE = 300;
   const PAUSE_MAX = 1500;
   const bigByte = (i: number) => i % 251;
@@ -307,6 +308,11 @@ describe('the /videos body timers (paused videos are not cut)', () => {
       if (req.url?.startsWith('/videos/stall')) {
         res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '1000000' });
         res.write(Buffer.alloc(100, 1)); // then silence
+        return;
+      }
+      if (req.url?.startsWith('/videos/small')) {
+        res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': String(SMALL) });
+        res.end(Buffer.alloc(SMALL, 3));
         return;
       }
       const m = /^bytes=(\d+)-(\d*)$/.exec(String(req.headers.range ?? ''));
@@ -404,6 +410,45 @@ describe('the /videos body timers (paused videos are not cut)', () => {
     expect((await end).complete).toBe(false); // truncated: the browser re-requests a Range
     await waitFor(() => upSockets.size === 0);
   });
+
+  it('closes a small, fully-received body that the client never reads once the pause cap is over', async () => {
+    const r = await open('/videos/small.mp4');
+    expect(r.statusCode).toBe(200);
+    r.pause();
+    await sleep(IDLE * 2);
+    expect(await status('/videos/big.mp4')).toBe(429); // slot still held
+    const t = Date.now();
+    let freed = false;
+    while (!freed && Date.now() - t < PAUSE_MAX + 2000) {
+      await sleep(100);
+      freed = (await status('/videos/small.mp4?p=1')) === 200;
+    }
+    expect(freed).toBe(true);
+    r.destroy();
+  });
+
+  it('a slow but steady reader is not cut even when the total time is over the pause cap', async () => {
+    const r = await open('/videos/big.mp4');
+    expect(r.statusCode).toBe(200);
+    const parts: Buffer[] = [];
+    const t = Date.now();
+    r.on('error', () => undefined);
+    r.on('data', (c: Buffer) => parts.push(c));
+    const closed = new Promise((res) => r.on('close', res));
+    let n = 0;
+    while (!r.complete && (Date.now() - t < PAUSE_MAX + 800 || n < 6)) {
+      r.pause();
+      await sleep(PAUSE_MAX / 3); // each pause is shorter than the cap
+      r.resume();
+      await sleep(40);
+      n++;
+    }
+    r.resume();
+    await closed;
+    const body = Buffer.concat(parts);
+    expect(r.complete).toBe(true);
+    expect(sha(body)).toBe(sha(bigBuf));
+  }, 20_000);
 
   it('a client that resumes after more than the idle time gets the rest of the body intact', async () => {
     const r = await open('/videos/big.mp4');

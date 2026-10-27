@@ -201,6 +201,7 @@ export function registerMediaProxy(
             // `res` would start it flowing before Fastify pipes it, and lose bytes).
             let lastChunk = Date.now();
             let heldSince: number | null = null;
+            let lastWritten = 0;
             const meter = new Transform({
               transform(chunk, _enc, cb) {
                 lastChunk = Date.now();
@@ -212,7 +213,10 @@ export function registerMediaProxy(
             reply.raw.once('finish', stopWatchdog);
             watchdog = setInterval(() => {
               const now = Date.now();
-              if (res.complete) return;
+              // Bytes that reached the client's socket since the last tick: a slow reader is progress, not a pause.
+              const written = reply.raw.socket?.bytesWritten ?? 0;
+              const progressed = written > lastWritten;
+              lastWritten = written;
               // Held up by the client (paused / not draining): not upstream silence, but not forever either.
               if (
                 res.isPaused() ||
@@ -220,7 +224,8 @@ export function registerMediaProxy(
                 meter.writableNeedDrain ||
                 reply.raw.writableNeedDrain
               ) {
-                heldSince ??= now;
+                if (progressed) heldSince = now;
+                else heldSince ??= now;
                 lastChunk = now;
                 if (now - heldSince > pauseMaxMs) {
                   stopWatchdog();
@@ -230,7 +235,8 @@ export function registerMediaProxy(
                 return;
               }
               heldSince = null;
-              if (now - lastChunk > idleMs) {
+              // (a finished upstream cannot go silent: only the pause cap above applies to it)
+              if (!res.complete && now - lastChunk > idleMs) {
                 stopWatchdog();
                 up.destroy(new Error('media timeout'));
                 reply.raw.destroy();
@@ -239,6 +245,13 @@ export function registerMediaProxy(
             watchdog.unref();
           },
         );
+        // The client left before the headers came: stop the upstream request now, not at the connect timeout.
+        reply.raw.once('close', () => {
+          if (!streaming) {
+            done();
+            up.destroy();
+          }
+        });
         up.on('timeout', () => up.destroy(new Error('media timeout')));
         up.on('error', (err) => {
           stopWatchdog();
