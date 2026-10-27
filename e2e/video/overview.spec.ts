@@ -398,7 +398,8 @@ test('record the overview video', async ({ browser }) => {
     await click(page, chip('Blocked'));
     await soft('approval chip', async () => {
       // the chip only exists while a card waits for an approval (the demo has none): skip at once when absent
-      if ((await chip(/^Waiting for my approval/).count()) === 0) throw new Error('no card waits for approval');
+      if ((await chip(/^Waiting for my approval/).count()) === 0)
+        throw new Error('no card waits for approval');
       await click(page, chip(/^Waiting for my approval/));
       await pause(1500);
       await click(page, chip(/^Waiting for my approval/));
