@@ -97,14 +97,14 @@ describe('shift flow with a fake runner', () => {
       baseBranch: 'main',
       remoteUrlNormalized: 'github.com/acme/toy',
     });
-    expect(start.worktree?.branchName).toBe('aom/toy-1-flow-card');
+    expect(start.worktree?.branchName).toBe('guildwise/toy-1-flow-card');
     expect(start.prepare.rebase).toBe(false);
     expect((await cardRow(card.id)).status).toBe('claimed');
 
     await startShift(r, start);
     const wt = await cardRow(card.id);
     expect(wt.worktree_path).toBe('/work/TOY-1');
-    expect(wt.branch_name).toBe('aom/toy-1-flow-card');
+    expect(wt.branch_name).toBe('guildwise/toy-1-flow-card');
     expect(wt.home_workstation_id).toBe(w.workstationId);
 
     const res1 = await report(
@@ -152,7 +152,7 @@ describe('shift flow with a fake runner', () => {
     expect(rs.worktree).toMatchObject({
       mode: 'reuse',
       path: '/work/TOY-1',
-      branchName: 'aom/toy-1-flow-card',
+      branchName: 'guildwise/toy-1-flow-card',
     });
     await startShift(r, rs);
     const ch = await report(r, rs.shiftId, {

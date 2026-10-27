@@ -72,7 +72,7 @@ describe('finalize', () => {
       repoId: w.repoId,
     });
     expect((cmd.payload as any).worktreePath).toBe(`/work/${card.ref}`);
-    expect((cmd.payload as any).branchName).toMatch(/^aom\/toy-|^aom\//);
+    expect((cmd.payload as any).branchName).toMatch(/^guildwise\/toy-/);
 
     result(cmd.commandId, { ok: true, action: 'merge', mergeCommit: 'abc1234567' });
     await until(async () => (await cardRow(card.id)).status === 'done', 3000, 'card finalized');
