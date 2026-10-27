@@ -33,6 +33,7 @@ import {
 import { loadOrg, orgRoleOf, requireFeature } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
+import { qualifiedSkillKeys } from '../capabilities/agent-skills.ts';
 import { isOthersPrivateRole } from '../catalogue/loader.ts';
 import { subworkflowLookupFor } from '../catalogue/subworkflow-lookup.ts';
 import { variantIssues } from '../catalogue/variants.ts';
@@ -615,7 +616,8 @@ export async function extendRole(
               baseVersion: latest.version,
               extensions: {
                 instructions: req.instructions.trim(),
-                skills: [...new Set(req.skills.map((s) => s.trim()))],
+                // an extension applies to every agent on the role: a bare name resolves among the organization's packs only
+                skills: await qualifiedSkillKeys(tx, orgId, req.skills),
                 standingOrders: req.standingOrders.map((s) => s.trim()),
               },
             },

@@ -1,4 +1,10 @@
-import { type AgentPermissions, AgentPermissionsSchema, rebasePermissions, streamId } from '@aom/shared';
+import {
+  type AgentPermissions,
+  AgentPermissionsSchema,
+  rebasePermissions,
+  rebaseSkills,
+  streamId,
+} from '@aom/shared';
 import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
@@ -10,8 +16,9 @@ const SYSTEM = { kind: 'system', id: null } as const;
 /**
  * Agents follow their role. For every active agent (optionally only those of one role key / organization) whose role
  * has a newer active version, append `AgentPermissionsRebased`: the new version's permissions plus the agent's own
- * deviations from the version it was derived from (`newRole + (agent - oldRole)`). The agent's `roleVersion` moves
- * with it, so its instructions follow the role too. Idempotent: an agent already on the current version is untouched.
+ * deviations from the version it was derived from (`newRole + (agent - oldRole)`), and its skills by the same rule. The
+ * agent's `roleVersion` moves with it, so its instructions follow the role too. Idempotent: an agent already on the current
+ * version is untouched.
  */
 export async function rebaseAgentsToCurrentRoles(
   ctx: Ctx,
@@ -20,7 +27,7 @@ export async function rebaseAgentsToCurrentRoles(
   const run = async (tx: Tx): Promise<number> => {
     const agents = await rows(
       tx,
-      `SELECT id, org_id, role_key, role_version, seniority, permissions FROM agents
+      `SELECT id, org_id, role_key, role_version, seniority, permissions, skills FROM agents
         WHERE status <> 'retired' AND ($1::uuid IS NULL OR org_id = $1) AND ($2::text IS NULL OR role_key = $2)`,
       [opts.orgId ?? null, opts.roleKey ?? null],
     );
@@ -58,6 +65,15 @@ export async function rebaseAgentsToCurrentRoles(
         own.data,
         current.definition.permissions,
       );
+      const ownSkills = (a.skills ?? []) as string[];
+      const skills = rebaseSkills(
+        {
+          role: (pinned?.definition as { skills?: string[] } | undefined)?.skills ?? [],
+          known: past.flatMap((p) => (p.definition as { skills?: string[] }).skills ?? []),
+        },
+        ownSkills,
+        current.definition.skills,
+      );
       events.push({
         streamId: streamId.agent(a.id),
         event: {
@@ -69,6 +85,8 @@ export async function rebaseAgentsToCurrentRoles(
             toRoleVersion: current.version,
             previous: own.data,
             permissions: next,
+            skills,
+            previousSkills: ownSkills,
           },
         },
         actor: SYSTEM,

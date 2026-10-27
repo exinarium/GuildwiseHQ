@@ -5,7 +5,20 @@ import {
   hasDeviations,
   permissionDeviations,
   rebasePermissions,
+  rebaseSkills,
 } from '../src/index.ts';
+
+describe('rebaseSkills: newRole + (agent - oldRole)', () => {
+  it("an unedited agent takes the new version's skills", () => {
+    expect(rebaseSkills({ role: ['a', 'b'] }, ['a', 'b'], ['a', 'c'])).toEqual(['a', 'c']);
+  });
+  it('keeps the skills the agent added and leaves out the ones it dropped', () => {
+    expect(rebaseSkills({ role: ['a', 'b'] }, ['a', 'own'], ['a', 'b', 'c'])).toEqual(['a', 'c', 'own']);
+  });
+  it('a skill an older version listed is not taken for one of its own', () => {
+    expect(rebaseSkills({ role: ['a'], known: ['old'] }, ['a', 'old'], ['a', 'new'])).toEqual(['a', 'new']);
+  });
+});
 
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder')!.permissions;
 const v1 = { ...builder, deniedShellPatterns: COMMON_DENIED_SHELL };

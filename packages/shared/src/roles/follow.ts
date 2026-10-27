@@ -98,6 +98,21 @@ export function applyDeviations(role: AgentPermissions, d: PermissionDeviations)
   };
 }
 
+/**
+ * The same rule for skills: the new version's skills, without the ones the agent had dropped from the version it followed,
+ * plus the agent's own additions (a skill no version of the role ever listed). `known` is every skill of the role's versions
+ * up to the one the agent follows, so a skill an older version listed is never taken for the agent's own.
+ */
+export function rebaseSkills(
+  base: { role: string[]; known?: string[] },
+  agent: string[],
+  newRole: string[],
+): string[] {
+  const known = uniq([...base.role, ...(base.known ?? [])]);
+  const removed = minus(base.role, agent);
+  return uniq([...minus(newRole, removed), ...minus(agent, known)]);
+}
+
 /** `newRole + (agent - oldRole)`: the agent's permissions after its role moved to a new version. */
 export function rebasePermissions(
   base: RoleBaseline,

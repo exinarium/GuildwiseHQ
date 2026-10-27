@@ -13,6 +13,8 @@ import {
   parsePersona,
   parsePlaybook,
   parseSkill,
+  qualifySkillKey,
+  qualifySkillKeys,
   renderCapabilityIndex,
   resolveCapabilityRef,
   splitFrontmatter,
@@ -139,6 +141,34 @@ describe('registry merge and refs', () => {
     expect(text).toContain('aom skill show');
     expect(text).toContain('`nope`: not found');
     expect(renderCapabilityIndex([], meta)).toBe('');
+  });
+});
+
+describe('qualifySkillKey: a hand-typed name to the key the registry knows', () => {
+  const reg = [
+    { kind: 'skill' as const, key: 'interview-techniques', source: 'builtin' as const },
+    { kind: 'skill' as const, key: 'bmad-method:bmad-prd', source: 'pack' as const },
+    { kind: 'skill' as const, key: 'bmad-method:bmad-review', source: 'pack' as const },
+    { kind: 'skill' as const, key: 'other:bmad-review', source: 'pack' as const },
+    { kind: 'skill' as const, key: 'acme:interview-techniques', source: 'pack' as const },
+    { kind: 'playbook' as const, key: 'acme:retro', source: 'pack' as const },
+  ];
+  it('gives a bare name the one pack that has it', () => {
+    expect(qualifySkillKey('bmad-prd', reg)).toBe('bmad-method:bmad-prd');
+    expect(qualifySkillKey(' bmad-prd ', reg)).toBe('bmad-method:bmad-prd');
+  });
+  it('keeps full keys, built-in names, names two packs share and names nothing has', () => {
+    expect(qualifySkillKey('bmad-method:bmad-prd', reg)).toBe('bmad-method:bmad-prd');
+    expect(qualifySkillKey('interview-techniques', reg)).toBe('interview-techniques');
+    expect(qualifySkillKey('bmad-review', reg)).toBe('bmad-review');
+    expect(qualifySkillKey('retro', reg)).toBe('retro');
+    expect(qualifySkillKey('nope', reg)).toBe('nope');
+  });
+  it('a list loses duplicates and empty entries', () => {
+    expect(qualifySkillKeys(['bmad-prd', 'bmad-method:bmad-prd', '', 'nope'], reg)).toEqual([
+      'bmad-method:bmad-prd',
+      'nope',
+    ]);
   });
 });
 

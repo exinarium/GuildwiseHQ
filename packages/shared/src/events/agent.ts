@@ -93,6 +93,9 @@ export const agentEvents = [
       toRoleVersion: z.number().int().min(1),
       previous: AgentPermissionsSchema,
       permissions: AgentPermissionsSchema,
+      /** The agent's skills after the move (the role's new skills plus its own); absent in events written before skills followed. */
+      skills: z.array(z.string()).optional(),
+      previousSkills: z.array(z.string()).optional(),
     }),
   ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),

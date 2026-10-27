@@ -151,6 +151,10 @@ export function HireDialog({
     if (!effectiveStation) errs.workstation = 'Pair a workstation first';
     setErrors(errs);
     if (Object.keys(errs).length || !role) return;
+    const typedSkills = skills
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const common = {
       name: name.trim(),
       seniority: effectiveSeniority as 'junior' | 'senior',
@@ -161,10 +165,6 @@ export function HireDialog({
       ...(model.trim() ? { model: model.trim() } : {}),
       ...(effort ? { effort } : {}),
       ...(unsandboxed && ackUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
-      skills: skills
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
       capacity: 1,
     };
     const done = {
@@ -177,8 +177,16 @@ export function HireDialog({
     };
     if (draft) {
       const { permissions: _p, withheld: _w, ...d } = draft;
-      hireDraft.mutate({ ...common, draft: d, ...(starterKey ? { starterKey } : {}) }, done);
-    } else hire.mutate({ ...common, roleKey: role.key }, done);
+      hireDraft.mutate(
+        { ...common, skills: typedSkills, draft: d, ...(starterKey ? { starterKey } : {}) },
+        done,
+      );
+      // an empty box hires with the role's own skills (sending [] would hire with none)
+    } else
+      hire.mutate(
+        { ...common, roleKey: role.key, ...(typedSkills.length ? { skills: typedSkills } : {}) },
+        done,
+      );
   };
 
   return (
@@ -301,7 +309,11 @@ export function HireDialog({
         </div>
         <TextInput
           label="Skills"
-          hint="Comma separated, optional"
+          hint={
+            draft
+              ? 'Comma separated, optional'
+              : "Comma separated, optional. Leave empty for the role's skills; what you type replaces them."
+          }
           value={skills}
           onChange={(e) => setSkills(e.target.value)}
         />
