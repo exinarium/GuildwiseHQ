@@ -108,7 +108,9 @@ export async function convertPreview(
     activeRepos: await n(
       'SELECT count(*) AS n FROM project_repos WHERE project_id=$1 AND removed_at IS NULL',
     ),
-    publishedNotes: await n('SELECT count(*) AS n FROM research_publications WHERE project_id=$1'),
+    publishedNotes: await n(
+      'SELECT count(*) AS n FROM research_publications WHERE project_id=$1 AND superseded_at IS NULL',
+    ),
     foreignCards: foreign.map(cardDto),
     placedCards: placed.length,
     suggested: SUGGESTED_NEXT[p.workflow_key] ?? null,
@@ -467,7 +469,7 @@ export async function researchIndexNotes(db: Queryable, projectId: string): Prom
   const list = await rows(
     db,
     `SELECT r.vault_path, r.title, r.citations, r.created_at, c.ref FROM research_publications r
-       JOIN cards c ON c.id = r.card_id WHERE r.project_id=$1 ORDER BY r.event_seq`,
+       JOIN cards c ON c.id = r.card_id WHERE r.project_id=$1 AND r.superseded_at IS NULL ORDER BY r.event_seq`,
     [projectId],
   );
   return list.map((r) => ({

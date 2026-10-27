@@ -60,7 +60,7 @@ const HAS_VAULT_SQL = `EXISTS (SELECT 1 FROM vaults v WHERE v.project_id = p.id
   OR (v.org_id = p.org_id AND v.kind = 'org' AND v.project_id IS NULL)) AS has_vault`;
 
 /** Published research notes of the project (the Research tab shows when there are some). */
-const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp WHERE rp.project_id = p.id) AS published_notes`;
+const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp WHERE rp.project_id = p.id AND rp.superseded_at IS NULL) AS published_notes`;
 
 /** The project's account per provider or runtime other than Claude Code (S-A): `{ scope: { key, fallbackToMain } }`. */
 const PROVIDER_ACCOUNTS_SQL = `(SELECT jsonb_object_agg(pa.scope, jsonb_build_object('key', pa.account_key, 'fallbackToMain', pa.fallback_to_main))

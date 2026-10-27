@@ -19,7 +19,11 @@ const toDto = (r: Row): PublicationDto => ({
 
 /** The published note of a research card, if any (the caller already checked the card is visible). */
 export async function publicationOfCard(db: Queryable, cardId: string): Promise<PublicationDto | null> {
-  const r = await one(db, `${SELECT} WHERE r.card_id=$1 ORDER BY r.event_seq DESC LIMIT 1`, [cardId]);
+  const r = await one(
+    db,
+    `${SELECT} WHERE r.card_id=$1 AND r.superseded_at IS NULL ORDER BY r.event_seq DESC LIMIT 1`,
+    [cardId],
+  );
   return r ? toDto(r) : null;
 }
 
@@ -32,7 +36,7 @@ export async function listPublications(
 ): Promise<PublicationDto[]> {
   const r = await rows(
     db,
-    `${SELECT} WHERE r.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active')
+    `${SELECT} WHERE r.superseded_at IS NULL AND r.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active')
        AND (p.kind = 'project' OR $3::uuid IS NOT NULL)
        AND ($2::uuid IS NULL OR r.project_id=$2) AND ($3::uuid IS NULL OR c.interest_id=$3)
      ORDER BY r.event_seq DESC`,

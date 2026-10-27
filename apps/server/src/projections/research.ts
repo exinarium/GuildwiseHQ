@@ -6,6 +6,12 @@ import { mutateCard } from './util.ts';
 export const researchProjectors: Record<string, Projector> = {
   ResearchPublished: async (tx, e) => {
     const p = (e.event as EventOf<'ResearchPublished'>).payload;
+    // A republished card replaces its earlier note: older live rows are superseded (kept as history).
+    await exec(
+      tx,
+      `UPDATE research_publications SET superseded_at=$2 WHERE card_id=$1 AND superseded_at IS NULL`,
+      [p.cardId, e.createdAt],
+    );
     // The id is derived from the event so a rebuild reproduces the same row.
     await exec(
       tx,

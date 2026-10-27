@@ -918,9 +918,65 @@ export async function reopenCard(
           ),
         );
     }
+    // A published research note is superseded by the reopen (the projector marks it); the manager is told what stays.
+    const published = await one(
+      tx,
+      'SELECT 1 FROM research_publications WHERE card_id=$1 AND superseded_at IS NULL LIMIT 1',
+      [card.id],
+    );
+    if (published)
+      events.push(
+        cardMessage(
+          card,
+          { kind: 'system' },
+          'system',
+          `The earlier research note stays in the vault, marked as superseded in the Research tab, until the new one is published.`,
+        ),
+      );
+    // A reopened bug child is not resolved any more: the parent it sent back to Test waits for it again.
+    if (card.parent_card_id && card.origin === 'test_failure')
+      events.push(...(await parentOfReopenedBugChild(tx, card, user)));
     await ctx.store.append(events, { tx });
     return card.id as string;
   });
+}
+
+/** What a reopened bug child does to its parent: wait again while the parent is still in Test, else only a warning. */
+async function parentOfReopenedBugChild(
+  tx: Tx,
+  child: Row,
+  user: AuthSession['user'],
+): Promise<AppendInput[]> {
+  const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [child.parent_card_id]);
+  if (!parent) return [];
+  if (parent.status === 'waiting' && parent.stage === 'test') return []; // already waiting for the fix
+  const inTest = parent.stage === 'test' && !['done', 'cancelled', 'waiting'].includes(parent.status);
+  if (!inTest) {
+    const where =
+      parent.status === 'done' || parent.status === 'cancelled'
+        ? parent.status
+        : `past Test (${parent.stage})`;
+    const text = `${child.ref} (${child.title}) was reopened by ${user.displayName}, but ${parent.ref} is ${where}, so it was left as it is. The fix being reworked is not covered by the parent's test result.`;
+    return [
+      cardMessage(parent, { kind: 'system' }, 'system', text),
+      cardMessage(child, { kind: 'system' }, 'system', text),
+    ];
+  }
+  return [
+    ...releaseEvents(parent, user.id, 'manual'),
+    {
+      streamId: streamId.card(parent.id),
+      event: { type: 'ParentCardRewaited', payload: { cardId: parent.id, childCardId: child.id } },
+      actor: userActor(user.id),
+      scope: projectScope(parent.org_id, parent.project_id),
+    },
+    cardMessage(
+      parent,
+      { kind: 'system' },
+      'system',
+      `${child.ref} (${child.title}) was reopened by ${user.displayName}: ${parent.ref} waits for it again.`,
+    ),
+  ];
 }
 
 export async function releaseCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason?: string) {
