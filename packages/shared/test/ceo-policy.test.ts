@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTION_CLASSES,
   agreementScores,
+  CeoPolicySchema,
   clonePolicy,
   DEFAULT_CEO_POLICY,
   deskMode,
@@ -118,7 +119,7 @@ describe('the gate', () => {
 
   it('never-mode and hard-never classes are refused, and an unknown class too', () => {
     const p = clonePolicy(P);
-    p.classes['card.release'] = { mode: 'never', delayMinutes: 0 };
+    p.classes['card.release'] = { mode: 'never' };
     expect(evaluatePolicy(p, 'card.release', base).verdict).toBe('deny');
     for (const c of [
       'ceo.policy',
@@ -142,10 +143,10 @@ describe('there is no training period: the table decides staffing from the first
   it('staffing and model changes follow the table, whatever the CEO has done so far', () => {
     expect(STAFFING_CLASSES.length).toBeGreaterThan(5);
     const allDecide = clonePolicy(P);
-    for (const c of STAFFING_CLASSES) allDecide.classes[c] = { mode: 'decide', delayMinutes: 0 };
+    for (const c of STAFFING_CLASSES) allDecide.classes[c] = { mode: 'decide' };
     for (const c of STAFFING_CLASSES) expect(evaluatePolicy(allDecide, c, base).verdict, c).toBe('allow');
     const allRecommend = clonePolicy(P);
-    for (const c of STAFFING_CLASSES) allRecommend.classes[c] = { mode: 'recommend', delayMinutes: 0 };
+    for (const c of STAFFING_CLASSES) allRecommend.classes[c] = { mode: 'recommend' };
     for (const c of STAFFING_CLASSES)
       expect(evaluatePolicy(allRecommend, c, base), c).toMatchObject({ verdict: 'recommend', cause: 'mode' });
     expect(isStaffingClass('agent.pause')).toBe(false);
@@ -197,5 +198,15 @@ describe('training state and agreement', () => {
     });
     expect(sumScores(scores)).toEqual({ agreed: 2, total: 5 });
     expect(scores[0]!.class).toBe('agent.hire'); // most answered first
+  });
+});
+
+describe('a stored policy with the retired cooling-off field', () => {
+  it('still parses, and the field is dropped', () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_CEO_POLICY));
+    for (const c of Object.keys(legacy.classes)) legacy.classes[c].delayMinutes = 30;
+    const parsed = CeoPolicySchema.parse(legacy);
+    expect(parsed.classes['card.release']).toEqual({ mode: 'decide' });
+    expect(parsed).toEqual(DEFAULT_CEO_POLICY);
   });
 });

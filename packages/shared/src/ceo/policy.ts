@@ -172,10 +172,8 @@ export const DEFAULT_CEO_LIMITS: CeoLimits = CeoLimitsSchema.parse({});
 
 export const CeoPolicySchema = z.object({
   version: z.number().int().min(0).default(1),
-  classes: z.record(
-    z.string(),
-    z.object({ mode: CeoMode, delayMinutes: z.number().int().min(0).max(240).default(0) }),
-  ),
+  // Stored policies may still carry the retired `delayMinutes` (cooling-off); zod strips the unknown key on parse.
+  classes: z.record(z.string(), z.object({ mode: CeoMode })),
   /** Desk item key (`kind:subkind`, `kind:*`) -> mode. */
   desk: z.record(z.string(), CeoMode),
   delegated: z.array(OwnerReservedKey).default([]),
@@ -184,8 +182,8 @@ export const CeoPolicySchema = z.object({
 });
 export type CeoPolicy = z.infer<typeof CeoPolicySchema>;
 
-const decide = { mode: 'decide' as const, delayMinutes: 0 };
-const recommend = { mode: 'recommend' as const, delayMinutes: 0 };
+const decide = { mode: 'decide' as const };
+const recommend = { mode: 'recommend' as const };
 
 /** The policy once the training period is over (v2 section 3.1). */
 export const DEFAULT_CEO_POLICY: CeoPolicy = {

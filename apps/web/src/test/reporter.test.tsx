@@ -201,6 +201,8 @@ const digest: FloorDigest = {
   generatedAt: '2026-11-10T06:00:00.000Z',
   localDate: '2026-11-10',
   since: null,
+  highRiskMerges: [],
+  highRiskMergesMore: 0,
   phases: [{ ref: 'TOY-P1', name: 'Autosave', status: 'open', projectKey: 'TOY', lateBugs: ['TOY-9'] }],
   signals: [
     {
@@ -324,6 +326,49 @@ describe('the floor report on the desk', () => {
     expect(link.getAttribute('href')).toBe(`/chat/${U(60)}`);
     // an alert is acknowledged like any other
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeTruthy();
+  });
+
+  it('shows a high-risk card waiting and the high-risk cards finished (old stored digests have neither field)', () => {
+    const waiting = {
+      id: U(70),
+      kind: 'high_risk_waiting' as const,
+      urgency: 'normal' as const,
+      fingerprint: 'high_risk_waiting:card:x',
+      count: 1,
+      status: 'open' as const,
+      firstSeenAt: 'a',
+      lastSeenAt: 'b',
+      subject: { title: 'TOY-8 is rated high risk and has waited 30 hours for approval', detail: '' },
+      evidence: {},
+      isNew: true,
+    };
+    const full = {
+      ...digest,
+      signals: [...digest.signals, waiting],
+      highRiskMerges: [
+        { ref: 'TOY-7', title: 'Billing rewrite', projectKey: 'TOY', analysis: 'touches money' },
+      ],
+      highRiskMergesMore: 2,
+    };
+    const { unmount } = renderWith(
+      <DeskItem item={{ ...base, floor: full }} now={Date.parse('2026-11-10T07:00:00.000Z')} />,
+    );
+    const report = within(screen.getByTestId('floor-report'));
+    expect(report.getByRole('heading', { name: /High-risk cards finished/ })).toBeTruthy();
+    expect(report.getByText(/TOY-7 Billing rewrite \(TOY\): touches money/)).toBeTruthy();
+    expect(report.getByText('and 2 more')).toBeTruthy();
+    expect(report.getByText(/TOY-8 is rated high risk/)).toBeTruthy();
+    unmount();
+    const { highRiskMerges: _a, highRiskMergesMore: _b, ...old } = digest;
+    renderWith(
+      <DeskItem
+        item={{ ...base, floor: old as unknown as typeof digest }}
+        now={Date.parse('2026-11-10T07:00:00.000Z')}
+      />,
+    );
+    expect(
+      within(screen.getByTestId('floor-report')).getByRole('heading', { name: /High-risk cards finished/ }),
+    ).toBeTruthy();
   });
 
   it('an empty section says None', () => {

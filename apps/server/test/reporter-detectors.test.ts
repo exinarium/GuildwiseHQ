@@ -240,6 +240,134 @@ describe('detectors: one fixture per threshold, plus a control', () => {
   });
 });
 
+describe('review risk (report only)', () => {
+  const risk = (level: string) => JSON.stringify({ level, analysis: 'touches billing', qaFocus: '' });
+  const wait = async (id: string, level: string | null, hoursAgo: number, extra = `stage='owner_approval'`) =>
+    q(`UPDATE cards SET status='waiting', ${extra}, review_risk=$2::jsonb, updated_at=$3 WHERE id=$1`, [
+      id,
+      level === null ? null : risk(level),
+      new Date(w.t.clock.now().getTime() - hoursAgo * 3600_000),
+    ]);
+
+  it('high_risk_waiting: only a high-risk card past the threshold, never low, medium, unknown or NULL, never twice', async () => {
+    await clean();
+    const hi = await w.card({ title: 'High risk, waiting' });
+    const fresh = await w.card({ title: 'High risk, fresh' });
+    const merge = await w.card({ title: 'High risk, merge waits' });
+    const others = [];
+    for (const lvl of ['low', 'medium', 'unknown', null])
+      others.push([lvl, await w.card({ title: `risk ${lvl}` })] as const);
+    const late = REPORTER.highRiskWaitHours + 1;
+    await wait(hi.id, 'high', late);
+    await wait(fresh.id, 'high', REPORTER.highRiskWaitHours - 1);
+    await wait(merge.id, 'high', late, `stage='testing', finalize_state='awaiting_approval'`);
+    for (const [lvl, c] of others) await wait(c.id, lvl, late);
+
+    await reporter().run();
+    const found = await open('high_risk_waiting');
+    expect(found.map((s) => s.fingerprint).sort()).toEqual(
+      [`high_risk_waiting:card:${hi.id}`, `high_risk_waiting:card:${merge.id}`].sort(),
+    );
+    expect(found[0]).toMatchObject({ urgency: 'normal', kind: 'high_risk_waiting' });
+
+    // A second sweep raises nothing new; the signals stay at one row each.
+    expect((await reporter().run()).raised).toBe(0);
+    expect(await signals('high_risk_waiting')).toHaveLength(2);
+
+    // Rework resets the risk to NULL: the signal clears.
+    await q(`UPDATE cards SET review_risk=NULL WHERE id=$1`, [hi.id]);
+    await reporter().run();
+    expect((await open('high_risk_waiting')).map((s) => s.fingerprint)).toEqual([
+      `high_risk_waiting:card:${merge.id}`,
+    ]);
+  });
+
+  it('high_risk_waiting: finalize approval outside owner_approval fires, finalize running does not, and an edit while waiting does not restart the clock', async () => {
+    await clean();
+    const late = REPORTER.highRiskWaitHours + 1;
+    const fin = await w.card({ title: 'Merge approval stale' });
+    const running = await w.card({ title: 'Merge running' });
+    const edited = await w.card({ title: 'Edited while waiting' });
+    await wait(fin.id, 'high', late, `stage='testing', finalize_state='awaiting_approval'`);
+    await wait(running.id, 'high', late, `stage='testing', finalize_state='running'`);
+    await wait(edited.id, 'high', late);
+    const enteredAt = new Date(w.t.clock.now().getTime() - late * 3600_000);
+    await q(
+      `INSERT INTO card_transitions (card_id, from_stage, to_stage, from_status, to_status, reason, event_seq, at)
+       VALUES ($1,'review','owner_approval','working','waiting','test',0,$2)`,
+      [edited.id, enteredAt],
+    );
+    // a title edit while it waits bumps updated_at only
+    await q(`UPDATE cards SET title='Edited title', updated_at=$2 WHERE id=$1`, [edited.id, w.t.clock.now()]);
+    await reporter().run();
+    expect((await open('high_risk_waiting')).map((s) => s.fingerprint).sort()).toEqual(
+      [`high_risk_waiting:card:${fin.id}`, `high_risk_waiting:card:${edited.id}`].sort(),
+    );
+  });
+
+  it('the digest window: a finish before the last report is left out, one after it is in; the first report looks back 24 hours', async () => {
+    await clean();
+    const { buildFloorDigest } = await import('../src/ceo/digest.ts');
+    const now = w.t.clock.now();
+    const finish = async (title: string, at: Date) => {
+      const c = await w.card({ title });
+      await q(
+        `UPDATE cards SET status='done', stage='done', finalized_at=$2, review_risk=$3::jsonb WHERE id=$1`,
+        [c.id, at, risk('high')],
+      );
+      return c;
+    };
+    const old = await finish('Two days ago', new Date(now.getTime() - 48 * 3600_000));
+    const recent = await finish('An hour ago', new Date(now.getTime() - 3600_000));
+    let d = await buildFloorDigest(w.t.app.ctx.pool, w.owner.id, now, '2026-10-27');
+    expect(d.highRiskMerges.map((m) => m.ref)).toEqual([recent.ref]); // no earlier report: 24 hours only
+    const before = await finish('Before the report', new Date(now.getTime() - 2 * 3600_000));
+    await q(
+      `INSERT INTO desk_items (id, org_id, kind, subkind, title, status, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, 'alert', 'ceo_report', 'Daily report', 'open', $2, $2)`,
+      [w.owner.id, new Date(now.getTime() - 5400_000)],
+    );
+    d = await buildFloorDigest(w.t.app.ctx.pool, w.owner.id, now, '2026-10-27');
+    // the report 90 minutes ago bounds the window: the finish an hour ago is in, the ones before it are out
+    expect(d.highRiskMerges.map((m) => m.ref)).toEqual([recent.ref]);
+    expect([old.ref, before.ref]).not.toContain(d.highRiskMerges[0]?.ref);
+  });
+
+  it('the daily digest lists high-risk merges of the day, and omits the section when there are none', async () => {
+    await clean();
+    const { buildFloorDigest } = await import('../src/ceo/digest.ts');
+    const { renderFloorReportFallback } = await import('@aom/shared');
+    const now = w.t.clock.now();
+    const done = async (title: string, level: string | null) => {
+      const c = await w.card({ title });
+      await q(
+        `UPDATE cards SET status='done', stage='done', finalized_at=$2, review_risk=$3::jsonb WHERE id=$1`,
+        [c.id, now, level === null ? null : risk(level)],
+      );
+      return c;
+    };
+    await done('Low one', 'low');
+    await done('Unknown one', 'unknown');
+    await done('No risk call', null);
+    let d = await buildFloorDigest(w.t.app.ctx.pool, w.owner.id, now, '2026-10-27');
+    expect(d.highRiskMerges).toEqual([]);
+    expect(renderFloorReportFallback(d)).not.toContain('High-risk cards finished');
+
+    const hi = await done('Rewrote the billing path', 'high');
+    d = await buildFloorDigest(w.t.app.ctx.pool, w.owner.id, now, '2026-10-27');
+    expect(d.highRiskMerges).toEqual([
+      expect.objectContaining({
+        ref: hi.ref,
+        title: 'Rewrote the billing path',
+        analysis: 'touches billing',
+      }),
+    ]);
+    const text = renderFloorReportFallback(d);
+    expect(text).toContain('## High-risk cards finished');
+    expect(text).toContain(hi.ref);
+  });
+});
+
 describe("the BA reporter is retired: signals are the CEO's to hear about", () => {
   it('an urgent signal queues no BA task and no desk report; a signal that clears acknowledges the old BA report item', async () => {
     await clean();

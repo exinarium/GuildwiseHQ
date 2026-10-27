@@ -58,7 +58,9 @@ const Section = ({ title, children, count }: { title: string; children: React.Re
 
 /** The structured facts behind a floor report. The BA reporter is retired: this renders historical items only (the CEO report has its own card). */
 export function FloorReport({ digest }: { digest: FloorDigest }) {
-  const stuck = digest.signals.filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind));
+  const stuck = digest.signals.filter((s) =>
+    ['blocked', 'unclaimed', 'loop', 'high_risk_waiting'].includes(s.kind),
+  );
   const approvals = digest.signals.filter((s) => s.kind === 'repeated_approval');
   const failed = digest.signals.filter((s) =>
     ['rework', 'finalize_failures', 'repo_hygiene', 'budget'].includes(s.kind),
@@ -89,6 +91,14 @@ export function FloorReport({ digest }: { digest: FloorDigest }) {
             {b.ref} {b.title}: backing off after {b.failures} failed shifts
           </li>
         ))}
+      </Section>
+      <Section title="High-risk cards finished" count={(digest.highRiskMerges ?? []).length}>
+        {(digest.highRiskMerges ?? []).map((m) => (
+          <li key={m.ref}>
+            {m.ref} {m.title} ({m.projectKey}){m.analysis ? `: ${m.analysis}` : ''}
+          </li>
+        ))}
+        {(digest.highRiskMergesMore ?? 0) > 0 && <li>and {digest.highRiskMergesMore} more</li>}
       </Section>
       <Section title="Repeated approvals" count={approvals.length}>
         {approvals.map((s) => (

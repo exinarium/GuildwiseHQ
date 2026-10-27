@@ -102,6 +102,19 @@ export async function buildFloorDigest(
     [orgId, sinceOrEpoch],
   );
 
+  // High-risk cards finished (merge, PR or push) since the last report with the reviewer's risk call `high` (unknown and
+  // NULL do not count). The first report, or a long gap, looks back 24 hours at most; the newest HIGH_RISK_LIMIT are listed.
+  const riskSince = since ?? new Date(now.getTime() - 24 * 3600_000);
+  const highRiskAll = await rows(
+    db,
+    `SELECT c.ref, c.title, c.review_risk->>'analysis' AS analysis, p.key
+       FROM cards c JOIN projects p ON p.id = c.project_id
+      WHERE c.org_id=$1 AND c.status='done' AND c.finalized_at > $2 AND c.review_risk->>'level' = 'high'
+      ORDER BY c.finalized_at DESC, c.id DESC LIMIT ${HIGH_RISK_LIMIT + 1000}`,
+    [orgId, riskSince],
+  );
+  const highRisk = highRiskAll.slice(0, HIGH_RISK_LIMIT);
+
   const failures = await rows(
     db,
     `SELECT c.ref, c.title, count(*)::int AS n FROM shifts s JOIN cards c ON c.id = s.card_id
@@ -154,6 +167,13 @@ export async function buildFloorDigest(
       how: r.triage === 'merged' ? 'merged' : r.triage === 'dismissed' ? 'dismissed' : 'answered',
       note: (r.ba_note ?? r.answer) ? summarize(plain(r.ba_note ?? r.answer)) || null : null,
     })),
+    highRiskMerges: highRisk.map((c) => ({
+      ref: c.ref,
+      title: c.title,
+      projectKey: c.key,
+      analysis: summarize(plain(c.analysis ?? '')),
+    })),
+    highRiskMergesMore: Math.max(0, highRiskAll.length - highRisk.length),
     failures: failures.map((f) => ({ ref: f.ref, title: f.title, failedShifts: f.n })),
     interests,
     spend,
@@ -161,6 +181,7 @@ export async function buildFloorDigest(
 }
 
 const HIGHLIGHTS_PER_INTEREST = 3;
+const HIGH_RISK_LIMIT = 20;
 
 /**
  * The interests of the organization for the floor report and the interests e-mail: counts, the top delivered items per
