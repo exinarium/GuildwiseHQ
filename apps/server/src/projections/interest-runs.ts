@@ -153,9 +153,22 @@ export const interestRunProjectors: Record<string, Projector> = {
     if (run)
       await exec(
         tx,
-        `UPDATE interest_runs SET status='published', published=COALESCE(published,0)+1, finished_at=$2 WHERE id=$1`,
-        [run, e.createdAt],
+        `UPDATE interest_runs SET status='published', finished_at=$2,
+                published=(SELECT count(*) FROM research_publications WHERE card_id=$3 AND superseded_at IS NULL)
+          WHERE id=$1`,
+        [run, e.createdAt, p.cardId],
       );
+  },
+  /** A finished run goes back to its open status with the card; the cards projector has superseded the note by now. */
+  CardReopened: async (tx, e) => {
+    const p = ev<'CardReopened'>(e).payload;
+    const run = await runOfCard(tx, p.cardId);
+    if (!run) return;
+    await exec(
+      tx,
+      `UPDATE interest_runs SET status=$2, published=NULL, finished_at=NULL WHERE id=$1 AND NOT (status = ANY($3::text[]))`,
+      [run, STAGE_STATUS[p.toStage] ?? 'queued', OPEN],
+    );
   },
   InterestDigestDelivered: async (tx, e) => {
     const p = ev<'InterestDigestDelivered'>(e).payload;

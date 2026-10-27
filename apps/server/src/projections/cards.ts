@@ -724,7 +724,10 @@ export const cardProjectors: Record<string, Projector> = {
   ParentCardRewaited: async (tx, e) => {
     const p = ev<'ParentCardRewaited'>(e).payload;
     await mutateCard(tx, e, p.cardId, () =>
-      exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1`, [p.cardId, e.createdAt]),
+      exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1 AND stage='test'`, [
+        p.cardId,
+        e.createdAt,
+      ]),
     );
   },
 

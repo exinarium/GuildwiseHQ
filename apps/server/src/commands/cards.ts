@@ -950,12 +950,15 @@ async function parentOfReopenedBugChild(
   const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [child.parent_card_id]);
   if (!parent) return [];
   if (parent.status === 'waiting' && parent.stage === 'test') return []; // already waiting for the fix
-  const inTest = parent.stage === 'test' && !['done', 'cancelled', 'waiting'].includes(parent.status);
+  const inTest = parent.stage === 'test' && ['queued', 'claimed'].includes(parent.status);
   if (!inTest) {
+    // A block or hold is never overridden; a finished or moved-on parent is left alone too.
     const where =
       parent.status === 'done' || parent.status === 'cancelled'
         ? parent.status
-        : `past Test (${parent.stage})`;
+        : parent.stage === 'test'
+          ? `${parent.status} in Test`
+          : `in ${parent.stage}, not Test`;
     const text = `${child.ref} (${child.title}) was reopened by ${user.displayName}, but ${parent.ref} is ${where}, so it was left as it is. The fix being reworked is not covered by the parent's test result.`;
     return [
       cardMessage(parent, { kind: 'system' }, 'system', text),

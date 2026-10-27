@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { createFeedInterest } from './helpers/feeds.ts';
 import { seed } from './helpers/seed.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
@@ -61,9 +62,8 @@ describe('reopening a published research card', () => {
           scope: { orgId, projectId, audience: 'project' },
         },
       ]);
-    const listed = async () =>
-      (await ok<any>(owner('GET', `/api/research/publications?projectId=${projectId}`))).publications ??
-      (await ok<any>(owner('GET', `/api/research/publications?projectId=${projectId}`)));
+    const listed = async (): Promise<any[]> =>
+      (await ok<any>(owner('GET', `/api/research/publications?projectId=${projectId}`))).publications;
     const noteCount = async () =>
       Number((await q('SELECT count(*) AS n FROM research_publications WHERE card_id=$1', [card.id]))[0]?.n);
     const live = async () =>
@@ -87,6 +87,7 @@ describe('reopening a published research card', () => {
     const proj = await ok<any>(owner('GET', `/api/projects/${projectId}`));
     expect((proj.project ?? proj).publishedNotes).toBe(0);
     const detail = await ok<any>(owner('GET', `/api/cards/${card.id}`));
+    expect(detail.publication ?? null).toBeNull();
     expect(
       detail.thread.some(
         (m: any) => m.kind === 'system' && /earlier research note stays in the vault/.test(m.body),
@@ -117,5 +118,59 @@ describe('reopening a published research card', () => {
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
     expect(await snap()).toEqual(before);
     expect(PROJECTION_TABLES).toContain('research_publications');
+  });
+});
+
+describe('reopening a published interest research run', () => {
+  it('keeps the run log consistent with the one live note', async () => {
+    const i = await createFeedInterest(w, { name: 'Recon' });
+    const started = await ok<any>(
+      owner('POST', `/api/interests/${i.id}/run`, { kind: 'research', question: 'What now?' }),
+      201,
+    );
+    const run = async () => (await q('SELECT * FROM interest_runs WHERE id=$1', [started.runId]))[0]!;
+    const publish = (title: string) =>
+      seed(w, [
+        {
+          streamId: streamId.card(started.cardId),
+          event: {
+            type: 'ResearchPublished',
+            payload: {
+              cardId: started.cardId,
+              projectId: i.projectId,
+              vaultPath: `interests/recon/${title}.md`,
+              title,
+              citations: [
+                { url: 'https://example.test/a', title: 'A', accessedAt: '2026-10-03T08:00:00.000Z' },
+              ],
+              excerpt: 'x',
+            },
+          },
+          actor: SYSTEM,
+          scope: { orgId, projectId: i.projectId, audience: 'project' },
+        },
+      ]);
+    const detail = async () => ok<any>(owner('GET', `/api/interests/${i.id}/runs/${started.runId}`));
+
+    await publish('one');
+    expect(await run()).toMatchObject({ status: 'published', published: 1 });
+    expect((await detail()).notes).toHaveLength(1);
+
+    await ok(owner('POST', `/api/cards/${started.cardId}/reopen`, { toStage: 'research', reason: 'again' }));
+    expect(await run()).toMatchObject({ status: 'researching', published: null, finished_at: null });
+    expect((await detail()).notes).toHaveLength(0);
+
+    await publish('two');
+    expect(await run()).toMatchObject({ status: 'published', published: 1 });
+    const d = await detail();
+    expect(d.notes).toHaveLength(1);
+    expect(d.notes[0].title).toBe('two');
+
+    const snap = async () =>
+      JSON.stringify(await q('SELECT * FROM interest_runs WHERE id=$1', [started.runId]));
+    await w.t.app.ctx.notifier.flush();
+    const before = await snap();
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
+    expect(await snap()).toEqual(before);
   });
 });
