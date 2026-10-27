@@ -470,8 +470,9 @@ export function buildEnv(a: Answers, homeDir?: string): SetupEnv {
   const test = a.role === 'live' ? a.testEnv : null;
   const database = a.dbService
     ? {
+        // New setups default to ~/guildwise-backups; an existing environment keeps its stored dir (backupDir is loaded from it).
         service: a.dbService,
-        dir: a.backupDir || (a.hosting === 'ssh' ? `${dirOf(a.stackPath)}/backups` : '~/aom-backups'),
+        dir: a.backupDir || (a.hosting === 'ssh' ? `${dirOf(a.stackPath)}/backups` : '~/guildwise-backups'),
         keep: 20,
       }
     : undefined;
