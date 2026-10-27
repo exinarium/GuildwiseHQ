@@ -158,6 +158,7 @@ const digest: FloorDigest = {
   generatedAt: '2026-11-10T06:00:00.000Z',
   localDate: '2026-11-10',
   since: null,
+  highRiskMerges: [],
   phases: [{ ref: 'TOY-P1', name: 'Autosave', status: 'open', projectKey: 'TOY', lateBugs: ['TOY-9'] }],
   signals: [
     {

@@ -23,6 +23,8 @@ export const REPORTER = {
   /** Repeated failures (normal urgency): rework rounds on one card, failed finalizes on one card. */
   reworkRounds: 3,
   finalizeFailures: 2,
+  /** A card the reviewer rated high risk waits on the manager or the owner (approval, merge) longer than this. */
+  highRiskWaitHours: 24,
   /** A held item the BA has not triaged within this window reaches the manager unchanged. */
   triageWindowMinutes: 10,
   /** The detectors and the report timer run this often. */
@@ -177,6 +179,8 @@ export const SignalKind = z.enum([
   'repo_hygiene',
   /** A project used 80% or more of its monthly budget (urgent once it is used up and paused). */
   'budget',
+  /** A card the reviewer rated high risk has waited on a manager or owner approval for too long (report only). */
+  'high_risk_waiting',
 ]);
 export type SignalKind = z.infer<typeof SignalKind>;
 export const SignalUrgency = z.enum(['urgent', 'normal']);
@@ -193,6 +197,7 @@ export const SIGNAL_LABEL: Record<SignalKind, string> = {
   finalize_failures: 'Repeated finalize failures',
   repo_hygiene: 'Repository hygiene',
   budget: 'Budget',
+  high_risk_waiting: 'High-risk card waiting',
 };
 
 /** What a signal is about; free-form evidence the BA and the template read. */
@@ -258,6 +263,10 @@ export const FloorDigestSchema = z.object({
       note: z.string().nullable(),
     }),
   ),
+  /** Cards that finished since the last report with a high review risk (only `high` counts, not unknown or none). */
+  highRiskMerges: z
+    .array(z.object({ ref: z.string(), title: z.string(), projectKey: z.string(), analysis: z.string() }))
+    .default([]),
   /** Failed shifts and other failures since the last report, by card. */
   failures: z.array(z.object({ ref: z.string(), title: z.string(), failedShifts: z.number().int() })),
   /**
@@ -318,6 +327,7 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
   d.devopsOpen.length === 0 &&
   d.resolvedByBa.length === 0 &&
   d.failures.length === 0 &&
+  (d.highRiskMerges ?? []).length === 0 &&
   d.interests.highlights.length === 0 &&
   d.interests.failing.length === 0;
 // (spend alone does not make a day worth a report: it rides along when there is one, and a project near or over its
@@ -450,7 +460,13 @@ export function renderFloorReportFallback(d: FloorDigest): string {
   out.push(
     list([
       ...d.signals
-        .filter((s) => s.kind === 'blocked' || s.kind === 'unclaimed' || s.kind === 'loop')
+        .filter(
+          (s) =>
+            s.kind === 'blocked' ||
+            s.kind === 'unclaimed' ||
+            s.kind === 'loop' ||
+            s.kind === 'high_risk_waiting',
+        )
         .map((s) => `${s.subject.title}${s.subject.detail ? ` (${s.subject.detail})` : ''}`),
       ...d.backingOff.map((b) => `${b.ref} ${b.title}: backing off after ${b.failures} failed shifts`),
     ]),
@@ -475,6 +491,18 @@ export function renderFloorReportFallback(d: FloorDigest): string {
       ),
     ]),
   );
+  // (a digest stored before this section existed has no such field)
+  const highRisk = d.highRiskMerges ?? [];
+  if (highRisk.length) {
+    out.push('', '## High-risk merges');
+    out.push(
+      list(
+        d.highRiskMerges.map(
+          (m) => `${m.ref} ${m.title} (${m.projectKey})${m.analysis ? `: ${m.analysis}` : ''}`,
+        ),
+      ),
+    );
+  }
   out.push('', '## Spend');
   out.push(...renderSpendLines(d.spend));
   out.push('', '## Interests highlights');

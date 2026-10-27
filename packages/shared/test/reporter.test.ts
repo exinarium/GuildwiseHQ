@@ -98,6 +98,7 @@ describe('reporter contract', () => {
       since: null,
       phases: [{ ref: 'TOY-P1', name: 'Autosave', status: 'open', projectKey: 'TOY', lateBugs: ['TOY-9'] }],
       signals: [],
+      highRiskMerges: [],
       backingOff: [],
       devopsOpen: [],
       resolvedByBa: [],
@@ -137,6 +138,12 @@ describe('reporter contract', () => {
     const text = renderFloorReportFallback(d);
     expect(text).toContain('TOY-P1 Autosave: open, held open by late bugs TOY-9');
     expect((text.match(/^## /gm) ?? []).length).toBe(8);
+    expect(text).not.toContain('High-risk merges');
+    const withRisk = renderFloorReportFallback({
+      ...d,
+      highRiskMerges: [{ ref: 'TOY-4', title: 'Billing', projectKey: 'TOY', analysis: 'touches money' }],
+    });
+    expect(withRisk).toContain('## High-risk merges\n- TOY-4 Billing (TOY): touches money');
     expect(text).toContain('## Spend');
     expect(text).toContain('- TOY Toy: $40.00 of $50.00 (80%)');
     expect(text).toContain('this month $42.00 (org overhead $2.00)');

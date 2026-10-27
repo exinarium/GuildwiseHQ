@@ -23,6 +23,7 @@ const SIGNALS = [
   'finalize_failures',
   'repo_hygiene',
   'budget',
+  'high_risk_waiting',
 ] as const;
 const SIGNAL_LABEL: Record<(typeof SIGNALS)[number], string> = {
   loop: 'A card keeps failing (loop)',
@@ -33,6 +34,7 @@ const SIGNAL_LABEL: Record<(typeof SIGNALS)[number], string> = {
   finalize_failures: 'Finalize keeps failing',
   repo_hygiene: 'Repository hygiene',
   budget: 'A budget warning',
+  high_risk_waiting: 'A high-risk card waiting for approval',
 };
 
 type Draft = Pick<

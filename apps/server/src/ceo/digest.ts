@@ -102,6 +102,16 @@ export async function buildFloorDigest(
     [orgId, sinceOrEpoch],
   );
 
+  // High-risk merges: cards that finished since the last report with the reviewer's risk call `high` (unknown and NULL do not count).
+  const highRisk = await rows(
+    db,
+    `SELECT c.ref, c.title, c.review_risk->>'analysis' AS analysis, p.key
+       FROM cards c JOIN projects p ON p.id = c.project_id
+      WHERE c.org_id=$1 AND c.status='done' AND c.finalized_at > $2 AND c.review_risk->>'level' = 'high'
+      ORDER BY c.finalized_at, c.id LIMIT 20`,
+    [orgId, sinceOrEpoch],
+  );
+
   const failures = await rows(
     db,
     `SELECT c.ref, c.title, count(*)::int AS n FROM shifts s JOIN cards c ON c.id = s.card_id
@@ -153,6 +163,12 @@ export async function buildFloorDigest(
       title: plain(r.title),
       how: r.triage === 'merged' ? 'merged' : r.triage === 'dismissed' ? 'dismissed' : 'answered',
       note: (r.ba_note ?? r.answer) ? summarize(plain(r.ba_note ?? r.answer)) || null : null,
+    })),
+    highRiskMerges: highRisk.map((c) => ({
+      ref: c.ref,
+      title: c.title,
+      projectKey: c.key,
+      analysis: summarize(plain(c.analysis ?? '')),
     })),
     failures: failures.map((f) => ({ ref: f.ref, title: f.title, failedShifts: f.n })),
     interests,

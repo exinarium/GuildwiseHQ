@@ -377,6 +377,44 @@ export async function detectBudgets(db: Queryable, now: Date): Promise<Detected[
   return out;
 }
 
+/**
+ * A card the reviewer rated high risk (`cards.review_risk.level = 'high'`, report only) that has waited longer than
+ * `REPORTER.highRiskWaitHours` on a manager or owner approval: the owner-approval stage, or a finalize (merge, push, PR)
+ * that is awaiting approval. Only `high` counts: `unknown` (older runners) and NULL (reset on rework) never raise it.
+ * Normal urgency, no automatic action. The clock is the card's last change (`updated_at`), which is when it began to wait.
+ */
+export async function detectHighRiskWaiting(db: Queryable, now: Date): Promise<Detected[]> {
+  const cutoff = new Date(now.getTime() - REPORTER.highRiskWaitHours * 3600_000);
+  const list = await rows(
+    db,
+    `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, c.updated_at, c.stage, c.finalize_state, p.key
+       FROM cards c JOIN projects p ON p.id = c.project_id
+      WHERE c.status = 'waiting' AND p.status = 'active'
+        AND (c.stage = 'owner_approval' OR c.finalize_state = 'awaiting_approval')
+        AND c.review_risk->>'level' = 'high' AND c.updated_at < $1`,
+    [cutoff],
+  );
+  return list.map((c) => ({
+    orgId: c.org_id,
+    projectId: c.project_id,
+    kind: 'high_risk_waiting' as const,
+    fingerprint: `high_risk_waiting:card:${c.id}`,
+    urgency: 'normal' as const,
+    count: 1,
+    subject: {
+      title: `${c.ref} is rated high risk and has waited ${hours(now.getTime() - new Date(c.updated_at).getTime())} hours for approval`,
+      detail:
+        c.finalize_state === 'awaiting_approval'
+          ? 'Waiting for approval to merge'
+          : 'Waiting for the owner approval',
+      cardId: c.id,
+      cardRef: c.ref,
+      projectKey: c.key,
+    },
+    evidence: { waitingSince: iso(c.updated_at), cardTitle: c.title, stage: c.stage },
+  }));
+}
+
 /** Every detector, run once. */
 export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
   return [
@@ -387,5 +425,6 @@ export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
     ...(await detectFailures(ctx.pool)),
     ...(await detectHygiene(ctx.pool)),
     ...(await detectBudgets(ctx.pool, now)),
+    ...(await detectHighRiskWaiting(ctx.pool, now)),
   ];
 }
