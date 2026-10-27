@@ -517,6 +517,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Hire an agent: role, seniority, workstation, runtime, model and effort, which projects it may work on, skills and a name. Choose From a pack to hire an agent of an approved pack onto one of your roles.',
       },
       {
+        name: 'Hire from a private pack',
+        text: 'Only if you have a private pack with personas: turn a persona into a chat-only agent. Packs of your organization are hired from Hire agent, From a pack.',
+      },
+      {
         name: 'Project filter',
         text: 'Show only agents allowed on a specific project.',
       },

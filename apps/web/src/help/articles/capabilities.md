@@ -35,11 +35,11 @@ A repository laid out for BMad Method imports as skills like any other pack: add
 
 For a private git repository add a deploy key (ssh) or token (https). Your browser encrypts it for each workstation you choose, which stores it for that pack only. A member's workstation asks its owner first (a request on their desk) and clones only after they accept.
 
-## Hire from a pack {#hire}
+## Hire from a private pack {#hire}
 
 Members can hire too, for projects they are on and on their own workstation. Owners and Admins can also **read the text** of an organization pack before approving it, with a diff against the version approved before (the text is encrypted for your browser only).
 
-On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *ACME · analyst · v1.2.0*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
+On a private pack, **Hire from this pack** (and **Hire from a private pack** on Agents, shown only if you have one) turns a persona into an agent tagged like *ACME · analyst · v1.2.0*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
 
 ## Agents of a pack on your desk {#pack-agents}
 

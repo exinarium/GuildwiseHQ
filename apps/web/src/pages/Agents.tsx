@@ -28,6 +28,7 @@ import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
 import { useMcpServers } from '../api/queries/mcp.ts';
 import { useRehomeAgent } from '../api/queries/members.ts';
+import { useHirablePacks } from '../api/queries/my-capabilities.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
@@ -105,6 +106,8 @@ export function Agents() {
   });
   const [hireOpen, setHireOpen] = useState(!!prefill);
   const [packHireOpen, setPackHireOpen] = useState(false);
+  // the older hire from a pack (a persona becomes a chat-only role) is for the person's private packs; organization packs go through Hire agent > From a pack
+  const hasPrivatePacks = (useHirablePacks().data?.packs ?? []).some((p) => p.visibility === 'private');
   const [describeOpen, setDescribeOpen] = useState(false);
   /** A reviewed draft waiting for the hire dialog (from "Describe the agent you need" or the starter gallery). */
   const [draftHire, setDraftHire] = useState<AgentDraftDto | null>(null);
@@ -149,9 +152,11 @@ export function Agents() {
             <Button onClick={() => setDescribeOpen(true)} data-testid="describe-agent-open">
               Describe the agent you need
             </Button>
-            <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
-              Hire from a pack
-            </Button>
+            {hasPrivatePacks && (
+              <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
+                Hire from a private pack
+              </Button>
+            )}
             <Button variant="primary" onClick={() => setHireOpen(true)}>
               Hire agent
             </Button>

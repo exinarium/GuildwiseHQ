@@ -243,7 +243,14 @@ describe('skill classification', () => {
   };
 
   it('groups skills by the first word of their key and the rest under Other', () => {
-    const mk = (key: string) => ({ key, name: key, description: '', class: 'skill' as const, marked: false });
+    const mk = (key: string) => ({
+      key,
+      name: key,
+      description: '',
+      class: 'skill' as const,
+      marked: false,
+      group: null,
+    });
     const g = groupSkills([mk('web-a'), mk('web-b'), mk('web-c'), mk('solo'), mk('x-y')]);
     expect(g.map((x) => [x.name, x.items.length])).toEqual([
       ['web', 3],
@@ -449,5 +456,46 @@ describe('agent tag', () => {
   it('keeps the older tag for a persona turned into a role', () => {
     wrap(<PackProvenance agent={{ provenance: prov as never }} />);
     expect(screen.getByTestId('pack-provenance')).toHaveTextContent('ACME · mary · abc1234');
+  });
+});
+
+describe('older hire from a pack (private packs only)', () => {
+  const PRIV = ID(51);
+  it('lists only private packs', async () => {
+    const { PickPackToHire } = await import('../components/capabilities/PickPackToHire.tsx');
+    const base = fetchMock.getMockImplementation() as (u: string, i?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation(async (u: string, i?: RequestInit) =>
+      u === '/api/packs-hirable'
+        ? json({
+            packs: [
+              { id: PACK, name: 'acme', personaCount: 3, visibility: 'org' },
+              { id: PRIV, name: 'mine', personaCount: 1, visibility: 'private' },
+            ],
+          })
+        : base(u, i),
+    );
+    wrap(<PickPackToHire onClose={() => {}} />);
+    expect(await screen.findByTestId('pick-pack-mine')).toBeInTheDocument();
+    expect(screen.queryByTestId('pick-pack-acme')).toBeNull();
+  });
+
+  it('the Agents page shows the button only with a private pack', async () => {
+    const { Agents } = await import('../pages/Agents.tsx');
+    const base = fetchMock.getMockImplementation() as (u: string, i?: RequestInit) => Promise<Response>;
+    let hirablePacks: unknown[] = [{ id: PACK, name: 'acme', personaCount: 3, visibility: 'org' }];
+    fetchMock.mockImplementation(async (u: string, i?: RequestInit) => {
+      if (u === '/api/packs-hirable') return json({ packs: hirablePacks });
+      if (u.startsWith('/api/hr/board'))
+        return json({ windowDays: 30, agents: [], recommendations: [], roleUpdates: [] });
+      return base(u, i);
+    });
+    const first = wrap(<Agents />);
+    await screen.findByRole('button', { name: 'Hire agent' });
+    await waitFor(() => expect(sent().some((c) => c.url === '/api/packs-hirable')).toBe(true));
+    expect(screen.queryByTestId('hire-from-pack-open')).toBeNull();
+    first.unmount();
+    hirablePacks = [{ id: PRIV, name: 'mine', personaCount: 1, visibility: 'private' }];
+    wrap(<Agents />);
+    expect(await screen.findByTestId('hire-from-pack-open')).toHaveTextContent('Hire from a private pack');
   });
 });
