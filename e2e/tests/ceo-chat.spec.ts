@@ -48,7 +48,7 @@ test('New chat on an empty chat keeps the one standing chat and show it in the l
   // archive-with-history path is covered by the server tests (ceo-new-chat) and the web tests.
   const standing = (await ceoChats()).filter((c) => !c.archived);
   expect(standing).toHaveLength(1);
-  await expect(page.getByTestId('chat-offline').or(page.getByText('Pair a workstation'))).toBeVisible();
+  await expect(page.getByTestId('chat-offline').or(page.getByText('Add a workstation'))).toBeVisible();
 
   await page.getByTestId('ceo-chat-new').click();
   await expect(page.getByText('This chat is still empty')).toBeVisible();

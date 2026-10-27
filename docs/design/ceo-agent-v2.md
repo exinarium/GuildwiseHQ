@@ -547,7 +547,8 @@ Names verified against the code, and the deviations the build took:
   agent), wake shifts as `ceo`, project NULL; the Costs report has `management`.
 - **Retiring**: `retire` requires the agent to be benched first and defaults to `recommend`; accepting the recommendation runs
   `fireAgent`. There is no scheduled retirement event.
-- **Not built**: `ceo` as a real step of the escalation chain (`ChainLevel` unchanged; the org chart shows it and the CEO
-  gets questions through wakes), the vault mirror `ceo/owner-profile.md`, per-class cooling-off delays (`delayMinutes`
+- **Not built**: the vault mirror `ceo/owner-profile.md`, per-class cooling-off delays (`delayMinutes`
   is stored, not acted on), standby failover, `workstations.ceo_placement` (the CEO hires onto the owner's own workstations
   only), clustering of observed desk answers beyond identical text.
+  Update: two items once listed here now exist. `ceo` is a real step of the escalation chain (`ChainLevel` includes
+  `ceo`; `apps/server/src/commands/escalation.ts`), and web push is built (`apps/server/src/push`).

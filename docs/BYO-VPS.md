@@ -65,7 +65,7 @@ A VPS can run Docker, so it can be the target of Docker deploys: install Docker 
 
 ## Unattended pairing without the wizard
 
-For provisioning scripts, cloud-init or a boot unit, the runner pairs by itself when started with a one-time code from the Workstations page (Pair workstation):
+For provisioning scripts, cloud-init or a boot unit, the runner pairs by itself when started with a one-time code from the Workstations page (Pair with a code):
 
 ```bash
 GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" aom-runner up

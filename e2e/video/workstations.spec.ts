@@ -76,7 +76,7 @@ test('record the workstations video', async ({ browser }) => {
   await chapter(2);
   await narrate('c2-a', async () => {
     await click(page, page.getByTestId('pair-with-code'));
-    const dlg = page.getByRole('dialog', { name: 'Pair workstation' });
+    const dlg = page.getByRole('dialog', { name: 'Pair with a code' });
     await expect(dlg).toBeVisible();
     await pause(600);
     await click(page, dlg.getByRole('button', { name: 'Generate pairing code' }));
