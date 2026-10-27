@@ -21,11 +21,11 @@ export interface DigestText {
 }
 export type DigestBuilder = (ctx: Ctx, db: Queryable, args: DigestArgs) => Promise<DigestText>;
 
-/** The floor report as the server's template renders it (the BA's own report stays on the desk). */
+/** The organization report as the server's template renders it (the BA's own report stays on the desk). */
 const floorReport: DigestBuilder = async (_ctx, db, a) => {
   const prefs = await reportingOf(db, a.orgId);
   const digest = await buildFloorDigest(db, a.orgId, a.now, localParts(a.now, prefs.timezone).date);
-  return { subject: `Floor report ${digest.localDate}`, text: renderFloorReportFallback(digest) };
+  return { subject: `Organization report ${digest.localDate}`, text: renderFloorReportFallback(digest) };
 };
 
 /** Cards by stage, what finished this week, open desk items and phases of one project. */

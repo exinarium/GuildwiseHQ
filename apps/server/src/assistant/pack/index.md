@@ -43,7 +43,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
 - Environments: one page per project for where the app runs (start steps, test copies per card, a test site, a live site, extra sites, the computers and servers they use, rules, history); apps that run in Docker or directly on a machine (a service, pm2); Releases lists what waits, what is live and the history, and the Owner or an Admin can go back to an earlier version.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
-- A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
+- A business analyst agent that turns tickets and ideas into cards, and writes a daily organization report: what is stuck, what was solved, what it cost.
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans. It can look at a Jira ticket's screenshots and design files (downloaded on your workstation with your Jira token, which never leaves it), and cards carry file attachments for builders and testers.
 - Outbox: posts to Jira, GitHub or email wait for your approval before they go out.
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
@@ -118,9 +118,9 @@ The in-app help articles. The ones that match the visitor's question are attache
 - Two-factor login: Setting up two-factor authentication, recovery codes, enforcement and owner reset.
 - Projects: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
 - Board and cards: Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
-- Agents: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
+- Agents: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the Agents page.
 - DevOps and repository hygiene: The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and saved work, the toolchain, the working branch and new…
-- Your desk: Desk items and kinds, the decision desk, blocking, answering questions, standing orders, the ledger.
+- Your desk: Desk items and kinds, your desk, blocking, answering questions, standing orders, the ledger.
 - Ledger and vaults: The ledger, searching it, vaults and shared knowledge, vault conflicts.
 - Intake and outbox: Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guardrails.
 - The architect: investigate and design: The optional design step before build, investigation-only cards, where reports go, the main branch merge, and what the architect may touch.

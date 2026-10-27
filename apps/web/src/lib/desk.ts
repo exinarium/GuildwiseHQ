@@ -84,7 +84,7 @@ const SUBKIND_LABEL: Record<string, string> = {
   phase_done: 'Phase done',
   phase_results: 'Phase results',
   ba_report: 'BA report',
-  floor_report: 'Floor report',
+  floor_report: 'Organization report',
   loop_backoff: 'Card keeps failing',
   working_branch: 'Working branch',
   main_merge_skipped: 'Main not merged',

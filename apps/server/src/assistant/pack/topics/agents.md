@@ -1,5 +1,5 @@
 ### Agents
-Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
+Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the Agents page.
 - Hiring an agent: To hire an agent:
 - Allow-lists: An allow-list is where an agent is allowed to work. For each agent you decide:
 - Focus: Focus (a star next to a project in the allow-list) is a soft preference. When a card from a starred project and a card from another project are both waiting, the agent takes the starred one first, even when the other project is higher in your priority order.…
@@ -11,4 +11,4 @@ Hiring agents, seniority, runtime and model, allowed projects, focus, firing and
 - External tools (MCP): Each agent card has an External tools (MCP) section listing the plugin MCP servers (Jira, Confluence, ...) your workstations report, as switches with a plain-language note. Switch one on to let that agent call its tools. Everyone who can see the agent reads the switches;…
 - Delegation: Off by default. Under Who it may delegate to on an agent's card (Owner, Admin or its manager), list the personas or agents it may hand sub-tasks to.…
 - What it may do: What it may do on an agent's card shows in one place its tools, the repositories and projects it can reach, its provider and which key pays, its delegation grants (including what its role gives it and exclusions), its playbooks, skills and packs, its cost and the budgets that apply.
-- HR board: The HR board is the Agents page. It shows at a glance:
+- The Agents page: The Agents page shows at a glance:

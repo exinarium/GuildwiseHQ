@@ -42,7 +42,7 @@ export function AgentDialog({
           to="/agents"
           className="inline-flex h-9 items-center justify-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
         >
-          Open in HR board
+          Open on the Agents page
         </Link>
       }
     >

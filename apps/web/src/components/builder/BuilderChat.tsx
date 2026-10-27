@@ -30,7 +30,7 @@ export function BuilderChat({ outline, disabled }: { outline: () => string; disa
         <p className="text-sm text-subtle" data-testid="builder-no-ba">
           Hire a business analyst on the{' '}
           <Link to="/agents?hire=ba" className="underline">
-            HR board
+            Agents page
           </Link>{' '}
           to talk this draft through.
         </p>

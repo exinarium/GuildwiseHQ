@@ -107,8 +107,8 @@ export function OverviewTab({ status: s, owner }: { status: CeoStatusDto; owner:
       {a.workstationId === null && (
         <Callout tone="info" role="status" data-testid="ceo-pair-workstation">
           {owner
-            ? `Pair a workstation to talk to ${a.name}: it runs on the Owner's own computer.`
-            : `${a.name} runs on the Owner's own computer and has none yet: the Owner pairs a workstation first.`}
+            ? `Add a workstation to talk to ${a.name}: it runs on the Owner's own computer.`
+            : `${a.name} runs on the Owner's own computer and has none yet: the Owner adds a workstation first.`}
         </Callout>
       )}
 

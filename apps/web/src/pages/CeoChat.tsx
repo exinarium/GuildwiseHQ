@@ -62,7 +62,11 @@ export function CeoChat() {
         icon={MessageSquareOff}
         tone="neutral"
         title="No CEO to chat with"
-        description="Only the organization Owner can chat with the CEO, and the CEO has to be appointed first."
+        description={
+          owner
+            ? 'Your CEO is not set up yet. Try again in a moment.'
+            : 'Only the organization Owner chats with the CEO.'
+        }
       />
     );
   }

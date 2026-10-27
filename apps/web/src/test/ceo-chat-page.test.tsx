@@ -132,5 +132,15 @@ describe('CEO chat page', () => {
     stubApi('admin', routes() as never);
     mount(`/ceo-chat/${U(1)}`);
     expect(await screen.findByText('No CEO to chat with')).toBeInTheDocument();
+    expect(screen.getByText('Only the organization Owner chats with the CEO.')).toBeInTheDocument();
+  });
+
+  it('tells the Owner the CEO is not set up yet when there is no CEO row', async () => {
+    stubApi(
+      'owner',
+      routes([['GET /api/ceo/status', () => ceoStatus({ hired: false, agent: null })]]) as never,
+    );
+    mount(`/ceo-chat/${U(1)}`);
+    expect(await screen.findByText('Your CEO is not set up yet. Try again in a moment.')).toBeInTheDocument();
   });
 });

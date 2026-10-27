@@ -891,8 +891,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Launch the setup wizard: install the runner on your own computer, on a VPS over SSH, or in a GitHub Codespace, and pair it with your organization.',
       },
       {
-        name: 'Pair workstation',
-        text: 'If the wizard is not available, pair a workstation using a one-time code.',
+        name: 'Pair with a code',
+        text: 'If the wizard is not available, pair with a one-time code.',
       },
       {
         name: 'Where agents run',

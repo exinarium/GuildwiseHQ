@@ -102,7 +102,7 @@ function TourCard() {
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-fg">The guided tour</h2>
           <p className="text-sm text-muted">
-            A two-minute walk through the sidebar, the desk, the agents and where to find help.
+            A walk of about three minutes through the sidebar, the desk, the agents and where to find help.
             {canResume && ` You stopped at step ${tour.step + 1} of ${tour.total}.`}
           </p>
         </div>

@@ -35,14 +35,14 @@ describe('the CEO page: overview', () => {
     ]);
     renderCeoPage();
     expect(await screen.findByTestId('ceo-pair-workstation')).toHaveTextContent(
-      'Pair a workstation to talk to Cora',
+      'Add a workstation to talk to Cora',
     );
     expect(screen.getByRole('tab', { name: 'Authority' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Workstations' })).toBeInTheDocument();
     expect(screen.getByTestId('ceo-pause')).toBeInTheDocument();
   });
 
-  it('tells an Admin that the Owner pairs the workstation', async () => {
+  it('tells an Admin that the Owner adds the workstation', async () => {
     stubApi('admin', [
       [
         'GET /api/ceo/status',
@@ -56,7 +56,7 @@ describe('the CEO page: overview', () => {
     ]);
     renderCeoPage();
     expect(await screen.findByTestId('ceo-pair-workstation')).toHaveTextContent(
-      'the Owner pairs a workstation',
+      'the Owner adds a workstation',
     );
   });
 

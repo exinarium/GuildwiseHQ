@@ -1,11 +1,11 @@
 ---
 title: Agents
-summary: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
+summary: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the Agents page.
 keywords: [external tools, mcp, jira, confluence, hire, fire, allow-list, focus, seniority, agent, workstation, model, team]
 order: 6
 ---
 
-Agents are AI assistants that work on your cards. You hire them with a role and seniority, assign them to workstations and projects, and can fire them when you no longer need them. The HR board shows their work and recommendations for your team.
+Agents are AI assistants that work on your cards. You hire them with a role and seniority, assign them to workstations and projects, and can fire them when you no longer need them. The Agents page shows their work and recommendations for your team.
 
 ## Hiring an agent {#hiring}
 
@@ -92,9 +92,9 @@ Under **Approval gates**, switch on **Ask me before** merge and push, deploy, de
 
 A pack's skills, personas and playbooks can say what they need (`shell`, `web`, `commit`, ...). When you grant one to an agent that lacks a scope, you see what is missing and choose **Grant anyway**; the grant does not give the agent the permission.
 
-## HR board {#hr-board}
+## The Agents page {#hr-board}
 
-The HR board is the Agents page. It shows at a glance:
+The Agents page shows at a glance:
 
 - **Agent cards**: name, role, seniority, status (idle, on shift, blocked, or needs rehome), model, current card, who hired it, cost this month and in total, and quick actions.
 - **Performance stats** over the last 30 days: cards done, blocked rate, rework rate, bugs escaped, utilisation and tokens per card, each compared to the average of the agents in the same role. Builders also show work-quality figures such as the reviewer score.

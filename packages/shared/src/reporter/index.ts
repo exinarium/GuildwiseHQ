@@ -436,7 +436,7 @@ const list = (xs: string[]): string => (xs.length ? xs.map((x) => `- ${x}`).join
 
 /** The daily report as a template: the facts the CEO starts from, and the whole report when the CEO cannot run. */
 export function renderFloorReportFallback(d: FloorDigest): string {
-  const out: string[] = [`# Floor report ${d.localDate}`, ''];
+  const out: string[] = [`# Organization report ${d.localDate}`, ''];
   out.push('## Phases');
   out.push(
     list(

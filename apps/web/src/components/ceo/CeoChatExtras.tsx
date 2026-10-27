@@ -25,7 +25,7 @@ export function fullPowerText(fp: CeoChatStateDto['fullPower'], ceoName: string)
     case 'unknown':
       return `${ws} is offline, so full power cannot be checked. Messages wait until it is back.`;
     default:
-      return `Pair a workstation to talk to ${ceoName}.`;
+      return `Add a workstation to talk to ${ceoName}.`;
   }
 }
 

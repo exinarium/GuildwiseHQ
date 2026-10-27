@@ -148,7 +148,7 @@ export function HireDialog({
     if (runtimeProblem) errs.runtime = runtimeProblem;
     if (effectiveAccess.allowed !== null && effectiveAccess.allowed.length === 0)
       errs.access = 'Pick at least one project, or allow any project';
-    if (!effectiveStation) errs.workstation = 'Pair a workstation first';
+    if (!effectiveStation) errs.workstation = 'Add a workstation first';
     setErrors(errs);
     if (Object.keys(errs).length || !role) return;
     const common = {
