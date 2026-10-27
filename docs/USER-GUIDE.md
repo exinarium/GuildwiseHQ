@@ -136,6 +136,7 @@ This guide is for people who have never worked with AI agents before. You do not
 
 
 
+
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute
@@ -721,7 +722,7 @@ In the project settings, **Test without an environment** replaces the old "Test 
 
 > **In the app:** watch the videos "Your Desk" (Help, "Your desk", `/help/desk#desk-items`) and "The Ledger" (Help, "Ledger and vaults", `/help/ledger-and-vaults#ledger`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
 
-**Reminders for open items.** A question, approval, escalation or digest rating that stays open for **3 days** (the period is an organization setting under **Settings > General > Reminders for open items**; 0 turns it off) reminds the person it is waiting for (the person it is addressed to, else the card's owner, else the project's owners, else the Owners and Admins). They get a notification on their devices (category **Reminders for open items**, on by default) and the item shows **Reminded**. It repeats at most once per period. An item that sits with an agent is handed back to the agent once instead. **Snooze** on an item holds its reminders back for 1 day to 2 weeks. Reports (the floor report, BA reports, CEO notices) are never chased.
+**Reminders for open items.** A question, approval, escalation or digest rating that stays open for **3 days** (the period is an organization setting under **Settings > General > Reminders for open items**; 0 turns it off) reminds the person it is waiting for (the person it is addressed to, else the card's owner, else the project's owners, else the Owners and Admins). They get a notification on their devices (category **Reminders for open items**, on by default) and the item shows **Reminded**. It repeats at most once per period. An item that sits with an agent is handed back to the agent once instead. **Snooze** on an item holds its reminders back for 1 day to 2 weeks. Reports (daily reports, BA reports, CEO notices) are never chased.
 
 ### 4.6 Budgets and costs
 
@@ -732,7 +733,7 @@ Every shift records what it used (input, output and cache tokens and the model).
 - the **Costs** page (Owners and Admins): spend by project, agent, model and day for any date range, with an **Export CSV** button;
 - the **project settings** and the **board header** ("$9.00 of $10.00 this month");
 - each **agent card**, each **card** and each **phase**;
-- the **CEO's daily report** (older organization reports stay on the desk).
+- the **CEO's daily report** (older daily reports, written by the BA, stay on the desk).
 
 ![The Costs page](guide/assets/costs.jpg)
 
@@ -853,7 +854,7 @@ An **automation** (called a schedule before October 2026) is *a trigger and one 
 - **Ask the CEO** to look at something and put the answer on your desk as a notice (schedules that were made with "Ask the BA" now ask the CEO).
 - **Poll GitHub or Jira issues** and send each new one into **intake**.
 - **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
-- **E-mail a digest**: choose **Organization report (the day's facts)** (the organization-wide facts of the day) or **Project summary**, at a time you choose. There is no interests digest here: an interest delivers its own digest (4.9).
+- **E-mail a digest**: choose **Daily report (the day's facts)** (the organization-wide facts of the day) or **Project summary**, at a time you choose. There is no interests digest here: an interest delivers its own digest (4.9).
 
 ![The automation wizard](guide/assets/schedule-wizard.jpg)
 
@@ -1161,7 +1162,7 @@ You can start a project on any branch of any repository to try it, without leavi
 
 ### 4.22 Your CEO
 
-The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaced the BA's daily floor report, the BA's triage of held desk items and the BA's urgent notes (the BA reporter is gone: the BA is a spec writer only and keeps intake, specs, finalizing, phases and design chats). **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
+The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaced the BA's daily report, the BA's triage of held desk items and the BA's urgent notes (the BA reporter is gone: the BA is a spec writer only and keeps intake, specs, finalizing, phases and design chats). **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
 
 **The CEO page.** Open **CEO** in the sidebar (Organization group, `/org/ceo`). The Owner sees nine tabs: **Overview**, **Authority**, **Reporting & alerts**, **Persona & instructions**, **Memory**, **Tasks**, **Topics**, **Activity log** and **Workstations**. Admins see the Overview and the activity log, and can pause the CEO.
 
