@@ -5,7 +5,7 @@ keywords: [CEO, chief executive, front door, full power, model, correction, auth
 order: 26
 ---
 
-The **CEO** is built into every organization: you do not hire or appoint it, and it is free of plan limits. It is your front door: you tell it what you want, it answers agent questions, keeps cards moving, delegates to the team and to DevOps, and writes your daily report. It runs on your own workstation (the first one you pair; change it on **Organization, CEO**). You can **pause** it any time as an emergency stop. There is no training period: it decides what your policy allows from day one, and every decision can be reviewed and corrected.
+The **CEO** is built into every organization: you do not hire or appoint it, and it is free of plan limits. It is your front door: you tell it what you want, it answers agent questions, keeps cards moving, delegates to the team and to DevOps, and writes your daily report. It runs on one of your own workstations: the first one you pair takes it, and you can move it on the **Workstations** tab of the CEO page (**Organization, CEO**, then **Move the CEO here**). You can **pause** it any time as an emergency stop. There is no training period: it decides what your policy allows from day one, and every decision can be reviewed and corrected.
 
 ## Full power in your own chat {#full-power}
 
@@ -22,6 +22,14 @@ On the **Ledger** you can give the CEO full power on one of your own standing or
 ## What it may decide {#authority}
 
 The **Authority** tab sets, for each kind of action, whether the CEO decides, recommends or never does it. Matters like production deploys, manual QA and budgets stay yours unless you delegate one (you confirm each). Billing, members, security and secrets are never delegated. Below a minimum confidence it recommends instead.
+
+## Questions from agents and escalation {#escalation}
+
+When an agent asks a blocking question, the system routes it. With an active CEO that can be reached, the question goes to the CEO and the BA is skipped. If the CEO cannot be reached (its workstation is offline, or you paused it), the question goes to your desk. Without an active CEO, it goes to the BA, then to your desk. A question raised on a card may first go to the card's previous holder or a senior of the same role.
+
+A question that no one answers is passed on by the system: after 20 minutes without an answer, or after three question shifts that ended without one. It goes to the CEO when the CEO is active and does not have it yet; otherwise to your desk. A question on a paused project goes to your desk at once.
+
+On the desk, a question or escalation that the CEO has a view on shows a note that the CEO recommends an option (the CEO's name, then "recommends"), with the reason and the confidence. **Accept recommendation** answers with exactly what is recommended. It is not offered for vault conflicts.
 
 ## Decisions you review {#decisions}
 

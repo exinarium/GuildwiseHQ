@@ -12,6 +12,7 @@ Your **CEO** is the AI agent that reports to you: it is woken when something nee
 - **Urgent items reach your desk at once, unchanged**: blocking questions, approvals (DevOps, merges, outbound updates), pinned alerts and cards that keep failing. The CEO is woken for them too and acts within the rules you gave it.
 - **Everything else** (for example "bug reported" or "posting failed" alerts) is held for the CEO for up to 10 minutes. The CEO passes it on, folds duplicates into one item, or dismisses noise it can show is covered.
 - **The CEO never blocks anyone.** If an item has not been looked at within 10 minutes, it reaches you unchanged ("The CEO had not looked at this within the time limit"). When the CEO cannot run (its workstation is offline, or you paused it), nothing is held and everything reaches you at once; after 30 minutes of something urgent waiting you get a notice and an e-mail.
+- **Blocking questions from agents** that nobody answers are passed on, to the CEO when it is active; see [Questions from agents and escalation](/help/your-ceo#escalation).
 - There is no switch for this any more: the CEO is always there. **Pause** on the CEO page is the emergency stop.
 
 ## Signals the server watches for {#signals}
@@ -38,7 +39,7 @@ A signal appears once however long it lasts and clears by itself when the cause 
 
 ## The daily report {#floor-report}
 
-At **08:00 on your clock** (change it on the CEO page, **Reporting**), the CEO writes your daily report (only on days with something to say; urgent notices never wait).
+At **08:00 on your clock** (change it on the CEO page, **Reporting & alerts** tab), the CEO writes your daily report (only on days with something to say; urgent notices never wait). On your desk the item is labelled **CEO report**; older BA reports stay on the desk as **Organization report** items.
 
 The report lists:
 1. What needs you.

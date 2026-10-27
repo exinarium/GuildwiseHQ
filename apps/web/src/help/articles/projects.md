@@ -84,9 +84,17 @@ When you filter by department the order cannot be changed (it only makes sense f
 
 **Code projects** are for building: features, bug fixes, refactors and documentation. They have stages like Spec, Build, Review, Test and Finalize. They need repositories and can run test suites and regression tests.
 
-**Research projects** are for investigations and deep dives. They have stages like Question, Research, Fact Check and Publish. They do not need repositories. Results go to the project's vault folder.
+**Research projects** are for investigations and deep dives. They have stages like Question, Research and Fact check; a note is published once every claim is verified. They do not need repositories. Results go to the project's vault folder.
 
 You can also create a research card in any Code project: pick the card type "research" when creating the card. It then runs on the research workflow alongside your project's own stages. Research cards count as resolved when their note is published.
+
+## The Research tab {#research-tab}
+
+A project gets a **Research** entry in its sidebar when it started as a research project or has published research notes. The page has three parts:
+
+- **New research card** (top right): opens a new card with the research type.
+- **In progress**: the open research cards, each with the board column it is in.
+- **Published notes**: each note with the card that produced it, its date and its citations and transcripts. A note is published when the checker has verified every claim against its citations. The notes are kept in the project's vault folder, and `PROJECT.md` there lists them for the agents.
 
 ## Sharing a project {#sharing}
 

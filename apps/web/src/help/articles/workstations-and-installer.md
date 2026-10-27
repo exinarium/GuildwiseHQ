@@ -54,7 +54,7 @@ See the installer's help links for your system's commands. On Windows, install t
 
 While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows **ok**, **warn** or **fail**. A **fail** means something is missing or broken and the line says what. A **warn** (Docker, yt-dlp) is optional.
 
-Afterwards, a workstation's card on the **Workstations** page shows whether it is **Connected** or **Offline**, its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, and its repositories. To run the checks again, run `aom-runner doctor` on that computer.
+Afterwards, a workstation's card on the **Workstations** page shows its name and runner version, whether it is **Connected** or **Offline**, and an **Unpair** button. Click the name to expand it: its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, its repositories, its git hosts and the DevOps engineer panel. To run the checks again, run `aom-runner doctor` on that computer.
 
 ## Shifts at once {#shifts-at-once}
 
@@ -127,6 +127,8 @@ The runner version is shown under the workstation's name. When there is somethin
 - **Updates by hand**: this runner was started by hand and not by the installer's service, so it cannot restart itself. Run the install command again to update it.
 
 You do not need to do anything. Running the install command again still upgrades a runner at any time. To switch automatic updates off on one computer, set `AOM_RUNNER_AUTO_UPDATE=0` for the runner.
+
+**Check for updates.** Next to the runner version on the workstation card, **Check for updates** asks the runner to run its update check now instead of waiting for its timer. The usual rules still apply: it downloads and checks the new version, and waits until no agent is working before it restarts. The runner's answer appears beside the button. The button is disabled when the workstation is offline, or when its runner is too old to report updates.
 
 ## Unpairing {#unpairing}
 

@@ -12,12 +12,23 @@ Every shift records what it uses: input tokens, output tokens, and which model r
 You can see costs in several places:
 
 - **Project settings**: the month's spend in the header and a **Monthly budget** panel with a progress bar.
-- **Board header**: (e.g., "$9.00 of $10.00 this month") and a banner when near or over budget; each waiting card also says so in a [warning banner](/help/board-and-cards#reading-the-board).
+- **Board header**: the month's spend (e.g., "$9.00 of $10.00 this month"). It shows even when the project has no budget, and a banner appears when it is near or over budget; each waiting card also says so in a [warning banner](/help/board-and-cards#reading-the-board).
 - **Agents page**: each agent's cost this month and in total.
 - **A phase or a card**: what its shifts and BA work cost.
 - **Interests**: the spend and budget of the interest.
 - **The CEO's daily report**: a Spend section listing projects, cost and budget.
-- **Costs page** (Owner and Admin): breakdown by project, agent, model and day for any date range, with daily bars and an **Export CSV** button.
+- **Costs page** (Owner and Admin): see [The Costs page](#costs-page).
+
+## The Costs page {#costs-page}
+
+Open it from **Costs** in the sidebar. It covers the range you pick (**This month**, **Last 30 days**, **Last month**, or **From** and **To**), and the **Project** filter.
+
+- **Total spend** and **Org overhead**: overhead is spend on chats and BA work outside a project.
+- **By day**, **By project**, **By agent** and **By model**: each with spend, tokens and share.
+- **Management (CEO)**: the CEO's own spend. It appears only when the CEO has spent something in the range. Its **Organization budget** link opens the CEO's reporting tab.
+- **What the agents delivered**: cards finished this month, estimated hours of work, usage and return against the month before. The hours are estimates by card type, not measurements. Under **Adjust the estimates** you can change the hours per card type and the value of one hour. **Export value report (CSV)** downloads the month.
+- **Code map: what it saved**: compares billed input tokens per finished card, for cards that ran with the code map and cards that ran without it. It is hidden until some cards have run. A saving percentage appears only when the comparison is strong enough (at least 10 cards in each group); otherwise the panel gives the reason, and it says **measuring** while the comparison runs.
+- **Export CSV**: downloads the costs for the range.
 
 ## Monthly budgets {#monthly-budgets}
 
@@ -45,6 +56,6 @@ To change how costs appear:
 
 1. Go to **Costs** (sidebar: Organization; Owner and Admin).
 2. Open the **Currency and prices** panel (the prices used for the estimates are listed under it).
-3. Enter the **Currency** code (e.g., `EUR`) and the rate ("units per 1 USD"; e.g., `0.92` for euros), then save.
+3. Enter the **Currency** code (e.g., `EUR`) and the rate ("units per 1 USD"; e.g., `0.92` for euros), then click **Save currency**.
 
 Budgets and every amount you see use the currency you set. Changing the rate changes how all history is shown, not what was recorded.

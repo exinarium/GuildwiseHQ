@@ -49,7 +49,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | outdated | FAQ phone answer lacks phone controls | Filters, Project actions, Move to… | FAQ answer rewritten; figures `m-board`, `m-card` re-taken in the capture run |
 | guide | outdated | figures `phase`, `run-panel`, `card-detail` | follow-ups pick environments; "Test copy"; reviewer risk panel | figures re-taken in the capture run |
 | tutorial | no gaps | | | |
-| help (follow-up) | outdated | `board-and-cards.md` reading-the-board lacks the filter chips and Pause project; page help board and card detail | | follow-up |
+| help (follow-up) | outdated | `board-and-cards.md` reading-the-board lacks the filter chips and Pause project; page help board and card detail | | `board-and-cards.md` reading-the-board: QA and approval chips, "Board actions" with Pause project; page help board (Pause project, Archive, QA/approval chips). Blocked/Rework/Unassigned already present. Card detail page help not re-checked |
 
 ## 2 Backlog
 
@@ -60,7 +60,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | sort by "date created" | the sort is "Newest" | corrected |
 | guide | missing | 4.3b sits before 4.3a, is not in the contents, has no figure, has no Appendix A row | | order fixed; figure `backlog`; Appendix A row |
 | tutorial | missing | no tour step | sidebar entry Backlog | step `backlog`; Help article section `board-and-cards#backlog` (anchor added; role rule added) |
-| help (follow-up) | outdated | page help backlog | | follow-up |
+| help (follow-up) | outdated | page help backlog | | page help backlog: Owner and Admin actions (add, flag, send, drop), Owner items toggle, status chips, sort |
 
 ## 3 Environments
 
@@ -71,7 +71,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | button names | "Not sure: let DevOps look", "Use this", "Check", "Reconnect", "Use another computer" | corrected |
 | guide | missing | the Ready state, the releases-paused note, a figure | | added; figure `environments` (the Environments page, "Your app"; replaces `run-settings`, which is removed) |
 | tutorial | missing | no tour step | sidebar entry Environments | step `environments`; *tour Read more* `phases#delivery-recipes`: "Delivery" paragraph replaced by the Releases switch |
-| help (follow-up) | outdated | `phases.md` Change server/computer; page help environments | | follow-up |
+| help (follow-up) | outdated | `phases.md` Change server/computer; page help environments | | `phases.md`: More menu labels (Change server/computer, not "Change place"), Move to a new server button, place in use blocks removal; page help environments (Releases switch, More menu) |
 
 ## 4 Research
 
@@ -79,7 +79,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | no gaps | 4.13 and its figure are current; Appendix A row added | | Appendix A row |
 | tutorial | missing | no tour step | sidebar entry Research | step `research` (`project-conversion#research-as-a-stage` exists) |
-| help (follow-up) | wrong | page help research links `projects#project-types`, which does not describe the tab | | follow-up |
+| help (follow-up) | wrong | page help research links `projects#project-types`, which does not describe the tab | | `projects.md` new "The Research tab" section (`#research-tab`); page help research now links to it |
 | app issue | wrong | | "New research card" does not preselect the research type (`ResearchTab.tsx:65,100`, `CardNew.tsx:32`) | backlog suggestion |
 
 ## 5 Desk
@@ -90,7 +90,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | outdated | "Floor report" kind | retired: the CEO's "Daily report <date>" | replaced; figure `desk-floor-report` replaced by `desk-daily-report` |
 | guide | outdated | figures `desk`, `desk-question`, `m-desk` | changed | figures re-taken in the capture run |
 | tutorial | no gaps | tour step; *tour Read more* `desk#desk-items` was outdated | CEO handling, chips, Accept recommendation | `desk#desk-items` updated |
-| help (follow-up) | outdated | `desk.md` BA routing, "Remember this for the CEO", kind list; page help desk | | follow-up |
+| help (follow-up) | outdated | `desk.md` BA routing, "Remember this for the CEO", kind list; page help desk | | `desk.md`: CEO triage (not BA), Remember this for the CEO step, kind badges and labels, CEO report label, Accept recommendation, filters; page help desk (Handled by CEO, CEO decisions, Accept recommendation) |
 | app issue | wrong | | the Intake button shows for every role and with the integrations feature off (`Desk.tsx:191-193`) | backlog suggestion |
 
 ## 6 Intake
@@ -99,7 +99,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | no gaps | 4.8 and figures current | | added the One ticket / Batch tabs and the Admin's "Start intake" wording |
 | tutorial | outdated | step text omits Batch and CEO hand-over | Batch tab; "Tell your CEO" | step text; *tour Read more* `intake-and-outbox#intake` (buttons by role; "Outbox approval" → "Outbound update") |
-| help (follow-up) | outdated | page help intake | | follow-up |
+| help (follow-up) | outdated | page help intake | | page help /intake: Tell your CEO (Owner only), Work with the BA directly label, batch project and note; article already correct |
 
 ## 7 Automations
 
@@ -108,7 +108,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 4.8: an interests digest | digest options are "Floor report (organization)" and "Project summary" | corrected (labels quoted as shown) |
 | guide | outdated | "BA tasks"; "BA settings" in the chapter 4 table | "Ask the CEO" | corrected |
 | tutorial | no gaps | | | |
-| help (follow-up) | missing | page help: Send test (webhook and e-mail), Switch the secret off, "Run by the system" | | follow-up |
+| help (follow-up) | missing | page help: Send test (webhook and e-mail), Switch the secret off, "Run by the system" | | page help /automations: Send test for e-mail, Switch the secret off, Run by the system section |
 | app issue | outdated | | the wizard still calls the digest "Floor report (organization)" (`ScheduleWizard.tsx:1136,1171`) | backlog suggestion (stale UI copy) |
 
 ## 8 Projects
@@ -119,7 +119,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | missing | 4.3 | Workflows, Claude account, Owner approval, Manual QA, Full suite, Testing and decisions, PR branch prefix, Remove finished card branches, jump chips | added; figure `project-settings` re-taken in the capture run |
 | guide | wrong | Appendix A: Delivery | none | corrected |
 | tutorial | no gaps | | | |
-| help (follow-up) | outdated | page help settings and projects (Paused badge; ordering disabled under a department filter) | | follow-up |
+| help (follow-up) | outdated | page help settings and projects (Paused badge; ordering disabled under a department filter) | | page help /projects (Paused badge, ordering off under a department filter) |
 
 ## 9 Agents
 
@@ -131,7 +131,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | outdated | "ignore" recommendations | Dismiss and Dismiss all (N) | corrected |
 | guide | removed | "Start chat", "Send as a task" | button "Ask <CEO>" | replaced; figures `hr`, `hr-recs` re-taken in the capture run |
 | tutorial | no gaps | *tour Read more* `agents#hiring` lacked Planner/Pre-reviewer | | updated (`agents.md` lists the roles) |
-| help (follow-up) | wrong | `agents.md` Allow-lists: an empty list benches the agent; Pause/Resume, Re-home, Dismiss missing; page help agents | | follow-up |
+| help (follow-up) | wrong | `agents.md` Allow-lists: an empty list benches the agent; Pause/Resume, Re-home, Dismiss missing; page help agents | | `agents.md` "Pause and re-home" section (empty-list benching already stated); page help /agents and /hr (Pause or Resume). Dismiss: no Agents-page control found (desk only), not added |
 
 ## 10 Org chart
 
@@ -139,7 +139,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | outdated | 4.7: you, then the BAs | you, the CEO (always there), then the BAs; filter "Allowed on project"; panel "Workstations and DevOps"; "Hire a BA" | corrected; figure `org-chart` re-taken in the capture run |
 | tutorial | no gaps | *tour Read more* `org-chart-and-design#org-chart` lacked the CEO tier | | updated |
-| help (follow-up) | outdated | `org-chart-and-design.md` escalation; page help | | follow-up |
+| help (follow-up) | outdated | `org-chart-and-design.md` escalation; page help | | `org-chart-and-design.md` escalation paragraph (routing: CEO before BA) and status list; page help /org-chart status. Chart "Escalates to" disagrees with routing: see report |
 
 ## 11 CEO
 
@@ -152,7 +152,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | outdated | 4.11 duplicates 4.22; its `settings` figure | | 4.11 shortened to "The daily report" pointing to 4.22; figures `ceo`, `ceo-chat`, `ceo-reporting` |
 | guide | wrong | 4.22 diagnostics | not available to customer organizations yet | note added |
 | tutorial | missing | no tour step | sidebar entry CEO (Owner, Admin) | step `ceo` (`your-ceo#talking` exists) |
-| help (follow-up) | outdated | `your-ceo.md` lines 8 and 42, `ba-reporter.md` line 39; page help /org/ceo and /ceo-chat | | follow-up |
+| help (follow-up) | outdated | `your-ceo.md` lines 8 and 42, `ba-reporter.md` line 39; page help /org/ceo and /ceo-chat | | `your-ceo.md` workstation wording and new "Questions from agents and escalation" section (routing, 20-minute pass-on, Accept recommendation); `ba-reporter.md` tab name and "CEO report" label, escalation link; page help /org/ceo (five missing tabs), /ceo-chat (Owner only, refused while running) |
 | app issue | outdated | | `CeoChat.tsx:65` says the CEO "has to be appointed first" | backlog suggestion (stale UI copy) |
 
 ## 12 Roles & workflows
@@ -162,7 +162,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 4.7: "Start a design chat" | on the "Design with the BA" tab, needs a BA allowed on any project; the page is titled "Organization" | corrected |
 | guide | outdated | 4.26 and 4.20: "Design" stage | "Investigate & design"; "Merge review" stage | corrected; figure `org-workflows` re-taken in the capture run |
 | tutorial | missing | no tour step | sidebar entry Roles & workflows | step `org` (title "Roles & workflows") |
-| help (follow-up) | outdated | `org-chart-and-design.md` current version, Code v6 stages, "Create department"; page help builder | | follow-up |
+| help (follow-up) | outdated | `org-chart-and-design.md` current version, Code v6 stages, "Create department"; page help builder | | `org-chart-and-design.md` built-in Code v6 and Research stage lists, Create department, workflow/version text; `projects.md` Research stages. "Current version" statement not re-verified beyond the v6 definition; page help builder not re-checked line by line |
 | app issue | outdated | | `OrgDesigner.tsx:696` "Only the organization owner designs with the BA" (Admins can); `:652,707` "HR board" | backlog suggestion (stale UI copy) |
 
 ## 13 Workstations
@@ -174,7 +174,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 9.1 wizard wording | "Waiting for you to run the command" | corrected |
 | guide | outdated | 9.2 "Disconnected" | no such state | removed; figure `ws-offline` re-taken in the capture run |
 | tutorial | no gaps | | | |
-| help (follow-up) | outdated | `workstations-and-installer.md` (Check for updates, card contents); page help | | follow-up |
+| help (follow-up) | outdated | `workstations-and-installer.md` (Check for updates, card contents); page help | | `workstations-and-installer.md` card contents and a "Check for updates" paragraph; page help /workstations card entry |
 | app issue | wrong | | three labels for pairing (minor) | backlog suggestion (stale UI copy) |
 
 ## 14 Releases
@@ -184,7 +184,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 4.27 labels | "The standard rule", "Freeze all releases" / "Lift the freeze", "Advanced: rule sets" | corrected |
 | guide | missing | no own section | Not now, "Release to N of M", the Releases paused badge, history filters | new 4.28 Releases; figure `releases` |
 | tutorial | missing | no tour step | sidebar entry Releases | step `releases`; new Help section `phases#releases` |
-| help (follow-up) | missing | page help releases | | follow-up |
+| help (follow-up) | missing | page help releases | | already fixed on main: `/releases` page help exists; Rules entry now says Owner and Admins only and Freeze is per rule set |
 
 ## 15 Integrations
 
@@ -193,7 +193,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | outdated | 3.4a | one Claude tile per account, Connect another account, MCP Sign in / Sign out | corrected; figure `integrations` re-taken in the capture run |
 | guide | wrong | Appendix A puts integrations under Automations | own sidebar entry | corrected |
 | tutorial | missing | no tour step | sidebar entry Integrations | step `integrations`; *tour Read more* `integrations#connect` brought up to date |
-| help (follow-up) | missing | page help integrations | | follow-up |
+| help (follow-up) | missing | page help integrations | | already fixed on main: `/integrations` page help exists and its AI runtime and tile controls were re-checked against `IntegrationTile.tsx` and `AiRuntimeSection.tsx` |
 
 ## 16 Metrics
 
@@ -201,7 +201,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | missing | only an Appendix A row | Project filter, 7/14/30/90-day range, Throughput, Time blocked on you, Bounce rate per builder, Bugs escaped past test, Duration with Shift time per agent, Queue depth per column | new 4.29 Metrics; figure `metrics` |
 | tutorial | missing | no tour step | sidebar entry Metrics | step `metrics`; *tour Read more* `agents#hr-board` list fixed |
-| help (follow-up) | missing | page help metrics | | follow-up |
+| help (follow-up) | missing | page help metrics | | already fixed on main: `/metrics` page help exists; its six section names match `pages/Metrics.tsx` |
 
 ## 17 Costs
 
@@ -209,7 +209,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | wrong | 4.6 "Value report" | panel "What the agents delivered"; "Currency and prices" panel | corrected |
 | tutorial | wrong | "by project, agent and day"; budgets changed on this page | by project, agent, model and day; budgets are set in each project's settings | step text; *tour Read more* `budgets-and-costs#monthly-budgets` (BA Budget signal → the CEO's daily report) |
-| help (follow-up) | outdated | `budgets-and-costs.md` value and code-map panels, Org overhead and Management rows; page help | | follow-up |
+| help (follow-up) | outdated | `budgets-and-costs.md` value and code-map panels, Org overhead and Management rows; page help | | `budgets-and-costs.md` "The Costs page" section; page help /costs (overhead, management, code map) |
 | app issue | wrong | | the Project dropdown is built from the report and shrinks to the selected project (`Costs.tsx:164,229`) | backlog suggestion |
 
 ## 18 Interests
@@ -219,7 +219,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 8.3: a vault choice | interests live in the organization vault | removed |
 | guide | missing | 4.9 | Deliver N now, Archive / Restore / Delete permanently, list filters | added |
 | tutorial | no gaps | | | |
-| help (follow-up) | wrong | page help /interests/:id "vault is fixed" wording | | follow-up |
+| help (follow-up) | wrong | page help /interests/:id "vault is fixed" wording | | page help /interests/:id Settings tab: vault folder shown on Overview, not changed here (the "fixed once run" rule has no trace in code) |
 
 ## 19 Ledger
 
@@ -227,7 +227,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | missing | 4.5 | Project filter | added; figure `ledger` re-taken in the capture run |
 | tutorial | outdated | *tour Read more* `ledger-and-vaults#ledger` | Retire, Show retired, the "May contradict another order" badge | updated |
-| help (follow-up) | outdated | "Editing a standing order", "Which vault an agent reads"; page help | | follow-up |
+| help (follow-up) | outdated | "Editing a standing order", "Which vault an agent reads"; page help | | "Editing a standing order" and "Which vault an agent reads" already in `ledger-and-vaults.md`; page help /ledger (Show retired, Retire, Edit and History, contradiction badge) |
 
 ## 20 Vaults
 
@@ -235,7 +235,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | no gaps | local folders already covered | | figure `vaults` re-taken in the capture run |
 | tutorial | outdated | step: "sync to your workstations … Secrets stay on the machines you choose" | git vaults sync; a project vault can be a local folder | step text; *tour Read more* `ledger-and-vaults#vaults` |
-| help (follow-up) | outdated | the article does not say how a local-folder vault is created; page help | | follow-up |
+| help (follow-up) | outdated | the article does not say how a local-folder vault is created; page help | | `ledger-and-vaults.md` automatic local folder vault and how to sync it; page help /settings/vaults (local folder badge) |
 | app issue | wrong | | the empty state shows "Register a vault" to users who cannot register; the dialog opens empty (`Vaults.tsx:74-77,293`) | backlog suggestion (stale UI copy) |
 
 ## 21 Settings
@@ -246,7 +246,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 3.2 button name | "Set up" | corrected |
 | guide | wrong | 4.15 "Account, Security" | "Forgot your password?" | corrected |
 | tutorial | wrong | step: "when your daily report arrives"; Read more `getting-started#first-login` | the time is set on the CEO's Reporting & alerts tab; Notifications and Monday briefing exist | step text; new Help section `getting-started#your-settings` |
-| help (follow-up) | outdated | page help /settings ("Two-factor login"; link) | | follow-up |
+| help (follow-up) | outdated | page help /settings ("Two-factor login"; link) | | page help /settings: Two-factor login name, article link to `two-factor` |
 | app issue | wrong | | a non-Owner sees the Owner's time zone after saving their own (`Settings.tsx:23`); "on your clock" is wrong for non-Owners (`:127`) | backlog suggestion |
 
 ## 22 Organization
@@ -257,7 +257,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | missing | no figure of Project links | | figure `org-project-links` |
 | guide | no gaps | Members, Invitations, Guests, Plan | | |
 | tutorial | missing | no tour step | sidebar entry Organization | step `organization` |
-| help (follow-up) | outdated | `organizations-and-roles.md` lines 29 and 40; page help (Project links, E-mail inbox) | | follow-up |
+| help (follow-up) | outdated | `organizations-and-roles.md` lines 29 and 40; page help (Project links, E-mail inbox) | | `organizations-and-roles.md` tab list (E-mail inbox, Project links, Model providers, Audit log; Billing hosted-only), self-reset pointer; page help /settings/org (Project links, Audit log) |
 
 ## 23 Help
 

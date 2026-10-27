@@ -26,7 +26,7 @@ At the top of the sidebar, you see the name of the organization the current tab 
 
 ## Members and invitations {#members-and-invitations}
 
-To manage people in your organization, open **Organization** at the bottom of the sidebar, then the **Members** tab (Members see the list but cannot change it; the **Invitations**, **Guests** and **Plan & limits** tabs are for Owner and Admins, and the **Billing** tab is for the Owner).
+To manage people in your organization, open **Organization** at the bottom of the sidebar, then the **Members** tab (Members see the list but cannot change it). These tabs are for Owner and Admins: **Invitations**, **Guests**, **E-mail inbox**, **Project links** (the links between projects that you assert; suggestions from the code are not sent to Guildwise HQ), **Model providers**, **Plan & limits** and **Audit log**. The **Billing** tab appears only on a hosted service and is for the Owner.
 
 **Members** lists everyone with their role. The Owner can change roles and remove people. Admins can remove Members. When someone is removed, their agents go back to the Owner and need a new home (**Re-home** on the agent's card), and any cards they held are released back to the queue. Anyone except the Owner can leave the organization on their own (**Leave organization** on the **General** tab); the Owner must hand over ownership first (**Transfer ownership**).
 
@@ -37,7 +37,7 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
 4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
-Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way (use Account, Security). Their account is one account for every organization, so the new password applies in their other organizations too.
+Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way; they use **Forgot your password?** on the sign-in page. Their account is one account for every organization, so the new password applies in their other organizations too.
 
 The Owner can change an Admin or Member's role from the role selector on their row. On a hosted service your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Billing](/help/billing-and-plans#plans)).
 

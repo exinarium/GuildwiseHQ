@@ -40,7 +40,7 @@ Vaults are folders of markdown notes. A git vault is a repository that your DevO
 There are two kinds:
 
 - **Organization vault**: the knowledge of your organization, including your interests (under `interests/<name>/`). An organization has at most one.
-- **Project vault**: one per project, shared with the members of that project.
+- **Project vault**: one per project, shared with the members of that project. A project that has no vault gets an automatic **local folder** vault, held by the Owner's first workstation (the **local folder** badge shows on it). It is not synced and has no copy elsewhere. To sync it, the project owner gives the project a git repository with **Register a vault** (Settings, Vaults); the workstation keeps the old folder aside and clones the repository.
 
 There are no personal vaults any more: "personal" simply means your own organization. If you had a personal vault, its files were merged into the organization vault under `personal/`.
 

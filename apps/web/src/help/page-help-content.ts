@@ -22,18 +22,21 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Add to the backlog',
-        text: 'Type a title and press Enter (or tap Add). Fill in the details later with Edit.',
+        text: 'Owner and Admins: type a title and press Enter (or tap Add). Fill in the details later with Edit.',
       },
       {
         name: 'Search and filters',
-        text: 'Search title, description and tags. Filter by flagged, agent suggestions, status, priority and tag. Open items are shown by default.',
+        text: 'Search title, description and tags. Filter by flagged, Agent suggestions or Owner items (click the chip to cycle), status (Open, Done, Dropped), priority and tag. Sort by priority or Newest. Open items are shown by default.',
       },
-      { name: 'Star', text: 'Flag an item you want to look at soon.' },
+      { name: 'Star', text: 'Owner and Admins: flag an open item you want to look at soon.' },
       {
         name: 'Send to BA',
-        text: 'Hands the item to the BA as a new card on the board. The item becomes Done and links to the card. Select several items to send them together.',
+        text: 'Owner and Admins. From an open item’s menu, hands it to the BA as a new card on the board; the item becomes Done and links to the card. Tick several open items and press Send N to the BA to send them together.',
       },
-      { name: 'Drop', text: 'Takes an item off the backlog. Find it again with the Dropped filter.' },
+      {
+        name: 'Drop',
+        text: 'Owner and Admins. Takes an open item off the backlog. Find it again with the Dropped filter.',
+      },
     ],
   },
   '/p/:projectKey/board': {
@@ -74,6 +77,18 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Convert a research project to a Code project (or another workflow) once its questions are answered. Shown on research projects to the Owner and Admins.',
       },
       {
+        name: 'Pause project',
+        text: 'Owner and Admins, while the project runs: nothing new starts on it until it is resumed; running shifts finish. An optional reason shows on the project banner, where Resume project restarts it.',
+      },
+      {
+        name: 'Waiting for my QA and Waiting for my approval',
+        text: 'Shown when some card has a QA or approval step. Each shows how many cards wait for you; click to show only those.',
+      },
+      {
+        name: 'Archive',
+        text: 'Done and cancelled cards that have left the board. Open the Archive to search, filter or reopen them.',
+      },
+      {
         name: 'Settings',
         text: 'The gear opens the project settings: name, how finished work lands, repositories, phases, merging, budget, team and archiving.',
       },
@@ -107,7 +122,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'The finished research notes, each linked to the card that produced it.',
       },
     ],
-    article: 'projects#project-types',
+    article: 'projects#research-tab',
   },
   '/p/:projectKey/environments': {
     title: 'Environments',
@@ -124,7 +139,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Places',
-        text: 'The computers and servers this project can use. Add one once and choose it for any environment.',
+        text: 'The computers and servers this project can use. Add one once and choose it for any environment. A place an environment still uses cannot be removed until that environment changes its server or computer.',
+      },
+      {
+        name: 'Releases switch',
+        text: 'On or Paused. Pausing stops automatic updates after a merge, the Release and Update now buttons, and the deploy follow-ups that use these environments.',
+      },
+      {
+        name: 'More menu on an environment',
+        text: 'Edit, Change server (or Change computer), Go back to an earlier version on the live site, and Remove. Move to a new server is a button on the card where the place can move.',
       },
     ],
     article: 'phases#delivery-recipes',
@@ -175,7 +198,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Send test',
-        text: 'For webhooks: send a test delivery now. It is logged but never retried.',
+        text: 'For webhooks and e-mail automations: send a test delivery now. It is logged but never retried.',
+      },
+      {
+        name: 'Run by the system',
+        text: 'Automations the platform runs for you. They are locked and marked System; Configure opens the page where they are set up.',
       },
       {
         name: 'History',
@@ -186,8 +213,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Change an automation, switch it off and on, or remove it. Automations for the whole organization are changed by the Owner and Admins only.',
       },
       {
-        name: 'New secret',
-        text: 'For webhooks: replace the signing secret. The new one is shown once.',
+        name: 'New secret and Switch the secret off',
+        text: 'For webhooks: New secret replaces the signing secret, and the new one is shown once. Switch the secret off turns the web address off until you make a new secret.',
       },
     ],
     article: 'automations-and-integrations#triggers',
@@ -239,7 +266,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Settings tab',
-        text: 'Change what to collect, the run and delivery schedules, preferred agents and the budget. The vault is fixed once the interest has run.',
+        text: 'Change what to collect, the run and delivery schedules, preferred agents and the budget. The vault folder is shown on the Overview; it is not changed here.',
       },
       {
         name: 'Taste tab',
@@ -406,11 +433,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Priority order',
-        text: 'The projects of your organization, most important first. Agents take the next card from the highest project that has work, after scheduled work and their own rework. Owners and Admins change the order by dragging a project by its grip, or with the up and down buttons. A new project starts at the bottom.',
+        text: 'The projects of your organization, most important first. Agents take the next card from the highest project that has work, after scheduled work and their own rework. Owners and Admins change the order by dragging a project by its grip, or with the up and down buttons. A new project starts at the bottom. The order cannot be changed while a department filter is on: clear it first.',
       },
       {
         name: 'Project row',
-        text: 'Shows the priority number, the project name, key, workflow, department and whether you own it or it is shared with you. Click the name to open its board.',
+        text: 'Shows the priority number, the project name, key, workflow, department, a Paused badge when it is paused, and whether you own it or it is shared with you. Click the name to open its board.',
       },
       {
         name: 'Shared with you',
@@ -534,6 +561,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Shown when an agent needs a new home (for example its manager was removed): pick one of your own workstations.',
       },
       {
+        name: 'Pause or Resume',
+        text: 'Owner and Admins. A paused agent is not given cards until you resume it. On the CEO card, Manage on the CEO page opens the CEO page.',
+      },
+      {
         name: 'Reset (DevOps engineer)',
         text: "Wipe a DevOps engineer's sandbox. It stays assigned to its workstation.",
       },
@@ -605,6 +636,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Re-home',
         text: 'Shown when an agent needs a new home (for example its manager was removed): pick one of your own workstations.',
+      },
+      {
+        name: 'Pause or Resume',
+        text: 'Owner and Admins. A paused agent is not given cards until you resume it. On the CEO card, Manage on the CEO page opens the CEO page.',
       },
       {
         name: 'Reset (DevOps engineer)',
@@ -772,7 +807,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Agent status',
-        text: 'Each tile says in words what the agent is doing: working, blocked, idle or offline.',
+        text: 'Each tile says in words what the agent is doing: working, blocked, idle, offline or needs a new workstation.',
       },
       {
         name: 'DevOps engineers',
@@ -801,6 +836,26 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Memory',
         text: 'The rules the CEO remembers. Only the Owner can read and change them.',
+      },
+      {
+        name: 'Reporting & alerts',
+        text: 'When the daily report is written (08:00 by default, on your clock), which kinds of alert reach you by desk, e-mail or automation, the wake window, and the CEO budget: at 80% you are told; at 100% it works in minimal mode.',
+      },
+      {
+        name: 'Persona & instructions',
+        text: 'How the CEO wakes, runs its daily review, chats and hands over work, and the instructions it works by.',
+      },
+      {
+        name: 'Tasks',
+        text: 'Work you give the CEO, with its status (open, in progress, waiting for you, waiting for the work, done, failed or cancelled). Owner only.',
+      },
+      {
+        name: 'Topics',
+        text: 'Questions the CEO proposes for the Guildwise blog. Nothing is sent without your Accept; Edit and Reject are offered too.',
+      },
+      {
+        name: 'Workstations',
+        text: 'The workstation the CEO runs on. Move the CEO here moves it to another of your workstations.',
       },
     ],
     article: 'your-ceo',
@@ -836,11 +891,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Total spend',
-        text: 'Estimated cost of all shifts in the period, worked out from tokens at list prices. Not an invoice.',
+        text: 'Estimated cost of all shifts in the period, worked out from tokens at list prices. Not an invoice. Org overhead (chats and BA work outside a project) is shown beside it.',
       },
       {
         name: 'Breakdown by project',
-        text: 'See which projects are costing the most and where to optimize.',
+        text: 'See which projects are costing the most and where to optimize. Org overhead and Management (CEO) rows appear here when they have spend; Organization budget opens the CEO reporting tab.',
       },
       {
         name: 'Breakdown by agent',
@@ -856,7 +911,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'What the agents delivered',
-        text: 'Cards finished this month, estimated hours of work, usage and return. Adjust the estimates there.',
+        text: 'Cards finished this month, estimated hours of work, usage and return. Adjust the estimates there. Below the value panel, Code map: what it saved compares billed input tokens for cards that ran with the code map and without it; it appears once cards have run.',
       },
     ],
     article: 'budgets-and-costs#monthly-budgets',
@@ -876,7 +931,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Rules',
-        text: 'What must be true before a release, in plain sentences: for example the test site is healthy on the same version for 10 minutes. Freeze stops every release until you lift it.',
+        text: 'What must be true before a release, in plain sentences: for example the test site is healthy on the same version for 10 minutes. Freeze on a rule set stops the releases that use it until you Lift freeze. Owner and Admins only.',
       },
     ],
     article: 'phases#delivery-recipes',
@@ -904,7 +959,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Workstation card',
-        text: 'Name, system and runner version, whether it is connected, and an Unpair button. Click the name to expand: runtimes, shifts running, repositories and the DevOps engineer panel.',
+        text: 'Name, system and runner version, whether it is connected, and an Unpair button. Check for updates, next to the runner version, asks the runner to look for a new version now. Click the name to expand: runtimes, shifts running, repositories and the DevOps engineer panel.',
       },
       {
         name: 'Git hosts',
@@ -956,7 +1011,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/settings': {
     title: 'Settings',
     intro:
-      'Your personal preferences: picture, expert mode for code changes, the weekly blog digest, time zone and two-factor security.',
+      'Your personal preferences: picture, expert mode for code changes, the weekly blog digest, time zone and two-factor login.',
     controls: [
       {
         name: 'Your picture',
@@ -971,8 +1026,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Off by default: cards speak in plain results and Guildwise takes care of branches. Tick Show me branches and git controls to see branch names, choose how each card lands and use the manual merge controls. Only changes what you see.',
       },
       {
-        name: 'Two-factor security',
-        text: 'Set up two-factor login with an authenticator app, get new recovery codes or turn it off (not possible when your organization requires it).',
+        name: 'Two-factor login',
+        text: 'Turn on two-factor login with an authenticator app, make new recovery codes or turn it off. It cannot be turned off when your organization requires it.',
       },
       {
         name: 'Your time zone',
@@ -987,7 +1042,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'One email on Monday mornings with the new blog articles. On by default for Owners, off for everyone else until you tick it.',
       },
     ],
-    article: 'getting-started#the-tour',
+    article: 'two-factor',
     tips: [
       "Your picture, time zone and two-factor login are personal to your account. The CEO's report time (on the CEO page) applies to the whole organization.",
     ],
@@ -1003,7 +1058,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Vault card',
-        text: "The vault's kind, git URL and sync interval, and for each workstation whether it is synced, waiting or in error, with the last pull and push.",
+        text: "The vault's kind, git URL and sync interval, and for each workstation whether it is synced, waiting or in error, with the last pull and push. A project's automatic vault shows a local folder badge: it is not synced until the project is given a git repository.",
       },
       {
         name: 'Edit',
@@ -1091,7 +1146,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/settings/org': {
     title: 'Organization',
-    intro: 'Manage your organization: members, invitations, guests, plan and billing.',
+    intro:
+      'Manage your organization: members, invitations, guests, e-mail inbox, project links, plan and billing.',
     controls: [
       {
         name: 'General tab',
@@ -1114,8 +1170,16 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Addresses that turn incoming mail into draft cards, with Copy, New address, an allow-list of senders (Owner only) and the recent messages with what became of each. Owner and Admins only.',
       },
       {
+        name: 'Project links tab',
+        text: 'Links you assert between projects (depends on, uses, is related to) or to something outside Guildwise. Suggestions from the code are not shown here; the CEO raises those in chat. Owner and Admins only.',
+      },
+      {
         name: 'Plan & limits tab',
         text: 'Your plan and status, usage against the limits and the features switched on. Plans limit members, projects and workstations, never agents. Owner and Admins only.',
+      },
+      {
+        name: 'Audit log tab',
+        text: 'Export the audit log as CSV or JSON for a date range, optionally for one person. Secrets are masked. Owner and Admins only.',
       },
       {
         name: 'Billing tab',
@@ -1152,6 +1216,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Notices filter',
         text: 'Show only alerts and heads-up notices from agents and the system.',
+      },
+      {
+        name: 'Handled by CEO filter',
+        text: 'Show only items the CEO has already acted on for you, including closed ones.',
+      },
+      {
+        name: 'CEO decisions filter',
+        text: 'Show only the CEO decisions for review. They are information: not blocking and not counted in the open total.',
       },
       {
         name: 'Sort by priority',
@@ -1195,7 +1267,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Options',
-        text: 'Suggested answers to choose from. The asker may have marked one as recommended.',
+        text: 'Suggested answers to choose from. The asker may have marked one as recommended. When the CEO recommends one, Accept recommendation answers with exactly that.',
       },
       {
         name: 'Answer field',
@@ -1318,6 +1390,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Show more/less',
         text: 'Toggle to expand or collapse long entries.',
       },
+      {
+        name: 'Show retired',
+        text: 'Include retired entries, which stay in the ledger greyed out. Agents do not see them.',
+      },
+      {
+        name: 'Retire',
+        text: 'Retire an entry that is out of date. A reason is required. Agents stop seeing it.',
+      },
+      {
+        name: 'Edit and History',
+        text: 'Owner and Admins edit a standing order to change its title or text; History keeps the earlier versions.',
+      },
+      {
+        name: 'May contradict another order',
+        text: 'Shown on a standing order that may clash with another one. Check both.',
+      },
     ],
     article: 'ledger-and-vaults#ledger',
   },
@@ -1340,7 +1428,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/ceo-chat': {
     title: 'Chat with the CEO',
     intro:
-      'Your conversation with the CEO as a full page: the history, the message box, and your earlier CEO chats.',
+      'Your conversation with the CEO as a full page: the history, the message box, and your earlier CEO chats. Owner only.',
     controls: [
       {
         name: 'Message thread',
@@ -1348,7 +1436,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'New chat',
-        text: 'Start a fresh conversation (an empty chat is reused). The earlier one stays under Earlier, and you can still open it and write in it.',
+        text: 'Start a fresh conversation (an empty chat is reused). The earlier one moves under Earlier, and you can still open it and write in it. Not possible while a reply is still running.',
       },
       { name: 'Earlier', text: 'Open one of your previous chats with the CEO.' },
     ],
@@ -1494,11 +1582,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Start intake',
-        text: 'Open a conversation with your BA about it.',
+        text: 'Open a conversation with your BA about it. Owners see Work with the BA directly instead.',
+      },
+      {
+        name: 'Tell your CEO',
+        text: 'Owner only. Opens a chat with your CEO with the ticket or need already in it as a new intake.',
       },
       {
         name: 'Batch',
-        text: 'Paste many tickets, one per line. The BA works through them in the background and asks on the desk when stuck.',
+        text: 'Paste many tickets, one per line, with an optional project and a note for all of them. The BA works through them in the background and asks on the desk when stuck.',
       },
       {
         name: 'Earlier intakes',
