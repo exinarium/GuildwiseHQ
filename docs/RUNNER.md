@@ -666,6 +666,8 @@ a new generation. Doing it again undoes it. Claude Code (runner 0.1.60, `claude-
 
 **Pack scripts gate and work mentions (runner 0.1.60).** `pack-script-gate:1`: for an agent whose spec says `packScriptsGated`, no script file of a pack is written into the runtime's skill folder, and `aom skill show --file <script>` asks the server (`pack.script.gate`, runner to server only) first; a server that cannot be reached denies. `mention-work:1`: `chat.start.mentionWork` makes the chat of an @mention work in the card's folder (writable, `buildMentionWorkSettings`: the shift policy of the permissions the server cut, branch moving and push denied, no web/MCP), Claude Code only; without the folder on this workstation the chat fails. `chat-accounts:1`: `chat.start.account` runs a chat about a project's card on the project's account (the account gate of that account decides, not main's).
 
+**The role in a chat (runner 0.1.61).** `chat.start.role` (`{ name, persona?, extensions? }`, sent only when the agent's role has a persona or the owner extended it) is written into the chat's instructions as "# Your role" (`renderChatRoleSection`, Claude Code and the direct models alike): how the role works (`RoleDefinition.persona`, for example a BMAD role set's persona, docs/bmad-roles.md) and the owner's extension instructions. A card shift gets the persona in its brief (`role.persona`, after the role instructions). Additive: an older runner ignores the field and the chat runs without it, as before.
+
 **Old runners.** A runner without `provider-accounts:1` is told to update (tile "Runner too old"); the server sends it no
 named account and no key command with an account name, and pauses or falls back for a project that names one.
 

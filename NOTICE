@@ -3,3 +3,8 @@ Copyright 2026 Pieter Jordaan
 
 This product includes software developed by Pieter Jordaan and contributors.
 Third-party components keep their own licences; see apps/runner/THIRD_PARTY_NOTICES.
+
+The BMAD role set (packages/shared/src/roles/role-sets/bmad.generated.ts) contains persona and method text derived from
+the BMAD Method (https://github.com/bmad-code-org/BMAD-METHOD), Copyright (c) 2025 BMad Code, LLC, used under the MIT
+License (packages/shared/src/roles/role-sets/BMAD-LICENSE). BMad, BMad Method and BMAD are trademarks of BMad Code, LLC;
+Guildwise HQ is not affiliated with or endorsed by BMad Code, LLC. See docs/bmad-roles.md.

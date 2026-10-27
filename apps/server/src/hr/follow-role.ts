@@ -7,7 +7,7 @@ import {
 } from '@aom/shared';
 import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { rows } from '../db/sql.ts';
+import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 
@@ -18,11 +18,12 @@ const SYSTEM = { kind: 'system', id: null } as const;
  * has a newer active version, append `AgentPermissionsRebased`: the new version's permissions plus the agent's own
  * deviations from the version it was derived from (`newRole + (agent - oldRole)`), and its skills by the same rule. The
  * agent's `roleVersion` moves with it, so its instructions follow the role too. Idempotent: an agent already on the current
- * version is untouched.
+ * version is untouched. `allowDown` also moves agents whose version is no longer current to a LOWER current version (a role
+ * set withdrawn: its versions are superseded and the built-in version is current again).
  */
 export async function rebaseAgentsToCurrentRoles(
   ctx: Ctx,
-  opts: { orgId?: string; roleKey?: string; tx?: Tx } = {},
+  opts: { orgId?: string; roleKey?: string; tx?: Tx; allowDown?: boolean } = {},
 ): Promise<number> {
   const run = async (tx: Tx): Promise<number> => {
     const agents = await rows(
@@ -34,7 +35,20 @@ export async function rebaseAgentsToCurrentRoles(
     const events: AppendInput[] = [];
     for (const a of agents) {
       const current = await loadRole(tx, a.org_id, a.role_key);
-      if (!current || current.version <= a.role_version) continue;
+      if (!current) continue;
+      // An agent on a withdrawn role-set version moves back even when the built-in has reached the same number since.
+      const stale =
+        opts.allowDown &&
+        current.orgId === null &&
+        current.version <= a.role_version &&
+        !!(await one(
+          tx,
+          `SELECT 1 FROM role_definitions WHERE org_id=$1 AND key=$2 AND version=$3 AND status='superseded'
+              AND definition ? 'roleSet'`,
+          [a.org_id, a.role_key, a.role_version],
+        ));
+      if (current.version === a.role_version && !stale) continue;
+      if (current.version < a.role_version && !opts.allowDown) continue;
       if (!current.definition.seniorityLevels.includes(a.seniority)) continue;
       const own = AgentPermissionsSchema.safeParse(a.permissions);
       if (!own.success) continue;
@@ -42,7 +56,7 @@ export async function rebaseAgentsToCurrentRoles(
         tx,
         `SELECT definition, version FROM role_definitions
           WHERE key=$2 AND (org_id = $1 OR org_id IS NULL) AND version <= $3 AND status IN ('active','superseded')
-          ORDER BY version`,
+          ORDER BY version, (org_id IS NULL) DESC`,
         [a.org_id, a.role_key, a.role_version],
       );
       const perms = past.map((p) => (p.definition as { permissions?: AgentPermissions }).permissions);

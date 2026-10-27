@@ -4,6 +4,13 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Role sets: an organization can run its built-in roles as BMAD Method agents (Roles & workflows > Role set, docs/bmad-roles.md). The analyst, BA, planner, architect and builder take the persona and working method of the matching BMAD agent. They, the reviewers, the researcher and the writer get the BMAD skills that fit them from an imported BMAD pack, under their pack keys. Instructions, core rules, permissions and stages stay the built-in ones, enforced on registration and approval. The set's versions are one approval on the desk, agents follow them like any new role version, and switching back returns every agent to the built-in version. The persona text is generated from a BMAD checkout (`scripts/bmad-roles/generate.mjs`), and a new BMAD commit or built-in version is offered as a new approval at the server's start.
+- A UX designer role (part of the BMAD set) and a "UX design" step template for project workflows: after planning, before the architect and the builder, only for cards that need design.
+- Project workflow variants: an inserted agent step can run only when a card's boolean field is set (`when`, for example `designNeeded`).
+- Runner 0.1.61: a chat's instructions carry the role's persona and the owner's Extend instructions ("# Your role"); card shifts carry the persona after the role instructions.
+
 ### Fixed
 
 - Skills given to an agent: the skills added to a role with Extend now reach every agent on the role, in chats, sessions and card shifts alike, as loadable skills in the `# Capabilities` index and the runtime's skills folder. Before, chats got only the skills stored on the agent at hire, and card shifts listed the extension's skills as plain text only.

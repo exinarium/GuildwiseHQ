@@ -141,6 +141,14 @@ export const orgEvents = [
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
   /**
+   * The roles the organization runs (docs/bmad-roles.md): `guildwise` (the stock roles) or a role set such as `bmad`, whose
+   * versions wait on the desk until they are approved. `pack` is the imported pack that holds the set's skills.
+   */
+  defineEvent(
+    'OrgRoleSetChanged',
+    z.object({ orgId: Id, roleSet: z.string().min(1).max(40), pack: z.string().max(64).optional(), by: Id }),
+  ),
+  /**
    * The Owner switched the organization-level consent "Share diagnostic data with Guildwise" on or off
    * (docs/design/ceo-blog-topics.md section 11). `consentVersion` is the version of the consent text that was shown.
    */

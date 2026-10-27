@@ -121,7 +121,12 @@ describe('chat: the vault of the conversation', () => {
     isDevops: false,
   };
 
-  async function run(clone: boolean, context: Record<string, unknown>, devops = false) {
+  async function run(
+    clone: boolean,
+    context: Record<string, unknown>,
+    devops = false,
+    extra: Record<string, unknown> = {},
+  ) {
     h = await startHarness();
     if (clone) cloneVault(join(h.dataDir, 'vaults'));
     const adapter = h.runner.chat.deps.adapters.get('mock') as unknown as {
@@ -145,6 +150,7 @@ describe('chat: the vault of the conversation', () => {
       agent: { ...agent, isDevops: devops },
       message: 'what do we know',
       context,
+      ...extra,
     };
     h.server.send('chat.start', msg);
     await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
@@ -187,5 +193,19 @@ describe('chat: the vault of the conversation', () => {
   it('the DevOps engineer, who reads anywhere, is given no vault folder', async () => {
     const { input } = await run(true, { vault: { vaultId: VAULT_ID, kind: 'org' } }, true);
     expect(input.readDirs).toEqual([]);
+  });
+
+  it("a chat gets its role's persona and the owner's extension instructions (chat.start.role)", async () => {
+    const role = {
+      name: 'Builder',
+      persona: '## How you work\nTests first.',
+      extensions: 'Prefer small commits.',
+    };
+    const { instructions } = await run(false, {}, false, { role });
+    expect(instructions).toContain('# Your role: Builder\n## How you work\nTests first.');
+    expect(instructions).toContain('Prefer small commits.');
+    await h?.stop();
+    const plain = await run(false, {});
+    expect(plain.instructions).not.toContain('# Your role');
   });
 });

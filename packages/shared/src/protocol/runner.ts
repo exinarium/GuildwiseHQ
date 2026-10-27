@@ -336,6 +336,8 @@ export const ShiftBriefSchema = z.object({
     coreRules: z.array(z.string()),
     extensions: z.string().optional(),
     skills: z.array(z.string()),
+    /** How the role works (`RoleDefinition.persona`); absent for the stock roles. */
+    persona: z.string().optional(),
   }),
   /**
    * Investigate & design (docs/design/architect-and-workflows.md): where the architect writes its report and, once it
@@ -1654,6 +1656,13 @@ export const ChatStartSchema = msg('chat.start', {
    * `mention-work:1`; the runner works only when the permissions also hold edit or shell.
    */
   mentionWork: z.boolean().optional(),
+  /**
+   * The agent's role as a chat needs it: how the role works (`RoleDefinition.persona`) and the owner's extension instructions.
+   * Absent when the role has neither. Additive: an older runner ignores it (runner 0.1.61 writes it into the chat's instructions).
+   */
+  role: z
+    .object({ name: z.string(), persona: z.string().optional(), extensions: z.string().optional() })
+    .optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

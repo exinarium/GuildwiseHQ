@@ -189,6 +189,14 @@ export const catalogueProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'RoleVersionRejected'>).payload;
     await exec(tx, `UPDATE role_definitions SET status='rejected' WHERE id=$1`, [p.roleVersionId]);
   },
+  RoleSetVersionsWithdrawn: async (tx, e) => {
+    const p = (e.event as EventOf<'RoleSetVersionsWithdrawn'>).payload;
+    await exec(
+      tx,
+      `UPDATE role_definitions SET status='superseded' WHERE id = ANY($2::uuid[]) AND org_id=$1 AND status='active'`,
+      [p.orgId, p.roleVersionIds],
+    );
+  },
   RoleExtended: async (tx, e) => {
     const p = (e.event as EventOf<'RoleExtended'>).payload;
     await exec(

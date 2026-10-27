@@ -24,6 +24,7 @@
     "@biomejs/biome": "^2.5.15",
     "@types/node": "^22.19.0",
     "concurrently": "^10.0.5",
+    "smol-toml": "^1.4.2",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^4.1.12"

@@ -48,7 +48,7 @@ import { agentCapBlocked } from '../provider-keys/caps.ts';
 import { notifyUsers } from '../push/notifier.ts';
 import { standingOrdersForProjects } from '../queries/ledger.ts';
 import { threadMessageById } from '../queries/threads.ts';
-import { agentSpecFor } from '../runner-gateway/brief.ts';
+import { agentSpecFor, chatRoleFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
 import { delegationSpecFor } from '../sessions/delegate-grants.ts';
@@ -397,6 +397,8 @@ export class ChatRelay {
       c.mention || agentSpec.isDevops || agentSpec.roleKey === 'ceo'
         ? undefined
         : await delegationSpecFor(ctx.pool, 'agent', agentSpec.agentId);
+    // how the role works and the owner's extension instructions (an older runner ignores them)
+    const role = agentSpec.isDevops ? undefined : await chatRoleFor(ctx.pool, row);
     return ctx.services.runners.send(
       row.workstation_id,
       'chat.start',
@@ -411,6 +413,7 @@ export class ChatRelay {
         ...(delegation ? { delegation } : {}),
         ...(opts.account ? { account: { key: opts.account } } : {}),
         ...(mentionWork ? { mentionWork: true } : {}),
+        ...(role ? { role } : {}),
       },
       ctx.clock.now(),
     );

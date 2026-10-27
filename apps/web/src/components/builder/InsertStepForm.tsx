@@ -1,13 +1,19 @@
 import { type RoleDefinition, roleClaimsStage } from '@aom/shared';
 import { useState } from 'react';
-import { type EditorInsertion, investigateInsertion, slugId } from '../../lib/workflowVariant.ts';
+import {
+  type EditorInsertion,
+  investigateInsertion,
+  slugId,
+  uxDesignInsertion,
+} from '../../lib/workflowVariant.ts';
 import { Button, Select, TextArea, TextInput } from '../ui.tsx';
 
-type Template = 'investigate' | 'custom' | 'approval';
+type Template = 'investigate' | 'ux' | 'custom' | 'approval';
 
 /**
- * "Insert step after X" in project-variant scope: a template (Investigate & design for the architect, or a custom
- * step), the step's name, who works it and what done means. The result is one insertion for the variant's spec.
+ * "Insert step after X" in project-variant scope: a template (Investigate & design for the architect, UX design for the
+ * BMAD role set's UX designer, or a custom step), the step's name, who works it and what done means. The result is one
+ * insertion for the variant's spec.
  */
 export function InsertStepForm({
   after,
@@ -26,6 +32,7 @@ export function InsertStepForm({
   onCancel: () => void;
 }) {
   const hasArchitect = roles.some((r) => r.key === 'architect');
+  const hasUx = roles.some((r) => r.key === 'ux_designer');
   const [template, setTemplate] = useState<Template>(hasArchitect ? 'investigate' : 'custom');
   const [label, setLabel] = useState(template === 'investigate' ? 'Investigate & design' : '');
   const [role, setRole] = useState(template === 'investigate' ? 'architect' : '');
@@ -40,6 +47,10 @@ export function InsertStepForm({
       setLabel('Investigate & design');
       setRole('architect');
       setCriteria('');
+    } else if (t === 'ux') {
+      setLabel('UX design');
+      setRole('ux_designer');
+      setCriteria('');
     } else if (t === 'approval') {
       setLabel('Owner approves');
       setRole('');
@@ -49,7 +60,12 @@ export function InsertStepForm({
       setRole('');
     }
   };
-  const id = template === 'investigate' ? `investigate_after_${after.id}` : slugId(label);
+  const id =
+    template === 'investigate'
+      ? `investigate_after_${after.id}`
+      : template === 'ux'
+        ? uxDesignInsertion(after.id).stage.id
+        : slugId(label);
   const can = (r: RoleDefinition) => roleClaimsStage(r, variantKey, id);
 
   const add = () => {
@@ -71,8 +87,8 @@ export function InsertStepForm({
     }
     if (!role) return setError('Pick the role that works this step');
     if (template === 'custom' && !criteria.trim()) return setError('Say what done means for this step');
-    if (template === 'investigate') {
-      const t = investigateInsertion(after.id);
+    if (template === 'investigate' || template === 'ux') {
+      const t = template === 'ux' ? uxDesignInsertion(after.id) : investigateInsertion(after.id);
       onAdd({ ...t, stage: { ...t.stage, label: label.trim(), claimRole: role } });
       return;
     }
@@ -90,6 +106,7 @@ export function InsertStepForm({
     >
       <Select label="Template" value={template} onChange={(e) => pick(e.target.value as Template)}>
         {hasArchitect && <option value="investigate">Investigate &amp; design (architect)</option>}
+        {hasUx && <option value="ux">UX design (UX designer, cards that need design)</option>}
         <option value="custom">Custom step</option>
         <option value="approval">A person approves it on the desk</option>
       </Select>
@@ -116,7 +133,7 @@ export function InsertStepForm({
           label="Role"
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          disabled={template === 'investigate'}
+          disabled={template === 'investigate' || template === 'ux'}
         >
           <option value="">Pick a role</option>
           {roles.map((r) => (

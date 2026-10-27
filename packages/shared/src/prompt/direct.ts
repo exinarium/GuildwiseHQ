@@ -2,6 +2,7 @@ import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 import { renderDirectTurnInstructions, type SessionTurnSpec } from '../sessions/index.ts';
 import type { SessionToolDef } from '../sessions/tools.ts';
 import { renderToolMapping } from '../sessions/tools.ts';
+import { type ChatRole, renderChatRoleSection } from './chat.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
 
 /**
@@ -13,8 +14,12 @@ import { renderBindingStandingOrders } from './standing-orders.ts';
 export function renderDirectSystemPrompt(input: {
   /** A turn of a discovery or boardroom session. */
   session?: { spec: SessionTurnSpec; persona: string };
-  /** A plain chat. */
-  chat?: { agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>; context: ChatContext };
+  /** A plain chat (`role`: `chat.start.role`). */
+  chat?: {
+    agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>;
+    context: ChatContext;
+    role?: ChatRole | undefined;
+  };
   tools: readonly SessionToolDef[];
   /** The capability index (`CapabilityRegistry.instructionsIndex`), appended as it is. */
   capabilityIndex?: string;
@@ -25,7 +30,9 @@ export function renderDirectSystemPrompt(input: {
       renderDirectTurnInstructions(input.session.spec, input.session.persona, renderToolMapping(input.tools)),
     );
   } else if (input.chat) {
-    parts.push(renderDirectChatInstructions(input.chat.agent, input.chat.context, input.tools));
+    parts.push(
+      renderDirectChatInstructions(input.chat.agent, input.chat.context, input.tools, input.chat.role),
+    );
   }
   const idx = input.capabilityIndex?.trim();
   if (idx) parts.push(idx);
@@ -36,12 +43,15 @@ function renderDirectChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
   ctx: ChatContext,
   tools: readonly SessionToolDef[],
+  role?: ChatRole,
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
     `You are ${agent.name}, a ${agent.seniority} ${agent.roleKey} working for the manager you are chatting with. Names are handles, not personas: do not roleplay, answer plainly.`,
   );
+  const roleSection = renderChatRoleSection(role);
+  if (roleSection) out.push(roleSection);
   out.push('# This conversation');
   const where: string[] = [];
   if (ctx.projectKey) where.push(`project ${ctx.projectKey}`);

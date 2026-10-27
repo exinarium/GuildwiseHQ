@@ -33,6 +33,8 @@ export const InsertedStageSchema = StageSchema.pick({
   maxShiftMinutes: true,
   requiredCapabilities: true,
   environment: true,
+  /** Agent steps: run only for cards whose boolean field equals the value (for example `designNeeded`); skipped otherwise. */
+  when: true,
 }).extend({
   /** Board column; defaults to the label. */
   column: z.string().optional(),
@@ -84,7 +86,8 @@ export type VariantErrorCode =
   | 'nothing_to_redirect'
   | 'ambiguous_successor'
   | 'missing_role'
-  | 'bad_send_back';
+  | 'bad_send_back'
+  | 'conditional_approval';
 
 export class VariantError extends Error {
   constructor(
@@ -146,6 +149,12 @@ export function materialiseVariant(
     const successor = targets[0] as string;
     const s = ins.stage;
     if (s.kind === 'approval') {
+      if (s.when)
+        throw new VariantError(
+          `approval step '${s.id}' cannot be conditional (when)`,
+          'conditional_approval',
+          s.id,
+        );
       const back = s.sendBackTo ?? after.id;
       const backStage = stages.find((x) => x.id === back);
       if (!backStage || (backStage.kind !== 'agent' && backStage.kind !== 'manual'))
@@ -226,6 +235,8 @@ export function materialiseVariant(
         maxShiftMinutes: s.maxShiftMinutes,
         requiredCapabilities: s.requiredCapabilities,
         environment: s.environment,
+        // a skipped step follows its `done` outcome to the successor
+        ...(s.when ? { when: s.when } : {}),
       }),
     );
   }
@@ -276,6 +287,25 @@ export function smokeTestInsertion(after: string): StageInsertionInput {
       doneCriteria:
         'The running environment answers and its main flows work: the checks named on the card and the project suites were run against it and reported.',
       environment: 'project',
+      maxShiftMinutes: 60,
+    },
+  };
+}
+
+/**
+ * Template "UX design" (BMAD role set, docs/bmad-roles.md): a UX designer step after planning, before the architect's design
+ * and the build, run only for cards that need design (`designNeeded`). Needs the `ux_designer` role (`ux*` steps of code).
+ */
+export function uxDesignInsertion(after = 'planning'): StageInsertionInput {
+  return {
+    after,
+    stage: {
+      id: after === 'planning' ? 'ux_design' : `ux_design_after_${after}`,
+      label: 'UX design',
+      claimRole: 'ux_designer',
+      doneCriteria:
+        'The UX specification for the card is committed on the card branch (docs/ux/): screens and states, components, copy, accessibility, and how each acceptance criterion shows in the interface.',
+      when: { field: 'designNeeded', equals: true },
       maxShiftMinutes: 60,
     },
   };

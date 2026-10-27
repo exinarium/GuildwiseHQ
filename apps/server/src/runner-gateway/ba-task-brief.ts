@@ -188,6 +188,7 @@ export async function buildBaTaskShiftStart(
       instructions: role.definition.instructions,
       coreRules: role.definition.coreRules,
       skills: await effectiveAgentSkills(ctx.pool, agent),
+      ...(role.definition.persona ? { persona: role.definition.persona } : {}),
     },
     handoffs: [],
     reviewComments: [],

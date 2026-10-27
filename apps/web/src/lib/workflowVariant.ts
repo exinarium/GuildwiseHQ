@@ -10,6 +10,7 @@ import {
   type ProjectWorkflowDto,
   type RoleDefinition,
   type StageInsertionInput,
+  uxDesignInsertion,
   type ValidationIssue,
   validateVariant,
   type WorkflowDefinition,
@@ -243,4 +244,4 @@ export function moveInsertion(
   return out;
 }
 
-export { insertedStageIds, investigateInsertion };
+export { insertedStageIds, investigateInsertion, uxDesignInsertion };

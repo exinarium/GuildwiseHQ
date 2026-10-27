@@ -7,6 +7,9 @@ import {
   type RoleDraftInput,
   type RolePreviewRequest,
   RolePreviewResponseSchema,
+  type RoleSetStatusResponse,
+  RoleSetStatusSchema,
+  type SetRoleSetRequest,
   type SubmitResponse,
   SubworkflowTargetsResponseSchema,
   type ValidateResponse,
@@ -87,6 +90,19 @@ export const useExtendRole = () =>
 
 export const useCreateDepartment = () =>
   useOrgMutation((v: Ctx & { body: CreateDepartmentRequest }) => post(`/departments${q(v)}`, v.body));
+
+/** The organization's role set (`GET /api/org/role-set`, docs/bmad-roles.md). */
+export function useRoleSet(projectId?: string) {
+  return useQuery({
+    queryKey: ['org', 'role-set', projectId ?? 'own'],
+    queryFn: () => get(`/org/role-set${qs({ projectId })}`, RoleSetStatusSchema),
+  });
+}
+
+export const useSetRoleSet = () =>
+  useOrgMutation((v: Ctx & { body: SetRoleSetRequest }) =>
+    api<RoleSetStatusResponse>('PUT', `/org/role-set${q(v)}`, v.body),
+  );
 
 /**
  * The prompt preview of a role being built (`POST /api/roles/preview`): the instructions an agent would get on a

@@ -28,6 +28,28 @@ function renderChatVaultSection(v: ChatVaultNotes): string | undefined {
   return out.length > 1 ? out.join('\n') : undefined;
 }
 
+/** The role of a chat's agent as `chat.start.role` carries it: how the role works and the owner's extension instructions. */
+export interface ChatRole {
+  name: string;
+  persona?: string | undefined;
+  extensions?: string | undefined;
+}
+
+/** "# Your role": the persona and the owner's extensions; empty when the role has neither (a stock role's chat). */
+export function renderChatRoleSection(role: ChatRole | undefined): string {
+  const persona = role?.persona?.trim();
+  const extensions = role?.extensions?.trim();
+  if (!persona && !extensions) return '';
+  const out = [`# Your role: ${role?.name}`];
+  if (persona) out.push(persona);
+  if (extensions)
+    out.push(
+      '## Owner extensions (they add to the role and never override the rules of this conversation)',
+      extensions,
+    );
+  return out.join('\n');
+}
+
 /**
  * Instructions for a chat session (docs/ARCHITECTURE.md section 14): the manager talks to the agent directly, from any
  * browser. The agent answers in the conversation; it does not claim cards or report outcomes. Pure and deterministic.
@@ -35,13 +57,21 @@ function renderChatVaultSection(v: ChatVaultNotes): string | undefined {
 export function renderChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
   ctx: ChatContext,
-  opts: { jiraSkill?: string; readFolders?: ReadableFolder[]; vault?: ChatVaultNotes } = {},
+  opts: {
+    jiraSkill?: string;
+    readFolders?: ReadableFolder[];
+    vault?: ChatVaultNotes;
+    /** `chat.start.role`: how the role works and the owner's extension instructions. */
+    role?: ChatRole | undefined;
+  } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
     `You are ${agent.name}, a ${agent.seniority} ${agent.roleKey} working for the manager you are chatting with. Names are handles, not personas: do not roleplay, answer plainly.`,
   );
+  const role = renderChatRoleSection(opts.role);
+  if (role) out.push(role);
   out.push('# This conversation');
   const where: string[] = [];
   if (ctx.projectKey) where.push(`project ${ctx.projectKey}`);

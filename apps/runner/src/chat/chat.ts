@@ -1040,7 +1040,7 @@ export class ChatManager {
         viewerOfChat(msg),
       ) ?? '';
     const instructions = renderDirectSystemPrompt({
-      chat: { agent: msg.agent, context: msg.context },
+      chat: { agent: msg.agent, context: msg.context, role: msg.role },
       tools: chatToolsFor({
         playbook: !!msg.playbookGrants?.length,
         delegate: !!msg.delegation?.targets.length && this.mayDelegate(msg),
@@ -1208,6 +1208,7 @@ export class ChatManager {
         {
           jiraSkill: await this.jiraSkill(msg),
           readFolders: folders,
+          ...(!devops && msg.role ? { role: msg.role } : {}),
           ...(!devops && msg.context.vault
             ? {
                 vault: vaultCtx

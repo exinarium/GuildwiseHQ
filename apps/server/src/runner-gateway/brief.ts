@@ -77,6 +77,29 @@ export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> 
   return spec;
 }
 
+/**
+ * The agent's role as a chat needs it (`chat.start.role`): how the role works (the persona of the version it follows) and
+ * the owner's extension instructions. Undefined when the role has neither, so a stock role's chat is unchanged.
+ */
+export async function chatRoleFor(
+  db: Queryable,
+  a: Row,
+): Promise<{ name: string; persona?: string; extensions?: string } | undefined> {
+  const role = await loadRole(db, a.org_id, a.role_key, a.role_version);
+  const ext = await one(db, 'SELECT extensions FROM role_extensions WHERE org_id=$1 AND role_key=$2', [
+    a.org_id,
+    a.role_key,
+  ]);
+  const persona = role?.definition.persona?.trim();
+  const extensions = (ext?.extensions as { instructions?: string } | undefined)?.instructions?.trim();
+  if (!persona && !extensions) return undefined;
+  return {
+    name: role?.definition.name ?? a.role_key,
+    ...(persona ? { persona } : {}),
+    ...(extensions ? { extensions } : {}),
+  };
+}
+
 /** The model a card was raised to (`CardModelRaised`), or null. */
 async function cardModelOverride(
   ctx: Ctx,
@@ -303,6 +326,7 @@ export async function buildBrief(
       coreRules: role.definition.coreRules,
       extensions: mergedInstr || undefined,
       skills: await effectiveAgentSkills(ctx.pool, agent),
+      ...(role.definition.persona ? { persona: role.definition.persona } : {}),
     },
     ...(['test', 'qa_steps'].includes(stage.id) && riskOf(card)
       ? { reviewRisk: riskOf(card) as NonNullable<ReturnType<typeof riskOf>> }

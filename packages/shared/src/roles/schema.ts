@@ -50,6 +50,18 @@ export const RoleDefinitionSchema = z.object({
   source: PackProvenanceSchema.optional(),
   /** S-B2: the role was drafted in the hire dialog or made from a starter persona: chats, sessions and mentions only, no workflow stage. */
   chatOnly: z.boolean().optional(),
+  /**
+   * How the role works (expertise, principles, method), shown to its agents in chats as well as in shifts. The instructions
+   * say what to do in a shift; this says how. Absent on the stock roles.
+   */
+  persona: z.string().optional(),
+  /**
+   * The version belongs to a role set (`roles/role-sets`): the server generated it from the built-in role (`builtinVersion`)
+   * and the role set's data (`source`: where that came from, for example a BMAD commit). Not authored in the role designer.
+   */
+  roleSet: z
+    .object({ key: z.string(), builtinVersion: z.number().int().min(1).optional(), source: z.string() })
+    .optional(),
 });
 export type RoleDefinition = z.infer<typeof RoleDefinitionSchema>;
 

@@ -20,6 +20,7 @@ import {
   RoleDefinitionSchema,
   type RoleDraftInput,
   renderDefinitionFile,
+  roleSetIssues,
   type SubmitResponse,
   streamId,
   type ValidateResponse,
@@ -382,7 +383,30 @@ async function loadVersion(db: Queryable, kind: DefinitionKind, orgId: string, i
   return r;
 }
 
+/**
+ * A role-set version is the built-in role it was made from plus a persona and skills: it is checked against exactly that
+ * built-in version (and the set's custom role against the set's definition), never by the custom-role rules.
+ */
+function roleSetDefinitionIssues(row: Row): DefinitionIssue[] {
+  const def = RoleDefinitionSchema.parse(row.definition);
+  const builtinNow = BUILTIN_ROLES.find((r) => r.key === def.key);
+  const builtin = BUILTIN_ROLES.find((r) => r.key === def.key && r.version === def.roleSet?.builtinVersion);
+  const messages =
+    builtinNow && !builtin
+      ? [
+          `built-in ${def.key} is now v${builtinNow.version}: switch the role set again to get a version made from it`,
+        ]
+      : roleSetIssues(def, builtin);
+  return messages.map((message) => ({
+    severity: 'error' as const,
+    code: 'role_set',
+    message,
+    field: 'roleSet',
+  }));
+}
+
 async function issuesFor(db: Queryable, kind: DefinitionKind, row: Row, withDrafts: boolean) {
+  if (kind === 'role' && row.definition?.roleSet) return roleSetDefinitionIssues(row);
   // A project variant is validated from its insertions on its base (it is not a custom workflow).
   if (kind === 'workflow' && row.project_id)
     return variantIssues(db, row, await roleCatalogue(db, row.org_id, withDrafts), BUILTIN_WORKFLOW_KEYS);
@@ -538,7 +562,14 @@ export async function resolveDefinitionIn(
     throw badRequest('wrong_resolution', 'a definition is approved or rejected');
   if (!isOrgManager({ orgRole: await orgRoleOf(tx, user.id, item.org_id) }))
     throw forbidden('only the organization Owner and Admins can approve definitions');
-  const role = await one(tx, 'SELECT * FROM role_definitions WHERE desk_item_id=$1 FOR UPDATE', [item.id]);
+  const roles = await rows(
+    tx,
+    'SELECT * FROM role_definitions WHERE desk_item_id=$1 ORDER BY key FOR UPDATE',
+    [item.id],
+  );
+  if (roles.length > 1 || roles[0]?.definition?.roleSet)
+    return resolveRoleSetIn(ctx, tx, user, roles, resolution);
+  const role = roles[0];
   const wf = role
     ? undefined
     : await one(tx, 'SELECT * FROM workflow_versions WHERE desk_item_id=$1 FOR UPDATE', [item.id]);
@@ -577,6 +608,70 @@ export async function resolveDefinitionIn(
   // Hired agents follow their role: an approved version reaches the agents already working under the role.
   if (role && resolution === 'approved')
     await rebaseAgentsToCurrentRoles(ctx, { orgId: row.org_id, roleKey: row.key, tx });
+}
+
+/**
+ * The approval of a role set (docs/bmad-roles.md): its versions are approved or rejected together, then the agents of each
+ * role follow. A rejection that leaves none of the set's versions of built-in roles current puts the organization back on
+ * the stock roles.
+ */
+async function resolveRoleSetIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: { id: string },
+  roles: Row[],
+  resolution: 'approved' | 'rejected' | 'dismissed',
+): Promise<void> {
+  for (const r of roles)
+    if (r.status !== 'pending_approval')
+      throw conflict('already_decided', `${r.key} v${r.version} is already ${r.status}`);
+  const orgId = roles[0]?.org_id as string;
+  const scope = orgScope(orgId);
+  const approve = resolution === 'approved';
+  if (approve)
+    for (const r of roles) {
+      await requireOwnerForWideRole(tx, user.id, orgId, r.definition.permissions ?? {});
+      const first = (await issuesFor(tx, 'role', r, false)).find((i) => i.severity === 'error');
+      if (first)
+        throw unprocessable('invalid_definition', `cannot approve ${r.key}: ${first.message}`, {
+          issues: [first],
+        });
+    }
+  await ctx.store.append(
+    roles.map(
+      (r): AppendInput => ({
+        streamId: streamId.role(orgId, r.key),
+        event: approve
+          ? { type: 'RoleVersionApproved', payload: { roleVersionId: r.id } }
+          : { type: 'RoleVersionRejected', payload: { roleVersionId: r.id } },
+        actor: userActor(user.id),
+        scope,
+      }),
+    ),
+    { tx },
+  );
+  if (approve) {
+    for (const r of roles) await rebaseAgentsToCurrentRoles(ctx, { orgId, roleKey: r.key, tx });
+    return;
+  }
+  const live = await one(
+    tx,
+    `SELECT 1 FROM role_definitions WHERE org_id=$1 AND definition ? 'roleSet' AND status='active' AND key = ANY($2::text[])`,
+    [orgId, BUILTIN_ROLE_KEYS],
+  );
+  const org = await one(tx, 'SELECT role_set FROM organizations WHERE id=$1', [orgId]);
+  if (!live && org && org.role_set !== 'guildwise')
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.org(orgId),
+          event: { type: 'OrgRoleSetChanged', payload: { orgId, roleSet: 'guildwise', by: user.id } },
+          actor: userActor(user.id),
+          scope,
+        },
+      ],
+      { tx },
+    );
 }
 
 // ------------------------------------------------------------------------------------ extend built-ins
@@ -699,7 +794,9 @@ export async function orgCatalogue(
       )
     )
       continue;
-    const k = `${r.org_id ?? ''}/${r.key}`;
+    // a role set's versions of a built-in role are versions of that built-in role (newest first, below)
+    const ofBuiltin = r.org_id !== null && !!r.definition?.roleSet && BUILTIN_ROLE_KEYS.includes(r.key);
+    const k = `${ofBuiltin ? '' : (r.org_id ?? '')}/${r.key}`;
     let g = roles.get(k);
     if (!g) {
       const e = r.org_id === null ? exts.find((x) => x.role_key === r.key) : undefined;
@@ -729,6 +826,7 @@ export async function orgCatalogue(
       definition: RoleDefinitionSchema.parse(r.definition),
     });
   }
+  for (const g of roles.values()) g.versions.sort((a, b) => b.version - a.version);
   const workflows = new Map<string, OrgCatalogueResponse['workflows'][number]>();
   for (const w of wfRows) {
     const k = `${w.org_id ?? ''}/${w.key}`;

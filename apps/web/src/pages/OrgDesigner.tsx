@@ -25,6 +25,7 @@ import { ChatPanel } from '../components/ChatPanel.tsx';
 import { SkillPicker } from '../components/capabilities/SkillPicker.tsx';
 import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
 import { ListInput } from '../components/org/ListInput.tsx';
+import { RoleSetPanel } from '../components/org/RoleSetPanel.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
 import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
@@ -206,6 +207,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
 
   return (
     <div className="flex flex-col gap-4">
+      <RoleSetPanel canEdit={cat.canEdit} projectId={projectId} />
       {cat.canEdit && !edit && (
         <div>
           <Button variant="primary" onClick={() => setEdit({ input: blankRole() })}>
@@ -247,20 +249,24 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                         actions={
                           cat.canEdit && (
                             <>
-                              {(v.status === 'draft' || v.status === 'active' || v.status === 'rejected') && (
-                                <Button
-                                  aria-label={`${v.status === 'draft' ? 'Edit' : 'New version of'} ${r.key} v${v.version}`}
-                                  onClick={() =>
-                                    setEdit({
-                                      id: v.status === 'draft' ? v.id : undefined,
-                                      input: roleToInput(v.definition),
-                                      keyLocked: true,
-                                    })
-                                  }
-                                >
-                                  {v.status === 'draft' ? 'Edit' : 'New version'}
-                                </Button>
-                              )}
+                              {/* a role set's role is generated, not authored: it changes with the set */}
+                              {!v.definition.roleSet &&
+                                (v.status === 'draft' ||
+                                  v.status === 'active' ||
+                                  v.status === 'rejected') && (
+                                  <Button
+                                    aria-label={`${v.status === 'draft' ? 'Edit' : 'New version of'} ${r.key} v${v.version}`}
+                                    onClick={() =>
+                                      setEdit({
+                                        id: v.status === 'draft' ? v.id : undefined,
+                                        input: roleToInput(v.definition),
+                                        keyLocked: true,
+                                      })
+                                    }
+                                  >
+                                    {v.status === 'draft' ? 'Edit' : 'New version'}
+                                  </Button>
+                                )}
                               {v.status === 'draft' && (
                                 <Button
                                   variant="primary"
@@ -318,6 +324,11 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold">{d?.name}</h3>
                     <Badge tone="blue">Built in</Badge>
+                    {d?.roleSet && (
+                      <Badge tone="violet" data-testid={`role-set-${r.key}`}>
+                        {d.roleSet.key.toUpperCase()}
+                      </Badge>
+                    )}
                     {d?.department && <Badge>{d.department}</Badge>}
                     <span className="text-xs text-subtle">v{d?.version}</span>
                   </div>

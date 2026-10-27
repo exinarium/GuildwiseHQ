@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CatalogueStatus } from '../events/catalogue.ts';
+import { ROLE_SETS } from '../roles/role-sets/index.ts';
 import { RoleDefinitionSchema } from '../roles/schema.ts';
 import { WorkflowDefinitionSchema } from '../workflows/schema.ts';
 import { IsoTime } from './common.ts';
@@ -211,6 +212,21 @@ export const DESK_SUBKIND_DEFINITION = 'definition';
 /** `PUT /api/workflows/:id` and `PUT /api/roles/:id` (edit a draft) reuse the draft inputs. */
 export const WorkflowIdParamsSchema = z.object({ id: z.uuid() });
 export const RoleExtensionParamsSchema = z.object({ key: z.string().min(1) });
+
+/** `PUT /api/org/role-set`: switch the organization's role set (docs/bmad-roles.md). Owner and Admins. */
+export const SetRoleSetRequestSchema = z.object({ roleSet: z.enum(ROLE_SETS) });
+export type SetRoleSetRequest = z.infer<typeof SetRoleSetRequestSchema>;
+
+/** `GET /api/org/role-set` and the answer of the PUT. */
+export const RoleSetStatusSchema = z.object({
+  roleSet: z.string(),
+  /** The imported pack whose skills the set's roles are given. */
+  pack: z.string().nullable(),
+  /** The desk item holding the set's versions that wait for approval. */
+  pendingDeskItemId: z.uuid().nullable(),
+  roles: z.array(z.object({ key: z.string(), version: z.number().int(), status: z.string() })),
+});
+export type RoleSetStatusResponse = z.infer<typeof RoleSetStatusSchema>;
 
 /** BA rpc payloads (`aom org ...`): the same drafts, plus which one to validate or submit. */
 export const OrgRpcRefSchema = z.object({ id: z.uuid().optional(), key: z.string().optional() });

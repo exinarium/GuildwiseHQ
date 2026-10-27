@@ -79,6 +79,11 @@ export const catalogueEvents = [
       droppedExtensions: RoleExtensionsSchema,
     }),
   ),
+  /**
+   * The organization went back from a role set to the stock roles: the set's active versions of built-in roles are
+   * superseded (kept for the agents' history), so the built-in versions are current again.
+   */
+  defineEvent('RoleSetVersionsWithdrawn', z.object({ orgId: Id, roleVersionIds: z.array(Id).min(1) })),
   /** A draft that was never approved is dropped (approved and superseded versions are never removed). */
   defineEvent('DefinitionDraftDiscarded', z.object({ kind: z.enum(['role', 'workflow']), versionId: Id })),
   defineEvent('DepartmentCreated', z.object({ departmentId: Id, orgId: Id, name: z.string().min(1) })),

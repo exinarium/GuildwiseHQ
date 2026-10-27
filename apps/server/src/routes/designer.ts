@@ -8,6 +8,7 @@ import {
   RoleExtensionParamsSchema,
   RolePreviewQuerySchema,
   RolePreviewRequestSchema,
+  SetRoleSetRequestSchema,
   WorkflowDraftInputSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -28,6 +29,7 @@ import {
   validateDraft,
 } from '../commands/designer.ts';
 import { previewRole, previewRoleDraft } from '../commands/role-preview.ts';
+import { roleSetStatus, setRoleSet } from '../commands/role-sets.ts';
 import type { Ctx } from '../context.ts';
 import { resetRole } from '../hr/hr.ts';
 import { typed } from './util.ts';
@@ -44,6 +46,24 @@ export function designerRoutes(ctx: Ctx) {
     app.get('/api/org/catalogue', { schema: q }, async (req) => {
       const s = await requireUser(ctx, req);
       return orgCatalogue(ctx, s.user, await reqOrg(req, s), req.query.projectId);
+    });
+
+    // ----- role set (docs/bmad-roles.md): read by any member of the organization, switched by its Owner and Admins
+    app.get('/api/org/role-set', { schema: q }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(
+        ctx.pool,
+        s.user,
+        await reqOrg(req, s),
+        req.query.projectId,
+        false,
+      );
+      return roleSetStatus(ctx.pool, orgId);
+    });
+    app.put('/api/org/role-set', { schema: { ...q, body: SetRoleSetRequestSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(ctx.pool, s.user, await reqOrg(req, s), req.query.projectId, true);
+      return setRoleSet(ctx, s.user, orgId, req.body.roleSet);
     });
 
     app.get('/api/org/definitions/:id/file', { schema: { ...q, params: IdParamsSchema } }, async (req) => {

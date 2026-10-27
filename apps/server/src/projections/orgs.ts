@@ -186,6 +186,14 @@ export const orgProjectors: Record<string, Projector> = {
       [p.orgId, p.trialEndsAt, p.licenseExpiresAt, p.graceDays ?? null],
     );
   },
+  OrgRoleSetChanged: async (tx, e) => {
+    const p = ev<EventOf<'OrgRoleSetChanged'>>(e).payload;
+    await exec(tx, 'UPDATE organizations SET role_set=$2, role_set_pack=$3 WHERE id=$1', [
+      p.orgId,
+      p.roleSet,
+      p.pack ?? null,
+    ]);
+  },
   OrgFeaturesSet: async (tx, e) => {
     const p = ev<EventOf<'OrgFeaturesSet'>>(e).payload;
     const row = await one<{ features: Record<string, boolean>; plan: string }>(
