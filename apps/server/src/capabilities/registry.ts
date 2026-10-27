@@ -74,7 +74,7 @@ async function packItems(db: Queryable, orgId: string, projectId?: string, userI
   const packs = await rows(
     db,
     `SELECT p.id, p.scope, p.project_id, p.pinned_sha, p.content_hash, p.snapshot, p.trusted, p.trusted_sha, p.trusted_hash,
-            p.visibility, p.name
+            p.visibility, p.name, p.classification
        FROM packs p WHERE p.org_id=$1 AND p.removed_at IS NULL AND p.snapshot IS NOT NULL
         AND (p.scope='org' OR (p.project_id IS NOT NULL AND p.project_id = $2))
         AND (p.visibility = 'org' OR (p.owner_user_id IS NOT NULL AND p.owner_user_id = $3::uuid))
@@ -91,10 +91,19 @@ async function packItems(db: Queryable, orgId: string, projectId?: string, userI
   }> = [];
   for (const p of packs) {
     const u = packUsable(p as never);
+    // Skills the Owner marked as playbooks are listed as playbooks (loaded as skills: `loadAs`), so the `/` menu and a guided
+    // session treat them like any playbook. Metadata only; the skill's files and key are untouched.
+    const asPlaybook = new Set<string>(
+      ((p.classification as { playbooks?: string[] } | null)?.playbooks ?? []).map((k) => `${p.name}:${k}`),
+    );
     for (const i of (p.snapshot?.items ?? []) as PackItem[]) {
       const { files: _files, ...meta } = i;
+      const listed: CapabilityMeta =
+        i.kind === 'skill' && asPlaybook.has(i.key)
+          ? { ...(meta as CapabilityMeta), kind: 'playbook', loadAs: 'skill' }
+          : (meta as CapabilityMeta);
       out.push({
-        meta: meta as CapabilityMeta,
+        meta: listed,
         usable: u.usable,
         ...(u.reason ? { reason: u.reason } : {}),
         packId: p.id,

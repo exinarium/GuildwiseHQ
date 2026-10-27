@@ -12,6 +12,7 @@ import {
   DIRECT_RUNTIME,
   type HireAgentRequest,
   isOrgManager,
+  type PackPersonaRef,
   type PackProvenance,
   RUNTIME_GUARANTEES,
   randomAvatarSeed,
@@ -266,24 +267,52 @@ export async function sandboxGate(
  * Members and Guests only onto their own workstation and only for a project they are on. `org` is the request's
  * organization (an org-wide hire); a project-scoped hire belongs to the project's organization.
  */
+export interface HireExtra {
+  /** R3a, hire from pack: where the agent came from, and permissions narrower than the role's (never wider). */
+  provenance?: PackProvenance;
+  permissions?: AgentPermissions;
+  /** Hired onto a seat as a pack agent: the pack agent it works as. Its name, skills and brief block come from it. */
+  packPersona?: PackPersonaRef;
+  /** Skills added to the agent's own list after the role's (or the request's), without duplicates. Already qualified. */
+  addSkills?: string[];
+  /**
+   * Registers the role this agent is hired into, inside the hire transaction and after every authorization check, so a
+   * refused hire leaves no role behind (describe-an-agent: the drafted role).
+   */
+  registerRole?: (tx: Tx, orgId: string) => Promise<void>;
+  /** Like `registerRole`, but returns the key of the role to hire into (it overrides `req.roleKey`). */
+  roleKeyOf?: (tx: Tx, orgId: string) => Promise<string>;
+}
+
 export async function hireAgent(
   ctx: Ctx,
   user: AuthSession['user'],
   org: { id: string },
   req: HireAgentRequest,
-  /** R3a, hire from pack: where the agent came from, and permissions narrower than the role's (never wider). */
-  extra: {
-    provenance?: PackProvenance;
-    permissions?: AgentPermissions;
-    /**
-     * Registers the role this agent is hired into, inside the hire transaction and after every authorization check, so a
-     * refused hire leaves no role behind (describe-an-agent: the drafted role).
-     */
-    registerRole?: (tx: Tx, orgId: string) => Promise<void>;
-  } = {},
+  extra: HireExtra = {},
 ): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
+    await hireAgentIn(ctx, tx, user, org, req, extra, agentId);
+  });
+  return agentId;
+}
+
+/**
+ * `hireAgent` inside the caller's transaction (all-or-nothing hires of several agents: the whole team of a pack). Every check
+ * of a normal hire runs for each agent; the plan limit on agents is the caller's to check once for the total.
+ */
+export async function hireAgentIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  org: { id: string },
+  req: HireAgentRequest,
+  extra: HireExtra,
+  agentId: string,
+): Promise<{ orgId: string; roleKey: string; skills: string[]; name: string }> {
+  let result: { orgId: string; roleKey: string; skills: string[]; name: string } | undefined;
+  {
     // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
     const ws = await one(
       tx,
@@ -330,11 +359,12 @@ export async function hireAgent(
     );
     if (!uses) await assertWithinLimit(ctx, tx, orgId, 'workstations');
     if (extra.registerRole) await extra.registerRole(tx, orgId);
-    const roleDef = await loadRole(tx, orgId, req.roleKey);
-    if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
+    const roleKey = extra.roleKeyOf ? await extra.roleKeyOf(tx, orgId) : req.roleKey;
+    const roleDef = await loadRole(tx, orgId, roleKey);
+    if (!roleDef) throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
     // a role made from someone's private pack is that person's alone
     if (isOthersPrivateRole(roleDef.definition.source, user.id))
-      throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
+      throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
     if (roleDef.definition.key === DEVOPS_ROLE_KEY)
       throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
     if (roleDef.definition.key === 'ceo')
@@ -373,9 +403,10 @@ export async function hireAgent(
       { roleKey: roleDef.key, permissions: roleDef.definition.permissions, model: req.model ?? dm.model },
     );
     // Skills named in the hire (typed by hand) are stored as the registry knows them: a bare pack skill name gets its pack.
-    const skills = req.skills
+    const base = req.skills
       ? await qualifiedSkillKeys(tx, orgId, req.skills, { projectId: anchor ?? null, userId: user.id })
       : roleDef.definition.skills;
+    const skills = [...new Set([...base, ...(extra.addSkills ?? [])])];
     await ctx.store.append(
       [
         {
@@ -405,6 +436,7 @@ export async function hireAgent(
               avatarStyle: DEFAULT_AVATAR_STYLE,
               ...(unsandboxedAck ? { unsandboxedAck } : {}),
               ...(extra.provenance ? { provenance: extra.provenance } : {}),
+              ...(extra.packPersona ? { packPersona: extra.packPersona } : {}),
             },
           },
           actor: userActor(user.id),
@@ -413,8 +445,9 @@ export async function hireAgent(
       ],
       { tx },
     );
-  });
-  return agentId;
+    result = { orgId, roleKey: roleDef.key, skills, name: req.name };
+  }
+  return result as { orgId: string; roleKey: string; skills: string[]; name: string };
 }
 
 /**

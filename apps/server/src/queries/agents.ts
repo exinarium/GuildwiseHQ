@@ -1,4 +1,4 @@
-import { type AgentDto, type PackProvenance, provenanceLabel } from '@aom/shared';
+import { type AgentDto, type PackPersonaRef, type PackProvenance, provenanceLabel } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
 
@@ -7,7 +7,21 @@ export function toAgentDto(
   active: Array<{ cardId: string; ref: string; title: string }>,
   warning: 'revoked' | 'removed' | null = null,
 ): AgentDto {
-  const prov = a.provenance as PackProvenance | null | undefined;
+  const seat = a.pack_persona as PackPersonaRef | null | undefined;
+  // An agent on a seat has no role made from the pack, but it shows the same tag and the same warning as one that has.
+  const prov =
+    (a.provenance as PackProvenance | null | undefined) ??
+    (seat
+      ? ({
+          packId: seat.packId,
+          packName: seat.packName,
+          capability: seat.key,
+          ref: seat.ref ?? null,
+          sha: seat.sha,
+          hash: seat.hash ?? '0'.repeat(64),
+          visibility: 'org',
+        } satisfies PackProvenance)
+      : null);
   return {
     id: a.id,
     orgId: a.org_id,
@@ -41,6 +55,7 @@ export function toAgentDto(
     sandbox: a.sandbox ?? null,
     sandboxReason: a.sandbox_reason ?? null,
     activeCards: active,
+    ...(seat ? { packAgent: seat } : {}),
     ...(prov ? { provenance: { ...prov, label: provenanceLabel(prov), warning } } : {}),
   };
 }
@@ -100,7 +115,11 @@ export async function listAgents(
   );
   // Agents hired from a pack: a pack whose approval was withdrawn, or that was removed, flags them (they keep their role version).
   const packIds = [
-    ...new Set(list.map((a) => a.provenance?.packId as string | undefined).filter((x): x is string => !!x)),
+    ...new Set(
+      list
+        .map((a) => (a.provenance?.packId ?? a.pack_persona?.packId) as string | undefined)
+        .filter((x): x is string => !!x),
+    ),
   ];
   const packs = packIds.length
     ? await rows(
@@ -110,7 +129,7 @@ export async function listAgents(
       )
     : [];
   const warningOf = (a: Row): 'revoked' | 'removed' | null => {
-    const id = a.provenance?.packId as string | undefined;
+    const id = (a.provenance?.packId ?? a.pack_persona?.packId) as string | undefined;
     if (!id) return null;
     const p = packs.find((x) => x.id === id);
     if (!p || p.removed_at) return 'removed';

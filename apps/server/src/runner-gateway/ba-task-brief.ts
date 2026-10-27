@@ -19,7 +19,7 @@ import { buildSpecCardTask } from '../commands/spec-card.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
-import { accountOf, agentSpecFor, shiftVault } from './brief.ts';
+import { accountOf, agentSpecFor, briefAgent, shiftVault } from './brief.ts';
 import { projectReadRepos } from './read-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
@@ -150,7 +150,7 @@ export async function buildBaTaskShiftStart(
       outcomes: baTaskBriefOutcomes(task.kind),
       maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
     },
-    agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
+    agent: briefAgent(agent),
     card: {
       id: baTask.phase?.id ?? task.id,
       ref:

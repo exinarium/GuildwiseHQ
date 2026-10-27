@@ -6,6 +6,8 @@ import {
   DecidePackAssignmentRequestSchema,
   GrantPackAgentRequestSchema,
   HireFromPackRequestSchema,
+  HirePackAgentsRequestSchema,
+  PackClassificationSchema,
   PackScriptsRequestSchema,
   ReadMyPackRequestSchema,
   SaveMyPackRequestSchema,
@@ -42,6 +44,7 @@ import {
 } from '../commands/pack-hire.ts';
 import { decideAssignment, listMyAssignments } from '../commands/pack-holders.ts';
 import { getReviewWait, noteReviewWait } from '../commands/pack-review-wait.ts';
+import { classifyPack, hirePackAgents, packTeam } from '../commands/pack-team.ts';
 import {
   acceptPackUpdate,
   addPack,
@@ -104,6 +107,22 @@ export function packRoutes(ctx: Ctx) {
       async (req) => ({
         pack: await setPackScripts(ctx, await who(req), req.params.id, req.body.enabled),
       }),
+    );
+    // the Owner's toggles: which skills of an approved pack are agents, which are playbooks (full lists)
+    app.put(
+      '/api/packs/:id/classification',
+      { schema: { params: Params, body: PackClassificationSchema } },
+      async (req) => classifyPack(ctx, await who(req), req.params.id, req.body),
+    );
+    // the whole pack at once (Owner and Admin): all or nothing
+    app.post(
+      '/api/packs/:id/team/hire',
+      { schema: { params: Params, body: HirePackAgentsRequestSchema } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        reply.code(201);
+        return hirePackAgents(ctx, a.session.user, whoOf(a), req.params.id, req.body, 'team');
+      },
     );
     app.delete('/api/packs/:id', { schema: { params: Params } }, async (req, reply) => {
       await removePack(ctx, await who(req), req.params.id);
@@ -253,6 +272,20 @@ export function packRoutes(ctx: Ctx) {
         const a = await member(req);
         reply.code(202);
         return hireFromPack(ctx, a.session.user, whoOf(a), req.params.id, req.body);
+      },
+    );
+    // a pack's agents with a suggested seat each, and its skills with their class (any member; an unapproved pack lists nothing)
+    app.get('/api/packs/:id/team', { schema: { params: Params } }, async (req) =>
+      packTeam(ctx, whoOf(await member(req)), req.params.id),
+    );
+    // hire pack agents onto seats (or a role of their own), one or several, all or nothing
+    app.post(
+      '/api/packs/:id/agents/hire',
+      { schema: { params: Params, body: HirePackAgentsRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        reply.code(201);
+        return hirePackAgents(ctx, a.session.user, whoOf(a), req.params.id, req.body, 'agents');
       },
     );
     app.get(

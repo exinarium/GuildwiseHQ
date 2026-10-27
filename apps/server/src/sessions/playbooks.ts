@@ -90,6 +90,7 @@ export async function slashCommands(
         ? { scopes: normalizeScopes((i as { scopes?: string[] }).scopes) }
         : {}),
       canStartSession: i.kind === 'playbook',
+      ...(i.loadAs ? { loadAs: i.loadAs } : {}),
     });
   }
   // playbooks first, then skills; each by name

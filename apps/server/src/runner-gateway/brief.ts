@@ -11,9 +11,13 @@ import {
   getStage,
   highRiskSummary,
   type InvestigationLocation,
+  type PackAgentBrief,
+  type PackPersonaRef,
+  packAgentBriefOf,
   type ReadRepo,
   renderUntrusted,
   resolveReportTarget,
+  type Seniority,
   type ServerToRunnerOf,
   type ShiftBrief,
   streamId,
@@ -58,8 +62,23 @@ export function agentSpec(a: Row): AgentRuntimeSpec {
     skills: a.skills,
     permissions: AgentPermissionsSchema.parse(a.permissions),
     isDevops: a.is_devops,
+    ...packAgentOf(a),
   };
 }
+
+/** `{packAgent}` for an agent hired onto a seat as a pack agent (what its instructions say it works as), else nothing. */
+export function packAgentOf(a: Row): { packAgent?: PackAgentBrief } {
+  const p = a.pack_persona as PackPersonaRef | null | undefined;
+  return p ? { packAgent: packAgentBriefOf(p) } : {};
+}
+
+/** The `agent` of a shift brief. */
+export const briefAgent = (a: Row) => ({
+  id: a.id as string,
+  name: a.name as string,
+  seniority: a.seniority as Seniority,
+  ...packAgentOf(a),
+});
 
 /**
  * The agent as its runner sees it: its skills with the ones its role's extension adds (the runner builds the capability index
@@ -249,7 +268,7 @@ export async function buildBrief(
       })),
       maxShiftMinutes: stage.maxShiftMinutes,
     },
-    agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
+    agent: briefAgent(agent),
     card: {
       id: card.id,
       ref: card.ref,
@@ -950,7 +969,7 @@ export async function buildDevopsShiftStart(
       outcomes: devopsBriefOutcomes(),
       maxShiftMinutes: DEVOPS_MAX_SHIFT_MINUTES,
     },
-    agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
+    agent: briefAgent(agent),
     card: {
       id: requestId,
       ref: placeholder.ref,

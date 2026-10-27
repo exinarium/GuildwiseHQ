@@ -57,6 +57,11 @@ export const agentProjectors: Record<string, Projector> = {
         p.agentId,
         JSON.stringify(p.provenance),
       ]);
+    if (p.packPersona)
+      await exec(tx, 'UPDATE agents SET pack_persona=$2 WHERE id=$1', [
+        p.agentId,
+        JSON.stringify(p.packPersona),
+      ]);
   },
   AgentAllowedSet: async (tx, e) => {
     const p = (e.event as EventOf<'AgentAllowedSet'>).payload;

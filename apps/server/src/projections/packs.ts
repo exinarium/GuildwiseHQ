@@ -175,6 +175,15 @@ export const packProjectors: Record<string, Projector> = {
     );
   },
 
+  // The Owner's lists are full lists: the last event is the state, so a replay gives the same result.
+  PackItemsClassified: async (tx, e) => {
+    const p = (e.event as EventOf<'PackItemsClassified'>).payload;
+    await exec(tx, 'UPDATE packs SET classification=$2 WHERE id=$1', [
+      p.packId,
+      JSON.stringify({ agents: p.agents, playbooks: p.playbooks }),
+    ]);
+  },
+
   PackRemoved: async (tx, e) => {
     const p = (e.event as EventOf<'PackRemoved'>).payload;
     await exec(tx, `UPDATE packs SET removed_at=$2 WHERE id=$1`, [p.packId, e.createdAt]);

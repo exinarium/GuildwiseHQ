@@ -67,7 +67,7 @@ export function SlashMenu({
     onChange(
       c.kind === 'skill'
         ? skillChatInstruction({ key: c.key, name: c.name, input: typed })
-        : playbookChatInstruction({ key: c.key, name: c.name, input: typed }),
+        : playbookChatInstruction({ key: c.key, name: c.name, input: typed, loadAs: c.loadAs }),
     );
   const asSession = (c: SlashCommand) =>
     run.mutate(
