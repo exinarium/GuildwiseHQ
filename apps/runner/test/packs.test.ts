@@ -323,6 +323,49 @@ describe('git packs', () => {
   });
 });
 
+describe('a pack agent on a seat (plugin layout and agent skills)', () => {
+  const tree = {
+    'plugins/qa/agents/test-runner.md':
+      '---\nname: test-runner\ndescription: Runs tests.\n---\n\nYou run tests.\n',
+    'plugins/qa/commands/run-suite.md': '---\ndescription: Run the suite\n---\n# Run\n\nRun it.\n',
+    'skills/crew-agent-analyst/SKILL.md':
+      '---\nname: crew-agent-analyst\ndescription: Business analyst.\n---\n\nYou are Mary. Use crew-brainstorming.\n',
+    'skills/crew-agent-analyst/customize.toml': '[agent]\nname = "Mary"\n',
+    'skills/crew-brainstorming/SKILL.md':
+      '---\nname: crew-brainstorming\ndescription: Brainstorm.\n---\nIdeas.\n',
+  };
+  it('serves the plugin agent and command, and materialises the persona skill like any granted skill', async () => {
+    const remote = makeRemote(tree);
+    const a = manager();
+    await a.m.sync([desired(remote.url)]);
+    const snap = a.reports.find((x) => x.state === 'resolved')?.snapshot;
+    if (!snap) throw new Error('no snapshot');
+    expect(snap.items.find((i) => i.key === 'sample:crew-agent-analyst')?.displayName).toBe('Mary');
+    expect(snap.items.find((i) => i.key === 'sample:crew-agent-analyst')?.skillRefs).toEqual([
+      'crew-brainstorming',
+    ]);
+    await a.m.sync([
+      desired(remote.url, {
+        pinnedSha: snap.sha,
+        trusted: { sha: snap.sha, contentHash: snap.contentHash },
+      }),
+    ]);
+    const reg = new CapabilityRegistry({ packs: a.m });
+    const persona = reg.show('persona:sample:test-runner');
+    expect(persona.ok && persona.text).toContain('You run tests.');
+    const pb = reg.show('playbook:sample:run-suite');
+    expect(pb.ok && pb.text).toContain('steps/step-01-run-suite.md');
+    // what a seat agent is granted: its persona skill and the skill it names, materialised with fenced text
+    const granted = reg.grantedSkills(['sample:crew-agent-analyst', 'sample:crew-brainstorming']);
+    expect(granted.map((g) => g.name)).toEqual(['sample-crew-agent-analyst', 'sample-crew-brainstorming']);
+    const dest = tmp('aom-seat-skills-');
+    materializeSkills(join(dest, 'skills'), granted);
+    expect(readFileSync(join(dest, 'skills/sample-crew-agent-analyst/SKILL.md'), 'utf8')).toMatch(
+      /UNTRUSTED CONTENT/,
+    );
+  });
+});
+
 describe('registry use of packs', () => {
   async function trustedRegistry(scripts = false) {
     const remote = makeRemote(samplePackFixture());

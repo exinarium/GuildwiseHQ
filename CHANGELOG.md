@@ -10,6 +10,8 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - CEO: the daily report lists the day's high-risk cards finished (merged, PR or push).
 - Runner: `guildwise-runner` is installed alongside `aom-runner`; both names run the same command.
 - Webhooks: outgoing signed webhooks carry `X-Guildwise-Signature`. `X-AOM-Signature` is still sent with the same value until October 2027.
+- Packs: agents can be hired from an approved pack onto the built-in roles as their seat (analyst, BA, planner, architect, builder, pre-reviewer, reviewer, tester, researcher, writer), one at a time or the whole pack at once (all or nothing, Owners and Admins). They keep the pack agent's name and approach, join the agents already there, and the role's rules, gates and permissions are unchanged. Owners and Admins mark which skills of a pack are agents and which are playbooks. Pack agents without a seat get a role of their own that holds none of the pack's text. API in docs/ARCHITECTURE.md section 38.14; migration 2710.
+- Packs: the Claude Code plugin layout is read (`agents/*.md` as personas, `commands/*.md` as one-step playbooks, at any depth); a pack may list 1000 capabilities. Needs runner 0.1.62; a pack with such folders needs review again.
 
 ### Changed
 
@@ -24,6 +26,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ### Fixed
 
+- A bare skill key that is a playbook or a persona (`release`) is no longer rewritten to a pack skill of the same name when skills are qualified, and the key migration keeps it.
 - Skills given to an agent: the skills added to a role with Extend now reach every agent on the role, in chats, sessions and card shifts alike, as loadable skills in the `# Capabilities` index and the runtime's skills folder. Before, chats got only the skills stored on the agent at hire, and card shifts listed the extension's skills as plain text only.
 - A bare pack skill name typed into the hire form or a role extension (`bmad-prd`) is stored as the pack's full key (`bmad-method:bmad-prd`) when exactly one pack has it, instead of showing as "not found in the registry". The data migration `pack-skill-keys-2026-10` does the same for existing agents and extensions.
 - Hiring with an empty Skills box gives the agent its role's skills (the form sent an empty list, which hired with none).
