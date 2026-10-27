@@ -132,6 +132,11 @@ export function healthFunctions(env: SetupEnv): string[] {
   ];
 }
 
+// TODO(rename markers): rename the written markers after the next release. Readers already accept both the old and the
+// new names (`AOM-DEPLOY` / `GUILDWISE-DEPLOY` on stdout, `.aom-complete` / `.guildwise-complete`, `.aom-tmp.$$` /
+// `.guildwise-tmp.$$`), but every writer (this line, the `touch ... .aom-complete` lines here and in
+// setup-compile-direct.ts, the `.aom-tmp` / `.aom-new` temp files here, in apps/runner/src/delivery/connect.ts and
+// move.ts) keeps the old name for now, because an old runner (0.1.60) may run a newly generated script.
 export const doneFunction = (): string[] => [
   'done_line() {',
   sh`  local url="@{AOM_DEPLOY_APP_URL:-}"`,
@@ -873,7 +878,8 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
       return [
         ...stepNumberComment(i, 'put the approved version’s files on the server'),
         sh`SRC_DEST="$SRC_DIR/$SHORT"`,
-        'if rsh "test -f$(rquote "$SRC_DEST/.aom-complete")" </dev/null >/dev/null 2>&1; then',
+        // readers accept both marker names; the writer below still writes the old one (see doneFunction)
+        'if rsh "test -f$(rquote "$SRC_DEST/.aom-complete") || test -f$(rquote "$SRC_DEST/.guildwise-complete")" </dev/null >/dev/null 2>&1; then',
         '  say "the files of $SHORT are already on the server"',
         'elif [ "$DRY_RUN" = 1 ]; then',
         '  would "copy the approved version’s files to $SRC_DEST on the server"',

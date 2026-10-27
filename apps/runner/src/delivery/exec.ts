@@ -85,6 +85,9 @@ const refused = (why: string, extra: Partial<DeployExecResult> = {}): DeployExec
 });
 
 /** `KEY=value` lines (an optional `export `, optional quotes), as a dotenv file the owner keeps for the script. */
+/** The line a deploy script prints for the record. `GUILDWISE-DEPLOY` is the new name; generated scripts still print `AOM-DEPLOY` (see doneFunction in shared). */
+export const DEPLOY_LINE = /^(?:AOM|GUILDWISE)-DEPLOY\s+(\{.*\})\s*$/;
+
 export function parseEnvFile(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const raw of text.split(/\r?\n/)) {
@@ -463,7 +466,7 @@ export class DeployExecutor {
       });
       const line = (raw: string): void => {
         const text = redactSecrets(raw);
-        const m = /^AOM-DEPLOY\s+(\{.*\})\s*$/.exec(text);
+        const m = DEPLOY_LINE.exec(text);
         if (m) {
           try {
             const j = JSON.parse(m[1] as string) as Record<string, unknown>;

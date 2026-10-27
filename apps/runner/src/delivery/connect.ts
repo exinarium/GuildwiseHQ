@@ -78,6 +78,7 @@ echo "AOM_RESULT added $bak"
 `;
 
 /** Removes ONE key by its public key, only a line Guildwise made (its comment). A dated copy of the file is made first. */
+// TODO(rename markers): rename the .aom-tmp prefix written below after the next release (see doneFunction in shared setup-compile.ts).
 export const REVOKE_KEY_SCRIPT = `set -eu
 key=$1
 f="$HOME/.ssh/authorized_keys"

@@ -243,7 +243,7 @@ AOM_REMOTE
 
 # step 2: put the approved version’s files on the server
 SRC_DEST="$SRC_DIR/$SHORT"
-if rsh "test -f$(rquote "$SRC_DEST/.aom-complete")" </dev/null >/dev/null 2>&1; then
+if rsh "test -f$(rquote "$SRC_DEST/.aom-complete") || test -f$(rquote "$SRC_DEST/.guildwise-complete")" </dev/null >/dev/null 2>&1; then
   say "the files of $SHORT are already on the server"
 elif [ "$DRY_RUN" = 1 ]; then
   would "copy the approved version’s files to $SRC_DEST on the server"
