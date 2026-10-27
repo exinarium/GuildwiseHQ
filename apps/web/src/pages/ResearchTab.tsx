@@ -62,7 +62,7 @@ export function ResearchTab() {
           </span>
         }
         actions={
-          <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
+          <ButtonLink to={`/cards/new?project=${project.key}&type=research`} variant="primary">
             New research card
           </ButtonLink>
         }
@@ -97,7 +97,7 @@ export function ResearchTab() {
             title="No notes published yet"
             description="A note is published when the checker has verified every claim against its citations. Create a research card to start."
             action={
-              <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
+              <ButtonLink to={`/cards/new?project=${project.key}&type=research`} variant="primary">
                 New research card
               </ButtonLink>
             }

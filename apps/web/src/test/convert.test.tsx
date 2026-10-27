@@ -364,6 +364,13 @@ describe('research tab', () => {
     mount([]);
     expect(await screen.findByTestId('research-empty')).toHaveTextContent('No notes published yet');
   });
+  it('both New research card links preselect the research type', async () => {
+    mount([]);
+    await screen.findByTestId('research-empty');
+    const links = screen.getAllByRole('link', { name: 'New research card' });
+    expect(links).toHaveLength(2);
+    for (const l of links) expect(l).toHaveAttribute('href', '/cards/new?project=RLD&type=research');
+  });
 });
 
 describe('navigation and board', () => {
