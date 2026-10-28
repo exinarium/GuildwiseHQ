@@ -12,6 +12,7 @@ import {
   probeDuration,
   RENDER_ENCODERS,
   renderVideo,
+  sceneHtml,
   srt,
   streamDurations,
   voiceAvailable,
@@ -139,3 +140,15 @@ describe.skipIf(!canRender)(
     }, 180_000);
   },
 );
+
+describe('code card language label', () => {
+  const card = (lang: string) => sceneHtml({ type: 'code', lang, code: 'a = 1' }, 'landscape');
+  it('shows the language of real code', () => {
+    expect(card('ts')).toContain('<div class="lang">ts</div>');
+  });
+  it('hides the label for plain text', () => {
+    for (const lang of ['text', 'TEXT', 'plain', 'plaintext', 'txt', 'none'])
+      expect(card(lang)).not.toContain('class="lang"');
+    expect(card('text')).toContain('<pre>a = 1</pre>');
+  });
+});

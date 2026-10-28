@@ -3,6 +3,8 @@
 # Default engine: Kokoro-82M through kokoro-onnx (CPU, ONNX Runtime; the espeak-ng library comes inside the
 # espeakng-loader wheel, so no system packages), voice af_heart. Also installs a static ffmpeg (VP9 + Opus).
 #   AOM_VIDEO_HOME  where it goes (default ~/.cache/aom-video)
+#   AOM_VIDEO_PYTHON_DIR  where uv keeps the Python it downloads (default $AOM_VIDEO_HOME/python, so the whole voice lives in one
+#                   folder; the venv's python is a symlink into it, and a folder under /root would be unreadable to a non-root user)
 #   AOM_VIDEO_TTS   kokoro (default) or piper (the old voice, en_GB-cori-high; AOM_VIDEO_VOICE picks another Piper voice)
 # Safe to run again: finished steps are skipped, downloads are checked against pinned SHA-256 sums.
 set -euo pipefail
@@ -14,6 +16,7 @@ MODEL_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-fi
 MODEL_SHA=7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5
 VOICES_SHA=bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d
 mkdir -p "$HOME_DIR"
+export UV_PYTHON_INSTALL_DIR="${AOM_VIDEO_PYTHON_DIR:-$HOME_DIR/python}"
 
 # static ffmpeg (and, for the old engine, Piper) in the plain venv
 [ -x "$HOME_DIR/venv/bin/python" ] || python3 -m venv "$HOME_DIR/venv"

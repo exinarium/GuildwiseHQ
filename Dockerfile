@@ -41,11 +41,12 @@ COPY --from=build /out/server /app/server
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium && rm -rf /var/lib/apt/lists/*
 # The voice (Kokoro, af_heart), a static ffmpeg and Python 3.12 for it: the same script the development machines use.
 COPY e2e/video/setup-voice.sh /tmp/setup-voice.sh
-RUN bash /tmp/setup-voice.sh && rm /tmp/setup-voice.sh
+# uv's cache stays out of the image; its managed Python goes under AOM_VIDEO_HOME (not /root, which the worker's USER node cannot read).
+RUN UV_CACHE_DIR=/tmp/uv-cache bash /tmp/setup-voice.sh && rm -rf /tmp/setup-voice.sh /tmp/uv-cache
 # The help videos the clips are cut from, and the blog covers for image scenes.
 COPY --from=media videos/*.mp4 videos/*.json videos/*.vtt /opt/media-videos/
 COPY apps/web/public/blog/cover /opt/covers
-RUN mkdir -p /data/video && chown -R node:node /data/video /opt/aom-video
+RUN mkdir -p /data/video && chown -R node:node /data/video /opt/aom-video && chmod -R a+rX /opt/aom-video
 USER node
 CMD ["node", "dist/video-worker.mjs", "--loop"]
 

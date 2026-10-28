@@ -58,6 +58,12 @@ export function clipFrameHtml(orient: Orientation, title: string): string {
   );
 }
 
+/** Languages that are not worth a label on a code card: plain text has no language to name. */
+const PLAIN_LANGS = new Set(['', 'text', 'txt', 'plain', 'plaintext', 'none']);
+/** The language label of a code card, or '' when it is plain text (the card then shows no label). */
+export const codeLangLabel = (lang: string): string =>
+  PLAIN_LANGS.has(lang.trim().toLowerCase()) ? '' : lang.trim();
+
 /** HTML of a (non clip) scene card. */
 export function sceneHtml(scene: VideoScene, orient: Orientation, images: SceneImages = {}): string {
   switch (scene.type) {
@@ -76,7 +82,7 @@ export function sceneHtml(scene: VideoScene, orient: Orientation, images: SceneI
     case 'code':
       return page(
         orient,
-        `<div class="lang">${esc(scene.lang)}</div><pre>${esc(scene.code)}</pre>${brand()}`,
+        `${codeLangLabel(scene.lang) ? `<div class="lang">${esc(scene.lang)}</div>` : ''}<pre>${esc(scene.code)}</pre>${brand()}`,
       );
     case 'image': {
       const file =
