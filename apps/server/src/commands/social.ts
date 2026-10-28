@@ -2,11 +2,13 @@ import {
   BLOG_AUTHOR,
   type BlogContent,
   type ConnectSocialChannelRequest,
-  SOCIAL_NETWORKS,
+  SOCIAL_CHANNEL_NETWORKS,
   type SocialCaptions,
   type SocialChannel,
+  type SocialChannelNetwork,
   type SocialNetwork,
   type SocialPostContent,
+  type VideoSocialPostContent,
 } from '@aom/shared';
 import { decryptSecret, encryptSecret } from '../auth/secrets.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -16,6 +18,7 @@ import type { Ctx } from '../context.ts';
 import { exec, iso, one, rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
 import { socialAlertMail } from '../mail/blog-mail.ts';
+import { YouTubeError } from '../video/youtube.ts';
 import { blogEnabled } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
 
@@ -42,7 +45,7 @@ const EXPIRY_WARN_MS = 7 * 24 * 3600_000;
 
 export async function listChannels(ctx: Ctx): Promise<SocialChannel[]> {
   const rs = await rows(ctx.pool, 'SELECT * FROM social_channels');
-  return SOCIAL_NETWORKS.map((network) => {
+  return SOCIAL_CHANNEL_NETWORKS.map((network) => {
     const r = rs.find((x) => x.network === network);
     if (!r)
       return {
@@ -101,13 +104,41 @@ function normalizeConnect(network: SocialNetwork, body: ConnectSocialChannelRequ
   return body;
 }
 
+/**
+ * YouTube: the pasted refresh token is validated with a token exchange and `channels.list mine=true`, then stored
+ * encrypted as `{refreshToken}`. The account id is the channel id and the name its title.
+ */
+async function normalizeYoutube(ctx: Ctx, body: ConnectSocialChannelRequest): Promise<TokenInput> {
+  if (!('refreshToken' in body) || 'accountId' in body)
+    throw badRequest('bad_credentials', 'YouTube needs a refresh token');
+  const { youtubeClientId: clientId, youtubeClientSecret: clientSecret } = ctx.config;
+  if (!clientId || !clientSecret)
+    throw badRequest(
+      'youtube_not_configured',
+      'Set AOM_YOUTUBE_CLIENT_ID and AOM_YOUTUBE_CLIENT_SECRET (the OAuth client the refresh token was made with) first',
+    );
+  try {
+    const access = await ctx.youtube.accessToken({ clientId, clientSecret, refreshToken: body.refreshToken });
+    const channel = await ctx.youtube.channelMine(access);
+    return {
+      accountId: channel.id,
+      accountName: channel.title,
+      accessToken: JSON.stringify({ refreshToken: body.refreshToken }),
+    };
+  } catch (err) {
+    if (err instanceof YouTubeError)
+      throw badRequest('bad_credentials', `YouTube did not accept the refresh token: ${err.message}`);
+    throw err;
+  }
+}
+
 export async function connectChannel(
   ctx: Ctx,
   by: AuthSession['user'],
-  network: SocialNetwork,
+  network: SocialChannelNetwork,
   body: ConnectSocialChannelRequest,
 ): Promise<SocialChannel[]> {
-  const input = normalizeConnect(network, body);
+  const input = network === 'youtube' ? await normalizeYoutube(ctx, body) : normalizeConnect(network, body);
   const access = await encryptSecret(ctx, input.accessToken);
   const refresh = input.refreshToken ? await encryptSecret(ctx, input.refreshToken) : null;
   await exec(
@@ -145,7 +176,7 @@ export async function connectChannel(
 export async function disconnectChannel(
   ctx: Ctx,
   by: AuthSession['user'],
-  network: SocialNetwork,
+  network: SocialChannelNetwork,
 ): Promise<SocialChannel[]> {
   const n = await exec(ctx.pool, 'DELETE FROM social_channels WHERE network=$1', [network]);
   if (n)
@@ -219,7 +250,7 @@ export async function listSharesForApi(ctx: Ctx) {
 /** Failed shares and channel problems, for the banner on the platform blog page. */
 export async function socialProblems(
   ctx: Ctx,
-): Promise<{ failedShares: number; channelsNeedingReconnect: SocialNetwork[] }> {
+): Promise<{ failedShares: number; channelsNeedingReconnect: SocialChannelNetwork[] }> {
   const f = await one(ctx.pool, `SELECT count(*)::int AS n FROM social_shares WHERE status='failed'`);
   const c = await rows(ctx.pool, `SELECT network FROM social_channels WHERE status='needs_reconnect'`);
   return { failedShares: f?.n ?? 0, channelsNeedingReconnect: c.map((x) => x.network) };
@@ -238,7 +269,7 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
     `INSERT INTO social_shares (post_id, network, status, attempts, next_attempt_at, created_at, updated_at)
      SELECT p.id, c.network, 'pending', 0, $1, $1, $1
        FROM blog_posts p CROSS JOIN social_channels c
-      WHERE p.status='published' AND NOT p.launch AND c.status='ok'
+      WHERE p.status='published' AND NOT p.launch AND c.status='ok' AND c.network <> 'youtube'
         AND p.published_at >= c.connected_at AND p.published_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, fresh],
@@ -248,19 +279,19 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
     `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, created_at, updated_at)
      SELECT p.id, c.network, 'social', 'pending', 0, $1, $1, $1
        FROM social_posts p CROSS JOIN social_channels c
-      WHERE p.status='approved' AND c.status='ok'
+      WHERE p.status='approved' AND c.status='ok' AND c.network <> 'youtube'
         AND p.approved_at >= c.connected_at AND p.approved_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, fresh],
   );
 }
 
-async function superAdminEmails(ctx: Ctx): Promise<string[]> {
+export async function superAdminEmails(ctx: Ctx): Promise<string[]> {
   const rs = await rows(ctx.pool, `SELECT email FROM users WHERE kind='super_admin' AND status='active'`);
   return rs.map((r) => r.email as string);
 }
 
-async function alertOnce(ctx: Ctx, network: SocialNetwork, reason: string): Promise<void> {
+export async function alertOnce(ctx: Ctx, network: SocialChannelNetwork, reason: string): Promise<void> {
   const claimed = await exec(
     ctx.pool,
     `UPDATE social_channels SET alerted_at=$2 WHERE network=$1 AND alerted_at IS NULL`,
@@ -316,6 +347,26 @@ async function loadShareable(
   if (share.source === 'social') {
     const sp = await one(ctx.pool, 'SELECT * FROM social_posts WHERE id=$1', [share.post_id]);
     if (!sp) return null;
+    if (sp.kind === 'video') {
+      // the optional cross-post of a tutorial: the link is the YouTube watch URL of the upload
+      const c = sp.content as VideoSocialPostContent;
+      const yt = await one(
+        ctx.pool,
+        `SELECT url, status FROM social_shares WHERE post_id=$1 AND network='youtube' AND source='video'`,
+        [c.videoPostId],
+      );
+      return {
+        live: sp.status === 'approved' && yt?.status === 'sent' && !!yt.url,
+        at: sp.approved_at ? new Date(sp.approved_at) : null,
+        notLive: sp.status === 'approved' ? 'the video is not on YouTube' : 'post is not approved',
+        stream: `social-post-${sp.id}`,
+        link: yt?.url ?? '',
+        title: sp.title,
+        description: c.summary,
+        imageUrl: `${origin}/blog/cover/${c.coverKey}.png`,
+        ...captionFor(network, c.captions, c.summary),
+      };
+    }
     const c = sp.content as SocialPostContent;
     // a release: its own public page, with the campaign in the link so the traffic can be told apart
     const link = `${origin}/releases/${encodeURIComponent(sp.ref)}?utm_source=${network}&utm_medium=social&utm_campaign=release-${encodeURIComponent(sp.ref)}`;
@@ -446,7 +497,7 @@ async function checkExpiry(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
   const soon = await rows(
     ctx.pool,
-    `SELECT * FROM social_channels WHERE status='ok' AND expires_at IS NOT NULL AND expires_at < $1`,
+    `SELECT * FROM social_channels WHERE status='ok' AND network <> 'youtube' AND expires_at IS NOT NULL AND expires_at < $1`,
     [new Date(now.getTime() + EXPIRY_WARN_MS)],
   );
   for (const ch of soon) {
@@ -498,7 +549,7 @@ export async function socialTick(ctx: Ctx): Promise<number> {
   await exec(
     ctx.pool,
     `UPDATE social_shares SET status='failed', error='interrupted while posting; check the page before sharing again', updated_at=$1
-      WHERE status='posting' AND updated_at < $2`,
+      WHERE status='posting' AND source <> 'video' AND updated_at < $2`,
     [now, new Date(now.getTime() - STALE_POSTING_MS)],
   );
   await createMissingShares(ctx);
@@ -511,7 +562,7 @@ export async function socialTick(ctx: Ctx): Promise<number> {
         WHERE (s.post_id, s.network) = (
           SELECT s2.post_id, s2.network FROM social_shares s2
             JOIN social_channels c ON c.network = s2.network AND c.status='ok'
-           WHERE s2.status='pending' AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
+           WHERE s2.status='pending' AND s2.source <> 'video' AND s2.network <> 'youtube' AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
            ORDER BY s2.created_at LIMIT 1 FOR UPDATE OF s2 SKIP LOCKED)
         RETURNING s.*`,
       [ctx.clock.now()],

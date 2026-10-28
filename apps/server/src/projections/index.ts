@@ -55,6 +55,7 @@ import { threadProjectors } from './threads.ts';
 import { trackRecordProjectors } from './track-record.ts';
 import { userProjectors } from './users.ts';
 import { vaultProjectors } from './vaults.ts';
+import { videoPostProjectors } from './video-posts.ts';
 import { workstationProjectors } from './workstations.ts';
 
 /**
@@ -68,6 +69,7 @@ const domains: Array<Record<string, Projector>> = [
   platformProjectors,
   blogProjectors,
   socialPostProjectors,
+  videoPostProjectors,
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
@@ -164,6 +166,8 @@ export const PROJECTION_TABLES = [
   'blog_posts',
   'blog_topics',
   'social_posts',
+  'video_posts',
+  'video_topics',
   'workstations',
   'projects',
   'project_provider_accounts',

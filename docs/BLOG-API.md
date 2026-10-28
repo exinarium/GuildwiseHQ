@@ -332,3 +332,123 @@ origin, status)` in `commands/social-posts.ts` (idempotent per release; `origin`
 in Platform > Blog > Releases. The blog writer setting `releasePosts` (default on) tells a drafter whether to draft for each
 new release.
 
+
+## YouTube
+
+Faceless videos of articles, releases and tutorials, narrated by an offline voice and uploaded to the connected YouTube channel
+after the super admin approved the **rendered** video. Everything is super admin only (404 for everyone else), in Platform > Blog >
+Videos. There is no agent-key endpoint: on a hosted installation the hosting business's writer calls the functions below inside
+the server. The renderer is described in `docs/VIDEO-RENDERER.md`; the worker in `docs/SELF-HOSTING.md` (profile `video`).
+
+**Off unless asked for.** All of it is a no-op unless a YouTube channel is connected with status `ok` **and** the core platform
+setting `videoPosts.enabled` is on (default off): the writer is offered nothing, the worker renders and uploads nothing, and the
+daily clean-up does not run. Posts can still be added by hand once `enabled` is on, and wait.
+
+**The channel.** Paste a refresh token (scope `https://www.googleapis.com/auth/youtube.force-ssl`) in the **Social sharing**
+panel: `PUT /api/platform/social/channels/youtube` `{ "refreshToken": "..." }`. `AOM_YOUTUBE_CLIENT_ID` and
+`AOM_YOUTUBE_CLIENT_SECRET` must be the OAuth client that made it (`400 youtube_not_configured` otherwise). The token is
+exchanged and `channels.list mine=true` names the channel (`account_id` = channel id, name = title); it is stored encrypted as
+`{refreshToken}`. YouTube is **not** a share network: it is not in `SOCIAL_NETWORKS`, the blog and release sweep never creates
+a `youtube` share, and `POST /api/v1/posts/{slug}/share` does not accept it. A refused token (`invalid_grant`) sets the channel
+to `needs_reconnect`, pauses uploads and mails the super admins once.
+
+**Settings** (`GET/PATCH /api/platform/video/settings`, the `videoPosts` platform setting): `enabled`, `articleVideos`,
+`releaseVideos`, `tutorials`, `shorts`, `perWeek` (long videos the writer may draft per rolling 7 days, 3), `shortsPerWeek` (3),
+`privacy` (`public` | `unlisted` | `private`, default `public`), `playlists` `{ article?, release?, tutorial? }` (YouTube playlist
+ids), `categoryId` (`28`). A person's own submit ignores the per-kind switches and the weekly caps; the writer's does not
+(`409 kind_off`, `409 weekly_cap`).
+
+**Data.** Event-sourced `VideoPostSubmitted`, `VideoPostRevised`, `VideoPostApproved`, `VideoPostRejected` (stream `video-<id>`),
+projection `video_posts` (one per `kind` `article|release|tutorial`, `ref` and `format` `long|short`; `ref` is the article slug,
+the release version, a Video topic id or `lib:<help video slug>`; a Short has `parentId`). `video_renders` is operational (queue,
+lease, attempts, artifacts; survives a projection rebuild). The upload is a `social_shares` row (`network youtube`, `source video`,
+`detail` jsonb) so a second upload is impossible; its statuses add `locked_private`.
+
+**The one gate.** A submitted post queues render 1. The worker renders it (one at a time, a lease, 3 attempts, output at most
+10 minutes for a video and 3 for a Short). The super admin watches the video, reads script and metadata and edits what is wrong:
+a change to the script, title, description or hashtags renders a new revision (at most 3 renders a post, `409 render_limit`),
+tags and privacy change in place, an approved video is final. **Approve** pins the current revision's render and is refused until
+that revision is rendered (`409 not_rendered`) or when no channel exists (`409 no_channel`). The Short of a video is approved
+separately.
+
+**The upload** (worker). At most one video a day. A `public` video is uploaded as `private` with `publishAt` = the next free
+10:00 SAST (08:00 UTC) slot; `unlisted` and `private` are set at once. Fields: `categoryId` `28`, `defaultLanguage` and
+`defaultAudioLanguage` `en`, `selfDeclaredMadeForKids` false, `containsSyntheticMedia` false (the description says "Narrated
+with a synthetic voice."). Steps: resumable `videos.insert` (resumed after a 5xx or a dropped connection; the session is kept
+in `detail`, so a crash never uploads twice), `thumbnails.set` (long videos; skipped with a warning when the channel is not
+phone-verified), `captions.insert` (the WebVTT), `playlistItems.insert` (the playlist of the kind, if set), then `videos.list`
+to read back what YouTube did: a video that stayed private although another privacy was asked for and carries no `publishAt`
+is `locked_private` (YouTube locks videos of unaudited API projects): the owner is mailed the audit form
+(https://support.google.com/youtube/contact/yt_api_form), uploads pause until `resolve-locked`. Failures retry after 1, 5, 30
+and 120 minutes (network, 429, 5xx, quota), anything else is final. Only the token endpoint's `invalid_grant` pauses the
+channel (`needs_reconnect`, one mail); a 401 from an API call mints a new access token and repeats the call once; a refused
+OAuth client (`invalid_client`) is a configuration error mailed once, without a reconnect; a 403 is a refused step (a
+thumbnail becomes a warning) or a failed upload, never a reconnect. An upload session that died (404/410) is not blindly
+restarted: the channel's newest uploads are searched for the title first, so a video that did finish is adopted, not duplicated.
+A video uploaded as `public` is scheduled (private with `publishAt`); once the slot has passed the worker looks at it (every
+30 minutes at most): public is confirmed and the article or release page may embed it, still private makes it `locked_private`
+(mail, uploads pause). The daily cap and the slots count every share that reserved a slot or put a video on YouTube, even if a later step failed.
+The worker's heartbeat is renewed after every uploaded chunk.
+
+**Library.** `POST /api/platform/video/library/import` makes a `tutorial` / `lib:<slug>` draft of each recorded help video that
+is not imported: nothing is rendered, the metadata is a plain default to edit, chapters come from the video's JSON. The app
+image has no MP4s (they live in the media image and in the video worker's `/opt/media-videos`), so the app lists and imports
+from a small manifest generated at build from `media/videos/*.json` (`dist/video-library.json`, see
+`scripts/build-library-manifest.mjs`; `AOM_VIDEO_LIBRARY_MANIFEST` points at another one, and a checkout with `media/videos` is
+read directly). The render row stores the marker `lib:<slug>` and the WORKER resolves it to the recorded MP4 and VTT in its
+own media folder (`AOM_MEDIA_VIDEOS_DIR`); the review page plays it from the media service (`/videos/<slug>.mp4`). Script
+validation of clip scenes uses the same catalog; a server with no catalog at all refuses a script with clips
+(`409 no_media_catalog`). Cleanup never touches these files.
+
+**Video topics** (like Blog Topics): ideas for new showcase videos ("awesome things you can do with Guildwise HQ"). Core stores
+them and accepts the script; the hosting business's writer generates it (a remix: new narration over clips of the help videos
+and scene cards).
+
+**Cross-post.** A tutorial that is on YouTube can be announced on the other networks: `POST /api/platform/video/posts/{id}/crosspost`
+makes a draft `social_posts` row of kind `video` (ref = the video post id) whose link is the YouTube URL; edit and approve it
+with the social post routes (`/api/platform/social/posts/{id}`), separately from the video. Articles, releases and Shorts are
+not cross-posted. Embeds: `/blog/<slug>` and `/releases/<version>` show the video (`youtube-nocookie.com`) once it is visible.
+
+Routes (all `/api/platform/video`, session cookie, platform accounts only):
+
+| Call | Does |
+|---|---|
+| `GET /` `?status=` | posts with their render and upload, plus the status (worker heartbeat, channel, caps, next slot, locked count) |
+| `GET /status`, `GET/PATCH /settings` | the status; the `videoPosts` setting |
+| `POST /posts` `{ kind, format, ref, script, parentId? }` | add a script by hand (`201`; `200` and the existing post when there is one) |
+| `GET /posts/{id}`, `PATCH /posts/{id}` | one post; edit `{ script?, meta?, privacy? }` |
+| `POST /posts/{id}/approve`, `/reject` `{ reason }` | the go-ahead; `409` once approved |
+| `POST /posts/{id}/retry-render`, `/retry-upload`, `/resolve-locked`, `/crosspost` | try a failed render or upload again; continue after a locked upload; start the cross-post |
+| `GET /posts/{id}/files/{name}` `?revision=` | `video.mp4`, `short.mp4`, `captions.vtt`, `captions.srt`, `thumb.png`, `script.json`, `render.log`, `description.txt`; Range, `Cache-Control: no-store` |
+| `GET /library`, `POST /library/import` `{ slugs? }` | the help videos; import them |
+| `GET/POST /topics`, `POST /topics/{id}/reject`, `/move` | the Video topics list |
+| `GET /needing` | articles and releases of the last 7 days without a video |
+
+**For a hosting business's writer** (exported from the server, no route; `ctx` is the server context):
+
+- `submitVideoPost(ctx, { kind, format, ref, script, parentId? }, origin, status)` in `commands/video-posts.ts` returns
+  `{ post, created }`. Idempotent per `(kind, ref, format)`; `origin` `{ system: 'blog-writer' }`, `status` `'in_review'`. It validates
+  the script (`VideoScriptSchema` and `videoScriptIssues`), needs `videoPosts.enabled` (`503 video_disabled`), applies the kind
+  switches and weekly caps to a system origin, queues render 1, and for a `tutorial` whose `ref` is a Video topic id marks the topic drafted.
+- `articlesNeedingVideo(ctx, maxAgeDays = 7)`: published, non-launch articles published after the channel was connected, without a
+  long video; returns `{ slug, title, summary, tags, publishedAt, content }[]`. `releasesNeedingVideo(ctx, maxAgeDays = 7)`
+  returns `Release[]` (use `whatsNewFor`/`loadReleases` for the content and `SECTION_VIDEOS` help anchors for clips). Both return `[]`
+  unless videos are active (enabled and channel ok) and the kind is on.
+- `claimVideoTopic(ctx)` returns the oldest queued `VideoTopic` (now `writing`) or `null` (also when videos are not active or
+  tutorials are off); `releaseVideoTopic(ctx, topicId, reason?)` when the run failed (back to the queue; rejected after two takes);
+  `queueVideoTopic(ctx, { title, brief? }, 'writer')` to propose a topic.
+- `videoSettings(ctx)`, `videoActive(ctx)`, `videoCapacity(ctx)`, `videoStatus(ctx)`.
+- `clipCatalogForPrompt(loadClipCatalog())` in `video/clips.ts`: the clips a script may use (`{ slug, chapter, title, t0, t1 }[]`; a
+  server without `media/videos` has an empty catalog and skips the clip-slug check, the worker checks again).
+- `VideoScriptSchema`, `parseVideoScript`, `NARRATION_STYLE`, `VIDEO_LIMITS` from `@aom/shared`. The web app has a `VideoDrafter`
+  extension slot (`{ kind, ref, onDone }`) next to articles, releases and queued topics without a video.
+
+**Privacy policy text** for the YouTube API Services (put it in your privacy policy and link it from the OAuth consent screen):
+
+> Guildwise HQ uses YouTube API Services to upload videos that the channel owner has approved to the owner's own YouTube channel.
+> By using these features you agree to be bound by the [YouTube Terms of Service](https://www.youtube.com/t/terms) and the
+> [Google Privacy Policy](http://www.google.com/policies/privacy). We store an OAuth refresh token for the channel, encrypted
+> at rest, and use it only to upload and describe the owner's own videos (scope `youtube.force-ssl`) and to read back their status. We collect no
+> data about YouTube viewers. The owner can revoke access at any time in the
+> [Google security settings](https://security.google.com/settings/security/permissions) and by disconnecting the channel in
+> Guildwise HQ, which deletes the stored token.

@@ -321,6 +321,30 @@ Set `ANTHROPIC_API_KEY` to enable the public assistant on the landing page and t
 
 `AOM_BLOG_DIGEST=true` (the default) sends the weekly digest on Mondays. Set `false` to stop it.
 
+### YouTube videos (the `video` profile)
+
+Guildwise HQ can turn articles, releases and tutorials into narrated, faceless videos and upload the ones you approve to YouTube
+(docs/BLOG-API.md, "YouTube"). It is off by default. The render and the upload run in a separate container, the **video worker**
+(`docker compose -f docker-compose.prod.yml --profile video up -d --build`). It uses the same image sources, database and
+`AOM_SECRET_KEY` as the app, plus Chromium, ffmpeg and the offline voice (Kokoro, about 0.5 GB), and shares a `video` volume
+with the app (read-only there) for the rendered files. Give it 2 CPUs and 3 GB. It renders one video at a time, so a render
+(a few minutes) never starves the app.
+
+1. Create an OAuth client in Google Cloud (APIs & Services > Credentials, type "Web application" or "Desktop"), enable the
+   **YouTube Data API v3** and publish the OAuth consent screen (**In production**: a client left in Testing loses its refresh
+   tokens after 7 days; an unverified app in production is fine for your own channel).
+2. Set `AOM_YOUTUBE_CLIENT_ID` and `AOM_YOUTUBE_CLIENT_SECRET` in `.env`.
+3. Make a refresh token for the channel's Google account with the one scope `https://www.googleapis.com/auth/youtube.force-ssl`
+   (for example with Google's OAuth Playground using your own client) and paste it under Platform > Blog > Posts > Social
+   sharing > YouTube channel. It is checked with YouTube and stored encrypted.
+4. Platform > Blog > Videos: switch **Videos on**. The page shows "Video worker not running" while the worker's heartbeat is missing.
+
+Nothing is drafted, rendered or uploaded unless a YouTube channel is connected **and** Videos is on. YouTube may keep videos
+uploaded by an API project that has not passed Google's compliance audit private: the video is then shown as "kept private",
+you get one email with the audit form (https://support.google.com/youtube/contact/yt_api_form) and uploads pause until you say
+you dealt with it. Quota: about 500 units a video of the 10,000 a day, and the worker uploads at most one video a day.
+Files are cleaned up daily (replaced revisions after a day, rejected ones after 7 days, uploaded MP4s 30 days after the upload).
+
 ### Inbound e-mail
 
 Organizations can receive mail at their own addresses. This needs an inbound mail provider, a receiving domain and a secret. Set `AOM_INBOUND_PROVIDER` (`postmark` or `sendgrid`), `AOM_INBOUND_DOMAIN` and `AOM_INBOUND_SECRET` together (generate the secret with `openssl rand -hex 24`). Point the provider's inbound webhook at `https://inbound:<secret>@<your domain>/api/inbound/mail/<provider>`. Both adapters are included; use the one your mail provider offers.

@@ -45,8 +45,13 @@ services:
       AOM_SIMULATION_DIR: /data/simulation
       # The help videos: the app forwards /videos/* to the media service (unset = no videos). The videos are served by the media service (docs/SELF-HOSTING.md, Troubleshooting).
       AOM_MEDIA_URL: ${AOM_MEDIA_URL:-http://media:80}
+      # YouTube videos (docs/SELF-HOSTING.md "YouTube videos"): the OAuth client of the channel's refresh token; the app only reads the rendered files.
+      AOM_YOUTUBE_CLIENT_ID: ${AOM_YOUTUBE_CLIENT_ID:-}
+      AOM_YOUTUBE_CLIENT_SECRET: ${AOM_YOUTUBE_CLIENT_SECRET:-}
+      AOM_VIDEO_DIR: /data/video
     volumes:
       - simulation:/data/simulation
+      - video:/data/video:ro
     expose:
       - "4600"
 
@@ -61,6 +66,32 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+
+  # Optional: renders the videos of the YouTube push and uploads the approved ones: --profile video (Dockerfile target video-worker).
+  # One render at a time; the app shows "Video worker not running" while its heartbeat is missing.
+  video-worker:
+    build:
+      context: .
+      target: video-worker
+    profiles: ["video"]
+    restart: unless-stopped
+    cpus: 2
+    mem_limit: 3g
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://aom:${POSTGRES_PASSWORD}@postgres:5432/aom
+      AOM_PUBLIC_ORIGIN: ${AOM_PUBLIC_ORIGIN:?set AOM_PUBLIC_ORIGIN in .env}
+      AOM_SECRET_KEY: ${AOM_SECRET_KEY:?set AOM_SECRET_KEY in .env (a long random string, e.g. openssl rand -base64 32)}
+      AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
+      AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
+      AOM_YOUTUBE_CLIENT_ID: ${AOM_YOUTUBE_CLIENT_ID:-}
+      AOM_YOUTUBE_CLIENT_SECRET: ${AOM_YOUTUBE_CLIENT_SECRET:-}
+      AOM_MIGRATE_ON_BOOT: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - video:/data/video
 
   # Optional catch-all mail sink for trying the stack without an SMTP relay: --profile mail (UI on 127.0.0.1:8025).
   mailpit:
@@ -89,5 +120,6 @@ services:
 volumes:
   pgdata:
   simulation:
+  video:
   caddy_data:
   caddy_config:

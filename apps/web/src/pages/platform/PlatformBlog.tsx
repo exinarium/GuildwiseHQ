@@ -18,6 +18,7 @@ import {
 } from '../../components/ui.tsx';
 import { ext } from '../../extension/index.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { PlatformVideo } from './PlatformVideo.tsx';
 
 const STATUS: Array<{ id: BlogStatus; label: string }> = [
   { id: 'in_review', label: 'In review' },
@@ -49,10 +50,10 @@ export function PlatformBlog() {
   const d = list.data;
   const summary = useBlogSummary();
   const tabParam = params.get('tab');
-  const tab = tabParam === 'topics' || tabParam === 'releases' ? tabParam : 'posts';
+  const tab = tabParam === 'topics' || tabParam === 'releases' || tabParam === 'videos' ? tabParam : 'posts';
   const setTab = (id: string) => {
     const next = new URLSearchParams(params);
-    if (id === 'topics' || id === 'releases') next.set('tab', id);
+    if (id === 'topics' || id === 'releases' || id === 'videos') next.set('tab', id);
     else next.delete('tab');
     setParams(next, { replace: true });
   };
@@ -163,12 +164,23 @@ export function PlatformBlog() {
                 : 'Releases',
             testId: 'blog-tab-releases',
           },
+          {
+            id: 'videos',
+            label:
+              (summary.data?.pendingVideos ?? 0) > 0 ? `Videos (${summary.data?.pendingVideos})` : 'Videos',
+            testId: 'blog-tab-videos',
+          },
           { id: 'topics', label: 'Topics', testId: 'blog-tab-topics' },
         ]}
       />
       {tab === 'releases' && (
         <div role="tabpanel" id="blog-panel-releases" aria-labelledby="blog-tab-releases">
           <ReleasesPanel />
+        </div>
+      )}
+      {tab === 'videos' && (
+        <div role="tabpanel" id="blog-panel-videos" aria-labelledby="blog-tab-videos">
+          <PlatformVideo />
         </div>
       )}
       {tab === 'topics' && (

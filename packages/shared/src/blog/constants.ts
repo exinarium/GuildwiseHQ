@@ -42,6 +42,13 @@ export const SOCIAL_NETWORKS = ['facebook', 'linkedin', 'x', 'bluesky'] as const
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
 /**
+ * Networks that have a channel row (`social_channels`). YouTube is deliberately NOT in `SOCIAL_NETWORKS`: that list is
+ * what the blog and release sweep shares to, and nothing but the video worker uploads to YouTube.
+ */
+export const SOCIAL_CHANNEL_NETWORKS = [...SOCIAL_NETWORKS, 'youtube'] as const;
+export type SocialChannelNetwork = (typeof SOCIAL_CHANNEL_NETWORKS)[number];
+
+/**
  * The one source of truth for caption limits and hashtag counts per network. `text` is the caption alone (Facebook,
  * LinkedIn); `total` is everything the caption may hold except the link: for X the 280 characters minus the space and
  * the 23 a link counts (the hashtags share it), for Bluesky the 300 graphemes (the link is the card, not text).

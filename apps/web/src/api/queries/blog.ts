@@ -84,6 +84,8 @@ const SummarySchema = z.object({
   pending: z.number().int(),
   /** Release posts waiting for approval. */
   pendingReleases: z.number().int().default(0),
+  /** Videos waiting for approval. */
+  pendingVideos: z.number().int().default(0),
   enabled: z.boolean(),
 });
 export function useBlogSummary() {
@@ -189,6 +191,7 @@ export const useConnectChannel = () =>
             accountName?: string;
           }
         | { handle: string; appPassword: string }
+        | { refreshToken: string }
       ),
     ) => {
       const { network, ...body } = v;

@@ -75,6 +75,7 @@ describe('connecting channels', () => {
       ['linkedin', 'ok'],
       ['x', 'disconnected'],
       ['bluesky', 'disconnected'],
+      ['youtube', 'disconnected'],
     ]);
     await socialTick(t.app.ctx);
     expect(await shares(before.id)).toHaveLength(0);
@@ -259,7 +260,13 @@ describe('X and Bluesky', () => {
       'toksecret',
     );
     const list = await ok(t.req('GET', '/api/platform/social/channels', { cookie: sa.cookie }));
-    expect(list.channels.map((c: any) => c.network)).toEqual(['facebook', 'linkedin', 'x', 'bluesky']);
+    expect(list.channels.map((c: any) => c.network)).toEqual([
+      'facebook',
+      'linkedin',
+      'x',
+      'bluesky',
+      'youtube', // the video channel is listed too, but it is never a share network
+    ]);
     expect(list.channels.find((c: any) => c.network === 'bluesky').accountName).toBe('guildwise.bsky.social');
   });
 

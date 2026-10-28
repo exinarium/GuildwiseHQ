@@ -15,6 +15,7 @@ export interface RenderScriptOptions extends Omit<RenderOptions, 'clips'> {
 function coverImage(opts: RenderScriptOptions): string | undefined {
   const dir =
     opts.coverDir ??
+    process.env.AOM_COVER_DIR ??
     [
       resolve(import.meta.dirname, '../../../web/public/blog/cover'),
       resolve(import.meta.dirname, '../../../../apps/web/public/blog/cover'),

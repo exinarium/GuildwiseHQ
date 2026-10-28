@@ -140,6 +140,9 @@ const EnvSchema = z.object({
   /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
   AOM_LINKEDIN_CLIENT_ID: z.string().optional(),
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
+  AOM_YOUTUBE_CLIENT_ID: z.string().optional(),
+  AOM_YOUTUBE_CLIENT_SECRET: z.string().optional(),
+  AOM_VIDEO_DIR: z.string().optional(),
   /**
    * Simulation organizations: host their simulated workstation (a mock runner the server starts and supervises).
    * Unset: on, except under tests.
@@ -240,6 +243,11 @@ export interface Config {
   weeklyBriefing: boolean;
   linkedinClientId: string | undefined;
   linkedinClientSecret: string | undefined;
+  /** OAuth client of the Google Cloud project that owns the YouTube channel's refresh token. */
+  youtubeClientId: string | undefined;
+  youtubeClientSecret: string | undefined;
+  /** Where rendered videos live (rw in the video worker, ro in the app). */
+  videoDir: string;
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
@@ -319,6 +327,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     weeklyBriefing: e.AOM_WEEKLY_BRIEFING,
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
+    youtubeClientId: e.AOM_YOUTUBE_CLIENT_ID || undefined,
+    youtubeClientSecret: e.AOM_YOUTUBE_CLIENT_SECRET || undefined,
+    videoDir: e.AOM_VIDEO_DIR || '/data/video',
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
     simulationHost: e.AOM_SIMULATION_HOST,

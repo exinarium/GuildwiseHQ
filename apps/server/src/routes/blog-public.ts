@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { requireSession, requireUser } from '../auth/guards.ts';
 import { getRelease, loadReleases } from '../blog/releases.ts';
 import {
+  EMBED_MARK,
   listPage,
   messagePage,
   postPage,
@@ -31,6 +32,7 @@ import {
   publishedTags,
 } from '../commands/blog.ts';
 import { digestPreference, setDigestPreference, userOfUnsubscribeToken } from '../commands/blog-digest.ts';
+import { embedsVersion, publicVideoEmbed } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
@@ -54,7 +56,7 @@ export function blogPublicRoutes(ctx: Ctx) {
       const t = await lastPublishedChange(ctx);
       const n = await postsCount(ctx);
       const rel = loadReleases(ctx);
-      return `${n}:${t?.getTime() ?? 0}:${rel.length}:${rel[0]?.version ?? ''}`;
+      return `${n}:${t?.getTime() ?? 0}:${rel.length}:${rel[0]?.version ?? ''}:${await embedsVersion(ctx)}`;
     }
 
     /** Renders through the cache and answers with the validators a browser or crawler can reuse. */
@@ -73,6 +75,9 @@ export function blogPublicRoutes(ctx: Ctx) {
         if (status === 200) cache.set(key, hit);
         if (cache.size > 500) cache.delete(cache.keys().next().value as string);
       }
+      // a page with a YouTube embed may frame youtube-nocookie.com (the onSend hook of app.ts widens frame-src)
+      if (hit.body.includes(EMBED_MARK))
+        void reply.header('x-aom-frame-src', 'https://www.youtube-nocookie.com');
       const etag = `"${createHash('sha1').update(hit.body).digest('base64url')}"`;
       void reply
         .header('content-type', type)
@@ -173,7 +178,13 @@ export function blogPublicRoutes(ctx: Ctx) {
           if (!again || again === 'gone')
             return messagePage(origin, 'Not found', 'We could not find that article.');
           const c = again.row.content as BlogContent;
-          return postPage(origin, again.post, c.seo, c.aiDisclosure);
+          return postPage(
+            origin,
+            again.post,
+            c.seo,
+            c.aiDisclosure,
+            await publicVideoEmbed(ctx, 'article', slug),
+          );
         });
       },
     );
@@ -202,7 +213,9 @@ export function blogPublicRoutes(ctx: Ctx) {
             .code(404)
             .type(HTML)
             .send(messagePage(origin, 'Not found', 'We could not find that release.'));
-        return serve(req, reply, `release:${r.version}`, HTML, async () => releasePage(origin, r));
+        return serve(req, reply, `release:${r.version}`, HTML, async () =>
+          releasePage(origin, r, await publicVideoEmbed(ctx, 'release', r.version)),
+        );
       },
     );
 

@@ -466,7 +466,7 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const p = ev<'SocialPostSubmitted'>(e).payload;
     return {
       action: e.event.type,
-      summary: `Release post drafted${p.origin.system ? ' by the blog writer' : ''}: ${p.content.title}`,
+      summary: `${p.kind === 'video' ? 'Video' : 'Release'} post drafted${p.origin.system ? ' by the blog writer' : ''}: ${p.content.title}`,
       details: { postId: p.postId, kind: p.kind, ref: p.ref, origin: p.origin },
     };
   }),
@@ -503,6 +503,74 @@ export const platformAuditProjectors: Record<string, Projector> = {
       action: e.event.type,
       summary: `Release post rejected: ${post?.title ?? p.postId}`,
       details: { postId: p.postId },
+    };
+  }),
+  VideoPostSubmitted: always(async (_tx, e) => {
+    const p = ev<'VideoPostSubmitted'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Video ${p.format === 'short' ? 'Short ' : ''}drafted${p.origin.system ? ' by the blog writer' : ''}: ${p.meta.title}`,
+      details: { postId: p.postId, kind: p.kind, format: p.format, ref: p.ref, origin: p.origin },
+    };
+  }),
+  VideoPostRevised: always(async (_tx, e) => {
+    const p = ev<'VideoPostRevised'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Video edited${p.rerender ? ' (rendering again)' : ''}: ${p.meta.title}`,
+      details: { postId: p.postId, revision: p.revision, rerender: p.rerender },
+    };
+  }),
+  VideoPostApproved: always(async (tx, e) => {
+    const p = ev<'VideoPostApproved'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Video approved for YouTube: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, renderId: p.renderId },
+    };
+  }),
+  VideoPostRejected: always(async (tx, e) => {
+    const p = ev<'VideoPostRejected'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Video rejected: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId },
+    };
+  }),
+  VideoRetryRequested: always(async (tx, e) => {
+    const p = ev<'VideoRetryRequested'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    const what = {
+      render: 'render tried again',
+      upload: 'upload tried again',
+      'resolve-locked': 'private upload marked as dealt with',
+    }[p.what];
+    return {
+      action: e.event.type,
+      summary: `Video ${what}: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, what: p.what },
+    };
+  }),
+  VideoUploadLockedPrivate: always(async (_tx, e) => {
+    const p = ev<'VideoUploadLockedPrivate'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: 'YouTube kept an uploaded video private (API audit missing)',
+      details: { postId: p.postId, videoId: p.videoId },
+    };
+  }),
+  VideoSettingsChanged: always(async (_tx, e) => {
+    const p = ev<'VideoSettingsChanged'>(e).payload;
+    return { action: e.event.type, summary: 'Video settings changed', details: { change: p.change } };
+  }),
+  VideoTopicQueued: always(async (_tx, e) => {
+    const p = ev<'VideoTopicQueued'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Video topic queued: ${p.title}`,
+      details: { topicId: p.topicId },
     };
   }),
   SocialChannelConnected: always(async (_tx, e) => {

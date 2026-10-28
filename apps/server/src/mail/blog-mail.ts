@@ -52,6 +52,8 @@ export function digestMail(opts: {
   };
 }
 
+export const YOUTUBE_AUDIT_FORM_URL = 'https://support.google.com/youtube/contact/yt_api_form';
+
 export function socialAlertMail(opts: {
   to: string;
   network: string;
@@ -59,19 +61,53 @@ export function socialAlertMail(opts: {
   origin: string;
 }): MailMessage {
   const name =
-    { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', bluesky: 'Bluesky' }[opts.network] ?? opts.network;
+    { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', bluesky: 'Bluesky', youtube: 'YouTube' }[
+      opts.network
+    ] ?? opts.network;
+  const video = opts.network === 'youtube';
   return brandedMail({
     to: opts.to,
-    subject: `Blog sharing to ${name} needs attention`,
-    preheader: `${name} sharing is paused or failing`,
-    heading: `${name} sharing needs attention`,
+    subject: video ? 'YouTube uploads need attention' : `Blog sharing to ${name} needs attention`,
+    preheader: video ? 'YouTube uploads are paused or failing' : `${name} sharing is paused or failing`,
+    heading: video ? 'YouTube uploads need attention' : `${name} sharing needs attention`,
     origin: opts.origin,
     body: [
-      `Sharing blog posts to ${name} is not working, so new articles are not being posted there.`,
+      video
+        ? 'Uploading approved videos to YouTube is not working, so they wait in the queue.'
+        : `Sharing blog posts to ${name} is not working, so new articles are not being posted there.`,
       { facts: [['Problem', opts.reason]] },
-      'Open the platform blog settings, reconnect the account and the waiting posts are shared (those published in the last 48 hours).',
+      video
+        ? 'Open the platform blog settings, paste a fresh refresh token for the YouTube channel and the waiting videos are uploaded.'
+        : 'Open the platform blog settings, reconnect the account and the waiting posts are shared (those published in the last 48 hours).',
     ],
     cta: { label: 'Open the social settings', url: `${opts.origin}/platform/blog` },
+  });
+}
+
+/** YouTube kept an uploaded video private: the API project has not passed the compliance audit. */
+export function videoLockedMail(opts: {
+  to: string;
+  title: string;
+  videoUrl: string;
+  origin: string;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: 'YouTube kept an uploaded video private',
+    preheader: 'The API project needs the YouTube compliance audit',
+    heading: 'A video was uploaded but is private',
+    origin: opts.origin,
+    body: [
+      'YouTube locks videos uploaded through an API project that has not passed the compliance audit to private. The video was uploaded and is waiting in YouTube Studio; it will not become public by itself and no more videos are uploaded until you decide.',
+      {
+        facts: [
+          ['Video', opts.title],
+          ['YouTube', opts.videoUrl],
+        ],
+      },
+      `Request the audit with Google's form (${YOUTUBE_AUDIT_FORM_URL}), or make the video public by hand in YouTube Studio.`,
+    ],
+    cta: { label: 'Open the video queue', url: `${opts.origin}/platform/blog?tab=videos` },
   });
 }
 

@@ -52,6 +52,7 @@ import { shiftEvents } from './shift.ts';
 import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
 import { vaultEvents } from './vault.ts';
+import { videoEvents } from './video.ts';
 import { workstationEvents } from './workstation.ts';
 
 // Registry: later milestones add one spread per domain file (desk, ledger, testing, ...) on the line below.
@@ -96,6 +97,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...costEvents,
   ...providerKeyEvents,
   ...blogEvents,
+  ...videoEvents,
   ...runEvents,
   ...qaEvents,
   ...approvalEvents,
@@ -165,4 +167,5 @@ export * from './shift.ts';
 export * from './testing.ts';
 export * from './user.ts';
 export * from './vault.ts';
+export * from './video.ts';
 export * from './workstation.ts';

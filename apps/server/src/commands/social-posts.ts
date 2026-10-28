@@ -8,6 +8,7 @@ import {
   SocialPostContentSchema,
   type SocialPostKind,
   type SocialPostStatus,
+  VideoSocialPostContentSchema,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { getRelease, loadReleases } from '../blog/releases.ts';
@@ -144,6 +145,9 @@ export async function submitSocialPost(
   status: 'draft' | 'in_review',
 ): Promise<{ post: SocialPost; created: boolean }> {
   assertBlogEnabled(await blogEnabled(ctx));
+  // a video's cross-post is made from its video post (createVideoCrossPost), not here
+  if (input.kind !== 'release')
+    throw badRequest('validation_error', 'only a release post can be submitted here');
   const content = SocialPostContentSchema.parse(input.content);
   if (content.version !== input.ref)
     throw badRequest('validation_error', 'the post is for another version than its ref');
@@ -188,7 +192,8 @@ export async function reviseSocialPost(
   const r = await row(ctx, 'id', postId);
   if (!r) throw notFound('post not found', 'post_not_found');
   if (r.status === 'approved') throw conflict('already_approved', 'an approved post cannot be edited');
-  const content = SocialPostContentSchema.parse({ ...(r.content as SocialPostContent), ...patch });
+  const schema = r.kind === 'video' ? VideoSocialPostContentSchema : SocialPostContentSchema;
+  const content = schema.parse({ ...(r.content as SocialPostContent), ...patch });
   if (JSON.stringify(content) === JSON.stringify(r.content)) return getSocialPost(ctx, postId);
   await ctx.store.append([
     {
@@ -237,7 +242,10 @@ export async function approveSocialPost(
   if (r.status === 'approved') return getSocialPost(ctx, postId);
   if (r.status === 'rejected')
     throw conflict('post_rejected', 'a rejected post must be sent to review again first');
-  const have = await one(ctx.pool, `SELECT 1 AS x FROM social_channels WHERE status='ok' LIMIT 1`);
+  const have = await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM social_channels WHERE status='ok' AND network <> 'youtube' LIMIT 1`,
+  );
   if (!have) throw conflict('no_channel', 'connect a social network first: nothing would be posted');
   await ctx.store.append([
     {

@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { BLOG_API_SCOPES, BLOG_STATUSES, BLOG_WRITER, SOCIAL_NETWORKS } from '../blog/constants.ts';
+import {
+  BLOG_API_SCOPES,
+  BLOG_STATUSES,
+  BLOG_WRITER,
+  SOCIAL_CHANNEL_NETWORKS,
+  SOCIAL_NETWORKS,
+} from '../blog/constants.ts';
 import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
 import {
   ReleaseSchema,
@@ -16,6 +22,8 @@ import { IsoTime } from './common.ts';
 export const BlogStatusSchema = z.enum(BLOG_STATUSES);
 export const BlogApiScopeSchema = z.enum(BLOG_API_SCOPES);
 export const SocialNetworkSchema = z.enum(SOCIAL_NETWORKS);
+/** A network with a channel row: the four share networks and YouTube (uploads only, never shared to by the sweep). */
+export const SocialChannelNetworkSchema = z.enum(SOCIAL_CHANNEL_NETWORKS);
 
 export const BlogShareSchema = z.object({
   network: SocialNetworkSchema,
@@ -155,7 +163,7 @@ export const SetDigestPreferenceRequestSchema = z.object({ optedIn: z.boolean() 
 
 // ---- social
 export const SocialChannelSchema = z.object({
-  network: SocialNetworkSchema,
+  network: SocialChannelNetworkSchema,
   connected: z.boolean(),
   accountName: z.string().nullable(),
   status: z.enum(['ok', 'needs_reconnect', 'disconnected']),
@@ -192,13 +200,18 @@ export const ConnectBlueskyChannelSchema = z.object({
   handle: z.string().trim().min(3).max(253),
   appPassword: z.string().trim().min(8).max(100),
 });
+/** YouTube: a refresh token of the channel's Google account (scope youtube.force-ssl), pasted; validated with channels.list. */
+export const ConnectYoutubeChannelSchema = z.strictObject({
+  refreshToken: z.string().trim().min(10).max(4000),
+});
 export const ConnectSocialChannelRequestSchema = z.union([
   ConnectXChannelSchema,
   ConnectBlueskyChannelSchema,
   ConnectTokenChannelSchema,
+  ConnectYoutubeChannelSchema,
 ]);
 export type ConnectSocialChannelRequest = z.infer<typeof ConnectSocialChannelRequestSchema>;
-export const SocialNetworkParamsSchema = z.object({ network: SocialNetworkSchema });
+export const SocialNetworkParamsSchema = z.object({ network: SocialChannelNetworkSchema });
 
 // ---- the server-side blog writer (platform job; super admin only)
 export const BlogWriterPriceSchema = z.object({

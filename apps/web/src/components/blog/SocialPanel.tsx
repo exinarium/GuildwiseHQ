@@ -20,6 +20,11 @@ const NAMES: Record<string, { name: string; idLabel: string; help: string }> = {
     idLabel: '',
     help: 'From a developer app with "Read and write" user authentication: the API key and secret, and the access token and secret of the account (OAuth 1.0a). They do not expire. X charges for API use, so keep credit on the account.',
   },
+  youtube: {
+    name: 'YouTube channel',
+    idLabel: '',
+    help: 'Uploads of approved videos (Videos tab). Paste a refresh token for the channel with the scope youtube.force-ssl, made with the OAuth client in AOM_YOUTUBE_CLIENT_ID and AOM_YOUTUBE_CLIENT_SECRET. It is checked with YouTube and stored encrypted. A client in Testing mode loses its tokens after 7 days: publish the OAuth app (In production) so they last.',
+  },
   bluesky: {
     name: 'Bluesky account',
     idLabel: '',
@@ -40,8 +45,9 @@ export function SocialPanel({
   return (
     <Panel title="Social sharing" data-testid="social-panel">
       <p className="mb-3 text-sm text-muted">
-        Published articles are shared automatically to the connected networks. Tokens are stored encrypted and
-        never shown again. Unpublishing an article does not delete what was shared.
+        Published articles are shared automatically to Facebook, LinkedIn, X and Bluesky. YouTube is only for
+        the videos you approve. Tokens are stored encrypted and never shown again. Unpublishing an article
+        does not delete what was shared.
       </p>
       {needReconnect.length > 0 && (
         <Callout
@@ -96,6 +102,7 @@ function Channel({ channel }: { channel: SocialChannel }) {
         accessSecret: accessSecret.trim(),
         accountName: name.trim(),
       };
+    if (channel.network === 'youtube') return { refreshToken: refresh.trim() };
     if (channel.network === 'bluesky') return { handle: handle.trim(), appPassword: appPassword.trim() };
     return {
       accountId: id.trim(),
@@ -212,6 +219,16 @@ function Channel({ channel }: { channel: SocialChannel }) {
                 required
               />
             </>
+          )}
+          {channel.network === 'youtube' && (
+            <TextInput
+              label="Refresh token"
+              type="password"
+              autoComplete="off"
+              value={refresh}
+              onChange={(e) => setRefresh(e.target.value)}
+              required
+            />
           )}
           {(channel.network === 'facebook' || channel.network === 'linkedin') && (
             <>

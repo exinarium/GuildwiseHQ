@@ -2,7 +2,7 @@
 
 Renders a faceless video from a script: narration in the Kokoro `af_heart` voice (the voice of the help videos, same
 speech cache), scene cards, clips of the help videos, captions, a thumbnail and a YouTube description. Nothing here
-uploads anything; the review flow and the YouTube upload build on `renderScript` later.
+uploads anything. The review flow, the queue and the YouTube upload build on `renderScript`: see docs/BLOG-API.md "YouTube" (`apps/server/src/video/sweep.ts`, started by `video-worker --loop`, compose profile `video`).
 
 ## Pieces
 
@@ -16,7 +16,7 @@ uploads anything; the review flow and the YouTube upload build on `renderScript`
 - `apps/server/src/video`: `clips.ts` (the help video catalog from `media/videos/*.json`; a clip scene is a chapter or a
   `from`/`to` range of the MP4: trimmed, slowed to at least 0.8x, or its last frame held; audio dropped; branded frame) and
   `renders.ts` (`renderScript(script, opts)` validates, then renders).
-- `apps/server/src/video-worker.ts` (bundled to `dist/video-worker.mjs`): for now a CLI.
+- `apps/server/src/video-worker.ts` (bundled to `dist/video-worker.mjs`): the CLI below and `--loop`, the queue worker (claims a render, uploads approved videos, heartbeat, clean-up).
 
 ## Render one script
 

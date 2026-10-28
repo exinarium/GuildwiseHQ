@@ -52,6 +52,7 @@ import {
   reviseSocialPost,
   submitSocialPost,
 } from '../commands/social-posts.ts';
+import { pendingVideoPosts } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
@@ -78,6 +79,7 @@ export function blogPlatformRoutes(ctx: Ctx) {
       return {
         pending: await pendingCount(ctx),
         pendingReleases: await pendingSocialPosts(ctx),
+        pendingVideos: await pendingVideoPosts(ctx),
         enabled: s.enabled,
       };
     });

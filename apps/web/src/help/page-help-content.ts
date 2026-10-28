@@ -1787,7 +1787,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Social sharing',
-        text: 'Connect the Facebook Page, the LinkedIn organization, X and Bluesky. A banner shows when a token needs replacing.',
+        text: 'Connect the Facebook Page, the LinkedIn organization, X and Bluesky, and the YouTube channel for videos. A banner shows when a token needs replacing.',
+      },
+      {
+        name: 'Videos tab',
+        text: 'Narrated videos of articles, releases and tutorials. Watch the rendered video with captions, edit the script, title, description, tags and privacy, then approve it: it uploads to YouTube at the next 10:00 Johannesburg slot, one a day. Shows when the video worker is not running, imports the existing help videos as tutorials and keeps a list of video topics.',
       },
       {
         name: 'Releases tab',

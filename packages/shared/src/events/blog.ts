@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { BLOG_API_SCOPES, SOCIAL_NETWORKS } from '../blog/constants.ts';
+import { BLOG_API_SCOPES, SOCIAL_CHANNEL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema } from '../blog/schema.ts';
-import { SOCIAL_POST_KINDS, SocialPostContentSchema } from '../blog/social-post.ts';
+import { AnySocialPostContentSchema, SOCIAL_POST_KINDS } from '../blog/social-post.ts';
 import { TOPIC_LIMITS, TopicAreaSchema } from '../blog/topic.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
@@ -123,9 +123,9 @@ export const blogEvents = [
   defineEvent('BlogDigestSkipped', z.object({ digestId: z.string(), reason: z.string() })),
   defineEvent(
     'SocialChannelConnected',
-    z.object({ network: z.enum(SOCIAL_NETWORKS), accountName: z.string().max(200), by: Id }),
+    z.object({ network: z.enum(SOCIAL_CHANNEL_NETWORKS), accountName: z.string().max(200), by: Id }),
   ),
-  defineEvent('SocialChannelDisconnected', z.object({ network: z.enum(SOCIAL_NETWORKS), by: Id })),
+  defineEvent('SocialChannelDisconnected', z.object({ network: z.enum(SOCIAL_CHANNEL_NETWORKS), by: Id })),
   // ---- social posts that are not articles (a release announcement). Stream `social-post-<postId>`.
   defineEvent(
     'SocialPostSubmitted',
@@ -134,14 +134,14 @@ export const blogEvents = [
       kind: z.enum(SOCIAL_POST_KINDS),
       /** For a release: its version. One post per kind and ref. */
       ref: z.string().min(1).max(100),
-      content: SocialPostContentSchema,
+      content: AnySocialPostContentSchema,
       origin: BlogOriginSchema,
       status: z.enum(['draft', 'in_review']),
     }),
   ),
   defineEvent(
     'SocialPostRevised',
-    z.object({ postId: Id, content: SocialPostContentSchema, by: BlogOriginSchema }),
+    z.object({ postId: Id, content: AnySocialPostContentSchema, by: BlogOriginSchema }),
   ),
   /** A draft goes to the super admin's review queue. */
   defineEvent('SocialPostReviewRequested', z.object({ postId: Id, by: Id })),
@@ -152,7 +152,7 @@ export const blogEvents = [
     'SocialShareSucceeded',
     z.object({
       postId: Id,
-      network: z.enum(SOCIAL_NETWORKS),
+      network: z.enum(SOCIAL_CHANNEL_NETWORKS),
       externalId: z.string(),
       url: z.string().nullable(),
     }),
@@ -161,7 +161,7 @@ export const blogEvents = [
     'SocialShareFailed',
     z.object({
       postId: Id,
-      network: z.enum(SOCIAL_NETWORKS),
+      network: z.enum(SOCIAL_CHANNEL_NETWORKS),
       error: z.string().max(500),
       final: z.boolean(),
     }),

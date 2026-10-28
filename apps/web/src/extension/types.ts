@@ -58,6 +58,14 @@ export interface ReleaseDrafterProps {
   onDone: () => void;
 }
 
+export interface VideoDrafterProps {
+  /** What the video is about: `article` (slug), `release` (version) or `tutorial` (a Video topic id). */
+  kind: 'article' | 'release' | 'tutorial';
+  ref: string;
+  /** Called after the draft was created so the list refreshes. */
+  onDone: () => void;
+}
+
 export interface WebExtension {
   /** Public routes (no sign-in needed): sign-up, email verification, a public contact form. */
   publicRoutes?: RouteObject[];
@@ -92,6 +100,11 @@ export interface WebExtension {
    * offers "Write by hand" only. Call `onDone` after the draft was created so the list refreshes.
    */
   ReleaseDrafter?: ComponentType<ReleaseDrafterProps>;
+  /**
+   * "Draft video" for an article, a release or a Video topic that has no video yet (Platform > Blog > Videos). The
+   * open-source build has none: scripts are pasted by hand. Call `onDone` after the draft was created.
+   */
+  VideoDrafter?: ComponentType<VideoDrafterProps>;
   /** True when the extension enforces plan limits and licence dates: the platform page then shows those fields. */
   planLimits?: boolean;
   /** Page help (the "what is on this page" panel) for the routes the extension adds. */

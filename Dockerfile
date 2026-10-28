@@ -15,6 +15,33 @@ RUN pnpm --filter @aom/server deploy --prod /out/server \
            /out/server/tsup.config.ts /out/server/vitest.config.ts /out/server/pnpm-lock.yaml /out/server/pnpm-workspace.yaml \
  && cp -r apps/web/dist /out/web
 
+# The video worker (docker compose --profile video): the same server bundle with Chromium, ffmpeg and the offline voice.
+# Renders the videos of the YouTube push and uploads the approved ones (docs/SELF-HOSTING.md "YouTube videos"). Not part of the
+# default build: `docker build .` still builds the runtime stage below.
+FROM node:22.23-bookworm-slim AS video-worker
+ENV NODE_ENV=production \
+    AOM_VIDEO_DIR=/data/video \
+    AOM_VIDEO_HOME=/opt/aom-video \
+    AOM_MEDIA_VIDEOS_DIR=/opt/media-videos \
+    AOM_COVER_DIR=/opt/covers \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl python3 python3-venv fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app/server
+COPY --from=build /out/server /app/server
+# Chromium for the scene cards (the browsers go to PLAYWRIGHT_BROWSERS_PATH, their system libraries are installed too).
+RUN node node_modules/playwright-core/cli.js install --with-deps chromium && rm -rf /var/lib/apt/lists/*
+# The voice (Kokoro, af_heart), a static ffmpeg and Python 3.12 for it: the same script the development machines use.
+COPY e2e/video/setup-voice.sh /tmp/setup-voice.sh
+RUN bash /tmp/setup-voice.sh && rm /tmp/setup-voice.sh
+# The help videos the clips are cut from, and the blog covers for image scenes.
+COPY media/videos/*.mp4 media/videos/*.json media/videos/*.vtt /opt/media-videos/
+COPY apps/web/public/blog/cover /opt/covers
+RUN mkdir -p /data/video && chown -R node:node /data/video /opt/aom-video
+USER node
+CMD ["node", "dist/video-worker.mjs", "--loop"]
+
 FROM node:22.23-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     AOM_HOST=0.0.0.0 \

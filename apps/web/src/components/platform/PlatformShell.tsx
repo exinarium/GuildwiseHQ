@@ -95,13 +95,18 @@ export function PlatformShell() {
                   {n.label}
                   {n.Badge && <n.Badge />}
                   {n.to === '/platform/blog' &&
-                    (blog.data?.pending ?? 0) + (blog.data?.pendingReleases ?? 0) > 0 && (
+                    (blog.data?.pending ?? 0) +
+                      (blog.data?.pendingReleases ?? 0) +
+                      (blog.data?.pendingVideos ?? 0) >
+                      0 && (
                       <span
                         data-testid="blog-pending-badge"
                         className="rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-fg"
                         title="Posts waiting for review"
                       >
-                        {(blog.data?.pending ?? 0) + (blog.data?.pendingReleases ?? 0)}
+                        {(blog.data?.pending ?? 0) +
+                          (blog.data?.pendingReleases ?? 0) +
+                          (blog.data?.pendingVideos ?? 0)}
                       </span>
                     )}
                 </NavLink>

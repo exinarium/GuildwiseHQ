@@ -56,6 +56,7 @@ article blockquote{margin:1em 0;padding:2px 16px;border-left:4px solid var(--bra
 .table-wrap{overflow:auto}table{border-collapse:collapse;margin:1em 0}th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
 .sources{font-size:.95rem;color:var(--muted)}
 .disclosure{background:var(--sunken);border-radius:8px;padding:12px 14px;font-size:.9rem;color:var(--muted);margin:28px 0}
+.video{position:relative;aspect-ratio:16/9;margin:20px 0;border-radius:12px;overflow:hidden;background:var(--sunken)}.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .cta-box{background:var(--side);color:#eceff5;border-radius:12px;padding:22px 24px;margin:32px 0}
 .cta-box a.btn{display:inline-block;background:var(--accent);color:#0d1220;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none}
 footer.site{border-top:1px solid var(--line);background:var(--surface);padding:24px 0;font-size:.9rem;color:var(--muted)}
@@ -170,6 +171,17 @@ ${o.posts.length ? `<div class="grid">${o.posts.map((p) => card(origin, p)).join
   );
 }
 
+/** A YouTube video on a page (privacy-enhanced embed, no cookies until played). */
+export interface VideoEmbed {
+  videoId: string;
+  title: string;
+}
+export const EMBED_MARK = 'https://www.youtube-nocookie.com/embed/';
+export function videoEmbedHtml(v?: VideoEmbed | null): string {
+  if (!v || !/^[A-Za-z0-9_-]{6,20}$/.test(v.videoId)) return '';
+  return `<div class="video"><iframe src="${EMBED_MARK}${v.videoId}" title="${esc(v.title)}" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>`;
+}
+
 export function postPage(
   origin: string,
   post: PublicBlogPostFull,
@@ -180,6 +192,7 @@ export function postPage(
     noindex?: boolean | undefined;
   },
   disclosure: { model?: string | undefined; agentName?: string | undefined },
+  video?: VideoEmbed | null,
 ): string {
   const canonical =
     seo.canonicalUrl && new URL(seo.canonicalUrl).origin === new URL(origin).origin
@@ -195,6 +208,7 @@ export function postPage(
 <p class="meta">${esc(BLOG_AUTHOR)} &middot; <time datetime="${esc(post.publishedAt)}">${esc(fmtDate(post.publishedAt))}</time> &middot; ${post.readingMinutes} min read</p>
 ${tagList(post.tags)}
 <img class="cover" src="${esc(image)}" alt="${esc(post.coverImage.alt)}" width="1200" height="630">
+${videoEmbedHtml(video)}
 ${renderMarkdownHtml(post.bodyMarkdown)}
 ${sources}
 <p class="disclosure">This article was written by an AI agent for Guildwise HQ${by ? ` (${esc(by)})` : ''} and is reviewed against its sources.</p>
@@ -285,7 +299,7 @@ ${
   );
 }
 
-export function releasePage(origin: string, r: Release): string {
+export function releasePage(origin: string, r: Release, video?: VideoEmbed | null): string {
   const title = `Guildwise HQ ${r.version}`;
   const desc = fitText(
     [r.intro, ...r.whatsNew.map((w) => w.title)].filter(Boolean).join('. ') ||
@@ -300,6 +314,7 @@ export function releasePage(origin: string, r: Release): string {
 <h1>${esc(title)}</h1>
 <p class="meta"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></p>
 <img class="cover" src="${esc(RELEASE_COVER(origin))}" alt="" width="1200" height="630">
+${videoEmbedHtml(video)}
 ${r.intro ? `<p class="lead">${esc(r.intro)}</p>` : ''}
 ${r.whatsNew.length ? `<h2>What's new</h2>${r.whatsNew.map((w) => `<h3>${esc(w.title)}</h3>${entryBodyHtml(w.id, w.body)}`).join('')}` : ''}
 ${sections ? `<h2>Full changelog</h2>${sections}` : ''}

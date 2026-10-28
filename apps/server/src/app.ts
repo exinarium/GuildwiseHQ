@@ -120,6 +120,7 @@ import { shiftRoutes } from './routes/shifts.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { vaultRoutes } from './routes/vaults.ts';
+import { videoPlatformRoutes } from './routes/video-platform.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -128,6 +129,7 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
@@ -137,6 +139,8 @@ export interface BuildOptions {
   assistantClient?: AnthropicLike | null;
   /** Facebook and LinkedIn; tests pass a fake, nothing else reaches those networks. */
   social?: SocialClient;
+  /** YouTube; tests pass a fake. */
+  youtube?: YouTubeClient;
   /** Server extensions (billing, support, ...): none for a self-hosted server. See extension.ts. */
   extensions?: ServerExtension[];
   clock?: Clock;
@@ -278,6 +282,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     notifier,
     mailer,
     social: opts.social ?? createSocialClient(),
+    youtube: opts.youtube ?? createYouTubeClient(),
     ext: createExtensionHost(opts.extensions),
     log: app.log,
     services: {} as Ctx['services'],
@@ -366,6 +371,13 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     reply.header('x-frame-options', 'DENY');
     reply.header('referrer-policy', 'no-referrer');
     // An attachment sets its own, stricter policy (sandboxed: no script ever runs from an uploaded file).
+    // A public page with a privacy-enhanced YouTube embed (blog article, release) may frame youtube-nocookie.com, nothing else.
+    const frame = reply.getHeader('x-aom-frame-src');
+    if (frame !== undefined) {
+      reply.removeHeader('x-aom-frame-src');
+      if (!reply.hasHeader('content-security-policy'))
+        reply.header('content-security-policy', `${csp}; frame-src ${String(frame)}`);
+    }
     if (!reply.hasHeader('content-security-policy')) reply.header('content-security-policy', csp);
     reply.header('cross-origin-opener-policy', 'same-origin');
     reply.header('permissions-policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
@@ -459,6 +471,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(costRoutes(ctx));
   await app.register(orgChartRoutes(ctx));
   await app.register(blogPlatformRoutes(ctx));
+  await app.register(videoPlatformRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
   for (const e of ctx.ext.list) {
