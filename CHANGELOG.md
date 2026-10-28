@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-28
+
+Runner 0.1.62 (unchanged). Release posts, per-network hashtags and the YouTube video worker; migrations 2720 and 2730. Videos stay off until a YouTube channel is connected and video posts are switched on.
+
 ### Added
 
 - Blog: hashtags per social network (Facebook up to 3, LinkedIn 3 to 5, X and Bluesky 1 to 2), stored without `#` in `social.hashtags` of a post. The post editor shows a caption editor per network with a hashtag chip input, a live counter and the exact text that will be posted. X keeps its hashtags (the caption is cut first); Bluesky hashtags are clickable `#tag` facets. Caption limits live in one place (`SOCIAL_LIMITS`). Posts written before this keep their inline hashtags.
