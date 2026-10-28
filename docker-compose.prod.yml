@@ -73,6 +73,9 @@ services:
     build:
       context: .
       target: video-worker
+      # The help videos the clips are cut from: not in the build context (.dockerignore), so a named context carries them.
+      additional_contexts:
+        media: ./media
     profiles: ["video"]
     restart: unless-stopped
     cpus: 2

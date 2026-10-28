@@ -330,6 +330,16 @@ Guildwise HQ can turn articles, releases and tutorials into narrated, faceless v
 with the app (read-only there) for the rendered files. Give it 2 CPUs and 3 GB. It renders one video at a time, so a render
 (a few minutes) never starves the app.
 
+The help videos (the clips are cut from them) are not in the build context: `.dockerignore` leaves out `media/videos/*.mp4` and
+`*.webm` (about 180 MB) so every app build stays small. The app image only needs their metadata (the `.json` and `.vtt` files, from
+which it builds its library manifest), and the worker image gets the MP4s through a named build context, `media`, which the compose
+file sets (`additional_contexts: media: ./media`). Building the worker by hand:
+`docker build --target video-worker --build-context media=media -t aom-video-worker .`
+
+The `video` volume must be writable by the worker (uid 1000, user `node`). The app image creates `/data/video` owned by `node`, so a
+new volume is right. A volume that already exists (made by an older image) is root-owned and the worker fails with `EACCES`; fix it once:
+`docker run --rm -v <project>_video:/data/video alpine chown 1000:1000 /data/video` (`docker volume ls` shows the name).
+
 1. Create an OAuth client in Google Cloud (APIs & Services > Credentials, type "Web application" or "Desktop"), enable the
    **YouTube Data API v3** and publish the OAuth consent screen (**In production**: a client left in Testing loses its refresh
    tokens after 7 days; an unverified app in production is fine for your own channel).

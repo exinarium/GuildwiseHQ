@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "AOM_MOCK_UI=${AOM_MOCK_UI:-true} AOM_SMTP_URL=${AOM_SMTP_URL:-smtp://127.0.0.1:1026} tsx watch src/main.ts",
-    "build": "tsup && rm -rf dist/video-assets && cp -r ../../packages/video/assets dist/video-assets",
+    "build": "tsup && rm -rf dist/video-assets && cp -r ../../packages/video/assets dist/video-assets && rm -rf dist/release-notes && mkdir -p dist/release-notes && cp ../../CHANGELOG.md dist/release-notes/CHANGELOG.md && cp -r ../web/src/whats-new/entries dist/release-notes/whats-new && node scripts/build-library-manifest.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "db:migrate": "tsx src/db/migrate.ts",

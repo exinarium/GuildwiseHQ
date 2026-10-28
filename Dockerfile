@@ -6,6 +6,10 @@ RUN npm install -g pnpm@12.8.1
 WORKDIR /repo
 COPY . .
 RUN pnpm install --frozen-lockfile
+# The help videos' metadata (media/videos/*.json and *.vtt; the MP4s and WebMs stay out of the build context, see .dockerignore) is
+# all the app needs: the library manifest (dist/video-library.json) lists the videos and their chapters. The manifest builder
+# wants an MP4 next to each JSON, so an empty placeholder stands in for it in this stage only.
+RUN for j in media/videos/*.json; do [ -e "${j%.json}.mp4" ] || : > "${j%.json}.mp4"; done
 RUN pnpm --filter @aom/web build && pnpm --filter @aom/server build
 # The runner release the "Add a workstation" installers download from this app (release/aom-runner-<version>.tgz).
 RUN scripts/package-runner.sh && mkdir -p /out/release && cp release/aom-runner-*.tgz /out/release/
@@ -17,7 +21,10 @@ RUN pnpm --filter @aom/server deploy --prod /out/server \
 
 # The video worker (docker compose --profile video): the same server bundle with Chromium, ffmpeg and the offline voice.
 # Renders the videos of the YouTube push and uploads the approved ones (docs/SELF-HOSTING.md "YouTube videos"). Not part of the
-# default build: `docker build .` still builds the runtime stage below.
+# default build: `docker build .` still builds the runtime stage below. It needs the help videos (the clips are cut from them) from
+# the media folder as a named build context, because the context itself leaves the MP4s out (.dockerignore):
+#   docker build --target video-worker --build-context media=media -t aom-video-worker .
+# (docker-compose.prod.yml passes it as additional_contexts.)
 FROM node:22.23-bookworm-slim AS video-worker
 ENV NODE_ENV=production \
     AOM_VIDEO_DIR=/data/video \
@@ -36,7 +43,7 @@ RUN node node_modules/playwright-core/cli.js install --with-deps chromium && rm 
 COPY e2e/video/setup-voice.sh /tmp/setup-voice.sh
 RUN bash /tmp/setup-voice.sh && rm /tmp/setup-voice.sh
 # The help videos the clips are cut from, and the blog covers for image scenes.
-COPY media/videos/*.mp4 media/videos/*.json media/videos/*.vtt /opt/media-videos/
+COPY --from=media videos/*.mp4 videos/*.json videos/*.vtt /opt/media-videos/
 COPY apps/web/public/blog/cover /opt/covers
 RUN mkdir -p /data/video && chown -R node:node /data/video /opt/aom-video
 USER node
@@ -58,6 +65,10 @@ COPY --from=build --chown=node:node /out/web /app/web
 COPY --from=build --chown=node:node /out/release /app/release
 # Where simulation organizations keep their runner data and local repositories (mount a volume here: AOM_SIMULATION_DIR).
 RUN mkdir -p /data/simulation && chown node:node /data/simulation
+# The video volume is mounted read-only here (the app serves the rendered videos) and read-write in the video worker (USER node).
+# A fresh named volume copies this directory's ownership on first mount, so it must exist and belong to node, or the worker
+# (started after the app) gets EACCES.
+RUN mkdir -p /data/video && chown node:node /data/video
 USER node
 EXPOSE 4600
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \

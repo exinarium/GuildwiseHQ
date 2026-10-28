@@ -11,6 +11,7 @@ import {
   parseChangelog,
   parseWhatsNew,
   publicText,
+  resetReleaseWarnings,
   useReleaseSource,
   type WhatsNewSource,
   whatsNewFor,
@@ -179,6 +180,25 @@ describe('manifest files', () => {
       'Release posts: each release can be announced on the connected networks, thanks.',
     );
     expect(rs[1]?.whatsNew).toEqual([]);
+  });
+  it('is empty, and logs once, when the changelog path is not a regular file (a directory left by a build)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rel-'));
+    mkdirSync(join(dir, 'CHANGELOG.md')); // the directory tsup's onSuccess runner once left in its place
+    mkdirSync(join(dir, 'entries'));
+    useReleaseSource({ changelogPath: join(dir, 'CHANGELOG.md'), entriesDir: join(dir, 'entries') });
+    resetReleaseWarnings();
+    const logged: unknown[][] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a);
+    try {
+      expect(loadReleases()).toEqual([]); // no EISDIR
+      useReleaseSource({ changelogPath: join(dir, 'CHANGELOG.md'), entriesDir: join(dir, 'entries') }); // clears the cache
+      expect(loadReleases()).toEqual([]);
+    } finally {
+      console.error = orig;
+    }
+    expect(logged).toHaveLength(1);
+    expect(String(logged[0]?.[0])).toContain('not a regular file');
   });
   it('is empty when the files are missing', () => {
     useReleaseSource({ changelogPath: '/nonexistent/CHANGELOG.md', entriesDir: '/nonexistent' });

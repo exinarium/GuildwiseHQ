@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -211,8 +211,23 @@ export function locateReleaseSource(baseDir: string): { source: ReleaseSource; b
 const REREAD_MS = 5000;
 let cache: { releases: Release[]; at: number; permanent: boolean } | null = null;
 
+let warnedNotFile = false;
+/** Test hook: lets the "not a regular file" warning fire again. */
+export const resetReleaseWarnings = (): void => {
+  warnedNotFile = false;
+};
+
 function readReleases(src: ReleaseSource): Release[] {
   if (!existsSync(src.changelogPath)) return [];
+  // A build that left a directory where the changelog should be (tsup's onSuccess runner once did) must not make every public
+  // blog request throw EISDIR: there are no releases then, and the problem is logged once.
+  if (!statSync(src.changelogPath).isFile()) {
+    if (!warnedNotFile) {
+      warnedNotFile = true;
+      console.error(`release notes: ${src.changelogPath} is not a regular file; no releases are listed`);
+    }
+    return [];
+  }
   const md = readFileSync(src.changelogPath, 'utf8');
   const files = existsSync(src.entriesDir)
     ? readdirSync(src.entriesDir)

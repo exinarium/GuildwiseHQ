@@ -224,7 +224,8 @@ export type BlogWriterPrice = z.infer<typeof BlogWriterPriceSchema>;
 
 export const BlogWriterRunSchema = z.object({
   id: z.uuid(),
-  kind: z.enum(['scheduled', 'manual', 'release']),
+  // 'video': the drafting of a video script (the hosted writer; its own monthly cap)
+  kind: z.enum(['scheduled', 'manual', 'release', 'video']),
   status: z.enum(['running', 'ok', 'failed', 'skipped']),
   slot: z.string().nullable(),
   topic: z.string().nullable(),
