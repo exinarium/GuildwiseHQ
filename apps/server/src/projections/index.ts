@@ -48,6 +48,7 @@ import { scheduleProjectors } from './schedules.ts';
 import { sessionProjectors } from './sessions.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
+import { socialPostProjectors } from './social-posts.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';
@@ -66,6 +67,7 @@ const domains: Array<Record<string, Projector>> = [
   platformAuditProjectors,
   platformProjectors,
   blogProjectors,
+  socialPostProjectors,
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
@@ -161,6 +163,7 @@ export const PROJECTION_TABLES = [
   'invitations',
   'blog_posts',
   'blog_topics',
+  'social_posts',
   'workstations',
   'projects',
   'project_provider_accounts',

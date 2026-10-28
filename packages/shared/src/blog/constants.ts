@@ -41,6 +41,25 @@ export const BLOG_LIMITS = {
 export const SOCIAL_NETWORKS = ['facebook', 'linkedin', 'x', 'bluesky'] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
+/**
+ * The one source of truth for caption limits and hashtag counts per network. `text` is the caption alone (Facebook,
+ * LinkedIn); `total` is everything the caption may hold except the link: for X the 280 characters minus the space and
+ * the 23 a link counts (the hashtags share it), for Bluesky the 300 graphemes (the link is the card, not text).
+ * `tags` is [min, max] hashtags: the max is enforced by the schema, the min is what the writer and the editor aim for.
+ */
+export const SOCIAL_LIMITS = {
+  facebook: { text: 500, tags: [0, 3] },
+  linkedin: { text: 700, tags: [3, 5] },
+  x: { total: 256, tags: [1, 2] },
+  bluesky: { total: 300, tags: [1, 2] },
+} as const satisfies Record<
+  SocialNetwork,
+  { text?: number; total?: number; tags: readonly [number, number] }
+>;
+
+/** A hashtag without the `#`: starts with a letter, then letters, digits and underscores (2-50 characters). */
+export const HASHTAG_RE = /^[\p{L}][\p{L}\p{N}_]{1,49}$/u;
+
 /** The server-side blog writer. */
 export const BLOG_WRITER = {
   /** Selectable models. Only the first has built-in prices; any other needs a price set by the super admin. */

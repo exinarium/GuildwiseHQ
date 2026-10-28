@@ -67,7 +67,7 @@ count to the post cap.
 | `tags` | 1 to 5 of the same six keys. `industry-news` needs at least 2 sources. |
 | `sources` | up to 15 of `{ "title", "url" }` (http or https) |
 | `seo` | optional `metaTitle` (60), `metaDescription` (160), `canonicalUrl` (same origin), `noindex` |
-| `social` | optional `facebookText` (500), `linkedinText` (700), `xText` (250), `blueskyText` (270) captions. A missing caption falls back to the `summary` (cut to fit the network) |
+| `social` | optional captions `facebookText` (500), `linkedinText` (700), `xText` and `blueskyText`, and `hashtags` (below). A missing caption falls back to the `summary` (cut to fit the network) |
 | `aiDisclosure` | optional `{ "model", "agentName" }`, shown on the page |
 
 The author is always **The Guildwise HQ team**; there is no author field.
@@ -118,7 +118,13 @@ curl -s -X POST "$API/api/v1/blog/posts" \
   "tags": ["ai-agents", "how-to"],
   "sources": [{ "title": "Vendor documentation", "url": "https://example.com/docs" }],
   "seo": { "metaTitle": "Reviewing agent output", "metaDescription": "A checklist for reviewing AI agent output." },
-  "social": { "facebookText": "New on the blog: how to review agent output.", "linkedinText": "How we review what AI agents produce, as a checklist.", "xText": "How we review what AI agents produce, as a checklist. #AI", "blueskyText": "How we review what AI agents produce, as a checklist." },
+  "social": {
+    "facebookText": "New on the blog: how to review agent output.",
+    "linkedinText": "How we review what AI agents produce, as a checklist.",
+    "xText": "How we review what AI agents produce, as a checklist.",
+    "blueskyText": "How we review what AI agents produce, as a checklist.",
+    "hashtags": { "facebook": ["AIAgents"], "linkedin": ["AIAgents", "CodeReview", "Automation"], "x": ["AIAgents"], "bluesky": ["AIAgents"] }
+  },
   "aiDisclosure": { "model": "claude-sonnet", "agentName": "Blog writer" }
 }
 ```
@@ -241,24 +247,88 @@ with `AOM_BLOG_DIGEST=false` or in Platform > Blog. See `docs/SELF-HOSTING.md`.
 
 ## Facebook, LinkedIn, X and Bluesky
 
-The super admin pastes the credentials of each network under Platform > Blog > Social sharing (the `channels` of
+The super admin pastes the credentials of each network in the **Social sharing** panel at the bottom of the Posts tab under Platform > Blog (the `channels` of
 `POST /api/v1/posts/{slug}/share` accept `facebook`, `linkedin`, `x` and `bluesky`; the default is all four, limited to
 the connected ones). Credentials are encrypted with `AOM_SECRET_KEY` and are never returned.
 
 | Network | Fields pasted | Where to get them |
 |---|---|---|
 | Facebook | `accountId` (Page id), `accessToken` | The Page access token (`pages_manage_posts`) of the Guildwise page |
-| LinkedIn | `accountId` (organization id), `accessToken`, optional `refreshToken` | OAuth with `w_organization_social`; renewed with the refresh token when `AOM_LINKEDIN_CLIENT_ID` and `AOM_LINKEDIN_CLIENT_SECRET` are set |
+| LinkedIn | `accountId` (the organization's number only, for example `5515715`; a pasted `urn:li:organization:5515715` is cut down to the number), `accessToken`, optional `refreshToken` | OAuth with `w_organization_social`; renewed with the refresh token when `AOM_LINKEDIN_CLIENT_ID` and `AOM_LINKEDIN_CLIENT_SECRET` are set |
 | X | `apiKey`, `apiSecret`, `accessToken`, `accessSecret` (optional `accountName`) | developer.x.com: create a project and app, set **User authentication settings** to **Read and write** (OAuth 1.0a), then generate the API Key and Secret and the Access Token and Secret of the account that should post. They do not expire. X API access is paid, pay-per-use as of 2026: keep credit on the developer account, because when it runs out X answers 402 and sharing pauses |
 | Bluesky | `handle` (for example `guildwise.bsky.social`), `appPassword` | Bluesky **Settings > Privacy and security > App passwords**; never the main password. A session is created for each post |
 
 Captions: `facebookText`, `linkedinText`, `xText` and `blueskyText`; when one is missing the post `summary` is used,
-cut to fit. X counts every link as 23 characters (the caption is cut so that caption, a space and the link fit in 280);
-Bluesky allows 300 characters including the link, which is made clickable and shown as a link card with the cover.
-X shows the card from the page's Open Graph tags.
+cut to fit.
+
+### Hashtags and limits
+
+`social.hashtags` holds the hashtags of each network, stored **without the `#`** (a leading `#` is accepted and
+dropped). A hashtag is one word of 2 to 50 letters, digits or underscores that starts with a letter (any script);
+duplicates are refused. The limits, kept in one place (`SOCIAL_LIMITS` in `packages/shared/src/blog/constants.ts`):
+
+| Network | Caption | Hashtags (goal) | Notes |
+|---|---|---|---|
+| Facebook | 500 characters | 0 to 3 | tags go on their own line after the caption |
+| LinkedIn | 700 characters | 3 to 5 | the caption is escaped for LinkedIn's "little text" format (the backslash, the vertical bar and `{ } @ [ ] ( ) < > * _ ~`, and a `#` that does not start a word); underscores are dropped from the tags, which are one word |
+| X | 256 characters, caption and hashtags together | 1 to 2 | the link is added after them and counts as 23 (280 in all); the caption is cut first so the hashtags survive, and hashtags are dropped from the end only when the caption would be left with almost no room |
+| Bluesky | 300 graphemes, caption and hashtags together | 1 to 2 | **no link in the text**: the link card carries it; each hashtag is a clickable `#tag` facet |
+
+The maximum is enforced (`400 validation_error`); the minimum is the goal the editor and the blog writer aim for. A
+post written before `hashtags` existed keeps its hashtags inline in the caption and is posted as it was (except that
+Bluesky no longer repeats the link in the text).
 
 A published post is shared once per network within a few minutes, retried after 1 minute, 5 minutes, 30 minutes and
 2 hours on network errors, 429 and 5xx. Another 4xx answer is final. A refused credential (401, 403, and for X 402 when
 the credit is used up) pauses that network, mails the super admin once and shows a banner; waiting posts from the last
 48 hours are shared after a reconnect. A token that is about to expire (7 days) also triggers the alert (X and Bluesky
 credentials have no expiry date). Unpublishing a post does **not** delete what was shared.
+
+## Release announcements
+
+Each release of the product can be announced on the connected networks. This is separate from the blog: the posts live in
+their own table (`social_posts`), never appear in `/blog`, the RSS feed, the weekly digest or `/api/blog/posts`, and there
+is **no agent-key endpoint** for creating them. Only the super admin (and, on a hosted installation, the hosting
+business's own drafter inside the server) can.
+
+**The manifest.** Releases come from the files the repository already keeps: `CHANGELOG.md` (one `## [x.y.z] - YYYY-MM-DD`
+section per release; `[Unreleased]` is ignored) and the What's New entries (`apps/web/src/whats-new/entries/*.md`). An entry
+belongs to the release in its optional `release: x.y.z` frontmatter, else to the release whose date range holds its own
+date. Only entries for everyone, Owners or Admins are public (`superadmin` entries never are); @handles, issue numbers and
+Help links are removed. The build copies both beside the bundle (`dist/release-notes`); in the source tree and in tests the
+repository files are read (`apps/server/src/blog/releases.ts`). A deployment without the files has no releases.
+
+**Public pages** (own domain, in the sitemap, cached like the blog, `404` while the blog is switched off):
+`/releases` and `/releases/<version>`: What's New in plain language and the full changelog of the release, with
+`/blog/cover/release.png` as the `og:image` (one static branded cover, no version text).
+
+**Posting.** A release post is `{ version, releasedOn, title (10-110), summary (40-300), coverKey: "release", captions }`
+where `captions` is the same object as a blog post's `social` (captions and `hashtags`, same limits). Status:
+`draft` -> `in_review` -> `approved` (or `rejected`, which goes back through review). **It is never approved by anything but
+the super admin**: nothing auto-publishes, whoever drafted it. An approved post is final.
+Once approved, the same sweep as for blog posts shares it once per connected network (the row key is the post id and the
+network), if the approval is less than 48 hours old and came after the network was connected; the kill switch stops it.
+The link is `<origin>/releases/<version>?utm_source=<network>&utm_medium=social&utm_campaign=release-<version>` and the
+card image is the release cover. One post per release, ever: a release that has a post of any status is not drafted again.
+
+Super admin routes (session cookie, platform accounts only):
+
+| Call | Does |
+|---|---|
+| `GET /api/platform/social/releases` | every release with its post (if any) and the number waiting for approval |
+| `POST /api/platform/social/posts` `{ "kind": "release", "ref": "1.2.0" }` | "write by hand": a draft prefilled from the manifest (`201`; `200` and the existing post when there is one) |
+| `GET /api/platform/social/posts/{id}` | one post with its shares |
+| `PATCH /api/platform/social/posts/{id}` | `title`, `summary` and/or `captions`; `409` once approved |
+| `POST .../{id}/submit` | draft or rejected -> in review |
+| `POST .../{id}/approve` | `409 no_channel` when no network is connected; the sweep shares it within minutes |
+| `POST .../{id}/reject` `{ "reason": "..." }` | `409` once approved |
+
+`GET /api/v1/social/shares` rows carry `source` (`blog` or `social`) and either `slug` (blog) or `ref` (the version).
+
+**For a hosting business's drafter** (exported from the server, no route): `submitSocialPost(ctx, { kind, ref, content },
+origin, status)` in `commands/social-posts.ts` (idempotent per release; `origin` `{ system: 'blog-writer' }`, `status`
+`'in_review'`), `newestUnannouncedRelease(ctx, maxAgeDays)`, `loadReleases(ctx)` and `getRelease(version)` in
+`blog/releases.ts`. The web app has a `ReleaseDrafter` extension slot (`{ version, onDone }`), shown next to "Write by hand"
+in Platform > Blog > Releases. The blog writer setting `releasePosts` (default on) tells a drafter whether to draft for each
+new release.
+

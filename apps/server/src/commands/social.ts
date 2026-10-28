@@ -3,11 +3,14 @@ import {
   type BlogContent,
   type ConnectSocialChannelRequest,
   SOCIAL_NETWORKS,
+  type SocialCaptions,
   type SocialChannel,
   type SocialNetwork,
+  type SocialPostContent,
 } from '@aom/shared';
 import { decryptSecret, encryptSecret } from '../auth/secrets.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { getRelease } from '../blog/releases.ts';
 import { SocialError } from '../blog/social-client.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, rows } from '../db/sql.ts';
@@ -195,12 +198,22 @@ const shareRow = (r: Record<string, any>) => ({
   nextAttemptAt: iso(r.next_attempt_at),
 });
 
+/** Latest shares of blog posts (`slug`) and release posts (`ref`); `source` says which. */
 export async function listSharesForApi(ctx: Ctx) {
   const rs = await rows(
     ctx.pool,
-    `SELECT s.*, p.slug FROM social_shares s JOIN blog_posts p ON p.id = s.post_id ORDER BY s.updated_at DESC LIMIT 100`,
+    `SELECT s.*, p.slug AS slug, sp.ref AS ref
+       FROM social_shares s
+       LEFT JOIN blog_posts p ON s.source = 'blog' AND p.id = s.post_id
+       LEFT JOIN social_posts sp ON s.source = 'social' AND sp.id = s.post_id
+      WHERE p.id IS NOT NULL OR sp.id IS NOT NULL
+      ORDER BY s.updated_at DESC LIMIT 100`,
   );
-  return rs.map((r) => ({ slug: r.slug as string, ...shareRow(r) }));
+  return rs.map((r) => ({
+    source: r.source as 'blog' | 'social',
+    ...(r.source === 'social' ? { ref: r.ref as string } : { slug: r.slug as string }),
+    ...shareRow(r),
+  }));
 }
 
 /** Failed shares and channel problems, for the banner on the platform blog page. */
@@ -212,9 +225,14 @@ export async function socialProblems(
   return { failedShares: f?.n ?? 0, channelsNeedingReconnect: c.map((x) => x.network) };
 }
 
-/** Published posts that have no share row yet get one per connected, healthy channel (no backlog from before the connection). */
+/**
+ * Posts that have no share row yet get one per connected, healthy channel (no backlog from before the connection):
+ * published blog articles, and approved release posts (`source = 'social'`, counted from their approval). Both only
+ * while fresh (48 hours).
+ */
 async function createMissingShares(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
+  const fresh = new Date(now.getTime() - FRESH_MS);
   await exec(
     ctx.pool,
     `INSERT INTO social_shares (post_id, network, status, attempts, next_attempt_at, created_at, updated_at)
@@ -223,7 +241,17 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
       WHERE p.status='published' AND NOT p.launch AND c.status='ok'
         AND p.published_at >= c.connected_at AND p.published_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
-    [now, new Date(now.getTime() - FRESH_MS)],
+    [now, fresh],
+  );
+  await exec(
+    ctx.pool,
+    `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, created_at, updated_at)
+     SELECT p.id, c.network, 'social', 'pending', 0, $1, $1, $1
+       FROM social_posts p CROSS JOIN social_channels c
+      WHERE p.status='approved' AND c.status='ok'
+        AND p.approved_at >= c.connected_at AND p.approved_at > $2
+     ON CONFLICT (post_id, network) DO NOTHING`,
+    [now, fresh],
   );
 }
 
@@ -248,46 +276,107 @@ async function alertOnce(ctx: Ctx, network: SocialNetwork, reason: string): Prom
   }
 }
 
-function captionFor(network: SocialNetwork, c: BlogContent): string {
+function captionFor(
+  network: SocialNetwork,
+  c: SocialCaptions,
+  fallback: string,
+): { text: string; tags: string[] } {
   const text = {
-    facebook: c.social.facebookText,
-    linkedin: c.social.linkedinText,
-    x: c.social.xText,
-    bluesky: c.social.blueskyText,
+    facebook: c.facebookText,
+    linkedin: c.linkedinText,
+    x: c.xText,
+    bluesky: c.blueskyText,
   }[network];
-  return text || c.summary; // older posts have no X or Bluesky caption; the client cuts the summary to fit
+  // older posts have no X or Bluesky caption (the client cuts the summary to fit) and no hashtag array (tags stay inline)
+  return { text: text || fallback, tags: c.hashtags?.[network] ?? [] };
+}
+
+/** What a share needs from the thing it shares, whichever table it lives in. */
+interface Shareable {
+  /** Still in the state that may be posted (published / approved). */
+  live: boolean;
+  /** When it became live; older than 48 hours is not posted. */
+  at: Date | null;
+  notLive: string;
+  stream: string;
+  link: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+  text: string;
+  tags: string[];
+}
+
+async function loadShareable(
+  ctx: Ctx,
+  share: Record<string, any>,
+  network: SocialNetwork,
+): Promise<Shareable | null> {
+  const origin = ctx.config.publicOrigin;
+  if (share.source === 'social') {
+    const sp = await one(ctx.pool, 'SELECT * FROM social_posts WHERE id=$1', [share.post_id]);
+    if (!sp) return null;
+    const c = sp.content as SocialPostContent;
+    // a release: its own public page, with the campaign in the link so the traffic can be told apart
+    const link = `${origin}/releases/${encodeURIComponent(sp.ref)}?utm_source=${network}&utm_medium=social&utm_campaign=release-${encodeURIComponent(sp.ref)}`;
+    return {
+      // never post a card that links to a 404: the release notes may be missing (a rollback, a build without them)
+      live: sp.status === 'approved' && !!getRelease(sp.ref, ctx),
+      at: sp.approved_at ? new Date(sp.approved_at) : null,
+      notLive: sp.status === 'approved' ? 'release page not available' : 'post is not approved',
+      stream: `social-post-${sp.id}`,
+      link,
+      title: sp.title,
+      description: c.summary,
+      imageUrl: `${origin}/blog/cover/${c.coverKey}.png`,
+      ...captionFor(network, c.captions, c.summary),
+    };
+  }
+  const post = await one(ctx.pool, 'SELECT * FROM blog_posts WHERE id=$1', [share.post_id]);
+  if (!post) return null;
+  const content = post.content as BlogContent;
+  return {
+    live: post.status === 'published',
+    at: post.published_at ? new Date(post.published_at) : null,
+    notLive: 'post is not published',
+    stream: `blog-${post.id}`,
+    link: `${origin}/blog/${post.slug}?utm_source=${network}&utm_medium=social`,
+    title: post.title,
+    description: post.summary,
+    imageUrl: `${origin}/blog/cover/${content.coverImage.defaultKey}.png`,
+    ...captionFor(network, content.social, content.summary),
+  };
 }
 
 async function runShare(ctx: Ctx, share: Record<string, any>): Promise<void> {
   const network = share.network as SocialNetwork;
-  const post = await one(ctx.pool, 'SELECT * FROM blog_posts WHERE id=$1', [share.post_id]);
+  const item = await loadShareable(ctx, share, network);
   const ch = await one(ctx.pool, 'SELECT * FROM social_channels WHERE network=$1', [network]);
   const now = ctx.clock.now();
-  const tooOld = post?.published_at && new Date(post.published_at).getTime() < now.getTime() - FRESH_MS;
-  if (!post || post.status !== 'published' || !ch || tooOld) {
+  const tooOld = item?.at && item.at.getTime() < now.getTime() - FRESH_MS;
+  if (!item?.live || !ch || tooOld) {
     await exec(
       ctx.pool,
       `UPDATE social_shares SET status='skipped', error=$3, updated_at=$4 WHERE post_id=$1 AND network=$2`,
       [
         share.post_id,
         network,
-        !ch ? 'channel disconnected' : tooOld ? 'older than 48 hours' : 'post is not published',
+        !ch ? 'channel disconnected' : tooOld ? 'older than 48 hours' : (item?.notLive ?? 'post is gone'),
         now,
       ],
     );
     return;
   }
-  const content = post.content as BlogContent;
-  const origin = ctx.config.publicOrigin;
   try {
     const res = await ctx.social.post(network, {
       accountId: ch.account_id,
       accessToken: await decryptSecret(ctx, ch.access_token),
-      text: captionFor(network, content),
-      link: `${origin}/blog/${post.slug}?utm_source=${network}&utm_medium=social`,
-      title: post.title,
-      description: post.summary,
-      imageUrl: `${origin}/blog/cover/${content.coverImage.defaultKey}.png`,
+      text: item.text,
+      tags: item.tags,
+      link: item.link,
+      title: item.title,
+      description: item.description,
+      imageUrl: item.imageUrl,
     });
     await exec(
       ctx.pool,
@@ -297,7 +386,7 @@ async function runShare(ctx: Ctx, share: Record<string, any>): Promise<void> {
     );
     await ctx.store.append([
       {
-        streamId: `blog-${share.post_id}`,
+        streamId: item.stream,
         event: {
           type: 'SocialShareSucceeded',
           payload: { postId: share.post_id, network, externalId: res.externalId, url: res.url },
@@ -338,7 +427,7 @@ async function runShare(ctx: Ctx, share: Record<string, any>): Promise<void> {
     if (final) {
       await ctx.store.append([
         {
-          streamId: `blog-${share.post_id}`,
+          streamId: item.stream,
           event: {
             type: 'SocialShareFailed',
             payload: { postId: share.post_id, network, error: message, final: true },

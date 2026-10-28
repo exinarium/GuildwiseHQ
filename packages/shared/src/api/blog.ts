@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { BLOG_API_SCOPES, BLOG_STATUSES, BLOG_WRITER, SOCIAL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
+import {
+  ReleaseSchema,
+  ReleaseVersionSchema,
+  SOCIAL_POST_KINDS,
+  SOCIAL_POST_STATUSES,
+  SocialPostContentSchema,
+} from '../blog/social-post.ts';
 import { TOPIC_LIMITS, TOPIC_ORIGINS, TOPIC_STATUSES, TopicAreaSchema } from '../blog/topic.ts';
 import { IsoTime } from './common.ts';
 
@@ -159,7 +166,14 @@ export type SocialChannel = z.infer<typeof SocialChannelSchema>;
 /** Facebook and LinkedIn: one pasted token. */
 export const ConnectTokenChannelSchema = z.object({
   /** Facebook: the Page id; LinkedIn: the organization id. */
-  accountId: z.string().trim().min(1).max(100),
+  accountId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(150)
+    // LinkedIn: a pasted `urn:li:organization:5515715` is stored as `5515715` (the server adds the prefix).
+    .transform((v) => v.replace(/^urn:li:organization:/i, '').trim())
+    .pipe(z.string().min(1).max(100)),
   accountName: z.string().trim().max(200).default(''),
   accessToken: z.string().trim().min(10).max(4000),
   refreshToken: z.string().trim().max(4000).optional(),
@@ -197,7 +211,7 @@ export type BlogWriterPrice = z.infer<typeof BlogWriterPriceSchema>;
 
 export const BlogWriterRunSchema = z.object({
   id: z.uuid(),
-  kind: z.enum(['scheduled', 'manual']),
+  kind: z.enum(['scheduled', 'manual', 'release']),
   status: z.enum(['running', 'ok', 'failed', 'skipped']),
   slot: z.string().nullable(),
   topic: z.string().nullable(),
@@ -220,6 +234,8 @@ export const BlogWriterSchema = z.object({
   postsPerDay: z.number().int().min(0).max(2),
   /** How many of a day's articles may come from the topic queue before the rotation (default 1). */
   queuedPerDay: z.number().int().min(0).max(10).default(1),
+  /** Draft a social post for each new core release (always held for the super admin's approval). Default on. */
+  releasePosts: z.boolean().default(true),
   topics: z.array(z.string()),
   model: z.string(),
   models: z.array(z.string()),
@@ -248,6 +264,7 @@ export const PatchBlogWriterRequestSchema = z.object({
   enabled: z.boolean().optional(),
   postsPerDay: z.number().int().min(0).max(2).optional(),
   queuedPerDay: z.number().int().min(0).max(10).optional(),
+  releasePosts: z.boolean().optional(),
   topics: z.array(z.string().trim().min(3).max(BLOG_WRITER.topicChars)).max(BLOG_WRITER.topicsMax).optional(),
   model: z.string().trim().min(1).max(100).optional(),
   capUsd: z.number().min(0).max(BLOG_WRITER.maxCapUsd).optional(),
@@ -299,3 +316,44 @@ export const CreateBlogTopicRequestSchema = z.object({
 export type CreateBlogTopicRequest = z.infer<typeof CreateBlogTopicRequestSchema>;
 
 export const RejectBlogTopicRequestSchema = z.object({ reason: z.string().trim().min(1).max(500) });
+
+// ---- release announcements (social posts that are not articles)
+export const SocialPostSchema = z.object({
+  id: z.uuid(),
+  kind: z.enum(SOCIAL_POST_KINDS),
+  ref: z.string(),
+  status: z.enum(SOCIAL_POST_STATUSES),
+  title: z.string(),
+  content: SocialPostContentSchema,
+  rejectionReason: z.string().nullable(),
+  /** The person's name, or "Blog writer" for the hosted drafter. */
+  origin: z.string().nullable(),
+  reviewSince: IsoTime.nullable(),
+  approvedAt: IsoTime.nullable(),
+  createdAt: IsoTime,
+  updatedAt: IsoTime,
+  shares: z.array(BlogShareSchema),
+});
+export type SocialPost = z.infer<typeof SocialPostSchema>;
+
+/** A release of the product with the post that announces it (null: none yet). */
+export const ReleaseRowSchema = ReleaseSchema.extend({ post: SocialPostSchema.nullable() });
+export type ReleaseRow = z.infer<typeof ReleaseRowSchema>;
+export const ReleaseListSchema = z.object({
+  releases: z.array(ReleaseRowSchema),
+  /** Posts waiting for the super admin's approval. */
+  pending: z.number().int(),
+});
+export type ReleaseList = z.infer<typeof ReleaseListSchema>;
+
+/** Start a post for a release: the captions are prefilled from the manifest for the super admin to write by hand. */
+export const CreateSocialPostRequestSchema = z.object({
+  kind: z.enum(SOCIAL_POST_KINDS),
+  ref: ReleaseVersionSchema,
+});
+export const EditSocialPostRequestSchema = SocialPostContentSchema.pick({
+  title: true,
+  summary: true,
+  captions: true,
+}).partial();
+export const RejectSocialPostRequestSchema = z.object({ reason: z.string().trim().min(1).max(2000) });

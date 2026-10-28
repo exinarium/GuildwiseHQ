@@ -1,13 +1,13 @@
 import type { SocialNetwork } from '@aom/shared';
 import { oauth1Header } from './oauth1.ts';
-import { blueskyPost, xTweetText } from './social-text.ts';
+import { composeCaption } from './social-text.ts';
 
 /**
  * The only code that talks to Facebook, LinkedIn, X and Bluesky. Everything else (and every test) goes through the `SocialClient`
  * interface, so no test ever reaches a real network. The versions below are pinned on purpose: review them every 6 to 12 months.
  */
-export const GRAPH_VERSION = 'v21.0';
-export const LINKEDIN_VERSION = '202509';
+export const GRAPH_VERSION = 'v26.0'; // released 2026-07-29; https://developers.facebook.com/docs/graph-api/changelog/versions
+export const LINKEDIN_VERSION = '202610'; // latest; each version is supported 12 months; https://learn.microsoft.com/en-us/linkedin/marketing/versioning
 
 export type SocialErrorKind = 'auth' | 'retry' | 'final';
 export class SocialError extends Error {
@@ -27,8 +27,10 @@ export interface SharePayload {
    * `{handle, appPassword}`.
    */
   accessToken: string;
-  /** The caption. */
+  /** The caption, without hashtags (they are added per network by `composeCaption`). */
   text: string;
+  /** Hashtags for this network, without `#`. */
+  tags?: string[];
   link: string;
   title: string;
   description: string;
@@ -101,7 +103,7 @@ async function postToX(p: SharePayload): Promise<ShareResult> {
       }),
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ text: xTweetText(p.text, p.link) }),
+    body: JSON.stringify({ text: composeCaption('x', p.text, p.tags, p.link).text }),
   });
   // 402: the pay-per-use credits are used up. That needs the super admin, so it pauses and alerts like an auth error.
   if (r.status === 402) throw new SocialError('auth', `HTTP 402: ${r.body.slice(0, 300)}`);
@@ -114,7 +116,7 @@ async function postToX(p: SharePayload): Promise<ShareResult> {
 const BSKY = 'https://bsky.social/xrpc';
 const MAX_THUMB_BYTES = 1_000_000;
 
-/** Bluesky: a session per post, then the post record with a link facet and an external embed (card). */
+/** Bluesky: a session per post, then the post record with tag facets and an external embed (the link card). */
 async function postToBluesky(p: SharePayload): Promise<ShareResult> {
   const c = parseCreds(p.accessToken, ['handle', 'appPassword'] as const);
   const handle = c.handle.replace(/^@/, '');
@@ -149,7 +151,8 @@ async function postToBluesky(p: SharePayload): Promise<ShareResult> {
     // a missing thumbnail does not stop the post
   }
 
-  const { text, facets } = blueskyPost(p.text, p.link);
+  // No link in the text: the external embed card below carries it. Hashtags become tag facets.
+  const { text, facets } = composeCaption('bluesky', p.text, p.tags);
   const r = await call(`${BSKY}/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: { ...auth, 'content-type': 'application/json' },
@@ -192,7 +195,11 @@ export function createSocialClient(): SocialClient {
           {
             method: 'POST',
             headers: { 'content-type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ message: p.text, link: p.link, access_token: p.accessToken }),
+            body: new URLSearchParams({
+              message: composeCaption('facebook', p.text, p.tags).text,
+              link: p.link,
+              access_token: p.accessToken,
+            }),
           },
         );
         if (r.status >= 300) throw classify(r.status, r.body);
@@ -237,7 +244,7 @@ export function createSocialClient(): SocialClient {
         headers,
         body: JSON.stringify({
           author: owner,
-          commentary: p.text,
+          commentary: composeCaption('linkedin', p.text, p.tags).text,
           visibility: 'PUBLIC',
           distribution: {
             feedDistribution: 'MAIN_FEED',

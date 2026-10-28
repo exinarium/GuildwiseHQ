@@ -15,6 +15,8 @@ const TAGS = {
   'case-study': [194, 65, 12],
   'how-to': [10, 100, 180],
   'industry-news': [190, 24, 93],
+  // Release announcements (/releases): one static cover, no version text.
+  release: [14, 116, 144],
 };
 
 const crcTable = Array.from({ length: 256 }, (_, n) => {

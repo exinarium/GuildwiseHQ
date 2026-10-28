@@ -5,6 +5,7 @@ import {
   escapeHtml as esc,
   type PublicBlogPost,
   type PublicBlogPostFull,
+  type Release,
   renderMarkdownHtml,
 } from '@aom/shared';
 
@@ -113,7 +114,7 @@ ${meta.jsonLd ? `<script type="application/ld+json">${jsonLd(meta.jsonLd)}</scri
 <header class="site"><div class="wrap"><a class="brand" href="/" aria-label="Guildwise HQ, home"><img class="light" src="/brand/logo-hq.svg" alt="Guildwise HQ"><img class="dark" src="/brand/logo-hq-dark.svg" alt="" aria-hidden="true"></a>
 <nav class="site" aria-label="Main"><a href="/">Home</a><a href="/blog">Blog</a><a class="cta" href="/login">Sign in</a></nav></div></header>
 <main><div class="wrap">${content}</div></main>
-<footer class="site"><div class="wrap"><a href="/blog">Blog</a><a href="/blog/rss.xml">RSS</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/contact">Contact</a><br>Guildwise HQ. Many hands. One master.</div></footer>
+<footer class="site"><div class="wrap"><a href="/blog">Blog</a><a href="/releases">Releases</a><a href="/blog/rss.xml">RSS</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/contact">Contact</a><br>Guildwise HQ. Many hands. One master.</div></footer>
 </body></html>`;
 }
 
@@ -231,6 +232,97 @@ ${sources}
   );
 }
 
+// ---- releases: /releases and /releases/:version (own pages, never part of the blog list, feed or digest)
+
+const RELEASE_COVER = (origin: string) => coverUrl(origin, 'release');
+
+const SECTION_TITLES = { added: 'Added', changed: 'Changed', fixed: 'Fixed' } as const;
+
+/** `- item` lines rendered through the restricted Markdown renderer (inline code, bold and links work; HTML does not). */
+const bullets = (items: string[]): string =>
+  renderMarkdownHtml(items.map((i) => `- ${i.replace(/\n+/g, ' ')}`).join('\n'));
+
+/**
+ * A What's New body under its own `<h3>`: headings inside it move down two levels (so the page's hierarchy stays valid)
+ * and their ids get the entry's id as a prefix (two entries may both have an "Overview").
+ */
+function entryBodyHtml(entryId: string, body: string): string {
+  const prefix = entryId.replace(/[^a-z0-9-]/gi, '-');
+  return renderMarkdownHtml(body).replace(
+    /<h([2-4]) id="([^"]*)">(.*?)<\/h\1>/g,
+    (_m, level: string, id: string, text: string) => {
+      const l = Math.min(6, Number(level) + 2);
+      return `<h${l} id="${prefix}-${id}">${text}</h${l}>`;
+    },
+  );
+}
+
+export function releasesIndexPage(origin: string, releases: Release[]): string {
+  const desc = 'What changed in each release of Guildwise HQ.';
+  const html = `<h1>Releases</h1><p class="lead">${esc(desc)}</p>
+${
+  releases.length
+    ? `<div class="grid">${releases
+        .map((r) => {
+          const first = r.whatsNew[0]?.title ?? r.sections.added[0] ?? r.intro;
+          return `<article class="card"><div class="body"><h2><a href="/releases/${esc(r.version)}">Guildwise HQ ${esc(r.version)}</a></h2>
+<p>${esc(first.length > 160 ? `${first.slice(0, 157)}...` : first)}</p>
+<div class="meta"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></div></div></article>`;
+        })
+        .join('')}</div>`
+    : '<p>No releases yet. Check back soon.</p>'
+}`;
+  return layout(
+    origin,
+    {
+      title: 'Releases | Guildwise HQ',
+      description: desc,
+      canonical: `${origin}/releases`,
+      image: RELEASE_COVER(origin),
+      rss: false,
+    },
+    html,
+  );
+}
+
+export function releasePage(origin: string, r: Release): string {
+  const title = `Guildwise HQ ${r.version}`;
+  const desc = fitText(
+    [r.intro, ...r.whatsNew.map((w) => w.title)].filter(Boolean).join('. ') ||
+      `What changed in Guildwise HQ ${r.version}.`,
+    160,
+  );
+  const sections = (Object.keys(SECTION_TITLES) as Array<keyof typeof SECTION_TITLES>)
+    .filter((k) => r.sections[k].length)
+    .map((k) => `<h3>${SECTION_TITLES[k]}</h3>${bullets(r.sections[k])}`)
+    .join('');
+  const html = `<article><p class="meta"><a href="/releases">&larr; All releases</a></p>
+<h1>${esc(title)}</h1>
+<p class="meta"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></p>
+<img class="cover" src="${esc(RELEASE_COVER(origin))}" alt="" width="1200" height="630">
+${r.intro ? `<p class="lead">${esc(r.intro)}</p>` : ''}
+${r.whatsNew.length ? `<h2>What's new</h2>${r.whatsNew.map((w) => `<h3>${esc(w.title)}</h3>${entryBodyHtml(w.id, w.body)}`).join('')}` : ''}
+${sections ? `<h2>Full changelog</h2>${sections}` : ''}
+<div class="cta-box"><strong>Many hands. One master.</strong><p>Guildwise HQ lets one person run an organization of AI agents, with a board, a desk for decisions and a full record of the work.</p><a class="btn" href="/">See how Guildwise HQ works</a></div>
+</article>`;
+  return layout(
+    origin,
+    {
+      title: `${title} | Guildwise HQ`,
+      description: desc,
+      canonical: `${origin}/releases/${r.version}`,
+      ogType: 'article',
+      image: RELEASE_COVER(origin),
+      publishedTime: `${r.date}T00:00:00Z`,
+      rss: false,
+    },
+    html,
+  );
+}
+
+const fitText = (s: string, max: number): string =>
+  s.length <= max ? s : `${s.slice(0, max - 3).trimEnd()}...`;
+
 export function messagePage(origin: string, title: string, text: string, extra = ''): string {
   return layout(
     origin,
@@ -300,11 +392,12 @@ export function sitemap(
   posts: PublicBlogPost[],
   tags: string[],
   extraPaths: string[] = [],
+  releases: Array<{ version: string; date: string }> = [],
 ): string {
   const url = (loc: string, lastmod?: string) =>
     `<url><loc>${xml(loc)}</loc>${lastmod ? `<lastmod>${new Date(lastmod).toISOString()}</lastmod>` : ''}</url>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${[url(`${origin}/`), url(`${origin}/blog`, posts[0]?.updatedAt), ...tags.map((t) => url(`${origin}/blog/tag/${t}`)), ...posts.map((p) => url(p.url, p.updatedAt)), url(`${origin}/privacy`), url(`${origin}/terms`), url(`${origin}/trust`), url(`${origin}/popia`), url(`${origin}/contact`), ...extraPaths.map((p) => url(`${origin}${p}`))].join('\n')}
+${[url(`${origin}/`), url(`${origin}/blog`, posts[0]?.updatedAt), ...tags.map((t) => url(`${origin}/blog/tag/${t}`)), ...posts.map((p) => url(p.url, p.updatedAt)), url(`${origin}/releases`), ...releases.map((r) => url(`${origin}/releases/${r.version}`, `${r.date}T00:00:00Z`)), url(`${origin}/privacy`), url(`${origin}/terms`), url(`${origin}/trust`), url(`${origin}/popia`), url(`${origin}/contact`), ...extraPaths.map((p) => url(`${origin}${p}`))].join('\n')}
 </urlset>`;
 }

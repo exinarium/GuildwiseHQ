@@ -4,6 +4,20 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Blog: hashtags per social network (Facebook up to 3, LinkedIn 3 to 5, X and Bluesky 1 to 2), stored without `#` in `social.hashtags` of a post. The post editor shows a caption editor per network with a hashtag chip input, a live counter and the exact text that will be posted. X keeps its hashtags (the caption is cut first); Bluesky hashtags are clickable `#tag` facets. Caption limits live in one place (`SOCIAL_LIMITS`). Posts written before this keep their inline hashtags.
+- Blog: release announcements. Platform > Blog > Releases lists each release from `CHANGELOG.md` with a post that you write (or, on a hosted installation, a drafter proposes), edit and approve; it is shared once per connected network and never without your approval. New public pages `/releases` and `/releases/<version>` (What's New plus the changelog, in the sitemap) are the link target. Optional `release:` in What's New entries pins an entry to a release. Migration 2720 (`social_posts`, `social_shares.source`).
+- Blog writer setting `releasePosts` (on by default): whether a drafter creates a release post for each new release.
+
+### Changed
+
+- Bluesky posts no longer repeat the link in the text: the link card carries it.
+- LinkedIn posts use API version 202610 (202509 was sunset) and Facebook posts Graph API v26.0 (v21.0 ends 2027-01-21). LinkedIn captions are escaped for LinkedIn's text format.
+- The X caption limit is 256 characters with its hashtags (the link is added and counts 23); Bluesky 300 characters. Before, the limits were 250 and 270 and differed between the editor and the server.
+- Connecting LinkedIn: a pasted `urn:li:organization:<id>` is cut down to the id. The Social sharing panel is at the bottom of Platform > Blog (Posts tab).
+
+
 ## [1.1.0] - 2026-10-27
 
 Runner 0.1.62. Workstations update themselves; pack agents on seats need 0.1.62.

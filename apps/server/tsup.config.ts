@@ -28,7 +28,8 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   // The assistant's knowledge pack is a committed text file too (src/assistant/pack, built by `assistant:pack`).
+  // The release notes (CHANGELOG.md and the What's New entries) feed the public /releases pages and the release posts.
   // The installer scripts are real files (lintable) read at runtime: ship them beside the bundle.
   onSuccess:
-    'rm -rf dist/installer-templates && cp -r src/installer/templates dist/installer-templates && rm -rf dist/assistant-pack && cp -r src/assistant/pack dist/assistant-pack && rm -rf dist/blog-launch && cp -r src/blog/launch dist/blog-launch',
+    'rm -rf dist/installer-templates && cp -r src/installer/templates dist/installer-templates && rm -rf dist/assistant-pack && cp -r src/assistant/pack dist/assistant-pack && rm -rf dist/blog-launch && cp -r src/blog/launch dist/blog-launch && rm -rf dist/release-notes && mkdir -p dist/release-notes && cp ../../CHANGELOG.md dist/release-notes/CHANGELOG.md && cp -r ../web/src/whats-new/entries dist/release-notes/whats-new',
 });

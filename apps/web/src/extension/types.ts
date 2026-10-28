@@ -52,6 +52,12 @@ export interface GateProps {
   orgName: string;
 }
 
+export interface ReleaseDrafterProps {
+  /** `1.2.0` */
+  version: string;
+  onDone: () => void;
+}
+
 export interface WebExtension {
   /** Public routes (no sign-in needed): sign-up, email verification, a public contact form. */
   publicRoutes?: RouteObject[];
@@ -81,6 +87,11 @@ export interface WebExtension {
   PlatformBanner?: ComponentType;
   /** The blog writer panel on the platform blog page. */
   PlatformBlogWriter?: ComponentType;
+  /**
+   * "Draft release post" for a release that has no post yet (Platform > Blog > Releases). The open-source build has none and
+   * offers "Write by hand" only. Call `onDone` after the draft was created so the list refreshes.
+   */
+  ReleaseDrafter?: ComponentType<ReleaseDrafterProps>;
   /** True when the extension enforces plan limits and licence dates: the platform page then shows those fields. */
   planLimits?: boolean;
   /** Page help (the "what is on this page" panel) for the routes the extension adds. */

@@ -1,3 +1,4 @@
+import type { BlogContent } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { publishPost, submitPost } from '../src/commands/blog.ts';
 import { SHARE_BACKOFF_MS, socialTick } from '../src/commands/social.ts';
@@ -21,9 +22,9 @@ const connect = (network: string, extra: Record<string, unknown> = {}) =>
     }),
   );
 
-async function publish() {
+async function publish(over: Partial<BlogContent> = {}) {
   const slug = `social-${++n}-${Math.random().toString(36).slice(2, 6)}`;
-  const { post } = await submitPost(t.app.ctx, blogContent(slug), { userId: sa.id }, 'draft');
+  const { post } = await submitPost(t.app.ctx, blogContent(slug, over), { userId: sa.id }, 'draft');
   await publishPost(t.app.ctx, post.id, { userId: sa.id });
   return post;
 }
@@ -111,6 +112,34 @@ describe('sharing on publish', () => {
     await socialTick(t.app.ctx);
     expect((await shares(post.id)).map((r) => r.status)).toEqual(['sent', 'sent']);
     expect(fake.calls).toHaveLength(2);
+  });
+
+  it('hands each network its own hashtags, and none for an older post', async () => {
+    await reset();
+    const tagged = await publish({
+      social: {
+        facebookText: 'New on the blog',
+        linkedinText: 'New on the blog: agents',
+        hashtags: { facebook: ['AI'], linkedin: ['Agents', 'AI', 'Automation'], x: ['AI'] },
+      },
+    });
+    await socialTick(t.app.ctx);
+    expect(fake.calls.map((c) => [c.network, c.p.tags]).sort()).toEqual([
+      ['facebook', ['AI']],
+      ['linkedin', ['Agents', 'AI', 'Automation']],
+    ]);
+    expect((await shares(tagged.id)).map((r) => r.status)).toEqual(['sent', 'sent']);
+    await reset();
+    await publish(); // helper content has no hashtag array: the tags stay inline in the caption
+    await socialTick(t.app.ctx);
+    expect(fake.calls.every((c) => (c.p.tags ?? []).length === 0)).toBe(true);
+  });
+
+  it('accepts a pasted LinkedIn URN and keeps only the id', async () => {
+    await connect('linkedin', { accountId: 'urn:li:organization:5515715' });
+    const row = (await q(`SELECT account_id FROM social_channels WHERE network='linkedin'`))[0];
+    expect(row?.account_id).toBe('5515715');
+    await connect('linkedin');
   });
 
   it('retries with backoff and never before the retry is due', async () => {

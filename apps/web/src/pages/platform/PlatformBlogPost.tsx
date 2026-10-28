@@ -1,4 +1,4 @@
-import { BLOG_COVER_KEYS, BLOG_TAGS, type BlogPost } from '@aom/shared';
+import { BLOG_COVER_KEYS, BLOG_TAGS, type BlogPost, type SocialCaptions } from '@aom/shared';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import {
@@ -10,6 +10,7 @@ import {
   useUnpublishPost,
 } from '../../api/queries/blog.ts';
 import { BlogBody } from '../../components/blog/BlogBody.tsx';
+import { SocialCaptionsEditor } from '../../components/blog/SocialCaptionsEditor.tsx';
 import {
   Badge,
   Button,
@@ -38,6 +39,18 @@ const textToSources = (t: string) =>
       return i > 0 ? { title: l.slice(0, i).trim(), url: l.slice(i + 1).trim() } : { title: l, url: l };
     });
 
+/** Empty captions and empty hashtag lists are left out of the saved post. */
+export function cleanSocial(c: SocialCaptions): SocialCaptions {
+  const hashtags = Object.fromEntries(Object.entries(c.hashtags ?? {}).filter(([, v]) => v?.length));
+  return {
+    ...(c.facebookText ? { facebookText: c.facebookText } : {}),
+    ...(c.linkedinText ? { linkedinText: c.linkedinText } : {}),
+    ...(c.xText ? { xText: c.xText } : {}),
+    ...(c.blueskyText ? { blueskyText: c.blueskyText } : {}),
+    ...(Object.keys(hashtags).length ? { hashtags } : {}),
+  };
+}
+
 /** `/platform/blog/:id`: preview exactly as it will render, edit, publish or reject with a reason, unpublish, share status. */
 export function PlatformBlogPost() {
   const { id } = useParams();
@@ -64,10 +77,7 @@ function Editor({ post }: { post: BlogPost }) {
   const [metaTitle, setMetaTitle] = useState(post.seo.metaTitle ?? '');
   const [metaDesc, setMetaDesc] = useState(post.seo.metaDescription ?? '');
   const [noindex, setNoindex] = useState(!!post.seo.noindex);
-  const [fb, setFb] = useState(post.social.facebookText ?? '');
-  const [li, setLi] = useState(post.social.linkedinText ?? '');
-  const [xt, setXt] = useState(post.social.xText ?? '');
-  const [bs, setBs] = useState(post.social.blueskyText ?? '');
+  const [social, setSocial] = useState<SocialCaptions>(post.social);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   // the server's copy changed (after a save or an action): show it
@@ -83,10 +93,7 @@ function Editor({ post }: { post: BlogPost }) {
     setMetaTitle(post.seo.metaTitle ?? '');
     setMetaDesc(post.seo.metaDescription ?? '');
     setNoindex(!!post.seo.noindex);
-    setFb(post.social.facebookText ?? '');
-    setLi(post.social.linkedinText ?? '');
-    setXt(post.social.xText ?? '');
-    setBs(post.social.blueskyText ?? '');
+    setSocial(post.social);
   }, [post.updatedAt]);
 
   const save = () =>
@@ -103,12 +110,7 @@ function Editor({ post }: { post: BlogPost }) {
           ...(metaDesc ? { metaDescription: metaDesc } : {}),
           ...(noindex ? { noindex: true } : {}),
         },
-        social: {
-          ...(fb ? { facebookText: fb } : {}),
-          ...(li ? { linkedinText: li } : {}),
-          ...(xt ? { xText: xt } : {}),
-          ...(bs ? { blueskyText: bs } : {}),
-        },
+        social: cleanSocial(social),
       },
       { onSuccess: () => toast.success('Saved') },
     );
@@ -267,33 +269,8 @@ function Editor({ post }: { post: BlogPost }) {
                 value={metaDesc}
                 onChange={(e) => setMetaDesc(e.target.value)}
               />
-              <TextArea
-                label="Facebook caption"
-                rows={2}
-                value={fb}
-                onChange={(e) => setFb(e.target.value)}
-              />
-              <TextArea
-                label="LinkedIn caption"
-                rows={2}
-                value={li}
-                onChange={(e) => setLi(e.target.value)}
-              />
-              <TextArea
-                label="X caption (max 250)"
-                rows={2}
-                maxLength={250}
-                value={xt}
-                onChange={(e) => setXt(e.target.value)}
-              />
-              <TextArea
-                label="Bluesky caption (max 270)"
-                rows={2}
-                maxLength={270}
-                value={bs}
-                onChange={(e) => setBs(e.target.value)}
-              />
             </div>
+            <SocialCaptionsEditor value={social} onChange={setSocial} fallback={summary} />
             <label className="flex items-center gap-2 text-sm text-fg">
               <input type="checkbox" checked={noindex} onChange={(e) => setNoindex(e.target.checked)} />
               Ask search engines not to index this post

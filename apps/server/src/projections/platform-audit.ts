@@ -462,6 +462,49 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const p = ev<'ApiKeyRevoked'>(e).payload;
     return { action: e.event.type, summary: 'API key revoked', details: { keyId: p.keyId } };
   }),
+  SocialPostSubmitted: always(async (_tx, e) => {
+    const p = ev<'SocialPostSubmitted'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Release post drafted${p.origin.system ? ' by the blog writer' : ''}: ${p.content.title}`,
+      details: { postId: p.postId, kind: p.kind, ref: p.ref, origin: p.origin },
+    };
+  }),
+  SocialPostRevised: always(async (_tx, e) => {
+    const p = ev<'SocialPostRevised'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Release post edited: ${p.content.title}`,
+      details: { postId: p.postId },
+    };
+  }),
+  SocialPostReviewRequested: always(async (tx, e) => {
+    const p = ev<'SocialPostReviewRequested'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM social_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Release post sent to review: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId },
+    };
+  }),
+  SocialPostApproved: always(async (tx, e) => {
+    const p = ev<'SocialPostApproved'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM social_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Release post approved: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId },
+    };
+  }),
+  SocialPostRejected: always(async (tx, e) => {
+    const p = ev<'SocialPostRejected'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM social_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Release post rejected: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId },
+    };
+  }),
   SocialChannelConnected: always(async (_tx, e) => {
     const p = ev<'SocialChannelConnected'>(e).payload;
     return { action: e.event.type, summary: `Connected ${p.network}: ${p.accountName}` };

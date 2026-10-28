@@ -1789,6 +1789,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Social sharing',
         text: 'Connect the Facebook Page, the LinkedIn organization, X and Bluesky. A banner shows when a token needs replacing.',
       },
+      {
+        name: 'Releases tab',
+        text: 'One row per release of Guildwise HQ. Write the announcement, edit the caption and hashtags of each network, then approve it: a release post is never shared without your approval, and each release is announced once.',
+      },
     ],
     article: 'blog-and-digest#platform-blog',
   },

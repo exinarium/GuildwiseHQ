@@ -13,7 +13,7 @@ const NAMES: Record<string, { name: string; idLabel: string; help: string }> = {
   linkedin: {
     name: 'LinkedIn organization',
     idLabel: 'Organization id',
-    help: 'The access token with w_organization_social, and the refresh token so it can be renewed.',
+    help: 'Organization id: the number only (for example 5515715), not urn:li:organization:5515715. The access token needs w_organization_social; add the refresh token so it can be renewed.',
   },
   x: {
     name: 'X account',
@@ -27,7 +27,7 @@ const NAMES: Record<string, { name: string; idLabel: string; help: string }> = {
   },
 };
 
-/** Platform > Blog > Social: connect the Facebook Page and the LinkedIn organization; status per network. */
+/** Platform > Blog (Posts tab), Social sharing: connect the Facebook Page and the LinkedIn organization; status per network. */
 export function SocialPanel({
   channels,
   failedShares,

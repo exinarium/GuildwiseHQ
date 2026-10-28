@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BLOG_API_SCOPES, SOCIAL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema } from '../blog/schema.ts';
+import { SOCIAL_POST_KINDS, SocialPostContentSchema } from '../blog/social-post.ts';
 import { TOPIC_LIMITS, TopicAreaSchema } from '../blog/topic.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
@@ -125,6 +126,28 @@ export const blogEvents = [
     z.object({ network: z.enum(SOCIAL_NETWORKS), accountName: z.string().max(200), by: Id }),
   ),
   defineEvent('SocialChannelDisconnected', z.object({ network: z.enum(SOCIAL_NETWORKS), by: Id })),
+  // ---- social posts that are not articles (a release announcement). Stream `social-post-<postId>`.
+  defineEvent(
+    'SocialPostSubmitted',
+    z.object({
+      postId: Id,
+      kind: z.enum(SOCIAL_POST_KINDS),
+      /** For a release: its version. One post per kind and ref. */
+      ref: z.string().min(1).max(100),
+      content: SocialPostContentSchema,
+      origin: BlogOriginSchema,
+      status: z.enum(['draft', 'in_review']),
+    }),
+  ),
+  defineEvent(
+    'SocialPostRevised',
+    z.object({ postId: Id, content: SocialPostContentSchema, by: BlogOriginSchema }),
+  ),
+  /** A draft goes to the super admin's review queue. */
+  defineEvent('SocialPostReviewRequested', z.object({ postId: Id, by: Id })),
+  /** Always a person: a release post never publishes by itself. */
+  defineEvent('SocialPostApproved', z.object({ postId: Id, by: Id })),
+  defineEvent('SocialPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   defineEvent(
     'SocialShareSucceeded',
     z.object({

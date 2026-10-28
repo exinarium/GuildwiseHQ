@@ -11,8 +11,18 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireSession, requireUser } from '../auth/guards.ts';
-import { listPage, messagePage, postPage, rssFeed, sitemap } from '../blog/render.ts';
+import { getRelease, loadReleases } from '../blog/releases.ts';
 import {
+  listPage,
+  messagePage,
+  postPage,
+  releasePage,
+  releasesIndexPage,
+  rssFeed,
+  sitemap,
+} from '../blog/render.ts';
+import {
+  blogEnabled,
   getPublished,
   lastPublishedChange,
   listPublished,
@@ -43,7 +53,8 @@ export function blogPublicRoutes(ctx: Ctx) {
     async function version(): Promise<string> {
       const t = await lastPublishedChange(ctx);
       const n = await postsCount(ctx);
-      return `${n}:${t?.getTime() ?? 0}`;
+      const rel = loadReleases(ctx);
+      return `${n}:${t?.getTime() ?? 0}:${rel.length}:${rel[0]?.version ?? ''}`;
     }
 
     /** Renders through the cache and answers with the validators a browser or crawler can reuse. */
@@ -125,6 +136,7 @@ export function blogPublicRoutes(ctx: Ctx) {
           (await publishedTags(ctx)).map((t) => t.tag),
           // pages an extension builds into the web dist and wants indexed (the hosted pricing page)
           ctx.ext.list.flatMap((e) => (e.publicPages ?? []).filter((pg) => pg.sitemap).map((pg) => pg.route)),
+          (await blogEnabled(ctx)) ? loadReleases(ctx) : [],
         );
       }),
     );
@@ -163,6 +175,34 @@ export function blogPublicRoutes(ctx: Ctx) {
           const c = again.row.content as BlogContent;
           return postPage(origin, again.post, c.seo, c.aiDisclosure);
         });
+      },
+    );
+
+    // ---- releases: own pages on our own domain (the link target of release posts). They follow the blog's kill switch.
+    const releasesOff = (reply: FastifyReply) =>
+      reply
+        .code(404)
+        .type(HTML)
+        .send(messagePage(origin, 'Not found', 'There is nothing here.'));
+
+    app.get('/releases', async (req, reply) => {
+      if (!(await blogEnabled(ctx))) return releasesOff(reply);
+      return serve(req, reply, 'releases', HTML, async () => releasesIndexPage(origin, loadReleases(ctx)));
+    });
+    app.get(
+      '/releases/:version',
+      { schema: { params: z.object({ version: z.string() }) } },
+      async (req, reply) => {
+        if (!(await blogEnabled(ctx))) return releasesOff(reply);
+        const r = /^\d+\.\d+\.\d+$/.test(req.params.version)
+          ? getRelease(req.params.version, ctx)
+          : undefined;
+        if (!r)
+          return reply
+            .code(404)
+            .type(HTML)
+            .send(messagePage(origin, 'Not found', 'We could not find that release.'));
+        return serve(req, reply, `release:${r.version}`, HTML, async () => releasePage(origin, r));
       },
     );
 

@@ -3,5 +3,7 @@ export * from './constants.ts';
 export * from './markdown.ts';
 export * from './public-terms.ts';
 export * from './schema.ts';
+export * from './social-post.ts';
+export * from './social-text.ts';
 export * from './topic.ts';
 export * from './topic-scrub.ts';

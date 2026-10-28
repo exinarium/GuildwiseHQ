@@ -3,19 +3,23 @@ import {
   ConnectSocialChannelRequestSchema,
   CreateApiKeyRequestSchema,
   CreateBlogTopicRequestSchema,
+  CreateSocialPostRequestSchema,
   EditBlogPostRequestSchema,
+  EditSocialPostRequestSchema,
   IdParamsSchema,
   PatchBlogSettingsRequestSchema,
   PatchBlogWriterRequestSchema,
   PlatformBlogQuerySchema,
   RejectBlogPostRequestSchema,
   RejectBlogTopicRequestSchema,
+  RejectSocialPostRequestSchema,
   SOCIAL_NETWORKS,
   SocialNetworkParamsSchema,
   scrubTopic,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireSuperAdmin } from '../auth/guards.ts';
+import { draftFromRelease, getRelease } from '../blog/releases.ts';
 import { listTopics, moveTopicUp, queueBlogTopic, rejectTopic } from '../blog/topics.ts';
 import {
   blogSettings,
@@ -38,6 +42,16 @@ import {
   requestShares,
   socialProblems,
 } from '../commands/social.ts';
+import {
+  approveSocialPost,
+  getSocialPost,
+  listReleases,
+  pendingSocialPosts,
+  rejectSocialPost,
+  requestSocialReview,
+  reviseSocialPost,
+  submitSocialPost,
+} from '../commands/social-posts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
@@ -61,7 +75,11 @@ export function blogPlatformRoutes(ctx: Ctx) {
     app.get('/api/platform/blog/summary', async (req) => {
       await requireSuperAdmin(ctx, req);
       const s = await blogSettings(ctx);
-      return { pending: await pendingCount(ctx), enabled: s.enabled };
+      return {
+        pending: await pendingCount(ctx),
+        pendingReleases: await pendingSocialPosts(ctx),
+        enabled: s.enabled,
+      };
     });
 
     app.get('/api/platform/blog/settings', async (req) => {
@@ -221,6 +239,62 @@ export function blogPlatformRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireSuperAdmin(ctx, req);
         return { channels: await disconnectChannel(ctx, s.user, req.params.network) };
+      },
+    );
+
+    // ---- release announcements: a post per release of the product, always approved by hand
+    app.get('/api/platform/social/releases', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return listReleases(ctx);
+    });
+    /** "Write by hand": starts a draft for a release with captions prefilled from the changelog and What's New. */
+    app.post(
+      '/api/platform/social/posts',
+      { schema: { body: CreateSocialPostRequestSchema } },
+      async (req, reply) => {
+        const s = await requireSuperAdmin(ctx, req);
+        const release = getRelease(req.body.ref, ctx);
+        if (!release) throw badRequest('unknown_release', `there is no release ${req.body.ref}`);
+        const { post, created } = await submitSocialPost(
+          ctx,
+          { kind: req.body.kind, ref: req.body.ref, content: draftFromRelease(release) },
+          { userId: s.user.id },
+          'draft',
+        );
+        reply.code(created ? 201 : 200);
+        return post;
+      },
+    );
+    app.get('/api/platform/social/posts/:id', { schema: { params: IdParamsSchema } }, async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return getSocialPost(ctx, req.params.id);
+    });
+    app.patch(
+      '/api/platform/social/posts/:id',
+      { schema: { params: IdParamsSchema, body: EditSocialPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return reviseSocialPost(ctx, req.params.id, req.body, { userId: s.user.id });
+      },
+    );
+    app.post('/api/platform/social/posts/:id/submit', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireSuperAdmin(ctx, req);
+      return requestSocialReview(ctx, s.user, req.params.id);
+    });
+    app.post(
+      '/api/platform/social/posts/:id/approve',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return approveSocialPost(ctx, s.user, req.params.id);
+      },
+    );
+    app.post(
+      '/api/platform/social/posts/:id/reject',
+      { schema: { params: IdParamsSchema, body: RejectSocialPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return rejectSocialPost(ctx, s.user, req.params.id, req.body.reason);
       },
     );
   };

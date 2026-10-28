@@ -20,7 +20,9 @@ import {
   PlatformBlogListSchema,
   PublicBlogListSchema,
   PublicBlogPostFullSchema,
+  ReleaseListSchema,
   SocialChannelSchema,
+  SocialPostSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -78,7 +80,12 @@ export function usePlatformBlog(status?: string) {
   });
 }
 
-const SummarySchema = z.object({ pending: z.number().int(), enabled: z.boolean() });
+const SummarySchema = z.object({
+  pending: z.number().int(),
+  /** Release posts waiting for approval. */
+  pendingReleases: z.number().int().default(0),
+  enabled: z.boolean(),
+});
 export function useBlogSummary() {
   return useQuery({
     queryKey: ['platform', 'blog', 'summary'],
@@ -190,6 +197,33 @@ export const useConnectChannel = () =>
   );
 export const useDisconnectChannel = () =>
   useBlogMutation((network: string) => del(`/platform/social/channels/${network}`));
+
+// ---- release announcements (Platform > Blog > Releases)
+
+export function useReleases() {
+  return useQuery({
+    queryKey: ['platform', 'blog', 'releases'],
+    queryFn: () => get('/platform/social/releases', ReleaseListSchema),
+    refetchInterval: 30_000,
+  });
+}
+/** "Write by hand": starts a draft for a release with captions prefilled from the changelog. */
+export const useCreateReleasePost = () =>
+  useBlogMutation((version: string) =>
+    post('/platform/social/posts', { kind: 'release', ref: version }, SocialPostSchema),
+  );
+export const useEditSocialPost = (id: string) =>
+  useBlogMutation((v: { title?: string; summary?: string; captions?: unknown }) =>
+    patch(`/platform/social/posts/${id}`, v, SocialPostSchema),
+  );
+export const useSocialPostAction = (id: string) =>
+  useBlogMutation((v: { action: 'submit' | 'approve' | 'reject'; reason?: string }) =>
+    post(
+      `/platform/social/posts/${id}/${v.action}`,
+      v.action === 'reject' ? { reason: v.reason } : undefined,
+      SocialPostSchema,
+    ),
+  );
 
 // ---- the server-side blog writer (platform job)
 

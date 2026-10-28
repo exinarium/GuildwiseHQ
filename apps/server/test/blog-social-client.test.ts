@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSocialClient, SocialError } from '../src/blog/social-client.ts';
-import { blueskyPost, fitCaption, graphemes, xTweetText } from '../src/blog/social-text.ts';
+import {
+  createSocialClient,
+  GRAPH_VERSION,
+  LINKEDIN_VERSION,
+  SocialError,
+} from '../src/blog/social-client.ts';
+import { composeCaption, fitCaption, graphemes, xTweetText } from '../src/blog/social-text.ts';
 
 const LINK = 'https://guildwise.example/blog/some-post?utm_source=x&utm_medium=social';
 
@@ -15,21 +20,25 @@ describe('caption rules', () => {
   });
   it('leaves a short caption alone', () => {
     expect(xTweetText('Short one', LINK)).toBe(`Short one ${LINK}`);
+    expect(xTweetText('Short one', LINK, ['AI', 'Agents'])).toBe(`Short one #AI #Agents ${LINK}`);
     expect(fitCaption('  a\n b  ', 10)).toBe('a b');
   });
-  it('cuts the Bluesky text to 300 graphemes including the whole link', () => {
-    const b = blueskyPost('émoji 👨‍👩‍👧 '.repeat(60), LINK);
+  it('cuts the Bluesky text to 300 graphemes and puts no link in it', () => {
+    const b = composeCaption('bluesky', 'émoji 👨‍👩‍👧 '.repeat(60), ['AI'], LINK);
     expect(graphemes(b.text).length).toBeLessThanOrEqual(300);
-    expect(b.text.endsWith(LINK)).toBe(true);
+    expect(b.text).not.toContain('http');
+    expect(b.text.endsWith(' #AI')).toBe(true);
   });
-  it('puts the link facet on UTF-8 byte offsets', () => {
-    const b = blueskyPost('Café — review', LINK);
+  it('puts the tag facets on UTF-8 byte offsets', () => {
+    const b = composeCaption('bluesky', 'Café — review', ['Agents', 'LLMOps']);
+    expect(b.text).toBe('Café — review #Agents #LLMOps');
+    expect(b.facets).toHaveLength(2);
     const bytes = Buffer.from(b.text, 'utf8');
     const f = b.facets[0];
     expect(f?.index.byteStart).toBe(Buffer.byteLength('Café — review '));
     expect(f?.index.byteStart).not.toBe('Café — review '.length); // multi-byte: offsets differ from char counts
-    expect(bytes.subarray(f?.index.byteStart, f?.index.byteEnd).toString('utf8')).toBe(LINK);
-    expect(f?.features[0]).toEqual({ $type: 'app.bsky.richtext.facet#link', uri: LINK });
+    expect(bytes.subarray(f?.index.byteStart, f?.index.byteEnd).toString('utf8')).toBe('#Agents');
+    expect(f?.features[0]).toEqual({ $type: 'app.bsky.richtext.facet#tag', tag: 'Agents' });
   });
 });
 
@@ -98,7 +107,7 @@ describe('Bluesky adapter', () => {
 
   it('creates a session, uploads the thumb and posts with facet and embed', async () => {
     const calls = route();
-    const r = await createSocialClient().post('bluesky', payload(BSKY_CREDS));
+    const r = await createSocialClient().post('bluesky', { ...payload(BSKY_CREDS), tags: ['Agents'] });
     expect(r.url).toBe('https://bsky.app/profile/guildwise.bsky.social/post/3kabc');
     expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
       identifier: 'guildwise.bsky.social',
@@ -107,7 +116,10 @@ describe('Bluesky adapter', () => {
     const rec = record(calls);
     expect(rec.repo).toBe('did:plc:abc');
     expect(rec.collection).toBe('app.bsky.feed.post');
+    expect(rec.record.text).toBe('Café — review #Agents');
+    expect(rec.record.text).not.toContain('http');
     expect(rec.record.facets[0].index.byteStart).toBe(Buffer.byteLength('Café — review '));
+    expect(rec.record.facets[0].features[0]).toEqual({ $type: 'app.bsky.richtext.facet#tag', tag: 'Agents' });
     expect(rec.record.embed.external).toMatchObject({ uri: LINK, title: 'T', thumb: { $type: 'blob' } });
   });
   it('still posts without a thumb when the image cannot be fetched or is too big', async () => {
@@ -132,5 +144,40 @@ describe('Bluesky adapter', () => {
     await expect(createSocialClient().post('bluesky', payload(BSKY_CREDS))).rejects.toMatchObject({
       kind: 'final',
     });
+  });
+});
+
+describe('Facebook and LinkedIn adapters', () => {
+  it('pins the API versions', () => {
+    expect(GRAPH_VERSION).toMatch(/^v\d+\.0$/);
+    expect(LINKEDIN_VERSION).toBe('202610');
+  });
+  it('posts the Facebook message with hashtags on their own line', async () => {
+    const f = vi.fn(async () => json(200, { id: '1_2' }));
+    vi.stubGlobal('fetch', f);
+    await createSocialClient().post('facebook', { ...payload('tok-tok-tok-tok'), tags: ['AI', 'Agents'] });
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`https://graph.facebook.com/${GRAPH_VERSION}/x/feed`);
+    expect(new URLSearchParams(init.body as string).get('message')).toBe('Café — review\n\n#AI #Agents');
+  });
+  it('sends LinkedIn commentary escaped, with hashtags, and the version header', async () => {
+    const f = vi.fn(async (url: string) => {
+      if (url.includes('initializeUpload')) return json(200, { value: {} });
+      return json(201, {}, { 'x-restli-id': 'urn:li:share:9' });
+    });
+    vi.stubGlobal('fetch', f);
+    await createSocialClient().post('linkedin', {
+      ...payload('tok-tok-tok-tok'),
+      text: 'Agents (v2) @team: a_b | c',
+      tags: ['AI', 'LLM_Ops'],
+    });
+    const call = f.mock.calls.find((c) => (c as unknown[])[0] === 'https://api.linkedin.com/rest/posts') as
+      | unknown[]
+      | undefined;
+    const init = call?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>)['linkedin-version']).toBe('202610');
+    expect(JSON.parse(init.body as string).commentary).toBe(
+      'Agents \\(v2\\) \\@team: a\\_b \\| c\n\n#AI #LLMOps',
+    );
   });
 });

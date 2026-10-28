@@ -12,6 +12,8 @@ export interface WhatsNewEntry {
   audience: Audience;
   /** Deep link to a help article, `/help/<slug>` or `/help/<slug>#anchor`. */
   help?: string;
+  /** The release (`1.2.0`) this entry belongs to, when it is pinned to one: used by the public release page, not by the popup. */
+  release?: string;
   blocks: Block[];
   /** Plain body, for tests. */
   body: string;
@@ -19,7 +21,7 @@ export interface WhatsNewEntry {
 
 const AUDIENCES: readonly Audience[] = ['all', 'owner', 'admin', 'superadmin'];
 
-/** Reads one entry file: a small frontmatter (title, date, audience, help) and a markdown body. */
+/** Reads one entry file: a small frontmatter (title, date, audience, help, release) and a markdown body. */
 export function parseEntry(id: string, src: string): WhatsNewEntry {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(src);
   const raw: Record<string, string> = {};
@@ -41,6 +43,7 @@ export function parseEntry(id: string, src: string): WhatsNewEntry {
     date,
     audience,
     ...(raw.help?.startsWith('/help/') ? { help: raw.help } : {}),
+    ...(raw.release && /^\d+\.\d+\.\d+$/.test(raw.release) ? { release: raw.release } : {}),
     blocks: parseBlocks(body),
     body,
   };
