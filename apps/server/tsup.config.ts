@@ -14,12 +14,15 @@ export default defineConfig({
     'ledger-cleanup': 'scripts/ledger-cleanup-2026-10.ts',
     'deploy-reset': 'scripts/deploy-reset.ts',
     'vapid-generate': 'scripts/vapid-generate.ts',
+    'video-worker': 'src/video-worker.ts',
   },
   format: ['esm'],
   outDir: 'dist',
   platform: 'node',
   target: 'node22',
   noExternal: [/^@aom\//],
+  // Playwright is loaded at runtime by the video worker (a dependency of the server package, so tsup keeps it external anyway).
+  external: ['playwright-core'],
   outExtension: () => ({ js: '.mjs' }),
   // `yaml` (a dependency of @aom/shared, bundled in) is CommonJS and calls `require`: give the ESM bundle one.
   banner: {

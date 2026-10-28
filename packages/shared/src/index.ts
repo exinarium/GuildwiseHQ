@@ -61,4 +61,5 @@ export * from './sessions/tools.ts';
 export * from './setup/index.ts';
 export * from './testing/index.ts';
 export * from './vaults/index.ts';
+export * from './video/index.ts';
 export * from './workflows/index.ts';

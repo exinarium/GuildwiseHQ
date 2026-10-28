@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "kind": "tutorial",
+  "format": "short",
+  "ref": "agents",
+  "title": "Hire an AI agent in one minute",
+  "cues": [
+    {
+      "id": "s1",
+      "text": "Hire an AI teammate in under a minute.",
+      "scene": {
+        "type": "title",
+        "heading": "Hire an AI agent",
+        "sub": "Guildwise HQ in 45 seconds"
+      }
+    },
+    {
+      "id": "s2",
+      "text": "Open Agents, choose Hire an agent, pick a role, name it and choose its model.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 0
+      }
+    },
+    {
+      "id": "s3",
+      "text": "Then hand it a card from your board. It works in your repository and opens a pull request.",
+      "scene": {
+        "type": "points",
+        "heading": "What happens next",
+        "items": ["Pick a card", "Agent works in your repo", "You review the pull request"]
+      }
+    },
+    {
+      "id": "s4",
+      "text": "You can pause it, resume it or switch its model whenever you like.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 1
+      }
+    },
+    {
+      "id": "s5",
+      "text": "You stay in charge of what ships. Try it with your own team.",
+      "scene": {
+        "type": "points",
+        "heading": "You stay in charge",
+        "items": ["Review every pull request", "Change models any time"]
+      }
+    },
+    {
+      "id": "s6",
+      "text": "Guildwise HQ is open source. Find the link in the description.",
+      "scene": {
+        "type": "outro"
+      }
+    }
+  ],
+  "chapters": [],
+  "meta": {
+    "title": "Hire an AI agent in one minute #Shorts",
+    "description": "Hire an AI teammate in Guildwise HQ in under a minute.",
+    "tags": ["Guildwise HQ", "AI agents"],
+    "hashtags": ["#Shorts", "#AIAgents", "#GuildwiseHQ"]
+  }
+}

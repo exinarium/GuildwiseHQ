@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "kind": "tutorial",
+  "format": "long",
+  "ref": "agents",
+  "title": "Hire and manage AI agents in Guildwise HQ",
+  "cues": [
+    {
+      "id": "hook",
+      "text": "Your next teammate does not need a desk. In this video you will hire an AI agent in Guildwise HQ and put it to work.",
+      "scene": {
+        "type": "title",
+        "heading": "Hire an AI agent",
+        "sub": "A two minute tour"
+      }
+    },
+    {
+      "id": "why",
+      "text": "Agents take the cards you hand them, work in your repository and come back with a pull request. You stay in charge of what ships.",
+      "scene": {
+        "type": "points",
+        "heading": "What an agent does",
+        "items": [
+          "Takes a card from the board",
+          "Works in your repository",
+          "Opens a pull request for review",
+          "You decide what ships"
+        ]
+      }
+    },
+    {
+      "id": "hire1",
+      "text": "Open the Agents page and choose Hire an agent. Pick a role, give it a name and choose the model it should use.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 0
+      }
+    },
+    {
+      "id": "hire2",
+      "text": "The agent appears in your team right away, ready for its first card.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 0
+      }
+    },
+    {
+      "id": "pause",
+      "text": "Need a breather? Pause an agent at any time, resume it later, or switch it to another model without losing its history.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 1
+      }
+    },
+    {
+      "id": "quote",
+      "text": "Think of it like a colleague you can tune: same person, different brain, whenever the work calls for it.",
+      "scene": {
+        "type": "quote",
+        "text": "Same teammate, a different brain, whenever the work calls for it."
+      }
+    },
+    {
+      "id": "rec1",
+      "text": "Guildwise HQ also watches how your agents are doing. Recommendations suggest when to change a model or a role, so your team keeps getting better.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 2
+      }
+    },
+    {
+      "id": "code",
+      "text": "Prefer to script it? Everything you see here is also available through the API, so you can hire an agent from your own tooling.",
+      "scene": {
+        "type": "code",
+        "lang": "bash",
+        "code": "curl -X POST /api/agents \\\n  -d '{\"role\":\"developer\",\"name\":\"Mia\"}'"
+      }
+    },
+    {
+      "id": "filter",
+      "text": "With many agents, filter the list by project to see just the people working on what matters today.",
+      "scene": {
+        "type": "clip",
+        "slug": "agents",
+        "chapter": 3
+      }
+    },
+    {
+      "id": "outro1",
+      "text": "That is how you hire, tune and follow your agents. Try it with your own team.",
+      "scene": {
+        "type": "outro",
+        "heading": "Hire your first agent",
+        "sub": "Open source. Link in the description."
+      }
+    }
+  ],
+  "chapters": [
+    {
+      "title": "Introduction",
+      "fromCue": 0
+    },
+    {
+      "title": "Hire an agent",
+      "fromCue": 2
+    },
+    {
+      "title": "Pause and change model",
+      "fromCue": 4
+    },
+    {
+      "title": "Recommendations and filters",
+      "fromCue": 6
+    },
+    {
+      "title": "Wrap up",
+      "fromCue": 9
+    }
+  ],
+  "meta": {
+    "title": "Hire and manage AI agents in Guildwise HQ",
+    "description": "See how to hire an AI agent, change its model and keep track of your whole team in Guildwise HQ.",
+    "tags": ["Guildwise HQ", "AI agents", "software development", "automation"],
+    "hashtags": ["#AIAgents", "#GuildwiseHQ", "#DevTools"]
+  }
+}

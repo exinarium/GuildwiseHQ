@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "AOM_MOCK_UI=${AOM_MOCK_UI:-true} AOM_SMTP_URL=${AOM_SMTP_URL:-smtp://127.0.0.1:1026} tsx watch src/main.ts",
-    "build": "tsup",
+    "build": "tsup && rm -rf dist/video-assets && cp -r ../../packages/video/assets dist/video-assets",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "db:migrate": "tsx src/db/migrate.ts",
@@ -31,6 +31,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",
     "@aom/shared": "workspace:*",
+    "@aom/video": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/multipart": "^10.1.3",
     "@fastify/rate-limit": "^10.0.0",
@@ -42,6 +43,7 @@
     "fastify-type-provider-zod": "^6.0.0",
     "nodemailer": "^10.2.1",
     "pg": "^8.0.0",
+    "playwright-core": "^1.63.0",
     "postal-mime": "^4.0.8",
     "ssh2": "^1.17.0",
     "web-push": "3.6.7",

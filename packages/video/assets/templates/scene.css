@@ -1,0 +1,219 @@
+/* Scene cards of the generated videos. Colours are the dark theme of apps/web/src/tokens.css. */
+:root {
+  --bg: #0e121b;
+  --surface: #131822;
+  --surface-2: #1b2230;
+  --fg: #eceff5;
+  --muted: #9aa5ba;
+  --brand: #4c63f0;
+  --brand-text: #9daeff;
+  --brand-soft: #1c2250;
+  --u: calc(100vw / 100); /* 1% of the width */
+  --k: 1; /* text scale: portrait is narrower, so its text is bigger in u */
+}
+body.portrait {
+  --k: 2.5;
+}
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+body {
+  background: radial-gradient(120% 90% at 20% 0%, #1a2142 0%, var(--bg) 60%);
+  color: var(--fg);
+  font-family: Inter, "Liberation Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: calc(var(--u) * 6 * var(--k) / 1.4);
+  position: relative;
+}
+body::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: calc(var(--u) * 0.7);
+  background: var(--brand);
+}
+.brand {
+  position: absolute;
+  left: calc(var(--u) * 6);
+  bottom: calc(var(--u) * 3 * var(--k));
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: calc(var(--u) * 1.5 * var(--k));
+}
+.brand img {
+  height: calc(var(--u) * 2.6 * var(--k));
+}
+.kicker {
+  color: var(--brand-text);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: calc(var(--u) * 1.4 * var(--k));
+  margin-bottom: calc(var(--u) * 1.6);
+}
+h1 {
+  font-size: calc(var(--u) * 5.2 * var(--k) / 1.3);
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  max-width: 90%;
+}
+h2 {
+  font-size: calc(var(--u) * 4 * var(--k) / 1.3);
+  line-height: 1.15;
+  font-weight: 800;
+  margin-bottom: calc(var(--u) * 3);
+}
+.sub {
+  margin-top: calc(var(--u) * 2.2);
+  color: var(--muted);
+  font-size: calc(var(--u) * 2.2 * var(--k) / 1.3);
+  line-height: 1.35;
+  max-width: 85%;
+}
+ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: calc(var(--u) * 1.6);
+}
+li {
+  background: var(--surface-2);
+  border-left: calc(var(--u) * 0.4) solid var(--brand);
+  border-radius: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4);
+  font-size: calc(var(--u) * 2.6 * var(--k) / 1.3);
+  line-height: 1.25;
+  font-weight: 600;
+}
+.quote {
+  font-size: calc(var(--u) * 4 * var(--k) / 1.3);
+  line-height: 1.3;
+  font-weight: 700;
+  max-width: 92%;
+}
+.quote::before {
+  content: "\201C";
+  display: block;
+  font-size: calc(var(--u) * 10);
+  line-height: 0.6;
+  color: var(--brand);
+}
+pre {
+  background: #0a0d14;
+  border: 1px solid #263044;
+  border-radius: calc(var(--u) * 1);
+  padding: calc(var(--u) * 2.4);
+  font:
+    500 calc(var(--u) * 1.9 * var(--k) / 1.2) / 1.5 "DejaVu Sans Mono",
+    "Liberation Mono",
+    monospace;
+  color: #d7def0;
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+.lang {
+  color: var(--brand-text);
+  font-weight: 700;
+  font-size: calc(var(--u) * 1.4 * var(--k));
+  margin-bottom: calc(var(--u) * 1);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgba(14, 18, 27, 0.85) 0%, rgba(14, 18, 27, 0) 45%);
+}
+.caption {
+  position: absolute;
+  left: calc(var(--u) * 6);
+  right: calc(var(--u) * 6);
+  bottom: calc(var(--u) * 8 * var(--k));
+  z-index: 2;
+  font-size: calc(var(--u) * 2.6 * var(--k) / 1.3);
+  font-weight: 700;
+}
+.logo-big {
+  width: calc(var(--u) * 18 * var(--k) / 1.3);
+  margin-bottom: calc(var(--u) * 3);
+}
+.center {
+  align-items: center;
+  text-align: center;
+}
+.center h1,
+.center .sub {
+  max-width: 100%;
+}
+/* help video frame */
+.strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--strip);
+  display: flex;
+  align-items: center;
+  padding: 0 calc(var(--u) * 4);
+  background: var(--surface);
+  border-bottom: 2px solid var(--brand);
+  font-size: calc(var(--u) * 2 * var(--k) / 1.3);
+  font-weight: 700;
+}
+.strip small {
+  color: var(--brand-text);
+  font-size: 0.6em;
+  margin-right: calc(var(--u) * 1.6);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.well {
+  position: absolute;
+  border-radius: calc(var(--u) * 0.8);
+  box-shadow:
+    0 0 0 calc(var(--u) * 0.25) var(--brand-soft),
+    0 calc(var(--u) * 1) calc(var(--u) * 4) rgba(0, 0, 0, 0.5);
+  background: #000;
+}
+/* thumbnail 1280x720 */
+body.thumb {
+  padding: 64px 64px 130px;
+  justify-content: flex-end;
+}
+body.thumb h1 {
+  font-size: 92px;
+  max-width: 100%;
+}
+body.thumb .kicker {
+  font-size: 28px;
+}
+body.thumb .brand {
+  font-size: 26px;
+  left: 64px;
+  bottom: 40px;
+}
+body.thumb .brand img {
+  height: 48px;
+}

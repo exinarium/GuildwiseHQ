@@ -1,0 +1,17 @@
+{
+  "name": "@aom/video",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aom/shared": "workspace:*",
+    "playwright-core": "^1.63.0"
+  }
+}

@@ -10,6 +10,8 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - Blog: release announcements. Platform > Blog > Releases lists each release from `CHANGELOG.md` with a post that you write (or, on a hosted installation, a drafter proposes), edit and approve; it is shared once per connected network and never without your approval. New public pages `/releases` and `/releases/<version>` (What's New plus the changelog, in the sitemap) are the link target. Optional `release:` in What's New entries pins an entry to a release. Migration 2720 (`social_posts`, `social_shares.source`).
 - Blog writer setting `releasePosts` (on by default): whether a drafter creates a release post for each new release.
 
+- Video renderer (`@aom/video`, `docs/VIDEO-RENDERER.md`): turns a script into a narrated 1920x1080 video or a 1080x1920 Short with captions, thumbnail and YouTube description, using the help videos' voice and clips of the help videos. Run from the command line with `node dist/video-worker.mjs --render script.json --out dir`; not used by the app yet.
+
 ### Changed
 
 - Bluesky posts no longer repeat the link in the text: the link card carries it.
