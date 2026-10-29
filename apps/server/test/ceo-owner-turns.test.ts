@@ -268,6 +268,9 @@ describe('queueing while the workstation is offline', () => {
     done(first, 'back online', { runtimeSessionId: 'sess-q' });
     const second = (await r?.waitFor('chat.start', (f: any) => f.message === 'while you were away 2')) as any;
     done(second, 'and the second', { runtimeSessionId: 'sess-q' });
+    // The queue being empty only means the second turn has started: the next test must not begin while it still runs
+    // (a message sent during a running turn is refused as busy, not queued).
+    await until(async () => (await turn(second.chatId)).status === 'done', 5000, 'second turn done');
     await until(
       async () =>
         (await q(`SELECT 1 FROM ceo_turns WHERE thread_id=$1 AND status='queued'`, [threadId])).length === 0,

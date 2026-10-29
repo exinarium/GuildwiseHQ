@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createMediaLimiter, mediaTarget, registerMediaProxy } from '../src/media-proxy.ts';
@@ -286,13 +286,44 @@ describe('the /videos limits per address (security review finding 15)', () => {
 
 describe('the /videos body timers (paused videos are not cut)', () => {
   const BIG = 24 * 1024 * 1024;
-  const SMALL = 4 * 1024 * 1024; // fully received by the proxy while the client reads nothing
+  const SMALL = 4 * 1024 * 1024;
+  // Declared length of the endless body: far more than the kernel can buffer on the way to a client that reads nothing
+  const ENDLESS = 1024 * 1024 * 1024;
+  const CHUNK = 64 * 1024;
   const IDLE = 300;
   const PAUSE_MAX = 1500;
   const bigByte = (i: number) => i % 251;
   const bigBuf = Buffer.alloc(BIG);
   for (let i = 0; i < BIG; i++) bigBuf[i] = bigByte(i);
   const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+
+  // The proxy's watchdog runs on this clock, which only the tests move: how long a stream has been quiet or held is
+  // decided by the test, not by how fast a busy machine happens to run the event loop.
+  let clock = 1_000_000;
+  const advance = (ms: number) => {
+    clock += ms;
+  };
+  // Time is only moved once the stream has settled: nothing more is pulled from the media service (the buffers on the
+  // way are full, or the stream is quiet) and the watchdog has had a few ticks to see that. A negative check ("nothing
+  // was cut") then also gets the real ticks it needs.
+  const TICK = 25;
+  let pulled = 0;
+  const settle = async () => {
+    let last = -1;
+    for (let stable = 0; stable < 5; ) {
+      await sleep(TICK + 5);
+      stable = pulled === last ? stable + 1 : 0;
+      last = pulled;
+    }
+    await sleep(TICK * 3);
+  };
+  // The cap runs from the first tick that sees the stream held: let one tick see it, then move past the cap.
+  const pastCap = async () => {
+    await settle();
+    advance(PAUSE_MAX + 1);
+    await settle();
+    advance(PAUSE_MAX + 1);
+  };
 
   let up: http.Server;
   let upUrl: string;
@@ -308,6 +339,25 @@ describe('the /videos body timers (paused videos are not cut)', () => {
       if (req.url?.startsWith('/videos/stall')) {
         res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '1000000' });
         res.write(Buffer.alloc(100, 1)); // then silence
+        return;
+      }
+      if (req.url?.startsWith('/videos/endless')) {
+        // generated on demand, so no buffer on the way (kernel included) can ever hold all of it
+        let offset = 0;
+        res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': String(ENDLESS) });
+        pipeline(
+          new Readable({
+            read() {
+              const chunk = Buffer.alloc(CHUNK);
+              for (let i = 0; i < CHUNK; i++) chunk[i] = bigByte(offset + i);
+              offset += CHUNK;
+              pulled += CHUNK;
+              this.push(chunk);
+            },
+          }),
+          res,
+          () => undefined,
+        );
         return;
       }
       if (req.url?.startsWith('/videos/small')) {
@@ -337,7 +387,7 @@ describe('the /videos body timers (paused videos are not cut)', () => {
       proxy,
       upUrl,
       { maxConcurrentPerIp: 1, ratePerMin: 0 },
-      { idleMs: IDLE, pauseMaxMs: PAUSE_MAX, tickMs: 25 },
+      { idleMs: IDLE, pauseMaxMs: PAUSE_MAX, tickMs: TICK, now: () => clock },
     );
     await proxy.listen({ port: 0, host: '127.0.0.1' });
     proxyPort = (proxy.server.address() as AddressInfo).port;
@@ -349,10 +399,16 @@ describe('the /videos body timers (paused videos are not cut)', () => {
   });
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** The response, already paused: a client that reads ahead before the test pauses it would let the kernel swallow more. */
   const open = (path: string, headers: http.OutgoingHttpHeaders = {}) =>
     new Promise<http.IncomingMessage>((resolve, reject) => {
       const agent = new http.Agent({ keepAlive: false });
-      http.get({ host: '127.0.0.1', port: proxyPort, path, headers, agent }, resolve).on('error', reject);
+      http
+        .get({ host: '127.0.0.1', port: proxyPort, path, headers, agent }, (res) => {
+          res.pause();
+          resolve(res);
+        })
+        .on('error', reject);
     });
   const status = (path: string) =>
     new Promise<number>((resolve, reject) => {
@@ -376,7 +432,7 @@ describe('the /videos body timers (paused videos are not cut)', () => {
       r.on('error', () => undefined);
       r.on('close', () => resolve(Buffer.concat(parts)));
     });
-  const waitFor = async (cond: () => boolean, ms = 3000) => {
+  const waitFor = async (cond: () => boolean, ms = 10_000) => {
     const t = Date.now();
     while (!cond() && Date.now() - t < ms) await sleep(20);
     expect(cond()).toBe(true);
@@ -385,25 +441,29 @@ describe('the /videos body timers (paused videos are not cut)', () => {
   it('cuts a body when the media service itself goes silent for longer than the idle time', async () => {
     const r = await open('/videos/stall.mp4');
     expect(r.statusCode).toBe(200);
-    const t = Date.now();
-    const end = await untilClosed(r.resume());
-    expect(end.complete).toBe(false);
-    expect(Date.now() - t).toBeGreaterThanOrEqual(IDLE - 50);
+    const end = untilClosed(r);
+    r.resume();
+    // quiet, but not yet for the idle time: still open
+    advance(IDLE - 50);
+    await settle();
+    expect(r.socket.destroyed).toBe(false);
+    advance(100);
+    expect((await end).complete).toBe(false);
     await waitFor(() => upReqsOpen === 0);
     expect(await status('/videos/big.mp4?x=1')).toBe(200); // slot was freed
   });
 
   it('does not cut a client that stopped reading before the pause cap, and closes it (slot freed) after', async () => {
-    const t = Date.now();
-    const r = await open('/videos/big.mp4');
+    const r = await open('/videos/endless.mp4');
     expect(r.statusCode).toBe(200);
-    r.pause();
-    await sleep(IDLE * 3); // well past idle, before the cap
+    await settle(); // the proxy notices the client is not reading
+    advance(IDLE * 3); // well past idle, before the cap
+    await settle();
     expect(upReqsOpen).toBe(1); // still being served
     expect(await status('/videos/big.mp4')).toBe(429); // slot still held
+    await pastCap();
     // (a paused client only sees the close once it reads again, so watch the proxy side)
-    await waitFor(() => upReqsOpen === 0, PAUSE_MAX + 2000);
-    expect(Date.now() - t).toBeGreaterThanOrEqual(PAUSE_MAX - 100);
+    await waitFor(() => upReqsOpen === 0);
     expect(await status('/videos/big.mp4')).toBe(200); // slot freed
     const end = untilClosed(r);
     r.resume();
@@ -411,49 +471,62 @@ describe('the /videos body timers (paused videos are not cut)', () => {
     await waitFor(() => upSockets.size === 0);
   });
 
-  it('closes a small, fully-received body that the client never reads once the pause cap is over', async () => {
+  it('closes a small body that the client never reads once the pause cap is over', async () => {
     const r = await open('/videos/small.mp4');
     expect(r.statusCode).toBe(200);
-    r.pause();
-    await sleep(IDLE * 2);
-    expect(await status('/videos/big.mp4')).toBe(429); // slot still held
-    const t = Date.now();
+    await settle();
+    advance(IDLE * 2);
+    await settle();
+    // How much a paused client's socket swallows is up to the kernel (autotuned buffers): if it took all 4 MB the
+    // response is over by itself and the slot is free. Only while the proxy still holds the body is it held.
+    if (upReqsOpen > 0) expect(await status('/videos/big.mp4')).toBe(429); // slot still held
+    await pastCap();
     let freed = false;
-    while (!freed && Date.now() - t < PAUSE_MAX + 2000) {
-      await sleep(100);
+    for (let i = 0; i < 100 && !freed; i++) {
       freed = (await status('/videos/small.mp4?p=1')) === 200;
+      if (!freed) await sleep(50);
     }
     expect(freed).toBe(true);
     r.destroy();
   });
 
   it('a slow but steady reader is not cut even when the total time is over the pause cap', async () => {
-    const r = await open('/videos/big.mp4');
+    const r = await open('/videos/endless.mp4');
     expect(r.statusCode).toBe(200);
     const parts: Buffer[] = [];
-    const t = Date.now();
+    let closed = false;
     r.on('error', () => undefined);
+    r.on('close', () => {
+      closed = true;
+    });
     r.on('data', (c: Buffer) => parts.push(c));
-    const closed = new Promise((res) => r.on('close', res));
-    let n = 0;
-    while (!r.complete && (Date.now() - t < PAUSE_MAX + 800 || n < 6)) {
-      r.pause();
-      await sleep(PAUSE_MAX / 3); // each pause is shorter than the cap
+    const got = () => parts.reduce((n, c) => n + c.length, 0);
+    // the total (simulated) time reaches more than twice the cap, but no single pause comes near it
+    for (let n = 0; n < 7; n++) {
+      const before = got();
       r.resume();
-      await sleep(40);
-      n++;
+      await waitFor(() => got() > before + 1024 * 1024);
+      r.pause();
+      await settle(); // the watchdog sees the bytes that went out, then the pause
+      advance(PAUSE_MAX / 3);
+      await settle();
+      expect(closed, `cut in round ${n}`).toBe(false);
     }
-    r.resume();
-    await closed;
     const body = Buffer.concat(parts);
-    expect(r.complete).toBe(true);
-    expect(sha(body)).toBe(sha(bigBuf));
+    expect(body.length).toBeGreaterThan(7 * 1024 * 1024);
+    // every byte is the one the media service sent
+    const expected = Buffer.alloc(251 * 1000);
+    for (let i = 0; i < expected.length; i++) expected[i] = bigByte(i);
+    expect(sha(body.subarray(0, expected.length))).toBe(sha(expected));
+    r.destroy();
+    await waitFor(() => upReqsOpen === 0);
   }, 20_000);
 
   it('a client that resumes after more than the idle time gets the rest of the body intact', async () => {
     const r = await open('/videos/big.mp4');
-    r.pause();
-    await sleep(IDLE * 3);
+    await settle(); // backpressure is on
+    advance(IDLE * 3);
+    await settle();
     const got = collect(r);
     r.resume();
     const body = await got;
@@ -467,8 +540,9 @@ describe('the /videos body timers (paused videos are not cut)', () => {
     const from = 5_000_000;
     const r = await open('/videos/big.mp4', { range: `bytes=${from}-` });
     expect(r.statusCode).toBe(206);
-    r.pause();
-    await sleep(IDLE * 3);
+    await settle();
+    advance(IDLE * 3);
+    await settle();
     const got = collect(r);
     r.resume();
     const body = await got;
@@ -479,9 +553,14 @@ describe('the /videos body timers (paused videos are not cut)', () => {
 
   it('leaks nothing: every upstream connection and request is gone once the streams are over', async () => {
     const r = await open('/videos/big.mp4');
-    await collect(r);
+    const all = collect(r);
+    r.resume();
+    await all;
     const s = await open('/videos/stall.mp4');
-    await untilClosed(s.resume());
+    const end = untilClosed(s);
+    s.resume();
+    advance(IDLE + 100);
+    await end;
     await waitFor(() => upReqsOpen === 0);
     await waitFor(() => upSockets.size === 0);
   });

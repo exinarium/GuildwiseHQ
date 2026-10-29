@@ -47,16 +47,18 @@ export interface MediaLimits {
   /** Requests per rolling minute per address; 0 = no limit. */
   ratePerMin: number;
 }
-/** Body timers; injectable so tests run fast. */
+/** Body timers; injectable so tests run fast. `now` is the watchdog's clock (tests drive it by hand, so a stalled event loop cannot trip a cap). */
 export interface MediaTiming {
   idleMs: number;
   pauseMaxMs: number;
   tickMs: number;
+  now: () => number;
 }
 export const DEFAULT_MEDIA_TIMING: MediaTiming = {
   idleMs: MEDIA_IDLE_TIMEOUT_MS,
   pauseMaxMs: MEDIA_PAUSE_MAX_MS,
   tickMs: MEDIA_WATCHDOG_TICK_MS,
+  now: Date.now,
 };
 export const DEFAULT_MEDIA_LIMITS: MediaLimits = { maxConcurrentPerIp: 8, ratePerMin: 240 };
 
@@ -112,7 +114,7 @@ export function registerMediaProxy(
   limits: MediaLimits = DEFAULT_MEDIA_LIMITS,
   timing: Partial<MediaTiming> = {},
 ): void {
-  const { idleMs, pauseMaxMs, tickMs } = { ...DEFAULT_MEDIA_TIMING, ...timing };
+  const { idleMs, pauseMaxMs, tickMs, now: clock } = { ...DEFAULT_MEDIA_TIMING, ...timing };
   const base = mediaUrl ? new URL(mediaUrl) : null;
   const limiter = createMediaLimiter(limits);
   const client = base?.protocol === 'https:' ? https : http;
@@ -199,12 +201,12 @@ export function registerMediaProxy(
             }
             // A pass-through lets us see when upstream chunks arrive without consuming them (a 'data' listener on
             // `res` would start it flowing before Fastify pipes it, and lose bytes).
-            let lastChunk = Date.now();
+            let lastChunk = clock();
             let heldSince: number | null = null;
             let lastWritten = 0;
             const meter = new Transform({
               transform(chunk, _enc, cb) {
-                lastChunk = Date.now();
+                lastChunk = clock();
                 cb(null, chunk);
               },
             });
@@ -212,7 +214,7 @@ export function registerMediaProxy(
             void reply.send(meter);
             reply.raw.once('finish', stopWatchdog);
             watchdog = setInterval(() => {
-              const now = Date.now();
+              const now = clock();
               // Bytes that reached the client's socket since the last tick: a slow reader is progress, not a pause.
               const written = reply.raw.socket?.bytesWritten ?? 0;
               const progressed = written > lastWritten;
