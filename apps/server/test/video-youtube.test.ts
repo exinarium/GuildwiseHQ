@@ -1891,7 +1891,7 @@ describe('scheduling: slots, render timing, destinations', () => {
   it('alerts when the render worker is offline near a slot, and when a render failed for good', async () => {
     const { videoWatch } = await import('../src/video/sweep.ts');
     const p = await approved('article', 'long', 'alerts');
-    await q(`DELETE FROM platform_settings WHERE key='video_worker_heartbeat'`);
+    await q(`DELETE FROM platform_settings WHERE key LIKE 'video_worker_%'`);
     await q(`UPDATE video_posts SET slot_at = now() + interval '20 hours' WHERE id=$1`, [p.id]);
     await videoWatch(t.app.ctx);
     expect(mail.sent.filter((m) => /render worker is offline/.test(m.subject))).toHaveLength(1);

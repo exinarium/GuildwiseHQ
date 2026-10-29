@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { clipCatalogForPrompt, loadClipCatalog } from './video/clips.ts';
+import { startPushServer } from './video/push.ts';
 import { renderScriptFile } from './video/renders.ts';
 import { videoTick } from './video/sweep.ts';
 
@@ -10,7 +11,14 @@ async function runLoop(intervalSeconds: number): Promise<void> {
   const ctx = app.ctx;
   let stopping = false;
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => (stopping = true));
-  console.log(`video worker started (videos in ${ctx.config.videoDir})`);
+  const role = ctx.config.videoRole;
+  // the publish side owns the video volume, so it is also where pushed files land
+  let stopPush: (() => Promise<void>) | null = null;
+  if (role !== 'render' && ctx.config.videoWorkerToken) {
+    stopPush = await startPushServer(ctx);
+    console.log(`video push endpoint listening on :${ctx.config.videoWorkerPort}`);
+  }
+  console.log(`video worker started (role ${role}, videos in ${ctx.config.videoDir})`);
   while (!stopping) {
     let busy = false;
     try {
@@ -23,6 +31,7 @@ async function runLoop(intervalSeconds: number): Promise<void> {
     // after work, look again at once (more may be queued); idle, wait
     if (!busy) await new Promise((res) => setTimeout(res, intervalSeconds * 1000));
   }
+  await stopPush?.();
   await app.close();
 }
 
@@ -31,7 +40,7 @@ async function runLoop(intervalSeconds: number): Promise<void> {
  *   node dist/video-worker.mjs --render script.json --out dir [--silent] [--cover name]
  *   node dist/video-worker.mjs --list-clips
  *   node dist/video-worker.mjs --loop [--interval 15]
- * `--loop` is the container's command: every few seconds a heartbeat, and (only when a YouTube channel is connected and
+ * `--loop` is the container's command (AOM_VIDEO_ROLE=render|publish|all picks which half runs; see video/sweep.ts): every few seconds a heartbeat, and (only when a YouTube channel is connected and
  * `videoPosts.enabled`) claim one queued render, upload one approved video a day, clean up old files (video/sweep.ts).
  * It shares the database, config and AOM_SECRET_KEY with the app and writes to AOM_VIDEO_DIR.
  */

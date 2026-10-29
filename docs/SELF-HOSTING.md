@@ -337,6 +337,13 @@ which it builds its library manifest), and the worker image gets the MP4s throug
 file sets (`additional_contexts: media: ./media`). Building the worker by hand:
 `docker build --target video-worker --build-context media=media -t aom-video-worker .`
 
+**Rendering elsewhere.** If the server cannot render (Chromium and the voice need a CPU with AVX), set `AOM_VIDEO_ROLE=publish` in
+`.env` for the worker here and run a second worker with `AOM_VIDEO_ROLE=render` on a machine that can, on the same database. That
+machine sets `AOM_VIDEO_PUSH_URL` (your public URL) and `AOM_VIDEO_WORKER_TOKEN` and pushes each finished file over HTTPS; set the
+same `AOM_VIDEO_WORKER_TOKEN` (a long random string) here, and the publish worker accepts them on `AOM_VIDEO_WORKER_PORT`
+(default 4610, internal network only; the bundled Caddy forwards `/api/worker/video/*` to it). See docs/VIDEO-RENDERER.md "Worker roles and the artifact push". Default
+`AOM_VIDEO_ROLE=all` keeps one worker doing both.
+
 The `video` volume must be writable by the worker (uid 1000, user `node`). The app image creates `/data/video` owned by `node`, so a
 new volume is right. A volume that already exists (made by an older image) is root-owned and the worker fails with `EACCES`; fix it once:
 `docker run --rm -v <project>_video:/data/video alpine chown 1000:1000 /data/video` (`docker volume ls` shows the name).

@@ -15,6 +15,8 @@ const EXEMPT_PREFIXES = [
   '/api/hooks/',
   // The runner uploads a file an agent attached with its runner token (Bearer), no cookie and no Origin.
   '/api/runner/uploads/',
+  // The video render worker pushes a finished file with its worker token (Bearer), no cookie and no Origin.
+  '/api/worker/video/',
 ];
 
 /**
@@ -49,7 +51,12 @@ export function checkContentType(req: FastifyRequest, formPostPaths: ReadonlySet
   if (formPostPaths.has(req.url.split('?')[0] ?? '')) return;
   // A file upload is the raw body (the web app sends application/octet-stream), not JSON.
   const path = req.url.split('?')[0] ?? '';
-  if (/^\/api\/cards\/[^/]+\/attachments$/.test(path) || path.startsWith('/api/runner/uploads/')) return;
+  if (
+    /^\/api\/cards\/[^/]+\/attachments$/.test(path) ||
+    path.startsWith('/api/runner/uploads/') ||
+    path.startsWith('/api/worker/video/')
+  )
+    return;
   const ct = req.headers['content-type'];
   const hasBody = req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0';
   const chunked = req.headers['transfer-encoding'] !== undefined;

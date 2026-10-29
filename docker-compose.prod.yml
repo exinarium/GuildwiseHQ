@@ -91,8 +91,17 @@ services:
       AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
       AOM_YOUTUBE_CLIENT_ID: ${AOM_YOUTUBE_CLIENT_ID:-}
       AOM_YOUTUBE_CLIENT_SECRET: ${AOM_YOUTUBE_CLIENT_SECRET:-}
+      # render | publish | all (default): which half of the video pipeline this container runs. A server that cannot render
+      # (no AVX) runs `publish` and a render worker elsewhere pushes the files here (docs/VIDEO-RENDERER.md "Worker roles").
+      AOM_VIDEO_ROLE: ${AOM_VIDEO_ROLE:-all}
+      # Set it to accept pushed files: the publish worker then serves PUT /api/worker/video/* on AOM_VIDEO_WORKER_PORT.
+      AOM_VIDEO_WORKER_TOKEN: ${AOM_VIDEO_WORKER_TOKEN:-}
+      AOM_VIDEO_WORKER_PORT: ${AOM_VIDEO_WORKER_PORT:-4610}
       AOM_MIGRATE_ON_BOOT: "false"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    # the push endpoint, reached by Caddy on the internal network only
+    expose:
+      - "${AOM_VIDEO_WORKER_PORT:-4610}"
     volumes:
       - video:/data/video
 
