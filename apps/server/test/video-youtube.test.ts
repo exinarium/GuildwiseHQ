@@ -15,6 +15,7 @@ import {
   releaseVideoTopic,
   slotAfter,
   submitVideoPost,
+  videoCapacity,
 } from '../src/commands/video-posts.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { cleanupVideos, type RenderFn, videoTick } from '../src/video/sweep.ts';
@@ -610,6 +611,41 @@ describe('editing and approval rules', () => {
       ),
     ).rejects.toMatchObject({ code: 'kind_off' });
     await settings({ articleVideos: true });
+  });
+
+  it('a rejected writer draft frees its weekly slot; other statuses still count', async () => {
+    await q('DELETE FROM video_posts');
+    await settings({ perWeek: 1, shortsPerWeek: 1, articleVideos: true, shorts: true });
+    const writer = { system: 'blog-writer' as const };
+    const draft = (ref: string, format: 'long' | 'short', status: 'draft' | 'in_review' = 'in_review') =>
+      submitVideoPost(
+        t.app.ctx,
+        { kind: 'article', format, ref, script: script('article', format, ref) },
+        writer,
+        status,
+      );
+    const a = await draft('cap-a', 'long');
+    const s = await draft('cap-a', 'short');
+    expect(await videoCapacity(t.app.ctx)).toMatchObject({
+      long: { used: 1, limit: 1 },
+      short: { used: 1, limit: 1 },
+    });
+    await expect(draft('cap-b', 'long')).rejects.toMatchObject({ code: 'weekly_cap' });
+    await expect(draft('cap-b', 'short')).rejects.toMatchObject({ code: 'weekly_cap' });
+    await ok(api('POST', `/api/platform/video/posts/${a.post.id}/reject`, { reason: 'unwanted' }));
+    await ok(api('POST', `/api/platform/video/posts/${s.post.id}/reject`, { reason: 'unwanted' }));
+    expect(await videoCapacity(t.app.ctx)).toMatchObject({ long: { used: 0 }, short: { used: 0 } });
+    const b = await draft('cap-b', 'long');
+    expect(b.created).toBe(true);
+    await draft('cap-b', 'short');
+    expect(await videoCapacity(t.app.ctx)).toMatchObject({ long: { used: 1 }, short: { used: 1 } });
+    // every non-rejected status counts (draft, in_review, approved)
+    for (const st of ['draft', 'in_review', 'approved']) {
+      await q('UPDATE video_posts SET status=$1 WHERE id=$2', [st, b.post.id]);
+      expect((await videoCapacity(t.app.ctx)).long.used).toBe(1);
+    }
+    await q("UPDATE video_posts SET status='rejected' WHERE id=$1", [b.post.id]);
+    expect((await videoCapacity(t.app.ctx)).long.used).toBe(0);
   });
 
   it('refuses an invalid script', async () => {

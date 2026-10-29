@@ -353,7 +353,7 @@ a `youtube` share, and `POST /api/v1/posts/{slug}/share` does not accept it. A r
 to `needs_reconnect`, pauses uploads and mails the super admins once.
 
 **Settings** (`GET/PATCH /api/platform/video/settings`, the `videoPosts` platform setting): `enabled`, `articleVideos`,
-`releaseVideos`, `tutorials`, `shorts`, `perWeek` (long videos the writer may draft per rolling 7 days, 3), `shortsPerWeek` (3),
+`releaseVideos`, `tutorials`, `shorts`, `perWeek` (long videos the writer may draft per rolling 7 days, 3; rejected drafts do not count), `shortsPerWeek` (3),
 `privacy` (`public` | `unlisted` | `private`, default `public`), `playlists` `{ article?, release?, tutorial? }` (YouTube playlist
 ids), `categoryId` (`28`). A person's own submit ignores the per-kind switches and the weekly caps; the writer's does not
 (`409 kind_off`, `409 weekly_cap`).

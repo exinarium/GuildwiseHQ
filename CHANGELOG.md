@@ -4,6 +4,14 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-29
+
+Runner 0.1.62 (unchanged). Patch for the video weekly limit; no migration.
+
+### Fixed
+
+- YouTube videos: a video draft that you reject no longer uses up the week's video limit (`perWeek` and `shortsPerWeek`). Before, rejected drafts counted for seven days and could block new videos. Drafts, videos in review and approved videos still count.
+
 ## [1.2.0] - 2026-10-28
 
 Runner 0.1.62 (unchanged). Release posts, per-network hashtags and the YouTube video worker; migrations 2720 and 2730. Videos stay off until a YouTube channel is connected and video posts are switched on.

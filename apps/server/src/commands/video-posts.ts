@@ -338,14 +338,14 @@ export async function listVideoPosts(
   return { posts: await toDtos(ctx, rs), status: await videoStatus(ctx) };
 }
 
-/** Writer posts of the last 7 days against the weekly caps (rejected ones were paid for too). */
+/** Writer posts of the last 7 days against the weekly caps (rejected ones do not count; the owner turned them down). */
 export async function videoCapacity(ctx: Ctx): Promise<VideoCapacity> {
   const s = await videoSettings(ctx);
   const since = new Date(ctx.clock.now().getTime() - 7 * DAY);
   const r = await rows(
     ctx.pool,
     `SELECT format, count(*)::int AS n FROM video_posts
-      WHERE origin_system IS NOT NULL AND created_at >= $1 GROUP BY format`,
+      WHERE origin_system IS NOT NULL AND status <> 'rejected' AND created_at >= $1 GROUP BY format`,
     [since],
   );
   const n = (f: string) => r.find((x) => x.format === f)?.n ?? 0;
