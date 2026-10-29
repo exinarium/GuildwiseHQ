@@ -223,10 +223,22 @@ describe('X', () => {
       return undefined;
     };
     expect((await client.publish(payload('x', { credentials: creds }), io())).done).toBe(true);
+    // a refused media call fails the Short only (final), never pauses the channel the articles use
     router = () => ({ status: 403, text: 'forbidden' });
     await expect(client.publish(payload('x', { credentials: creds }), io())).rejects.toMatchObject({
+      kind: 'final',
+      message: expect.stringMatching(/articles are not affected.*media\.write scope/),
+    });
+    // a refused tweet call (after a good upload) is a real key problem: reconnect
+    router = (c) => {
+      if (path(c) === '/2/media/upload/initialize') return { json: { data: { id: 'mid' } } };
+      if (path(c).endsWith('/append')) return { json: {} };
+      if (path(c).endsWith('/finalize')) return { json: { data: { id: 'mid' } } };
+      if (path(c) === '/2/tweets') return { status: 401, text: 'Unauthorized' };
+      return undefined;
+    };
+    await expect(client.publish(payload('x', { credentials: creds }), io())).rejects.toMatchObject({
       kind: 'auth',
-      message: expect.stringMatching(/OAuth 2\.0 user token with the media\.write scope/),
     });
     router = () => ({ status: 402, text: 'credits' });
     await expect(client.publish(payload('x', { credentials: creds }), io())).rejects.toMatchObject({

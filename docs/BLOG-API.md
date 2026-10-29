@@ -447,9 +447,10 @@ revokes its token. Links typed into an X or TikTok caption are removed. A video 
   `/append` in 4 MB multipart segments, `/finalize`, wait for `processing_info`, then `POST /2/tweets` with `media.media_ids`.
   The API reference of the v2 media endpoints (`/2/media/upload` and `/initialize`) lists both an OAuth 2.0 user token with
   `media.write` and the OAuth 1.0a user token (`UserToken`, scheme `OAuth`), so the existing keys are expected to work; not yet
-  proven on a real post. If X answers 401 or 403 the share fails with a message saying so (and, as an
-  authentication error, pauses the channel); the fix is an OAuth 2.0 user token with the `media.write` scope, which this version
-  does not store. Video up to 20 minutes or 8 GB; X is pay-per-use ($0.015 a post without a link); a 402 means the credits are used up.
+  proven on a real post. If a media call answers 401 or 403 the Short's X share fails for good
+  with a message saying so, and the X channel is **not** paused (articles keep posting with the same keys; a 401 or 403 on
+  `/2/tweets` itself is a real reconnect); the fix would be an OAuth 2.0 user token with the `media.write` scope, which this
+  version does not store. Video up to 20 minutes or 8 GB; X is pay-per-use ($0.015 a post without a link); a 402 means the credits are used up.
 - *LinkedIn (organization video)*: the existing token with `w_organization_social`. `POST /rest/videos?action=initializeUpload` as
   `urn:li:organization:<id>`, a PUT per part (4 MB) keeping each ETag, `finalizeUpload`, wait for `AVAILABLE`, `POST /rest/posts`
   with `content.media.id`. `Linkedin-Version: 202610`. 3 seconds to 30 minutes, 75 KB to 500 MB (the reference says 5 GB for the

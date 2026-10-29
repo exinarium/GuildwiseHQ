@@ -406,8 +406,12 @@ async function postToX(p: DestinationPayload, io: DestinationIO): Promise<Destin
       tokenSecret: c.accessSecret,
       ...(params ? { params } : {}),
     });
-  /** The v2 media endpoints may demand an OAuth 2.0 user token (media.write): tell the owner what to do, do not retry blindly. */
-  const xError = (r: Res, what: string): DestinationError => {
+  /**
+   * A 401/403 from a v2 MEDIA endpoint fails this Short only ('final'): it must not pause the X channel, because the
+   * articles share the same keys and post through /2/tweets, which checks them itself. The tweet call keeps the plain
+   * classification (a refused key there is a real reconnect).
+   */
+  const xError = (r: Res, what: string, media = true): DestinationError => {
     if (r.status === 402)
       return new DestinationError('auth', `${what}: HTTP 402: the X API credits are used up`);
     // X refuses a repeated text with a 403 that is about the content, not about the keys
@@ -416,10 +420,10 @@ async function postToX(p: DestinationPayload, io: DestinationIO): Promise<Destin
         'final',
         `${what}: X refused the post as duplicate content (the same text was posted before): ${r.body.slice(0, 120)}`,
       );
-    if (r.status === 401 || r.status === 403)
+    if (media && (r.status === 401 || r.status === 403))
       return new DestinationError(
-        'auth',
-        `${what}: HTTP ${r.status}: X refused the OAuth 1.0a keys for video upload. The v2 media endpoints may need an OAuth 2.0 user token with the media.write scope (see docs/BLOG-API.md, X setup). ${r.body.slice(0, 160)}`,
+        'final',
+        `${what}: HTTP ${r.status}: X refused the video upload with the OAuth 1.0a keys (articles are not affected). Check the app has Read and write and the access token was generated after that; otherwise X wants an OAuth 2.0 user token with the media.write scope (see docs/BLOG-API.md, X setup). ${r.body.slice(0, 160)}`,
       );
     return classify(r, what);
   };
@@ -497,7 +501,7 @@ async function postToX(p: DestinationPayload, io: DestinationIO): Promise<Destin
       body: JSON.stringify({ text: p.text, media: { media_ids: [mediaId] } }),
     }),
   );
-  if (r.status >= 300) throw xError(r, 'X post');
+  if (r.status >= 300) throw xError(r, 'X post', false);
   const id = str(json<{ data?: { id?: string } }>(r).data?.id);
   if (!id) throw new DestinationError('final', 'no post id in the answer');
   return { done: true, externalId: id, url: `https://x.com/i/web/status/${id}` };
