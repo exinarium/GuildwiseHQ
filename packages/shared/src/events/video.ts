@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { VideoPostMetaSchema } from '../video/post.ts';
-import { VIDEO_DESTINATIONS, VideoCaptionsSchema } from '../video/schedule.ts';
+import { VIDEO_DESTINATIONS, VideoCaptionsSchema, VideoDestinationOptionsSchema } from '../video/schedule.ts';
 import { VIDEO_FORMATS, VIDEO_KINDS, VideoScriptSchema } from '../video/schema.ts';
 import { BlogOriginSchema } from './blog.ts';
 import { defineEvent, Id } from './define.ts';
@@ -56,6 +56,7 @@ export const videoEvents = [
       mode: z.enum(['slot', 'now']),
       destinations: z.array(z.enum(VIDEO_DESTINATIONS)).min(1),
       captions: VideoCaptionsSchema.optional(),
+      destinationOptions: VideoDestinationOptionsSchema.optional(),
       reason: z.enum(['approved', 'moved', 'slipped', 'reflow', 'migrated']),
       by: z.union([Id, z.literal('system')]),
     }),

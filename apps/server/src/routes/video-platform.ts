@@ -35,6 +35,7 @@ import {
   patchVideoSettings,
   previewVideoPost,
   queueVideoTopic,
+  reflowVideoPosts,
   rejectVideoPost,
   rejectVideoTopic,
   releasesNeedingVideo,
@@ -168,6 +169,10 @@ export function videoPlatformRoutes(ctx: Ctx) {
         return swapVideoPosts(ctx, s.user, req.params.id, req.body.withId);
       },
     );
+    app.post('/api/platform/video/reflow', async (req) => {
+      const s = await requireSuperAdmin(ctx, req);
+      return reflowVideoPosts(ctx, s.user);
+    });
     app.post('/api/platform/video/posts/:id/preview', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireSuperAdmin(ctx, req);
       return previewVideoPost(ctx, s.user, req.params.id);

@@ -273,3 +273,43 @@ export const VideoCaptionsSchema = z.partialRecord(
   z.object({ text: z.string().max(5000), tags: z.array(z.string().max(60)).max(15).default([]) }),
 );
 export type VideoCaptions = z.infer<typeof VideoCaptionsSchema>;
+
+// ---- per-destination options (TikTok's Direct Post UX rules)
+
+/** TikTok privacy levels as `creator_info` returns them. There is deliberately no default: the owner picks one per post. */
+export const TIKTOK_PRIVACY_LEVELS = [
+  'PUBLIC_TO_EVERYONE',
+  'MUTUAL_FOLLOW_FRIENDS',
+  'FOLLOWER_OF_CREATOR',
+  'SELF_ONLY',
+] as const;
+
+/**
+ * What the owner chose for the TikTok post (stored with the post, used at the slot). Branded content cannot be private;
+ * `consent` is the tick of "By posting, you agree to TikTok's ..." and must be true.
+ */
+export const TikTokOptionsSchema = z
+  .object({
+    privacy: z.enum(TIKTOK_PRIVACY_LEVELS),
+    allowComment: z.boolean(),
+    allowDuet: z.boolean(),
+    allowStitch: z.boolean(),
+    /** Commercial content disclosure: off by default. `yourBrand` = promotional content, `brandedContent` = paid partnership. */
+    commercial: z.object({ on: z.boolean(), yourBrand: z.boolean(), brandedContent: z.boolean() }),
+    consent: z.literal(true),
+  })
+  .refine((o) => !(o.commercial.on && !o.commercial.yourBrand && !o.commercial.brandedContent), {
+    message: 'pick "Your brand" or "Branded content"',
+    path: ['commercial'],
+  })
+  .refine((o) => !(o.commercial.on && o.commercial.brandedContent && o.privacy === 'SELF_ONLY'), {
+    message: 'branded content cannot be private',
+    path: ['privacy'],
+  });
+export type TikTokOptions = z.infer<typeof TikTokOptionsSchema>;
+
+export const VideoDestinationOptionsSchema = z.object({ tiktok: TikTokOptionsSchema.optional() });
+export type VideoDestinationOptions = z.infer<typeof VideoDestinationOptionsSchema>;
+
+/** `YYYY-MM-DD` plus `n` days (calendar arithmetic, no time zone involved), and the weekday of such a date. */
+export { addDays as addLocalDays, weekdayOf as weekdayOfDate };

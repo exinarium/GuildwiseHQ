@@ -70,7 +70,9 @@ export const videoPostProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE video_posts SET slot_at=$2, publish_mode=$3, destinations=$4::text[],
-              captions = COALESCE($5::jsonb, captions), updated_at=$6
+              captions = COALESCE($5::jsonb, captions),
+              destination_options = COALESCE($7::jsonb, destination_options), updated_at=$6,
+              slipped_at = CASE WHEN $8::text = 'slipped' THEN $6::timestamptz WHEN $8::text = 'migrated' THEN slipped_at ELSE NULL END
         WHERE id=$1 AND status='approved'`,
       [
         p.postId,
@@ -79,6 +81,8 @@ export const videoPostProjectors: Record<string, Projector> = {
         p.destinations,
         p.captions ? JSON.stringify(p.captions) : null,
         e.createdAt,
+        p.destinationOptions ? JSON.stringify(p.destinationOptions) : null,
+        p.reason,
       ],
     );
   },

@@ -43,6 +43,7 @@ export function buildDescription(
   const len = (i: number) => (kept[i + 1]?.start ?? totalSeconds) - (kept[i]?.start ?? 0);
   for (let i = 0; i < kept.length; i++) {
     if (len(i) >= 10) continue;
+    if (kept.length <= 1) break; // nothing to merge into (it would loop for ever)
     kept.splice(i === 0 ? 1 : i, 1);
     i = -1;
   }
