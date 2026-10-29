@@ -8,9 +8,14 @@ interface WorkerState {
   running: boolean;
   lastSeen: string | null;
 }
-/** One heartbeat today; `{render, publish}` once the roles are split (Core 4). */
-export function workerStates(worker: VideoStatus['worker']): WorkerState[] {
-  const w = worker as unknown as Record<string, unknown>;
+/**
+ * One state per worker role: the render worker (renders shortly before a slot) and the publish worker (uploads, posts at
+ * the slot, cleans up), from `status.render` / `status.publish`; the combined `status.worker` for a server that has one heartbeat.
+ */
+export function workerStates(status: Pick<VideoStatus, 'worker' | 'render' | 'publish'>): WorkerState[] {
+  const w = (status.render || status.publish
+    ? { render: status.render, publish: status.publish }
+    : status.worker) as unknown as Record<string, unknown>;
   const one = (label: string, v: unknown): WorkerState => {
     const x = (v ?? {}) as { running?: boolean; lastSeen?: string | null };
     return { label, running: !!x.running, lastSeen: x.lastSeen ?? null };
@@ -29,7 +34,11 @@ export function videoAlerts(posts: VideoPost[], status: VideoStatus): string[] {
     out.push(
       `${slipped} video${slipped === 1 ? '' : 's'} slipped to a later slot because ${slipped === 1 ? 'it was' : 'they were'} not rendered in time.`,
     );
-  const waiting = mine.filter((p) => /waiting for file/i.test(p.upload?.error ?? '')).length;
+  const waiting = mine.filter((p) =>
+    [p.upload?.error, ...p.shares.map((s) => s.error)].some((e) =>
+      /waiting for the video file/i.test(e ?? ''),
+    ),
+  ).length;
   if (waiting)
     out.push(
       `${waiting} video${waiting === 1 ? ' is' : 's are'} waiting for the rendered file to reach the publish worker.`,
@@ -43,7 +52,7 @@ export function videoAlerts(posts: VideoPost[], status: VideoStatus): string[] {
 
 /** Always visible: are the workers up, the next slot per format, this week's room, and the alerts. */
 export function StatusStrip({ status, posts }: { status: VideoStatus; posts: VideoPost[] }) {
-  const workers = workerStates(status.worker);
+  const workers = workerStates(status);
   const alerts = videoAlerts(posts, status);
   const cap = status.capacity;
   return (

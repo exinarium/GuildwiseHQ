@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSocialPostAction } from '../../api/queries/blog.ts';
 import { useEditVideo, useVideoAction, useVideoPost, videoFileUrl } from '../../api/queries/video.ts';
 import { formatDateTime } from '../../lib/time.ts';
-import { PHASE_LABEL, PHASE_TONE } from '../../lib/video-schedule.ts';
+import { PHASE_LABEL, PHASE_TONE, safeHref } from '../../lib/video-schedule.ts';
 import {
   Badge,
   Button,
@@ -418,11 +418,11 @@ export function VideoReview({
             <li key={s.network}>
               {s.network}: {s.status}
               {s.error ? ` (${s.error})` : ''}
-              {s.url && (
+              {safeHref(s.url) && (
                 <>
                   {' '}
                   <a
-                    href={s.url}
+                    href={safeHref(s.url) as string}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand hover:underline"
@@ -496,9 +496,9 @@ export function VideoReview({
         <div className="flex flex-col gap-2" data-testid="video-upload">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={UPLOAD_TONE[u.status]}>{UPLOAD_LABEL[u.status]}</Badge>
-            {u.url && (
+            {safeHref(u.url) && (
               <a
-                href={u.url}
+                href={safeHref(u.url) as string}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-brand hover:underline"

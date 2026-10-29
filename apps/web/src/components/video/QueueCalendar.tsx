@@ -4,6 +4,7 @@ import { CheckCircle2, Clock, Loader2, Lock, MinusCircle, XCircle } from 'lucide
 import { useMemo, useState } from 'react';
 import {
   useMoveVideo,
+  useRetryShare,
   useRetryVideo,
   useSwapVideo,
   useUnscheduleVideo,
@@ -16,6 +17,7 @@ import {
   dayHeading,
   PHASE_LABEL,
   PHASE_TONE,
+  safeHref,
   slotLabel,
   slotTime,
 } from '../../lib/video-schedule.ts';
@@ -177,9 +179,10 @@ function ScheduledPost({
   const [mode, setMode] = useState<'move' | 'swap' | null>(null);
   const unschedule = useUnscheduleVideo();
   const retry = useRetryVideo();
+  const retryShare = useRetryShare();
   const toast = useToast();
   const change = canChangeSlot(post);
-  const youtubeFailed = post.upload?.status === 'failed';
+  const failedDestinations = destinationStates(post).filter((d) => d.state === 'failed');
   const renderFailed = post.render?.status === 'failed';
   return (
     <div className="flex flex-col gap-1.5" data-testid={`queue-post-${post.id}`}>
@@ -220,20 +223,22 @@ function ScheduledPost({
             </Button>
           </>
         )}
-        {youtubeFailed && (
+        {failedDestinations.map(({ dest }) => (
           <Button
+            key={dest}
             size="sm"
-            loading={retry.isPending}
+            loading={retryShare.isPending}
+            data-testid={`retry-${dest}`}
             onClick={() =>
-              retry.mutate(
-                { id: post.id, what: 'retry-upload' },
+              retryShare.mutate(
+                { id: post.id, network: dest },
                 { onSuccess: () => toast.success('Queued again') },
               )
             }
           >
-            Retry YouTube
+            Retry {DESTINATION_LABEL[dest]}
           </Button>
-        )}
+        ))}
         {renderFailed && (
           <Button
             size="sm"
@@ -249,7 +254,7 @@ function ScheduledPost({
           </Button>
         )}
       </div>
-      <ErrorBox error={unschedule.error ?? retry.error} />
+      <ErrorBox error={unschedule.error ?? retry.error ?? retryShare.error} />
       {mode === 'move' && <MoveForm post={post} onDone={() => setMode(null)} />}
       {mode === 'swap' && <SwapForm post={post} others={others} onDone={() => setMode(null)} />}
     </div>
@@ -362,7 +367,7 @@ export function QueueCalendar({
                 <span className="text-xs text-muted">{slotLabel(p.slotAt as string)}</span>
                 <span className="flex flex-wrap gap-2 text-sm">
                   {destinationStates(p)
-                    .filter((x) => x.url)
+                    .filter((x) => safeHref(x.url))
                     .map((x) => (
                       <a
                         key={x.dest}

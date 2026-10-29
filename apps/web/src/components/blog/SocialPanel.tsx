@@ -1,6 +1,7 @@
 import type { SocialChannel } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useConnectChannel, useDisconnectChannel } from '../../api/queries/blog.ts';
+import { usePatchVideoSettings, useVideoSettings } from '../../api/queries/video.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, Callout, ErrorBox, Panel, TextInput, useToast } from '../ui.tsx';
 
@@ -25,6 +26,16 @@ const NAMES: Record<string, { name: string; idLabel: string; help: string }> = {
     idLabel: '',
     help: 'Uploads of approved videos (Videos tab). Paste a refresh token for the channel with the scope youtube.force-ssl, made with the OAuth client in AOM_YOUTUBE_CLIENT_ID and AOM_YOUTUBE_CLIENT_SECRET. It is checked with YouTube and stored encrypted. A client in Testing mode loses its tokens after 7 days: publish the OAuth app (In production) so they last.',
   },
+  instagram: {
+    name: 'Instagram account',
+    idLabel: 'Instagram account id',
+    help: 'For Instagram Reels of the Shorts you schedule. The id of the Instagram professional (Business or Creator) account linked to your Facebook Page, and the access token of that Facebook Page with the permissions instagram_basic, instagram_content_publish and pages_read_engagement (re-issue the Page token if it was made without them). Checked with Instagram when you connect.',
+  },
+  tiktok: {
+    name: 'TikTok account',
+    idLabel: '',
+    help: 'For TikTok posts of the Shorts you schedule. Connect signs in on TikTok with the developer app in AOM_TIKTOK_CLIENT_KEY and AOM_TIKTOK_CLIENT_SECRET (scopes user.info.basic and video.publish); the tokens are stored encrypted and renewed automatically.',
+  },
   bluesky: {
     name: 'Bluesky account',
     idLabel: '',
@@ -42,6 +53,14 @@ export function SocialPanel({
   failedShares: number;
   needReconnect: string[];
 }) {
+  // TikTok sends the browser back here with the result of the sign-in
+  const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+  const tiktokResult =
+    q.get('tiktok') === 'connected'
+      ? { ok: true, message: '' }
+      : q.get('tiktok') === 'error'
+        ? { ok: false, message: q.get('message') ?? 'unknown error' }
+        : null;
   return (
     <Panel title="Social sharing" data-testid="social-panel">
       <p className="mb-3 text-sm text-muted">
@@ -49,6 +68,16 @@ export function SocialPanel({
         the videos you approve. Tokens are stored encrypted and never shown again. Unpublishing an article
         does not delete what was shared.
       </p>
+      {tiktokResult && (
+        <Callout
+          tone={tiktokResult.ok ? 'success' : 'danger'}
+          className="mb-3"
+          role="status"
+          data-testid="tiktok-result"
+        >
+          {tiktokResult.ok ? 'TikTok is connected.' : `TikTok was not connected: ${tiktokResult.message}`}
+        </Callout>
+      )}
       {needReconnect.length > 0 && (
         <Callout
           tone="danger"
@@ -82,7 +111,7 @@ function Channel({ channel }: { channel: SocialChannel }) {
   const connect = useConnectChannel();
   const disconnect = useDisconnectChannel();
   const toast = useToast();
-  const [open, setOpen] = useState(!channel.connected);
+  const [open, setOpen] = useState(!channel.connected && channel.network !== 'tiktok');
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [token, setToken] = useState('');
@@ -145,7 +174,7 @@ function Channel({ channel }: { channel: SocialChannel }) {
         </p>
       )}
       <div className="mt-2 flex flex-wrap gap-2">
-        {channel.connected && (
+        {channel.connected && channel.network !== 'tiktok' && (
           <Button size="sm" onClick={() => setOpen((o) => !o)}>
             {open ? 'Cancel' : 'Replace the credentials'}
           </Button>
@@ -161,7 +190,8 @@ function Channel({ channel }: { channel: SocialChannel }) {
           </Button>
         )}
       </div>
-      {open && (
+      {channel.network === 'tiktok' && <TikTokRow channel={channel} help={meta.help} />}
+      {open && channel.network !== 'tiktok' && (
         <form onSubmit={submit} className="mt-3 flex flex-col gap-3">
           <p className="text-xs text-subtle">{meta.help}</p>
           {channel.network === 'x' && (
@@ -230,7 +260,9 @@ function Channel({ channel }: { channel: SocialChannel }) {
               required
             />
           )}
-          {(channel.network === 'facebook' || channel.network === 'linkedin') && (
+          {(channel.network === 'facebook' ||
+            channel.network === 'linkedin' ||
+            channel.network === 'instagram') && (
             <>
               <TextInput label={meta.idLabel} value={id} onChange={(e) => setId(e.target.value)} required />
               <TextInput label="Name (for you)" value={name} onChange={(e) => setName(e.target.value)} />
@@ -268,6 +300,45 @@ function Channel({ channel }: { channel: SocialChannel }) {
           <ErrorBox error={connect.error} />
         </form>
       )}
+    </div>
+  );
+}
+
+/** TikTok signs in on TikTok (a redirect), so there is no form: the Connect link, and the switch for the app audit. */
+function TikTokRow({ channel, help }: { channel: SocialChannel; help: string }) {
+  const settings = useVideoSettings();
+  const patch = usePatchVideoSettings();
+  const audited = settings.data?.tiktokAudited ?? false;
+  return (
+    <div className="mt-2 flex flex-col gap-3">
+      <p className="text-xs text-subtle">{help}</p>
+      <div>
+        <a
+          href="/api/platform/social/tiktok/connect"
+          className="inline-flex items-center rounded-control border border-line px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-2"
+          data-testid="tiktok-connect"
+        >
+          {channel.connected ? 'Connect again' : 'Connect TikTok'}
+        </a>
+      </div>
+      <label className="flex items-start gap-2 text-sm text-fg">
+        <input
+          type="checkbox"
+          checked={audited}
+          disabled={settings.isLoading || patch.isPending}
+          onChange={(e) => patch.mutate({ tiktokAudited: e.target.checked })}
+          data-testid="tiktok-audited"
+        />
+        <span>
+          The TikTok app has passed TikTok&apos;s audit
+          <span className="block text-xs text-muted">
+            {audited
+              ? 'Posts may be public, as the privacy you choose when scheduling.'
+              : 'TikTok posts privately until the app is audited: only "Only me" can be chosen. Tick this once TikTok approved the app.'}
+          </span>
+        </span>
+      </label>
+      <ErrorBox error={patch.error} />
     </div>
   );
 }

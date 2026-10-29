@@ -3,6 +3,7 @@ import {
   type PatchVideoSettingsRequest,
   type ScheduleVideoPostRequest,
   type SubmitVideoPostRequest,
+  type VideoDestination,
   VideoLibraryListSchema,
   type VideoPost,
   VideoPostListSchema,
@@ -44,6 +45,15 @@ function useVideoMutation<V, R = unknown>(fn: (v: V) => Promise<R>) {
       void qc.invalidateQueries({ queryKey: ['platform', 'video'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'blog'] });
     },
+  });
+}
+
+/** The video settings (the Social sharing TikTok row reads `tiktokAudited`). */
+export function useVideoSettings() {
+  return useQuery({
+    queryKey: ['platform', 'video', 'settings'],
+    queryFn: () => get('/platform/video/settings', VideoSettingsSchema),
+    staleTime: 30_000,
   });
 }
 
@@ -167,6 +177,11 @@ export const useSwapVideo = () =>
 export const useUnscheduleVideo = () =>
   useVideoMutation((id: string) =>
     post<VideoPost>(`/platform/video/posts/${id}/unschedule`, {}, VideoPostSchema),
+  );
+/** Tries one destination of a scheduled video again (YouTube included). */
+export const useRetryShare = () =>
+  useVideoMutation((v: { id: string; network: VideoDestination }) =>
+    post<VideoPost>(`/platform/video/posts/${v.id}/shares/${v.network}/retry`, undefined, VideoPostSchema),
   );
 export const useRetryVideo = () =>
   useVideoMutation((v: { id: string; what: 'retry-render' | 'retry-upload' }) =>

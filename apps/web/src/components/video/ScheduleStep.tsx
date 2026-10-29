@@ -59,7 +59,9 @@ export function ScheduleStep({
 
   const [captions, setCaptions] = useState<Partial<Record<VideoDestination, Caption>>>({});
   const [tab, setTab] = useState<string>('');
-  const captionOf = (d: VideoDestination): Caption => captions[d] ?? defaultCaption(d, post.meta);
+  // the owner's edit, else the drafter's caption stored with the post, else a default from the metadata
+  const captionOf = (d: VideoDestination): Caption =>
+    captions[d] ?? post.captions?.[d] ?? defaultCaption(d, post.meta);
   // biome-ignore lint/correctness/useExhaustiveDependencies: new defaults when the stored revision changes
   useEffect(() => setCaptions({}), [post.revision, post.updatedAt]);
   const activeTab = extras.includes(tab as VideoDestination) ? (tab as VideoDestination) : extras[0];

@@ -93,6 +93,7 @@ const video = (over: Partial<VideoPost> = {}): VideoPost => ({
 const status = (over: Partial<VideoStatus> = {}): VideoStatus => ({
   settings: {
     enabled: true,
+    tiktokAudited: false,
     articleVideos: true,
     releaseVideos: true,
     tutorials: true,
@@ -190,7 +191,11 @@ beforeEach(() => {
       if (url.endsWith('/schedule'))
         return json(video({ status: 'approved', slotAt: SLOTS[0] as string, phase: 'scheduled' }));
       if (url === '/api/platform/video/reflow') return json({ moved: 2 });
-      if (/\/(move|unschedule|retry-upload|retry-render)$/.test(url))
+      if (url === '/api/platform/video/settings')
+        return json(
+          init?.method === 'PATCH' ? { ...st.settings, ...JSON.parse(String(init.body)) } : st.settings,
+        );
+      if (/\/(move|unschedule|retry-upload|retry-render|shares\/[a-z]+\/retry)$/.test(url))
         return json(video({ status: 'approved', slotAt: SLOTS[1] as string, phase: 'scheduled' }));
       if (url.endsWith('/swap')) return json({ a: video(), b: video() });
       if (url.startsWith('/api/platform/video')) return json({ posts, status: st });
@@ -715,7 +720,7 @@ describe('Queue', () => {
       ).toBe(true),
     );
     await user.click(within(card).getByRole('button', { name: 'Retry YouTube' }));
-    await waitFor(() => expect(calls.some((c) => c.url.endsWith(`/${id}/retry-upload`))).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith(`/${id}/shares/youtube/retry`))).toBe(true));
   });
 
   it('lists past posts with their links', async () => {
@@ -779,5 +784,151 @@ describe('status strip', () => {
     ];
     wrap(<PlatformVideo />);
     expect((await screen.findByTestId('video-alert')).textContent).toContain('slipped');
+  });
+});
+
+describe('Core 5: destinations', () => {
+  const channel = (network: 'instagram' | 'tiktok', connected = false) => ({
+    network,
+    connected,
+    accountName: connected ? 'acct' : null,
+    status: (connected ? 'ok' : 'disconnected') as 'ok' | 'disconnected',
+    expiresAt: null,
+    connectedAt: null,
+  });
+
+  it('Social sharing has an Instagram row (account id and Page token) and a TikTok row with Connect and the audit tick', async () => {
+    wrap(
+      <SocialPanel
+        failedShares={0}
+        needReconnect={[]}
+        channels={[channel('instagram'), channel('tiktok', true)]}
+      />,
+    );
+    const ig = screen.getByTestId('social-instagram');
+    expect(ig.textContent).toContain('instagram_content_publish');
+    expect(within(ig).getByLabelText('Instagram account id')).toBeTruthy();
+    expect(within(ig).getByLabelText('Access token')).toBeTruthy();
+    const tt = screen.getByTestId('social-tiktok');
+    expect(within(tt).getByTestId('tiktok-connect').getAttribute('href')).toBe(
+      '/api/platform/social/tiktok/connect',
+    );
+    expect(tt.textContent).toContain('posts privately until the app is audited');
+    const audited = within(tt).getByTestId('tiktok-audited') as HTMLInputElement;
+    await waitFor(() => expect(audited.disabled).toBe(false));
+    expect(audited.checked).toBe(false);
+    await userEvent.setup().click(audited);
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'PATCH' &&
+            c.url === '/api/platform/video/settings' &&
+            c.body === '{"tiktokAudited":true}',
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('the Queue offers a retry for each failed destination, not only YouTube', async () => {
+    const id = '66666666-6666-4666-8666-666666666666';
+    const sch = defaultSchedule(0, 7);
+    st = status({ settings: { ...st.settings, schedule: sch } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'facebook', 'x'],
+        phase: 'partial',
+        shares: [
+          { network: 'facebook', status: 'failed', url: null, error: 'HTTP 400' },
+          { network: 'x', status: 'sent', url: 'https://x.com/i/web/status/1', error: null },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).queryByTestId('retry-x')).toBeNull();
+    await user.click(within(card).getByTestId('retry-facebook'));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/shares/facebook/retry`,
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('share links are shown only for https addresses', async () => {
+    const { safeHref } = await import('../lib/video-schedule.ts');
+    expect(safeHref('https://x.com/i/web/status/1')).toBe('https://x.com/i/web/status/1');
+    expect(safeHref('javascript:alert(1)')).toBeNull();
+    expect(safeHref('http://plain.example.com')).toBeNull();
+    expect(safeHref(null)).toBeNull();
+  });
+
+  it('the strip says what a missing worker means, per role, and the waiting wording matches the server', async () => {
+    st = status({
+      worker: { running: false, lastSeen: null },
+      render: { running: true, lastSeen: null },
+      publish: { running: false, lastSeen: '2026-10-29T08:00:00.000Z' },
+    });
+    posts = [
+      video({
+        status: 'approved',
+        slotAt: '2026-11-02T08:00:00.000Z',
+        phase: 'rendered',
+        shares: [{ network: 'facebook', status: 'pending', url: null, error: 'waiting for the video file' }],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const down = await screen.findByTestId('video-worker-down');
+    expect(down.textContent).toContain('Publish worker is offline');
+    expect(down.textContent).toContain('Nothing is uploaded or posted');
+    expect(down.textContent).not.toContain('Render worker is offline');
+    expect((await screen.findByTestId('video-alert')).textContent).toContain('waiting for the rendered file');
+  });
+
+  it('the Schedule step starts from the captions stored with the post', async () => {
+    const { normalizeCreator } = await import('../api/queries/video.ts');
+    // the shape of GET /api/platform/social/tiktok/creator-info
+    expect(
+      normalizeCreator({
+        nickname: 'GW',
+        username: 'gw',
+        avatarUrl: null,
+        privacyLevelOptions: ['SELF_ONLY'],
+        commentDisabled: false,
+        duetDisabled: true,
+        stitchDisabled: false,
+        maxVideoPostDurationSec: 600,
+        canPost: true,
+        audited: false,
+      }),
+    ).toMatchObject({
+      privacyOptions: ['SELF_ONLY'],
+      maxDurationSeconds: 600,
+      duetDisabled: true,
+      canPost: true,
+      audited: false,
+    });
+    withShort(['youtube', 'facebook']);
+    posts = [
+      shortVideo({ captions: { facebook: { text: 'Drafter wrote this for Facebook', tags: ['ai'] } } }),
+    ];
+    wrap(<PlatformVideo />);
+    await userEvent.setup().click(await screen.findByTestId('video-open-my-short-short'));
+    const step = await screen.findByTestId('schedule-step');
+    await waitFor(() => expect(step.textContent).toContain('Facebook'));
+    const box = within(step)
+      .getAllByRole('textbox')
+      .find((el) => (el as HTMLTextAreaElement).value.includes('Drafter wrote this'));
+    expect(box).toBeTruthy();
   });
 });

@@ -53,20 +53,25 @@ const TONE = { draft: 'neutral', in_review: 'warning', approved: 'success', reje
 
 /** Problems that stop the push, always visible above the tabs. */
 function Problems({ status }: { status: VideoStatus }) {
-  const down = workerStates(status.worker).filter((w) => !w.running);
+  const down = workerStates(status).filter((w) => !w.running);
+  const effect = (label: string) =>
+    label === 'Render worker'
+      ? 'Scheduled videos are not rendered, so they slip to a later slot.'
+      : label === 'Publish worker'
+        ? 'Nothing is uploaded or posted to the destinations, and finished files are not cleaned up.'
+        : 'Nothing is rendered, uploaded or posted.';
   return (
     <>
       {down.length > 0 && (
         <Callout tone="warning" title="Video worker not running" role="alert" data-testid="video-worker-down">
-          Nothing is{' '}
-          {down.length === 1 && down[0]?.label === 'Render worker' ? 'rendered' : 'rendered or uploaded'}{' '}
-          until the video worker runs (the Docker Compose profile <code>video</code>; see the deploy guide).
-          {down.length > 1 || down[0]?.label === 'Video worker'
-            ? ''
-            : ` Offline: ${down.map((w) => w.label).join(', ')}.`}
-          {down[0]?.lastSeen
-            ? ` Last seen ${formatDateTime(down[0].lastSeen)}.`
-            : ' It has never reported in.'}
+          {down.map((w) => (
+            <span key={w.label} className="block">
+              {w.label} is offline
+              {w.lastSeen ? ` (last seen ${formatDateTime(w.lastSeen)})` : ' (it has never reported in)'}.{' '}
+              {effect(w.label)}
+            </span>
+          ))}
+          Start the worker (the Docker Compose profile <code>video</code>; see the deploy guide).
         </Callout>
       )}
       {!status.channel.connected && (
@@ -591,7 +596,7 @@ export function PlatformVideo() {
                   <PostRow
                     key={p.id}
                     p={p}
-                    workerRunning={workerStates(d.status.worker).every((w) => w.running)}
+                    workerRunning={workerStates(d.status).every((w) => w.running)}
                     status={d.status}
                   />
                 ))}

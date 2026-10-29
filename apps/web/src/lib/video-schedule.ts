@@ -1,12 +1,12 @@
 import {
   addLocalDays,
   composeCaption,
+  defaultVideoCaption,
   graphemeCount,
   localDate,
   VIDEO_CAPTION_LIMITS,
   type VideoDestination,
   type VideoPhase,
-  type VideoPostMeta,
   type VideoSchedule,
   WEEKDAYS,
   type Weekday,
@@ -87,16 +87,7 @@ export interface Caption {
   tags: string[];
 }
 /** The caption the owner starts from for a destination: the description's hook and the hashtags (no link). */
-export function defaultCaption(
-  dest: VideoDestination,
-  meta: Pick<VideoPostMeta, 'title' | 'description' | 'hashtags'>,
-): Caption {
-  const tags = meta.hashtags.map((h) => h.replace(/^#/, '')).filter(Boolean);
-  const max = VIDEO_CAPTION_LIMITS[dest].tags[1];
-  const text =
-    dest === 'x' || dest === 'bluesky' ? meta.title : `${meta.title}\n\n${meta.description}`.trim();
-  return { text, tags: tags.slice(0, max) };
-}
+export const defaultCaption = defaultVideoCaption;
 
 const UNLIMITED = { total: 1_000_000, text: 1_000_000, title: 1_000_000 };
 export function limitOf(dest: VideoDestination): number {
@@ -139,3 +130,7 @@ export const PHASE_TONE: Record<VideoPhase, 'neutral' | 'info' | 'success' | 'wa
   failed: 'danger',
   rejected: 'danger',
 };
+
+/** A share or upload URL is shown as a link only when it is https (a stored value is never trusted to be a safe scheme). */
+export const safeHref = (url: string | null | undefined): string | null =>
+  url && /^https:\/\//i.test(url) ? url : null;
