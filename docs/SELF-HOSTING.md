@@ -344,6 +344,14 @@ same `AOM_VIDEO_WORKER_TOKEN` (a long random string) here, and the publish worke
 (default 4610, internal network only; the bundled Caddy forwards `/api/worker/video/*` to it). See docs/VIDEO-RENDERER.md "Worker roles and the artifact push". Default
 `AOM_VIDEO_ROLE=all` keeps one worker doing both.
 
+**Short destinations.** Shorts can also go to Facebook (Reels), Instagram (Reels), X, LinkedIn, Bluesky and TikTok (docs/BLOG-API.md,
+"Short destinations"): the publish worker posts them at the slot. They need nothing but the accounts connected under Social sharing,
+except TikTok, which needs a developer app: set `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET` (app and worker), register
+`https://<your host>/api/platform/social/tiktok/callback` as its redirect URI and verify your domain in the app. TikTok pulls the
+video from `https://<your host>/api/public/video-media/...` (a signed link that lives under 2 hours), so `AOM_PUBLIC_ORIGIN` must
+be your public HTTPS address, the app must be able to read the video volume, and `AOM_SECRET_KEY` must be the same on the app and the worker.
+`AOM_VIDEO_PUSH_URL` now requires `AOM_VIDEO_WORKER_TOKEN`: the server refuses to start with one and not the other.
+
 The `video` volume must be writable by the worker (uid 1000, user `node`). The app image creates `/data/video` owned by `node`, so a
 new volume is right. A volume that already exists (made by an older image) is root-owned and the worker fails with `EACCES`; fix it once:
 `docker run --rm -v <project>_video:/data/video alpine chown 1000:1000 /data/video` (`docker volume ls` shows the name).

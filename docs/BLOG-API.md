@@ -382,8 +382,7 @@ the release version, a Video topic id or `lib:<help video slug>`; a Short has `p
 lock (`409 slot_taken`). `video_renders` is operational (queue, `not_before`, `preview`,
 lease, attempts, artifacts; survives a projection rebuild). The upload is a `social_shares` row (`network youtube`, `source video`,
 `detail` jsonb) so a second upload is impossible; its statuses add `locked_private`. Every other destination of a Short gets a
-`social_shares` row too (`source video`), kept `skipped` with the reason "not available yet" until its adapter ships: it is never
-failed. Instagram and TikTok are destinations only; they are not in `SOCIAL_NETWORKS`. The derived `phase` of a post
+`social_shares` row too (`source video`), posted by the publish worker at the slot (see "Short destinations" below). Instagram and TikTok are destinations only; they are not in `SOCIAL_NETWORKS` (they are in `SOCIAL_CHANNEL_NETWORKS`, so they have a channel in Social sharing). The derived `phase` of a post
 (`scripted`, `in_review`, `scheduled`, `rendering`, `rendered`, `publishing`, `published`, `partial`, `failed`, `rejected`) is in the API.
 
 **Data.** Event-sourced `VideoPostSubmitted`, `VideoPostRevised`, `VideoPostApproved`, `VideoPostRejected` (stream `video-<id>`),
@@ -391,6 +390,99 @@ projection `video_posts` (one per `kind` `article|release|tutorial`, `ref` and `
 the release version, a Video topic id or `lib:<help video slug>`; a Short has `parentId`). `video_renders` is operational (queue,
 lease, attempts, artifacts; survives a projection rebuild). The upload is a `social_shares` row (`network youtube`, `source video`,
 `detail` jsonb) so a second upload is impossible; its statuses add `locked_private`.
+
+
+### Short destinations (Facebook Reels, Instagram Reels, X, LinkedIn, Bluesky, TikTok)
+
+A Short can go to more networks than YouTube. The Schedule step lists the destinations of the schedule's `short.destinations`
+that are connected; each gets a caption of its own. `video_posts.captions` holds them per destination `{ text, tags }`: the
+drafter's (the optional `captions` of `POST /api/platform/video/posts`, stored with `VideoPostSubmitted`, shown as the defaults
+in the Schedule step), over which the owner's edits at scheduling are merged per destination; with neither, a default is built
+from the title, description and hashtags. The caption is composed to the destination's limits (`VIDEO_CAPTION_LIMITS`: Facebook
+500, LinkedIn 700, X 256, Bluesky 300 graphemes, Instagram and TikTok 2,200) and **never carries a link** (X charges $0.20
+instead of $0.015 for a post with a URL, TikTok forbids promotional links, and a Short has no page of its own). Unscheduling a
+post clears what the owner edited at scheduling and the TikTok options; the drafter's captions stay.
+
+**When it posts.** Once the render exists, the publish worker creates one `social_shares` row per destination (`source video`):
+`pending` with `next_attempt_at` = the slot (now for "publish now"), or `skipped` ("not connected") when the network has no
+channel. At the slot the worker posts them (a handful per pass; each is claimed `posting` before the call). A destination that
+fails with a rate limit, a 5xx or a network error backs off 1, 5, 30 and then every 120 minutes until **6 hours after the slot**,
+then it is `failed` and the super admins are mailed once per channel. A video the network refuses (`final`) fails at once. An
+authentication error sets the channel to `needs_reconnect`, keeps the share waiting and mails once; after you reconnect the share
+is posted if its window is still open. A destination that needs time to process (Instagram, TikTok, X, LinkedIn, Bluesky) is
+polled again later without counting as a failure, and its progress (upload session, container, media id, publish id) is kept in
+`social_shares.detail.dest`, so a retry resumes and never uploads twice. A file that has not reached the publish worker yet shows
+"waiting for the video file" and is waited for until the window closes. The post phase is `partial` when some destinations
+were sent and others failed. The MP4 is removed only when every destination is `sent` or `skipped` (and the video is public / the
+slot is 6 hours past), or 3 days after a failure. **Retry one destination:** `POST /api/platform/video/posts/{id}/shares/{network}/retry`
+(super admin; `network` is one of the seven; `404` when the post has no such destination, `409 not_failed` unless it is `failed`
+or `skipped`, `409 video_purged` when the file is gone and cannot be rendered again). A retry of a destination other than YouTube
+starts from scratch and opens a new 6-hour window; if the clean-up already removed the MP4 the same revision renders again first.
+
+**Setup and scopes per network.** Connect each under Platform > Blog > Posts > Social sharing.
+- *Facebook (Reels of the Page)*: the existing Page access token needs `pages_show_list`, `pages_read_engagement` and `pages_manage_posts`.
+  Flow: `POST /{page}/video_reels` `upload_phase=start`, the file to `rupload.facebook.com/video-upload/{version}/{video_id}` (headers
+  `Authorization: OAuth <token>`, `offset`, `file_size`), then `upload_phase=finish` `video_state=PUBLISHED` with the caption.
+  Reels are 9:16, 3 to 90 seconds, at least 540x960, 24 to 60 fps; 30 API-published reels per 24 hours. The documentation says the
+  publish step is `complete` in prose and `finish` in every example: the code uses `finish`. Unverified: that `pages_manage_posts`
+  is available at Standard Access for a Page you own without app review.
+- *Instagram (Reels)*: the id of the Instagram professional account linked to your Page and that **Page's** access token with
+  `instagram_basic`, `instagram_content_publish` and `pages_read_engagement` (re-issue the token if it was made without them). It
+  is checked with the Graph API when you connect. Flow: `POST /{ig-user}/media` `media_type=REELS&upload_type=resumable`, the file
+  to `rupload.facebook.com/ig-api-upload/{version}/{container}`, poll `status_code` until `FINISHED` (about every 10 seconds, then
+  again later), `POST /{ig-user}/media_publish`. 100 API-published posts per 24 hours (an earlier figure of 50 is not what the
+  documentation says now). Unverified: Meta documents `upload_type=resumable` under "Facebook Login for Business"; it is used with
+  a Page token here and the first real post will show whether the app type allows it.
+- *X*: the existing OAuth 1.0a keys. Flow: `POST /2/media/upload/initialize` (`media_type video/mp4`, `media_category tweet_video`),
+  `/append` in 4 MB multipart segments, `/finalize`, wait for `processing_info`, then `POST /2/tweets` with `media.media_ids`.
+  **Unverified and likely the weak point**: the X documentation shows only user access tokens (OAuth 2.0) for the v2 media
+  endpoints and never says OAuth 1.0a works. If X answers 401 or 403 the share fails with a message saying so (and, as an
+  authentication error, pauses the channel); the fix is an OAuth 2.0 user token with the `media.write` scope, which this version
+  does not store. Video up to 20 minutes or 8 GB; X is pay-per-use ($0.015 a post without a link); a 402 means the credits are used up.
+- *LinkedIn (organization video)*: the existing token with `w_organization_social`. `POST /rest/videos?action=initializeUpload` as
+  `urn:li:organization:<id>`, a PUT per part (4 MB) keeping each ETag, `finalizeUpload`, wait for `AVAILABLE`, `POST /rest/posts`
+  with `content.media.id`. `Linkedin-Version: 202610`. 3 seconds to 30 minutes, 75 KB to 500 MB (the reference says 5 GB for the
+  initialize call and 500 MB in the specifications; the code refuses over 500 MB).
+- *Bluesky*: the existing handle and app password. `getUploadLimits` is checked first (the daily quota is a "try again later", not a
+  failure), then `com.atproto.server.getServiceAuth` for the account's PDS (`lxm com.atproto.repo.uploadBlob`), `uploadVideo` on
+  `video.bsky.app`, `getJobStatus` until `JOB_STATE_COMPLETED`, then the post with `app.bsky.embed.video`. Unverified: that an app
+  password session may mint those service tokens; if Bluesky refuses, the share fails with that message.
+- *TikTok*: see below.
+
+**TikTok.** TikTok needs a developer app (developers.tiktok.com), not pasted tokens.
+1. Create the app with **Login Kit** and the **Content Posting API** (Direct Post), scopes `user.info.basic` and `video.publish`;
+   redirect URI exactly `https://<your host>/api/platform/social/tiktok/callback`; verify your domain (and the video URL prefix
+   `https://<your host>/api/public/video-media/`) in the app, because TikTok only pulls videos from verified prefixes.
+2. Set `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET` on the server and the worker, then press **Connect TikTok** in
+   Social sharing (`GET /api/platform/social/tiktok/connect` redirects to TikTok with a state kept on the server for 10 minutes;
+   `/callback` swaps the code, stores the tokens encrypted and the account's `open_id`, and checks the creator info).
+   The access token (24 hours) is renewed before it ends; TikTok may send a new refresh token (valid 365 days) with every renewal and
+   the newest is always kept. Reconnect within a year of the last use.
+3. **Audit.** Until TikTok audits the app every post must be private (`SELF_ONLY`; TikTok answers
+   `unaudited_client_can_only_post_to_private_accounts` otherwise). The setting `tiktokAudited` (default false, a tick in the
+   TikTok row of Social sharing, `PATCH /api/platform/video/settings`) says the audit passed. While it is false the creator-info
+   route offers only `SELF_ONLY`, scheduling a public TikTok post is `400 tiktok_not_audited` and the worker refuses one. TikTok's
+   guidelines also list "internal or test tools for posting to your own accounts" as not allowed: confirm with TikTok before
+   applying for the audit.
+4. **Every TikTok post needs the owner's choices**: scheduling a Short that goes to TikTok (including when TikTok is only the
+   schedule's default) without `destinationOptions.tiktok` is `400 tiktok_options_required`; the options carry the privacy (no
+   default, one of the creator's `privacy_level_options`), comment/duet/stitch (off unless ticked), the commercial-content
+   disclosure and the consent tick. At the slot the worker asks TikTok for the creator info again and never sends a privacy level
+   or a duration TikTok does not allow.
+5. `GET /api/platform/social/tiktok/creator-info` (super admin) returns `{ nickname, username, avatarUrl, privacyLevelOptions,
+   commentDisabled, duetDisabled, stitchDisabled, maxVideoPostDurationSec, canPost, audited }`; `400 tiktok_not_configured`,
+   `404 tiktok_not_connected`, `409 tiktok_reconnect`.
+The video is posted with `PULL_FROM_URL`: TikTok downloads it from the signed media URL below. Public posts are checked by TikTok
+first (minutes to hours): the share stays `pending` ("TikTok is still processing the video") until TikTok reports
+`PUBLISH_COMPLETE`.
+
+**The signed media URL.** `GET /api/public/video-media/{renderId}/{exp}/{sig}/video.mp4` serves the rendered MP4 of an approved
+post to whoever holds a valid link: `sig` = base64url HMAC-SHA256 (a key derived from `AOM_SECRET_KEY`) of
+`video-media|{renderId}|{exp}`, `exp` = Unix seconds and at most 2 hours ahead (links are made for 90 minutes), compared in
+constant time. Anything else (wrong or expired signature, a link that would live over 2 hours, a purged render, a post that is not
+approved, a missing file) is the same `404`. It supports `Range` and `HEAD`, never redirects, sends `Cache-Control: no-store` and
+`X-Robots-Tag: noindex`, and logs every fetch (render id, outcome, address, user agent, range). The app must be able to read the
+video volume (read-only is fine) and `AOM_PUBLIC_ORIGIN` must be the public HTTPS origin.
 
 **The one gate: the script.** Nothing is rendered when a script is submitted or edited. The super admin reads the script and
 the metadata, edits what is wrong (a change to the script, title, description or hashtags is a new revision; tags and privacy
