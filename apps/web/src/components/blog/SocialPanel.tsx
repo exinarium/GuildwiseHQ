@@ -64,9 +64,9 @@ export function SocialPanel({
   return (
     <Panel title="Social sharing" data-testid="social-panel">
       <p className="mb-3 text-sm text-muted">
-        Published articles are shared automatically to Facebook, LinkedIn, X and Bluesky. YouTube is only for
-        the videos you approve. Tokens are stored encrypted and never shown again. Unpublishing an article
-        does not delete what was shared.
+        Published articles are shared automatically to Facebook, LinkedIn, X and Bluesky. YouTube, Instagram
+        and TikTok are only for the videos and Shorts you schedule. Tokens are stored encrypted and never
+        shown again. Unpublishing an article does not delete what was shared.
       </p>
       {tiktokResult && (
         <Callout

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildDescription,
   chapterStamp,
@@ -149,6 +149,14 @@ describe('description builder', () => {
     expect(d).toContain('Narrated with a synthetic voice.');
     expect(d.trim().endsWith(s.meta.hashtags.join(' '))).toBe(true);
     expect(Buffer.byteLength(d)).toBeLessThanOrEqual(VIDEO_LIMITS.youtube.descriptionBytes);
+  });
+  it('works without the Node Buffer (the review panel builds it in the browser)', () => {
+    vi.stubGlobal('Buffer', undefined);
+    try {
+      expect(() => buildDescription({ ...s, kind: 'article', ref: 'my-post' }, chapters, 72)).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it('omits chapters that cannot satisfy YouTube and links releases', () => {
     const d = buildDescription({ ...s, kind: 'release', ref: '1.2.0' }, chapters.slice(0, 2), 72);

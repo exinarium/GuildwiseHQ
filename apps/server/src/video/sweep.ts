@@ -47,7 +47,8 @@ import { watchUrl, YouTubeError } from './youtube.ts';
 /**
  * The video worker's loop (`video-worker --loop`, a separate container): one pass does, in this order,
  *   1. a heartbeat (the UI shows "video worker not running" when it is stale),
- *   2. nothing else unless a YouTube channel is connected (status ok) AND `videoPosts.enabled`,
+ *   2. nothing else unless a YouTube channel is connected (status ok) AND `videoPosts.enabled` (with no channel only an
+ *      explicit preview renders),
  *   3. the watch (a post that will not be rendered in time slips to the next slot, alerts), 4. the rendered posts get
  *   their destination rows, 5. ONE render is claimed (a lease, 3 attempts, one at a time; only a scheduled post whose
  *   `not_before` has passed, or an explicit preview), 6. ONE upload at a time (YouTube, `publishAt` = the slot),
@@ -151,13 +152,14 @@ const CLAIMABLE = `NOT x.library AND p.script IS NOT NULL
        OR (x.status='rendering' AND x.lease_until < $1))
   AND x.attempts < $2`;
 
-async function claimRender(ctx: Ctx): Promise<Row | undefined> {
+async function claimRender(ctx: Ctx, previewsOnly = false): Promise<Row | undefined> {
   const now = ctx.clock.now();
+  const claimable = previewsOnly ? `${CLAIMABLE} AND x.preview` : CLAIMABLE;
   // the disk budget: nothing starts while the rendered videos on disk plus room for one more pass the limit
   const waiting = await one(
     ctx.pool,
     `SELECT 1 AS x FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-      WHERE ${CLAIMABLE} LIMIT 1`,
+      WHERE ${claimable} LIMIT 1`,
     [now, VIDEO_POST_LIMITS.maxAttempts],
   );
   if (!waiting) return undefined;
@@ -182,7 +184,7 @@ async function claimRender(ctx: Ctx): Promise<Row | undefined> {
       `UPDATE video_renders r SET status='rendering', lease_until=$3, attempts=r.attempts+1, error=NULL
         WHERE r.id = (
           SELECT x.id FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-           WHERE ${CLAIMABLE}
+           WHERE ${claimable}
              AND NOT EXISTS (SELECT 1 FROM video_renders y WHERE y.status='rendering' AND y.lease_until >= $1)
            ORDER BY x.not_before NULLS FIRST, p.slot_at NULLS LAST, x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
         RETURNING r.*`,
@@ -198,9 +200,9 @@ async function claimRender(ctx: Ctx): Promise<Row | undefined> {
   }
 }
 
-/** Claims and renders one queued render. Returns true when it did something. */
-export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolean> {
-  const r = await claimRender(ctx);
+/** Claims and renders one queued render (only previews with `previewsOnly`). Returns true when it did something. */
+export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = false): Promise<boolean> {
+  const r = await claimRender(ctx, previewsOnly);
   if (!r) return false;
   const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [r.post_id]);
   const root = ctx.config.videoDir;
@@ -1310,7 +1312,13 @@ export async function videoTick(
   const doPublish = role !== 'render';
   if (doRender) await beatHeartbeat(ctx, 'render');
   if (doPublish) await beatHeartbeat(ctx, 'publish');
-  if (!(await videoActive(ctx))) return { active: false, rendered: false, uploaded: false, cleaned: 0 };
+  if (!(await videoActive(ctx))) {
+    // no channel yet: a preview the owner asked for still renders (it uploads nothing), so the script can be checked
+    // before YouTube is connected; scheduled renders wait for the channel
+    const rendered =
+      doRender && (await videoSettings(ctx)).enabled ? await renderNext(ctx, deps, true) : false;
+    return { active: false, rendered, uploaded: false, cleaned: 0 };
+  }
   if (doPublish) {
     await healRenders(ctx);
     await videoWatch(ctx).catch((err) => ctx.log.error({ err }, 'video watch failed'));

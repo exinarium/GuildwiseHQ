@@ -175,6 +175,46 @@ describe('worker roles', () => {
   });
 });
 
+describe('no YouTube channel yet', () => {
+  it('a preview still renders (nothing is uploaded); a scheduled render waits for the channel', async () => {
+    await clean();
+    const scheduled = await newPost('no-channel-scheduled');
+    const draft = await ok(
+      api('POST', '/api/platform/video/posts', {
+        kind: 'tutorial',
+        format: 'long',
+        ref: 'no-channel-preview',
+        script: { ...LONG, kind: 'tutorial', ref: 'no-channel-preview' },
+      }),
+      201,
+    );
+    await ok(api('POST', `/api/platform/video/posts/${draft.id}/preview`));
+    const saved = await q(`SELECT * FROM social_channels WHERE network='youtube'`);
+    await q(`DELETE FROM social_channels WHERE network='youtube'`);
+    try {
+      const out = await videoTick(t.app.ctx, { render: fakeRender });
+      expect(out).toMatchObject({ active: false, rendered: true, uploaded: false });
+      expect(await q('SELECT status FROM video_renders WHERE post_id=$1', [draft.id])).toEqual([
+        { status: 'rendered' },
+      ]);
+      expect(await q('SELECT status FROM video_renders WHERE post_id=$1', [scheduled.id])).toEqual([
+        { status: 'queued' },
+      ]);
+      // nothing more to do: the scheduled one is not claimed
+      expect((await videoTick(t.app.ctx, { render: mustNotRender })).rendered).toBe(false);
+      // videos off: not even a preview
+      await ok(api('PATCH', '/api/platform/video/settings', { enabled: false }));
+      expect((await videoTick(t.app.ctx, { render: mustNotRender })).rendered).toBe(false);
+    } finally {
+      await ok(api('PATCH', '/api/platform/video/settings', { enabled: true }));
+      await ok(
+        api('PUT', '/api/platform/social/channels/youtube', { refreshToken: '1//0g-refresh-token-value' }),
+      );
+      expect(saved).toHaveLength(1);
+    }
+  });
+});
+
 describe('push endpoint', () => {
   const sha = (b: string) => createHash('sha256').update(b).digest('hex');
   let renderId: string;

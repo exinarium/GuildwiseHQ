@@ -263,7 +263,7 @@ function SubmitByHand({ onDone }: { onDone: () => void }) {
               onClick={go}
               data-testid="video-script-submit"
             >
-              Add and render
+              Add for review
             </Button>
           </div>
         </div>
@@ -296,9 +296,11 @@ function LibraryButton({ enabled }: { enabled: boolean }) {
         Library: import help videos{todo ? ` (${todo})` : ''}
       </Button>
       <span className="text-xs text-muted">
-        {lib.data?.videos.length
-          ? 'Each existing help video becomes a tutorial draft; its recorded MP4 is uploaded as it is.'
-          : 'No help videos found on this server.'}
+        {!enabled
+          ? 'Switch videos on to import the help videos.'
+          : lib.data?.videos.length
+            ? 'Each existing help video becomes a tutorial draft; its recorded MP4 is uploaded as it is.'
+            : 'No help videos found on this server.'}
       </span>
       <ErrorBox error={imp.error} />
     </div>

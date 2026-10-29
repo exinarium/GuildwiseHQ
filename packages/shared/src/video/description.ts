@@ -56,7 +56,8 @@ export function buildDescription(
   if (usable) parts.push(kept.map((c) => `${chapterStamp(c.start)} ${c.title}`).join('\n'));
   parts.push(`Source code: ${REPO_URL}`, SYNTHETIC_VOICE_LINE, script.meta.hashtags.join(' '));
   let out = parts.join('\n\n');
-  if (Buffer.byteLength(out) > VIDEO_LIMITS.youtube.descriptionBytes) {
+  // TextEncoder, not Buffer: this runs in the browser too (the review panel)
+  if (new TextEncoder().encode(out).length > VIDEO_LIMITS.youtube.descriptionBytes) {
     const hook = script.meta.description.trim().slice(0, 800);
     out = [hook, ...parts.slice(1).filter((p) => !p.startsWith('00:00'))].join('\n\n');
   }
