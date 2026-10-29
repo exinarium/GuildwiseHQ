@@ -142,6 +142,8 @@ const EnvSchema = z.object({
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
   AOM_YOUTUBE_CLIENT_ID: z.string().optional(),
   AOM_YOUTUBE_CLIENT_SECRET: z.string().optional(),
+  AOM_TIKTOK_CLIENT_KEY: z.string().optional(),
+  AOM_TIKTOK_CLIENT_SECRET: z.string().optional(),
   AOM_VIDEO_DIR: z.string().optional(),
   /** Which half of the video pipeline this worker runs: render, publish, or all (default). */
   AOM_VIDEO_ROLE: z.enum(['render', 'publish', 'all']).default('all'),
@@ -259,6 +261,9 @@ export interface Config {
   /** OAuth client of the Google Cloud project that owns the YouTube channel's refresh token. */
   youtubeClientId: string | undefined;
   youtubeClientSecret: string | undefined;
+  /** The TikTok developer app (Login Kit + Content Posting API): AOM_TIKTOK_CLIENT_KEY / AOM_TIKTOK_CLIENT_SECRET. */
+  tiktokClientKey: string | undefined;
+  tiktokClientSecret: string | undefined;
   /** Where rendered videos live (rw in the video worker, ro in the app). */
   videoDir: string;
   /** The disk budget of rendered videos in bytes (AOM_VIDEO_MAX_BYTES, default 5 GB). */
@@ -297,6 +302,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (e.NODE_ENV === 'production' && !e.AOM_SECRET_KEY)
     throw new Error(
       'AOM_SECRET_KEY is required in production: set it to a long random string (for example `openssl rand -base64 32`) and keep it with your backups.',
+    );
+  if (e.AOM_VIDEO_PUSH_URL && !e.AOM_VIDEO_WORKER_TOKEN)
+    throw new Error(
+      'AOM_VIDEO_PUSH_URL needs AOM_VIDEO_WORKER_TOKEN: the render worker authenticates its push to the publish worker with it.',
     );
   const publicOrigin = e.AOM_PUBLIC_ORIGIN.replace(/\/+$/, '');
   return {
@@ -351,6 +360,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
     youtubeClientId: e.AOM_YOUTUBE_CLIENT_ID || undefined,
     youtubeClientSecret: e.AOM_YOUTUBE_CLIENT_SECRET || undefined,
+    tiktokClientKey: e.AOM_TIKTOK_CLIENT_KEY || undefined,
+    tiktokClientSecret: e.AOM_TIKTOK_CLIENT_SECRET || undefined,
     videoDir: e.AOM_VIDEO_DIR || '/data/video',
     videoMaxBytes: e.AOM_VIDEO_MAX_BYTES,
     videoRole: e.AOM_VIDEO_ROLE,

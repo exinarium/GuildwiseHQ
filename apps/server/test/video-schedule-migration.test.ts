@@ -167,6 +167,19 @@ beforeAll(async () => {
     publishAt: '2026-10-30T08:00:00.000Z',
     privacy: 'public',
   });
+  // an approved library import that was never uploaded: a long video like any other, it gets the next free long slot
+  const waitingLib = await submitted('waiting-lib', 'lib:tasks', { kind: 'tutorial', lib: true });
+  await insertLibraryRender(
+    t.app.ctx,
+    waitingLib,
+    { slug: 'tasks', title: 'Tasks', duration: 60, vtt: true, chapters: [] },
+    1,
+  );
+  await oldApprove(
+    waitingLib,
+    (await q('SELECT id FROM video_renders WHERE post_id=$1', [waitingLib]))[0]?.id,
+  );
+  await share(waitingLib, 'pending', { reservedAt: '2026-10-28T13:00:00.000Z', privacy: 'public' });
   // two in review: a finished render, a render that was only queued
   const done = await submitted('rendered-review', 'review-rendered', { origin: true });
   await render(done, 'rendered');
@@ -182,7 +195,7 @@ describe('video-schedule-2026-10', () => {
   it('gives each approved post its slot, makes finished reviews previews and defers unfinished renders', async () => {
     await q('DELETE FROM data_migrations WHERE name = $1', [VIDEO_SCHEDULE_MIGRATION]);
     const report = await migrateVideoSchedule(env());
-    expect(report?.scheduled.map((s) => s.step).sort()).toEqual(['uploaded', 'waiting']);
+    expect(report?.scheduled.map((s) => s.step).sort()).toEqual(['uploaded', 'waiting', 'waiting']);
     const post = async (key: string) => (await q('SELECT * FROM video_posts WHERE id=$1', [ids[key]]))[0];
 
     // lib:overview keeps the slot it has on YouTube
@@ -198,6 +211,11 @@ describe('video-schedule-2026-10', () => {
     expect(detail.publishAt).toBeUndefined();
     expect(detail.reservedAt).toBeUndefined();
     expect(detail.privacy).toBe('public');
+    // the approved, never uploaded library import gets a long slot of its own, different from the other's
+    const lib = await post('waiting-lib');
+    expect(lib).toMatchObject({ status: 'approved', publish_mode: 'slot' });
+    expect(new Date(lib?.slot_at).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(lib?.slot_at).getTime()).not.toBe(new Date(waiting?.slot_at).getTime());
     // its existing render is kept (rendered)
     expect((await q('SELECT status FROM video_renders WHERE post_id=$1', [ids.waiting]))[0]?.status).toBe(
       'rendered',
@@ -252,6 +270,6 @@ describe('video-schedule-2026-10', () => {
     const before = await q(`SELECT ${cols} FROM video_posts ORDER BY id`);
     await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
     expect(await q(`SELECT ${cols} FROM video_posts ORDER BY id`)).toEqual(before);
-    expect(before.filter((r) => r.slot_at)).toHaveLength(2);
+    expect(before.filter((r) => r.slot_at)).toHaveLength(3);
   });
 });

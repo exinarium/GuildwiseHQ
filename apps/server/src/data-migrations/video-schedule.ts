@@ -9,8 +9,8 @@ import type { DataMigrationEnv } from './orgs.ts';
  * the script, give it a slot, render just before it". Existing posts are brought over:
  *  1. an approved post whose YouTube upload is done (sent, locked private, or a video id exists) gets the slot its video
  *     has on YouTube (`detail.publishAt`, else the upload time) as a `VideoPostScheduled` ('migrated');
- *  2. an approved post still waiting to upload gets the next free slot of its format, in approval order; its render is
- *     already there, and the slot it had reserved in the share is dropped (the slot now comes from the post);
+ *  2. an approved post still waiting to upload (a library `lib:` import included: it is a long video on the schedule like
+ *     any other) gets the next free slot of its format, in approval order; its render is already there, and the slot it had reserved in the share is dropped (the slot now comes from the post);
  *  3. a post in review whose video is rendered keeps it as a preview (reused if the script is unchanged at scheduling,
  *     the MP4 removed after 7 days without activity);
  *  4. a post in review whose render was only queued or running: that render is marked failed "renders now happen after

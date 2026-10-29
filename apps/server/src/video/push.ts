@@ -2,7 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { artifactKeyOf, renderDir } from '../commands/video-posts.ts';
@@ -19,7 +19,9 @@ import { badRequest, HttpError, notFound } from '../errors.ts';
  *     Authorization: Bearer <AOM_VIDEO_WORKER_TOKEN>   x-content-sha256: <hex>   content-length: <bytes>
  *
  * The name is one of the fixed artifact names. The body is streamed to a temp file next to the target, its size and
- * sha256 verified, then renamed into place, so a reader never sees a half-written file.
+ * sha256 verified, then renamed into place, so a reader never sees a half-written file. Two pushes of the same name at once
+ * write to their own temp files (unique names); each one is verified on its own and the last rename wins, which is safe
+ * because a render's file content is the same whichever push lands.
  */
 
 const NON_VIDEO_MAX_BYTES = 32 * 1024 * 1024;
@@ -54,7 +56,8 @@ export function videoPushRoutes(ctx: Ctx) {
         const sha = String(req.headers['x-content-sha256'] ?? '').toLowerCase();
         if (!/^[0-9a-f]{64}$/.test(sha))
           throw badRequest('bad_hash', 'x-content-sha256 must be 64 hex characters');
-        const len = Number(req.headers['content-length']);
+        // a 0-byte file may arrive with no Content-Length and no body at all
+        const len = Number(req.headers['content-length'] ?? (req.body === undefined ? 0 : Number.NaN));
         if (!Number.isInteger(len) || len < 0) throw badRequest('bad_length', 'content-length is required');
         const cap = maxPushBytes(ctx, name);
         if (len > cap) throw new HttpError(413, 'too_large', `the file is over the ${cap} byte limit`);
@@ -70,7 +73,8 @@ export function videoPushRoutes(ctx: Ctx) {
         const tmp = join(dir, `.push-${randomUUID()}.tmp`);
         const hash = createHash('sha256');
         let bytes = 0;
-        const body = req.body as Readable;
+        // a 0-byte file has no body at all (no stream is created)
+        const body = (req.body as Readable | undefined) ?? Readable.from([]);
         body.on('data', (c: Buffer) => {
           bytes += c.length;
           hash.update(c);
@@ -108,14 +112,12 @@ export async function startPushServer(
       typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500
         ? err.statusCode
         : 500;
-    return reply
-      .code(status)
-      .send({
-        error: {
-          code: status === 500 ? 'internal_error' : 'bad_request',
-          message: status === 500 ? 'internal server error' : err.message,
-        },
-      });
+    return reply.code(status).send({
+      error: {
+        code: status === 500 ? 'internal_error' : 'bad_request',
+        message: status === 500 ? 'internal server error' : err.message,
+      },
+    });
   });
   server.setNotFoundHandler((_req, reply) =>
     reply.code(404).send({ error: { code: 'not_found', message: 'not found' } }),

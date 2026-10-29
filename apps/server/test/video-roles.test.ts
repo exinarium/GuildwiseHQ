@@ -242,6 +242,37 @@ describe('push endpoint', () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it('accepts a 0-byte artifact (no body at all)', async () => {
+    const res = await put('captions.srt', '', { 'content-length': '0' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, bytes: 0 });
+    expect(readFileSync(join(videoDir, postId, '1', 'captions.srt'), 'utf8')).toBe('');
+  });
+
+  it('two pushes of one name at once: each is verified on its own, the last rename wins, no temp file is left', async () => {
+    const [a, b] = await Promise.all([put('script.json', '{"a":1}'), put('script.json', '{"a":1}')]);
+    expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+    const dir = join(videoDir, postId, '1');
+    expect(readFileSync(join(dir, 'script.json'), 'utf8')).toBe('{"a":1}');
+    expect((await import('node:fs')).readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('the clean-up removes push temp files over an hour old and keeps fresh ones', async () => {
+    const { utimesSync, writeFileSync: write } = await import('node:fs');
+    const { cleanupPushTemps } = await import('../src/video/sweep.ts');
+    const dir = join(videoDir, postId, '1');
+    const old = join(dir, '.push-old.tmp');
+    const fresh = join(dir, '.push-fresh.tmp');
+    write(old, 'x');
+    write(fresh, 'x');
+    const longAgo = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(old, longAgo, longAgo);
+    expect(await cleanupPushTemps(t.app.ctx)).toBe(1);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    (await import('node:fs')).rmSync(fresh);
+  });
+
   it('writes a good push atomically', async () => {
     const res = await put('captions.vtt', 'WEBVTT\nhello');
     expect(res.statusCode).toBe(200);
@@ -369,5 +400,21 @@ describe('a missing file for a rendered video', () => {
     )[0];
     expect(s?.status).toBe('failed');
     expect(s?.error).toMatch(/video file was not found/);
+  });
+});
+
+describe('configuration', () => {
+  it('AOM_VIDEO_PUSH_URL needs AOM_VIDEO_WORKER_TOKEN: the server refuses to start without it', async () => {
+    const { loadConfig } = await import('../src/config.ts');
+    const base = {
+      ...process.env,
+      AOM_VIDEO_PUSH_URL: 'https://video.example.com',
+      AOM_VIDEO_WORKER_TOKEN: undefined,
+    };
+    expect(() => loadConfig(base)).toThrow(/AOM_VIDEO_WORKER_TOKEN/);
+    expect(() => loadConfig({ ...base, AOM_VIDEO_WORKER_TOKEN: TOKEN })).not.toThrow();
+    expect(() =>
+      loadConfig({ ...process.env, AOM_VIDEO_PUSH_URL: undefined, AOM_VIDEO_WORKER_TOKEN: undefined }),
+    ).not.toThrow();
   });
 });

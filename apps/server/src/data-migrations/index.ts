@@ -127,8 +127,19 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {
-  for (const m of DATA_MIGRATIONS) {
-    env.log(`data migration ${m.name}`);
-    await m.run(env);
+  // two instances starting together (app and worker) run the migrations one after the other: the second finds them done
+  const lock = await env.pool.connect();
+  try {
+    await lock.query(`SELECT pg_advisory_lock(hashtext('data-migrations'))`);
+    for (const m of DATA_MIGRATIONS) {
+      env.log(`data migration ${m.name}`);
+      await m.run(env);
+    }
+  } finally {
+    try {
+      await lock.query(`SELECT pg_advisory_unlock(hashtext('data-migrations'))`);
+    } finally {
+      lock.release();
+    }
   }
 }
