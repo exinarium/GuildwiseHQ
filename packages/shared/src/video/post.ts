@@ -4,6 +4,7 @@ import {
   PatchVideoScheduleSchema,
   VIDEO_DESTINATIONS,
   VideoCaptionsSchema,
+  VideoDestinationOptionsSchema,
   VideoScheduleSchema,
 } from './schedule.ts';
 import { VIDEO_FORMATS, VIDEO_KINDS, VideoMetaSchema, VideoScriptSchema } from './schema.ts';
@@ -212,6 +213,9 @@ export const VideoPostSchema = z.object({
   publishMode: z.enum(VIDEO_PUBLISH_MODES).nullable().default(null),
   destinations: z.array(z.enum(VIDEO_DESTINATIONS)).default([]),
   captions: VideoCaptionsSchema.nullable().default(null),
+  destinationOptions: VideoDestinationOptionsSchema.nullable().default(null),
+  /** When the system moved the post to a later slot because it was not rendered in time (null: it did not). */
+  slippedAt: IsoTime.nullable().default(null),
   /** Where the post is in its life, derived from status, render and shares. */
   phase: z.enum(VIDEO_PHASES).default('in_review'),
   /** The share of every destination other than YouTube (YouTube is `upload`). */
@@ -302,6 +306,8 @@ export const ScheduleVideoPostRequestSchema = z.object({
   /** Absent: the schedule's destinations of the format. */
   destinations: z.array(z.enum(VIDEO_DESTINATIONS)).min(1).optional(),
   captions: VideoCaptionsSchema.optional(),
+  /** Choices a destination needs from the owner at scheduling time (TikTok: privacy, interactions, disclosure, consent). */
+  destinationOptions: VideoDestinationOptionsSchema.optional(),
 });
 export type ScheduleVideoPostRequest = z.input<typeof ScheduleVideoPostRequestSchema>;
 export const MoveVideoPostRequestSchema = z.object({ slotAt: IsoTime });

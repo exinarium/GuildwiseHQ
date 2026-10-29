@@ -157,6 +157,10 @@ describe('description builder', () => {
       'https://guildwisehq.com/releases/1.2.0?utm_source=youtube&utm_medium=video&utm_campaign=release-1.2.0',
     );
   });
+  it('does not loop on a single chapter shorter than 10 seconds', () => {
+    const d = buildDescription({ ...s, kind: 'article', ref: 'x' }, [{ title: 'Only', start: 0 }], 8);
+    expect(d).not.toContain('00:00');
+  });
   it('formats chapter stamps', () => {
     expect(chapterStamp(0)).toBe('00:00');
     expect(chapterStamp(75.9)).toBe('01:15');

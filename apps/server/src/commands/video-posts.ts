@@ -26,6 +26,7 @@ import {
   type VideoCaptions,
   type VideoCrossPost,
   type VideoDestination,
+  type VideoDestinationOptions,
   type VideoFormat,
   type VideoKind,
   type VideoLibraryEntry,
@@ -411,6 +412,8 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
       publishMode: p.publish_mode ?? null,
       destinations: (p.destinations ?? []) as VideoDestination[],
       captions: (p.captions as VideoCaptions | null) ?? null,
+      destinationOptions: (p.destination_options as VideoDestinationOptions | null) ?? null,
+      slippedAt: iso(p.slipped_at),
       phase: phaseOf(
         p,
         current,
@@ -881,6 +884,8 @@ async function scheduleLocked(
     if (stray.length)
       throw badRequest('validation_error', `captions for ${stray.join(', ')}, which is not a destination`);
   }
+  if (req.destinationOptions?.tiktok && !destinations.includes('tiktok'))
+    throw badRequest('validation_error', 'TikTok options for a post that does not go to TikTok');
   if (destinations.includes('youtube') && !(await youtubeChannel(ctx)))
     throw conflict('no_channel', 'connect a YouTube channel first: nothing would be uploaded');
   const now = ctx.clock.now();
@@ -945,6 +950,7 @@ async function scheduleLocked(
           mode: req.mode,
           destinations,
           ...(req.captions ? { captions: req.captions } : {}),
+          ...(req.destinationOptions ? { destinationOptions: req.destinationOptions } : {}),
           reason: 'approved',
           by: by.id,
         },
@@ -1047,6 +1053,56 @@ export async function swapVideoPosts(
     await retargetRender(ctx, b, sa);
     return { a: await getVideoPost(ctx, aId), b: await getVideoPost(ctx, bId) };
   });
+}
+
+/**
+ * Re-flow after the schedule changed: every scheduled post whose destinations have not started takes the slots of the new
+ * schedule in order (by its current slot, then approval), from the first free slot onwards; posts that already started and
+ * "publish now" posts keep theirs and their slots stay taken. One `VideoPostScheduled` (reason `reflow`) per post that
+ * actually moves, appended together. Returns how many moved.
+ */
+export async function reflowVideoPosts(ctx: Ctx, by: AuthSession['user']): Promise<{ moved: number }> {
+  let moved = 0;
+  for (const format of ['long', 'short'] as const) {
+    moved += await withLock(ctx, `video-slot:${format}`, async () => {
+      const { schedule } = await videoSettings(ctx);
+      const now = ctx.clock.now();
+      const all = await rows(
+        ctx.pool,
+        `SELECT * FROM video_posts WHERE format=$1 AND status='approved' AND publish_mode='slot' AND slot_at IS NOT NULL
+          ORDER BY slot_at, approved_at, id`,
+        [format],
+      );
+      const movable: Row[] = [];
+      const taken = new Set<number>();
+      for (const r of all) {
+        const at = new Date(r.slot_at).getTime();
+        if (at <= now.getTime() || (await shareStarted(ctx, r.id))) taken.add(at);
+        else movable.push(r);
+      }
+      // slots some other post (a "publish now" one, a started one) holds stay out of the pool
+      const others = await takenSlots(ctx, format);
+      for (const r of movable) others.delete(new Date(r.slot_at).getTime());
+      for (const t of taken) others.add(t);
+      const pool = new Set(others);
+      const events: ReturnType<typeof scheduledEvent>[] = [];
+      const moves: Array<{ r: Row; slot: Date }> = [];
+      for (const r of movable) {
+        const slot = nextFreeSlot(schedule[format], schedule.timezone, now, pool, minLeadMs(format));
+        if (!slot) break; // no days in the schedule: nothing can be placed
+        pool.add(slot.getTime());
+        if (slot.getTime() !== new Date(r.slot_at).getTime()) {
+          events.push(scheduledEvent(r, slot, 'reflow', by.id));
+          moves.push({ r, slot });
+        }
+      }
+      if (events.length === 0) return 0;
+      await ctx.store.append(events);
+      for (const m of moves) await retargetRender(ctx, m.r, m.slot);
+      return events.length;
+    });
+  }
+  return { moved };
 }
 
 async function slotLocked<T>(ctx: Ctx, postId: string, fn: () => Promise<T>): Promise<T> {

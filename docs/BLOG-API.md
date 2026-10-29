@@ -404,7 +404,13 @@ per-destination `captions` `{ <destination>: { text, tags } }` are stored with t
 destination and no channel exists; `409 no_slots` when the schedule has no days for the format. `POST /posts/{id}/unschedule`
 takes a post back to review, `POST /posts/{id}/move` `{ slotAt }` to another free slot and `POST /posts/{id}/swap` `{ withId }`
 trades the slots of two posts of one format; all three are refused with `409 already_started` once a destination has the video
-or is posting it. Settings changes never move a scheduled post silently.
+or is posting it. Settings changes never move a scheduled post silently: the status counts them in `offSchedule` and
+`POST /api/platform/video/reflow` (the Re-flow button) puts every scheduled post that has not started onto the current slots, in
+order, one `VideoPostScheduled` with reason `reflow` per post that moves (`{ moved }`). `destinationOptions` `{ tiktok: { privacy,
+allowComment, allowDuet, allowStitch, commercial: { on, yourBrand, brandedContent }, consent: true } }` carries the owner's
+TikTok choices (privacy has no default; branded content cannot be private; only valid for a post that goes to TikTok); it is
+stored in the event and in `video_posts.destination_options` and kept through moves. A post the system slipped to a later slot
+shows `slippedAt` until it is moved again.
 
 **Render timing.** Scheduling queues the render of the post's revision with `not_before` = slot minus `renderLeadHours` (at once
 for "now"). The worker claims a render only when its post is approved and `not_before` has passed, or when it is an explicit

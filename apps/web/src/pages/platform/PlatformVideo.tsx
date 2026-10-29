@@ -1,10 +1,9 @@
-import {
-  defaultSchedule,
-  type PatchVideoSettingsRequest,
-  type VideoPost,
-  type VideoPostStatus,
-  type VideoSettings,
-  type VideoStatus,
+import type {
+  PatchVideoSettingsRequest,
+  VideoPost,
+  VideoPostStatus,
+  VideoSettings,
+  VideoStatus,
 } from '@aom/shared';
 import { Video } from 'lucide-react';
 import { useState } from 'react';
@@ -13,6 +12,7 @@ import {
   useImportLibrary,
   useMoveVideoTopic,
   usePatchVideoSettings,
+  useReflowVideos,
   useRejectVideoTopic,
   useSubmitVideo,
   useVideoLibrary,
@@ -30,13 +30,18 @@ import {
   ListSkeleton,
   Panel,
   Select,
+  Tabs,
   TextArea,
   TextInput,
   useToast,
 } from '../../components/ui.tsx';
+import { QueueCalendar } from '../../components/video/QueueCalendar.tsx';
+import { ScheduleSettings } from '../../components/video/ScheduleSettings.tsx';
+import { StatusStrip, workerStates } from '../../components/video/StatusStrip.tsx';
 import { VideoReview } from '../../components/video/VideoReview.tsx';
 import { ext } from '../../extension/index.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { weeklyCapText } from '../../lib/video-schedule.ts';
 
 const STATUS: Array<{ id: VideoPostStatus; label: string }> = [
   { id: 'in_review', label: 'In review' },
@@ -46,8 +51,81 @@ const STATUS: Array<{ id: VideoPostStatus; label: string }> = [
 ];
 const TONE = { draft: 'neutral', in_review: 'warning', approved: 'success', rejected: 'danger' } as const;
 
-/** The state of the YouTube push: worker heartbeat, channel, caps, the next slot, and the settings. */
-function StatusPanel({ status }: { status: VideoStatus }) {
+/** Problems that stop the push, always visible above the tabs. */
+function Problems({ status }: { status: VideoStatus }) {
+  const down = workerStates(status.worker).filter((w) => !w.running);
+  return (
+    <>
+      {down.length > 0 && (
+        <Callout tone="warning" title="Video worker not running" role="alert" data-testid="video-worker-down">
+          Nothing is{' '}
+          {down.length === 1 && down[0]?.label === 'Render worker' ? 'rendered' : 'rendered or uploaded'}{' '}
+          until the video worker runs (the Docker Compose profile <code>video</code>; see the deploy guide).
+          {down.length > 1 || down[0]?.label === 'Video worker'
+            ? ''
+            : ` Offline: ${down.map((w) => w.label).join(', ')}.`}
+          {down[0]?.lastSeen
+            ? ` Last seen ${formatDateTime(down[0].lastSeen)}.`
+            : ' It has never reported in.'}
+        </Callout>
+      )}
+      {!status.channel.connected && (
+        <Callout tone="info" data-testid="video-no-channel">
+          No YouTube channel is connected. Paste its refresh token under Social sharing on the Posts tab.
+          Until then nothing is drafted by the writer, rendered or uploaded, whatever the switch below says.
+        </Callout>
+      )}
+      {status.channel.status === 'needs_reconnect' && (
+        <Callout tone="danger" role="alert">
+          The YouTube token was refused. Paste a fresh refresh token under Social sharing; uploads wait until
+          then.
+        </Callout>
+      )}
+      {status.lockedPrivate > 0 && (
+        <Callout tone="danger" role="alert" data-testid="video-locked">
+          YouTube kept {status.lockedPrivate} uploaded video{status.lockedPrivate === 1 ? '' : 's'} private.
+          Uploads are paused; open the video to see what to do.
+        </Callout>
+      )}
+    </>
+  );
+}
+
+/** "N videos sit on slots no longer in your schedule": re-flow puts them on the current slots, in order. */
+function OffScheduleBanner({ count }: { count: number }) {
+  const reflow = useReflowVideos();
+  const toast = useToast();
+  if (count <= 0) return null;
+  return (
+    <Callout
+      tone="warning"
+      role="status"
+      data-testid="video-offschedule"
+      actions={
+        <Button
+          size="sm"
+          loading={reflow.isPending}
+          data-testid="video-reflow"
+          onClick={() =>
+            reflow.mutate(undefined, {
+              onSuccess: (r) =>
+                toast.success(`${r.moved} video${r.moved === 1 ? '' : 's'} moved onto the schedule`),
+            })
+          }
+        >
+          Re-flow
+        </Button>
+      }
+    >
+      {count} video{count === 1 ? ' sits' : 's sit'} on slots no longer in your schedule. Re-flow moves every
+      scheduled video that has not started onto the current slots, in order.
+      <ErrorBox error={reflow.error} />
+    </Callout>
+  );
+}
+
+/** The switches and defaults of the YouTube push. */
+function SettingsPanel({ status }: { status: VideoStatus }) {
   const patch = usePatchVideoSettings();
   const s = status.settings;
   const set = (v: PatchVideoSettingsRequest) => patch.mutate(v);
@@ -55,38 +133,6 @@ function StatusPanel({ status }: { status: VideoStatus }) {
   return (
     <Panel title="YouTube" data-testid="video-status">
       <div className="flex flex-col gap-3">
-        {!status.worker.running && (
-          <Callout
-            tone="warning"
-            title="Video worker not running"
-            role="alert"
-            data-testid="video-worker-down"
-          >
-            Nothing is rendered or uploaded until the video worker runs (the Docker Compose profile{' '}
-            <code>video</code>; see the deploy guide).
-            {status.worker.lastSeen
-              ? ` Last seen ${formatDateTime(status.worker.lastSeen)}.`
-              : ' It has never reported in.'}
-          </Callout>
-        )}
-        {!status.channel.connected && (
-          <Callout tone="info" data-testid="video-no-channel">
-            No YouTube channel is connected. Paste its refresh token under Social sharing on the Posts tab.
-            Until then nothing is drafted by the writer, rendered or uploaded, whatever the switch below says.
-          </Callout>
-        )}
-        {status.channel.status === 'needs_reconnect' && (
-          <Callout tone="danger" role="alert">
-            The YouTube token was refused. Paste a fresh refresh token under Social sharing; uploads wait
-            until then.
-          </Callout>
-        )}
-        {status.lockedPrivate > 0 && (
-          <Callout tone="danger" role="alert" data-testid="video-locked">
-            YouTube kept {status.lockedPrivate} uploaded video{status.lockedPrivate === 1 ? '' : 's'} private.
-            Uploads are paused; open the video to see what to do.
-          </Callout>
-        )}
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm font-medium text-fg">
             <input
@@ -97,20 +143,9 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             />
             Videos on
           </label>
-          <Badge tone={status.active ? 'success' : 'neutral'}>
-            {status.active ? 'Active' : 'Not active'}
-          </Badge>
           {status.channel.connected && (
             <span className="text-sm text-muted">Channel: {status.channel.accountName}</span>
           )}
-          <span className="text-sm text-muted">
-            This week: {status.capacity.long.used} of {status.capacity.long.limit} videos,{' '}
-            {status.capacity.short.used} of {status.capacity.short.limit} Shorts
-          </span>
-          <span className="text-sm text-muted">
-            Next slot: video {status.nextSlot.long ? formatDateTime(status.nextSlot.long) : 'none'}, Short{' '}
-            {status.nextSlot.short ? formatDateTime(status.nextSlot.short) : 'none'} ({s.schedule.timezone})
-          </span>
         </div>
         <div className="flex flex-wrap gap-4 text-sm">
           {(
@@ -127,7 +162,7 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             </label>
           ))}
         </div>
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Select
             label="Privacy"
             value={s.privacy}
@@ -138,32 +173,13 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             <option value="private">Private</option>
           </Select>
           <TextInput
-            label="Videos a week (writer)"
-            type="number"
-            min={0}
-            max={14}
-            value={s.schedule.long.days.length}
-            onChange={(e) =>
-              set({ schedule: { long: { days: defaultSchedule(Number(e.target.value)).long.days } } })
-            }
-          />
-          <TextInput
-            label="Shorts a week (writer)"
-            type="number"
-            min={0}
-            max={14}
-            value={s.schedule.short.days.length}
-            onChange={(e) =>
-              set({ schedule: { short: { days: defaultSchedule(3, Number(e.target.value)).short.days } } })
-            }
-          />
-          <TextInput
             label="Category id"
             value={s.categoryId}
             onChange={(e) => set({ categoryId: e.target.value })}
             hint="28 is Science and Technology"
           />
         </div>
+        <p className="text-sm text-muted">{weeklyCapText(s.schedule)} Tick the days below to change it.</p>
         <div className="grid gap-3 sm:grid-cols-3">
           {(['article', 'release', 'tutorial'] as const).map((k) => (
             <TextInput
@@ -426,7 +442,15 @@ function Needed({ enabled }: { enabled: boolean }) {
   );
 }
 
-function PostRow({ p, workerRunning }: { p: VideoPost; workerRunning: boolean }) {
+function PostRow({
+  p,
+  workerRunning,
+  status,
+}: {
+  p: VideoPost;
+  workerRunning: boolean;
+  status: VideoStatus;
+}) {
   const [open, setOpen] = useState(false);
   const r = p.render;
   return (
@@ -466,18 +490,23 @@ function PostRow({ p, workerRunning }: { p: VideoPost; workerRunning: boolean })
       </div>
       {open && (
         <div className="mt-3">
-          <VideoReview post={p} workerRunning={workerRunning} />
+          <VideoReview post={p} workerRunning={workerRunning} status={status} />
         </div>
       )}
     </li>
   );
 }
 
+type Section = 'review' | 'queue' | 'settings';
+
 /** Platform > Blog > Videos: the YouTube push (faceless videos of articles, releases and tutorials). */
 export function PlatformVideo() {
+  const [section, setSection] = useState<Section>('review');
   const [status, setStatus] = useState<VideoPostStatus | undefined>();
   const list = useVideoList(status);
+  const all = useVideoList(undefined);
   const d = list.data;
+  const st = d?.status ?? all.data?.status;
   // Shorts are shown under their long video
   const posts = d?.posts.filter(
     (p) => !(p.format === 'short' && p.parentId && d.posts.some((x) => x.id === p.parentId)),
@@ -485,45 +514,93 @@ export function PlatformVideo() {
   return (
     <div className="flex flex-col gap-5" data-testid="video-panel">
       {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
-      {d && <StatusPanel status={d.status} />}
-      <Needed enabled={!!d?.status.active} />
-      <div className="flex flex-wrap items-start gap-4">
-        <SubmitByHand onDone={() => list.refetch()} />
-        <LibraryButton enabled={!!d?.status.settings.enabled} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Video status">
-        <FilterChip pressed={!status} onClick={() => setStatus(undefined)}>
-          All
-        </FilterChip>
-        {STATUS.map((s) => (
-          <FilterChip
-            key={s.id}
-            pressed={status === s.id}
-            {...(s.id === 'in_review' && d ? { count: d.status.pending } : {})}
-            onClick={() => setStatus(s.id)}
-          >
-            {s.label}
-          </FilterChip>
-        ))}
-      </div>
-      {list.isPending && <ListSkeleton label="Loading videos" rows={3} />}
-      {posts?.length === 0 && (
-        <EmptyState
-          icon={Video}
-          title="No videos here"
-          description="Videos of articles and releases arrive from the writer, tutorials from the Library or the topics below, or add a script by hand."
-        />
+      {st && <Problems status={st} />}
+      {st && <StatusStrip status={st} posts={all.data?.posts ?? d?.posts ?? []} />}
+      {st && <OffScheduleBanner count={st.offSchedule} />}
+      <Tabs
+        label="Videos"
+        prefix="videosub"
+        value={section}
+        onChange={(v) => setSection(v as Section)}
+        className="!mb-0"
+        tabs={[
+          { id: 'review', label: 'Review', testId: 'video-tab-review' },
+          { id: 'queue', label: 'Queue', testId: 'video-tab-queue' },
+          { id: 'settings', label: 'Settings', testId: 'video-tab-settings' },
+        ]}
+      />
+      {section === 'settings' && st && (
+        <div
+          role="tabpanel"
+          id="videosub-panel-settings"
+          aria-labelledby="videosub-tab-settings"
+          className="flex flex-col gap-5"
+        >
+          <SettingsPanel status={st} />
+          <ScheduleSettings status={st} />
+        </div>
       )}
-      {d && posts && posts.length > 0 && (
-        <Panel padding="none">
-          <ul className="divide-y divide-line" data-testid="video-list">
-            {posts.map((p) => (
-              <PostRow key={p.id} p={p} workerRunning={d.status.worker.running} />
+      {section === 'queue' && (
+        <div role="tabpanel" id="videosub-panel-queue" aria-labelledby="videosub-tab-queue">
+          {st && all.data ? (
+            <QueueCalendar posts={all.data.posts} status={st} />
+          ) : (
+            <ListSkeleton label="Loading the queue" rows={3} />
+          )}
+        </div>
+      )}
+      {section === 'review' && (
+        <div
+          role="tabpanel"
+          id="videosub-panel-review"
+          aria-labelledby="videosub-tab-review"
+          className="flex flex-col gap-5"
+        >
+          <Needed enabled={!!st?.active} />
+          <div className="flex flex-wrap items-start gap-4">
+            <SubmitByHand onDone={() => list.refetch()} />
+            <LibraryButton enabled={!!st?.settings.enabled} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Video status">
+            <FilterChip pressed={!status} onClick={() => setStatus(undefined)}>
+              All
+            </FilterChip>
+            {STATUS.map((s) => (
+              <FilterChip
+                key={s.id}
+                pressed={status === s.id}
+                {...(s.id === 'in_review' && st ? { count: st.pending } : {})}
+                onClick={() => setStatus(s.id)}
+              >
+                {s.label}
+              </FilterChip>
             ))}
-          </ul>
-        </Panel>
+          </div>
+          {list.isPending && <ListSkeleton label="Loading videos" rows={3} />}
+          {posts?.length === 0 && (
+            <EmptyState
+              icon={Video}
+              title="No videos here"
+              description="Videos of articles and releases arrive from the writer, tutorials from the Library or the topics below, or add a script by hand."
+            />
+          )}
+          {d && posts && posts.length > 0 && (
+            <Panel padding="none">
+              <ul className="divide-y divide-line" data-testid="video-list">
+                {posts.map((p) => (
+                  <PostRow
+                    key={p.id}
+                    p={p}
+                    workerRunning={workerStates(d.status.worker).every((w) => w.running)}
+                    status={d.status}
+                  />
+                ))}
+              </ul>
+            </Panel>
+          )}
+          <VideoTopics enabled={!!st?.settings.enabled} />
+        </div>
       )}
-      <VideoTopics enabled={!!d?.status.settings.enabled} />
     </div>
   );
 }

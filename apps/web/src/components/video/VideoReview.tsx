@@ -1,8 +1,15 @@
-import type { VideoPost, VideoPrivacy } from '@aom/shared';
-import { useEffect, useState } from 'react';
+import {
+  buildDescription,
+  type VideoPost,
+  type VideoPrivacy,
+  type VideoScene,
+  type VideoStatus,
+} from '@aom/shared';
+import { useEffect, useMemo, useState } from 'react';
 import { useSocialPostAction } from '../../api/queries/blog.ts';
 import { useEditVideo, useVideoAction, useVideoPost, videoFileUrl } from '../../api/queries/video.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { PHASE_LABEL, PHASE_TONE } from '../../lib/video-schedule.ts';
 import {
   Badge,
   Button,
@@ -14,6 +21,7 @@ import {
   TextInput,
   useToast,
 } from '../ui.tsx';
+import { ScheduleStep } from './ScheduleStep.tsx';
 
 const STATUS_LABEL = {
   draft: 'Draft',
@@ -45,6 +53,16 @@ const UPLOAD_LABEL = {
 } as const;
 const AUDIT_FORM = 'https://support.google.com/youtube/contact/yt_api_form';
 
+/** About 2.6 spoken words a second, plus a short pause per cue. */
+const estimateSeconds = (texts: string[]): number =>
+  texts.reduce((n, t) => n + t.trim().split(/\s+/).filter(Boolean).length / 2.6 + 0.4, 0);
+/** "clip: agents, chapter 2" / "points" / "title": what the viewer sees while the cue is spoken. */
+function sceneLabel(sc: VideoScene): string {
+  if (sc.type !== 'clip') return `scene: ${sc.type}`;
+  const part = sc.chapter !== undefined ? `, chapter ${sc.chapter}` : `, ${sc.from}s to ${sc.to}s`;
+  return `scene: clip ${sc.slug}${part}`;
+}
+
 const size = (bytes: number | null) => (bytes === null ? '' : `${(bytes / 1_000_000).toFixed(1)} MB`);
 const clock = (s: number | null) =>
   s === null ? '' : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -58,9 +76,12 @@ export function VideoReview({
   post,
   workerRunning = true,
   nested = false,
+  status,
 }: {
   post: VideoPost;
   workerRunning?: boolean;
+  /** The video status (schedule, next slots); without it the Schedule step offers YouTube only. */
+  status?: VideoStatus | undefined;
   /** The Short shown under its long video. */
   nested?: boolean;
 }) {
@@ -154,6 +175,30 @@ export function VideoReview({
         setReason('');
       },
     });
+
+  const renderedDescription = useMemo(() => {
+    if (!post.script) return '';
+    const total = r?.durationSeconds ?? estimateSeconds(post.script.cues.map((c) => cues[c.id] ?? c.text));
+    let at = 0;
+    const starts = post.script.cues.map((c) => {
+      const start = at;
+      at += estimateSeconds([cues[c.id] ?? c.text]);
+      return start;
+    });
+    const scale = r?.durationSeconds && at > 0 ? r.durationSeconds / at : 1;
+    return buildDescription(
+      {
+        kind: post.kind,
+        ref: post.script.ref ?? post.ref,
+        meta: { title, description: description.trim(), tags: tagList, hashtags: hashList },
+      },
+      post.script.chapters.map((ch) => ({
+        title: ch.title,
+        start: Math.round((starts[ch.fromCue] ?? 0) * scale),
+      })),
+      total,
+    );
+  }, [post.script, post.kind, post.ref, cues, r?.durationSeconds, title, description, tagList, hashList]);
 
   const videoName = short ? 'short.mp4' : 'video.mp4';
   // A library video is a recorded help video: the app has no copy, the media service serves it at /videos/<slug>.
@@ -304,26 +349,52 @@ export function VideoReview({
       </fieldset>
 
       {post.script && (
-        <Disclosure summary={`Script (${post.script.cues.length} cues)`} data-testid="video-script">
+        <section className="flex flex-col gap-2" data-testid="video-script" aria-label="Script">
+          <h3 className="text-sm font-semibold text-fg">Script ({post.script.cues.length} cues)</h3>
+          <p className="text-xs text-muted">
+            The narration cue by cue, with the scene shown while it is spoken. This is what you approve:
+            nothing is rendered until it is scheduled.
+          </p>
           <ol className="flex flex-col gap-2">
-            {post.script.cues.map((c, i) => (
-              <li key={c.id}>
-                <TextArea
-                  label={`${i + 1}. ${c.scene.type}${post.script?.chapters.find((ch) => ch.fromCue === i) ? ` · chapter: ${post.script.chapters.find((ch) => ch.fromCue === i)?.title}` : ''}`}
-                  rows={2}
-                  disabled={locked}
-                  value={cues[c.id] ?? c.text}
-                  onChange={(e) => setCues((v) => ({ ...v, [c.id]: e.target.value }))}
-                />
-              </li>
-            ))}
+            {post.script.cues.map((c, i) => {
+              const chapter = post.script?.chapters.find((ch) => ch.fromCue === i);
+              return (
+                <li key={c.id} className="flex flex-col gap-1">
+                  {chapter && (
+                    <p className="text-xs font-semibold text-brand" data-testid="video-chapter">
+                      Chapter: {chapter.title}
+                    </p>
+                  )}
+                  <TextArea
+                    label={`${i + 1}. ${sceneLabel(c.scene)}`}
+                    rows={2}
+                    disabled={locked}
+                    value={cues[c.id] ?? c.text}
+                    onChange={(e) => setCues((v) => ({ ...v, [c.id]: e.target.value }))}
+                  />
+                </li>
+              );
+            })}
           </ol>
+        </section>
+      )}
+
+      {post.script && (
+        <Disclosure summary="Description as YouTube will show it" data-testid="video-description">
+          <pre className="max-h-72 overflow-auto rounded-control bg-sunken p-3 text-xs whitespace-pre-wrap text-fg">
+            {renderedDescription}
+          </pre>
+          {!r?.durationSeconds && (
+            <p className="mt-1 text-xs text-muted">
+              Chapter times are estimated until the video is rendered.
+            </p>
+          )}
         </Disclosure>
       )}
 
       {locked && post.slotAt && (
         <div className="flex flex-wrap items-center gap-2" data-testid="video-slot">
-          <Badge tone="info">{post.phase}</Badge>
+          <Badge tone={PHASE_TONE[post.phase]}>{PHASE_LABEL[post.phase]}</Badge>
           <span className="text-sm text-muted">
             {post.publishMode === 'now'
               ? 'Published as soon as rendered'
@@ -347,6 +418,19 @@ export function VideoReview({
             <li key={s.network}>
               {s.network}: {s.status}
               {s.error ? ` (${s.error})` : ''}
+              {s.url && (
+                <>
+                  {' '}
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-brand hover:underline"
+                  >
+                    Open
+                  </a>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -357,37 +441,31 @@ export function VideoReview({
           <Button loading={edit.isPending} disabled={!changed} onClick={save} data-testid="video-save">
             {rerenders ? 'Save and render again' : 'Save changes'}
           </Button>
-          {post.status !== 'rejected' && (
+        </div>
+      )}
+      {!locked && post.status !== 'rejected' && (
+        <ScheduleStep
+          post={post}
+          status={status}
+          disabledReason={changed ? 'Save your changes first.' : null}
+          privacy={privacy || status?.settings.privacy || 'public'}
+        />
+      )}
+      {!locked && post.status !== 'rejected' && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!post.library && !rendered && r?.status !== 'queued' && r?.status !== 'rendering' && (
             <Button
-              variant="primary"
               loading={act.isPending}
-              disabled={changed}
-              title={changed ? 'Save your changes first' : ''}
-              onClick={() => run('approve', 'Scheduled at the next free slot')}
-              data-testid="video-approve"
+              disabled={changed || post.rendersUsed >= 3}
+              onClick={() => run('preview', 'Preview render queued')}
+              data-testid="video-preview"
             >
-              Schedule
+              Preview render (uses {Math.min(post.rendersUsed + 1, 3)} of 3)
             </Button>
           )}
-          {post.status !== 'rejected' &&
-            !post.library &&
-            !rendered &&
-            r?.status !== 'queued' &&
-            r?.status !== 'rendering' && (
-              <Button
-                loading={act.isPending}
-                disabled={changed || post.rendersUsed >= 3}
-                onClick={() => run('preview', 'Preview render queued')}
-                data-testid="video-preview"
-              >
-                Preview render
-              </Button>
-            )}
-          {post.status !== 'rejected' && (
-            <Button variant="danger" onClick={() => setRejecting((v) => !v)} data-testid="video-reject">
-              Reject
-            </Button>
-          )}
+          <Button variant="danger" onClick={() => setRejecting((v) => !v)} data-testid="video-reject">
+            Reject
+          </Button>
         </div>
       )}
       {rejecting && (
@@ -472,15 +550,25 @@ export function VideoReview({
         <CrossPost post={post} onCreate={() => run('crosspost', 'Cross-post drafted')} busy={act.isPending} />
       )}
 
-      {!nested && post.shortId && <ShortOfPost id={post.shortId} workerRunning={workerRunning} />}
+      {!nested && post.shortId && (
+        <ShortOfPost id={post.shortId} workerRunning={workerRunning} status={status} />
+      )}
     </div>
   );
 }
 
-function ShortOfPost({ id, workerRunning }: { id: string; workerRunning: boolean }) {
+function ShortOfPost({
+  id,
+  workerRunning,
+  status,
+}: {
+  id: string;
+  workerRunning: boolean;
+  status?: VideoStatus | undefined;
+}) {
   const q = useVideoPost(id);
   if (!q.data) return q.isError ? <ErrorBox error={q.error} onRetry={() => q.refetch()} /> : null;
-  return <VideoReview post={q.data} workerRunning={workerRunning} nested />;
+  return <VideoReview post={q.data} workerRunning={workerRunning} status={status} nested />;
 }
 
 /** The optional cross-post of a tutorial to the other networks: a link to the YouTube video, approved on its own. */

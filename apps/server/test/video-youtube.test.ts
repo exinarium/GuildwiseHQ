@@ -1694,6 +1694,67 @@ describe('scheduling: slots, render timing, destinations', () => {
     expect((await api('POST', `/api/platform/video/posts/${a.id}/move`, { slotAt: free })).status).toBe(409);
   });
 
+  it('re-flow moves every unstarted scheduled post onto the slots of the changed schedule, in order', async () => {
+    const a = await approved('article', 'long', 'rf-a');
+    const b = await approved('article', 'long', 'rf-b');
+    const c = await approved('article', 'long', 'rf-c');
+    await settings({ schedule: { long: { days: ['mon'] } } });
+    const before = await ok(api('GET', '/api/platform/video/status'));
+    expect(before.offSchedule).toBeGreaterThanOrEqual(2);
+    const out = await ok(api('POST', '/api/platform/video/reflow'));
+    expect(out.moved).toBeGreaterThanOrEqual(2);
+    const after = [await post(a.id), await post(b.id), await post(c.id)];
+    const times = after.map((p) => Date.parse(p.slotAt));
+    expect(times).toEqual([...times].sort((x, y) => x - y)); // the order is kept
+    expect(new Set(times).size).toBe(3);
+    for (const p of after) expect(new Date(p.slotAt).getUTCDay()).toBe(1); // 10:00 SAST on a Monday
+    expect((await ok(api('GET', '/api/platform/video/status'))).offSchedule).toBe(0);
+    expect((await ok(api('POST', '/api/platform/video/reflow'))).moved).toBe(0); // nothing left to do
+    // a rebuild from the events agrees
+    const mine = 'SELECT id, slot_at FROM video_posts WHERE id = ANY($1::uuid[]) ORDER BY id';
+    const rows0 = await q(mine, [[a.id, b.id, c.id]]);
+    await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
+    expect(await q(mine, [[a.id, b.id, c.id]])).toEqual(rows0);
+    await settings({ schedule: { long: { days: ALL_DAYS } } });
+  });
+
+  it('TikTok options travel with the schedule request and are stored (validated, and only for a TikTok post)', async () => {
+    const tiktok = {
+      privacy: 'SELF_ONLY',
+      allowComment: false,
+      allowDuet: false,
+      allowStitch: false,
+      commercial: { on: false, yourBrand: false, brandedContent: false },
+      consent: true,
+    };
+    const s1 = await submit('article', 'short', 'tt-a');
+    const branded = await api('POST', `/api/platform/video/posts/${s1.id}/schedule`, {
+      destinations: ['youtube', 'tiktok'],
+      destinationOptions: {
+        tiktok: { ...tiktok, commercial: { on: true, yourBrand: false, brandedContent: true } },
+      },
+    });
+    expect(branded.status).toBe(400); // branded content cannot be private
+    const done = await ok(
+      api('POST', `/api/platform/video/posts/${s1.id}/schedule`, {
+        destinations: ['youtube', 'tiktok'],
+        destinationOptions: { tiktok },
+      }),
+    );
+    expect(done.destinationOptions).toEqual({ tiktok });
+    const moved = await ok(
+      api('POST', `/api/platform/video/posts/${s1.id}/move`, {
+        slotAt: (await slots('short')).slots.find((x: { free: boolean }) => x.free).at,
+      }),
+    );
+    expect(moved.destinationOptions).toEqual({ tiktok }); // a move keeps them
+    const s2 = await submit('article', 'short', 'tt-b');
+    const stray = await api('POST', `/api/platform/video/posts/${s2.id}/schedule`, {
+      destinationOptions: { tiktok },
+    });
+    expect(stray.status).toBe(400);
+  });
+
   it('a Short that belongs to a long video takes the first Short slot at or after the long slot', async () => {
     const long = await approved('article', 'long', 'pair');
     const short = await submit('article', 'short', 'pair', { parentId: long.id });
@@ -1808,6 +1869,8 @@ describe('scheduling: slots, render timing, destinations', () => {
       const read = (id: string) => getVideoPost(t.app.ctx, id); // no API call while the clock is ahead: sessions expire
       const after = await read(a.id);
       expect(Date.parse(after.slotAt as string)).toBeGreaterThan(Date.parse(c.slotAt)); // the next FREE slot: b and c stay
+      expect(after.slippedAt).not.toBeNull();
+      expect((await read(b.id)).slippedAt).toBeNull();
       expect((await read(b.id)).slotAt).toBe(b.slotAt);
       expect((await read(c.id)).slotAt).toBe(c.slotAt);
       expect(after.render?.notBefore).toBe(
