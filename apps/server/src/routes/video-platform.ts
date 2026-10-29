@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import {
   CreateVideoTopicRequestSchema,
   EditVideoPostRequestSchema,
@@ -12,6 +12,7 @@ import {
   SubmitVideoPostRequestSchema,
   SwapVideoPostRequestSchema,
   UnscheduleVideoPostRequestSchema,
+  VIDEO_DESTINATIONS,
   VIDEO_POST_STATUSES,
   VideoSlotsQuerySchema,
 } from '@aom/shared';
@@ -41,6 +42,7 @@ import {
   releasesNeedingVideo,
   resolveLockedUpload,
   retryRender,
+  retryShare,
   retryUpload,
   reviseVideoPost,
   scheduleVideoPost,
@@ -52,7 +54,8 @@ import {
 } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { notFound } from '../errors.ts';
+import { sendRangedFile } from '../video/serve.ts';
 import { typed } from './util.ts';
 
 const TYPES: Record<string, string> = {
@@ -201,6 +204,15 @@ export function videoPlatformRoutes(ctx: Ctx) {
         return retryUpload(ctx, s.user.id, req.params.id);
       },
     );
+    /** Tries one destination of a scheduled video again (YouTube, Facebook, Instagram, X, LinkedIn, Bluesky, TikTok). */
+    app.post(
+      '/api/platform/video/posts/:id/shares/:network/retry',
+      { schema: { params: z.object({ id: z.uuid(), network: z.enum(VIDEO_DESTINATIONS) }) } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return retryShare(ctx, s.user.id, req.params.id, req.params.network);
+      },
+    );
     app.post(
       '/api/platform/video/posts/:id/resolve-locked',
       { schema: { params: IdParamsSchema } },
@@ -247,33 +259,8 @@ export function videoPlatformRoutes(ctx: Ctx) {
         );
         const file = render ? artifactPath(ctx, render.artifacts ?? {}, key) : null;
         if (!file || !existsSync(file)) throw notFound('the file is not there (yet)');
-        const size = statSync(file).size;
         const ext = file.split('.').pop() ?? '';
-        reply.header('content-type', TYPES[ext] ?? 'application/octet-stream');
-        reply.header('cache-control', 'no-store');
-        reply.header('accept-ranges', 'bytes');
-        const range = req.headers.range;
-        if (range) {
-          const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
-          let start = m?.[1] ? Number(m[1]) : NaN;
-          let end = m?.[2] ? Number(m[2]) : NaN;
-          if (!m || (Number.isNaN(start) && Number.isNaN(end)))
-            throw badRequest('bad_range', 'unreadable Range header');
-          if (Number.isNaN(start)) {
-            start = Math.max(0, size - end); // bytes=-N: the last N bytes
-            end = size - 1;
-          } else if (Number.isNaN(end) || end >= size) end = size - 1;
-          if (start > end || start >= size) {
-            reply.code(416).header('content-range', `bytes */${size}`);
-            return reply.send();
-          }
-          reply.code(206);
-          reply.header('content-range', `bytes ${start}-${end}/${size}`);
-          reply.header('content-length', end - start + 1);
-          return reply.send(createReadStream(file, { start, end }));
-        }
-        reply.header('content-length', size);
-        return reply.send(createReadStream(file));
+        return sendRangedFile(req, reply, file, TYPES[ext] ?? 'application/octet-stream');
       },
     );
 

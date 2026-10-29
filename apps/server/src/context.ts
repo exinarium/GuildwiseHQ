@@ -20,6 +20,7 @@ import type { Scheduler } from './scheduler/scheduler.ts';
 import type { BoardService } from './sessions/board.ts';
 import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
+import type { VideoDestinationClient } from './video/destinations.ts';
 import type { YouTubeClient } from './video/youtube.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
@@ -34,6 +35,8 @@ export interface Ctx {
   social: SocialClient;
   /** YouTube (a fake in tests; only the video worker uploads, the app validates a pasted refresh token). */
   youtube: YouTubeClient;
+  /** Facebook Reels, Instagram Reels, X, LinkedIn, Bluesky and TikTok video posting (a fake in tests). */
+  videoDestinations: VideoDestinationClient;
   /** Registered extensions (billing, support, ... in a hosted build; empty for a self-hosted server). */
   ext: ExtensionHost;
   log: FastifyBaseLogger;

@@ -76,6 +76,8 @@ describe('connecting channels', () => {
       ['x', 'disconnected'],
       ['bluesky', 'disconnected'],
       ['youtube', 'disconnected'],
+      ['instagram', 'disconnected'],
+      ['tiktok', 'disconnected'],
     ]);
     await socialTick(t.app.ctx);
     expect(await shares(before.id)).toHaveLength(0);
@@ -265,7 +267,9 @@ describe('X and Bluesky', () => {
       'linkedin',
       'x',
       'bluesky',
-      'youtube', // the video channel is listed too, but it is never a share network
+      'youtube', // the video channels are listed too, but they are never share networks
+      'instagram',
+      'tiktok',
     ]);
     expect(list.channels.find((c: any) => c.network === 'bluesky').accountName).toBe('guildwise.bsky.social');
   });

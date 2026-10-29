@@ -119,6 +119,7 @@ import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
+import { tiktokPlatformRoutes } from './routes/tiktok-platform.ts';
 import { vaultRoutes } from './routes/vaults.ts';
 import { videoPlatformRoutes } from './routes/video-platform.ts';
 import { workstationRoutes } from './routes/workstations.ts';
@@ -129,6 +130,8 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
+import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 
@@ -142,6 +145,8 @@ export interface BuildOptions {
   social?: SocialClient;
   /** YouTube; tests pass a fake. */
   youtube?: YouTubeClient;
+  /** Video destinations (Reels, X, LinkedIn, Bluesky, TikTok); tests pass a fake. */
+  videoDestinations?: VideoDestinationClient;
   /** Server extensions (billing, support, ...): none for a self-hosted server. See extension.ts. */
   extensions?: ServerExtension[];
   clock?: Clock;
@@ -284,6 +289,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     mailer,
     social: opts.social ?? createSocialClient(),
     youtube: opts.youtube ?? createYouTubeClient(),
+    videoDestinations: opts.videoDestinations ?? createVideoDestinationClient(),
     ext: createExtensionHost(opts.extensions),
     log: app.log,
     services: {} as Ctx['services'],
@@ -473,7 +479,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgChartRoutes(ctx));
   await app.register(blogPlatformRoutes(ctx));
   await app.register(videoPlatformRoutes(ctx));
+  await app.register(tiktokPlatformRoutes(ctx));
   await app.register(videoPushRoutes(ctx));
+  await app.register(videoMediaRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
   for (const e of ctx.ext.list) {

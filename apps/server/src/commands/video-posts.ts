@@ -420,7 +420,10 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
       slotAt: iso(p.slot_at),
       publishMode: p.publish_mode ?? null,
       destinations: (p.destinations ?? []) as VideoDestination[],
-      captions: (p.captions as VideoCaptions | null) ?? null,
+      captions:
+        p.captions || p.submit_captions
+          ? ({ ...(p.submit_captions ?? {}), ...(p.captions ?? {}) } as VideoCaptions)
+          : null,
       destinationOptions: (p.destination_options as VideoDestinationOptions | null) ?? null,
       slippedAt: iso(p.slipped_at),
       phase: phaseOf(
@@ -591,7 +594,7 @@ const metaOf = (script: VideoScript, privacy?: VideoPostMeta['privacy']): VideoP
   ...(privacy ? { privacy } : {}),
 });
 
-async function withLock<T>(ctx: Ctx, key: string, fn: () => Promise<T>): Promise<T> {
+export async function withLock<T>(ctx: Ctx, key: string, fn: () => Promise<T>): Promise<T> {
   const lock = await ctx.pool.connect();
   try {
     await lock.query('SELECT pg_advisory_lock(hashtext($1))', [key]);
@@ -681,6 +684,7 @@ export async function submitVideoPost(
               meta: metaOf(stored),
               origin,
               status,
+              ...(input.captions ? { captions: input.captions } : {}),
             },
           },
           actor: origin.userId ? userActor(origin.userId) : SYSTEM_ACTOR,
@@ -903,6 +907,20 @@ async function scheduleLocked(
   }
   if (req.destinationOptions?.tiktok && !destinations.includes('tiktok'))
     throw badRequest('validation_error', 'TikTok options for a post that does not go to TikTok');
+  if (destinations.includes('tiktok')) {
+    // TikTok's rules: the owner chooses privacy and ticks the consent for every post; nothing is assumed
+    const tt = req.destinationOptions?.tiktok;
+    if (!tt)
+      throw badRequest(
+        'tiktok_options_required',
+        'choose who can see the TikTok video and tick the consent, or untick TikTok',
+      );
+    if (!settings.tiktokAudited && tt.privacy !== 'SELF_ONLY')
+      throw badRequest(
+        'tiktok_not_audited',
+        'the TikTok app has not passed its audit: until then a TikTok video can only be private (SELF_ONLY)',
+      );
+  }
   if (destinations.includes('youtube') && !(await youtubeChannel(ctx)))
     throw conflict('no_channel', 'connect a YouTube channel first: nothing would be uploaded');
   const now = ctx.clock.now();
@@ -1027,6 +1045,13 @@ async function retargetRender(ctx: Ctx, r: Row, slot: Date): Promise<void> {
     `UPDATE video_renders SET not_before=$3 WHERE post_id=$1 AND revision=$2 AND NOT library AND status IN ('queued','rendering')`,
     [r.id, r.revision, start],
   );
+  // the destinations that post at the slot follow it
+  await exec(
+    ctx.pool,
+    `UPDATE social_shares SET next_attempt_at=$2, updated_at=$3
+      WHERE post_id=$1 AND source='video' AND network <> 'youtube' AND status='pending' AND error IS NULL`,
+    [r.id, slot, ctx.clock.now()],
+  );
 }
 
 /** Moves a scheduled post to another free slot (409 `already_started` once a destination has the video). */
@@ -1042,7 +1067,12 @@ export function moveVideoPost(
       throw conflict('not_movable', 'a video published "now" has no slot to move');
     const slot = new Date(slotAt);
     if (slot.getTime() === new Date(r.slot_at).getTime()) return getVideoPost(ctx, postId);
-    await checkPickedSlot(ctx, r.format, slot, 0, postId);
+    const rendered = await one(
+      ctx.pool,
+      `SELECT 1 AS x FROM video_renders WHERE post_id=$1 AND revision=$2 AND status='rendered' AND purged_at IS NULL`,
+      [postId, r.revision],
+    );
+    await checkPickedSlot(ctx, r.format, slot, minLeadMs(r.format, !!rendered), postId);
     await ctx.store.append([scheduledEvent(r, slot, 'moved', by.id)]);
     await retargetRender(ctx, r, slot);
     return getVideoPost(ctx, postId);
@@ -1092,9 +1122,19 @@ export async function reflowVideoPosts(ctx: Ctx, by: AuthSession['user']): Promi
       );
       const movable: Row[] = [];
       const taken = new Set<number>();
+      const lead = Math.max(schedule[format].renderLeadHours * 3_600_000, 3 * 3_600_000);
       for (const r of all) {
         const at = new Date(r.slot_at).getTime();
-        if (at <= now.getTime() || (await shareStarted(ctx, r.id))) taken.add(at);
+        const busy = await one(
+          ctx.pool,
+          `SELECT 1 AS x FROM video_renders WHERE post_id=$1 AND revision=$2 AND status IN ('rendered','rendering') AND NOT library`,
+          [r.id, r.revision],
+        );
+        // never move a post that started, is rendered or rendering, or is due within the render lead (or 3 hours)
+        const fixed = at <= now.getTime() + lead || !!busy || (await shareStarted(ctx, r.id));
+        // a post on a slot of the schedule stays (no compacting of gaps); only an off-schedule slot or a double booking moves
+        const fine = isScheduleSlot(schedule[format], schedule.timezone, new Date(at)) && !taken.has(at);
+        if (fixed || fine) taken.add(at);
         else movable.push(r);
       }
       // slots some other post (a "publish now" one, a started one) holds stay out of the pool
@@ -1229,6 +1269,9 @@ export async function slipVideoPost(ctx: Ctx, postId: string): Promise<{ from: D
   return slotLocked(ctx, postId, async () => {
     const r = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [postId]);
     if (!r || r.status !== 'approved' || r.publish_mode !== 'slot' || !r.slot_at || !r.script) return null;
+    // the watch runs in the app and in the publish worker: whoever got the lock second finds the slot already moved
+    if (new Date(r.slot_at).getTime() > ctx.clock.now().getTime() + SCHEDULE_DEFAULTS.slipBeforeMs)
+      return null;
     if (await shareStarted(ctx, postId)) return null;
     const done = await one(
       ctx.pool,
@@ -1302,17 +1345,39 @@ export async function retryRender(ctx: Ctx, by: string, postId: string): Promise
  * A failed upload is tried again on request. When the clean-up already removed the MP4 (a failed share keeps it 3 days)
  * the same revision is rendered again first and the upload waits for it.
  */
-export async function retryUpload(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
+export function retryUpload(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
+  return retryShare(ctx, by, postId, 'youtube');
+}
+
+/**
+ * A failed (or skipped) destination is tried again on request: YouTube, Facebook, Instagram, X, LinkedIn, Bluesky or TikTok.
+ * When the clean-up already removed the MP4 the same revision is rendered again first and the share waits for it. A
+ * destination other than YouTube starts from scratch (its saved progress is dropped) and gets a new 6-hour window.
+ * 404 when the post has no such destination, 409 `not_failed` when it is not failed or skipped.
+ */
+export async function retryShare(
+  ctx: Ctx,
+  by: string,
+  postId: string,
+  network: VideoDestination,
+): Promise<VideoPost> {
   const now = ctx.clock.now();
+  const p = await one(ctx.pool, 'SELECT status FROM video_posts WHERE id=$1', [postId]);
+  if (!p) throw notFound('video post not found', 'video_post_not_found');
   const share = await one(
     ctx.pool,
-    `SELECT s.detail, r.id AS render_id, r.artifacts, r.library FROM social_shares s
+    `SELECT s.detail, s.status, r.id AS render_id, r.artifacts, r.library FROM social_shares s
        JOIN video_posts p ON p.id = s.post_id
        LEFT JOIN video_renders r ON r.post_id = p.id AND r.revision = p.revision
-      WHERE s.post_id=$1 AND s.network='youtube' AND s.source='video' AND s.status IN ('failed','skipped')`,
-    [postId],
+      WHERE s.post_id=$1 AND s.network=$2 AND s.source='video'`,
+    [postId, network],
   );
-  if (!share) throw conflict('not_failed', 'only a failed upload can be tried again');
+  if (!share && network === 'youtube')
+    throw conflict('not_failed', 'only a failed upload can be tried again');
+  if (!share) throw notFound('this video has no such destination', 'share_not_found');
+  if (p.status !== 'approved') throw conflict('not_scheduled', 'this video is not scheduled');
+  if (!['failed', 'skipped'].includes(share.status))
+    throw conflict('not_failed', 'only a failed destination can be tried again');
   const uploaded = !!(share.detail as { videoId?: string } | null)?.videoId;
   const art = (share.artifacts ?? {}) as Record<string, unknown>;
   if (!uploaded && !art.video) {
@@ -1328,9 +1393,11 @@ export async function retryUpload(ctx: Ctx, by: string, postId: string): Promise
   }
   await exec(
     ctx.pool,
-    `UPDATE social_shares SET status='pending', attempts=0, next_attempt_at=$2, error=NULL, updated_at=$2
-      WHERE post_id=$1 AND network='youtube' AND source='video' AND status IN ('failed','skipped')`,
-    [postId, now],
+    `UPDATE social_shares SET status='pending', attempts=0, next_attempt_at=$3, error=NULL, updated_at=$3,
+            detail = CASE WHEN $2 = 'youtube' THEN detail
+                          ELSE (COALESCE(detail,'{}'::jsonb) - 'dest') || jsonb_build_object('retryAt', $4::text) END
+      WHERE post_id=$1 AND network=$2 AND source='video' AND status IN ('failed','skipped')`,
+    [postId, network, now, now.toISOString()],
   );
   await auditRetry(ctx, postId, 'upload', by);
   return getVideoPost(ctx, postId);

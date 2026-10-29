@@ -59,26 +59,47 @@ export function socialAlertMail(opts: {
   network: string;
   reason: string;
   origin: string;
+  /** The problem is with a Short (a video post), not with sharing blog articles. */
+  shorts?: boolean;
 }): MailMessage {
   const name =
-    { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', bluesky: 'Bluesky', youtube: 'YouTube' }[
-      opts.network
-    ] ?? opts.network;
+    {
+      facebook: 'Facebook',
+      linkedin: 'LinkedIn',
+      x: 'X',
+      bluesky: 'Bluesky',
+      youtube: 'YouTube',
+      instagram: 'Instagram',
+      tiktok: 'TikTok',
+    }[opts.network] ?? opts.network;
   const video = opts.network === 'youtube';
+  const shorts = !video && (!!opts.shorts || opts.network === 'instagram' || opts.network === 'tiktok');
   return brandedMail({
     to: opts.to,
-    subject: video ? 'YouTube uploads need attention' : `Blog sharing to ${name} needs attention`,
+    subject: video
+      ? 'YouTube uploads need attention'
+      : shorts
+        ? `Posting videos to ${name} needs attention`
+        : `Blog sharing to ${name} needs attention`,
     preheader: video ? 'YouTube uploads are paused or failing' : `${name} sharing is paused or failing`,
-    heading: video ? 'YouTube uploads need attention' : `${name} sharing needs attention`,
+    heading: video
+      ? 'YouTube uploads need attention'
+      : shorts
+        ? `Posting videos to ${name} needs attention`
+        : `${name} sharing needs attention`,
     origin: opts.origin,
     body: [
       video
         ? 'Uploading approved videos to YouTube is not working, so they wait in the queue.'
-        : `Sharing blog posts to ${name} is not working, so new articles are not being posted there.`,
+        : shorts
+          ? `Posting scheduled videos to ${name} is not working, so they are not going out there.`
+          : `Sharing blog posts to ${name} is not working, so new articles are not being posted there.`,
       { facts: [['Problem', opts.reason]] },
       video
         ? 'Open the platform blog settings, paste a fresh refresh token for the YouTube channel and the waiting videos are uploaded.'
-        : 'Open the platform blog settings, reconnect the account and the waiting posts are shared (those published in the last 48 hours).',
+        : shorts
+          ? 'Open the platform blog settings, reconnect the account, then retry the video in the queue (a video waits up to 6 hours after its slot).'
+          : 'Open the platform blog settings, reconnect the account and the waiting posts are shared (those published in the last 48 hours).',
     ],
     cta: { label: 'Open the social settings', url: `${opts.origin}/platform/blog` },
   });

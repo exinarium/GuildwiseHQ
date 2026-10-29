@@ -8,8 +8,8 @@ export const videoPostProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'VideoPostSubmitted'>).payload;
     await exec(
       tx,
-      `INSERT INTO video_posts (id, kind, format, ref, parent_id, script, meta, title, revision, status, origin_user_id, origin_system, review_since, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11,$12,$13,$13)
+      `INSERT INTO video_posts (id, kind, format, ref, parent_id, script, meta, title, revision, status, origin_user_id, origin_system, review_since, created_at, updated_at, submit_captions)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11,$12,$13,$13,$14::jsonb)
        ON CONFLICT DO NOTHING`,
       [
         p.postId,
@@ -25,6 +25,7 @@ export const videoPostProjectors: Record<string, Projector> = {
         p.origin.system ?? null,
         p.status === 'in_review' ? e.createdAt : null,
         e.createdAt,
+        p.captions ? JSON.stringify(p.captions) : null,
       ],
     );
     // a tutorial written for a topic: the topic is done (its ref is the topic id)
@@ -70,7 +71,7 @@ export const videoPostProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE video_posts SET slot_at=$2, publish_mode=$3, destinations=$4::text[],
-              captions = COALESCE($5::jsonb, captions),
+              captions = CASE WHEN $5::jsonb IS NULL THEN captions ELSE COALESCE(captions, '{}'::jsonb) || $5::jsonb END,
               destination_options = COALESCE($7::jsonb, destination_options), updated_at=$6,
               slipped_at = CASE WHEN $8::text = 'slipped' THEN $6::timestamptz WHEN $8::text = 'migrated' THEN slipped_at ELSE NULL END
         WHERE id=$1 AND status='approved'`,
@@ -91,7 +92,8 @@ export const videoPostProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE video_posts SET status='in_review', slot_at=NULL, publish_mode=NULL, approved_render_id=NULL,
-              approved_at=NULL, review_since=$2, updated_at=$2
+              approved_at=NULL, review_since=$2, updated_at=$2,
+              destinations='{}', captions=NULL, destination_options=NULL
         WHERE id=$1 AND status='approved'`,
       [p.postId, e.createdAt],
     );

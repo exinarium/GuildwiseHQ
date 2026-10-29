@@ -17,7 +17,7 @@ import {
   videoCapacity,
 } from '../src/commands/video-posts.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
-import { cleanupVideos, type RenderFn, videoTick } from '../src/video/sweep.ts';
+import { cleanupVideos, type RenderFn, renderNext, runUpload, videoTick } from '../src/video/sweep.ts';
 import {
   type UploadSpec,
   type YouTubeChannelInfo,
@@ -1698,7 +1698,8 @@ describe('scheduling: slots, render timing, destinations', () => {
     const a = await approved('article', 'long', 'rf-a');
     const b = await approved('article', 'long', 'rf-b');
     const c = await approved('article', 'long', 'rf-c');
-    await settings({ schedule: { long: { days: ['mon'] } } });
+    // a post inside its render lead (or 3 hours) is never moved: shrink the lead so these three are movable
+    await settings({ schedule: { long: { days: ['mon'], renderLeadHours: 1 } } });
     const before = await ok(api('GET', '/api/platform/video/status'));
     expect(before.offSchedule).toBeGreaterThanOrEqual(2);
     const out = await ok(api('POST', '/api/platform/video/reflow'));
@@ -1715,7 +1716,7 @@ describe('scheduling: slots, render timing, destinations', () => {
     const rows0 = await q(mine, [[a.id, b.id, c.id]]);
     await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
     expect(await q(mine, [[a.id, b.id, c.id]])).toEqual(rows0);
-    await settings({ schedule: { long: { days: ALL_DAYS } } });
+    await settings({ schedule: { long: { days: ALL_DAYS, renderLeadHours: 168 } } });
   });
 
   it('TikTok options travel with the schedule request and are stored (validated, and only for a TikTok post)', async () => {
@@ -1786,7 +1787,7 @@ describe('scheduling: slots, render timing, destinations', () => {
     expect((await ok(sched(long.id, { mode: 'now' }))).publishMode).toBe('now');
   });
 
-  it('other destinations get a skipped share "not available yet"; a long video is YouTube only', async () => {
+  it('a destination whose account is not connected gets a skipped share; a long video is YouTube only', async () => {
     const long = await submit('article', 'long', 'dest-long');
     const bad = await sched(long.id, { destinations: ['youtube', 'x'] });
     expect(bad.status).toBe(400);
@@ -1795,6 +1796,16 @@ describe('scheduling: slots, render timing, destinations', () => {
       sched(short.id, {
         destinations: ['youtube', 'instagram', 'x', 'tiktok'],
         captions: { instagram: { text: 'Look at this', tags: ['agents'] } },
+        destinationOptions: {
+          tiktok: {
+            privacy: 'SELF_ONLY',
+            allowComment: false,
+            allowDuet: false,
+            allowStitch: false,
+            commercial: { on: false, yourBrand: false, brandedContent: false },
+            consent: true,
+          },
+        },
       }),
     );
     expect(sch.destinations).toEqual(['youtube', 'instagram', 'x', 'tiktok']);
@@ -1812,7 +1823,7 @@ describe('scheduling: slots, render timing, destinations', () => {
       ['tiktok', 'skipped'],
       ['x', 'skipped'],
     ]);
-    expect(d.shares[0].error).toMatch(/not available yet/);
+    expect(d.shares[0].error).toMatch(/not connected/);
     // the YouTube video is confirmed public: every share is sent or skipped, so the MP4 goes
     await q(
       `UPDATE social_shares SET detail = detail || jsonb_build_object('verifiedAt', now()::text) WHERE post_id=$1 AND network='youtube'`,
@@ -1996,6 +2007,108 @@ describe('scheduling: slots, render timing, destinations', () => {
       ['POST', `/api/platform/video/posts/${p.id}/preview`, {}],
     ] as const)
       expect((await api(method, url, body, member.cookie)).status).toBe(404);
+  });
+});
+
+describe('review fixes: publishAt margin, the claim race, the render lock, the clean-up', () => {
+  beforeEach(clean);
+  const sched = (id: string, body: Record<string, unknown> = {}) =>
+    api('POST', `/api/platform/video/posts/${id}/schedule`, body);
+  /** Renders first (an unrendered post close to its slot would slip), then moves the slot close. */
+  const slotIn = async (id: string, interval: string) => {
+    await videoTick(t.app.ctx, { render: fakeRender, role: 'render' });
+    await q(`UPDATE video_posts SET slot_at = now() + interval '${interval}' WHERE id=$1`, [id]);
+  };
+
+  it('a slot less than 15 minutes away uploads public at once; further away it is a publishAt', async () => {
+    await settings({ privacy: 'public' });
+    const near = await approved('article', 'short', 'margin-near');
+    await slotIn(near.id, '10 minutes');
+    await tick();
+    expect(yt.uploads[0]?.status.privacyStatus).toBe('public');
+    expect(yt.uploads[0]?.status.publishAt).toBeUndefined();
+    const far = await approved('article', 'short', 'margin-far');
+    await slotIn(far.id, '20 minutes');
+    await tick();
+    expect(yt.uploads[1]?.status.privacyStatus).toBe('private');
+    expect(yt.uploads[1]?.status.publishAt).toBeTruthy();
+  });
+
+  it('a retry before any upload session exists works the publishAt out again', async () => {
+    await settings({ privacy: 'public' });
+    const p = await approved('article', 'short', 'margin-retry');
+    await slotIn(p.id, '20 minutes');
+    yt.uploadErrors = [new YouTubeError('retry', 'HTTP 503', 503)];
+    await tick();
+    expect(yt.uploads).toHaveLength(0);
+    t.clock.advance(7 * 60_000); // the slot is now 13 minutes away; the back-off (1 minute) has passed
+    await tick();
+    expect(yt.uploads[0]?.status.privacyStatus).toBe('public');
+    expect(yt.uploads[0]?.status.publishAt).toBeUndefined();
+    t.clock.advance(-7 * 60_000);
+  });
+
+  it('a post moved or unscheduled between the claim and the upload is not uploaded with its old slot', async () => {
+    const claim = async (id: string) => {
+      await tickRenderOnly();
+      await q(
+        `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, created_at, updated_at)
+         VALUES ($1,'youtube','video','posting',0,now(),now(),now()) ON CONFLICT DO NOTHING`,
+        [id],
+      );
+      return (await q(`SELECT * FROM social_shares WHERE post_id=$1 AND network='youtube'`, [id]))[0];
+    };
+    const tickRenderOnly = () => videoTick(t.app.ctx, { render: fakeRender, role: 'render' });
+    const a = await approved('article', 'short', 'claim-moved');
+    const claimed = await claim(a.id);
+    const later = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    await q(`UPDATE video_posts SET slot_at=$2 WHERE id=$1`, [a.id, later]); // moved after the claim
+    await runUpload(t.app.ctx, claimed as never);
+    expect(yt.uploads[0]?.status.publishAt).toBe(later);
+
+    const b = await approved('article', 'short', 'claim-unscheduled');
+    const claimedB = await claim(b.id);
+    await q(`UPDATE video_posts SET status='in_review' WHERE id=$1`, [b.id]); // unscheduled after the claim
+    const before = yt.uploads.length;
+    await runUpload(t.app.ctx, claimedB as never);
+    expect(yt.uploads).toHaveLength(before);
+    expect((await q(`SELECT status FROM social_shares WHERE post_id=$1`, [b.id]))[0]?.status).toBe('skipped');
+  });
+
+  it('only one render runs at a time even when two workers claim at once', async () => {
+    await approved('article', 'short', 'two-renders-a');
+    await approved('article', 'short', 'two-renders-b');
+    const slow: RenderFn = async (s, o) => {
+      await new Promise((r) => setTimeout(r, 150));
+      return fakeRender(s, o);
+    };
+    const results = await Promise.all([
+      renderNext(t.app.ctx, { render: slow }),
+      renderNext(t.app.ctx, { render: slow }),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM video_renders WHERE status='rendered'`)).toHaveLength(1);
+  });
+
+  it('the clean-up keeps the MP4 of a sent public upload that YouTube has not confirmed until 6 hours after the slot', async () => {
+    const p = await approved('article', 'short', 'unverified-keeps');
+    await slotIn(p.id, '20 minutes');
+    await tick(); // uploaded private with a publishAt: sent, not verified
+    const s = (await q(`SELECT * FROM social_shares WHERE post_id=$1 AND network='youtube'`, [p.id]))[0];
+    expect([s?.status, s?.detail.verifiedAt]).toEqual(['sent', undefined]);
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(0);
+    expect((await post(p.id)).render.files).toContain('video');
+    await q(`UPDATE video_posts SET slot_at = now() - interval '7 hours' WHERE id=$1`, [p.id]);
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
+    expect((await post(p.id)).render.files).not.toContain('video');
+  });
+
+  it('a schedule request is refused for TikTok without options even when TikTok is only the schedule default', async () => {
+    await settings({ schedule: { short: { destinations: ['youtube', 'tiktok'] } } });
+    const p = await submit('article', 'short', 'default-tiktok');
+    const r = await sched(p.id, {});
+    expect([r.status, r.body.error.code]).toEqual([400, 'tiktok_options_required']);
+    await settings({ schedule: { short: { destinations: ['youtube'] } } });
   });
 });
 

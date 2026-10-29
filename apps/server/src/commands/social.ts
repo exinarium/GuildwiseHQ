@@ -18,6 +18,7 @@ import type { Ctx } from '../context.ts';
 import { exec, iso, one, rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
 import { socialAlertMail } from '../mail/blog-mail.ts';
+import { DestinationError } from '../video/destinations.ts';
 import { YouTubeError } from '../video/youtube.ts';
 import { blogEnabled } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
@@ -76,7 +77,7 @@ type TokenInput = {
 };
 
 /** X and Bluesky pastes become the same shape as a token: the secrets go into one JSON string, encrypted below. */
-function normalizeConnect(network: SocialNetwork, body: ConnectSocialChannelRequest): TokenInput {
+function normalizeConnect(network: SocialChannelNetwork, body: ConnectSocialChannelRequest): TokenInput {
   if (network === 'x') {
     if (!('apiKey' in body))
       throw badRequest('bad_credentials', 'X needs apiKey, apiSecret, accessToken and accessSecret');
@@ -132,13 +133,42 @@ async function normalizeYoutube(ctx: Ctx, body: ConnectSocialChannelRequest): Pr
   }
 }
 
+/**
+ * Instagram Reels: the Instagram professional account id and a Facebook Page access token of the Page that account is
+ * linked to (scopes instagram_basic, instagram_content_publish, pages_read_engagement). Checked with the Graph API.
+ */
+async function normalizeInstagram(ctx: Ctx, body: ConnectSocialChannelRequest): Promise<TokenInput> {
+  if (!('accountId' in body)) throw badRequest('bad_credentials', 'accountId and accessToken are required');
+  try {
+    const ig = await ctx.videoDestinations.instagramAccount(body.accountId, body.accessToken);
+    return { ...body, accountName: body.accountName || `@${ig.username}` };
+  } catch (err) {
+    if (err instanceof DestinationError)
+      throw badRequest(
+        'bad_credentials',
+        `Instagram did not accept the account id and token: ${err.message}`,
+      );
+    throw err;
+  }
+}
+
 export async function connectChannel(
   ctx: Ctx,
   by: AuthSession['user'],
   network: SocialChannelNetwork,
   body: ConnectSocialChannelRequest,
 ): Promise<SocialChannel[]> {
-  const input = network === 'youtube' ? await normalizeYoutube(ctx, body) : normalizeConnect(network, body);
+  if (network === 'tiktok')
+    throw badRequest(
+      'use_oauth',
+      'TikTok is connected with the Connect button (it signs in on TikTok), not with pasted tokens',
+    );
+  const input =
+    network === 'youtube'
+      ? await normalizeYoutube(ctx, body)
+      : network === 'instagram'
+        ? await normalizeInstagram(ctx, body)
+        : normalizeConnect(network, body);
   const access = await encryptSecret(ctx, input.accessToken);
   const refresh = input.refreshToken ? await encryptSecret(ctx, input.refreshToken) : null;
   await exec(
@@ -269,7 +299,7 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
     `INSERT INTO social_shares (post_id, network, status, attempts, next_attempt_at, created_at, updated_at)
      SELECT p.id, c.network, 'pending', 0, $1, $1, $1
        FROM blog_posts p CROSS JOIN social_channels c
-      WHERE p.status='published' AND NOT p.launch AND c.status='ok' AND c.network <> 'youtube'
+      WHERE p.status='published' AND NOT p.launch AND c.status='ok' AND c.network IN ('facebook','linkedin','x','bluesky')
         AND p.published_at >= c.connected_at AND p.published_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, fresh],
@@ -279,7 +309,7 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
     `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, created_at, updated_at)
      SELECT p.id, c.network, 'social', 'pending', 0, $1, $1, $1
        FROM social_posts p CROSS JOIN social_channels c
-      WHERE p.status='approved' AND c.status='ok' AND c.network <> 'youtube'
+      WHERE p.status='approved' AND c.status='ok' AND c.network IN ('facebook','linkedin','x','bluesky')
         AND p.approved_at >= c.connected_at AND p.approved_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, fresh],
@@ -291,7 +321,12 @@ export async function superAdminEmails(ctx: Ctx): Promise<string[]> {
   return rs.map((r) => r.email as string);
 }
 
-export async function alertOnce(ctx: Ctx, network: SocialChannelNetwork, reason: string): Promise<void> {
+export async function alertOnce(
+  ctx: Ctx,
+  network: SocialChannelNetwork,
+  reason: string,
+  shorts = false,
+): Promise<void> {
   const claimed = await exec(
     ctx.pool,
     `UPDATE social_channels SET alerted_at=$2 WHERE network=$1 AND alerted_at IS NULL`,
@@ -300,7 +335,9 @@ export async function alertOnce(ctx: Ctx, network: SocialChannelNetwork, reason:
   if (!claimed) return;
   for (const to of await superAdminEmails(ctx)) {
     try {
-      await ctx.mailer.send(socialAlertMail({ to, network, reason, origin: ctx.config.publicOrigin }));
+      await ctx.mailer.send(
+        socialAlertMail({ to, network, reason, origin: ctx.config.publicOrigin, shorts }),
+      );
     } catch (err) {
       ctx.log.error({ err }, 'social alert mail failed');
     }
@@ -497,7 +534,7 @@ async function checkExpiry(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
   const soon = await rows(
     ctx.pool,
-    `SELECT * FROM social_channels WHERE status='ok' AND network <> 'youtube' AND expires_at IS NOT NULL AND expires_at < $1`,
+    `SELECT * FROM social_channels WHERE status='ok' AND network NOT IN ('youtube','tiktok') AND expires_at IS NOT NULL AND expires_at < $1`,
     [new Date(now.getTime() + EXPIRY_WARN_MS)],
   );
   for (const ch of soon) {
@@ -562,7 +599,7 @@ export async function socialTick(ctx: Ctx): Promise<number> {
         WHERE (s.post_id, s.network) = (
           SELECT s2.post_id, s2.network FROM social_shares s2
             JOIN social_channels c ON c.network = s2.network AND c.status='ok'
-           WHERE s2.status='pending' AND s2.source <> 'video' AND s2.network <> 'youtube' AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
+           WHERE s2.status='pending' AND s2.source <> 'video' AND s2.network IN ('facebook','linkedin','x','bluesky') AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
            ORDER BY s2.created_at LIMIT 1 FOR UPDATE OF s2 SKIP LOCKED)
         RETURNING s.*`,
       [ctx.clock.now()],

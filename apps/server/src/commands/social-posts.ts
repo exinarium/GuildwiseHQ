@@ -244,7 +244,7 @@ export async function approveSocialPost(
     throw conflict('post_rejected', 'a rejected post must be sent to review again first');
   const have = await one(
     ctx.pool,
-    `SELECT 1 AS x FROM social_channels WHERE status='ok' AND network <> 'youtube' LIMIT 1`,
+    `SELECT 1 AS x FROM social_channels WHERE status='ok' AND network IN ('facebook','linkedin','x','bluesky') LIMIT 1`,
   );
   if (!have) throw conflict('no_channel', 'connect a social network first: nothing would be posted');
   await ctx.store.append([

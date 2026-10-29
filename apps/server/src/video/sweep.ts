@@ -1,16 +1,23 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readdir, rm, rmdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
+  type BlueskyFacet,
+  composeCaption,
+  defaultVideoCaption,
   SCHEDULE_DEFAULTS,
+  TikTokOptionsSchema,
+  VIDEO_CAPTION_LIMITS,
   VIDEO_LIMITS,
   VIDEO_POST_LIMITS,
+  type VideoCaptions,
   type VideoPostMeta,
   type VideoScript,
 } from '@aom/shared';
 import { decryptSecret } from '../auth/secrets.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import { alertOnce, SHARE_BACKOFF_MS, superAdminEmails } from '../commands/social.ts';
+import { freshTiktokToken } from '../commands/tiktok.ts';
 import {
   artifactPath,
   beatHeartbeat,
@@ -25,12 +32,15 @@ import {
   videoPostStream,
   videoSettings,
   videoStorageUsed,
+  withLock,
   workerHeartbeat,
 } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { videoAlertMail, videoLockedMail } from '../mail/blog-mail.ts';
+import { DestinationError, type DestinationPayload, type ShortDestination } from './destinations.ts';
 import { libraryCatalog } from './library.ts';
+import { signedMediaUrl } from './media-url.ts';
 import { type PushDeps, pushArtifacts } from './push-client.ts';
 import { watchUrl, YouTubeError } from './youtube.ts';
 
@@ -48,6 +58,7 @@ import { watchUrl, YouTubeError } from './youtube.ts';
 const adminScope = { orgId: null, projectId: null, audience: 'admin' } as const;
 const LEASE_MS = 40 * 60_000;
 const STALE_POSTING_MS = 30 * 60_000;
+const PUBLISH_AT_MARGIN_MS = 15 * 60_000;
 const DAY = 86_400_000;
 /** A video with no slot (publish now) waits this long for its file to arrive. */
 const WAIT_FOR_FILE_MS = 60 * 60_000;
@@ -160,17 +171,31 @@ async function claimRender(ctx: Ctx): Promise<Row | undefined> {
     );
     return undefined;
   }
-  return one(
-    ctx.pool,
-    `UPDATE video_renders r SET status='rendering', lease_until=$3, attempts=r.attempts+1, error=NULL
-      WHERE r.id = (
-        SELECT x.id FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-         WHERE ${CLAIMABLE}
-           AND NOT EXISTS (SELECT 1 FROM video_renders y WHERE y.status='rendering' AND y.lease_until >= $1)
-         ORDER BY x.not_before NULLS FIRST, p.slot_at NULLS LAST, x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
-      RETURNING r.*`,
-    [now, VIDEO_POST_LIMITS.maxAttempts, new Date(now.getTime() + LEASE_MS)],
-  );
+  // one render at a time even with several render workers: the claim runs under a transaction-scoped advisory lock, so
+  // two workers cannot both see "nothing is rendering" (READ COMMITTED would let them)
+  const db = await ctx.pool.connect();
+  try {
+    await db.query('BEGIN');
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext('video-render-claim'))`);
+    const claimed = await one(
+      db,
+      `UPDATE video_renders r SET status='rendering', lease_until=$3, attempts=r.attempts+1, error=NULL
+        WHERE r.id = (
+          SELECT x.id FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
+           WHERE ${CLAIMABLE}
+             AND NOT EXISTS (SELECT 1 FROM video_renders y WHERE y.status='rendering' AND y.lease_until >= $1)
+           ORDER BY x.not_before NULLS FIRST, p.slot_at NULLS LAST, x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
+        RETURNING r.*`,
+      [now, VIDEO_POST_LIMITS.maxAttempts, new Date(now.getTime() + LEASE_MS)],
+    );
+    await db.query('COMMIT');
+    return claimed;
+  } catch (err) {
+    await db.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    db.release();
+  }
 }
 
 /** Claims and renders one queued render. Returns true when it did something. */
@@ -281,8 +306,8 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolea
 
 // ---- uploads
 
-/** Why a destination other than YouTube does not post yet. */
-export const NOT_AVAILABLE_YET = 'not available yet: posting to this destination arrives in a later version';
+/** How long after its slot a destination keeps trying (retries with back-off) before the share fails for good. */
+export const POST_WINDOW_MS = 6 * 3_600_000;
 
 /** A render of the post's revision that finished and still has its video (or is a recorded help video). */
 const RENDERED = `EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id AND r.status = 'rendered'
@@ -290,9 +315,10 @@ const RENDERED = `EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id A
                             AND (r.library OR r.purged_at IS NULL))`;
 
 /**
- * Rendered, approved posts get a share row per destination. YouTube is uploaded; every other destination is created
- * `skipped` with a clear reason (its adapter ships later) and is never failed. A post with no destinations (an older one)
- * goes to YouTube.
+ * Rendered, approved posts get a share row per destination. YouTube is uploaded at once (its own `publishAt` is the slot);
+ * every other destination is posted by `postNextDestination` when its slot is due (`next_attempt_at` = the slot, or now for
+ * "publish now"). A destination whose channel is not connected is created `skipped` ("retry" after connecting). A post with
+ * no destinations (an older one) goes to YouTube.
  */
 async function createMissingUploads(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
@@ -307,12 +333,17 @@ async function createMissingUploads(ctx: Ctx): Promise<void> {
   );
   await exec(
     ctx.pool,
-    `INSERT INTO social_shares (post_id, network, source, status, attempts, error, created_at, updated_at)
-     SELECT p.id, d.network, 'video', 'skipped', 0, $2, $1, $1
+    `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, error, created_at, updated_at)
+     SELECT p.id, d.network, 'video',
+            CASE WHEN c.network IS NULL THEN 'skipped' ELSE 'pending' END, 0,
+            CASE WHEN c.network IS NULL THEN NULL WHEN p.publish_mode = 'slot' AND p.slot_at IS NOT NULL THEN p.slot_at ELSE $1::timestamptz END,
+            CASE WHEN c.network IS NULL THEN 'not connected: connect the account under Social sharing, then retry' END,
+            $1, $1
        FROM video_posts p CROSS JOIN LATERAL unnest(p.destinations) AS d(network)
+       LEFT JOIN social_channels c ON c.network = d.network
       WHERE p.status='approved' AND d.network <> 'youtube' AND ${RENDERED}
      ON CONFLICT (post_id, network) DO NOTHING`,
-    [now, NOT_AVAILABLE_YET],
+    [now],
   );
   // an upload that died mid-way resumes (its session and video id are in `detail`), it is never started a second time
   await exec(
@@ -425,9 +456,9 @@ async function announceLocked(ctx: Ctx, post: Row, videoId: string): Promise<voi
     }
 }
 
-async function runUpload(ctx: Ctx, share: Row): Promise<void> {
+export async function runUpload(ctx: Ctx, share: Row): Promise<void> {
   const now = ctx.clock.now();
-  const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [share.post_id]);
+  let post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [share.post_id]);
   // the render the owner approved (older posts pin it), else the render of the revision that was scheduled
   const render = post
     ? await one(
@@ -487,12 +518,24 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
           'the video file was not found (the video volume, or the help videos folder)',
         );
       }
-      // YouTube publishes at the slot itself (publishAt). Fixed before the upload starts, so a resume keeps it. A slot
-      // that is too close (or "publish now") uploads public at once.
-      if (privacy === 'public' && detail.publishAt === undefined) {
+      // The owner may have moved or unscheduled the post between the claim and now: read it again under the slot lock
+      // (move and unschedule take it and refuse once a share is posting), and stop if it is no longer scheduled.
+      if (!detail.sessionUri) {
+        const fresh = await withLock(ctx, `video-slot:${post.format}`, () =>
+          one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [post?.id]),
+        );
+        if (!fresh || fresh.status !== 'approved')
+          return void (await skip('the video is no longer scheduled'));
+        post = fresh;
+      }
+      // YouTube publishes at the slot itself (publishAt). Fixed with the session, so a resume keeps it; before a session
+      // exists it is worked out again (a retry after a long wait may find the slot passed). Less than 15 minutes ahead
+      // (or "publish now") uploads public at once: YouTube refuses a publishAt that is not in the future by the time the
+      // upload ends.
+      if (privacy === 'public' && (detail.publishAt === undefined || !detail.sessionUri)) {
         const slot = post.slot_at ? new Date(post.slot_at) : null;
         detail.publishAt =
-          post.publish_mode === 'slot' && slot && slot.getTime() > now.getTime() + 2 * 60_000
+          post.publish_mode === 'slot' && slot && slot.getTime() > now.getTime() + PUBLISH_AT_MARGIN_MS
             ? slot.toISOString()
             : null;
       }
@@ -667,6 +710,209 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
       await alertOnce(ctx, 'youtube', `An upload failed for good: ${message}`);
     }
   }
+}
+
+// ---- the other destinations (Reels, X, LinkedIn, Bluesky, TikTok)
+
+const DEST_BACKOFF_MS = [1, 5, 30, 120].map((m) => m * 60_000);
+
+/** The caption a destination posts: the owner's (schedule) over the drafter's (submit) over the default, composed to its limits. */
+export function destinationCaption(
+  post: Row,
+  network: ShortDestination,
+): { text: string; facets: BlueskyFacet[] } {
+  const meta = post.meta as VideoPostMeta;
+  const mine = ({ ...(post.submit_captions ?? {}), ...(post.captions ?? {}) } as VideoCaptions)[network];
+  const c = mine && mine.text.trim() ? mine : defaultVideoCaption(network, meta);
+  // no link on any Short: X and TikTok forbid or charge for it, and a Short has no page of its own
+  return composeCaption(network, c.text, c.tags, '', VIDEO_CAPTION_LIMITS[network]);
+}
+
+async function runDestination(ctx: Ctx, share: Row): Promise<void> {
+  const now = ctx.clock.now();
+  const network = share.network as ShortDestination;
+  const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [share.post_id]);
+  const render = post
+    ? await one(
+        ctx.pool,
+        post.approved_render_id
+          ? 'SELECT * FROM video_renders WHERE id=$1'
+          : 'SELECT * FROM video_renders WHERE post_id=$1 AND revision=$2',
+        post.approved_render_id ? [post.approved_render_id] : [post.id, post.revision],
+      )
+    : undefined;
+  const setShare = (sets: string, params: unknown[]) =>
+    exec(ctx.pool, `UPDATE social_shares SET ${sets}, updated_at=$3 WHERE post_id=$1 AND network=$2`, [
+      share.post_id,
+      network,
+      now,
+      ...params,
+    ]);
+  if (!post || post.status !== 'approved' || !render)
+    return void (await setShare(`status='skipped', error=$4`, ['the video is no longer approved']));
+  const ch = await one(ctx.pool, `SELECT * FROM social_channels WHERE network=$1`, [network]);
+  if (!ch) return void (await setShare(`status='skipped', error=$4`, ['channel disconnected']));
+  const stream = videoPostStream(post.id);
+  const detail = { ...((share.detail as Record<string, unknown> | null) ?? {}) };
+  // the window is 6 hours from the slot (from the share for "publish now"); a retry by the owner opens a new one
+  const deadline =
+    Math.max(
+      post.publish_mode === 'slot' && post.slot_at
+        ? new Date(post.slot_at).getTime()
+        : new Date(share.created_at ?? now).getTime(),
+      typeof detail.retryAt === 'string' ? Date.parse(detail.retryAt) : 0,
+    ) + POST_WINDOW_MS;
+  const state = { ...((detail.dest as Record<string, unknown> | undefined) ?? {}) };
+  const save = async () => {
+    detail.dest = state;
+    await setShare(`detail=$4::jsonb`, [JSON.stringify(detail)]);
+  };
+  const fail = async (message: string, alert: boolean) => {
+    await setShare(`status='failed', error=$4, next_attempt_at=NULL, attempts=attempts+1`, [message]);
+    await ctx.store.append([
+      {
+        streamId: stream,
+        event: {
+          type: 'SocialShareFailed',
+          payload: { postId: post.id, network, error: message, final: true },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: adminScope,
+      },
+    ]);
+    if (alert) await alertOnce(ctx, network, `A video failed for good: ${message}`, true);
+  };
+  try {
+    if (Object.keys(state).length === 0 && now.getTime() > deadline)
+      return void (await fail(
+        'the slot passed more than 6 hours ago and the video was not posted; retry it to post now',
+        true,
+      ));
+    if (Object.keys(state).length > 0 && now.getTime() > deadline + POST_WINDOW_MS)
+      return void (await fail('still processing 12 hours after the slot; check the account and retry', true));
+    const artifacts = (render.artifacts ?? {}) as Record<string, unknown>;
+    const file = artifactPath(ctx, artifacts, 'video');
+    if (!file || !existsSync(file)) {
+      if (now.getTime() < deadline) {
+        await setShare(`status='pending', error=$4, next_attempt_at=$5`, [
+          'waiting for the video file',
+          new Date(now.getTime() + 60_000),
+        ]);
+        return;
+      }
+      return void (await fail('the video file was not found (the video volume)', true));
+    }
+    const settings = await videoSettings(ctx);
+    const meta = post.meta as VideoPostMeta;
+    const cap = destinationCaption(post, network);
+    let credentials = await decryptSecret(ctx, ch.access_token);
+    let tiktok: DestinationPayload['tiktok'];
+    if (network === 'tiktok') {
+      const parsed = TikTokOptionsSchema.safeParse(post.destination_options?.tiktok);
+      if (!parsed.success)
+        return void (await fail(
+          'TikTok needs the options the owner chose when scheduling (who can see it, interactions, consent); schedule the video again with TikTok ticked',
+          true,
+        ));
+      if (!settings.tiktokAudited && parsed.data.privacy !== 'SELF_ONLY')
+        return void (await fail(
+          `the TikTok app has not passed its audit: only private (SELF_ONLY) posts are allowed, not ${parsed.data.privacy}`,
+          true,
+        ));
+      credentials = await freshTiktokToken(ctx, ch);
+      tiktok = { options: parsed.data, videoUrl: await signedMediaUrl(ctx, render.id) };
+    }
+    await beatHeartbeat(ctx, 'publish', { busy: 'post' });
+    const payload: DestinationPayload = {
+      network,
+      accountId: ch.account_id,
+      credentials,
+      filePath: file,
+      bytes: statSync(file).size,
+      durationSeconds: Number(render.duration_s ?? 0),
+      text: cap.text,
+      facets: cap.facets,
+      title: meta.title,
+      ...(tiktok ? { tiktok } : {}),
+    };
+    const out = await ctx.videoDestinations.publish(payload, {
+      state,
+      save,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    });
+    if (!out.done) {
+      await setShare(`status='pending', error=$4, next_attempt_at=$5, detail=$6::jsonb`, [
+        out.note,
+        new Date(now.getTime() + out.retryInMs),
+        JSON.stringify({ ...detail, dest: state }),
+      ]);
+      return;
+    }
+    await setShare(
+      `status='sent', external_id=$4, url=$5, error=NULL, attempts=attempts+1, next_attempt_at=NULL, detail=$6::jsonb`,
+      [out.externalId, out.url, JSON.stringify({ ...detail, dest: state })],
+    );
+    await ctx.store.append([
+      {
+        streamId: stream,
+        event: {
+          type: 'SocialShareSucceeded',
+          payload: { postId: post.id, network, externalId: out.externalId, url: out.url },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: adminScope,
+      },
+    ]);
+  } catch (err) {
+    const kind = err instanceof DestinationError ? err.kind : 'retry';
+    const message = (err instanceof Error ? err.message : String(err)).slice(0, 480);
+    if (kind === 'auth') {
+      // not the video's fault: pause the channel, keep the share waiting for the reconnect
+      await exec(ctx.pool, `UPDATE social_channels SET status='needs_reconnect' WHERE network=$1`, [network]);
+      await setShare(`status='pending', next_attempt_at=NULL, error=$4, detail=$5::jsonb`, [
+        message,
+        JSON.stringify({ ...detail, dest: state }),
+      ]);
+      await alertOnce(ctx, network, message, true);
+      return;
+    }
+    const attempts = (share.attempts as number) + 1;
+    const wait = DEST_BACKOFF_MS[Math.min(attempts - 1, DEST_BACKOFF_MS.length - 1)] as number;
+    if (kind === 'final' || now.getTime() + wait > deadline) {
+      await setShare(`detail=$4::jsonb`, [JSON.stringify({ ...detail, dest: state })]);
+      return void (await fail(
+        kind === 'final' ? message : `gave up 6 hours after the slot: ${message}`,
+        true,
+      ));
+    }
+    await setShare(`status='pending', attempts=$4, error=$5, next_attempt_at=$6, detail=$7::jsonb`, [
+      attempts,
+      message,
+      new Date(now.getTime() + wait),
+      JSON.stringify({ ...detail, dest: state }),
+    ]);
+  }
+}
+
+/** Claims and posts one due destination share (a slot that has come, a retry that is due). Returns true when it did something. */
+export async function postNextDestination(ctx: Ctx): Promise<boolean> {
+  const now = ctx.clock.now();
+  const claimed = await one(
+    ctx.pool,
+    `UPDATE social_shares s SET status='posting', updated_at=$1
+      WHERE (s.post_id, s.network) = (
+        SELECT s2.post_id, s2.network FROM social_shares s2
+          JOIN social_channels c ON c.network = s2.network AND c.status='ok'
+          JOIN video_posts p ON p.id = s2.post_id AND p.status = 'approved'
+         WHERE s2.source='video' AND s2.network <> 'youtube' AND s2.status='pending'
+           AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
+         ORDER BY s2.next_attempt_at NULLS FIRST, s2.created_at LIMIT 1 FOR UPDATE OF s2 SKIP LOCKED)
+      RETURNING s.*`,
+    [now],
+  );
+  if (!claimed) return false;
+  await runDestination(ctx, claimed);
+  return true;
 }
 
 /** Claims and runs one due upload of a rendered video, if no other upload is running. Returns true when it did something. */
@@ -876,6 +1122,28 @@ export async function videoWatch(ctx: Ctx): Promise<{ slipped: number; alerts: n
 
 const CLEANUP_KEY = 'video_cleanup_at';
 
+/** A push that died (killed process, cut connection) leaves `.push-<uuid>.tmp` next to the target: remove those over an hour old. */
+export async function cleanupPushTemps(ctx: Ctx): Promise<number> {
+  const root = ctx.config.videoDir;
+  const cutoff = ctx.clock.now().getTime() - 3_600_000;
+  let removed = 0;
+  const dirs = async (p: string) =>
+    (await readdir(p, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory());
+  for (const post of await dirs(root))
+    for (const rev of await dirs(join(root, post.name))) {
+      const dir = join(root, post.name, rev.name);
+      for (const f of await readdir(dir).catch(() => [] as string[])) {
+        if (!/^\.push-.*\.tmp$/.test(f)) continue;
+        const st = await stat(join(dir, f)).catch(() => null);
+        if (st && st.mtimeMs < cutoff) {
+          await rm(join(dir, f), { force: true });
+          removed++;
+        }
+      }
+    }
+  return removed;
+}
+
 /**
  * Daily storage policy. Thumbnails, captions, scripts, descriptions and logs are kept for good; the MP4 goes:
  * - published: once every destination is sent or skipped (at least one sent) AND (YouTube verified the video public OR the
@@ -898,6 +1166,7 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
   );
   const root = ctx.config.videoDir;
   let purged = 0;
+  await cleanupPushTemps(ctx);
   const purge = async (r: Row, onlyVideo: boolean) => {
     const a = (r.artifacts ?? {}) as Record<string, unknown>;
     const keep: Record<string, unknown> = { ...a };
@@ -1037,6 +1306,8 @@ export async function videoTick(
   let cleaned = 0;
   if (doPublish) {
     uploaded = await uploadNext(ctx);
+    // the slots that have come: up to a handful of destinations per pass (each can take minutes)
+    for (let i = 0; i < 5 && (await postNextDestination(ctx)); i++) uploaded = true;
     await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
     cleaned = await cleanupVideos(ctx).catch((err) => {
       ctx.log.error({ err }, 'video cleanup failed');

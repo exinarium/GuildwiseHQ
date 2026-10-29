@@ -85,3 +85,10 @@ export async function verifySigned(ctx: Ctx, purpose: string, token: string): Pr
   const got = Buffer.from(token.slice(i + 1));
   return want.length === got.length && timingSafeEqual(want, got) ? value : null;
 }
+
+/** A key for signing links (HMAC), derived from the secret key and a purpose so one purpose's signatures mean nothing to another. */
+export async function signingKey(ctx: Ctx, purpose: string): Promise<Buffer> {
+  return createHmac('sha256', await key(ctx))
+    .update(`sign|${purpose}`)
+    .digest();
+}
