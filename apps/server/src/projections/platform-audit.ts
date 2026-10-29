@@ -526,8 +526,48 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
     return {
       action: e.event.type,
-      summary: `Video approved for YouTube: ${post?.title ?? p.postId}`,
-      details: { postId: p.postId, renderId: p.renderId },
+      summary: `Video approved: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, ...(p.renderId ? { renderId: p.renderId } : {}) },
+    };
+  }),
+  VideoPostScheduled: always(async (tx, e) => {
+    const p = ev<'VideoPostScheduled'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    const what = {
+      approved: 'scheduled',
+      moved: 'moved',
+      slipped: 'slipped to a later slot (not rendered in time)',
+      reflow: 'moved to a slot of the new schedule',
+      migrated: 'given its slot',
+    }[p.reason];
+    return {
+      action: e.event.type,
+      summary: `Video ${what}: ${post?.title ?? p.postId} (${p.mode === 'now' ? 'as soon as rendered' : p.slotAt})`,
+      details: {
+        postId: p.postId,
+        slotAt: p.slotAt,
+        mode: p.mode,
+        destinations: p.destinations,
+        reason: p.reason,
+      },
+    };
+  }),
+  VideoPostUnscheduled: always(async (tx, e) => {
+    const p = ev<'VideoPostUnscheduled'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Video taken off the schedule: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, ...(p.reason ? { reason: p.reason } : {}) },
+    };
+  }),
+  VideoPreviewRequested: always(async (tx, e) => {
+    const p = ev<'VideoPreviewRequested'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Preview render requested: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, revision: p.revision },
     };
   }),
   VideoPostRejected: always(async (tx, e) => {

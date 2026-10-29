@@ -1,25 +1,35 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { VIDEO_LIMITS, VIDEO_POST_LIMITS, type VideoPostMeta, type VideoScript } from '@aom/shared';
+import {
+  SCHEDULE_DEFAULTS,
+  VIDEO_LIMITS,
+  VIDEO_POST_LIMITS,
+  type VideoPostMeta,
+  type VideoScript,
+} from '@aom/shared';
 import { decryptSecret } from '../auth/secrets.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import { alertOnce, SHARE_BACKOFF_MS, superAdminEmails } from '../commands/social.ts';
 import {
   artifactPath,
   beatHeartbeat,
+  ensureFinalRender,
   insertLibraryRender,
   libraryDescription,
+  nextFreeSlotOf,
   renderDir,
-  slotAfter,
-  takenSlots,
+  renderStart,
+  slipVideoPost,
   videoActive,
   videoPostStream,
   videoSettings,
+  videoStorageUsed,
+  workerHeartbeat,
 } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
-import { videoLockedMail } from '../mail/blog-mail.ts';
+import { videoAlertMail, videoLockedMail } from '../mail/blog-mail.ts';
 import { libraryCatalog } from './library.ts';
 import { watchUrl, YouTubeError } from './youtube.ts';
 
@@ -27,8 +37,10 @@ import { watchUrl, YouTubeError } from './youtube.ts';
  * The video worker's loop (`video-worker --loop`, a separate container): one pass does, in this order,
  *   1. a heartbeat (the UI shows "video worker not running" when it is stale),
  *   2. nothing else unless a YouTube channel is connected (status ok) AND `videoPosts.enabled`,
- *   3. the approved posts get an upload row, 4. ONE queued render is claimed (a lease, 3 attempts, one at a time),
- *   5. ONE upload per day (at most one video a day, public at 10:00 SAST), 6. the daily cleanup of old files.
+ *   3. the watch (a post that will not be rendered in time slips to the next slot, alerts), 4. the rendered posts get
+ *   their destination rows, 5. ONE render is claimed (a lease, 3 attempts, one at a time; only a scheduled post whose
+ *   `not_before` has passed, or an explicit preview), 6. ONE upload at a time (YouTube, `publishAt` = the slot),
+ *   7. the cleanup of files nobody needs any more.
  * The render and the YouTube client are injected so tests never render or reach Google.
  */
 
@@ -67,19 +79,22 @@ const defaultRender: RenderFn = async (script, opts) => {
 
 // ---- renders
 
-/** Posts that need a render row but have none (a crash between the event and the insert), and renders nobody wants. */
+/**
+ * Scheduled posts that need a render row but have none (a crash between the event and the insert), and renders nobody
+ * wants. A post in review gets no row here: only an explicit preview renders before scheduling.
+ */
 async function healRenders(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
-  await exec(
+  const missing = await rows(
     ctx.pool,
-    `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at)
-     SELECT gen_random_uuid(), p.id, p.revision, 'queued', 0, $1 FROM video_posts p
-      WHERE p.script IS NOT NULL AND p.status IN ('draft','in_review')
-        AND NOT EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id AND r.revision = p.revision)
-        AND (SELECT count(*) FROM video_renders r WHERE r.post_id = p.id AND NOT r.library) < $2
-     ON CONFLICT (post_id, revision) DO NOTHING`,
-    [now, VIDEO_POST_LIMITS.maxRenders],
+    `SELECT p.id, p.revision, p.format, p.script, p.slot_at, p.publish_mode FROM video_posts p
+      WHERE p.script IS NOT NULL AND p.status = 'approved'
+        AND NOT EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id AND r.revision = p.revision)`,
   );
+  for (const p of missing) {
+    const slot = p.slot_at ? new Date(p.slot_at) : now;
+    await ensureFinalRender(ctx, p as never, await renderStart(ctx, p.format, slot, p.publish_mode ?? 'now'));
+  }
   await exec(
     ctx.pool,
     `UPDATE video_renders r SET status='failed', error='superseded by a newer revision', finished_at=$1
@@ -110,21 +125,44 @@ async function healRenders(ctx: Ctx): Promise<void> {
   );
 }
 
+/** A render that may start: of an approved post once its `not_before` has passed, or an explicit preview in review. */
+const CLAIMABLE = `NOT x.library AND p.script IS NOT NULL
+  AND ((p.status='approved' AND (x.not_before IS NULL OR x.not_before <= $1))
+       OR (x.preview AND p.status IN ('draft','in_review')))
+  AND ((x.status='queued' AND (x.lease_until IS NULL OR x.lease_until <= $1))
+       OR (x.status='rendering' AND x.lease_until < $1))
+  AND x.attempts < $2`;
+
 async function claimRender(ctx: Ctx): Promise<Row | undefined> {
   const now = ctx.clock.now();
+  // the disk budget: nothing starts while the rendered videos on disk plus room for one more pass the limit
+  const waiting = await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
+      WHERE ${CLAIMABLE} LIMIT 1`,
+    [now, VIDEO_POST_LIMITS.maxAttempts],
+  );
+  if (!waiting) return undefined;
+  const used = await videoStorageUsed(ctx);
+  if (used + VIDEO_POST_LIMITS.renderReserveBytes > ctx.config.videoMaxBytes) {
+    await alertVideoOnce(
+      ctx,
+      `storage:${now.toISOString().slice(0, 10)}`,
+      'The video disk is full',
+      `Rendered videos take ${Math.round(used / 1024 ** 2)} MB of the ${Math.round(ctx.config.videoMaxBytes / 1024 ** 2)} MB budget (AOM_VIDEO_MAX_BYTES), so no new render starts until published videos are cleaned up.`,
+    );
+    return undefined;
+  }
   return one(
     ctx.pool,
-    `UPDATE video_renders r SET status='rendering', lease_until=$2, attempts=r.attempts+1, error=NULL
+    `UPDATE video_renders r SET status='rendering', lease_until=$3, attempts=r.attempts+1, error=NULL
       WHERE r.id = (
         SELECT x.id FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-         WHERE NOT x.library AND p.script IS NOT NULL AND p.status IN ('draft','in_review')
-           AND ((x.status='queued' AND (x.lease_until IS NULL OR x.lease_until <= $1))
-                OR (x.status='rendering' AND x.lease_until < $1))
-           AND x.attempts < $3
+         WHERE ${CLAIMABLE}
            AND NOT EXISTS (SELECT 1 FROM video_renders y WHERE y.status='rendering' AND y.lease_until >= $1)
-         ORDER BY x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
+         ORDER BY x.not_before NULLS FIRST, p.slot_at NULLS LAST, x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
       RETURNING r.*`,
-    [now, new Date(now.getTime() + LEASE_MS), VIDEO_POST_LIMITS.maxAttempts],
+    [now, VIDEO_POST_LIMITS.maxAttempts, new Date(now.getTime() + LEASE_MS)],
   );
 }
 
@@ -220,17 +258,38 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolea
 
 // ---- uploads
 
-/** The calendar day in South Africa (UTC+2, no daylight saving) of an instant. */
-const sastDay = (d: Date): string => new Date(d.getTime() + 2 * 3600_000).toISOString().slice(0, 10);
+/** Why a destination other than YouTube does not post yet. */
+export const NOT_AVAILABLE_YET = 'not available yet: posting to this destination arrives in a later version';
 
+/** A render of the post's revision that finished and still has its video (or is a recorded help video). */
+const RENDERED = `EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id AND r.status = 'rendered'
+                            AND (r.id = p.approved_render_id OR r.revision = p.revision)
+                            AND (r.library OR r.purged_at IS NULL))`;
+
+/**
+ * Rendered, approved posts get a share row per destination. YouTube is uploaded; every other destination is created
+ * `skipped` with a clear reason (its adapter ships later) and is never failed. A post with no destinations (an older one)
+ * goes to YouTube.
+ */
 async function createMissingUploads(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
   await exec(
     ctx.pool,
     `INSERT INTO social_shares (post_id, network, source, status, attempts, next_attempt_at, created_at, updated_at)
-     SELECT p.id, 'youtube', 'video', 'pending', 0, $1, $1, $1 FROM video_posts p WHERE p.status='approved'
+     SELECT p.id, 'youtube', 'video', 'pending', 0, $1, $1, $1 FROM video_posts p
+      WHERE p.status='approved' AND ('youtube' = ANY(p.destinations) OR cardinality(p.destinations) = 0)
+        AND ${RENDERED}
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now],
+  );
+  await exec(
+    ctx.pool,
+    `INSERT INTO social_shares (post_id, network, source, status, attempts, error, created_at, updated_at)
+     SELECT p.id, d.network, 'video', 'skipped', 0, $2, $1, $1
+       FROM video_posts p CROSS JOIN LATERAL unnest(p.destinations) AS d(network)
+      WHERE p.status='approved' AND d.network <> 'youtube' AND ${RENDERED}
+     ON CONFLICT (post_id, network) DO NOTHING`,
+    [now, NOT_AVAILABLE_YET],
   );
   // an upload that died mid-way resumes (its session and video id are in `detail`), it is never started a second time
   await exec(
@@ -242,25 +301,17 @@ async function createMissingUploads(ctx: Ctx): Promise<void> {
 }
 
 /**
- * May this share upload today? At most one upload a (South African) day. Whatever already put a video on YouTube today counts
- * (even a share that failed in a later step), and so does a share that reserved today's slot and waits to retry. A video
- * YouTube kept private, or an upload in progress elsewhere, pauses everything. `self` is the share being claimed.
+ * May this share start uploading? One upload runs at a time, and none while a video YouTube kept private waits for the
+ * owner. `self` is the share being claimed. (There is no limit per day any more: the schedule decides when a video is public.)
  */
 async function uploadAllowed(ctx: Ctx, self: Row): Promise<boolean> {
-  const day = sastDay(ctx.clock.now());
-  const rs = await rows(
+  const busy = await one(
     ctx.pool,
-    `SELECT status, detail->>'uploadedAt' AS uploaded, detail->>'reservedAt' AS reserved
-       FROM social_shares
-      WHERE source='video' AND network='youtube' AND post_id <> $1
-        AND (status IN ('posting','locked_private') OR detail->>'uploadedAt' IS NOT NULL OR detail->>'reservedAt' IS NOT NULL)`,
+    `SELECT 1 AS x FROM social_shares
+      WHERE source='video' AND network='youtube' AND post_id <> $1 AND status IN ('posting','locked_private')`,
     [self.post_id],
   );
-  if (rs.some((r) => r.status === 'locked_private' || r.status === 'posting')) return false;
-  return !rs.some((r) => {
-    const at = r.uploaded ?? r.reserved;
-    return at && sastDay(new Date(at)) === day && (r.uploaded || r.status === 'pending');
-  });
+  return !busy;
 }
 
 type Detail = {
@@ -268,7 +319,6 @@ type Detail = {
   sessionStartedAt?: string;
   videoId?: string;
   uploadedAt?: string;
-  reservedAt?: string;
   publishAt?: string | null;
   privacy?: string;
   /** The worker saw the video public after its slot (or the owner said so). */
@@ -355,8 +405,15 @@ async function announceLocked(ctx: Ctx, post: Row, videoId: string): Promise<voi
 async function runUpload(ctx: Ctx, share: Row): Promise<void> {
   const now = ctx.clock.now();
   const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [share.post_id]);
-  const render = post?.approved_render_id
-    ? await one(ctx.pool, 'SELECT * FROM video_renders WHERE id=$1', [post.approved_render_id])
+  // the render the owner approved (older posts pin it), else the render of the revision that was scheduled
+  const render = post
+    ? await one(
+        ctx.pool,
+        post.approved_render_id
+          ? 'SELECT * FROM video_renders WHERE id=$1'
+          : 'SELECT * FROM video_renders WHERE post_id=$1 AND revision=$2',
+        post.approved_render_id ? [post.approved_render_id] : [post.id, post.revision],
+      )
     : undefined;
   const skip = async (why: string) =>
     exec(
@@ -387,11 +444,15 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
           'final',
           'the video file was not found (the video volume, or the help videos folder)',
         );
-      // the slot is reserved in `detail` before the upload starts, so a resume keeps it
-      if (privacy === 'public' && !detail.publishAt) {
-        detail.publishAt = slotAfter(now, await takenSlots(ctx)).toISOString();
+      // YouTube publishes at the slot itself (publishAt). Fixed before the upload starts, so a resume keeps it. A slot
+      // that is too close (or "publish now") uploads public at once.
+      if (privacy === 'public' && detail.publishAt === undefined) {
+        const slot = post.slot_at ? new Date(post.slot_at) : null;
+        detail.publishAt =
+          post.publish_mode === 'slot' && slot && slot.getTime() > now.getTime() + 2 * 60_000
+            ? slot.toISOString()
+            : null;
       }
-      detail.reservedAt ??= now.toISOString();
       detail.privacy = privacy;
       await saveDetail(ctx, share, detail);
       const descFile = artifactPath(ctx, artifacts, 'description');
@@ -412,7 +473,10 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
           defaultAudioLanguage: 'en',
         },
         status: {
-          privacyStatus: (privacy === 'public' ? 'private' : privacy) as 'private' | 'unlisted' | 'public',
+          privacyStatus: (privacy === 'public' && detail.publishAt ? 'private' : privacy) as
+            | 'private'
+            | 'unlisted'
+            | 'public',
           ...(privacy === 'public' && detail.publishAt ? { publishAt: detail.publishAt } : {}),
           selfDeclaredMadeForKids: false as const,
           containsSyntheticMedia: false as const,
@@ -493,7 +557,9 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
       );
     const locked =
       !!status && privacy !== 'private' && status.privacyStatus === 'private' && !status.publishAt;
-    if (privacy !== 'public' && !locked) detail.verifiedAt = ctx.clock.now().toISOString();
+    // unlisted/private need no check; a public video uploaded without a publishAt is verified when YouTube shows it public
+    if (!locked && (privacy !== 'public' || (!detail.publishAt && status?.privacyStatus === 'public')))
+      detail.verifiedAt = ctx.clock.now().toISOString();
     await exec(
       ctx.pool,
       `UPDATE social_shares SET status=$3, error=NULL, attempts=attempts+1, next_attempt_at=NULL, detail=$4::jsonb, updated_at=$5
@@ -560,7 +626,7 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
   }
 }
 
-/** Claims and runs one due upload, if the one-a-day cap allows. Returns true when it did something. */
+/** Claims and runs one due upload of a rendered video, if no other upload is running. Returns true when it did something. */
 export async function uploadNext(ctx: Ctx): Promise<boolean> {
   const now = ctx.clock.now();
   const claimed = await one(
@@ -569,8 +635,10 @@ export async function uploadNext(ctx: Ctx): Promise<boolean> {
       WHERE (s.post_id, s.network) = (
         SELECT s2.post_id, s2.network FROM social_shares s2
           JOIN social_channels c ON c.network = s2.network AND c.status='ok'
+          JOIN video_posts p ON p.id = s2.post_id AND p.status = 'approved'
          WHERE s2.source='video' AND s2.network='youtube' AND s2.status='pending'
            AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
+           AND (s2.detail->>'videoId' IS NOT NULL OR ${RENDERED})
          ORDER BY s2.created_at LIMIT 1 FOR UPDATE OF s2 SKIP LOCKED)
       RETURNING s.*`,
     [now],
@@ -651,14 +719,128 @@ export async function recheckPublished(ctx: Ctx): Promise<number> {
   return n;
 }
 
+// ---- alerts and the watch over the slots
+
+/** A mail to the owner, once per `key` (ever). The claim is a row in the platform settings. */
+export async function alertVideoOnce(
+  ctx: Ctx,
+  key: string,
+  heading: string,
+  reason: string,
+): Promise<boolean> {
+  const claimed = await exec(
+    ctx.pool,
+    `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ($1,$2::jsonb,NULL,$3)
+     ON CONFLICT (key) DO NOTHING`,
+    [`video_alert:${key}`, JSON.stringify({ heading, reason }), ctx.clock.now()],
+  );
+  if (!claimed) return false;
+  for (const to of await superAdminEmails(ctx))
+    try {
+      await ctx.mailer.send(videoAlertMail({ to, heading, reason, origin: ctx.config.publicOrigin }));
+    } catch (err) {
+      ctx.log.error({ err }, 'video alert mail failed');
+    }
+  return true;
+}
+
+const HOUR = 3_600_000;
+
+/**
+ * What the owner must hear about before a slot passes, and the one thing the system does by itself:
+ * - at slot minus 30 minutes a post that is still not rendered slips to the next free slot of its format (never cascading);
+ * - 24 hours (Shorts: 12) before a slot, a render that has not started while no render worker is alive: "render worker offline";
+ * - 6 hours before a slot, a render that failed for good;
+ * - 24 hours before a slot nobody holds, while scripts wait in review: "empty slot".
+ * Only database work, so the app runs it too: a dead render worker cannot report itself.
+ */
+export async function videoWatch(ctx: Ctx): Promise<{ slipped: number; alerts: number }> {
+  const out = { slipped: 0, alerts: 0 };
+  if (!(await videoActive(ctx))) return out;
+  const now = ctx.clock.now();
+  const send = async (key: string, heading: string, reason: string) => {
+    if (await alertVideoOnce(ctx, key, heading, reason)) out.alerts++;
+  };
+  // 1. slip
+  const late = await rows(
+    ctx.pool,
+    `SELECT p.id, p.title, p.format, p.slot_at FROM video_posts p
+      WHERE p.status='approved' AND p.publish_mode='slot' AND p.script IS NOT NULL
+        AND p.slot_at <= $1
+        AND NOT EXISTS (SELECT 1 FROM video_renders r WHERE r.post_id = p.id AND r.revision = p.revision
+                          AND r.status = 'rendered' AND r.purged_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video'
+                          AND (s.external_id IS NOT NULL OR s.status IN ('posting','sent','locked_private')))
+      ORDER BY p.slot_at`,
+    [new Date(now.getTime() + SCHEDULE_DEFAULTS.slipBeforeMs)],
+  );
+  for (const p of late) {
+    const moved = await slipVideoPost(ctx, p.id);
+    if (!moved) continue;
+    out.slipped++;
+    await send(
+      `slip:${p.id}:${moved.from.getTime()}`,
+      'A video missed its slot',
+      `"${p.title}" was not rendered in time for ${moved.from.toISOString()} and now goes out at ${moved.to.toISOString()}. Check that the video render worker is running.`,
+    );
+  }
+  // 2. render worker offline / render failed
+  const pending = await rows(
+    ctx.pool,
+    `SELECT p.id, p.title, p.format, p.slot_at, r.status AS render_status, r.attempts, r.error
+       FROM video_posts p JOIN video_renders r ON r.post_id = p.id AND r.revision = p.revision
+      WHERE p.status='approved' AND p.publish_mode='slot' AND NOT r.library AND p.slot_at > $1
+        AND r.status IN ('queued','failed')`,
+    [now],
+  );
+  const alive = (await workerHeartbeat(ctx)).running;
+  for (const p of pending) {
+    const left = new Date(p.slot_at).getTime() - now.getTime();
+    const warn = (p.format === 'short' ? 12 : 24) * HOUR;
+    if (p.render_status === 'queued' && p.attempts === 0 && left <= warn && !alive)
+      await send(
+        `offline:${p.id}`,
+        'The video render worker is offline',
+        `"${p.title}" goes out at ${new Date(p.slot_at).toISOString()} but its render has not started and the render worker is not running.`,
+      );
+    if (p.render_status === 'failed' && left <= 6 * HOUR)
+      await send(
+        `failed:${p.id}`,
+        'A video failed to render',
+        `"${p.title}" goes out at ${new Date(p.slot_at).toISOString()} but its render failed: ${p.error ?? 'unknown error'}. Fix the script or retry the render.`,
+      );
+  }
+  // 3. an empty slot while scripts wait
+  for (const format of ['long', 'short'] as const) {
+    const waiting = await one(
+      ctx.pool,
+      `SELECT count(*)::int AS n FROM video_posts WHERE format=$1 AND status='in_review' AND ref NOT LIKE 'lib:%'`,
+      [format],
+    );
+    if (!waiting?.n) continue;
+    const next = await nextFreeSlotOf(ctx, format, { leadMs: 0 });
+    if (next && next.getTime() - now.getTime() <= 24 * HOUR)
+      await send(
+        `empty:${format}:${next.getTime()}`,
+        'A video slot is still empty',
+        `The ${format === 'short' ? 'Short' : 'long video'} slot at ${next.toISOString()} has nothing scheduled while ${waiting.n} script${waiting.n === 1 ? ' waits' : 's wait'} for your review.`,
+      );
+  }
+  return out;
+}
+
 // ---- cleanup
 
 const CLEANUP_KEY = 'video_cleanup_at';
 
 /**
- * Daily: renders of superseded revisions go one day after they were replaced, those of rejected posts after 7 days, and
- * the MP4 of an uploaded video 30 days after it was sent (thumbnail, captions and script stay). A library video's file is
- * the help video itself and is never touched.
+ * Daily storage policy. Thumbnails, captions, scripts, descriptions and logs are kept for good; the MP4 goes:
+ * - published: once every destination is sent or skipped (at least one sent) AND (YouTube verified the video public OR the
+ *   slot is 6 hours past);
+ * - a failed destination: 3 days after its last failure (a retry renders the same revision again);
+ * - a rejected post: all files after 1 day; a superseded revision's render after 1 day;
+ * - a preview in review: the MP4 after 7 days without activity on the post.
+ * A library video's file is the help video itself and is never touched.
  */
 export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): Promise<number> {
   const now = ctx.clock.now();
@@ -691,30 +873,61 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
     );
     purged++;
   };
+  const ago = (ms: number) => new Date(now.getTime() - ms);
   // superseded: a newer revision exists and the render is older than a day
   for (const r of await rows(
     ctx.pool,
     `SELECT r.* FROM video_renders r JOIN video_posts p ON p.id = r.post_id
       WHERE NOT r.library AND r.purged_at IS NULL AND r.revision < p.revision
         AND COALESCE(r.finished_at, r.created_at) < $1 AND p.approved_render_id IS DISTINCT FROM r.id`,
-    [new Date(now.getTime() - DAY)],
+    [ago(DAY)],
   ))
     await purge(r, false);
-  // rejected for a week
+  // rejected for a day
   for (const r of await rows(
     ctx.pool,
     `SELECT r.* FROM video_renders r JOIN video_posts p ON p.id = r.post_id
       WHERE NOT r.library AND r.purged_at IS NULL AND p.status='rejected' AND p.updated_at < $1`,
-    [new Date(now.getTime() - 7 * DAY)],
+    [ago(VIDEO_POST_LIMITS.rejectedKeepDays * DAY)],
   ))
     await purge(r, false);
-  // uploaded for 30 days: only the MP4 goes
+  // a preview nobody touched for a week: only the MP4 goes
   for (const r of await rows(
     ctx.pool,
-    `SELECT r.* FROM video_renders r JOIN video_posts p ON p.approved_render_id = r.id
-      JOIN social_shares s ON s.post_id = p.id AND s.network='youtube' AND s.source='video' AND s.status IN ('sent','locked_private')
-      WHERE NOT r.library AND r.purged_at IS NULL AND r.artifacts ? 'video' AND s.updated_at < $1`,
-    [new Date(now.getTime() - 30 * DAY)],
+    `SELECT r.* FROM video_renders r JOIN video_posts p ON p.id = r.post_id AND p.revision = r.revision
+      WHERE NOT r.library AND r.purged_at IS NULL AND r.artifacts ? 'video' AND p.status IN ('draft','in_review')
+        AND COALESCE(r.finished_at, r.created_at) < $1 AND p.updated_at < $1`,
+    [ago(VIDEO_POST_LIMITS.previewKeepDays * DAY)],
+  ))
+    await purge(r, true);
+  // published: every destination sent or skipped (one sent), YouTube verified or the slot is 6 hours past
+  for (const r of await rows(
+    ctx.pool,
+    `SELECT r.* FROM video_renders r
+      JOIN video_posts p ON p.id = r.post_id AND p.status = 'approved'
+        AND (p.approved_render_id = r.id OR (p.approved_render_id IS NULL AND p.revision = r.revision))
+      WHERE NOT r.library AND r.purged_at IS NULL AND r.artifacts ? 'video'
+        AND NOT EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video'
+                          AND s.status NOT IN ('sent','skipped'))
+        AND EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video' AND s.status = 'sent')
+        AND (EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video'
+                       AND s.network='youtube' AND s.detail->>'verifiedAt' IS NOT NULL)
+             OR COALESCE(p.slot_at, (SELECT max(s.updated_at) FROM social_shares s WHERE s.post_id = p.id AND s.source='video')) < $1)`,
+    [ago(VIDEO_POST_LIMITS.publishedKeepHours * 3_600_000)],
+  ))
+    await purge(r, true);
+  // a failed destination: the MP4 waits 3 days for a retry
+  for (const r of await rows(
+    ctx.pool,
+    `SELECT r.* FROM video_renders r
+      JOIN video_posts p ON p.id = r.post_id AND p.status = 'approved'
+        AND (p.approved_render_id = r.id OR (p.approved_render_id IS NULL AND p.revision = r.revision))
+      WHERE NOT r.library AND r.purged_at IS NULL AND r.artifacts ? 'video'
+        AND EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video'
+                      AND s.status = 'failed' AND s.updated_at < $1)
+        AND NOT EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video'
+                          AND s.status IN ('pending','posting','locked_private'))`,
+    [ago(VIDEO_POST_LIMITS.failedKeepDays * DAY)],
   ))
     await purge(r, true);
   return purged;
@@ -730,8 +943,10 @@ export async function videoTick(
   await beatHeartbeat(ctx);
   if (!(await videoActive(ctx))) return { active: false, rendered: false, uploaded: false, cleaned: 0 };
   await healRenders(ctx);
+  await videoWatch(ctx).catch((err) => ctx.log.error({ err }, 'video watch failed'));
   await createMissingUploads(ctx);
   const rendered = await renderNext(ctx, deps);
+  if (rendered) await createMissingUploads(ctx);
   const uploaded = await uploadNext(ctx);
   await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
   const cleaned = await cleanupVideos(ctx).catch((err) => {

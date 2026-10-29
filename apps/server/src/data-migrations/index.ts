@@ -19,6 +19,7 @@ import { migrateReporterRetired } from './reporter-retired.ts';
 import { migrateRestructure } from './restructure.ts';
 import { migrateStrandedTestCards } from './stranded-test-cards.ts';
 import { migrateSuspiciousRoles } from './suspicious-roles.ts';
+import { migrateVideoSchedule } from './video-schedule.ts';
 
 export {
   BLOG_CITE_CLEANUP_MIGRATION,
@@ -89,6 +90,11 @@ export {
   STRANDED_TEST_CARDS_MIGRATION,
   type StrandedTestCardsReport,
 } from './stranded-test-cards.ts';
+export {
+  migrateVideoSchedule,
+  VIDEO_SCHEDULE_MIGRATION,
+  type VideoScheduleReport,
+} from './video-schedule.ts';
 
 /**
  * Boot data migrations, run after the SQL migrations and before the dispatcher, scheduler and HTTP listener
@@ -117,6 +123,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'delegation-explicit-2026-10', run: (env) => migrateDelegationExplicit(env) },
   { name: 'suspicious-roles-2026-10', run: (env) => migrateSuspiciousRoles(env) },
   { name: 'pack-skill-keys-2026-10', run: (env) => migratePackSkillKeys(env) },
+  { name: 'video-schedule-2026-10', run: (env) => migrateVideoSchedule(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

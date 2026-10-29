@@ -21,6 +21,7 @@ import { reachabilityTick } from '../delivery/reachability.ts';
 import { governanceTick } from '../governance/offboarding.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
+import { videoWatch } from '../video/sweep.ts';
 
 const TICK_MS = 15_000;
 const MAINTENANCE_MS = 5 * 60_000;
@@ -178,6 +179,8 @@ export class Scheduler {
     await autoPublishDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog auto-publish failed'));
     await socialTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog social sharing failed'));
     await blogDigestTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog digest failed'));
+    // the video schedule: a post that will not be rendered in time slips, and the owner hears about it (DB only)
+    await videoWatch(this.ctx).catch((err) => this.ctx.log.error({ err }, 'video watch failed'));
   }
 
   /** The interests' run schedules, then their delivery schedules (digests to the desk within the quiet cap). */

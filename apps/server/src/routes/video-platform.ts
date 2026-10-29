@@ -4,11 +4,16 @@ import {
   EditVideoPostRequestSchema,
   IdParamsSchema,
   ImportVideoLibraryRequestSchema,
+  MoveVideoPostRequestSchema,
   PatchVideoSettingsRequestSchema,
   RejectVideoPostRequestSchema,
   RejectVideoTopicRequestSchema,
+  ScheduleVideoPostRequestSchema,
   SubmitVideoPostRequestSchema,
+  SwapVideoPostRequestSchema,
+  UnscheduleVideoPostRequestSchema,
   VIDEO_POST_STATUSES,
+  VideoSlotsQuerySchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -22,10 +27,13 @@ import {
   getVideoPost,
   importLibrary,
   listLibrary,
+  listSlots,
   listVideoPosts,
   listVideoTopics,
+  moveVideoPost,
   moveVideoTopicUp,
   patchVideoSettings,
+  previewVideoPost,
   queueVideoTopic,
   rejectVideoPost,
   rejectVideoTopic,
@@ -34,7 +42,10 @@ import {
   retryRender,
   retryUpload,
   reviseVideoPost,
+  scheduleVideoPost,
   submitVideoPost,
+  swapVideoPosts,
+  unscheduleVideoPost,
   videoSettings,
   videoStatus,
 } from '../commands/video-posts.ts';
@@ -119,6 +130,47 @@ export function videoPlatformRoutes(ctx: Ctx) {
     app.post('/api/platform/video/posts/:id/approve', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireSuperAdmin(ctx, req);
       return approveVideoPost(ctx, s.user, req.params.id);
+    });
+    // ---- the schedule: Schedule = approve + slot; nothing renders before it (except an explicit preview)
+    app.get('/api/platform/video/slots', { schema: { querystring: VideoSlotsQuerySchema } }, async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return listSlots(ctx, req.query.format, req.query.count);
+    });
+    app.post(
+      '/api/platform/video/posts/:id/schedule',
+      { schema: { params: IdParamsSchema, body: ScheduleVideoPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return scheduleVideoPost(ctx, s.user, req.params.id, req.body);
+      },
+    );
+    app.post(
+      '/api/platform/video/posts/:id/unschedule',
+      { schema: { params: IdParamsSchema, body: UnscheduleVideoPostRequestSchema.optional() } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return unscheduleVideoPost(ctx, s.user, req.params.id, req.body?.reason);
+      },
+    );
+    app.post(
+      '/api/platform/video/posts/:id/move',
+      { schema: { params: IdParamsSchema, body: MoveVideoPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return moveVideoPost(ctx, s.user, req.params.id, req.body.slotAt);
+      },
+    );
+    app.post(
+      '/api/platform/video/posts/:id/swap',
+      { schema: { params: IdParamsSchema, body: SwapVideoPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return swapVideoPosts(ctx, s.user, req.params.id, req.body.withId);
+      },
+    );
+    app.post('/api/platform/video/posts/:id/preview', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireSuperAdmin(ctx, req);
+      return previewVideoPost(ctx, s.user, req.params.id);
     });
     app.post(
       '/api/platform/video/posts/:id/reject',

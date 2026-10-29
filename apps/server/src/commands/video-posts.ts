@@ -7,27 +7,41 @@ import {
   type EditVideoPostRequest,
   fitCaption,
   isLibraryRef,
+  isScheduleSlot,
+  nextFreeSlot,
   type PatchVideoSettingsRequest,
   type Release,
+  resolveSchedule,
+  SCHEDULE_DEFAULTS,
+  type ScheduleVideoPostRequest,
+  ScheduleVideoPostRequestSchema,
   SOCIAL_LIMITS,
   type SocialCaptions,
   type SubmitVideoPostRequest,
+  slotsFrom,
   VIDEO_LIBRARY_PREFIX,
   VIDEO_POST_LIMITS,
   VIDEO_TOPIC_LIMITS,
   type VideoCapacity,
+  type VideoCaptions,
   type VideoCrossPost,
+  type VideoDestination,
   type VideoFormat,
   type VideoKind,
   type VideoLibraryEntry,
+  type VideoPhase,
   type VideoPost,
   type VideoPostList,
   type VideoPostMeta,
   type VideoPostStatus,
   type VideoRender,
+  type VideoSchedule,
+  VideoScheduleSchema,
   type VideoScript,
   VideoScriptSchema,
   type VideoSettings,
+  type VideoShare,
+  type VideoSlotList,
   type VideoStatus,
   type VideoTopic,
   type VideoTopicList,
@@ -50,11 +64,16 @@ import { SYSTEM_ACTOR, userActor } from './common.ts';
  * the Video topics list and the cross-post of a tutorial. Event-sourced (`VideoPost*`, `VideoTopic*`); the renders and
  * the upload are operational tables the video worker (video/sweep.ts) works on.
  *
- * ONE review gate: the rendered video. A post renders on its own (revision 1 is queued when it is submitted), the owner
- * watches the video and reads script and metadata, edits re-render (at most 3 renders a post) and only an approval of the
- * rendered revision lets the worker upload it. Everything automatic is a no-op unless a YouTube channel is connected
- * (status ok) AND `videoPosts.enabled`.
+ * ONE review gate: the script. Nothing renders when a script is submitted or edited; the owner reads script and metadata
+ * and schedules it ("Schedule" = approve + slot in one append). The render starts `renderLeadHours` before the slot
+ * (at once for "publish now"), YouTube gets the file as soon as it is rendered with the slot as its publishAt, and the MP4
+ * is removed once everything is published. An explicit preview render (at most 3 renders a post) is the only render of a
+ * post in review. Everything automatic is a no-op unless a YouTube channel is connected (status ok) AND
+ * `videoPosts.enabled`.
  */
+
+/** The error of a render that was queued before renders moved to scheduling; it is not a render the post used. */
+export const RENDER_DEFERRED = 'renders now happen after scheduling';
 
 const adminScope = { orgId: null, projectId: null, audience: 'admin' } as const;
 export const videoPostStream = (postId: string) => `video-${postId}`;
@@ -74,13 +93,14 @@ async function putSetting(ctx: Ctx, by: string | null, key: string, value: unkno
   );
 }
 
-/** The core platform setting `videoPosts` (defaults for whatever was never set). */
+/** The core platform setting `videoPosts` (defaults for whatever was never set; `schedule` is always present). */
 export async function videoSettings(ctx: Ctx): Promise<VideoSettings> {
   const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [SETTINGS_KEY]);
   const v = (r?.value ?? {}) as Partial<VideoSettings>;
   return {
     ...DEFAULT_VIDEO_SETTINGS,
     ...v,
+    schedule: resolveSchedule(v),
     playlists: { ...DEFAULT_VIDEO_SETTINGS.playlists, ...(v.playlists ?? {}) },
   };
 }
@@ -90,15 +110,35 @@ export async function patchVideoSettings(
   by: AuthSession['user'],
   patch: PatchVideoSettingsRequest,
 ): Promise<VideoSettings> {
-  const cur = await videoSettings(ctx);
-  const next: VideoSettings = { ...cur, ...stripUndefined(patch), playlists: { ...cur.playlists } };
-  if (patch.playlists) {
+  const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [SETTINGS_KEY]);
+  const stored = (r?.value ?? {}) as Partial<VideoSettings>;
+  const { schedule: schedulePatch, playlists: playlistsPatch, ...flat } = patch;
+  const next: Record<string, unknown> = { ...stored, ...stripUndefined(flat) };
+  if (playlistsPatch) {
+    const playlists = { ...(stored.playlists ?? {}) };
     for (const k of ['article', 'release', 'tutorial'] as const) {
-      const v = patch.playlists[k];
+      const v = playlistsPatch[k];
       if (v === undefined) continue;
-      if (v === '') delete next.playlists[k];
-      else next.playlists[k] = v;
+      if (v === '') delete playlists[k];
+      else playlists[k] = v;
     }
+    next.playlists = playlists;
+  }
+  if (schedulePatch) {
+    // a patch of part of the schedule lands on the schedule in force (the derived one included), then the whole is validated
+    const cur = resolveSchedule(stored);
+    const merged = {
+      timezone: schedulePatch.timezone ?? cur.timezone,
+      long: { ...cur.long, ...stripUndefined(schedulePatch.long ?? {}) },
+      short: { ...cur.short, ...stripUndefined(schedulePatch.short ?? {}) },
+    };
+    const parsed = VideoScheduleSchema.safeParse(merged);
+    if (!parsed.success)
+      throw badRequest(
+        'validation_error',
+        parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      );
+    next.schedule = parsed.data;
   }
   await putSetting(ctx, by.id, SETTINGS_KEY, next);
   await ctx.store.append([
@@ -152,34 +192,59 @@ export async function workerHeartbeat(ctx: Ctx): Promise<{ running: boolean; las
 
 // ---- slots
 
-/** 10:00 SAST (08:00 UTC) on the day of `t` or the day after. */
-export function slotAfter(t: Date, taken: Iterable<string> = []): Date {
-  const used = new Set([...taken].map((x) => new Date(x).toISOString().slice(0, 10)));
-  const minimum = t.getTime() + 30 * 60_000; // YouTube wants publishAt well in the future
-  const d = new Date(t);
-  d.setUTCHours(VIDEO_POST_LIMITS.slotHourUtc, 0, 0, 0);
-  for (let i = 0; i < 400; i++, d.setUTCDate(d.getUTCDate() + 1))
-    if (d.getTime() >= minimum && !used.has(d.toISOString().slice(0, 10))) return new Date(d);
-  return d;
-}
-
-/**
- * The slots (ISO) already given to uploads: any share that holds a reserved `publishAt` and is either still going to upload
- * (pending with its reservation, posting, sent, locked) or already put a video on YouTube (a `videoId`, even if a later
- * step failed). A failed share that never uploaded gives its slot back.
- */
-export async function takenSlots(ctx: Ctx): Promise<string[]> {
+/** The slots (epoch ms) approved posts of `format` hold, published ones included. `except` leaves one post out. */
+export async function takenSlots(ctx: Ctx, format: VideoFormat, except?: string): Promise<Set<number>> {
   const rs = await rows(
     ctx.pool,
-    `SELECT detail->>'publishAt' AS at FROM social_shares
-      WHERE source='video' AND network='youtube' AND detail->>'publishAt' IS NOT NULL
-        AND (status IN ('pending','posting','sent','locked_private') OR detail->>'videoId' IS NOT NULL)`,
+    `SELECT slot_at FROM video_posts WHERE format=$1 AND status='approved' AND slot_at IS NOT NULL
+        AND ($2::uuid IS NULL OR id <> $2)`,
+    [format, except ?? null],
   );
-  return rs.map((r) => r.at as string);
+  return new Set(rs.map((r) => new Date(r.slot_at).getTime()));
 }
 
-export async function nextUploadSlot(ctx: Ctx): Promise<Date> {
-  return slotAfter(ctx.clock.now(), await takenSlots(ctx));
+/** How soon after "now" a slot may be: render time and YouTube's future-`publishAt` rule; 30 minutes with a rendered preview. */
+export const minLeadMs = (format: VideoFormat, hasRenderedVideo = false): number =>
+  hasRenderedVideo ? SCHEDULE_DEFAULTS.minLeadMs.preview : SCHEDULE_DEFAULTS.minLeadMs[format];
+
+/** The next free slot of a format (null when its schedule has no days). `notBefore`: a Short follows its long video. */
+export async function nextFreeSlotOf(
+  ctx: Ctx,
+  format: VideoFormat,
+  opts: { leadMs?: number; notBefore?: Date | null; except?: string } = {},
+): Promise<Date | null> {
+  const { schedule } = await videoSettings(ctx);
+  const now = ctx.clock.now();
+  const lead = opts.leadMs ?? minLeadMs(format);
+  const from = opts.notBefore && opts.notBefore.getTime() > now.getTime() + lead ? opts.notBefore : now;
+  const leadMs = from === now ? lead : 0;
+  return nextFreeSlot(
+    schedule[format],
+    schedule.timezone,
+    from,
+    await takenSlots(ctx, format, opts.except),
+    leadMs,
+  );
+}
+
+/** The next `count` slots of a format and who holds each. */
+export async function listSlots(ctx: Ctx, format: VideoFormat, count = 14): Promise<VideoSlotList> {
+  const { schedule } = await videoSettings(ctx);
+  const slots = slotsFrom(schedule[format], schedule.timezone, ctx.clock.now(), count);
+  const held = await rows(
+    ctx.pool,
+    `SELECT id, slot_at FROM video_posts WHERE format=$1 AND status='approved' AND slot_at IS NOT NULL AND slot_at >= $2`,
+    [format, ctx.clock.now()],
+  );
+  const by = new Map(held.map((h) => [new Date(h.slot_at).getTime(), h.id as string]));
+  return {
+    timezone: schedule.timezone,
+    slots: slots.map((d) => ({
+      at: d.toISOString(),
+      postId: by.get(d.getTime()) ?? null,
+      free: !by.has(d.getTime()),
+    })),
+  };
 }
 
 // ---- artifacts on disk
@@ -235,7 +300,33 @@ function renderDto(r: Row): VideoRender {
     files: FILE_KEYS.filter((k) => typeof a[k] === 'string' && a[k]),
     purged: !!r.purged_at,
     library: !!r.library,
+    notBefore: iso(r.not_before),
+    preview: !!r.preview,
   };
+}
+
+/** Where a post is in its life, from its status, its render of the current revision and its shares. */
+export function phaseOf(
+  p: Row,
+  render: Row | null,
+  shares: Array<{ status: string; videoId?: string | null }>,
+  now: Date,
+): VideoPhase {
+  if (p.status === 'rejected') return 'rejected';
+  if (p.status === 'draft') return 'scripted';
+  if (p.status === 'in_review') return 'in_review';
+  const real = shares.filter((s) => s.status !== 'skipped');
+  const sent = real.filter((s) => s.status === 'sent' || s.status === 'locked_private');
+  if (real.length && sent.length === real.length) {
+    const past = !p.slot_at || new Date(p.slot_at).getTime() <= now.getTime();
+    return past ? 'published' : 'rendered';
+  }
+  if (sent.length) return real.some((s) => s.status === 'failed') ? 'partial' : 'publishing';
+  if (real.some((s) => s.status === 'failed') || render?.status === 'failed') return 'failed';
+  if (real.some((s) => s.status === 'posting' || s.videoId)) return 'publishing';
+  if (render?.status === 'rendered') return 'rendered';
+  if (render?.status === 'rendering') return 'rendering';
+  return 'scheduled';
 }
 
 function uploadDto(r: Row): VideoUpload {
@@ -273,6 +364,14 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
     const mine = renders.filter((r) => r.post_id === p.id);
     const current = mine.find((r) => r.revision === p.revision) ?? null;
     const share = shares.find((s) => s.post_id === p.id && s.network === 'youtube');
+    const others: VideoShare[] = shares
+      .filter((s) => s.post_id === p.id && s.network !== 'youtube')
+      .map((s) => ({
+        network: s.network,
+        status: s.status,
+        url: s.url ?? null,
+        error: s.error ?? null,
+      }));
     const cp = crossPosts.find((c) => c.ref === p.id);
     const crossPost: VideoCrossPost | null = cp
       ? {
@@ -308,10 +407,21 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
       reviewSince: iso(p.review_since),
       approvedAt: iso(p.approved_at),
       approvedRenderId: p.approved_render_id ?? null,
+      slotAt: iso(p.slot_at),
+      publishMode: p.publish_mode ?? null,
+      destinations: (p.destinations ?? []) as VideoDestination[],
+      captions: (p.captions as VideoCaptions | null) ?? null,
+      phase: phaseOf(
+        p,
+        current,
+        shares.filter((s) => s.post_id === p.id).map((s) => ({ status: s.status, videoId: s.external_id })),
+        ctx.clock.now(),
+      ),
+      shares: others,
       createdAt: iso(p.created_at) as string,
       updatedAt: iso(p.updated_at) as string,
       render: current ? renderDto(current) : null,
-      rendersUsed: mine.filter((r) => !r.library).length,
+      rendersUsed: mine.filter((r) => !r.library && r.error !== RENDER_DEFERRED).length,
       library: isLibraryRef(p.ref),
       shortId: kids.find((k) => k.parent_id === p.id)?.id ?? null,
       upload: share ? uploadDto(share) : null,
@@ -338,35 +448,81 @@ export async function listVideoPosts(
   return { posts: await toDtos(ctx, rs), status: await videoStatus(ctx) };
 }
 
-/** Writer posts of the last 7 days against the weekly caps (rejected ones do not count; the owner turned them down). */
+/**
+ * The writer's room per format. `limit` = the days ticked in the schedule; `used` = writer posts of the last 7 days that
+ * were not rejected (the owner turned those down); `backlog` = posts waiting for the owner (in review) plus scheduled ones
+ * not yet published, the recorded help videos excluded. The writer stops when `used >= limit` or `backlog >= backlogLimit`
+ * (twice the weekly slots).
+ */
 export async function videoCapacity(ctx: Ctx): Promise<VideoCapacity> {
-  const s = await videoSettings(ctx);
+  const { schedule } = await videoSettings(ctx);
   const since = new Date(ctx.clock.now().getTime() - 7 * DAY);
-  const r = await rows(
+  const [r, b] = await Promise.all([
+    rows(
+      ctx.pool,
+      `SELECT format, count(*)::int AS n FROM video_posts
+        WHERE origin_system IS NOT NULL AND status <> 'rejected' AND created_at >= $1 GROUP BY format`,
+      [since],
+    ),
+    rows(
+      ctx.pool,
+      `SELECT p.format, count(*)::int AS n FROM video_posts p
+        WHERE p.ref NOT LIKE 'lib:%'
+          AND (p.status = 'in_review'
+               OR (p.status = 'approved' AND NOT EXISTS (
+                     SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source = 'video'
+                        AND s.status IN ('sent','locked_private'))))
+        GROUP BY p.format`,
+    ),
+  ]);
+  const entry = (f: VideoFormat) => ({
+    used: r.find((x) => x.format === f)?.n ?? 0,
+    limit: schedule[f].days.length,
+    backlog: b.find((x) => x.format === f)?.n ?? 0,
+    backlogLimit: SCHEDULE_DEFAULTS.backlogFactor * schedule[f].days.length,
+  });
+  return { long: entry('long'), short: entry('short') };
+}
+
+/** Bytes of rendered videos on this disk (the MP4s the clean-up has not removed yet). */
+export async function videoStorageUsed(ctx: Ctx): Promise<number> {
+  const r = await one(
     ctx.pool,
-    `SELECT format, count(*)::int AS n FROM video_posts
-      WHERE origin_system IS NOT NULL AND status <> 'rejected' AND created_at >= $1 GROUP BY format`,
-    [since],
+    `SELECT COALESCE(sum(bytes),0)::bigint AS n FROM video_renders
+      WHERE NOT library AND purged_at IS NULL AND status = 'rendered' AND artifacts ? 'video'`,
   );
-  const n = (f: string) => r.find((x) => x.format === f)?.n ?? 0;
-  return {
-    long: { used: n('long'), limit: s.perWeek },
-    short: { used: n('short'), limit: s.shortsPerWeek },
-  };
+  return Number(r?.n ?? 0);
+}
+
+/** Scheduled posts whose slot is not one of the schedule's any more (the settings changed after they were scheduled). */
+export async function offScheduleCount(ctx: Ctx): Promise<number> {
+  const { schedule } = await videoSettings(ctx);
+  const rs = await rows(
+    ctx.pool,
+    `SELECT format, slot_at FROM video_posts
+      WHERE status='approved' AND publish_mode='slot' AND slot_at > $1`,
+    [ctx.clock.now()],
+  );
+  return rs.filter(
+    (r) => !isScheduleSlot(schedule[r.format as VideoFormat], schedule.timezone, new Date(r.slot_at)),
+  ).length;
 }
 
 export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
-  const [settings, channel, worker, capacity, slot, pending, locked] = await Promise.all([
+  const [settings, channel, worker, capacity, long, short, pending, locked, used, off] = await Promise.all([
     videoSettings(ctx),
     youtubeChannel(ctx),
     workerHeartbeat(ctx),
     videoCapacity(ctx),
-    nextUploadSlot(ctx),
+    nextFreeSlotOf(ctx, 'long'),
+    nextFreeSlotOf(ctx, 'short'),
     one(ctx.pool, `SELECT count(*)::int AS n FROM video_posts WHERE status='in_review'`),
     one(
       ctx.pool,
       `SELECT count(*)::int AS n FROM social_shares WHERE source='video' AND status='locked_private'`,
     ),
+    videoStorageUsed(ctx),
+    offScheduleCount(ctx),
   ]);
   return {
     settings,
@@ -378,7 +534,9 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
     active: settings.enabled && channel?.status === 'ok',
     worker,
     capacity,
-    nextSlot: slot.toISOString(),
+    nextSlot: { long: long?.toISOString() ?? null, short: short?.toISOString() ?? null },
+    storage: { usedBytes: used, maxBytes: ctx.config.videoMaxBytes },
+    offSchedule: off,
     pending: pending?.n ?? 0,
     lockedPrivate: locked?.n ?? 0,
     auditFormUrl: YOUTUBE_AUDIT_FORM_URL,
@@ -427,24 +585,16 @@ async function withLock<T>(ctx: Ctx, key: string, fn: () => Promise<T>): Promise
   }
 }
 
-async function queueRender(ctx: Ctx, postId: string, revision: number): Promise<void> {
-  await exec(
-    ctx.pool,
-    `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at)
-     VALUES ($1,$2,$3,'queued',0,$4) ON CONFLICT (post_id, revision) DO NOTHING`,
-    [randomUUID(), postId, revision, ctx.clock.now()],
-  );
-}
-
 // ---- submit / revise / approve / reject
 
 /**
- * Creates the video post for (kind, ref, format) and queues render 1. Idempotent: a post that exists returns itself
+ * Creates the video post for (kind, ref, format). Nothing is rendered: the script is what the owner reviews. Idempotent: a post that exists returns itself
  * (`created: false`) whatever the script. `status` is `draft` for the super admin's own start and `in_review` for a
  * writer's finished script. The hosted blog writer and the platform route both come through here.
  *
- * Needs `videoPosts.enabled` (503 `video_disabled`). A writer's post (`origin.system`) also respects the per-kind switches
- * and the weekly caps (409 `kind_off`, `weekly_cap`); a person's own submit does not.
+ * Needs `videoPosts.enabled` (503 `video_disabled`). A writer's post (`origin.system`) also respects the per-kind switches,
+ * the weekly cap (the days ticked in the schedule) and the backlog guard (409 `kind_off`, `weekly_cap`, `backlog_full`);
+ * a person's own submit does not.
  */
 export async function submitVideoPost(
   ctx: Ctx,
@@ -482,6 +632,11 @@ export async function submitVideoPost(
         const c = cap[input.format];
         if (c.used >= c.limit)
           throw conflict('weekly_cap', `the weekly limit of ${c.limit} ${input.format} videos is reached`);
+        if (c.backlog >= c.backlogLimit)
+          throw conflict(
+            'backlog_full',
+            `${c.backlog} ${input.format} videos wait to be reviewed or published (the limit is ${c.backlogLimit})`,
+          );
       }
       if (input.parentId) {
         const parent = await one(ctx.pool, 'SELECT format FROM video_posts WHERE id=$1', [input.parentId]);
@@ -512,7 +667,6 @@ export async function submitVideoPost(
           scope: adminScope,
         },
       ]);
-      await queueRender(ctx, postId, 1);
       return { post: await getVideoPost(ctx, postId), created: true };
     }),
   );
@@ -521,8 +675,9 @@ export async function submitVideoPost(
 const withoutTags = (s: VideoScript) => JSON.stringify({ ...s, meta: { ...s.meta, tags: [] } });
 
 /**
- * Edits a post that is not approved. A change to the script, title, description or hashtags re-renders (a new revision and
- * render, at most 3 renders a post: 409 `render_limit`); tags and privacy change in place. A library video has no script:
+ * Edits a post that is not approved. A change to the script, title, description or hashtags makes a new revision (the
+ * old preview render, if any, is superseded; at most 3 renders a post: 409 `render_limit` once a preview is asked for or
+ * the post is scheduled); tags and privacy change in place. A library video has no script:
  * only its metadata can change, never a render.
  */
 export function reviseVideoPost(
@@ -575,12 +730,7 @@ async function reviseLocked(
     return getVideoPost(ctx, postId);
   if (script && !oldScript) throw badRequest('library_video', 'a library video has no script');
   if (rerender) {
-    const used = await one(
-      ctx.pool,
-      `SELECT count(*)::int AS n FROM video_renders WHERE post_id=$1 AND NOT library`,
-      [postId],
-    );
-    if ((used?.n ?? 0) >= VIDEO_POST_LIMITS.maxRenders)
+    if ((await rendersUsed(ctx, postId)) >= VIDEO_POST_LIMITS.maxRenders)
       throw conflict(
         'render_limit',
         `this video was rendered ${VIDEO_POST_LIMITS.maxRenders} times already; approve it, reject it or edit only the tags and privacy`,
@@ -595,42 +745,431 @@ async function reviseLocked(
       scope: adminScope,
     },
   ]);
-  if (rerender) await queueRender(ctx, postId, revision);
   return getVideoPost(ctx, postId);
 }
 
-/**
- * The owner's go-ahead for the rendered video: pins the current revision's render. Needs a connected YouTube channel
- * (409 `no_channel`) and a finished render of the current revision (409 `not_rendered`). The worker uploads it at the
- * next free daily slot.
- */
-export function approveVideoPost(ctx: Ctx, by: AuthSession['user'], postId: string): Promise<VideoPost> {
-  return withLock(ctx, `video-post-edit:${postId}`, () => approveLocked(ctx, by, postId));
+/** Renders a post used (a render that was only deferred to scheduling does not count). */
+async function rendersUsed(ctx: Ctx, postId: string): Promise<number> {
+  const r = await one(
+    ctx.pool,
+    `SELECT count(*)::int AS n FROM video_renders WHERE post_id=$1 AND NOT library AND error IS DISTINCT FROM $2`,
+    [postId, RENDER_DEFERRED],
+  );
+  return r?.n ?? 0;
 }
 
-async function approveLocked(ctx: Ctx, by: AuthSession['user'], postId: string): Promise<VideoPost> {
+/**
+ * The render row of a post's current revision for a scheduled post: queued with `not_before` (the slot minus the render
+ * lead; null = at once). A failed or purged row of the same revision is reset (it does not count as a new render), an
+ * unpurged rendered preview is reused. A library post has its recorded video and needs no render.
+ */
+export async function ensureFinalRender(
+  ctx: Ctx,
+  p: { id: string; revision: number; script: unknown },
+  notBefore: Date | null,
+): Promise<void> {
+  if (!p.script) return;
+  await exec(
+    ctx.pool,
+    `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at, not_before, preview)
+     VALUES ($1,$2,$3,'queued',0,$4,$5,false) ON CONFLICT (post_id, revision) DO NOTHING`,
+    [randomUUID(), p.id, p.revision, ctx.clock.now(), notBefore],
+  );
+  await exec(
+    ctx.pool,
+    `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL, purged_at=NULL,
+            artifacts='{}'::jsonb, bytes=NULL, duration_s=NULL, finished_at=NULL
+      WHERE post_id=$1 AND revision=$2 AND NOT library AND (status='failed' OR purged_at IS NOT NULL)`,
+    [p.id, p.revision],
+  );
+  await exec(
+    ctx.pool,
+    `UPDATE video_renders SET not_before=$3, preview=false WHERE post_id=$1 AND revision=$2 AND NOT library`,
+    [p.id, p.revision, notBefore],
+  );
+}
+
+/** When the render of a post slotted at `slot` starts: `renderLeadHours` before it (null: now, for "publish now"). */
+export async function renderStart(
+  ctx: Ctx,
+  format: VideoFormat,
+  slot: Date,
+  mode: 'slot' | 'now',
+): Promise<Date | null> {
+  if (mode === 'now') return null;
+  const { schedule } = await videoSettings(ctx);
+  return new Date(slot.getTime() - schedule[format].renderLeadHours * 3_600_000);
+}
+
+/** Any destination has the video or is busy with it: the post can no longer move, swap or be unscheduled. */
+export async function shareStarted(ctx: Ctx, postId: string): Promise<boolean> {
+  return !!(await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM social_shares WHERE post_id=$1 AND source='video'
+        AND (external_id IS NOT NULL OR status IN ('posting','sent','locked_private')
+             OR detail->>'sessionUri' IS NOT NULL OR detail->>'videoId' IS NOT NULL)`,
+    [postId],
+  ));
+}
+
+function destinationsOf(
+  format: VideoFormat,
+  schedule: VideoSchedule,
+  asked: VideoDestination[] | undefined,
+): VideoDestination[] {
+  const d = [...new Set(asked ?? schedule[format].destinations)];
+  if (format === 'long' && (d.length !== 1 || d[0] !== 'youtube'))
+    throw badRequest('validation_error', 'long videos go to YouTube only');
+  return d;
+}
+
+/** Validates a slot a person picked for `format`: one of the schedule's, far enough ahead, and free. */
+async function checkPickedSlot(
+  ctx: Ctx,
+  format: VideoFormat,
+  slot: Date,
+  leadMs: number,
+  except?: string,
+): Promise<void> {
+  const { schedule } = await videoSettings(ctx);
+  if (!isScheduleSlot(schedule[format], schedule.timezone, slot))
+    throw conflict('not_a_slot', 'that time is not one of the slots of the schedule');
+  if (slot.getTime() < ctx.clock.now().getTime() + leadMs)
+    throw conflict('slot_too_soon', 'that slot is too close: the video needs time to render');
+  if ((await takenSlots(ctx, format, except)).has(slot.getTime()))
+    throw conflict('slot_taken', 'another video already holds that slot');
+}
+
+/**
+ * Schedule = approve + slot in one atomic append (`VideoPostApproved` + `VideoPostScheduled`). No slot given: the next
+ * free slot of the format (a Short that belongs to a long video: the first free Short slot at or after its slot). A slot
+ * given must be one of the schedule's and free (409 `not_a_slot`, `slot_taken`, `slot_too_soon`). `mode: 'now'` publishes
+ * as soon as rendered: allowed for Shorts and for public long videos. Nothing renders before: the render is queued with
+ * `not_before` = slot - the render lead. Needs a YouTube channel when YouTube is a destination (409 `no_channel`).
+ */
+export async function scheduleVideoPost(
+  ctx: Ctx,
+  by: AuthSession['user'],
+  postId: string,
+  request: ScheduleVideoPostRequest = {},
+): Promise<VideoPost> {
+  const req = ScheduleVideoPostRequestSchema.parse(request);
+  const r0 = await one(ctx.pool, 'SELECT format FROM video_posts WHERE id=$1', [postId]);
+  if (!r0) throw notFound('video post not found', 'video_post_not_found');
+  return withLock(ctx, `video-slot:${r0.format}`, () =>
+    withLock(ctx, `video-post-edit:${postId}`, () => scheduleLocked(ctx, by, postId, req)),
+  );
+}
+
+async function scheduleLocked(
+  ctx: Ctx,
+  by: AuthSession['user'],
+  postId: string,
+  req: ReturnType<typeof ScheduleVideoPostRequestSchema.parse>,
+): Promise<VideoPost> {
   const r = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [postId]);
   if (!r) throw notFound('video post not found', 'video_post_not_found');
   if (r.status === 'approved') return getVideoPost(ctx, postId);
   if (r.status === 'rejected')
     throw conflict('post_rejected', 'a rejected video must be edited (it then returns to review) first');
-  if (!(await youtubeChannel(ctx)))
+  const format = r.format as VideoFormat;
+  const settings = await videoSettings(ctx);
+  const { schedule } = settings;
+  const destinations = destinationsOf(format, schedule, req.destinations);
+  if (req.captions) {
+    const stray = Object.keys(req.captions).filter((k) => !destinations.includes(k as VideoDestination));
+    if (stray.length)
+      throw badRequest('validation_error', `captions for ${stray.join(', ')}, which is not a destination`);
+  }
+  if (destinations.includes('youtube') && !(await youtubeChannel(ctx)))
     throw conflict('no_channel', 'connect a YouTube channel first: nothing would be uploaded');
-  const render = await one(ctx.pool, 'SELECT * FROM video_renders WHERE post_id=$1 AND revision=$2', [
-    postId,
-    r.revision,
-  ]);
-  if (!render || render.status !== 'rendered')
-    throw conflict('not_rendered', 'the video of this revision is not rendered yet');
+  const now = ctx.clock.now();
+  const privacy = (r.meta as VideoPostMeta).privacy ?? settings.privacy;
+  let slot: Date;
+  if (req.mode === 'now') {
+    if (format === 'long' && privacy !== 'public')
+      throw badRequest('mode_not_allowed', 'a long video can be published now only when it is public');
+    if (req.slotAt) throw badRequest('validation_error', '"publish now" takes no slot');
+    slot = now;
+  } else {
+    const rendered = await one(
+      ctx.pool,
+      `SELECT 1 AS x FROM video_renders WHERE post_id=$1 AND revision=$2 AND status='rendered' AND purged_at IS NULL`,
+      [postId, r.revision],
+    );
+    const lead = minLeadMs(format, !!rendered);
+    if (req.slotAt) {
+      slot = new Date(req.slotAt);
+      await checkPickedSlot(ctx, format, slot, lead);
+    } else {
+      let from = now;
+      let leadMs = lead;
+      if (r.parent_id) {
+        const parent = await one(
+          ctx.pool,
+          `SELECT slot_at FROM video_posts WHERE id=$1 AND status='approved' AND slot_at IS NOT NULL`,
+          [r.parent_id],
+        );
+        const at = parent ? new Date(parent.slot_at) : null;
+        if (at && at.getTime() > now.getTime() + lead) {
+          from = at;
+          leadMs = 0;
+        }
+      }
+      const free = nextFreeSlot(
+        schedule[format],
+        schedule.timezone,
+        from,
+        await takenSlots(ctx, format),
+        leadMs,
+      );
+      if (!free)
+        throw conflict('no_slots', `the schedule has no ${format} days: tick at least one weekday first`);
+      slot = free;
+    }
+  }
   await ctx.store.append([
     {
       streamId: videoPostStream(postId),
-      event: { type: 'VideoPostApproved', payload: { postId, renderId: render.id, by: by.id } },
+      event: { type: 'VideoPostApproved', payload: { postId, by: by.id } },
+      actor: userActor(by.id),
+      scope: adminScope,
+    },
+    {
+      streamId: videoPostStream(postId),
+      event: {
+        type: 'VideoPostScheduled',
+        payload: {
+          postId,
+          slotAt: slot.toISOString(),
+          mode: req.mode,
+          destinations,
+          ...(req.captions ? { captions: req.captions } : {}),
+          reason: 'approved',
+          by: by.id,
+        },
+      },
       actor: userActor(by.id),
       scope: adminScope,
     },
   ]);
+  await ensureFinalRender(
+    ctx,
+    r as { id: string; revision: number; script: unknown },
+    await renderStart(ctx, format, slot, req.mode),
+  );
   return getVideoPost(ctx, postId);
+}
+
+/** The old "approve" is scheduling at the next free slot. */
+export function approveVideoPost(ctx: Ctx, by: AuthSession['user'], postId: string): Promise<VideoPost> {
+  return scheduleVideoPost(ctx, by, postId, { mode: 'slot' });
+}
+
+async function scheduledOrThrow(ctx: Ctx, postId: string): Promise<Row> {
+  const r = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [postId]);
+  if (!r) throw notFound('video post not found', 'video_post_not_found');
+  if (r.status !== 'approved' || !r.slot_at) throw conflict('not_scheduled', 'this video is not scheduled');
+  if (await shareStarted(ctx, postId))
+    throw conflict('already_started', 'the video is already on its way to a destination');
+  return r;
+}
+
+const scheduledEvent = (
+  r: Row,
+  slot: Date,
+  reason: 'moved' | 'slipped' | 'reflow' | 'migrated',
+  by: string,
+) => ({
+  streamId: videoPostStream(r.id),
+  event: {
+    type: 'VideoPostScheduled' as const,
+    payload: {
+      postId: r.id as string,
+      slotAt: slot.toISOString(),
+      mode: 'slot' as const,
+      destinations: (r.destinations?.length ? r.destinations : ['youtube']) as VideoDestination[],
+      reason,
+      by: by === 'system' ? ('system' as const) : by,
+    },
+  },
+  actor: by === 'system' ? SYSTEM_ACTOR : userActor(by),
+  scope: adminScope,
+});
+
+async function retargetRender(ctx: Ctx, r: Row, slot: Date): Promise<void> {
+  const start = await renderStart(ctx, r.format, slot, 'slot');
+  await exec(
+    ctx.pool,
+    `UPDATE video_renders SET not_before=$3 WHERE post_id=$1 AND revision=$2 AND NOT library AND status IN ('queued','rendering')`,
+    [r.id, r.revision, start],
+  );
+}
+
+/** Moves a scheduled post to another free slot (409 `already_started` once a destination has the video). */
+export function moveVideoPost(
+  ctx: Ctx,
+  by: AuthSession['user'],
+  postId: string,
+  slotAt: string,
+): Promise<VideoPost> {
+  return slotLocked(ctx, postId, async () => {
+    const r = await scheduledOrThrow(ctx, postId);
+    if (r.publish_mode !== 'slot')
+      throw conflict('not_movable', 'a video published "now" has no slot to move');
+    const slot = new Date(slotAt);
+    if (slot.getTime() === new Date(r.slot_at).getTime()) return getVideoPost(ctx, postId);
+    await checkPickedSlot(ctx, r.format, slot, 0, postId);
+    await ctx.store.append([scheduledEvent(r, slot, 'moved', by.id)]);
+    await retargetRender(ctx, r, slot);
+    return getVideoPost(ctx, postId);
+  });
+}
+
+/** Two scheduled posts of one format trade slots (two events, one append). */
+export async function swapVideoPosts(
+  ctx: Ctx,
+  by: AuthSession['user'],
+  aId: string,
+  bId: string,
+): Promise<{ a: VideoPost; b: VideoPost }> {
+  if (aId === bId) throw badRequest('validation_error', 'pick two different videos');
+  const a0 = await one(ctx.pool, 'SELECT format FROM video_posts WHERE id=$1', [aId]);
+  if (!a0) throw notFound('video post not found', 'video_post_not_found');
+  return slotLocked(ctx, aId, async () => {
+    const [a, b] = [await scheduledOrThrow(ctx, aId), await scheduledOrThrow(ctx, bId)];
+    if (a.format !== b.format) throw conflict('format_mismatch', 'only videos of one format swap slots');
+    if (a.publish_mode !== 'slot' || b.publish_mode !== 'slot')
+      throw conflict('not_movable', 'a video published "now" has no slot to swap');
+    const [sa, sb] = [new Date(a.slot_at), new Date(b.slot_at)];
+    await ctx.store.append([scheduledEvent(a, sb, 'moved', by.id), scheduledEvent(b, sa, 'moved', by.id)]);
+    await retargetRender(ctx, a, sb);
+    await retargetRender(ctx, b, sa);
+    return { a: await getVideoPost(ctx, aId), b: await getVideoPost(ctx, bId) };
+  });
+}
+
+async function slotLocked<T>(ctx: Ctx, postId: string, fn: () => Promise<T>): Promise<T> {
+  const r = await one(ctx.pool, 'SELECT format FROM video_posts WHERE id=$1', [postId]);
+  if (!r) throw notFound('video post not found', 'video_post_not_found');
+  return withLock(ctx, `video-slot:${r.format}`, fn);
+}
+
+/**
+ * Takes a scheduled post back to review (409 `already_started` once any destination has the video or is posting). The
+ * destinations' unstarted shares go; a render that finished stays as a preview, one that did not start waits.
+ */
+export function unscheduleVideoPost(
+  ctx: Ctx,
+  by: AuthSession['user'],
+  postId: string,
+  reason?: string,
+): Promise<VideoPost> {
+  return slotLocked(ctx, postId, () =>
+    withLock(ctx, `video-post-edit:${postId}`, async () => {
+      const r = await scheduledOrThrow(ctx, postId);
+      await ctx.store.append([
+        {
+          streamId: videoPostStream(postId),
+          event: {
+            type: 'VideoPostUnscheduled',
+            payload: { postId, ...(reason ? { reason } : {}), by: by.id },
+          },
+          actor: userActor(by.id),
+          scope: adminScope,
+        },
+      ]);
+      await exec(ctx.pool, `DELETE FROM social_shares WHERE post_id=$1 AND source='video'`, [postId]);
+      await exec(
+        ctx.pool,
+        `UPDATE video_renders SET not_before=NULL,
+                preview = (status IN ('rendered','rendering'))
+          WHERE post_id=$1 AND NOT library AND revision=$2 AND status IN ('queued','rendering','rendered')`,
+        [postId, r.revision],
+      );
+      return getVideoPost(ctx, postId);
+    }),
+  );
+}
+
+/**
+ * A preview render of the script in review (the only render of a post that is not scheduled; it counts toward the 3
+ * renders and is reused as the final render when the script is unchanged at scheduling). 409 `render_limit`, `already_approved`.
+ */
+export function previewVideoPost(ctx: Ctx, by: AuthSession['user'], postId: string): Promise<VideoPost> {
+  return withLock(ctx, `video-post-edit:${postId}`, async () => {
+    const r = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [postId]);
+    if (!r) throw notFound('video post not found', 'video_post_not_found');
+    if (r.status === 'approved') throw conflict('already_approved', 'a scheduled video renders on its own');
+    if (r.status === 'rejected') throw conflict('post_rejected', 'a rejected video must be edited first');
+    if (!r.script)
+      throw badRequest('library_video', 'a library video is recorded; there is nothing to render');
+    const row = await one(ctx.pool, 'SELECT * FROM video_renders WHERE post_id=$1 AND revision=$2', [
+      postId,
+      r.revision,
+    ]);
+    if (row && row.status !== 'failed' && !row.purged_at) {
+      await exec(
+        ctx.pool,
+        `UPDATE video_renders SET preview=true WHERE id=$1 AND status IN ('queued','rendering')`,
+        [row.id],
+      );
+    } else if (row) {
+      // a failed or purged preview of this revision is made again (not a new render)
+      await exec(
+        ctx.pool,
+        `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL, purged_at=NULL,
+                artifacts='{}'::jsonb, bytes=NULL, duration_s=NULL, finished_at=NULL, not_before=NULL, preview=true
+          WHERE id=$1`,
+        [row.id],
+      );
+    } else {
+      if ((await rendersUsed(ctx, postId)) >= VIDEO_POST_LIMITS.maxRenders)
+        throw conflict(
+          'render_limit',
+          `this video was rendered ${VIDEO_POST_LIMITS.maxRenders} times already; schedule it or edit it`,
+        );
+      await exec(
+        ctx.pool,
+        `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at, not_before, preview)
+         VALUES ($1,$2,$3,'queued',0,$4,NULL,true)`,
+        [randomUUID(), postId, r.revision, ctx.clock.now()],
+      );
+    }
+    await ctx.store.append([
+      {
+        streamId: videoPostStream(postId),
+        event: { type: 'VideoPreviewRequested', payload: { postId, revision: r.revision, by: by.id } },
+        actor: userActor(by.id),
+        scope: adminScope,
+      },
+    ]);
+    return getVideoPost(ctx, postId);
+  });
+}
+
+/**
+ * The system moves an approved post that is still not rendered half an hour before its slot to the next free slot of its
+ * format (never cascading: other posts stay, a started post never moves). Returns the new slot, or null.
+ */
+export async function slipVideoPost(ctx: Ctx, postId: string): Promise<{ from: Date; to: Date } | null> {
+  return slotLocked(ctx, postId, async () => {
+    const r = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [postId]);
+    if (!r || r.status !== 'approved' || r.publish_mode !== 'slot' || !r.slot_at || !r.script) return null;
+    if (await shareStarted(ctx, postId)) return null;
+    const done = await one(
+      ctx.pool,
+      `SELECT 1 AS x FROM video_renders WHERE post_id=$1 AND revision=$2 AND status='rendered' AND purged_at IS NULL`,
+      [postId, r.revision],
+    );
+    if (done) return null;
+    const from = new Date(r.slot_at);
+    const to = await nextFreeSlotOf(ctx, r.format, { except: postId });
+    if (!to) return null;
+    await ctx.store.append([scheduledEvent(r, to, 'slipped', 'system')]);
+    await retargetRender(ctx, r, to);
+    return { from, to };
+  });
 }
 
 export async function rejectVideoPost(
@@ -671,37 +1210,49 @@ async function auditRetry(
 
 /** A render that failed three times is tried again on request (the same revision, no new render is used). */
 export async function retryRender(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
-  const r = await one(ctx.pool, 'SELECT revision FROM video_posts WHERE id=$1', [postId]);
+  const r = await one(ctx.pool, 'SELECT revision, status FROM video_posts WHERE id=$1', [postId]);
   if (!r) throw notFound('video post not found', 'video_post_not_found');
+  // a post in review only renders as a preview; a scheduled one on its own (not_before stays)
   const n = await exec(
     ctx.pool,
-    `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL
+    `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL,
+            preview = ($3 <> 'approved'), not_before = CASE WHEN $3 <> 'approved' THEN NULL ELSE not_before END
       WHERE post_id=$1 AND revision=$2 AND status='failed' AND NOT library`,
-    [postId, r.revision],
+    [postId, r.revision, r.status],
   );
   if (!n) throw conflict('not_failed', 'only a failed render can be tried again');
   await auditRetry(ctx, postId, 'render', by);
   return getVideoPost(ctx, postId);
 }
 
-/** A failed upload is tried again on request. 409 `video_purged` when the cleanup already removed the MP4. */
+/**
+ * A failed upload is tried again on request. When the clean-up already removed the MP4 (a failed share keeps it 3 days)
+ * the same revision is rendered again first and the upload waits for it.
+ */
 export async function retryUpload(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
   const now = ctx.clock.now();
   const share = await one(
     ctx.pool,
-    `SELECT s.detail, r.artifacts FROM social_shares s
-       JOIN video_posts p ON p.id = s.post_id LEFT JOIN video_renders r ON r.id = p.approved_render_id
+    `SELECT s.detail, r.id AS render_id, r.artifacts, r.library FROM social_shares s
+       JOIN video_posts p ON p.id = s.post_id
+       LEFT JOIN video_renders r ON r.post_id = p.id AND r.revision = p.revision
       WHERE s.post_id=$1 AND s.network='youtube' AND s.source='video' AND s.status IN ('failed','skipped')`,
     [postId],
   );
   if (!share) throw conflict('not_failed', 'only a failed upload can be tried again');
   const uploaded = !!(share.detail as { videoId?: string } | null)?.videoId;
   const art = (share.artifacts ?? {}) as Record<string, unknown>;
-  if (!uploaded && !art.video)
-    throw conflict(
-      'video_purged',
-      'the video file was removed by the clean-up; it cannot be uploaded any more',
+  if (!uploaded && !art.video) {
+    if (!share.render_id || share.library)
+      throw conflict('video_purged', 'the video file is gone and cannot be made again');
+    await exec(
+      ctx.pool,
+      `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL, purged_at=NULL,
+              artifacts='{}'::jsonb, bytes=NULL, duration_s=NULL, finished_at=NULL, not_before=NULL, preview=false
+        WHERE id=$1`,
+      [share.render_id],
     );
+  }
   await exec(
     ctx.pool,
     `UPDATE social_shares SET status='pending', attempts=0, next_attempt_at=$2, error=NULL, updated_at=$2

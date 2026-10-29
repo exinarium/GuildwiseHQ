@@ -62,7 +62,34 @@ export const videoPostProjectors: Record<string, Projector> = {
       `UPDATE video_posts SET status='approved', approved_render_id=$2, approved_at=COALESCE(approved_at,$3),
               rejection_reason=NULL, updated_at=$3
         WHERE id=$1 AND status <> 'approved'`,
-      [p.postId, p.renderId, e.createdAt],
+      [p.postId, p.renderId ?? null, e.createdAt],
+    );
+  },
+  VideoPostScheduled: async (tx, e) => {
+    const p = (e.event as EventOf<'VideoPostScheduled'>).payload;
+    await exec(
+      tx,
+      `UPDATE video_posts SET slot_at=$2, publish_mode=$3, destinations=$4::text[],
+              captions = COALESCE($5::jsonb, captions), updated_at=$6
+        WHERE id=$1 AND status='approved'`,
+      [
+        p.postId,
+        p.slotAt,
+        p.mode,
+        p.destinations,
+        p.captions ? JSON.stringify(p.captions) : null,
+        e.createdAt,
+      ],
+    );
+  },
+  VideoPostUnscheduled: async (tx, e) => {
+    const p = (e.event as EventOf<'VideoPostUnscheduled'>).payload;
+    await exec(
+      tx,
+      `UPDATE video_posts SET status='in_review', slot_at=NULL, publish_mode=NULL, approved_render_id=NULL,
+              approved_at=NULL, review_since=$2, updated_at=$2
+        WHERE id=$1 AND status='approved'`,
+      [p.postId, e.createdAt],
     );
   },
   VideoPostRejected: async (tx, e) => {

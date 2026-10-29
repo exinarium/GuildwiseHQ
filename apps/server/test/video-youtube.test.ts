@@ -9,11 +9,10 @@ import { socialTick } from '../src/commands/social.ts';
 import {
   articlesNeedingVideo,
   claimVideoTopic,
-  importLibrary,
+  getVideoPost,
   queueVideoTopic,
   releasesNeedingVideo,
   releaseVideoTopic,
-  slotAfter,
   submitVideoPost,
   videoCapacity,
 } from '../src/commands/video-posts.ts';
@@ -185,12 +184,18 @@ const submit = async (kind: VideoScript['kind'], format: 'long' | 'short', ref: 
   );
 const tick = () => videoTick(t.app.ctx, { render: fakeRender });
 const post = (id: string) => ok(api('GET', `/api/platform/video/posts/${id}`));
-/** Submit, render and approve a post. */
+/** Submit and schedule a post (next free slot). Nothing is rendered until the worker ticks. */
 async function approved(kind: VideoScript['kind'], format: 'long' | 'short', ref: string) {
   const p = await submit(kind, format, ref);
-  await tick();
   return ok(api('POST', `/api/platform/video/posts/${p.id}/approve`));
 }
+const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+/** Tick the days of the schedule: `long` and `short` days a week. */
+const days = (long: number, short = long) =>
+  settings({
+    schedule: { long: { days: ALL_DAYS.slice(0, long) }, short: { days: ALL_DAYS.slice(0, short) } },
+  });
+const preview = (id: string) => ok(api('POST', `/api/platform/video/posts/${id}/preview`));
 const softClean = async () => {
   await q(
     `UPDATE blog_posts SET published_at = published_at - interval '5 days' WHERE published_at > now() - interval '4 days'`,
@@ -223,6 +228,15 @@ beforeAll(async () => {
   t.app.ctx.mailer = mail;
   t.app.ctx.social = social;
   sa = await t.superAdminSession();
+  // every day a slot, and the render starts a week ahead: a test's few posts render at once
+  await ok(
+    api('PATCH', '/api/platform/video/settings', {
+      schedule: {
+        long: { days: ALL_DAYS, renderLeadHours: 168 },
+        short: { days: ALL_DAYS, renderLeadHours: 168 },
+      },
+    }),
+  );
 });
 afterAll(async () => {
   useReleaseSource(null);
@@ -255,10 +269,10 @@ describe('nothing happens without a channel and the setting', () => {
     expect(await releasesNeedingVideo(t.app.ctx)).toEqual([]);
     await queueVideoTopic(t.app.ctx, { title: 'Run a night shift of agents' }, 'platform');
     expect(await claimVideoTopic(t.app.ctx)).toBeNull();
-    // a post can be drafted and sits queued; nothing renders
+    // a post can be drafted; nothing is rendered, not even queued
     const p = await submit('tutorial', 'long', 'agents');
     expect(await tick()).toMatchObject({ active: false, rendered: false });
-    expect((await q('SELECT status FROM video_renders WHERE post_id=$1', [p.id]))[0]?.status).toBe('queued');
+    expect(await q('SELECT 1 FROM video_renders WHERE post_id=$1', [p.id])).toHaveLength(0);
     expect(yt.calls).toEqual([]);
     // approving needs a channel
     const a = await api('POST', `/api/platform/video/posts/${p.id}/approve`);
@@ -321,21 +335,29 @@ describe('the YouTube channel', () => {
 describe('review and upload', () => {
   beforeEach(clean);
 
-  it('renders, holds for approval, then uploads once with the right fields', async () => {
+  it('submit renders nothing; scheduling queues the render; the worker renders, uploads once with publishAt = the slot', async () => {
     await settings({ playlists: { tutorial: 'PLtutorials' } });
     const p = await submit('tutorial', 'long', 'agents');
-    expect(p).toMatchObject({ status: 'in_review', revision: 1, library: false });
-    // approve is disabled until the revision is rendered
-    const early = await api('POST', `/api/platform/video/posts/${p.id}/approve`);
-    expect(early.status).toBe(409);
-    expect(early.body.error.code).toBe('not_rendered');
-    expect(await tick()).toMatchObject({ rendered: true, uploaded: false });
-    expect(yt.uploads).toHaveLength(0); // not before approval
-    const rendered = await post(p.id);
-    expect(rendered.render).toMatchObject({ status: 'rendered', durationSeconds: 130 });
-    expect(rendered.render.files).toEqual(expect.arrayContaining(['video', 'captionsVtt', 'thumb']));
-    await ok(api('POST', `/api/platform/video/posts/${p.id}/approve`));
-    expect(await tick()).toMatchObject({ uploaded: true });
+    expect(p).toMatchObject({
+      status: 'in_review',
+      revision: 1,
+      library: false,
+      phase: 'in_review',
+      render: null,
+    });
+    expect(await q('SELECT 1 FROM video_renders WHERE post_id=$1', [p.id])).toHaveLength(0);
+    expect(await tick()).toMatchObject({ rendered: false, uploaded: false }); // nothing to do before scheduling
+    expect(yt.uploads).toHaveLength(0);
+    const sch = await ok(api('POST', `/api/platform/video/posts/${p.id}/approve`));
+    expect(sch).toMatchObject({
+      status: 'approved',
+      publishMode: 'slot',
+      destinations: ['youtube'],
+      phase: 'scheduled',
+    });
+    expect(sch.approvedRenderId).toBeNull();
+    expect(sch.render).toMatchObject({ status: 'queued' });
+    expect(await tick()).toMatchObject({ rendered: true, uploaded: true });
     expect(await tick()).toMatchObject({ uploaded: false });
     expect(yt.uploads).toHaveLength(1);
     const u = yt.uploads[0] as UploadSpec;
@@ -351,11 +373,14 @@ describe('review and upload', () => {
       containsSyntheticMedia: false,
       privacyStatus: 'private', // public is requested through publishAt
     });
+    expect(u.status.publishAt).toBe(sch.slotAt); // YouTube publishes at the slot itself
     expect(new Date(u.status.publishAt as string).getUTCHours()).toBe(8); // 10:00 SAST
     expect(yt.thumbs).toHaveLength(1);
     expect(yt.captions).toHaveLength(1);
     expect(yt.playlist).toEqual([['PLtutorials', 'vid1abcdef']]);
     const done = await post(p.id);
+    expect(done.render).toMatchObject({ status: 'rendered', durationSeconds: 130 });
+    expect(done.render.files).toEqual(expect.arrayContaining(['video', 'captionsVtt', 'thumb']));
     expect(done.upload).toMatchObject({ status: 'sent', videoId: 'vid1abcdef', privacy: 'public' });
     expect(done.upload.url).toBe('https://www.youtube.com/watch?v=vid1abcdef');
     // the share is the only one per post and network
@@ -371,31 +396,17 @@ describe('review and upload', () => {
     await settings({ privacy: 'public' });
   });
 
-  it('uploads one video a day at 10:00 SAST and gives the next the next free slot', async () => {
-    const a = await approved('article', 'long', 'one-a-day-1');
-    const b = await approved('article', 'long', 'one-a-day-2');
-    await tick();
+  it('gives each long video its own slot, uploads them one at a time, all scheduled on YouTube', async () => {
+    const a = await approved('article', 'long', 'slots-1');
+    const b = await approved('article', 'long', 'slots-2');
+    expect(a.slotAt).not.toBe(b.slotAt);
+    expect(Date.parse(b.slotAt)).toBeGreaterThan(Date.parse(a.slotAt));
     await tick();
     expect(yt.uploads).toHaveLength(1);
-    expect((await post(b.id)).upload.status).toBe('pending');
-    // a day later the second goes, to the next slot
-    await q(
-      `UPDATE social_shares SET detail = jsonb_set(detail, '{uploadedAt}', to_jsonb((now() - interval '26 hours')::text)) WHERE post_id=$1`,
-      [a.id],
-    );
+    expect((await post(b.id)).upload).toBeNull(); // not rendered yet: one render a pass
     await tick();
-    expect(yt.uploads).toHaveLength(2);
-    const s1 = new Date(yt.uploads[0]?.status.publishAt as string).getTime();
-    const s2 = new Date(yt.uploads[1]?.status.publishAt as string).getTime();
-    expect(s2 - s1).toBeGreaterThanOrEqual(86_400_000);
-  });
-
-  it('slotAfter skips taken days and never picks a slot closer than half an hour', () => {
-    const noon = new Date('2026-11-02T12:00:00Z');
-    expect(slotAfter(noon).toISOString()).toBe('2026-11-03T08:00:00.000Z');
-    expect(slotAfter(noon, ['2026-11-03T08:00:00.000Z']).toISOString()).toBe('2026-11-04T08:00:00.000Z');
-    expect(slotAfter(new Date('2026-11-02T07:45:00Z')).toISOString()).toBe('2026-11-03T08:00:00.000Z');
-    expect(slotAfter(new Date('2026-11-02T06:00:00Z')).toISOString()).toBe('2026-11-02T08:00:00.000Z');
+    expect(yt.uploads).toHaveLength(2); // no limit of one a day any more
+    expect(yt.uploads.map((u) => u.status.publishAt)).toEqual([a.slotAt, b.slotAt]);
   });
 
   it('skips the thumbnail with a warning when the channel is not verified', async () => {
@@ -517,9 +528,8 @@ describe('review and upload', () => {
 describe('editing and approval rules', () => {
   beforeEach(clean);
 
-  it('an edit re-renders (max 3 renders); tags and privacy change in place; an approved video is final', async () => {
+  it('an edit makes a new revision without rendering; previews are limited to 3 renders; an approved video is final', async () => {
     const p = await submit('article', 'long', 'edits');
-    await tick();
     const edited = (rev: number) => ({
       script: {
         ...script('article', 'long', 'edits'),
@@ -528,11 +538,8 @@ describe('editing and approval rules', () => {
       },
     });
     let cur = await ok(api('PATCH', `/api/platform/video/posts/${p.id}`, edited(2)));
-    expect(cur).toMatchObject({ revision: 2, title: 'Edited title 2' });
-    expect(cur.render.status).toBe('queued'); // the new revision
-    // approve is disabled while the current revision is not rendered
-    expect((await api('POST', `/api/platform/video/posts/${p.id}/approve`)).status).toBe(409);
-    await tick();
+    expect(cur).toMatchObject({ revision: 2, title: 'Edited title 2', render: null });
+    expect(await tick()).toMatchObject({ rendered: false }); // an edit renders nothing
     const tags = await ok(
       api('PATCH', `/api/platform/video/posts/${p.id}`, {
         meta: { tags: ['one', 'two'] },
@@ -541,15 +548,26 @@ describe('editing and approval rules', () => {
     );
     expect(tags.revision).toBe(2);
     expect(tags.meta).toMatchObject({ tags: ['one', 'two'], privacy: 'unlisted' });
+    // preview of revision 2 (1 of 3), then revisions 3 and 4 with their own previews
+    expect((await preview(p.id)).render).toMatchObject({ revision: 2, status: 'queued', preview: true });
+    await tick();
     cur = await ok(api('PATCH', `/api/platform/video/posts/${p.id}`, edited(3)));
     expect(cur.revision).toBe(3);
-    const over = await api('PATCH', `/api/platform/video/posts/${p.id}`, edited(4));
+    await preview(p.id);
+    await tick();
+    cur = await ok(api('PATCH', `/api/platform/video/posts/${p.id}`, edited(4)));
+    expect(cur.revision).toBe(4);
+    const third = await preview(p.id);
+    expect(third.rendersUsed).toBe(3);
+    await tick();
+    const over = await api('PATCH', `/api/platform/video/posts/${p.id}`, edited(5));
     expect(over.status).toBe(409);
     expect(over.body.error.code).toBe('render_limit');
-    await tick();
-    await ok(api('POST', `/api/platform/video/posts/${p.id}/approve`));
-    const approvedPost = await post(p.id);
-    expect(approvedPost.approvedRenderId).toBe(approvedPost.render.id);
+    // scheduling reuses the rendered preview of the unchanged script: no new render
+    const rendered = await post(p.id);
+    const sch = await ok(api('POST', `/api/platform/video/posts/${p.id}/approve`));
+    expect(sch.render).toMatchObject({ id: rendered.render.id, status: 'rendered', preview: false });
+    expect(sch.rendersUsed).toBe(3);
     expect((await api('PATCH', `/api/platform/video/posts/${p.id}`, { privacy: 'public' })).status).toBe(409);
     expect((await api('POST', `/api/platform/video/posts/${p.id}/reject`, { reason: 'no' })).status).toBe(
       409,
@@ -583,7 +601,7 @@ describe('editing and approval rules', () => {
     );
     expect(again.id).toBe(a.id);
     await q('DELETE FROM video_posts');
-    await settings({ perWeek: 1 });
+    await days(1);
     const writer = { system: 'blog-writer' as const };
     await submitVideoPost(
       t.app.ctx,
@@ -601,7 +619,8 @@ describe('editing and approval rules', () => {
     ).rejects.toMatchObject({ code: 'weekly_cap' });
     // a person is not capped
     await submit('article', 'long', 'w3');
-    await settings({ perWeek: 3, articleVideos: false });
+    await days(3);
+    await settings({ articleVideos: false });
     await expect(
       submitVideoPost(
         t.app.ctx,
@@ -615,7 +634,8 @@ describe('editing and approval rules', () => {
 
   it('a rejected writer draft frees its weekly slot; other statuses still count', async () => {
     await q('DELETE FROM video_posts');
-    await settings({ perWeek: 1, shortsPerWeek: 1, articleVideos: true, shorts: true });
+    await days(1, 1);
+    await settings({ articleVideos: true, shorts: true });
     const writer = { system: 'blog-writer' as const };
     const draft = (ref: string, format: 'long' | 'short', status: 'draft' | 'in_review' = 'in_review') =>
       submitVideoPost(
@@ -627,8 +647,8 @@ describe('editing and approval rules', () => {
     const a = await draft('cap-a', 'long');
     const s = await draft('cap-a', 'short');
     expect(await videoCapacity(t.app.ctx)).toMatchObject({
-      long: { used: 1, limit: 1 },
-      short: { used: 1, limit: 1 },
+      long: { used: 1, limit: 1, backlog: 1, backlogLimit: 2 },
+      short: { used: 1, limit: 1, backlog: 1, backlogLimit: 2 },
     });
     await expect(draft('cap-b', 'long')).rejects.toMatchObject({ code: 'weekly_cap' });
     await expect(draft('cap-b', 'short')).rejects.toMatchObject({ code: 'weekly_cap' });
@@ -646,6 +666,42 @@ describe('editing and approval rules', () => {
     }
     await q("UPDATE video_posts SET status='rejected' WHERE id=$1", [b.post.id]);
     expect((await videoCapacity(t.app.ctx)).long.used).toBe(0);
+    await days(7);
+  });
+
+  it('the writer stops when the backlog reaches twice the weekly slots, library imports excluded', async () => {
+    await q('DELETE FROM video_posts');
+    await days(1, 1); // limit 1 a week, backlog limit 2
+    const writer = { system: 'blog-writer' as const };
+    const draft = (ref: string) =>
+      submitVideoPost(
+        t.app.ctx,
+        { kind: 'article', format: 'long', ref, script: script('article', 'long', ref) },
+        writer,
+        'in_review',
+      );
+    await draft('bl-1');
+    // older drafts of the owner wait too: the rolling week is empty but the review queue is not
+    await q(`UPDATE video_posts SET created_at = now() - interval '9 days'`);
+    await submit('article', 'long', 'bl-2');
+    await expect(draft('bl-3')).rejects.toMatchObject({ code: 'backlog_full' });
+    expect((await videoCapacity(t.app.ctx)).long).toMatchObject({
+      used: 0,
+      limit: 1,
+      backlog: 2,
+      backlogLimit: 2,
+    });
+    // a recorded help video in review is not a script waiting for you
+    await q(`UPDATE video_posts SET ref='lib:x' WHERE ref='bl-2'`);
+    expect((await videoCapacity(t.app.ctx)).long.backlog).toBe(1);
+    await q(`UPDATE video_posts SET ref='bl-2' WHERE ref='lib:x'`);
+    // a scheduled video counts until it is published
+    const second = (await q(`SELECT id FROM video_posts WHERE ref='bl-2'`))[0];
+    await ok(api('POST', `/api/platform/video/posts/${second?.id}/approve`));
+    expect((await videoCapacity(t.app.ctx)).long.backlog).toBe(2);
+    await tick();
+    expect((await videoCapacity(t.app.ctx)).long.backlog).toBe(1);
+    await days(7);
   });
 
   it('refuses an invalid script', async () => {
@@ -854,6 +910,7 @@ describe('files, projection and cleanup', () => {
 
   it('serves the preview with Range, no-store, to a super admin only', async () => {
     const p = await submit('article', 'long', 'preview');
+    await preview(p.id);
     await tick();
     const url = `/api/platform/video/posts/${p.id}/files/video.mp4`;
     const full = await t.app.inject({ method: 'GET', url, headers: { cookie: sa.cookie } });
@@ -904,7 +961,8 @@ describe('files, projection and cleanup', () => {
   it('a projection rebuild restores the posts and keeps the renders and uploads', async () => {
     const p = await approved('article', 'long', 'rebuild');
     await tick();
-    const cols = 'id, kind, ref, format, status, revision, title, approved_render_id, approved_at';
+    const cols =
+      'id, kind, ref, format, status, revision, title, approved_render_id, approved_at, slot_at, publish_mode, destinations, captions';
     const before = await q(`SELECT ${cols} FROM video_posts WHERE id=$1`, [p.id]);
     const renders = await q('SELECT id FROM video_renders WHERE post_id=$1', [p.id]);
     await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
@@ -916,8 +974,9 @@ describe('files, projection and cleanup', () => {
     expect((await q('SELECT count(*)::int AS n FROM video_topics'))[0]?.n).toBeGreaterThanOrEqual(0);
   });
 
-  it('cleans up superseded renders after a day, rejected after a week, uploaded MP4s after 30 days', async () => {
+  it('cleans up: superseded after a day, rejected after a day, a published video once everything is sent', async () => {
     const sup = await submit('article', 'long', 'cleanup-sup');
+    await preview(sup.id);
     await tick();
     await ok(
       api('PATCH', `/api/platform/video/posts/${sup.id}`, {
@@ -928,25 +987,34 @@ describe('files, projection and cleanup', () => {
         },
       }),
     );
+    await preview(sup.id);
     await tick();
     const dir1 = join(videoDir, sup.id, '1');
     const dir2 = join(videoDir, sup.id, '2');
     expect(readFileSync(join(dir1, 'video.mp4')).length).toBeGreaterThan(0);
     expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(0); // too young
     await q(`UPDATE video_renders SET finished_at = now() - interval '2 days'`);
+    await q(`UPDATE video_posts SET updated_at = now() WHERE id=$1`, [sup.id]);
     expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
     expect(() => readFileSync(join(dir1, 'video.mp4'))).toThrow();
     expect(readFileSync(join(dir2, 'video.mp4')).length).toBeGreaterThan(0);
-    // rejected for 8 days
+    // rejected for 2 days: all files go after one
     await ok(api('POST', `/api/platform/video/posts/${sup.id}/reject`, { reason: 'no' }));
-    await q(`UPDATE video_posts SET updated_at = now() - interval '8 days' WHERE id=$1`, [sup.id]);
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(0); // rejected just now
+    await q(`UPDATE video_posts SET updated_at = now() - interval '2 days' WHERE id=$1`, [sup.id]);
     expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
     expect(() => readFileSync(join(dir2, 'video.mp4'))).toThrow();
-    // an uploaded video: only the MP4 goes after 30 days
+    // a published video: scheduled on YouTube (sent) but its slot is ahead: the MP4 stays
     const up = await approved('article', 'long', 'cleanup-up');
     await tick();
     const dir = join(videoDir, up.id, '1');
-    await q(`UPDATE social_shares SET updated_at = now() - interval '31 days' WHERE post_id=$1`, [up.id]);
+    expect((await post(up.id)).upload.status).toBe('sent');
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(0);
+    // YouTube confirmed it public: the MP4 goes (thumbnail, captions and script stay)
+    await q(
+      `UPDATE social_shares SET detail = detail || jsonb_build_object('verifiedAt', now()::text) WHERE post_id=$1`,
+      [up.id],
+    );
     expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
     expect(() => readFileSync(join(dir, 'video.mp4'))).toThrow();
     expect(readFileSync(join(dir, 'captions.vtt'), 'utf8')).toContain('WEBVTT');
@@ -956,6 +1024,7 @@ describe('files, projection and cleanup', () => {
 
   it('a render over ten minutes fails and a crashing render is tried three times', async () => {
     const long = await submit('article', 'long', 'too-long');
+    await preview(long.id);
     await videoTick(t.app.ctx, {
       render: async (s, o) => ({ ...(await fakeRender(s, o)), durationSeconds: 700 }),
     });
@@ -1201,53 +1270,49 @@ describe('upload recovery and re-checks', () => {
   });
 });
 
-describe('slots and the daily cap count what really happened', () => {
+describe('slots and the upload gate', () => {
   beforeEach(clean);
 
-  it('a share that failed after the video was uploaded still holds its slot and today', async () => {
-    const a = await approved('article', 'long', 'cap-failed');
-    const slot = iso(2 * 86_400_000);
+  it('takenSlots holds the slots of approved posts of a format, published ones included', async () => {
+    const { takenSlots } = await import('../src/commands/video-posts.ts');
+    const a = await approved('article', 'long', 'taken-a');
+    const s = await approved('article', 'short', 'taken-s');
+    expect([...(await takenSlots(t.app.ctx, 'long'))]).toEqual([Date.parse(a.slotAt)]);
+    expect([...(await takenSlots(t.app.ctx, 'short'))]).toEqual([Date.parse(s.slotAt)]);
+    expect((await takenSlots(t.app.ctx, 'long', a.id)).size).toBe(0);
+    await tick();
+    expect((await takenSlots(t.app.ctx, 'long')).size).toBe(1); // sent: still taken
+  });
+
+  it('one upload runs at a time, and a video YouTube kept private pauses the next', async () => {
+    const a = await approved('article', 'long', 'gate-a');
+    const b = await approved('article', 'long', 'gate-b');
+    await tick(); // a: rendered and uploaded
+    await tick(); // b: rendered and uploaded: no limit of one a day
+    expect(yt.uploads).toHaveLength(2);
+    expect((await post(a.id)).upload.status).toBe('sent');
+    expect((await post(b.id)).upload.status).toBe('sent');
+    // an upload in progress elsewhere holds the next back
+    const c = await approved('article', 'long', 'gate-c');
+    await tick(); // renders c, uploads it
+    await q(`UPDATE social_shares SET status='posting', updated_at = now() WHERE post_id=$1`, [c.id]);
+    const d = await approved('article', 'long', 'gate-d');
+    await tick();
+    expect((await post(d.id)).upload.status).toBe('pending');
+    expect(yt.uploads).toHaveLength(3);
+  });
+
+  it('a share that failed after the video was uploaded keeps the slot', async () => {
+    const { takenSlots } = await import('../src/commands/video-posts.ts');
+    const a = await approved('article', 'long', 'slot-failed');
     await q(
       `INSERT INTO social_shares (post_id, network, source, status, external_id, url, created_at, updated_at, detail)
        VALUES ($1,'youtube','video','failed','vidFAILED001','https://www.youtube.com/watch?v=vidFAILED001', now(), now(), $2::jsonb)`,
-      [
-        a.id,
-        JSON.stringify({
-          videoId: 'vidFAILED001',
-          uploadedAt: new Date().toISOString(),
-          publishAt: slot,
-          privacy: 'public',
-        }),
-      ],
+      [a.id, JSON.stringify({ videoId: 'vidFAILED001', uploadedAt: new Date().toISOString() })],
     );
-    const { takenSlots } = await import('../src/commands/video-posts.ts');
-    expect(await takenSlots(t.app.ctx)).toContain(slot);
-    await approved('article', 'long', 'cap-after-failed');
-    await tick();
-    expect(yt.uploads).toHaveLength(0); // today's upload was already used
-  });
-
-  it('a pending share that reserved a slot keeps it, and blocks a second upload today', async () => {
-    const a = await approved('article', 'long', 'cap-pending');
-    const slot = iso(86_400_000);
-    await q(
-      `INSERT INTO social_shares (post_id, network, source, status, next_attempt_at, created_at, updated_at, detail)
-       VALUES ($1,'youtube','video','pending', now() + interval '30 minutes', now(), now(), $2::jsonb)`,
-      [a.id, JSON.stringify({ reservedAt: new Date().toISOString(), publishAt: slot, privacy: 'public' })],
-    );
-    const { takenSlots } = await import('../src/commands/video-posts.ts');
-    expect(await takenSlots(t.app.ctx)).toContain(slot);
-    await approved('article', 'long', 'cap-other');
-    await tick();
-    expect(yt.uploads).toHaveLength(0);
-    // the waiting share itself is never blocked by its own reservation
-    await q(`UPDATE social_shares SET next_attempt_at = now() - interval '1 minute' WHERE post_id=$1`, [
-      a.id,
-    ]);
-    await tick();
-    expect(yt.uploads).toHaveLength(1);
-    expect((await post(a.id)).upload.status).toBe('sent');
-    expect(new Date(yt.uploads[0]?.status.publishAt as string).toISOString()).toBe(slot);
+    expect((await takenSlots(t.app.ctx, 'long')).has(Date.parse(a.slotAt))).toBe(true);
+    const b = await approved('article', 'long', 'slot-after-failed');
+    expect(b.slotAt).not.toBe(a.slotAt);
   });
 });
 
@@ -1330,33 +1395,29 @@ describe('the app and the editing rules', () => {
     }
   });
 
-  it('approve and an edit of the same post cannot interleave: the loser changes nothing and queues no render', async () => {
+  it('approve and an edit of the same post cannot interleave: the loser changes nothing', async () => {
     for (let i = 0; i < 4; i++) {
       const p = await submit('article', 'long', `race-${i}`);
-      await tick();
       const edit = reviseTitle(p.id, `Raced title number ${i}`);
       const appr = api('POST', `/api/platform/video/posts/${p.id}/approve`);
       const [e, a] = await Promise.all([edit, appr]);
       const d = await post(p.id);
-      const renders = await q('SELECT revision, status FROM video_renders WHERE post_id=$1', [p.id]);
-      if (a.status === 200) {
-        // approved first: the edit lost
-        expect(e.status).toBe(409);
+      expect(a.status).toBe(200); // scheduling needs no render, so it never loses
+      expect(d.status).toBe('approved');
+      if (e.status === 200)
+        expect(d.revision).toBe(2); // edited first: the new revision is what was scheduled
+      else {
+        expect(e.status).toBe(409); // approved first: the edit lost
         expect(d.revision).toBe(1);
-        expect(renders).toHaveLength(1);
-        expect(d.approvedRenderId).toBe(d.render.id);
-      } else {
-        // edited first: revision 2 is not rendered, so the approval was refused
-        expect(a.status).toBe(409);
-        expect(e.status).toBe(200);
-        expect(d.revision).toBe(2);
-        expect(d.status).not.toBe('approved');
       }
+      expect(
+        await q('SELECT 1 FROM video_renders WHERE post_id=$1 AND revision <> $2', [p.id, d.revision]),
+      ).toHaveLength(0);
     }
   });
 
   it('concurrent writer submissions cannot pass the weekly cap together', async () => {
-    await settings({ perWeek: 2 });
+    await days(2, 2);
     const writer = { system: 'blog-writer' as const };
     const results = await Promise.allSettled(
       [0, 1, 2, 3, 4].map((i) =>
@@ -1372,11 +1433,12 @@ describe('the app and the editing rules', () => {
     expect(
       (await q(`SELECT count(*)::int AS n FROM video_posts WHERE origin_system IS NOT NULL`))[0]?.n,
     ).toBe(2);
-    await settings({ perWeek: 3 });
+    await days(7);
   });
 
   it('retries and the resolve of a locked upload are audited', async () => {
     const p = await submit('article', 'long', 'audited');
+    await preview(p.id);
     await videoTick(t.app.ctx, {
       render: async () => {
         throw new Error('boom');
@@ -1408,10 +1470,11 @@ describe('the app and the editing rules', () => {
 describe('files after the clean-up', () => {
   beforeEach(clean);
 
-  it('keeps serving the thumbnail, captions and script once the MP4 is gone, and refuses to upload without it', async () => {
+  it('keeps serving the thumbnail, captions and script once the MP4 is gone, and renders again for a retry', async () => {
     const p = await approved('article', 'long', 'purged');
     await tick();
-    await q(`UPDATE social_shares SET updated_at = now() - interval '31 days' WHERE post_id=$1`, [p.id]);
+    // the slot was 7 hours ago: published long enough, the MP4 goes
+    await q(`UPDATE video_posts SET slot_at = now() - interval '7 hours' WHERE id=$1`, [p.id]);
     expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
     const d = await post(p.id);
     expect(d.render.purged).toBe(true);
@@ -1426,14 +1489,16 @@ describe('files after the clean-up', () => {
     expect((await get('captions.vtt')).statusCode).toBe(200);
     expect((await get('thumb.png')).statusCode).toBe(200);
     expect((await get('video.mp4')).statusCode).toBe(404);
-    // a failed share that never uploaded cannot be retried without the file
+    // a failed share that never uploaded: the retry renders the same revision again, then uploads
     await q(
       `UPDATE social_shares SET status='failed', external_id=NULL, url=NULL, detail='{}'::jsonb WHERE post_id=$1`,
       [p.id],
     );
-    const r = await api('POST', `/api/platform/video/posts/${p.id}/retry-upload`);
-    expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe('video_purged');
+    const r = await ok(api('POST', `/api/platform/video/posts/${p.id}/retry-upload`));
+    expect(r.render).toMatchObject({ status: 'queued', purged: false });
+    expect(r.rendersUsed).toBe(1); // a re-render of the same revision is not a new render
+    expect(await tick()).toMatchObject({ rendered: true, uploaded: true });
+    expect((await post(p.id)).upload.status).toBe('sent');
   });
 
   it('only real file names are served (no inherited object properties)', async () => {
@@ -1455,6 +1520,7 @@ describe('render ownership and back-off', () => {
 
   it('a worker whose lease was taken over cannot overwrite the render', async () => {
     const p = await submit('article', 'long', 'stale-worker');
+    await preview(p.id);
     const slow: RenderFn = async (s, o) => {
       // while this worker renders, its lease expires and another worker claims the render (attempts + 1)
       await q(`UPDATE video_renders SET attempts = attempts + 1 WHERE post_id=$1`, [p.id]);
@@ -1467,6 +1533,7 @@ describe('render ownership and back-off', () => {
 
   it('a failed render waits before it is tried again', async () => {
     const p = await submit('article', 'long', 'backoff');
+    await preview(p.id);
     let n = 0;
     const flaky: RenderFn = async (s, o) => {
       n++;
@@ -1482,6 +1549,390 @@ describe('render ownership and back-off', () => {
     t.clock.advance(-2 * 60_000);
     expect(n).toBe(2);
     expect((await post(p.id)).render.status).toBe('rendered');
+  });
+});
+
+describe('scheduling: slots, render timing, destinations', () => {
+  beforeEach(clean);
+  const H = 3_600_000;
+  const slots = (format: 'long' | 'short', count = 14) =>
+    ok(api('GET', `/api/platform/video/slots?format=${format}&count=${count}`));
+  const sched = (id: string, body: Record<string, unknown> = {}) =>
+    api('POST', `/api/platform/video/posts/${id}/schedule`, body);
+
+  it('Schedule takes the next free slot of the schedule; a picked slot must be a free slot of it', async () => {
+    await settings({ schedule: { long: { days: ['mon', 'wed', 'fri'] } } });
+    const list = await slots('long');
+    expect(list.timezone).toBe('Africa/Johannesburg');
+    for (const sl of list.slots) {
+      const d = new Date(sl.at);
+      expect(d.getUTCHours()).toBe(8); // 10:00 SAST
+      expect([1, 3, 5]).toContain(d.getUTCDay());
+    }
+    const a = await submit('article', 'long', 'sched-a');
+    const b = await submit('article', 'long', 'sched-b');
+    const first = await ok(sched(a.id));
+    expect(first.slotAt).toBe(
+      list.slots.find((x: { at: string }) => Date.parse(x.at) >= Date.now() + 3 * H)?.at,
+    );
+    const second = await ok(sched(b.id));
+    expect(Date.parse(second.slotAt)).toBeGreaterThan(Date.parse(first.slotAt));
+    // errors: not a slot, taken, too soon
+    const c = await submit('article', 'long', 'sched-c');
+    const odd = await sched(c.id, { slotAt: new Date(Date.parse(first.slotAt) + H).toISOString() });
+    expect([odd.status, odd.body.error.code]).toEqual([409, 'not_a_slot']);
+    const taken = await sched(c.id, { slotAt: first.slotAt });
+    expect([taken.status, taken.body.error.code]).toEqual([409, 'slot_taken']);
+    const soon = list.slots.find(
+      (x: { at: string }) => Date.parse(x.at) < Date.now() + 3 * H && Date.parse(x.at) > Date.now(),
+    );
+    if (soon) expect((await sched(c.id, { slotAt: soon.at })).body.error.code).toBe('slot_too_soon');
+    const view = await slots('long');
+    expect(
+      view.slots.filter((x: { postId: string | null }) => x.postId).map((x: { postId: string }) => x.postId),
+    ).toEqual([a.id, b.id]);
+    await days(7);
+  });
+
+  it('two requests for the same slot: exactly one wins, the other gets 409 slot_taken', async () => {
+    const [a, b] = [
+      await submit('article', 'long', 'race-slot-a'),
+      await submit('article', 'long', 'race-slot-b'),
+    ];
+    const target = (await slots('long')).slots.find(
+      (x: { at: string; free: boolean }) => x.free && Date.parse(x.at) > Date.now() + 4 * H,
+    ).at;
+    const [ra, rb] = await Promise.all([sched(a.id, { slotAt: target }), sched(b.id, { slotAt: target })]);
+    expect([ra.status, rb.status].sort()).toEqual([200, 409]);
+    expect([ra, rb].find((r) => r.status === 409)?.body.error.code).toBe('slot_taken');
+    // without a slot, concurrent schedules get different free slots
+    const [c, d] = [
+      await submit('article', 'long', 'race-slot-c'),
+      await submit('article', 'long', 'race-slot-d'),
+    ];
+    const [rc, rd] = await Promise.all([sched(c.id), sched(d.id)]);
+    expect(rc.status).toBe(200);
+    expect(rd.status).toBe(200);
+    expect(rc.body.slotAt).not.toBe(rd.body.slotAt);
+  });
+
+  it('the render is not claimed before slot minus the render lead, then starts', async () => {
+    await settings({ schedule: { long: { renderLeadHours: 48 } } });
+    const p = await submit('article', 'long', 'lead');
+    const far = (await slots('long')).slots[5].at as string; // five days ahead
+    const sch = await ok(sched(p.id, { slotAt: far }));
+    expect(sch.render.notBefore).toBe(new Date(Date.parse(far) - 48 * H).toISOString());
+    expect(await tick()).toMatchObject({ rendered: false, uploaded: false });
+    expect((await post(p.id)).render.status).toBe('queued');
+    t.clock.advance(Date.parse(far) - 48 * H - Date.now() + 60_000);
+    expect(await tick()).toMatchObject({ rendered: true, uploaded: true });
+    t.clock.advance(-(Date.parse(far) - 48 * H - Date.now() + 60_000) - 0);
+    expect(yt.uploads[0]?.status.publishAt).toBe(far);
+    await settings({ schedule: { long: { renderLeadHours: 168 } } });
+  });
+
+  it('a purged preview is queued again at scheduling without using another render', async () => {
+    const p = await submit('article', 'long', 'repurge');
+    await preview(p.id);
+    await tick();
+    await q(`UPDATE video_renders SET finished_at = now() - interval '8 days' WHERE post_id=$1`, [p.id]);
+    await q(`UPDATE video_posts SET updated_at = now() - interval '8 days' WHERE id=$1`, [p.id]);
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1); // a preview idle for 7 days
+    expect((await post(p.id)).render.purged).toBe(true);
+    const sch = await ok(sched(p.id));
+    expect(sch.render).toMatchObject({ status: 'queued', purged: false, preview: false });
+    expect(sch.rendersUsed).toBe(1);
+    expect(await tick()).toMatchObject({ rendered: true, uploaded: true });
+  });
+
+  it('unschedule: back to review while nothing started (the render becomes a preview); refused once on YouTube', async () => {
+    const p = await approved('article', 'long', 'unsched');
+    await tick(); // rendered and uploaded already
+    const gone = await api('POST', `/api/platform/video/posts/${p.id}/unschedule`, {});
+    expect([gone.status, gone.body.error.code]).toEqual([409, 'already_started']);
+    const q1 = await approved('article', 'long', 'unsched-2');
+    await q(`UPDATE video_renders SET not_before = now() + interval '1 day' WHERE post_id=$1`, [q1.id]);
+    const back = await ok(api('POST', `/api/platform/video/posts/${q1.id}/unschedule`)); // no body, like the web app
+    expect(back).toMatchObject({
+      status: 'in_review',
+      slotAt: null,
+      publishMode: null,
+      approvedAt: null,
+      phase: 'in_review',
+    });
+    expect(await tick()).toMatchObject({ rendered: false }); // a queued render of a post in review waits
+    // it can be scheduled again
+    const again = await ok(sched(q1.id));
+    expect(again.status).toBe('approved');
+    expect(await tick()).toMatchObject({ rendered: true });
+  });
+
+  it('move and swap trade free slots until a destination has the video', async () => {
+    const a = await approved('article', 'long', 'mv-a');
+    const b = await approved('article', 'long', 'mv-b');
+    // move a to a free slot further out
+    const free = (await slots('long')).slots.find(
+      (x: { free: boolean; at: string }) => x.free && Date.parse(x.at) > Date.parse(b.slotAt),
+    ).at;
+    const moved = await ok(api('POST', `/api/platform/video/posts/${a.id}/move`, { slotAt: free }));
+    expect(moved.slotAt).toBe(free);
+    const clash = await api('POST', `/api/platform/video/posts/${a.id}/move`, { slotAt: b.slotAt });
+    expect(clash.body.error.code).toBe('slot_taken');
+    const swapped = await ok(api('POST', `/api/platform/video/posts/${a.id}/swap`, { withId: b.id }));
+    expect(swapped.a.slotAt).toBe(b.slotAt);
+    expect(swapped.b.slotAt).toBe(free);
+    await tick(); // one of them is rendered and on YouTube
+    // the projection and a rebuild agree
+    const cols = 'id, slot_at, publish_mode, destinations, status';
+    const mine = `SELECT ${cols} FROM video_posts WHERE id = ANY($1::uuid[]) ORDER BY id`;
+    const before = await q(mine, [[a.id, b.id]]);
+    await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
+    expect(await q(mine, [[a.id, b.id]])).toEqual(before);
+    expect(before).toHaveLength(2);
+    const started = await api('POST', `/api/platform/video/posts/${a.id}/swap`, { withId: b.id });
+    expect([started.status, started.body.error?.code]).toEqual([409, 'already_started']);
+    expect((await api('POST', `/api/platform/video/posts/${a.id}/move`, { slotAt: free })).status).toBe(409);
+  });
+
+  it('a Short that belongs to a long video takes the first Short slot at or after the long slot', async () => {
+    const long = await approved('article', 'long', 'pair');
+    const short = await submit('article', 'short', 'pair', { parentId: long.id });
+    const sch = await ok(sched(short.id));
+    expect(Date.parse(sch.slotAt)).toBeGreaterThanOrEqual(Date.parse(long.slotAt));
+    const earlier = (await slots('short')).slots.find(
+      (x: { at: string }) => Date.parse(x.at) >= Date.now() + H,
+    );
+    expect(Date.parse(sch.slotAt)).toBeGreaterThanOrEqual(Date.parse(earlier.at));
+    expect(new Date(sch.slotAt).getUTCHours()).toBe(14); // 16:00 SAST
+  });
+
+  it('"publish now": Shorts and public long videos upload public at once, a private long one may not', async () => {
+    const s = await submit('article', 'short', 'now-short');
+    const sn = await ok(sched(s.id, { mode: 'now' }));
+    expect(sn).toMatchObject({ publishMode: 'now' });
+    expect(sn.render.notBefore).toBeNull();
+    await tick();
+    expect(yt.uploads[0]?.status).toMatchObject({ privacyStatus: 'public' });
+    expect(yt.uploads[0]?.status.publishAt).toBeUndefined();
+    const d = await post(s.id);
+    expect(d.upload).toMatchObject({ status: 'sent', publishAt: null });
+    expect((await shareOf(s.id))?.detail.verifiedAt).toBeTruthy(); // YouTube showed it public
+    const long = await submit('article', 'long', 'now-long');
+    await ok(api('PATCH', `/api/platform/video/posts/${long.id}`, { privacy: 'unlisted' }));
+    const refused = await sched(long.id, { mode: 'now' });
+    expect([refused.status, refused.body.error.code]).toEqual([400, 'mode_not_allowed']);
+    await ok(api('PATCH', `/api/platform/video/posts/${long.id}`, { privacy: 'public' }));
+    expect((await ok(sched(long.id, { mode: 'now' }))).publishMode).toBe('now');
+  });
+
+  it('other destinations get a skipped share "not available yet"; a long video is YouTube only', async () => {
+    const long = await submit('article', 'long', 'dest-long');
+    const bad = await sched(long.id, { destinations: ['youtube', 'x'] });
+    expect(bad.status).toBe(400);
+    const short = await submit('article', 'short', 'dest-short');
+    const sch = await ok(
+      sched(short.id, {
+        destinations: ['youtube', 'instagram', 'x', 'tiktok'],
+        captions: { instagram: { text: 'Look at this', tags: ['agents'] } },
+      }),
+    );
+    expect(sch.destinations).toEqual(['youtube', 'instagram', 'x', 'tiktok']);
+    expect(sch.captions).toEqual({ instagram: { text: 'Look at this', tags: ['agents'] } });
+    const stray = await sched((await submit('article', 'short', 'dest-short-2')).id, {
+      destinations: ['youtube'],
+      captions: { x: { text: 'no', tags: [] } },
+    });
+    expect(stray.status).toBe(400);
+    await tick();
+    const d = await post(short.id);
+    expect(d.upload.status).toBe('sent');
+    expect(d.shares.map((x: { network: string; status: string }) => [x.network, x.status]).sort()).toEqual([
+      ['instagram', 'skipped'],
+      ['tiktok', 'skipped'],
+      ['x', 'skipped'],
+    ]);
+    expect(d.shares[0].error).toMatch(/not available yet/);
+    // the YouTube video is confirmed public: every share is sent or skipped, so the MP4 goes
+    await q(
+      `UPDATE social_shares SET detail = detail || jsonb_build_object('verifiedAt', now()::text) WHERE post_id=$1 AND network='youtube'`,
+      [short.id],
+    );
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
+    expect((await post(short.id)).render.files).not.toContain('video');
+    // the blog sweep never sees these networks
+    const { SOCIAL_NETWORKS } = await import('@aom/shared');
+    expect(SOCIAL_NETWORKS as readonly string[]).not.toContain('instagram');
+  });
+
+  it('a failed destination keeps the MP4 for 3 days; a rejected post loses its files after one', async () => {
+    const p = await approved('article', 'long', 'failkeep');
+    await tick();
+    await q(
+      `UPDATE social_shares SET status='failed', updated_at = now() - interval '2 days' WHERE post_id=$1`,
+      [p.id],
+    );
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(0);
+    await q(`UPDATE social_shares SET updated_at = now() - interval '4 days' WHERE post_id=$1`, [p.id]);
+    expect(await cleanupVideos(t.app.ctx, { force: true })).toBe(1);
+  });
+
+  it('the disk budget stops new renders and mails once', async () => {
+    const p = await approved('article', 'long', 'budget');
+    const cfg = t.app.ctx.config as { videoMaxBytes: number };
+    const keep = cfg.videoMaxBytes;
+    cfg.videoMaxBytes = 100_000_000;
+    try {
+      expect(await tick()).toMatchObject({ rendered: false });
+      await tick();
+      expect((await post(p.id)).render.status).toBe('queued');
+      expect(mail.sent.filter((m) => /disk is full/.test(m.subject))).toHaveLength(1);
+    } finally {
+      cfg.videoMaxBytes = keep;
+    }
+    await q(`DELETE FROM platform_settings WHERE key LIKE 'video_alert:%'`);
+    expect(await tick()).toMatchObject({ rendered: true });
+  });
+
+  it('slips at slot minus 30 minutes when not rendered, once, without cascading; a started post stays', async () => {
+    const { videoWatch } = await import('../src/video/sweep.ts');
+    const a = await approved('article', 'long', 'slip-a');
+    const b = await approved('article', 'long', 'slip-b');
+    const c = await approved('article', 'long', 'slip-c');
+    const slotA = Date.parse(a.slotAt);
+    // nothing is rendered (the worker never ticked); 29 minutes before a's slot
+    const jump = slotA - 29 * 60_000 - Date.now();
+    t.clock.advance(jump);
+    try {
+      const out = await videoWatch(t.app.ctx);
+      expect(out.slipped).toBe(1);
+      const read = (id: string) => getVideoPost(t.app.ctx, id); // no API call while the clock is ahead: sessions expire
+      const after = await read(a.id);
+      expect(Date.parse(after.slotAt as string)).toBeGreaterThan(Date.parse(c.slotAt)); // the next FREE slot: b and c stay
+      expect((await read(b.id)).slotAt).toBe(b.slotAt);
+      expect((await read(c.id)).slotAt).toBe(c.slotAt);
+      expect(after.render?.notBefore).toBe(
+        new Date(Date.parse(after.slotAt as string) - 168 * H).toISOString(),
+      );
+      expect(mail.sent.filter((m) => /missed its slot/.test(m.subject))).toHaveLength(1);
+      const ev = await q(
+        `SELECT payload FROM events WHERE type='VideoPostScheduled' AND payload->>'postId'=$1 ORDER BY seq DESC LIMIT 1`,
+        [a.id],
+      );
+      expect(ev[0]?.payload).toMatchObject({ reason: 'slipped', by: 'system' });
+      expect((await videoWatch(t.app.ctx)).slipped).toBe(0); // not again
+    } finally {
+      t.clock.advance(-jump);
+    }
+  });
+
+  it('alerts when the render worker is offline near a slot, and when a render failed for good', async () => {
+    const { videoWatch } = await import('../src/video/sweep.ts');
+    const p = await approved('article', 'long', 'alerts');
+    await q(`DELETE FROM platform_settings WHERE key='video_worker_heartbeat'`);
+    await q(`UPDATE video_posts SET slot_at = now() + interval '20 hours' WHERE id=$1`, [p.id]);
+    await videoWatch(t.app.ctx);
+    expect(mail.sent.filter((m) => /render worker is offline/.test(m.subject))).toHaveLength(1);
+    await videoWatch(t.app.ctx);
+    expect(mail.sent.filter((m) => /render worker is offline/.test(m.subject))).toHaveLength(1);
+    await q(`UPDATE video_posts SET slot_at = now() + interval '5 hours' WHERE id=$1`, [p.id]);
+    await q(
+      `UPDATE video_renders SET status='failed', error='ffmpeg exploded', attempts=3 WHERE post_id=$1`,
+      [p.id],
+    );
+    await videoWatch(t.app.ctx);
+    expect(mail.sent.filter((m) => /failed to render/.test(m.subject))).toHaveLength(1);
+    expect((await post(p.id)).phase).toBe('failed');
+  });
+
+  it('an empty slot with scripts waiting in review is mailed once, 24 hours before', async () => {
+    const { videoWatch } = await import('../src/video/sweep.ts');
+    await submit('article', 'long', 'empty-slot');
+    await videoWatch(t.app.ctx);
+    expect(mail.sent.filter((m) => /slot is still empty/.test(m.subject))).toHaveLength(1);
+    await videoWatch(t.app.ctx);
+    expect(mail.sent.filter((m) => /slot is still empty/.test(m.subject))).toHaveLength(1);
+  });
+
+  it('the status carries the capacity from the days ticked and the next slot per format', async () => {
+    await days(4, 2);
+    const st = await ok(api('GET', '/api/platform/video/status'));
+    expect(st.capacity.long).toMatchObject({ limit: 4, backlogLimit: 8 });
+    expect(st.capacity.short).toMatchObject({ limit: 2, backlogLimit: 4 });
+    expect(st.nextSlot.long).toBeTruthy();
+    expect(st.nextSlot.short).toBeTruthy();
+    expect(st.storage.maxBytes).toBe(5 * 1024 ** 3);
+    await days(0, 0);
+    const none = await ok(api('GET', '/api/platform/video/status'));
+    expect(none.nextSlot).toEqual({ long: null, short: null });
+    expect(none.capacity.long.limit).toBe(0);
+    const p = await submit('article', 'long', 'no-days');
+    expect((await sched(p.id)).body.error.code).toBe('no_slots');
+    await days(7);
+  });
+
+  it('settings: the schedule is validated, patched in parts, and derived from the old counts until one is saved', async () => {
+    expect(
+      (await api('PATCH', '/api/platform/video/settings', { schedule: { timezone: 'Mars/Olympus' } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await api('PATCH', '/api/platform/video/settings', {
+          schedule: { long: { destinations: ['youtube', 'x'] } },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await api('PATCH', '/api/platform/video/settings', { schedule: { long: { days: ['mon', 'mon'] } } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await api('PATCH', '/api/platform/video/settings', { schedule: { short: { time: '25:00' } } })).status,
+    ).toBe(400);
+    const tz = await settings({
+      schedule: {
+        timezone: 'Europe/Amsterdam',
+        short: { time: '09:30', destinations: ['youtube', 'bluesky'] },
+      },
+    });
+    expect(tz.schedule).toMatchObject({
+      timezone: 'Europe/Amsterdam',
+      short: { time: '09:30', destinations: ['youtube', 'bluesky'] },
+    });
+    expect(tz.schedule.long.days).toEqual(ALL_DAYS); // untouched
+    // slots follow the zone (09:30 Amsterdam is 08:30 UTC in winter, 07:30 in summer)
+    const hours = (await slots('short', 40)).slots.map(
+      (x: { at: string }) => new Date(x.at).getUTCHours() * 60 + new Date(x.at).getUTCMinutes(),
+    );
+    expect(new Set(hours).size).toBeLessThanOrEqual(2);
+    expect(hours.every((m: number) => m === 450 || m === 510)).toBe(true);
+    // derived from perWeek / shortsPerWeek while nothing was saved
+    const saved = (await q(`SELECT value FROM platform_settings WHERE key='video_posts'`))[0]?.value;
+    const { schedule: _drop, ...rest } = saved;
+    await q(`UPDATE platform_settings SET value=$1::jsonb WHERE key='video_posts'`, [
+      JSON.stringify({ ...rest, perWeek: 3, shortsPerWeek: 2 }),
+    ]);
+    const derived = await ok(api('GET', '/api/platform/video/settings'));
+    expect(derived.schedule).toMatchObject({
+      timezone: 'Africa/Johannesburg',
+      long: { days: ['mon', 'wed', 'fri'], time: '10:00', destinations: ['youtube'], renderLeadHours: 48 },
+      short: { days: ['tue', 'thu'], time: '16:00', destinations: ['youtube'], renderLeadHours: 24 },
+    });
+    expect((await settings({ perWeek: 5 })).schedule.long.days).toHaveLength(5);
+    await q(`UPDATE platform_settings SET value=$1::jsonb WHERE key='video_posts'`, [JSON.stringify(saved)]);
+  });
+
+  it('the schedule routes are 404 for everyone but a super admin', async () => {
+    const member = await t.userSession('member-schedule@example.com');
+    const p = await submit('article', 'long', 'routes-404');
+    for (const [method, url, body] of [
+      ['GET', '/api/platform/video/slots?format=long', undefined],
+      ['POST', `/api/platform/video/posts/${p.id}/schedule`, {}],
+      ['POST', `/api/platform/video/posts/${p.id}/unschedule`, {}],
+      ['POST', `/api/platform/video/posts/${p.id}/move`, { slotAt: new Date().toISOString() }],
+      ['POST', `/api/platform/video/posts/${p.id}/swap`, { withId: p.id }],
+      ['POST', `/api/platform/video/posts/${p.id}/preview`, {}],
+    ] as const)
+      expect((await api(method, url, body, member.cookie)).status).toBe(404);
   });
 });
 

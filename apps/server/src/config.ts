@@ -143,6 +143,11 @@ const EnvSchema = z.object({
   AOM_YOUTUBE_CLIENT_ID: z.string().optional(),
   AOM_YOUTUBE_CLIENT_SECRET: z.string().optional(),
   AOM_VIDEO_DIR: z.string().optional(),
+  AOM_VIDEO_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(100_000_000)
+    .default(5 * 1024 ** 3),
   /**
    * Simulation organizations: host their simulated workstation (a mock runner the server starts and supervises).
    * Unset: on, except under tests.
@@ -248,6 +253,8 @@ export interface Config {
   youtubeClientSecret: string | undefined;
   /** Where rendered videos live (rw in the video worker, ro in the app). */
   videoDir: string;
+  /** The disk budget of rendered videos in bytes (AOM_VIDEO_MAX_BYTES, default 5 GB). */
+  videoMaxBytes: number;
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
@@ -330,6 +337,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     youtubeClientId: e.AOM_YOUTUBE_CLIENT_ID || undefined,
     youtubeClientSecret: e.AOM_YOUTUBE_CLIENT_SECRET || undefined,
     videoDir: e.AOM_VIDEO_DIR || '/data/video',
+    videoMaxBytes: e.AOM_VIDEO_MAX_BYTES,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
     simulationHost: e.AOM_SIMULATION_HOST,

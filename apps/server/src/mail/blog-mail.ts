@@ -111,6 +111,24 @@ export function videoLockedMail(opts: {
   });
 }
 
+/** Something about the video schedule needs the owner (a slipped slot, an offline render worker, a full disk). */
+export function videoAlertMail(opts: {
+  to: string;
+  heading: string;
+  reason: string;
+  origin: string;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: opts.heading,
+    preheader: opts.reason.slice(0, 100),
+    heading: opts.heading,
+    origin: opts.origin,
+    body: [{ facts: [['What happened', opts.reason]] }],
+    cta: { label: 'Open the video queue', url: `${opts.origin}/platform/blog?tab=videos` },
+  });
+}
+
 /** The blog writer stopped for the month: its spend plus one more run would pass the monthly cap. */
 export function writerCapMail(opts: { to: string; reason: string; origin: string }): MailMessage {
   return brandedMail({
