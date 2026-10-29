@@ -52,8 +52,9 @@ export function videoMediaRoutes(ctx: Ctx) {
       reply: import('fastify').FastifyReply,
     ) => {
       const { renderId, exp, sig } = req.params;
+      // a served fetch is logged at info; a refused one (anyone can probe the route) only at debug
       const log = (outcome: string) =>
-        ctx.log.info(
+        ctx.log[outcome === 'served' ? 'info' : 'debug'](
           { renderId, outcome, ip: req.ip, ua: req.headers['user-agent'], range: req.headers.range },
           'video media fetch',
         );

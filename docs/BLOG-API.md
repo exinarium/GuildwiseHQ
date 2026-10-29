@@ -419,6 +419,16 @@ slot is 6 hours past), or 3 days after a failure. **Retry one destination:** `PO
 or `skipped`, `409 video_purged` when the file is gone and cannot be rendered again). A retry of a destination other than YouTube
 starts from scratch and opens a new 6-hour window; if the clean-up already removed the MP4 the same revision renders again first.
 
+**No double posts.** A destination's progress (upload session, container, media or publish id) is kept in `social_shares.detail.dest`;
+a share that holds progress counts as started, so unscheduling, moving, slipping and re-flowing that post are refused
+(`409 already_started`). The request that makes a post public is marked before it is sent. If its answer is lost (a dropped
+connection or a 5xx) it is never repeated blindly: Facebook asks whether the reel is published, Instagram reads the container
+status (`PUBLISHED` is never published again), and X, LinkedIn and Bluesky, which have no lookup here, fail with "may already be
+posted: check the account" and wait for your retry. X's duplicate-content 403 is a plain failure, not a reconnect. Addresses
+the networks hand back are followed only on their own hosts (LinkedIn upload URLs on linkedin.com or licdn.com, the Bluesky
+server on bsky.social or bsky.network). A retry keeps TikTok's publish id and first asks TikTok about it. Disconnecting TikTok
+revokes its token. Links typed into an X or TikTok caption are removed. A video whose length is unknown is not sent to TikTok.
+
 **Setup and scopes per network.** Connect each under Platform > Blog > Posts > Social sharing.
 - *Facebook (Reels of the Page)*: the existing Page access token needs `pages_show_list`, `pages_read_engagement` and `pages_manage_posts`.
   Flow: `POST /{page}/video_reels` `upload_phase=start`, the file to `rupload.facebook.com/video-upload/{version}/{video_id}` (headers

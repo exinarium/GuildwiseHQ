@@ -593,6 +593,12 @@ export async function runUpload(ctx: Ctx, share: Row): Promise<void> {
       }
       detail.videoId = videoId;
       detail.uploadedAt = ctx.clock.now().toISOString();
+      // an upload that resumed or ran long can end after its slot: YouTube would keep a video with a past publishAt private,
+      // so it is made public now
+      if (detail.publishAt && Date.parse(detail.publishAt) <= ctx.clock.now().getTime() + 60_000) {
+        await call((t) => ctx.youtube.makePublic(t, videoId));
+        detail.publishAt = null;
+      }
       delete detail.sessionUri;
       delete detail.sessionStartedAt;
       await saveDetail(ctx, share, detail, { external_id: videoId, url: watchUrl(videoId) });
@@ -722,10 +728,22 @@ export function destinationCaption(
   network: ShortDestination,
 ): { text: string; facets: BlueskyFacet[] } {
   const meta = post.meta as VideoPostMeta;
-  const mine = ({ ...(post.submit_captions ?? {}), ...(post.captions ?? {}) } as VideoCaptions)[network];
-  const c = mine && mine.text.trim() ? mine : defaultVideoCaption(network, meta);
-  // no link on any Short: X and TikTok forbid or charge for it, and a Short has no page of its own
-  return composeCaption(network, c.text, c.tags, '', VIDEO_CAPTION_LIMITS[network]);
+  // the owner's edit, else the drafter's caption, else a default; an empty text falls through to the next
+  const filled = (c?: { text: string; tags: string[] }) => (c && c.text.trim() ? c : undefined);
+  const c =
+    filled((post.captions as VideoCaptions | null)?.[network]) ??
+    filled((post.submit_captions as VideoCaptions | null)?.[network]) ??
+    defaultVideoCaption(network, meta);
+  // no link on any Short: X and TikTok forbid or charge for it, and a Short has no page of its own. A link the owner typed
+  // into an X or TikTok caption is taken out.
+  const text =
+    network === 'x' || network === 'tiktok'
+      ? c.text
+          .replace(/(?:https?:\/\/|www\.)\S+/gi, '')
+          .replace(/[ \t]{2,}/g, ' ')
+          .trim()
+      : c.text;
+  return composeCaption(network, text, c.tags, '', VIDEO_CAPTION_LIMITS[network]);
 }
 
 async function runDestination(ctx: Ctx, share: Row): Promise<void> {
@@ -839,6 +857,7 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
       state,
       save,
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      now: () => ctx.clock.now().getTime(),
     });
     if (!out.done) {
       await setShare(`status='pending', error=$4, next_attempt_at=$5, detail=$6::jsonb`, [

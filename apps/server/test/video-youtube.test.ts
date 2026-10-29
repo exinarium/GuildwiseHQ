@@ -93,6 +93,11 @@ class FakeYouTube implements YouTubeClient {
     this.calls.push('playlist');
     this.playlist.push([pl, id]);
   }
+  madePublic: string[] = [];
+  async makePublic(_t: string, id: string) {
+    this.calls.push('makePublic');
+    this.madePublic.push(id);
+  }
   async videoStatus(_t: string, id: string) {
     this.calls.push('status');
     const n = Number(/^vid(\d+)/.exec(id)?.[1] ?? 0);
@@ -113,6 +118,7 @@ class FakeYouTube implements YouTubeClient {
     this.uploadErrors = [];
     this.progressAdvanceMs = 0;
     this.thumbError = null;
+    this.madePublic = [];
   }
 }
 
@@ -2073,6 +2079,18 @@ describe('review fixes: publishAt margin, the claim race, the render lock, the c
     await runUpload(t.app.ctx, claimedB as never);
     expect(yt.uploads).toHaveLength(before);
     expect((await q(`SELECT status FROM social_shares WHERE post_id=$1`, [b.id]))[0]?.status).toBe('skipped');
+  });
+
+  it('an upload that ends after its slot makes the video public instead of leaving a past publishAt', async () => {
+    await settings({ privacy: 'public' });
+    const p = await approved('article', 'short', 'ends-late');
+    await slotIn(p.id, '20 minutes');
+    yt.progressAdvanceMs = 25 * 60_000; // the upload runs past the slot
+    await tick();
+    t.clock.advance(-25 * 60_000);
+    expect(yt.uploads[0]?.status.publishAt).toBeTruthy();
+    expect(yt.madePublic).toHaveLength(1);
+    expect((await post(p.id)).upload?.publishAt).toBeNull();
   });
 
   it('only one render runs at a time even when two workers claim at once', async () => {

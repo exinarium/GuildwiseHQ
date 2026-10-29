@@ -5,7 +5,11 @@ import type { VideoScript } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR, userActor } from '../src/commands/common.ts';
 import { insertLibraryRender, RENDER_DEFERRED, videoPostStream } from '../src/commands/video-posts.ts';
-import { migrateVideoSchedule, VIDEO_SCHEDULE_MIGRATION } from '../src/data-migrations/index.ts';
+import {
+  migrateVideoSchedule,
+  runDataMigrations,
+  VIDEO_SCHEDULE_MIGRATION,
+} from '../src/data-migrations/index.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
 import { buildProjectors } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -271,5 +275,15 @@ describe('video-schedule-2026-10', () => {
     await rebuildProjections(t.app.ctx.pool, t.app.ctx.store);
     expect(await q(`SELECT ${cols} FROM video_posts ORDER BY id`)).toEqual(before);
     expect(before.filter((r) => r.slot_at)).toHaveLength(3);
+  });
+});
+
+describe('runDataMigrations', () => {
+  it('two instances starting together run every migration once, one after the other', async () => {
+    const names = async () => (await q('SELECT name FROM data_migrations')).map((r) => r.name as string);
+    await Promise.all([runDataMigrations(env()), runDataMigrations(env())]);
+    const done = await names();
+    expect(new Set(done).size).toBe(done.length); // no migration recorded twice
+    expect(done).toContain(VIDEO_SCHEDULE_MIGRATION);
   });
 });

@@ -6,7 +6,7 @@ import { exec, one } from '../db/sql.ts';
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import { DestinationError, type TikTokCreatorInfo } from '../video/destinations.ts';
 import { userActor } from './common.ts';
-import { videoSettings } from './video-posts.ts';
+import { videoSettings, withLock } from './video-posts.ts';
 
 /**
  * TikTok as a social channel: OAuth connect (Login Kit, scopes user.info.basic and video.publish), token renewal (the
@@ -37,6 +37,11 @@ function appCreds(ctx: Ctx): { clientKey: string; clientSecret: string } {
 /** The TikTok authorize URL; the state is stored server-side (one use, 10 minutes) and bound to the admin who asked. */
 export async function tiktokConnectUrl(ctx: Ctx, by: AuthSession['user']): Promise<string> {
   const { clientKey } = appCreds(ctx);
+  // states nobody came back with
+  await exec(ctx.pool, `DELETE FROM platform_settings WHERE key LIKE $1 AND updated_at < $2`, [
+    `${STATE_PREFIX}%`,
+    new Date(ctx.clock.now().getTime() - STATE_TTL_MS),
+  ]);
   const state = randomBytes(24).toString('base64url');
   await exec(
     ctx.pool,
@@ -71,9 +76,8 @@ export async function tiktokCallback(
 ): Promise<{ accountName: string }> {
   if (!query.state) throw badRequest('bad_state', 'the TikTok sign-in has no state');
   const key = `${STATE_PREFIX}${query.state}`;
-  const row = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [key]);
-  // one use: gone whatever happens next
-  await exec(ctx.pool, 'DELETE FROM platform_settings WHERE key=$1', [key]);
+  // one use, atomically: of two callbacks with the same state only one gets the row
+  const row = await one(ctx.pool, 'DELETE FROM platform_settings WHERE key=$1 RETURNING value', [key]);
   const v = row?.value as { userId?: string; at?: string } | undefined;
   if (!v || v.userId !== by.id || ctx.clock.now().getTime() - Date.parse(v.at ?? '') > STATE_TTL_MS)
     throw badRequest('bad_state', 'the TikTok sign-in expired or was not started here: press Connect again');
@@ -125,28 +129,50 @@ export async function tiktokCallback(
  * A usable access token for the connected TikTok account: the stored one, or a new one when it ends within 30 minutes
  * (the refresh token TikTok sends back replaces the stored one). An `auth` DestinationError means "connect again".
  */
-export async function freshTiktokToken(ctx: Ctx, ch: Record<string, any>): Promise<string> {
-  const token = await decryptSecret(ctx, ch.access_token);
-  const exp = ch.expires_at ? new Date(ch.expires_at).getTime() : 0;
-  if (exp - ctx.clock.now().getTime() > REFRESH_AHEAD_MS) return token;
+export async function freshTiktokToken(ctx: Ctx, first: Record<string, any>): Promise<string> {
+  const stillGood = (ch: Record<string, any>) =>
+    (ch.expires_at ? new Date(ch.expires_at).getTime() : 0) - ctx.clock.now().getTime() > REFRESH_AHEAD_MS;
+  if (stillGood(first)) return decryptSecret(ctx, first.access_token);
+  // one renewal at a time (the app and the worker both ask): whoever comes second finds the new token and uses it, so a
+  // refresh token that TikTok rotated is never spent twice
+  return withLock(ctx, 'tiktok-token', async () => {
+    const ch = (await one(ctx.pool, `SELECT * FROM social_channels WHERE network='tiktok'`)) ?? first;
+    if (stillGood(ch)) return decryptSecret(ctx, ch.access_token);
+    const { tiktokClientKey: clientKey, tiktokClientSecret: clientSecret } = ctx.config;
+    if (!clientKey || !clientSecret)
+      throw new DestinationError('final', 'AOM_TIKTOK_CLIENT_KEY and AOM_TIKTOK_CLIENT_SECRET are not set');
+    if (!ch.refresh_token)
+      throw new DestinationError('auth', 'TikTok has no refresh token: connect it again');
+    const fresh = await ctx.videoDestinations.tiktokToken(
+      { refreshToken: await decryptSecret(ctx, ch.refresh_token) },
+      { clientKey, clientSecret },
+    );
+    await exec(
+      ctx.pool,
+      `UPDATE social_channels SET access_token=$1, refresh_token=$2, expires_at=$3, alerted_at=NULL WHERE network='tiktok'`,
+      [
+        await encryptSecret(ctx, fresh.accessToken),
+        await encryptSecret(ctx, fresh.refreshToken),
+        fresh.expiresAt,
+      ],
+    );
+    return fresh.accessToken;
+  });
+}
+
+/** Revokes the stored TikTok access token (on disconnect). Best effort: a failure never blocks the disconnect. */
+export async function revokeTiktok(ctx: Ctx): Promise<void> {
   const { tiktokClientKey: clientKey, tiktokClientSecret: clientSecret } = ctx.config;
-  if (!clientKey || !clientSecret)
-    throw new DestinationError('final', 'AOM_TIKTOK_CLIENT_KEY and AOM_TIKTOK_CLIENT_SECRET are not set');
-  if (!ch.refresh_token) throw new DestinationError('auth', 'TikTok has no refresh token: connect it again');
-  const fresh = await ctx.videoDestinations.tiktokToken(
-    { refreshToken: await decryptSecret(ctx, ch.refresh_token) },
-    { clientKey, clientSecret },
-  );
-  await exec(
-    ctx.pool,
-    `UPDATE social_channels SET access_token=$1, refresh_token=$2, expires_at=$3, alerted_at=NULL WHERE network='tiktok'`,
-    [
-      await encryptSecret(ctx, fresh.accessToken),
-      await encryptSecret(ctx, fresh.refreshToken),
-      fresh.expiresAt,
-    ],
-  );
-  return fresh.accessToken;
+  const ch = await one(ctx.pool, `SELECT access_token FROM social_channels WHERE network='tiktok'`);
+  if (!ch || !clientKey || !clientSecret) return;
+  try {
+    await ctx.videoDestinations.tiktokRevoke(await decryptSecret(ctx, ch.access_token), {
+      clientKey,
+      clientSecret,
+    });
+  } catch (err) {
+    ctx.log.warn({ err }, 'tiktok revoke failed');
+  }
 }
 
 export interface TikTokCreatorDto {

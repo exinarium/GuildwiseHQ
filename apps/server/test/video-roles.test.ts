@@ -34,6 +34,7 @@ class FakeYouTube implements YouTubeClient {
   async setThumbnail() {}
   async insertCaption() {}
   async addToPlaylist() {}
+  async makePublic() {}
   async videoStatus(_t: string, _id: string) {
     return {
       privacyStatus: 'private',

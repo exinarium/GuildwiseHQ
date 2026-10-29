@@ -73,6 +73,10 @@ class FakeDestinations implements VideoDestinationClient {
       openId: 'open-id-1',
     };
   }
+  revoked: string[] = [];
+  async tiktokRevoke(accessToken: string) {
+    this.revoked.push(accessToken);
+  }
   async instagramAccount(accountId: string) {
     if (this.igError) throw new DestinationError('final', 'Graph error 100: no such account');
     return { username: `ig_${accountId}` };
@@ -83,6 +87,7 @@ class FakeDestinations implements VideoDestinationClient {
     this.resumed = [];
     this.exchanges = [];
     this.refreshes = [];
+    this.revoked = [];
     this.igError = false;
   }
 }
@@ -206,7 +211,9 @@ beforeAll(async () => {
   t.app.ctx.mailer = mail;
   sa = await t.superAdminSession();
   await shortSettings();
-  await ok(api('PUT', '/api/platform/social/channels/youtube', { refreshToken: '1//0g-refresh-token-value' }));
+  await ok(
+    api('PUT', '/api/platform/social/channels/youtube', { refreshToken: '1//0g-refresh-token-value' }),
+  );
   for (const [n, id] of [
     ['facebook', 'page-1'],
     ['linkedin', '5515715'],
@@ -847,5 +854,166 @@ describe('review fixes', () => {
       const r = await api('POST', `/api/platform/video/posts/${p.id}/move`, { slotAt: soon.at });
       expect([r.status, r.body.error.code]).toEqual([409, 'slot_too_soon']);
     }
+  });
+});
+
+describe('a destination with saved progress has started', () => {
+  const started = async (ref: string, network = 'x') => {
+    dest.script[network] = ['processing'];
+    const p = await submit(ref);
+    const s = await ok(sched(p.id, { mode: 'now', destinations: [network] }));
+    await tick();
+    await tick();
+    return { p, s };
+  };
+
+  it('unschedule, move and slip are refused while a pending share holds progress (no duplicate on reschedule)', async () => {
+    const { p } = await started('progress-pending');
+    const sh = await share(p.id, 'x');
+    expect([sh?.status, sh?.detail.dest]).toEqual(['pending', { stage: 'uploaded' }]);
+    const un = await api('POST', `/api/platform/video/posts/${p.id}/unschedule`, {});
+    expect([un.status, un.body.error.code]).toEqual([409, 'already_started']);
+    expect((await share(p.id, 'x'))?.detail.dest).toEqual({ stage: 'uploaded' }); // the share was not deleted
+    // a Move would lose the progress too (mode "now" cannot move; a slotted post is checked through the same test)
+    await q(
+      `UPDATE video_posts SET publish_mode='slot', slot_at = now() + interval '10 minutes' WHERE id=$1`,
+      [p.id],
+    );
+    const list = await ok(api('GET', '/api/platform/video/slots?format=short&count=20'));
+    const free = list.slots.find(
+      (x: { free: boolean; at: string }) => x.free && Date.parse(x.at) > Date.now() + 86_400_000,
+    );
+    const mv = await api('POST', `/api/platform/video/posts/${p.id}/move`, { slotAt: free.at });
+    expect([mv.status, mv.body.error.code]).toEqual([409, 'already_started']);
+    // not slipped either
+    expect(await slipVideoPost(t.app.ctx, p.id)).toBeNull();
+    // and a re-flow leaves it
+    await ok(
+      api('PATCH', '/api/platform/video/settings', {
+        schedule: { short: { days: ['mon'], renderLeadHours: 1 } },
+      }),
+    );
+    expect((await ok(api('POST', '/api/platform/video/reflow'))).moved).toBe(0);
+  });
+
+  it('the same after the stale-posting reset', async () => {
+    const { p } = await started('progress-stale');
+    await q(
+      `UPDATE social_shares SET status='posting', updated_at = now() - interval '2 hours' WHERE post_id=$1`,
+      [p.id],
+    );
+    await tick(); // the stale claim goes back to pending
+    const un = await api('POST', `/api/platform/video/posts/${p.id}/unschedule`, {});
+    expect([un.status, un.body.error.code]).toEqual([409, 'already_started']);
+  });
+
+  it('an unscheduled post whose share had no progress still goes back to review', async () => {
+    const p = await submit('no-progress');
+    await ok(sched(p.id, { destinations: ['x'] }));
+    await tick();
+    expect((await share(p.id, 'x'))?.status).toBe('pending');
+    expect((await ok(api('POST', `/api/platform/video/posts/${p.id}/unschedule`, {}))).status).toBe(
+      'in_review',
+    );
+  });
+
+  it("a retry keeps TikTok's publish id and drops the saved progress of the others", async () => {
+    const p = await submit('retry-progress');
+    await ok(
+      sched(p.id, {
+        mode: 'now',
+        destinations: ['tiktok', 'facebook'],
+        destinationOptions: { tiktok: TIKTOK_PRIVATE },
+      }),
+    );
+    await tick();
+    await q(
+      `UPDATE social_shares SET status='failed', detail = '{"dest":{"ttPublishId":"p-old","finalAttemptAt":"x"}}'::jsonb WHERE post_id=$1 AND network='tiktok'`,
+      [p.id],
+    );
+    await q(
+      `UPDATE social_shares SET status='failed', detail = '{"dest":{"fbVideoId":"v1"}}'::jsonb WHERE post_id=$1 AND network='facebook'`,
+      [p.id],
+    );
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/tiktok/retry`));
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/facebook/retry`));
+    expect((await share(p.id, 'tiktok'))?.detail.dest).toEqual({ ttPublishId: 'p-old' }); // the ambiguity marker is cleared
+    expect((await share(p.id, 'facebook'))?.detail.dest).toBeUndefined();
+  });
+});
+
+describe('TikTok token, state and disconnect', () => {
+  it('two renewals at once spend the refresh token once', async () => {
+    const { freshTiktokToken } = await import('../src/commands/tiktok.ts');
+    await q(`UPDATE social_channels SET expires_at = now() + interval '1 minute' WHERE network='tiktok'`);
+    const row = (await q(`SELECT * FROM social_channels WHERE network='tiktok'`))[0];
+    const [a, b] = await Promise.all([
+      freshTiktokToken(t.app.ctx, row as never),
+      freshTiktokToken(t.app.ctx, row as never),
+    ]);
+    expect(dest.refreshes).toHaveLength(1);
+    expect(a).toBe(b);
+    expect((await q(`SELECT status FROM social_channels WHERE network='tiktok'`))[0]?.status).toBe('ok');
+  });
+
+  it('a callback state works once, also when two callbacks arrive together; old states are purged', async () => {
+    const loc = new URL((await api('GET', '/api/platform/social/tiktok/connect')).headers.location);
+    const state = loc.searchParams.get('state') as string;
+    const [x, y] = await Promise.all([
+      api('GET', `/api/platform/social/tiktok/callback?code=a&state=${state}`),
+      api('GET', `/api/platform/social/tiktok/callback?code=b&state=${state}`),
+    ]);
+    const results = [x.headers.location, y.headers.location].map((l) =>
+      new URL(l).searchParams.get('tiktok'),
+    );
+    expect(results.sort()).toEqual(['connected', 'error']);
+    expect(dest.exchanges).toHaveLength(1);
+    // a state nobody came back with is removed by the next connect
+    await q(
+      `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ('tiktok_oauth_state:old','{}'::jsonb,NULL, now() - interval '1 hour')`,
+    );
+    await api('GET', '/api/platform/social/tiktok/connect');
+    expect(await q(`SELECT 1 FROM platform_settings WHERE key='tiktok_oauth_state:old'`)).toHaveLength(0);
+  });
+
+  it('disconnecting TikTok revokes the token', async () => {
+    const saved = (await q(`SELECT * FROM social_channels WHERE network='tiktok'`))[0];
+    await ok(api('DELETE', '/api/platform/social/channels/tiktok'));
+    expect(dest.revoked).toHaveLength(1);
+    await q(
+      `INSERT INTO social_channels (network, account_id, account_name, access_token, refresh_token, expires_at, status, connected_by, connected_at)
+       VALUES ('tiktok',$1,$2,$3,$4,$5,'ok',$6,now())`,
+      [
+        saved?.account_id,
+        saved?.account_name,
+        saved?.access_token,
+        saved?.refresh_token,
+        saved?.expires_at,
+        saved?.connected_by,
+      ],
+    );
+  });
+});
+
+describe('captions', () => {
+  it("an empty schedule caption falls through to the drafter's; a link typed into an X or TikTok caption is taken out", async () => {
+    const p = await submit('caption-fallthrough', {
+      captions: {
+        facebook: { text: 'Drafter Facebook', tags: [] },
+        x: { text: 'Own words https://evil.example.com/x and www.spam.test more', tags: [] },
+      },
+    });
+    await ok(
+      sched(p.id, {
+        mode: 'now',
+        destinations: ['facebook', 'x'],
+        captions: { facebook: { text: '   ', tags: [] } },
+      }),
+    );
+    await tick();
+    await tick();
+    const text = (n: string) => dest.payloads.find((x) => x.network === n)?.text;
+    expect(text('facebook')).toBe('Drafter Facebook');
+    expect(text('x')).toBe('Own words and more');
   });
 });

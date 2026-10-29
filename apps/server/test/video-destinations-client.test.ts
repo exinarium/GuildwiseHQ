@@ -42,6 +42,7 @@ beforeAll(() => {
     };
     calls.push(call);
     const r = router(call);
+    if (r?.throw) throw new Error('socket hang up');
     if (!r) return new Response('unexpected call', { status: 599 });
     return new Response(r.text ?? JSON.stringify(r.json ?? {}), {
       status: r.status ?? 200,
@@ -66,6 +67,7 @@ const io = (state: Record<string, unknown> = {}): DestinationIO & { saved: numbe
       o.saved++;
     },
     async sleep() {},
+    now: () => Date.now(),
   };
   return o;
 };
@@ -291,7 +293,7 @@ describe('Bluesky', () => {
           json: {
             accessJwt: 'jwt',
             did: 'did:plc:me',
-            didDoc: { service: [{ id: '#atproto_pds', serviceEndpoint: 'https://pds.example.com' }] },
+            didDoc: { service: [{ id: '#atproto_pds', serviceEndpoint: 'https://pds.bsky.network' }] },
           },
         };
       if (path(c).endsWith('getServiceAuth'))
@@ -314,7 +316,7 @@ describe('Bluesky', () => {
       .filter((c) => path(c).endsWith('getServiceAuth'))
       .map((c) => Object.fromEntries(new URL(c.url).searchParams));
     expect(auths[0]).toMatchObject({ aud: 'did:web:video.bsky.app', lxm: 'app.bsky.video.getUploadLimits' });
-    expect(auths[1]).toMatchObject({ aud: 'did:web:pds.example.com', lxm: 'com.atproto.repo.uploadBlob' });
+    expect(auths[1]).toMatchObject({ aud: 'did:web:pds.bsky.network', lxm: 'com.atproto.repo.uploadBlob' });
     const up = calls.find((c) => path(c).endsWith('uploadVideo'));
     expect(up?.url).toContain('did=did%3Aplc%3Ame');
     expect(up?.headers).toMatchObject({
@@ -473,5 +475,236 @@ describe('TikTok', () => {
     await expect(
       client.tiktokToken({ refreshToken: 'dead' }, { clientKey: 'k', clientSecret: 's' }),
     ).rejects.toMatchObject({ kind: 'auth' });
+  });
+});
+
+describe('an ambiguous last request is never repeated blindly', () => {
+  const xCreds = JSON.stringify({ apiKey: 'k', apiSecret: 's', accessToken: 't', accessSecret: 'ts' });
+  const blueskyCreds = JSON.stringify({ handle: 'gw.bsky.social', appPassword: 'abcd-efgh' });
+  const xRouter = (tweet: () => unknown) => (c: Call) => {
+    if (path(c) === '/2/media/upload/initialize') return { json: { data: { id: 'mid' } } };
+    if (path(c).endsWith('/append') || path(c).endsWith('/finalize'))
+      return { json: { data: { id: 'mid' } } };
+    if (path(c) === '/2/tweets') return tweet();
+    return undefined;
+  };
+
+  it('X: a 5xx or a dropped connection on the tweet is retried later but never reposted; the owner decides', async () => {
+    for (const lost of [{ status: 503, text: 'down' }, { throw: true }]) {
+      calls = [];
+      router = xRouter(() => lost);
+      const st = io();
+      await expect(client.publish(payload('x', { credentials: xCreds }), st)).rejects.toMatchObject({
+        kind: 'retry',
+      });
+      expect(st.state.finalAttemptAt).toBeTruthy();
+      expect(st.saved).toBeGreaterThan(0);
+      const before = calls.length;
+      router = xRouter(() => ({ json: { data: { id: 'tw-dup' } } }));
+      await expect(client.publish(payload('x', { credentials: xCreds }), st)).rejects.toMatchObject({
+        kind: 'final',
+        code: 'ambiguous_final',
+        message: expect.stringMatching(/may already be posted/),
+      });
+      expect(calls).toHaveLength(before); // nothing was sent
+    }
+  });
+
+  it('X: a refused tweet (4xx) clears the marker; a duplicate-content 403 is final, not an authentication error', async () => {
+    router = xRouter(() => ({
+      status: 403,
+      text: 'You are not allowed to create a Tweet with duplicate content.',
+    }));
+    const st = io();
+    await expect(client.publish(payload('x', { credentials: xCreds }), st)).rejects.toMatchObject({
+      kind: 'final',
+    });
+    expect(st.state.finalAttemptAt).toBeUndefined();
+    router = xRouter(() => ({ status: 429, text: 'slow down' }));
+    await expect(client.publish(payload('x', { credentials: xCreds }), io(st.state))).rejects.toMatchObject({
+      kind: 'retry',
+    });
+  });
+
+  it('LinkedIn and Bluesky: the same rule', async () => {
+    const li = (post: () => unknown) => (c: Call) => {
+      if (c.url.endsWith('/rest/videos/urn%3Ali%3Avideo%3AV1')) return { json: { status: 'AVAILABLE' } };
+      if (c.url.endsWith('/rest/posts')) return post();
+      return undefined;
+    };
+    router = li(() => ({ status: 502, text: 'bad gateway' }));
+    const st = io({ liVideo: 'urn:li:video:V1' });
+    await expect(client.publish(payload('linkedin'), st)).rejects.toMatchObject({ kind: 'retry' });
+    router = li(() => ({ headers: { 'x-restli-id': 'urn:li:share:2' } }));
+    calls = [];
+    await expect(client.publish(payload('linkedin'), st)).rejects.toMatchObject({ code: 'ambiguous_final' });
+    expect(calls.some((c) => c.url.endsWith('/rest/posts'))).toBe(false);
+
+    const bsky = (record: () => unknown) => (c: Call) => {
+      if (path(c).endsWith('createSession')) return { json: { accessJwt: 'jwt', did: 'did:plc:me' } };
+      if (path(c).endsWith('createRecord')) return record();
+      return undefined;
+    };
+    router = bsky(() => ({ throw: true }));
+    const bs = io({ bskyBlob: { ref: 'x' } });
+    await expect(client.publish(payload('bluesky', { credentials: blueskyCreds }), bs)).rejects.toMatchObject(
+      { kind: 'retry' },
+    );
+    router = bsky(() => ({ json: { uri: 'at://x/app.bsky.feed.post/1' } }));
+    calls = [];
+    await expect(client.publish(payload('bluesky', { credentials: blueskyCreds }), bs)).rejects.toMatchObject(
+      { code: 'ambiguous_final' },
+    );
+    expect(calls.some((c) => path(c).endsWith('createRecord'))).toBe(false);
+  });
+
+  it('Facebook: after a lost finish the reel is looked up; published is done, not published is sent again', async () => {
+    const fb = (published: boolean, finish: () => unknown) => (c: Call) => {
+      if (c.url.includes('/v1?fields=published')) return { json: { published } };
+      if (c.url.includes('/v1?fields=status')) return { json: { status: { video_status: 'ready' } } };
+      if (c.url.endsWith('/video_reels')) return finish();
+      return undefined;
+    };
+    const st = io({ fbVideoId: 'v1', fbUploaded: true });
+    router = fb(false, () => ({ status: 500, text: 'oops' }));
+    await expect(client.publish(payload('facebook'), st)).rejects.toMatchObject({ kind: 'retry' });
+    router = fb(true, () => ({ json: { success: true } }));
+    calls = [];
+    expect(await client.publish(payload('facebook'), st)).toMatchObject({ done: true, externalId: 'v1' });
+    expect(calls.some((c) => c.url.endsWith('/video_reels'))).toBe(false);
+
+    const again = io({ fbVideoId: 'v1', fbUploaded: true, finalAttemptAt: '2026-10-29T10:00:00.000Z' });
+    router = fb(false, () => ({ json: { success: true } }));
+    calls = [];
+    expect(await client.publish(payload('facebook'), again)).toMatchObject({ done: true });
+    expect(calls.some((c) => c.url.endsWith('/video_reels'))).toBe(true);
+    // a lookup that fails is "may already be posted"
+    router = () => ({ status: 500, text: 'x' });
+    await expect(
+      client.publish(payload('facebook'), io({ fbVideoId: 'v1', fbUploaded: true, finalAttemptAt: 'x' })),
+    ).rejects.toMatchObject({ code: 'ambiguous_final' });
+  });
+
+  it('Instagram: a container that reads PUBLISHED is never published again; FINISHED after a lost answer is', async () => {
+    const ig = (code: string) => (c: Call) => {
+      if (c.url.includes('/c1?fields=status_code')) return { json: { status_code: code } };
+      if (path(c).endsWith('/ig-1/media_publish')) return { json: { id: 'm-new' } };
+      if (c.url.includes('/ig-1/media?fields=id')) return { json: { data: [{ id: 'm-existing' }] } };
+      if (c.url.includes('?fields=permalink'))
+        return { json: { permalink: 'https://www.instagram.com/reel/z/' } };
+      return undefined;
+    };
+    const base = { igContainer: 'c1', igUploaded: true, finalAttemptAt: '2026-10-29T10:00:00.000Z' };
+    router = ig('PUBLISHED');
+    expect(await client.publish(payload('instagram', { accountId: 'ig-1' }), io({ ...base }))).toMatchObject({
+      done: true,
+      externalId: 'm-existing',
+    });
+    expect(calls.some((c) => c.url.endsWith('/media_publish'))).toBe(false);
+    calls = [];
+    router = ig('FINISHED');
+    expect(await client.publish(payload('instagram', { accountId: 'ig-1' }), io({ ...base }))).toMatchObject({
+      externalId: 'm-new',
+    });
+    expect(calls.some((c) => c.url.endsWith('/media_publish'))).toBe(true);
+    // PUBLISHED and no way to find the media: do not guess
+    router = (c) =>
+      c.url.includes('status_code') ? { json: { status_code: 'PUBLISHED' } } : { status: 500, text: 'x' };
+    await expect(
+      client.publish(payload('instagram', { accountId: 'ig-1' }), io({ ...base })),
+    ).rejects.toMatchObject({
+      code: 'ambiguous_final',
+    });
+  });
+});
+
+describe('addresses the networks hand back', () => {
+  it('LinkedIn: only https on LinkedIn hosts, and a byte range inside the file', async () => {
+    const init =
+      (uploadUrl: string, firstByte = 0, lastByte = 200 * 1024 - 1) =>
+      (c: Call) =>
+        c.url.endsWith('initializeUpload')
+          ? {
+              json: {
+                value: {
+                  video: 'urn:li:video:V1',
+                  uploadToken: 't',
+                  uploadInstructions: [{ uploadUrl, firstByte, lastByte }],
+                },
+              },
+            }
+          : undefined;
+    for (const bad of [
+      'https://evil.example.com/x',
+      'http://www.linkedin.com/x',
+      'not a url',
+      'https://licdn.com.evil.io/x',
+    ]) {
+      router = init(bad);
+      await expect(client.publish(payload('linkedin'), io())).rejects.toMatchObject({ kind: 'final' });
+      expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+    }
+    router = init('https://www.linkedin.com/dms-uploads/x', 0, 10 * 1024 * 1024);
+    await expect(client.publish(payload('linkedin'), io())).rejects.toMatchObject({
+      kind: 'final',
+      message: expect.stringMatching(/range/),
+    });
+  });
+
+  it('Bluesky: the PDS from the DID document must be a Bluesky host; a malformed one is a clear error, not a crash', async () => {
+    const creds = JSON.stringify({ handle: 'gw.bsky.social', appPassword: 'abcd-efgh' });
+    for (const pds of ['https://pds.evil.example.com', 'http://bsky.social', 'garbage']) {
+      router = (c) =>
+        path(c).endsWith('createSession')
+          ? {
+              json: {
+                accessJwt: 'j',
+                did: 'did:plc:me',
+                didDoc: { service: [{ id: '#atproto_pds', serviceEndpoint: pds }] },
+              },
+            }
+          : undefined;
+      calls = [];
+      await expect(client.publish(payload('bluesky', { credentials: creds }), io())).rejects.toMatchObject({
+        kind: 'final',
+      });
+      expect(calls).toHaveLength(1); // only the login
+    }
+  });
+});
+
+describe('small checks', () => {
+  it('TikTok refuses a video whose length is unknown', async () => {
+    router = () => ({
+      json: {
+        data: { privacy_level_options: ['SELF_ONLY'], max_video_post_duration_sec: 600 },
+        error: { code: 'ok' },
+      },
+    });
+    const opts = {
+      privacy: 'SELF_ONLY' as const,
+      allowComment: false,
+      allowDuet: false,
+      allowStitch: false,
+      commercial: { on: false, yourBrand: false, brandedContent: false },
+      consent: true as const,
+    };
+    await expect(
+      client.publish(
+        payload('tiktok', { durationSeconds: 0, tiktok: { options: opts, videoUrl: 'https://aom.test/x' } }),
+        io(),
+      ),
+    ).rejects.toMatchObject({ kind: 'final', message: expect.stringMatching(/unknown/) });
+  });
+
+  it('revokes a TikTok token with the app credentials', async () => {
+    router = () => ({ json: {} });
+    await client.tiktokRevoke('tok', { clientKey: 'k', clientSecret: 's' });
+    expect(calls[0]?.url).toBe('https://open.tiktokapis.com/v2/oauth/revoke/');
+    expect(Object.fromEntries(new URLSearchParams(String(calls[0]?.body)))).toEqual({
+      client_key: 'k',
+      client_secret: 's',
+      token: 'tok',
+    });
   });
 });

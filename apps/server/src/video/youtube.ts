@@ -100,6 +100,8 @@ export interface YouTubeClient {
   findRecentUpload(accessToken: string, title: string, since: Date): Promise<string | null>;
   /** videos.list part=status. Null when the video is gone. */
   videoStatus(accessToken: string, videoId: string): Promise<YouTubeVideoStatus | null>;
+  /** videos.update part=status: make a video public now (its `publishAt` slipped into the past while the upload ran). */
+  makePublic(accessToken: string, videoId: string): Promise<void>;
 }
 
 const API = 'https://www.googleapis.com/youtube/v3';
@@ -394,6 +396,17 @@ export function createYouTubeClient(opts: YouTubeClientOptions = {}): YouTubeCli
         rejectionReason: s.rejectionReason ?? null,
         failureReason: s.failureReason ?? null,
       };
+    },
+
+    async makePublic(token, videoId) {
+      await json(`${API}/videos?part=status`, token, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: videoId,
+          status: { privacyStatus: 'public', selfDeclaredMadeForKids: false, containsSyntheticMedia: false },
+        }),
+      });
     },
   };
 }

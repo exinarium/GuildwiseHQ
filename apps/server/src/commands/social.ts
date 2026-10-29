@@ -22,6 +22,7 @@ import { DestinationError } from '../video/destinations.ts';
 import { YouTubeError } from '../video/youtube.ts';
 import { blogEnabled } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
+import { revokeTiktok } from './tiktok.ts';
 
 /**
  * Auto-share to the Facebook Page, the LinkedIn organization, X and Bluesky on publish.
@@ -208,6 +209,7 @@ export async function disconnectChannel(
   by: AuthSession['user'],
   network: SocialChannelNetwork,
 ): Promise<SocialChannel[]> {
+  if (network === 'tiktok') await revokeTiktok(ctx);
   const n = await exec(ctx.pool, 'DELETE FROM social_channels WHERE network=$1', [network]);
   if (n)
     await ctx.store.append([

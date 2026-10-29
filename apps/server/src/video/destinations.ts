@@ -63,6 +63,8 @@ export interface DestinationIO {
   state: Record<string, unknown>;
   save(): Promise<void>;
   sleep(ms: number): Promise<void>;
+  /** The server clock (epoch ms). */
+  now(): number;
 }
 
 export type DestinationOutcome =
@@ -98,6 +100,8 @@ export interface VideoDestinationClient {
     grant: { code: string; redirectUri: string } | { refreshToken: string },
     app: TikTokAppCreds,
   ): Promise<TikTokTokens>;
+  /** Revokes a TikTok access token (on disconnect); best effort. */
+  tiktokRevoke(accessToken: string, app: TikTokAppCreds): Promise<void>;
   /** Checks an Instagram professional account id with its Page token; returns the username. */
   instagramAccount(accountId: string, accessToken: string): Promise<{ username: string }>;
 }
@@ -153,6 +157,39 @@ function graphError(r: Res, what: string): DestinationError {
   }
   return classify(r, what);
 }
+
+/** An upstream-provided URL is only followed when it is https and on a host the network is known to use. */
+function trustedUrl(raw: string, allowed: (host: string) => boolean, what: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new DestinationError('final', `${what}: the address ${raw.slice(0, 80)} is not a URL`);
+  }
+  if (u.protocol !== 'https:' || !allowed(u.hostname.toLowerCase()))
+    throw new DestinationError('final', `${what}: refusing to use the address on ${u.hostname}`);
+  return u.toString();
+}
+const hostIs = (suffixes: string[]) => (h: string) => suffixes.some((s) => h === s || h.endsWith(`.${s}`));
+
+/**
+ * The last request of a destination (the one that makes the post public) is not repeated blindly. The marker is saved
+ * before it is sent and stays when the answer is lost (a network error or a 5xx): the next attempt must first find out
+ * whether the post exists (`ambiguousFinal`). A refusal (4xx) clears it: nothing was posted.
+ */
+async function finalCall(io: DestinationIO, send: () => Promise<Res>): Promise<Res> {
+  io.state.finalAttemptAt = new Date(io.now()).toISOString();
+  await io.save();
+  const r = await send();
+  if (r.status < 500) delete io.state.finalAttemptAt;
+  return r;
+}
+const mayBePosted = (what: string): DestinationError =>
+  new DestinationError(
+    'final',
+    `${what} did not answer to the last request, so the video may already be posted: check the account, then retry`,
+    'ambiguous_final',
+  );
 
 const chunks = (buf: Buffer, size: number): Buffer[] => {
   const out: Buffer[] = [];
@@ -214,17 +251,29 @@ async function postToFacebook(p: DestinationPayload, io: DestinationIO): Promise
       throw new DestinationError('final', 'Facebook could not process the video');
     await io.sleep(5_000);
   }
-  const r = await http(`${GRAPH}/${encodeURIComponent(p.accountId)}/video_reels`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      video_id: id,
-      upload_phase: 'finish',
-      video_state: 'PUBLISHED',
-      description: p.text,
-      access_token: token,
+  if (s.finalAttemptAt) {
+    // the last request did not finish: is the reel published?
+    const chk = await http(`${GRAPH}/${id}?fields=published&access_token=${encodeURIComponent(token)}`).catch(
+      () => null,
+    );
+    if (!chk || chk.status >= 300) throw mayBePosted('Facebook');
+    if (json<{ published?: boolean }>(chk).published === true)
+      return { done: true, externalId: id, url: `https://www.facebook.com/reel/${id}` };
+    delete s.finalAttemptAt;
+  }
+  const r = await finalCall(io, () =>
+    http(`${GRAPH}/${encodeURIComponent(p.accountId)}/video_reels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        video_id: id,
+        upload_phase: 'finish',
+        video_state: 'PUBLISHED',
+        description: p.text,
+        access_token: token,
+      }),
     }),
-  });
+  );
   if (r.status >= 300) throw graphError(r, 'Facebook reel publish');
   return { done: true, externalId: id, url: `https://www.facebook.com/reel/${id}` };
 }
@@ -298,14 +347,30 @@ async function postToInstagram(p: DestinationPayload, io: DestinationIO): Promis
     }
     if (code !== 'FINISHED' && code !== 'PUBLISHED')
       return { done: false, retryInMs: MIN, note: 'Instagram is still processing the video' };
-    const r = await http(`${GRAPH}/${encodeURIComponent(p.accountId)}/media_publish`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ creation_id: container, access_token: token }),
-    });
-    if (r.status >= 300) throw graphError(r, 'Instagram publish');
-    const mediaId = str(json<{ id?: string }>(r).id);
-    if (!mediaId) throw new DestinationError('final', 'Instagram gave no media id');
+    let mediaId: string | undefined;
+    if (code === 'PUBLISHED') {
+      // the container was published already (a lost answer, a crashed worker): never publish it again, find the media
+      const recent = await http(
+        `${GRAPH}/${encodeURIComponent(p.accountId)}/media?fields=id&limit=1&access_token=${encodeURIComponent(token)}`,
+      ).catch(() => null);
+      mediaId =
+        recent && recent.status < 300
+          ? str(json<{ data?: Array<{ id?: string }> }>(recent).data?.[0]?.id)
+          : undefined;
+      if (!mediaId) throw mayBePosted('Instagram');
+    } else {
+      delete s.finalAttemptAt; // FINISHED: the container is not published, a lost answer did not publish it
+      const r = await finalCall(io, () =>
+        http(`${GRAPH}/${encodeURIComponent(p.accountId)}/media_publish`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ creation_id: container, access_token: token }),
+        }),
+      );
+      if (r.status >= 300) throw graphError(r, 'Instagram publish');
+      mediaId = str(json<{ id?: string }>(r).id);
+      if (!mediaId) throw new DestinationError('final', 'Instagram gave no media id');
+    }
     s.igPublished = mediaId;
     await io.save();
   }
@@ -345,6 +410,12 @@ async function postToX(p: DestinationPayload, io: DestinationIO): Promise<Destin
   const xError = (r: Res, what: string): DestinationError => {
     if (r.status === 402)
       return new DestinationError('auth', `${what}: HTTP 402: the X API credits are used up`);
+    // X refuses a repeated text with a 403 that is about the content, not about the keys
+    if (r.status === 403 && /duplicate/i.test(r.body))
+      return new DestinationError(
+        'final',
+        `${what}: X refused the post as duplicate content (the same text was posted before): ${r.body.slice(0, 120)}`,
+      );
     if (r.status === 401 || r.status === 403)
       return new DestinationError(
         'auth',
@@ -418,11 +489,14 @@ async function postToX(p: DestinationPayload, io: DestinationIO): Promise<Destin
     }
   }
   const tweetUrl = `${X_API}/2/tweets`;
-  const r = await http(tweetUrl, {
-    method: 'POST',
-    headers: { authorization: sign('POST', tweetUrl), 'content-type': 'application/json' },
-    body: JSON.stringify({ text: p.text, media: { media_ids: [mediaId] } }),
-  });
+  if (s.finalAttemptAt) throw mayBePosted('X'); // no way to look the tweet up: never repost blindly
+  const r = await finalCall(io, () =>
+    http(tweetUrl, {
+      method: 'POST',
+      headers: { authorization: sign('POST', tweetUrl), 'content-type': 'application/json' },
+      body: JSON.stringify({ text: p.text, media: { media_ids: [mediaId] } }),
+    }),
+  );
   if (r.status >= 300) throw xError(r, 'X post');
   const id = str(json<{ data?: { id?: string } }>(r).data?.id);
   if (!id) throw new DestinationError('final', 'no post id in the answer');
@@ -470,8 +544,16 @@ async function postToLinkedIn(p: DestinationPayload, io: DestinationIO): Promise
       throw new DestinationError('final', 'LinkedIn gave no upload instructions');
     const etags: string[] = [];
     for (const part of v.uploadInstructions) {
+      if (
+        !Number.isInteger(part.firstByte) ||
+        !Number.isInteger(part.lastByte) ||
+        part.firstByte < 0 ||
+        part.lastByte < part.firstByte ||
+        part.lastByte >= buf.length
+      )
+        throw new DestinationError('final', 'LinkedIn sent an upload range outside the file');
       const r = await http(
-        part.uploadUrl,
+        trustedUrl(part.uploadUrl, hostIs(['licdn.com', 'linkedin.com']), 'LinkedIn upload'),
         {
           method: 'PUT',
           headers: { 'content-type': 'application/octet-stream' },
@@ -513,19 +595,26 @@ async function postToLinkedIn(p: DestinationPayload, io: DestinationIO): Promise
   }
   if (status !== 'AVAILABLE')
     return { done: false, retryInMs: 2 * MIN, note: 'LinkedIn is still processing the video' };
-  const r = await http(`${LI}/posts`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      author: owner,
-      commentary: p.text,
-      visibility: 'PUBLIC',
-      distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
-      content: { media: { title: p.title.slice(0, 200), id: video } },
-      lifecycleState: 'PUBLISHED',
-      isReshareDisabledByAuthor: false,
+  if (s.finalAttemptAt) throw mayBePosted('LinkedIn');
+  const r = await finalCall(io, () =>
+    http(`${LI}/posts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        author: owner,
+        commentary: p.text,
+        visibility: 'PUBLIC',
+        distribution: {
+          feedDistribution: 'MAIN_FEED',
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        content: { media: { title: p.title.slice(0, 200), id: video } },
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
+      }),
     }),
-  });
+  );
   if (r.status >= 300) throw classify(r, 'LinkedIn post');
   const id = r.headers.get('x-restli-id') ?? '';
   if (!id) throw new DestinationError('final', 'no post id in the answer');
@@ -561,11 +650,15 @@ async function postToBluesky(p: DestinationPayload, io: DestinationIO): Promise<
   }>(login);
   if (!session.accessJwt || !session.did) throw new DestinationError('final', 'no session in the answer');
   const pds = session.didDoc?.service?.find((x) => x.id?.endsWith('#atproto_pds'))?.serviceEndpoint;
-  const pdsUrl = pds ?? 'https://bsky.social';
+  const pdsUrl = trustedUrl(
+    pds ?? 'https://bsky.social',
+    hostIs(['bsky.social', 'bsky.network']),
+    'Bluesky server',
+  ).replace(/\/$/, '');
   const pdsHost = new URL(pdsUrl).host;
   const auth = { authorization: `Bearer ${session.accessJwt}` };
   const serviceAuth = async (aud: string, lxm: string): Promise<string> => {
-    const exp = Math.floor(Date.now() / 1000) + 30 * 60;
+    const exp = Math.floor(io.now() / 1000) + 30 * 60;
     const r = await http(
       `${pdsUrl}/xrpc/com.atproto.server.getServiceAuth?aud=${encodeURIComponent(aud)}&lxm=${encodeURIComponent(lxm)}&exp=${exp}`,
       { headers: auth },
@@ -648,21 +741,24 @@ async function postToBluesky(p: DestinationPayload, io: DestinationIO): Promise<
     if (!s.bskyBlob)
       return { done: false, retryInMs: 2 * MIN, note: 'Bluesky is still processing the video' };
   }
-  const r = await http(`${BSKY}/com.atproto.repo.createRecord`, {
-    method: 'POST',
-    headers: { ...auth, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      repo: session.did,
-      collection: 'app.bsky.feed.post',
-      record: {
-        $type: 'app.bsky.feed.post',
-        text: p.text,
-        createdAt: new Date().toISOString(),
-        facets: p.facets,
-        embed: { $type: 'app.bsky.embed.video', video: s.bskyBlob, alt: p.title.slice(0, 300) },
-      },
+  if (s.finalAttemptAt) throw mayBePosted('Bluesky');
+  const r = await finalCall(io, () =>
+    http(`${BSKY}/com.atproto.repo.createRecord`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: session.did,
+        collection: 'app.bsky.feed.post',
+        record: {
+          $type: 'app.bsky.feed.post',
+          text: p.text,
+          createdAt: new Date(io.now()).toISOString(),
+          facets: p.facets,
+          embed: { $type: 'app.bsky.embed.video', video: s.bskyBlob, alt: p.title.slice(0, 300) },
+        },
+      }),
     }),
-  });
+  );
   if (r.status >= 300) throw classify(r, 'Bluesky post');
   const uri = str(json<{ uri?: string }>(r).uri);
   const rkey = uri?.split('/').pop();
@@ -775,6 +871,11 @@ async function postToTikTok(p: DestinationPayload, io: DestinationIO): Promise<D
         `TikTok does not offer "${tt.options.privacy}" for this account now (it offers ${info.privacyLevelOptions.join(', ') || 'nothing'}): schedule the video again`,
         'privacy_level_option_mismatch',
       );
+    if (!(p.durationSeconds > 0))
+      throw new DestinationError(
+        'final',
+        'the length of the video is unknown, so it cannot be checked against what TikTok allows',
+      );
     if (info.maxVideoPostDurationSec !== null && p.durationSeconds > info.maxVideoPostDurationSec)
       throw new DestinationError(
         'final',
@@ -875,6 +976,18 @@ async function tiktokToken(
   };
 }
 
+async function tiktokRevoke(accessToken: string, app: TikTokAppCreds): Promise<void> {
+  await http(`${TT}/v2/oauth/revoke/`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'cache-control': 'no-cache' },
+    body: new URLSearchParams({
+      client_key: app.clientKey,
+      client_secret: app.clientSecret,
+      token: accessToken,
+    }),
+  });
+}
+
 // ---- Instagram account check
 
 async function instagramAccount(accountId: string, accessToken: string): Promise<{ username: string }> {
@@ -909,6 +1022,7 @@ export function createVideoDestinationClient(): VideoDestinationClient {
     },
     tiktokCreatorInfo,
     tiktokToken,
+    tiktokRevoke,
     instagramAccount,
   };
 }

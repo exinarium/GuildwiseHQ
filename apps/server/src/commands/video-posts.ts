@@ -831,7 +831,10 @@ export async function shareStarted(ctx: Ctx, postId: string): Promise<boolean> {
     ctx.pool,
     `SELECT 1 AS x FROM social_shares WHERE post_id=$1 AND source='video'
         AND (external_id IS NOT NULL OR status IN ('posting','sent','locked_private')
-             OR detail->>'sessionUri' IS NOT NULL OR detail->>'videoId' IS NOT NULL)`,
+             OR detail->>'sessionUri' IS NOT NULL OR detail->>'videoId' IS NOT NULL
+             -- a destination with saved progress (an upload session, a container, a media or publish id) has started,
+             -- also while it waits to be tried again
+             OR (jsonb_typeof(detail->'dest') = 'object' AND detail->'dest' <> '{}'::jsonb))`,
     [postId],
   ));
 }
@@ -1352,7 +1355,7 @@ export function retryUpload(ctx: Ctx, by: string, postId: string): Promise<Video
 /**
  * A failed (or skipped) destination is tried again on request: YouTube, Facebook, Instagram, X, LinkedIn, Bluesky or TikTok.
  * When the clean-up already removed the MP4 the same revision is rendered again first and the share waits for it. A
- * destination other than YouTube starts from scratch (its saved progress is dropped) and gets a new 6-hour window.
+ * destination other than YouTube starts from scratch (its saved progress is dropped; TikTok keeps its publish id and asks TikTok about it first) and gets a new 6-hour window.
  * 404 when the post has no such destination, 409 `not_failed` when it is not failed or skipped.
  */
 export async function retryShare(
@@ -1395,6 +1398,11 @@ export async function retryShare(
     ctx.pool,
     `UPDATE social_shares SET status='pending', attempts=0, next_attempt_at=$3, error=NULL, updated_at=$3,
             detail = CASE WHEN $2 = 'youtube' THEN detail
+                          WHEN $2 = 'tiktok' THEN
+                            -- TikTok keeps its publish id: the worker asks about the old publish first and starts a new
+                            -- one only when TikTok reports it failed
+                            (COALESCE(detail,'{}'::jsonb) - 'dest')
+                              || jsonb_build_object('retryAt', $4::text, 'dest', COALESCE(detail->'dest','{}'::jsonb) - 'finalAttemptAt')
                           ELSE (COALESCE(detail,'{}'::jsonb) - 'dest') || jsonb_build_object('retryAt', $4::text) END
       WHERE post_id=$1 AND network=$2 AND source='video' AND status IN ('failed','skipped')`,
     [postId, network, now, now.toISOString()],
