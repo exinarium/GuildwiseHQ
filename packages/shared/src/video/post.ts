@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  defaultSchedule,
+  PatchVideoScheduleSchema,
+  VIDEO_DESTINATIONS,
+  VideoCaptionsSchema,
+  VideoScheduleSchema,
+} from './schedule.ts';
 import { VIDEO_FORMATS, VIDEO_KINDS, VideoMetaSchema, VideoScriptSchema } from './schema.ts';
 
 /**
@@ -20,11 +27,18 @@ export const VIDEO_POST_LIMITS = {
   maxAttempts: 3,
   /** The worker is "not running" when its heartbeat is older than this. */
   heartbeatStaleSeconds: 180,
-  /** The one upload slot a day: 10:00 Africa/Johannesburg (UTC+2, no daylight saving) is 08:00 UTC. */
-  slotHourUtc: 8,
-  /** The hour label shown to the owner. */
-  slotLabel: '10:00 SAST',
   categoryId: '28',
+  /** A rendered video that nobody published is kept at most this long once its post is back in review (a preview). */
+  previewKeepDays: 7,
+  /** A failed destination keeps its MP4 this long for a retry. */
+  failedKeepDays: 3,
+  /** A rejected post's files go after this many days. */
+  rejectedKeepDays: 1,
+  /** The MP4 of a published video goes this long after its slot at the latest. */
+  publishedKeepHours: 6,
+  /** The disk budget of rendered videos (`AOM_VIDEO_MAX_BYTES`, default 5 GB) and the room a new render needs. */
+  defaultMaxBytes: 5 * 1024 ** 3,
+  renderReserveBytes: 300 * 1024 ** 2,
 } as const;
 
 /** The library import of the help videos: `lib:<slug>`. */
@@ -42,10 +56,15 @@ export const VideoSettingsSchema = z.object({
   releaseVideos: z.boolean(),
   tutorials: z.boolean(),
   shorts: z.boolean(),
-  /** Long videos the writer may draft per rolling week. */
+  /** Deprecated: the schedule's number of long days. Used only to derive `schedule` while none was saved. */
   perWeek: z.number().int().min(0).max(14),
-  /** Shorts the writer may draft per rolling week. */
+  /** Deprecated: the schedule's number of Short days. Used only to derive `schedule` while none was saved. */
   shortsPerWeek: z.number().int().min(0).max(14),
+  /**
+   * When each format goes out. Always present in what the server returns (derived from `perWeek` / `shortsPerWeek` until
+   * the owner saves one); once saved the two counts are ignored.
+   */
+  schedule: VideoScheduleSchema,
   privacy: z.enum(VIDEO_PRIVACIES),
   /** YouTube playlist ids per kind (optional). */
   playlists: z.object({
@@ -64,11 +83,13 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   shorts: true,
   perWeek: 3,
   shortsPerWeek: 3,
+  schedule: defaultSchedule(3, 3),
   privacy: 'public',
   playlists: {},
   categoryId: VIDEO_POST_LIMITS.categoryId,
 };
 export const PatchVideoSettingsRequestSchema = VideoSettingsSchema.partial().extend({
+  schedule: PatchVideoScheduleSchema.optional(),
   playlists: VideoSettingsSchema.shape.playlists.optional(),
 });
 export type PatchVideoSettingsRequest = z.infer<typeof PatchVideoSettingsRequestSchema>;
@@ -91,6 +112,10 @@ export const VideoRenderSchema = z.object({
   library: z.boolean(),
   /** The clean-up removed the MP4 (or all files): the kept thumbnail, captions and script can still be opened. */
   purged: z.boolean().default(false),
+  /** The render does not start before this (the slot minus the render lead); null: at once. */
+  notBefore: IsoTime.nullable().default(null),
+  /** An explicit preview render of a script that is still in review. */
+  preview: z.boolean().default(false),
 });
 export type VideoRender = z.infer<typeof VideoRenderSchema>;
 
@@ -116,6 +141,29 @@ export const VideoUploadSchema = z.object({
   warnings: z.array(z.string()),
 });
 export type VideoUpload = z.infer<typeof VideoUploadSchema>;
+
+export const VIDEO_PHASES = [
+  'scripted',
+  'in_review',
+  'scheduled',
+  'rendering',
+  'rendered',
+  'publishing',
+  'published',
+  'partial',
+  'failed',
+  'rejected',
+] as const;
+export type VideoPhase = (typeof VIDEO_PHASES)[number];
+export const VIDEO_PUBLISH_MODES = ['slot', 'now'] as const;
+
+export const VideoShareSchema = z.object({
+  network: z.enum(VIDEO_DESTINATIONS),
+  status: z.enum(VIDEO_UPLOAD_STATUSES),
+  url: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type VideoShare = z.infer<typeof VideoShareSchema>;
 
 export const VideoCrossPostSchema = z.object({
   id: z.uuid(),
@@ -158,6 +206,16 @@ export const VideoPostSchema = z.object({
   reviewSince: IsoTime.nullable(),
   approvedAt: IsoTime.nullable(),
   approvedRenderId: z.uuid().nullable(),
+  /** The slot the post goes out at (UTC), or null while it is not scheduled. */
+  slotAt: IsoTime.nullable().default(null),
+  /** `slot`: at `slotAt`. `now`: published as soon as it is rendered. */
+  publishMode: z.enum(VIDEO_PUBLISH_MODES).nullable().default(null),
+  destinations: z.array(z.enum(VIDEO_DESTINATIONS)).default([]),
+  captions: VideoCaptionsSchema.nullable().default(null),
+  /** Where the post is in its life, derived from status, render and shares. */
+  phase: z.enum(VIDEO_PHASES).default('in_review'),
+  /** The share of every destination other than YouTube (YouTube is `upload`). */
+  shares: z.array(VideoShareSchema).default([]),
   createdAt: IsoTime,
   updatedAt: IsoTime,
   /** The render of the current revision. */
@@ -172,9 +230,20 @@ export const VideoPostSchema = z.object({
 });
 export type VideoPost = z.infer<typeof VideoPostSchema>;
 
+/**
+ * `limit`: drafts the writer may add per rolling week (= the days ticked); `used`: its drafts of the last 7 days that were
+ * not rejected; `backlog`: posts in review plus scheduled and not yet published. The writer stops when `used >= limit`
+ * or `backlog >= backlogLimit`.
+ */
+export const VideoCapacityEntrySchema = z.object({
+  used: z.number().int(),
+  limit: z.number().int(),
+  backlog: z.number().int(),
+  backlogLimit: z.number().int(),
+});
 export const VideoCapacitySchema = z.object({
-  long: z.object({ used: z.number().int(), limit: z.number().int() }),
-  short: z.object({ used: z.number().int(), limit: z.number().int() }),
+  long: VideoCapacityEntrySchema,
+  short: VideoCapacityEntrySchema,
 });
 export type VideoCapacity = z.infer<typeof VideoCapacitySchema>;
 
@@ -190,8 +259,12 @@ export const VideoStatusSchema = z.object({
   active: z.boolean(),
   worker: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }),
   capacity: VideoCapacitySchema,
-  /** The next free upload slot (10:00 SAST). */
-  nextSlot: IsoTime,
+  /** The next free slot per format (null while the schedule has no days). */
+  nextSlot: z.object({ long: IsoTime.nullable(), short: IsoTime.nullable() }),
+  /** Bytes of rendered videos on disk and the budget (`AOM_VIDEO_MAX_BYTES`). */
+  storage: z.object({ usedBytes: z.number(), maxBytes: z.number() }),
+  /** Scheduled posts whose slot is no longer one of the schedule's (the settings changed). */
+  offSchedule: z.number().int().default(0),
   /** Posts waiting for the owner's approval. */
   pending: z.number().int(),
   /** Uploads whose video YouTube kept private. */
@@ -221,6 +294,29 @@ export const EditVideoPostRequestSchema = z.object({
   privacy: z.enum(VIDEO_PRIVACIES).nullable().optional(),
 });
 export type EditVideoPostRequest = z.infer<typeof EditVideoPostRequestSchema>;
+export const ScheduleVideoPostRequestSchema = z.object({
+  /** One of the schedule's slots; absent: the next free one. */
+  slotAt: IsoTime.optional(),
+  /** `now`: publish as soon as rendered (Shorts, and public long videos). */
+  mode: z.enum(VIDEO_PUBLISH_MODES).default('slot'),
+  /** Absent: the schedule's destinations of the format. */
+  destinations: z.array(z.enum(VIDEO_DESTINATIONS)).min(1).optional(),
+  captions: VideoCaptionsSchema.optional(),
+});
+export type ScheduleVideoPostRequest = z.input<typeof ScheduleVideoPostRequestSchema>;
+export const MoveVideoPostRequestSchema = z.object({ slotAt: IsoTime });
+export const SwapVideoPostRequestSchema = z.object({ withId: z.uuid() });
+export const UnscheduleVideoPostRequestSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export const VideoSlotsQuerySchema = z.object({
+  format: z.enum(VIDEO_FORMATS),
+  count: z.coerce.number().int().min(1).max(60).default(14),
+});
+export const VideoSlotListSchema = z.object({
+  timezone: z.string(),
+  slots: z.array(z.object({ at: IsoTime, postId: z.uuid().nullable(), free: z.boolean() })),
+});
+export type VideoSlotList = z.infer<typeof VideoSlotListSchema>;
+
 export const RejectVideoPostRequestSchema = z.object({ reason: z.string().trim().min(1).max(2000) });
 
 export const VideoLibraryEntrySchema = z.object({

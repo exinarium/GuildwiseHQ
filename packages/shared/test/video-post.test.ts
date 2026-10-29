@@ -40,7 +40,6 @@ describe('videoPosts setting', () => {
       categoryId: '28',
     });
     expect(VIDEO_POST_LIMITS.maxRenders).toBe(3);
-    expect(VIDEO_POST_LIMITS.slotHourUtc).toBe(8); // 10:00 SAST
   });
   it('a patch is partial and validates', () => {
     expect(PatchVideoSettingsRequestSchema.parse({ enabled: true })).toEqual({ enabled: true });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { VideoPostMetaSchema } from '../video/post.ts';
+import { VIDEO_DESTINATIONS, VideoCaptionsSchema } from '../video/schedule.ts';
 import { VIDEO_FORMATS, VIDEO_KINDS, VideoScriptSchema } from '../video/schema.ts';
 import { BlogOriginSchema } from './blog.ts';
 import { defineEvent, Id } from './define.ts';
@@ -38,8 +39,34 @@ export const videoEvents = [
       by: BlogOriginSchema,
     }),
   ),
-  /** Always a person. Pins the rendered revision (`renderId`) that is uploaded. */
-  defineEvent('VideoPostApproved', z.object({ postId: Id, renderId: Id, by: Id })),
+  /**
+   * Always a person. Scheduling a post is approving it: `renderId` is absent now (nothing is rendered before the owner
+   * approves the script; the worker uses the render of the post's revision) and present on older events.
+   */
+  defineEvent('VideoPostApproved', z.object({ postId: Id, renderId: Id.optional(), by: Id })),
+  /**
+   * The slot of an approved post (appended right after `VideoPostApproved`, and again for a move, a swap, a slip by the
+   * system or a re-flow). `mode` `now`: published as soon as it is rendered.
+   */
+  defineEvent(
+    'VideoPostScheduled',
+    z.object({
+      postId: Id,
+      slotAt: z.iso.datetime(),
+      mode: z.enum(['slot', 'now']),
+      destinations: z.array(z.enum(VIDEO_DESTINATIONS)).min(1),
+      captions: VideoCaptionsSchema.optional(),
+      reason: z.enum(['approved', 'moved', 'slipped', 'reflow', 'migrated']),
+      by: z.union([Id, z.literal('system')]),
+    }),
+  ),
+  /** Back to review: refused once any destination has the video or is posting. */
+  defineEvent(
+    'VideoPostUnscheduled',
+    z.object({ postId: Id, reason: z.string().max(500).optional(), by: Id }),
+  ),
+  /** The owner asked for a preview render of the current revision (audit only; the render row is operational). */
+  defineEvent('VideoPreviewRequested', z.object({ postId: Id, revision: z.number().int().min(1), by: Id })),
   defineEvent('VideoPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   /** YouTube kept the uploaded video private although another privacy was requested (the audit is missing). */
   defineEvent('VideoUploadLockedPrivate', z.object({ postId: Id, videoId: z.string().max(40) })),

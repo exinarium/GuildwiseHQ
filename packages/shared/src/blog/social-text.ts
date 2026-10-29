@@ -1,3 +1,4 @@
+import { VIDEO_CAPTION_LIMITS, type VideoDestination } from '../video/schedule.ts';
 import { SOCIAL_LIMITS, type SocialNetwork } from './constants.ts';
 
 /**
@@ -113,15 +114,18 @@ export function escapeLittleText(s: string): string {
  * - Facebook: the text, a blank line, then `#a #b`.
  */
 export function composeCaption(
-  network: SocialNetwork,
+  network: SocialNetwork | VideoDestination,
   text: string,
   tags: readonly string[] = [],
   link = '',
+  /** The limits entry to compose against (default: `VIDEO_CAPTION_LIMITS[network]`, the social limits for the four networks). */
+  limits: { total?: number; text?: number; title?: number } = VIDEO_CAPTION_LIMITS[network],
 ): ComposedCaption {
+  if (network === 'youtube') return { text: fitCaption(text, limits.title ?? 100), facets: [] };
   // LinkedIn hashtags are one word without underscores: normalise first, so `foo_bar` and `foobar` are one tag
   const extra = tagsNotInText(text, tags, network === 'linkedin' ? (t) => t.replaceAll('_', '') : undefined);
   if (network === 'x' || network === 'bluesky') {
-    const total = SOCIAL_LIMITS[network].total;
+    const total = limits.total ?? SOCIAL_LIMITS[network].total;
     const body = collapse(text);
     const kept = keepTags(body, extra, total);
     const head = fitCaption(body, total - tagRun(kept));
@@ -147,6 +151,12 @@ export function composeCaption(
     return { text: `${escapeLittleText(body)}${tagLine ? `\n\n${tagLine}` : ''}`, facets: [] };
   }
   const tagLine = extra.map((t) => `#${t}`).join(' ');
+  if ((network === 'instagram' || network === 'tiktok') && limits.total) {
+    // one block of at most `total` characters: the caption is cut so the hashtag line survives
+    const room = limits.total - (tagLine ? graphemeCount(tagLine) + 2 : 0);
+    const cut = graphemeCount(body) > room ? fitCaption(body, Math.max(1, room)) : body;
+    return { text: `${cut}${tagLine ? `\n\n${tagLine}` : ''}`, facets: [] };
+  }
   return { text: `${body}${tagLine ? `\n\n${tagLine}` : ''}`, facets: [] };
 }
 
