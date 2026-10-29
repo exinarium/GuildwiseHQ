@@ -4,10 +4,11 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Migration 2740 and a data migration (`video-schedule-2026-10`). New optional environment variable `AOM_VIDEO_MAX_BYTES`.
+Migration 2740 and a data migration (`video-schedule-2026-10`). New optional environment variables `AOM_VIDEO_MAX_BYTES`, `AOM_VIDEO_ROLE`, `AOM_VIDEO_WORKER_TOKEN`, `AOM_VIDEO_WORKER_PORT` and `AOM_VIDEO_PUSH_URL`.
 
 ### Added
 
+- Video worker roles: `AOM_VIDEO_ROLE=render|publish|all` (default `all`). A server that cannot render runs `publish`; a render worker elsewhere pushes each finished file over HTTPS to `PUT /api/worker/video/renders/:id/files/:name` (bearer `AOM_VIDEO_WORKER_TOKEN`, sha256 and size checked, served by the publish worker on `AOM_VIDEO_WORKER_PORT`, behind the reverse proxy) and a render counts as done only when every file is acknowledged. The video status reports `render` and `publish` heartbeats next to the combined `worker`. A rendered video whose file has not arrived yet is waited for until its slot instead of failing.
 - YouTube videos: a publishing schedule (`docs/BLOG-API.md` "YouTube"). Per format (videos, Shorts) you tick the weekdays, the local time and the time zone (default Africa/Johannesburg, daylight saving handled) and the destinations; a video goes out at the next free slot. The writer's weekly limit is the number of days ticked, and it stops while twice a week's slots wait in review or are scheduled. Slots are managed with new calls: `schedule`, `unschedule`, `move`, `swap`, `preview` and `GET /slots` under `/api/platform/video`.
 - Destinations for Shorts: YouTube, Facebook, Instagram, X, LinkedIn, Bluesky and TikTok can be chosen in the schedule and per video, with a caption each. Only YouTube posts for now; the others are recorded as "not available yet" and are never failed. Instagram and TikTok are not share networks of the blog.
 - Events `VideoPostScheduled`, `VideoPostUnscheduled` and `VideoPreviewRequested`; `VideoPostApproved` no longer needs a render. A missed slot (not rendered 30 minutes before it) slips to the next free slot, and the super admins are mailed about it, about an offline render worker, a render that failed, an empty slot and a full video disk.

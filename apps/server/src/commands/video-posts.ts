@@ -82,7 +82,9 @@ const DAY = 86_400_000;
 // ---- settings
 
 const SETTINGS_KEY = 'video_posts';
-const HEARTBEAT_KEY = 'video_worker_heartbeat';
+/** The two halves of the video worker beat separately (`AOM_VIDEO_ROLE`): `render` and `publish`. */
+export type VideoWorkerRole = 'render' | 'publish';
+const heartbeatKey = (role: VideoWorkerRole) => `video_worker_${role}`;
 
 async function putSetting(ctx: Ctx, by: string | null, key: string, value: unknown): Promise<void> {
   await exec(
@@ -179,11 +181,18 @@ export async function videoActive(ctx: Ctx): Promise<boolean> {
 
 // ---- worker heartbeat
 
-export async function beatHeartbeat(ctx: Ctx, info: Record<string, unknown> = {}): Promise<void> {
-  await putSetting(ctx, null, HEARTBEAT_KEY, { at: ctx.clock.now().toISOString(), ...info });
+export async function beatHeartbeat(
+  ctx: Ctx,
+  role: VideoWorkerRole,
+  info: Record<string, unknown> = {},
+): Promise<void> {
+  await putSetting(ctx, null, heartbeatKey(role), { at: ctx.clock.now().toISOString(), ...info });
 }
-export async function workerHeartbeat(ctx: Ctx): Promise<{ running: boolean; lastSeen: string | null }> {
-  const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [HEARTBEAT_KEY]);
+export async function workerHeartbeat(
+  ctx: Ctx,
+  role: VideoWorkerRole,
+): Promise<{ running: boolean; lastSeen: string | null }> {
+  const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [heartbeatKey(role)]);
   const at = (r?.value as { at?: string } | undefined)?.at ?? null;
   const running =
     !!at && ctx.clock.now().getTime() - Date.parse(at) <= VIDEO_POST_LIMITS.heartbeatStaleSeconds * 1000;
@@ -509,21 +518,23 @@ export async function offScheduleCount(ctx: Ctx): Promise<number> {
 }
 
 export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
-  const [settings, channel, worker, capacity, long, short, pending, locked, used, off] = await Promise.all([
-    videoSettings(ctx),
-    youtubeChannel(ctx),
-    workerHeartbeat(ctx),
-    videoCapacity(ctx),
-    nextFreeSlotOf(ctx, 'long'),
-    nextFreeSlotOf(ctx, 'short'),
-    one(ctx.pool, `SELECT count(*)::int AS n FROM video_posts WHERE status='in_review'`),
-    one(
-      ctx.pool,
-      `SELECT count(*)::int AS n FROM social_shares WHERE source='video' AND status='locked_private'`,
-    ),
-    videoStorageUsed(ctx),
-    offScheduleCount(ctx),
-  ]);
+  const [settings, channel, renderBeat, publishBeat, capacity, long, short, pending, locked, used, off] =
+    await Promise.all([
+      videoSettings(ctx),
+      youtubeChannel(ctx),
+      workerHeartbeat(ctx, 'render'),
+      workerHeartbeat(ctx, 'publish'),
+      videoCapacity(ctx),
+      nextFreeSlotOf(ctx, 'long'),
+      nextFreeSlotOf(ctx, 'short'),
+      one(ctx.pool, `SELECT count(*)::int AS n FROM video_posts WHERE status='in_review'`),
+      one(
+        ctx.pool,
+        `SELECT count(*)::int AS n FROM social_shares WHERE source='video' AND status='locked_private'`,
+      ),
+      videoStorageUsed(ctx),
+      offScheduleCount(ctx),
+    ]);
   return {
     settings,
     channel: {
@@ -532,7 +543,13 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
       accountName: channel?.accountName ?? null,
     },
     active: settings.enabled && channel?.status === 'ok',
-    worker,
+    // `worker` is the combined view older clients read: running only when both halves are
+    worker: {
+      running: renderBeat.running && publishBeat.running,
+      lastSeen: [renderBeat.lastSeen, publishBeat.lastSeen].filter(Boolean).sort().pop() ?? null,
+    },
+    render: renderBeat,
+    publish: publishBeat,
     capacity,
     nextSlot: { long: long?.toISOString() ?? null, short: short?.toISOString() ?? null },
     storage: { usedBytes: used, maxBytes: ctx.config.videoMaxBytes },

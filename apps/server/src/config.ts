@@ -143,6 +143,14 @@ const EnvSchema = z.object({
   AOM_YOUTUBE_CLIENT_ID: z.string().optional(),
   AOM_YOUTUBE_CLIENT_SECRET: z.string().optional(),
   AOM_VIDEO_DIR: z.string().optional(),
+  /** Which half of the video pipeline this worker runs: render, publish, or all (default). */
+  AOM_VIDEO_ROLE: z.enum(['render', 'publish', 'all']).default('all'),
+  /** Shared secret of the artifact push (PUT /api/worker/video/...); unset: the endpoint does not exist. */
+  AOM_VIDEO_WORKER_TOKEN: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(24).optional()),
+  /** The port of the publish worker's small push server (only when AOM_VIDEO_WORKER_TOKEN is set). */
+  AOM_VIDEO_WORKER_PORT: z.coerce.number().int().min(1).max(65535).default(4610),
+  /** Render worker: the base URL of the production server (or its publish worker) to push finished files to. */
+  AOM_VIDEO_PUSH_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   AOM_VIDEO_MAX_BYTES: z.coerce
     .number()
     .int()
@@ -255,6 +263,13 @@ export interface Config {
   videoDir: string;
   /** The disk budget of rendered videos in bytes (AOM_VIDEO_MAX_BYTES, default 5 GB). */
   videoMaxBytes: number;
+  /** AOM_VIDEO_ROLE: `render`, `publish` or `all` (default). */
+  videoRole: 'render' | 'publish' | 'all';
+  /** AOM_VIDEO_WORKER_TOKEN: the bearer token of the artifact push; undefined = the push endpoint is off. */
+  videoWorkerToken: string | undefined;
+  videoWorkerPort: number;
+  /** AOM_VIDEO_PUSH_URL: where a render worker pushes finished artifacts; undefined = write them to AOM_VIDEO_DIR. */
+  videoPushUrl: string | undefined;
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
@@ -338,6 +353,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     youtubeClientSecret: e.AOM_YOUTUBE_CLIENT_SECRET || undefined,
     videoDir: e.AOM_VIDEO_DIR || '/data/video',
     videoMaxBytes: e.AOM_VIDEO_MAX_BYTES,
+    videoRole: e.AOM_VIDEO_ROLE,
+    videoWorkerToken: e.AOM_VIDEO_WORKER_TOKEN,
+    videoWorkerPort: e.AOM_VIDEO_WORKER_PORT,
+    videoPushUrl: e.AOM_VIDEO_PUSH_URL,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
     simulationHost: e.AOM_SIMULATION_HOST,

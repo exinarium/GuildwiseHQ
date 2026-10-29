@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm, rmdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   SCHEDULE_DEFAULTS,
@@ -31,6 +31,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { videoAlertMail, videoLockedMail } from '../mail/blog-mail.ts';
 import { libraryCatalog } from './library.ts';
+import { type PushDeps, pushArtifacts } from './push-client.ts';
 import { watchUrl, YouTubeError } from './youtube.ts';
 
 /**
@@ -48,6 +49,8 @@ const adminScope = { orgId: null, projectId: null, audience: 'admin' } as const;
 const LEASE_MS = 40 * 60_000;
 const STALE_POSTING_MS = 30 * 60_000;
 const DAY = 86_400_000;
+/** A video with no slot (publish now) waits this long for its file to arrive. */
+const WAIT_FOR_FILE_MS = 60 * 60_000;
 
 export interface RenderOutcome {
   artifacts: {
@@ -70,6 +73,10 @@ export type RenderFn = (
 export interface SweepDeps {
   /** Defaults to `renderScript` of video/renders.ts (loaded on first use: it pulls in Playwright and ffmpeg). */
   render?: RenderFn;
+  /** The artifact push (fetch, sleep and backoff); tests inject fakes. */
+  push?: PushDeps;
+  /** Overrides `AOM_VIDEO_ROLE`. */
+  role?: 'render' | 'publish' | 'all';
 }
 
 const defaultRender: RenderFn = async (script, opts) => {
@@ -175,7 +182,7 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolea
   const outDir = join(root, renderDir(r.post_id, r.revision));
   const lines: string[] = [];
   const beat = setInterval(() => {
-    void beatHeartbeat(ctx, { busy: 'render' }).catch(() => {});
+    void beatHeartbeat(ctx, 'render', { busy: 'render' }).catch(() => {});
     void exec(
       ctx.pool,
       `UPDATE video_renders SET lease_until=$2 WHERE id=$1 AND status='rendering' AND attempts=$3`,
@@ -206,6 +213,18 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolea
     }
     const rel = (p: string | null) => (p ? relative(root, p) : null);
     const a = out.artifacts;
+    // a render worker that is not on the machine with the video volume pushes every file to production first; the render
+    // is `rendered` only once all of them are acknowledged, and the local copy goes after that
+    const pushing = !!(ctx.config.videoPushUrl && ctx.config.videoWorkerToken);
+    if (pushing) {
+      const files = Object.values(a).filter((f): f is string => !!f && existsSync(f));
+      await pushArtifacts(
+        { baseUrl: ctx.config.videoPushUrl as string, token: ctx.config.videoWorkerToken as string },
+        r.id,
+        files,
+        deps.push,
+      );
+    }
     await exec(
       ctx.pool,
       `UPDATE video_renders SET status='rendered', lease_until=NULL, error=NULL, duration_s=$2, bytes=$3, artifacts=$4::jsonb, finished_at=$5
@@ -231,6 +250,10 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}): Promise<boolea
         r.attempts,
       ],
     );
+    if (pushing) {
+      await rm(outDir, { recursive: true, force: true });
+      await rmdir(join(root, r.post_id)).catch(() => {}); // the post's folder too, unless another revision is in it
+    }
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 480);
     const final = (r.attempts as number) >= VIDEO_POST_LIMITS.maxAttempts;
@@ -435,15 +458,35 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
     const meta = post.meta as VideoPostMeta;
     const artifacts = (render.artifacts ?? {}) as Record<string, unknown>;
     const privacy = meta.privacy ?? settings.privacy;
-    await beatHeartbeat(ctx, { busy: 'upload' });
+    await beatHeartbeat(ctx, 'publish', { busy: 'upload' });
 
     if (!detail.videoId) {
       const file = artifactPath(ctx, artifacts, 'video');
-      if (!file || !existsSync(file))
+      if (!file || !existsSync(file)) {
+        // the render is done but its file has not reached this machine (a push in flight, a slow sync): wait for it until
+        // the slot is missed, then give up
+        const cutoff = post.slot_at
+          ? new Date(post.slot_at).getTime()
+          : new Date(share.created_at ?? now).getTime() + WAIT_FOR_FILE_MS;
+        if (now.getTime() < cutoff) {
+          await exec(
+            ctx.pool,
+            `UPDATE social_shares SET status='pending', error=$3, next_attempt_at=$4, updated_at=$5 WHERE post_id=$1 AND network=$2`,
+            [
+              share.post_id,
+              share.network,
+              'waiting for the video file',
+              new Date(now.getTime() + 60_000),
+              now,
+            ],
+          );
+          return;
+        }
         throw new YouTubeError(
           'final',
           'the video file was not found (the video volume, or the help videos folder)',
         );
+      }
       // YouTube publishes at the slot itself (publishAt). Fixed before the upload starts, so a resume keeps it. A slot
       // that is too close (or "publish now") uploads public at once.
       if (privacy === 'public' && detail.publishAt === undefined) {
@@ -488,7 +531,7 @@ async function runUpload(ctx: Ctx, share: Row): Promise<void> {
           await saveDetail(ctx, share, detail);
         },
         // a big file takes minutes: keep the heartbeat fresh between chunks
-        onProgress: () => beatHeartbeat(ctx, { busy: 'upload' }),
+        onProgress: () => beatHeartbeat(ctx, 'publish', { busy: 'upload' }),
       });
       let videoId: string;
       try {
@@ -793,7 +836,7 @@ export async function videoWatch(ctx: Ctx): Promise<{ slipped: number; alerts: n
         AND r.status IN ('queued','failed')`,
     [now],
   );
-  const alive = (await workerHeartbeat(ctx)).running;
+  const alive = (await workerHeartbeat(ctx, 'render')).running;
   for (const p of pending) {
     const left = new Date(p.slot_at).getTime() - now.getTime();
     const warn = (p.format === 'short' ? 12 : 24) * HOUR;
@@ -935,23 +978,75 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
 
 // ---- the loop
 
-/** One pass of the worker. Returns what it did (for tests and the log). */
+/**
+ * Render machines that push their files delete them after the push; a crash in between leaves a directory behind.
+ * Remove local render directories older than a day whose render is not being worked on. At most once an hour.
+ */
+let lastLocalSweep = 0;
+export async function cleanupLocalRenders(ctx: Ctx): Promise<number> {
+  const nowMs = ctx.clock.now().getTime();
+  if (nowMs - lastLocalSweep < 3_600_000) return 0;
+  lastLocalSweep = nowMs;
+  const root = ctx.config.videoDir;
+  let removed = 0;
+  const dirs = async (p: string) =>
+    (await readdir(p, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory());
+  for (const post of await dirs(root))
+    for (const rev of await dirs(join(root, post.name))) {
+      const dir = join(root, post.name, rev.name);
+      const age = nowMs - (await stat(dir)).mtimeMs;
+      if (age < DAY || !/^\d+$/.test(rev.name)) continue;
+      const busy = await one(
+        ctx.pool,
+        `SELECT 1 AS x FROM video_renders WHERE post_id::text=$1 AND revision=$2 AND status='rendering'`,
+        [post.name, Number(rev.name)],
+      );
+      if (busy) continue;
+      await rm(dir, { recursive: true, force: true });
+      removed++;
+    }
+  return removed;
+}
+
+/**
+ * One pass of the worker, by role (`AOM_VIDEO_ROLE`): `render` beats `video_worker_render` and renders (plus clearing its
+ * own leftovers when it pushes); `publish` beats `video_worker_publish` and does everything else (render rows, the watch,
+ * destination rows, uploads, re-checks, cleanup); `all` does both. Returns what it did (for tests and the log).
+ */
 export async function videoTick(
   ctx: Ctx,
   deps: SweepDeps = {},
 ): Promise<{ active: boolean; rendered: boolean; uploaded: boolean; cleaned: number }> {
-  await beatHeartbeat(ctx);
+  const role = deps.role ?? ctx.config.videoRole;
+  const doRender = role !== 'publish';
+  const doPublish = role !== 'render';
+  if (doRender) await beatHeartbeat(ctx, 'render');
+  if (doPublish) await beatHeartbeat(ctx, 'publish');
   if (!(await videoActive(ctx))) return { active: false, rendered: false, uploaded: false, cleaned: 0 };
-  await healRenders(ctx);
-  await videoWatch(ctx).catch((err) => ctx.log.error({ err }, 'video watch failed'));
-  await createMissingUploads(ctx);
-  const rendered = await renderNext(ctx, deps);
-  if (rendered) await createMissingUploads(ctx);
-  const uploaded = await uploadNext(ctx);
-  await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
-  const cleaned = await cleanupVideos(ctx).catch((err) => {
-    ctx.log.error({ err }, 'video cleanup failed');
-    return 0;
-  });
+  if (doPublish) {
+    await healRenders(ctx);
+    await videoWatch(ctx).catch((err) => ctx.log.error({ err }, 'video watch failed'));
+    await createMissingUploads(ctx);
+  }
+  let rendered = false;
+  if (doRender) {
+    rendered = await renderNext(ctx, deps);
+    if (rendered && doPublish) await createMissingUploads(ctx);
+  }
+  let uploaded = false;
+  let cleaned = 0;
+  if (doPublish) {
+    uploaded = await uploadNext(ctx);
+    await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
+    cleaned = await cleanupVideos(ctx).catch((err) => {
+      ctx.log.error({ err }, 'video cleanup failed');
+      return 0;
+    });
+  } else if (ctx.config.videoPushUrl) {
+    cleaned = await cleanupLocalRenders(ctx).catch((err) => {
+      ctx.log.error({ err }, 'local render cleanup failed');
+      return 0;
+    });
+  }
   return { active: true, rendered, uploaded, cleaned };
 }

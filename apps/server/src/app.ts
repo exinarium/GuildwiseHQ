@@ -129,6 +129,7 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 
 export interface BuildOptions {
@@ -472,6 +473,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgChartRoutes(ctx));
   await app.register(blogPlatformRoutes(ctx));
   await app.register(videoPlatformRoutes(ctx));
+  await app.register(videoPushRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
   for (const e of ctx.ext.list) {

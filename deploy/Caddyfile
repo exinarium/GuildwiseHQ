@@ -7,9 +7,17 @@
 	# every other service on localhost. (The app sends HSTS itself when AOM_PUBLIC_ORIGIN is https.)
 	@public not host localhost 127.0.0.1 ::1
 	header @public Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	# A render worker on another machine pushes its finished files to the publish worker, which owns the (read-write) video
+	# volume and starts its push server when AOM_VIDEO_WORKER_TOKEN is set (docs/SELF-HOSTING.md "YouTube videos").
+	# Without the video profile this answers 502.
+	handle /api/worker/video/* {
+		reverse_proxy video-worker:{$AOM_VIDEO_WORKER_PORT:4610}
+	}
 	# WebSocket upgrades (/api/ws, /api/runner/ws) pass through reverse_proxy unchanged.
-	reverse_proxy app:4600 {
-		health_uri /api/health
-		health_interval 15s
+	handle {
+		reverse_proxy app:4600 {
+			health_uri /api/health
+			health_interval 15s
+		}
 	}
 }

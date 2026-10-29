@@ -257,7 +257,11 @@ export const VideoStatusSchema = z.object({
   }),
   /** Settings enabled AND a channel with status ok: the condition for everything automatic. */
   active: z.boolean(),
+  /** Both halves of the worker are running (the combined view; see `render` and `publish`). */
   worker: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }),
+  /** The render worker (AOM_VIDEO_ROLE=render) and the publish worker (AOM_VIDEO_ROLE=publish), each with its heartbeat. */
+  render: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
+  publish: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
   capacity: VideoCapacitySchema,
   /** The next free slot per format (null while the schedule has no days). */
   nextSlot: z.object({ long: IsoTime.nullable(), short: IsoTime.nullable() }),
