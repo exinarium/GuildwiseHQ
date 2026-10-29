@@ -50,9 +50,9 @@ const clock = (s: number | null) =>
   s === null ? '' : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 /**
- * Review of one video post: the rendered video with its caption track, the script, the YouTube metadata, the render and
- * upload state. ONE gate: Approve is disabled until the current revision is rendered. A change to the script, title,
- * description or hashtags renders the video again (at most 3 renders); tags and privacy are saved in place.
+ * Review of one video post: the script, the YouTube metadata, the render and upload state. ONE gate: the script.
+ * "Schedule" approves it and gives it the next free slot; nothing renders before (the render starts shortly before the
+ * slot). "Preview render" renders the current script once to watch it (at most 3 renders a post).
  */
 export function VideoReview({
   post,
@@ -136,7 +136,15 @@ export function VideoReview({
     );
   };
   const run = (
-    action: 'approve' | 'reject' | 'retry-render' | 'retry-upload' | 'resolve-locked' | 'crosspost',
+    action:
+      | 'approve'
+      | 'preview'
+      | 'unschedule'
+      | 'reject'
+      | 'retry-render'
+      | 'retry-upload'
+      | 'resolve-locked'
+      | 'crosspost',
     done: string,
   ) =>
     act.mutate(action === 'reject' ? { action, reason: reason.trim() } : { action }, {
@@ -182,11 +190,19 @@ export function VideoReview({
 
       {/* the render */}
       <div data-testid="video-render">
-        {!r && <Callout tone="warning">No render yet.</Callout>}
+        {!r && !post.library && post.status !== 'rejected' && (
+          <Callout tone="info" title="Nothing is rendered yet">
+            {locked
+              ? 'The video renders shortly before its slot.'
+              : 'Review the script and schedule it: the video is rendered shortly before its slot. A preview render lets you watch it first.'}
+          </Callout>
+        )}
         {r && (r.status === 'queued' || r.status === 'rendering') && (
           <Callout tone="info" title={r.status === 'queued' ? 'Waiting to be rendered' : 'Rendering'}>
             {r.status === 'queued'
-              ? 'The video worker picks it up next; a render takes a few minutes. Approve unlocks when it is done.'
+              ? r.notBefore && Date.parse(r.notBefore) > Date.now()
+                ? `The render starts ${formatDateTime(r.notBefore)}, ahead of the slot.`
+                : 'The video worker picks it up next; a render takes a few minutes.'
               : `Attempt ${r.attempts} of 3.`}
             {!workerRunning && <strong> The video worker is not running.</strong>}
           </Callout>
@@ -206,8 +222,7 @@ export function VideoReview({
         )}
         {rendered && r && !post.library && !r.files.includes('video') && (
           <Callout tone="info">
-            The video file was removed by the clean-up (30 days after the upload). The captions and script are
-            kept.
+            The video file was removed by the clean-up (after publishing). The captions and script are kept.
           </Callout>
         )}
         {rendered && r && (post.library || r.files.includes('video')) && (
@@ -244,8 +259,7 @@ export function VideoReview({
         )}
         {!post.library && (
           <p className="mt-1 text-xs text-subtle">
-            Renders used: {post.rendersUsed} of 3. Editing the script, title, description or hashtags renders
-            again.
+            Renders used: {post.rendersUsed} of 3. A preview render or the render before the slot uses one.
           </p>
         )}
       </div>
@@ -276,7 +290,7 @@ export function VideoReview({
           label="Privacy"
           value={privacy}
           onChange={(e) => setPrivacy(e.target.value as VideoPrivacy | '')}
-          hint="Public goes live at the next daily slot, 10:00 SAST."
+          hint="Public goes live at its slot."
         >
           <option value="">Use the setting</option>
           <option value="public">Public (scheduled)</option>
@@ -307,6 +321,37 @@ export function VideoReview({
         </Disclosure>
       )}
 
+      {locked && post.slotAt && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="video-slot">
+          <Badge tone="info">{post.phase}</Badge>
+          <span className="text-sm text-muted">
+            {post.publishMode === 'now'
+              ? 'Published as soon as rendered'
+              : `Slot ${formatDateTime(post.slotAt)}`}
+          </span>
+          {(!u || (u.status === 'pending' && !u.videoId)) && (
+            <Button
+              size="sm"
+              loading={act.isPending}
+              onClick={() => run('unschedule', 'Back in review')}
+              data-testid="video-unschedule"
+            >
+              Unschedule
+            </Button>
+          )}
+        </div>
+      )}
+      {post.shares.length > 0 && (
+        <ul className="text-sm text-muted" data-testid="video-shares">
+          {post.shares.map((s) => (
+            <li key={s.network}>
+              {s.network}: {s.status}
+              {s.error ? ` (${s.error})` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+
       {!locked && (
         <div className="flex flex-wrap gap-2">
           <Button loading={edit.isPending} disabled={!changed} onClick={save} data-testid="video-save">
@@ -316,16 +361,28 @@ export function VideoReview({
             <Button
               variant="primary"
               loading={act.isPending}
-              disabled={!rendered || changed}
-              title={
-                !rendered ? 'Available when the video is rendered' : changed ? 'Save your changes first' : ''
-              }
-              onClick={() => run('approve', 'Approved: it uploads at the next free slot')}
+              disabled={changed}
+              title={changed ? 'Save your changes first' : ''}
+              onClick={() => run('approve', 'Scheduled at the next free slot')}
               data-testid="video-approve"
             >
-              Approve and upload
+              Schedule
             </Button>
           )}
+          {post.status !== 'rejected' &&
+            !post.library &&
+            !rendered &&
+            r?.status !== 'queued' &&
+            r?.status !== 'rendering' && (
+              <Button
+                loading={act.isPending}
+                disabled={changed || post.rendersUsed >= 3}
+                onClick={() => run('preview', 'Preview render queued')}
+                data-testid="video-preview"
+              >
+                Preview render
+              </Button>
+            )}
           {post.status !== 'rejected' && (
             <Button variant="danger" onClick={() => setRejecting((v) => !v)} data-testid="video-reject">
               Reject

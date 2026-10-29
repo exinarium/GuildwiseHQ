@@ -1791,7 +1791,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Videos tab',
-        text: 'Narrated videos of articles, releases and tutorials. Watch the rendered video with captions, edit the script, title, description, tags and privacy, then approve it: it uploads to YouTube at the next 10:00 Johannesburg slot, one a day. Shows when the video worker is not running, imports the existing help videos as tutorials and keeps a list of video topics.',
+        text: 'Narrated videos of articles, releases and tutorials. Watch the rendered video with captions, edit the script, title, description, tags and privacy, then schedule it: it takes the next free slot of your schedule, is rendered shortly before and goes public on YouTube at the slot. Shows when the video worker is not running, imports the existing help videos as tutorials and keeps a list of video topics.',
       },
       {
         name: 'Releases tab',

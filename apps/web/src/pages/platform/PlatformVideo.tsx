@@ -1,4 +1,11 @@
-import type { VideoPost, VideoPostStatus, VideoSettings, VideoStatus } from '@aom/shared';
+import {
+  defaultSchedule,
+  type PatchVideoSettingsRequest,
+  type VideoPost,
+  type VideoPostStatus,
+  type VideoSettings,
+  type VideoStatus,
+} from '@aom/shared';
 import { Video } from 'lucide-react';
 import { useState } from 'react';
 import {
@@ -43,7 +50,7 @@ const TONE = { draft: 'neutral', in_review: 'warning', approved: 'success', reje
 function StatusPanel({ status }: { status: VideoStatus }) {
   const patch = usePatchVideoSettings();
   const s = status.settings;
-  const set = (v: Partial<VideoSettings>) => patch.mutate(v);
+  const set = (v: PatchVideoSettingsRequest) => patch.mutate(v);
   const [playlists, setPlaylists] = useState(s.playlists);
   return (
     <Panel title="YouTube" data-testid="video-status">
@@ -101,7 +108,8 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             {status.capacity.short.used} of {status.capacity.short.limit} Shorts
           </span>
           <span className="text-sm text-muted">
-            Next upload slot: {formatDateTime(status.nextSlot)} (10:00 SAST)
+            Next slot: video {status.nextSlot.long ? formatDateTime(status.nextSlot.long) : 'none'}, Short{' '}
+            {status.nextSlot.short ? formatDateTime(status.nextSlot.short) : 'none'} ({s.schedule.timezone})
           </span>
         </div>
         <div className="flex flex-wrap gap-4 text-sm">
@@ -125,7 +133,7 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             value={s.privacy}
             onChange={(e) => set({ privacy: e.target.value as VideoSettings['privacy'] })}
           >
-            <option value="public">Public at the next slot</option>
+            <option value="public">Public at its slot</option>
             <option value="unlisted">Unlisted</option>
             <option value="private">Private</option>
           </Select>
@@ -134,16 +142,20 @@ function StatusPanel({ status }: { status: VideoStatus }) {
             type="number"
             min={0}
             max={14}
-            value={s.perWeek}
-            onChange={(e) => set({ perWeek: Number(e.target.value) })}
+            value={s.schedule.long.days.length}
+            onChange={(e) =>
+              set({ schedule: { long: { days: defaultSchedule(Number(e.target.value)).long.days } } })
+            }
           />
           <TextInput
             label="Shorts a week (writer)"
             type="number"
             min={0}
             max={14}
-            value={s.shortsPerWeek}
-            onChange={(e) => set({ shortsPerWeek: Number(e.target.value) })}
+            value={s.schedule.short.days.length}
+            onChange={(e) =>
+              set({ schedule: { short: { days: defaultSchedule(3, Number(e.target.value)).short.days } } })
+            }
           />
           <TextInput
             label="Category id"

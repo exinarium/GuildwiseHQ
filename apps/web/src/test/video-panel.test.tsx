@@ -1,4 +1,4 @@
-import type { VideoPost, VideoStatus } from '@aom/shared';
+import { defaultSchedule, type VideoPost, type VideoStatus } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -56,6 +56,12 @@ const video = (over: Partial<VideoPost> = {}): VideoPost => ({
   reviewSince: '2026-10-28T10:00:00.000Z',
   approvedAt: null,
   approvedRenderId: null,
+  slotAt: null,
+  publishMode: null,
+  destinations: [],
+  captions: null,
+  phase: 'in_review',
+  shares: [],
   createdAt: '2026-10-28T10:00:00.000Z',
   updatedAt: '2026-10-28T10:00:00.000Z',
   render: {
@@ -71,6 +77,8 @@ const video = (over: Partial<VideoPost> = {}): VideoPost => ({
     files: ['video', 'captionsVtt', 'thumb'],
     library: false,
     purged: false,
+    notBefore: null,
+    preview: true,
   },
   rendersUsed: 1,
   library: false,
@@ -88,6 +96,7 @@ const status = (over: Partial<VideoStatus> = {}): VideoStatus => ({
     shorts: true,
     perWeek: 3,
     shortsPerWeek: 3,
+    schedule: defaultSchedule(3, 3),
     privacy: 'public',
     playlists: {},
     categoryId: '28',
@@ -95,8 +104,13 @@ const status = (over: Partial<VideoStatus> = {}): VideoStatus => ({
   channel: { connected: true, status: 'ok', accountName: 'Guildwise HQ' },
   active: true,
   worker: { running: true, lastSeen: '2026-10-28T10:00:00.000Z' },
-  capacity: { long: { used: 1, limit: 3 }, short: { used: 0, limit: 3 } },
-  nextSlot: '2026-10-29T08:00:00.000Z',
+  capacity: {
+    long: { used: 1, limit: 3, backlog: 1, backlogLimit: 6 },
+    short: { used: 0, limit: 3, backlog: 0, backlogLimit: 6 },
+  },
+  nextSlot: { long: '2026-10-29T08:00:00.000Z', short: '2026-10-29T14:00:00.000Z' },
+  storage: { usedBytes: 0, maxBytes: 5 * 1024 ** 3 },
+  offSchedule: 0,
   pending: 1,
   lockedPrivate: 0,
   auditFormUrl: 'https://support.google.com/youtube/contact/yt_api_form',
@@ -160,7 +174,7 @@ afterEach(() => {
 });
 
 describe('Videos tab', () => {
-  it('shows the player with a caption track, the script and the metadata, and approves a rendered video', async () => {
+  it('shows the player with a caption track, the script and the metadata, and schedules a video (Schedule needs no render)', async () => {
     wrap(<PlatformVideo />);
     const user = userEvent.setup();
     await user.click(await screen.findByTestId('video-open-my-article-long'));
@@ -181,7 +195,7 @@ describe('Videos tab', () => {
     );
   });
 
-  it('keeps Approve disabled until the revision is rendered and says when the worker is down', async () => {
+  it('Schedule needs no render: with only a queued render it is enabled, and says when the worker is down', async () => {
     posts = [
       video({
         render: { ...(video().render as NonNullable<VideoPost['render']>), status: 'queued', files: [] },
@@ -194,7 +208,7 @@ describe('Videos tab', () => {
       'Video worker not running',
     );
     await user.click(await screen.findByTestId('video-open-my-article-long'));
-    expect((screen.getByTestId('video-approve') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('video-approve') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByTestId('video-player')).toBeNull();
     expect(screen.getByTestId('video-render').textContent).toContain('Waiting to be rendered');
   });
@@ -212,7 +226,7 @@ describe('Videos tab', () => {
     expect(save.textContent).toBe('Save changes');
     await user.type(within(meta).getByLabelText('YouTube title'), '!');
     expect(save.textContent).toBe('Save and render again');
-    // approve waits for the save
+    // scheduling waits for the save
     expect((screen.getByTestId('video-approve') as HTMLButtonElement).disabled).toBe(true);
     await user.click(save);
     await waitFor(() =>

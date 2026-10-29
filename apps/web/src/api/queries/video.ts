@@ -62,6 +62,8 @@ export const useEditVideo = (id: string) =>
 
 export type VideoAction =
   | 'approve'
+  | 'preview'
+  | 'unschedule'
   | 'reject'
   | 'retry-render'
   | 'retry-upload'
