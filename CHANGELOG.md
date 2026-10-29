@@ -2,9 +2,9 @@
 
 All notable changes to Guildwise HQ are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses semantic versioning.
 
-## [Unreleased]
+## [1.3.0] - 2026-10-29
 
-Migrations 2740 to 2742 and a data migration (`video-schedule-2026-10`). New optional environment variables `AOM_VIDEO_MAX_BYTES`, `AOM_VIDEO_ROLE`, `AOM_VIDEO_WORKER_TOKEN`, `AOM_VIDEO_WORKER_PORT`, `AOM_VIDEO_PUSH_URL` (now requires `AOM_VIDEO_WORKER_TOKEN`), `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET`.
+Runner 0.1.62 (unchanged). The video schedule, Short destinations and worker roles. Migrations 2740 to 2742 and a data migration (`video-schedule-2026-10`). New optional environment variables `AOM_VIDEO_MAX_BYTES`, `AOM_VIDEO_ROLE`, `AOM_VIDEO_WORKER_TOKEN`, `AOM_VIDEO_WORKER_PORT`, `AOM_VIDEO_PUSH_URL` (now requires `AOM_VIDEO_WORKER_TOKEN`), `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET`.
 
 ### Added
 
@@ -24,6 +24,8 @@ Migrations 2740 to 2742 and a data migration (`video-schedule-2026-10`). New opt
 - YouTube videos: the script is the review gate. Submitting or editing a script no longer renders anything; Schedule (the old Approve) gives the video its slot and the render starts `renderLeadHours` before it (48 hours for videos, 24 for Shorts), or at once for "publish now". A "Preview render" (one of the 3 renders) shows the video before you schedule it. YouTube publishes at the slot itself (`publishAt`); the limit of one upload a day is gone (one upload runs at a time).
 - Storage of rendered videos: the MP4 is removed after publishing (every destination sent or skipped and the video public, or 6 hours after the slot), 3 days after a failed destination, 1 day after a rejection, 7 days after a preview in review nobody touched. A retry of a failed upload renders again. `AOM_VIDEO_MAX_BYTES` (default 5 GB) stops new renders when the disk budget is used.
 - Settings `perWeek` and `shortsPerWeek` are replaced by `schedule`; until one is saved it is derived from them (3 and 3 give Monday, Wednesday and Friday at 10:00 for videos, Tuesday, Thursday and Saturday at 16:00 for Shorts).
+- A Preview render runs while no YouTube channel is connected yet (it uploads nothing); scheduled renders still wait for the channel.
+- The test suite no longer flakes under load: the media proxy's body watchdog takes an injectable clock (default `Date.now`, no behaviour change).
 - Existing videos are brought over by the data migration: approved videos keep the slot they have on YouTube, ones still waiting get the next free slot, finished renders of videos in review become previews, and unfinished renders are dropped (they render when you schedule the video).
 
 ## [1.2.1] - 2026-10-29
