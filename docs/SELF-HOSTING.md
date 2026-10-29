@@ -329,6 +329,7 @@ Guildwise HQ can turn articles, releases and tutorials into narrated, faceless v
 `AOM_SECRET_KEY` as the app, plus Chromium, ffmpeg and the offline voice (Kokoro, about 0.5 GB), and shares a `video` volume
 with the app (read-only there) for the rendered files. Give it 2 CPUs and 3 GB. It renders one video at a time, so a render
 (a few minutes) never starves the app.
+A video renders shortly before its slot, not when its script is written, and the MP4 is removed after publishing; `AOM_VIDEO_MAX_BYTES` (default 5 GB, on the app and the worker) is the disk budget: no render starts while the rendered videos plus 300 MB would pass it.
 
 The help videos (the clips are cut from them) are not in the build context: `.dockerignore` leaves out `media/videos/*.mp4` and
 `*.webm` (about 180 MB) so every app build stays small. The app image only needs their metadata (the `.json` and `.vtt` files, from

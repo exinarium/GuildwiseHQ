@@ -336,7 +336,7 @@ new release.
 ## YouTube
 
 Faceless videos of articles, releases and tutorials, narrated by an offline voice and uploaded to the connected YouTube channel
-after the super admin approved the **rendered** video. Everything is super admin only (404 for everyone else), in Platform > Blog >
+after the super admin approved the **script** and gave it a slot. Everything is super admin only (404 for everyone else), in Platform > Blog >
 Videos. There is no agent-key endpoint: on a hosted installation the hosting business's writer calls the functions below inside
 the server. The renderer is described in `docs/VIDEO-RENDERER.md`; the worker in `docs/SELF-HOSTING.md` (profile `video`).
 
@@ -353,10 +353,38 @@ a `youtube` share, and `POST /api/v1/posts/{slug}/share` does not accept it. A r
 to `needs_reconnect`, pauses uploads and mails the super admins once.
 
 **Settings** (`GET/PATCH /api/platform/video/settings`, the `videoPosts` platform setting): `enabled`, `articleVideos`,
-`releaseVideos`, `tutorials`, `shorts`, `perWeek` (long videos the writer may draft per rolling 7 days, 3; rejected drafts do not count), `shortsPerWeek` (3),
-`privacy` (`public` | `unlisted` | `private`, default `public`), `playlists` `{ article?, release?, tutorial? }` (YouTube playlist
-ids), `categoryId` (`28`). A person's own submit ignores the per-kind switches and the weekly caps; the writer's does not
-(`409 kind_off`, `409 weekly_cap`).
+`releaseVideos`, `tutorials`, `shorts`, `schedule`, `privacy` (`public` | `unlisted` | `private`, default `public`), `playlists`
+`{ article?, release?, tutorial? }` (YouTube playlist ids), `categoryId` (`28`). A person's own submit ignores the per-kind
+switches and the caps; the writer's does not (`409 kind_off`, `409 weekly_cap`, `409 backlog_full`).
+
+**The schedule** (`schedule`, always present in what the API returns): `timezone` (IANA, default `Africa/Johannesburg`, validated)
+and, per format `long` and `short`, `days` (`mon`..`sun`, each once, none allowed), `time` (`HH:MM` local), `destinations`
+(`youtube`, `facebook`, `instagram`, `x`, `linkedin`, `bluesky`, `tiktok`; a long video goes to `youtube` only) and
+`renderLeadHours` (1 to 168; 48 for long videos, 24 for Shorts). A PATCH takes any part of it and the whole is validated
+(`400`). While none was saved it is derived from the old `perWeek` / `shortsPerWeek`: the first N days of Mon, Wed, Fri, Tue,
+Thu, Sat, Sun at 10:00 for videos, of Tue, Thu, Sat, Mon, Wed, Fri, Sun at 16:00 for Shorts (3 and 3 give Mon/Wed/Fri 10:00 and
+Tue/Thu/Sat 16:00); once saved the two counts are ignored. Slots are UTC instants; the wall clock only decides which instants
+they are (daylight saving correct: a time that does not exist moves forward, one that happens twice takes the first). Changing
+the schedule keeps the slots posts already hold; `status.offSchedule` counts the scheduled posts whose slot is no longer one
+of the schedule's.
+
+**The writer's room.** The weekly limit of a format is the number of days ticked (`capacity.<format>.limit`; `used` = the
+writer's posts of the last 7 days that were not rejected). A backlog guard stops the writer too: posts in review plus
+scheduled-not-yet-published ones (recorded help videos excluded) at or over twice the weekly slots (`backlog`,
+`backlogLimit`, `409 backlog_full`). With no days ticked the writer drafts nothing.
+
+**Data.** Event-sourced `VideoPostSubmitted`, `VideoPostRevised`, `VideoPostApproved` (`renderId` is optional), `VideoPostScheduled`
+(`slotAt`, `mode` `slot|now`, `destinations`, `captions?`, `reason` `approved|moved|slipped|reflow|migrated`, `by` a person or
+`system`), `VideoPostUnscheduled`, `VideoPreviewRequested`, `VideoPostRejected` (stream `video-<id>`),
+projection `video_posts` (one per `kind` `article|release|tutorial`, `ref` and `format` `long|short`; `ref` is the article slug,
+the release version, a Video topic id or `lib:<help video slug>`; a Short has `parentId`; an approved post has `slot_at`,
+`publish_mode`, `destinations`, `captions`). The slot of a format is unique among approved posts, checked by the command under a
+lock (`409 slot_taken`). `video_renders` is operational (queue, `not_before`, `preview`,
+lease, attempts, artifacts; survives a projection rebuild). The upload is a `social_shares` row (`network youtube`, `source video`,
+`detail` jsonb) so a second upload is impossible; its statuses add `locked_private`. Every other destination of a Short gets a
+`social_shares` row too (`source video`), kept `skipped` with the reason "not available yet" until its adapter ships: it is never
+failed. Instagram and TikTok are destinations only; they are not in `SOCIAL_NETWORKS`. The derived `phase` of a post
+(`scripted`, `in_review`, `scheduled`, `rendering`, `rendered`, `publishing`, `published`, `partial`, `failed`, `rejected`) is in the API.
 
 **Data.** Event-sourced `VideoPostSubmitted`, `VideoPostRevised`, `VideoPostApproved`, `VideoPostRejected` (stream `video-<id>`),
 projection `video_posts` (one per `kind` `article|release|tutorial`, `ref` and `format` `long|short`; `ref` is the article slug,
@@ -364,15 +392,36 @@ the release version, a Video topic id or `lib:<help video slug>`; a Short has `p
 lease, attempts, artifacts; survives a projection rebuild). The upload is a `social_shares` row (`network youtube`, `source video`,
 `detail` jsonb) so a second upload is impossible; its statuses add `locked_private`.
 
-**The one gate.** A submitted post queues render 1. The worker renders it (one at a time, a lease, 3 attempts, output at most
-10 minutes for a video and 3 for a Short). The super admin watches the video, reads script and metadata and edits what is wrong:
-a change to the script, title, description or hashtags renders a new revision (at most 3 renders a post, `409 render_limit`),
-tags and privacy change in place, an approved video is final. **Approve** pins the current revision's render and is refused until
-that revision is rendered (`409 not_rendered`) or when no channel exists (`409 no_channel`). The Short of a video is approved
-separately.
+**The one gate: the script.** Nothing is rendered when a script is submitted or edited. The super admin reads the script and
+the metadata, edits what is wrong (a change to the script, title, description or hashtags is a new revision; tags and privacy
+change in place) and **schedules** it: `POST /posts/{id}/schedule` is approve + slot in one atomic append (`VideoPostApproved` and
+`VideoPostScheduled`); `/approve` is the same call without options. No `slotAt` gives the next free slot of the format (at least 3
+hours ahead for a video, 1 hour for a Short, 30 minutes when the current revision already has a rendered preview); a Short that
+belongs to a long video (`parentId`) gets the first free Short slot at or after the long video's slot. A `slotAt` must be one of
+the schedule's slots and free (`409 not_a_slot`, `409 slot_taken`, `409 slot_too_soon`). `mode: "now"` publishes as soon as
+rendered (Shorts, and long videos whose privacy is public; `400 mode_not_allowed`). `destinations` (default: the schedule's) and
+per-destination `captions` `{ <destination>: { text, tags } }` are stored with the slot. `409 no_channel` when YouTube is a
+destination and no channel exists; `409 no_slots` when the schedule has no days for the format. `POST /posts/{id}/unschedule`
+takes a post back to review, `POST /posts/{id}/move` `{ slotAt }` to another free slot and `POST /posts/{id}/swap` `{ withId }`
+trades the slots of two posts of one format; all three are refused with `409 already_started` once a destination has the video
+or is posting it. Settings changes never move a scheduled post silently.
 
-**The upload** (worker). At most one video a day. A `public` video is uploaded as `private` with `publishAt` = the next free
-10:00 SAST (08:00 UTC) slot; `unlisted` and `private` are set at once. Fields: `categoryId` `28`, `defaultLanguage` and
+**Render timing.** Scheduling queues the render of the post's revision with `not_before` = slot minus `renderLeadHours` (at once
+for "now"). The worker claims a render only when its post is approved and `not_before` has passed, or when it is an explicit
+preview; one at a time, a lease of 40 minutes, 3 attempts, output at most 10 minutes for a video and 3 for a Short. A failed or
+purged render of the same revision is queued again at scheduling without counting as a new render. **Preview render**
+(`POST /posts/{id}/preview`, a script in review): renders the current revision at once; it counts toward the 3 renders a post may
+use (`409 render_limit`) and is reused as the final render when the script is unchanged at scheduling. A post in review that has
+no preview takes no disk at all. If a scheduled post is still not rendered 30 minutes before its slot it slips to the next free
+slot of its format (`VideoPostScheduled` reason `slipped`, by `system`; other posts stay; a post that started never moves) and
+the super admins are mailed. They are also mailed once when the render worker is offline and a render has not started 24 hours
+(Shorts: 12) before the slot, when a render failed for good 6 hours before, and 24 hours before a slot nobody holds while
+scripts wait in review. These checks are database work only and also run in the app, so a dead render worker is reported.
+
+**The upload** (worker). As soon as a post is rendered. One upload runs at a time, and none while a video YouTube kept private
+waits for the owner (there is no limit of one a day: the schedule decides when a video is public). A `public` video is uploaded as
+`private` with `publishAt` = its slot; when the slot is less than two minutes away, or the mode is `now`, it is uploaded public
+at once. `unlisted` and `private` are set at once. Fields: `categoryId` `28`, `defaultLanguage` and
 `defaultAudioLanguage` `en`, `selfDeclaredMadeForKids` false, `containsSyntheticMedia` false (the description says "Narrated
 with a synthetic voice."). Steps: resumable `videos.insert` (resumed after a 5xx or a dropped connection; the session is kept
 in `detail`, so a crash never uploads twice), `thumbnails.set` (long videos; skipped with a warning when the channel is not
@@ -387,8 +436,14 @@ thumbnail becomes a warning) or a failed upload, never a reconnect. An upload se
 restarted: the channel's newest uploads are searched for the title first, so a video that did finish is adopted, not duplicated.
 A video uploaded as `public` is scheduled (private with `publishAt`); once the slot has passed the worker looks at it (every
 30 minutes at most): public is confirmed and the article or release page may embed it, still private makes it `locked_private`
-(mail, uploads pause). The daily cap and the slots count every share that reserved a slot or put a video on YouTube, even if a later step failed.
-The worker's heartbeat is renewed after every uploaded chunk.
+(mail, uploads pause). The worker's heartbeat is renewed after every uploaded chunk.
+
+**Storage.** Thumbnails, captions, scripts, descriptions and render logs are kept for good; the MP4 is removed when it is no
+longer needed: once every destination is `sent` or `skipped` (at least one `sent`) and YouTube confirmed the video public or the
+slot is 6 hours past; 3 days after a destination failed (a retry then renders the same revision again, `retry-upload`); one day
+after a post was rejected or a revision was superseded; 7 days after the last activity for a preview of a script in review. A
+library video's file is the recorded help video and is never touched. `AOM_VIDEO_MAX_BYTES` (default 5 GB) is a hard budget:
+no render starts while the rendered videos on disk plus 300 MB would pass it, and the owner is mailed once a day.
 
 **Library.** `POST /api/platform/video/library/import` makes a `tutorial` / `lib:<slug>` draft of each recorded help video that
 is not imported: nothing is rendered, the metadata is a plain default to edit, chapters come from the video's JSON. The app
@@ -413,11 +468,15 @@ Routes (all `/api/platform/video`, session cookie, platform accounts only):
 
 | Call | Does |
 |---|---|
-| `GET /` `?status=` | posts with their render and upload, plus the status (worker heartbeat, channel, caps, next slot, locked count) |
+| `GET /` `?status=` | posts with their render, upload, slot and phase, plus the status (worker heartbeat, channel, capacity with backlog, next slot per format, storage, locked count) |
 | `GET /status`, `GET/PATCH /settings` | the status; the `videoPosts` setting |
 | `POST /posts` `{ kind, format, ref, script, parentId? }` | add a script by hand (`201`; `200` and the existing post when there is one) |
 | `GET /posts/{id}`, `PATCH /posts/{id}` | one post; edit `{ script?, meta?, privacy? }` |
-| `POST /posts/{id}/approve`, `/reject` `{ reason }` | the go-ahead; `409` once approved |
+| `POST /posts/{id}/schedule` `{ slotAt?, mode?, destinations?, captions? }`, `/approve` | schedule = approve + slot; nothing renders before |
+| `POST /posts/{id}/unschedule` `{ reason? }`, `/move` `{ slotAt }`, `/swap` `{ withId }` | back to review; another free slot; trade slots (`409 already_started` once a destination has the video) |
+| `POST /posts/{id}/preview` | a preview render of the script in review (uses one of the 3 renders) |
+| `GET /slots` `?format=&count=` | the next slots of a format and who holds each |
+| `POST /posts/{id}/reject` `{ reason }` | turn it down; `409` once approved |
 | `POST /posts/{id}/retry-render`, `/retry-upload`, `/resolve-locked`, `/crosspost` | try a failed render or upload again; continue after a locked upload; start the cross-post |
 | `GET /posts/{id}/files/{name}` `?revision=` | `video.mp4`, `short.mp4`, `captions.vtt`, `captions.srt`, `thumb.png`, `script.json`, `render.log`, `description.txt`; Range, `Cache-Control: no-store` |
 | `GET /library`, `POST /library/import` `{ slugs? }` | the help videos; import them |
@@ -429,7 +488,7 @@ Routes (all `/api/platform/video`, session cookie, platform accounts only):
 - `submitVideoPost(ctx, { kind, format, ref, script, parentId? }, origin, status)` in `commands/video-posts.ts` returns
   `{ post, created }`. Idempotent per `(kind, ref, format)`; `origin` `{ system: 'blog-writer' }`, `status` `'in_review'`. It validates
   the script (`VideoScriptSchema` and `videoScriptIssues`), needs `videoPosts.enabled` (`503 video_disabled`), applies the kind
-  switches and weekly caps to a system origin, queues render 1, and for a `tutorial` whose `ref` is a Video topic id marks the topic drafted.
+  switches, the weekly cap and the backlog guard to a system origin, renders nothing, and for a `tutorial` whose `ref` is a Video topic id marks the topic drafted.
 - `articlesNeedingVideo(ctx, maxAgeDays = 7)`: published, non-launch articles published after the channel was connected, without a
   long video; returns `{ slug, title, summary, tags, publishedAt, content }[]`. `releasesNeedingVideo(ctx, maxAgeDays = 7)`
   returns `Release[]` (use `whatsNewFor`/`loadReleases` for the content and `SECTION_VIDEOS` help anchors for clips). Both return `[]`
@@ -437,7 +496,12 @@ Routes (all `/api/platform/video`, session cookie, platform accounts only):
 - `claimVideoTopic(ctx)` returns the oldest queued `VideoTopic` (now `writing`) or `null` (also when videos are not active or
   tutorials are off); `releaseVideoTopic(ctx, topicId, reason?)` when the run failed (back to the queue; rejected after two takes);
   `queueVideoTopic(ctx, { title, brief? }, 'writer')` to propose a topic.
-- `videoSettings(ctx)`, `videoActive(ctx)`, `videoCapacity(ctx)`, `videoStatus(ctx)`.
+- `videoSettings(ctx)`, `videoActive(ctx)`, `videoStatus(ctx)` and `videoCapacity(ctx)`, which returns
+  `{ long, short }` of `{ used, limit, backlog, backlogLimit }`: draft a format only while `used < limit` and
+  `backlog < backlogLimit` (`submitVideoPost` enforces both for a system origin). `nextFreeSlotOf(ctx, format)` is the next free slot
+  and `scheduleVideoPost` / `unscheduleVideoPost` / `moveVideoPost` / `swapVideoPosts` / `previewVideoPost` are the commands behind the routes.
+  The pure slot arithmetic is in `@aom/shared`: `zonedWallToUtc`, `slotsFrom`, `nextFreeSlot`, `isScheduleSlot`, `defaultSchedule`,
+  `resolveSchedule`, `weeklyLimit`, `backlogLimit`, `VIDEO_CAPTION_LIMITS`, `composeCaption(destination, text, tags, link)`.
 - `clipCatalogForPrompt(loadClipCatalog())` in `video/clips.ts`: the clips a script may use (`{ slug, chapter, title, t0, t1 }[]`; a
   server without `media/videos` has an empty catalog and skips the clip-slug check, the worker checks again).
 - `VideoScriptSchema`, `parseVideoScript`, `NARRATION_STYLE`, `VIDEO_LIMITS` from `@aom/shared`. The web app has a `VideoDrafter`
