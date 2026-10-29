@@ -30,7 +30,9 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
   // Data migrations run after the SQL migrations and before the dispatcher, scheduler and listener start
   // (docs/design/organizations.md section 2.3). Idempotent; `AOM_DATA_MIGRATIONS=false` skips them.
   if (config.dataMigrations) {
-    const pool = createPool(config.databaseUrl, 2);
+    // runDataMigrations holds one connection for its advisory lock for the whole run, and a migration may hold another
+    // for a lock of its own (restructure) while it still needs a third for its work: 2 connections deadlocked the boot.
+    const pool = createPool(config.databaseUrl, 5);
     try {
       const clock = createClock();
       await runDataMigrations({
