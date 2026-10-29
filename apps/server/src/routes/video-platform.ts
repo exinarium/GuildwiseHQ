@@ -146,7 +146,7 @@ export function videoPlatformRoutes(ctx: Ctx) {
     );
     app.post(
       '/api/platform/video/posts/:id/unschedule',
-      { schema: { params: IdParamsSchema, body: UnscheduleVideoPostRequestSchema.optional() } },
+      { schema: { params: IdParamsSchema, body: UnscheduleVideoPostRequestSchema.nullish() } },
       async (req) => {
         const s = await requireSuperAdmin(ctx, req);
         return unscheduleVideoPost(ctx, s.user, req.params.id, req.body?.reason);
