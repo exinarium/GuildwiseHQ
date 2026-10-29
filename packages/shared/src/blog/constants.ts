@@ -43,9 +43,10 @@ export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
 /**
  * Networks that have a channel row (`social_channels`). YouTube is deliberately NOT in `SOCIAL_NETWORKS`: that list is
- * what the blog and release sweep shares to, and nothing but the video worker uploads to YouTube.
+ * what the blog and release sweep shares to, and nothing but the video worker uploads to YouTube. Instagram and TikTok are
+ * video-only destinations (Reels, Shorts) and are likewise not in `SOCIAL_NETWORKS`.
  */
-export const SOCIAL_CHANNEL_NETWORKS = [...SOCIAL_NETWORKS, 'youtube'] as const;
+export const SOCIAL_CHANNEL_NETWORKS = [...SOCIAL_NETWORKS, 'youtube', 'instagram', 'tiktok'] as const;
 export type SocialChannelNetwork = (typeof SOCIAL_CHANNEL_NETWORKS)[number];
 
 /**

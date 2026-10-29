@@ -25,6 +25,8 @@ export const videoEvents = [
       meta: VideoPostMetaSchema,
       origin: BlogOriginSchema,
       status: z.enum(['draft', 'in_review']),
+      /** Default captions per destination from the drafter (optional; the owner edits them when scheduling). */
+      captions: VideoCaptionsSchema.optional(),
     }),
   ),
   /** An edit. `rerender`: the render changes (new revision, new render); else only metadata changed. */

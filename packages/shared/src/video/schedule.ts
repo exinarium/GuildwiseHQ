@@ -274,6 +274,21 @@ export const VideoCaptionsSchema = z.partialRecord(
 );
 export type VideoCaptions = z.infer<typeof VideoCaptionsSchema>;
 
+/**
+ * The caption a destination starts from when nobody wrote one: the title (X and Bluesky) or the title and description, and
+ * the hashtags (no `#`, at most the destination's maximum). Never a link.
+ */
+export function defaultVideoCaption(
+  dest: VideoDestination,
+  meta: { title: string; description: string; hashtags: readonly string[] },
+): { text: string; tags: string[] } {
+  const tags = meta.hashtags.map((h) => h.replace(/^#/, '')).filter(Boolean);
+  const max = VIDEO_CAPTION_LIMITS[dest].tags[1];
+  const text =
+    dest === 'x' || dest === 'bluesky' ? meta.title : `${meta.title}\n\n${meta.description}`.trim();
+  return { text, tags: tags.slice(0, max) };
+}
+
 // ---- per-destination options (TikTok's Direct Post UX rules)
 
 /** TikTok privacy levels as `creator_info` returns them. There is deliberately no default: the owner picks one per post. */

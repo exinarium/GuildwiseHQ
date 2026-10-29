@@ -14,7 +14,14 @@ describe('YouTube is a channel, not a share network', () => {
   it('SOCIAL_NETWORKS (what the blog and release sweep shares to) never lists youtube', () => {
     expect(SOCIAL_NETWORKS as readonly string[]).not.toContain('youtube');
     expect(SOCIAL_CHANNEL_NETWORKS).toContain('youtube');
-    expect(SOCIAL_CHANNEL_NETWORKS.filter((n) => n !== 'youtube')).toEqual([...SOCIAL_NETWORKS]);
+    // the video-only channels (YouTube, Instagram, TikTok) are not share networks of the blog
+    for (const n of ['youtube', 'instagram', 'tiktok']) {
+      expect(SOCIAL_CHANNEL_NETWORKS).toContain(n);
+      expect(SOCIAL_NETWORKS as readonly string[]).not.toContain(n);
+    }
+    expect(SOCIAL_CHANNEL_NETWORKS.filter((n) => !['youtube', 'instagram', 'tiktok'].includes(n))).toEqual([
+      ...SOCIAL_NETWORKS,
+    ]);
   });
 
   it('a pasted refresh token is a YouTube connect; a LinkedIn token with a refresh token is not', () => {

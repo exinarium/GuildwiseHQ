@@ -74,6 +74,11 @@ export const VideoSettingsSchema = z.object({
     tutorial: z.string().trim().max(100).optional(),
   }),
   categoryId: z.string().regex(/^\d{1,3}$/),
+  /**
+   * TikTok's Content Posting API audit has passed: public posts are allowed. False (the default) until the owner says so:
+   * an unaudited app can only post privately (`SELF_ONLY`).
+   */
+  tiktokAudited: z.boolean(),
 });
 export type VideoSettings = z.infer<typeof VideoSettingsSchema>;
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
@@ -88,6 +93,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   privacy: 'public',
   playlists: {},
   categoryId: VIDEO_POST_LIMITS.categoryId,
+  tiktokAudited: false,
 };
 export const PatchVideoSettingsRequestSchema = VideoSettingsSchema.partial().extend({
   schedule: PatchVideoScheduleSchema.optional(),
@@ -291,6 +297,8 @@ export const SubmitVideoPostRequestSchema = z.object({
   script: VideoScriptSchema,
   /** For a Short: the long video it belongs to. */
   parentId: z.uuid().optional(),
+  /** Default captions per destination (the Schedule step starts from them; the owner edits them there). */
+  captions: VideoCaptionsSchema.optional(),
 });
 export type SubmitVideoPostRequest = z.infer<typeof SubmitVideoPostRequestSchema>;
 
