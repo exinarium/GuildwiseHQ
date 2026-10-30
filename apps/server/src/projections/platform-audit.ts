@@ -440,6 +440,16 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { topicId: p.topicId, runId: p.runId },
     };
   }),
+  OrgModeSet: always(async (tx, e) => {
+    const p = ev<'OrgModeSet'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: p.orgId,
+      targetUserId: p.by,
+      summary: `Organization mode set to ${p.mode === 'business' ? 'Business' : 'Developer'} for ${await orgName(tx, p.orgId)}`,
+      details: { mode: p.mode, previous: p.previous },
+    };
+  }),
   OrgDiagnosticsSharingSet: always(async (tx, e) => {
     const p = ev<'OrgDiagnosticsSharingSet'>(e).payload;
     return {

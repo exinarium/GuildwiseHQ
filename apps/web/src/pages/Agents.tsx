@@ -77,6 +77,7 @@ import {
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
 
@@ -136,7 +137,9 @@ export function Agents() {
     !!myId && (orgRole(a) === 'owner' || orgRole(a) === 'admin' || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
-  const active = board.data?.agents ?? [];
+  // The built-in DevOps engineer is plumbing in a Business mode organization: not listed.
+  const business = useBusinessMode();
+  const active = (board.data?.agents ?? []).filter((h) => !(business && h.agent.isDevops));
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
 
   return (

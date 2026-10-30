@@ -75,6 +75,7 @@ const meBody = () => ({
           plan: 'team',
           planName: 'Team',
           features: {},
+          mode: 'dev',
           requireTwoFactor: false,
         }
       : null,

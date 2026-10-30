@@ -30,6 +30,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertDevMode, BUSINESS_MODE_MSG } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, runnerActor, userActor } from './common.ts';
 import { relayAuthoredBundles } from './pack-authoring.ts';
@@ -383,6 +384,7 @@ const slugOf = (url: string): string =>
 
 export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<PackDto> {
   requireManager(who);
+  await assertDevMode(ctx.pool, who.orgId, BUSINESS_MODE_MSG.packUrl);
   const name = req.name ?? slugOf(req.url);
   if (
     !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) ||

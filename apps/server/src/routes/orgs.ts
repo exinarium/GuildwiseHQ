@@ -29,6 +29,7 @@ import {
   revokeOrgInvitation,
   setDiagnosticsSharing,
   setMemberProjects,
+  setOrgMode,
   setRequireTwoFactor,
   transferOwnership,
 } from '../commands/orgs.ts';
@@ -91,6 +92,7 @@ export function orgRoutes(ctx: Ctx) {
         await setRequireTwoFactor(ctx, a, req.body.requireTwoFactor);
       if (req.body.diagnosticsSharing !== undefined)
         await setDiagnosticsSharing(ctx, a, req.body.diagnosticsSharing, req.body.consentVersion);
+      if (req.body.mode !== undefined) await setOrgMode(ctx, a, req.body.mode);
       const fresh = await requireOrg(ctx, req, { min: 'admin' });
       const owner = await one<{ id: string; display_name: string; email: string }>(
         ctx.pool,

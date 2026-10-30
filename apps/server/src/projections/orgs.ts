@@ -42,8 +42,8 @@ export const orgProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO organizations (id, name, owner_user_id, status, status_reason, status_changed_at, plan,
          max_members, max_workstations, max_agents, max_projects, trial_ends_at, license_expires_at, features,
-         created_via, created_at, simulation)
-       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5,$15)`,
+         created_via, created_at, simulation, mode)
+       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5,$15,$16)`,
       [
         p.orgId,
         p.name,
@@ -60,6 +60,7 @@ export const orgProjectors: Record<string, Projector> = {
         JSON.stringify(p.features ?? {}),
         p.createdVia,
         p.simulation === true,
+        p.mode ?? 'dev',
       ],
     );
   },
@@ -212,6 +213,10 @@ export const orgProjectors: Record<string, Projector> = {
   OrgTwoFactorPolicySet: async (tx, e) => {
     const p = ev<EventOf<'OrgTwoFactorPolicySet'>>(e).payload;
     await exec(tx, 'UPDATE organizations SET require_two_factor=$2 WHERE id=$1', [p.orgId, p.required]);
+  },
+  OrgModeSet: async (tx, e) => {
+    const p = ev<EventOf<'OrgModeSet'>>(e).payload;
+    await exec(tx, 'UPDATE organizations SET mode=$2 WHERE id=$1', [p.orgId, p.mode]);
   },
   OrgDiagnosticsSharingSet: async (tx, e) => {
     const p = ev<EventOf<'OrgDiagnosticsSharingSet'>>(e).payload;

@@ -10,6 +10,7 @@ import {
 } from '../../api/queries/capabilities.ts';
 import { sealPackCredential, useSetPackWorkstations } from '../../api/queries/my-capabilities.ts';
 import { useProjects } from '../../api/queries/projects.ts';
+import { useBusinessMode } from '../../lib/orgMode.ts';
 import { canSealHere, newId } from '../../lib/secure.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { SecureContextNotice } from '../SecureContextNotice.tsx';
@@ -37,18 +38,21 @@ import { UpdateReview } from './UpdateReview.tsx';
 export function PacksTab() {
   const q = usePacks();
   const [adding, setAdding] = useState(false);
+  const business = useBusinessMode();
   const packs = q.data?.packs ?? [];
   return (
     <div className="flex flex-col gap-4" data-testid="packs-tab">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" onClick={() => setAdding(true)}>
-          Add a pack by git URL
-        </Button>
-        <span className="text-xs text-muted" data-testid="packs-format-note">
-          Any repository of skills in the Agent Skills format (folders with a SKILL.md) can be added by its
-          git URL.
-        </span>
-      </div>
+      {!business && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="primary" onClick={() => setAdding(true)}>
+            Add a pack by git URL
+          </Button>
+          <span className="text-xs text-muted" data-testid="packs-format-note">
+            Any repository of skills in the Agent Skills format (folders with a SKILL.md) can be added by its
+            git URL.
+          </span>
+        </div>
+      )}
       {q.data && q.data.workstationsOnline === 0 && (
         <Callout tone="warning" data-testid="no-workstation">
           No workstation is online. A pack is fetched and read by a workstation, so nothing can be fetched or
@@ -70,7 +74,9 @@ export function PacksTab() {
           description="A pack brings extra skills, personas and playbooks from a git repository. It stays off until you have read it and approved it."
         />
       )}
-      {adding && <AddPackDialog workstations={q.data?.workstations ?? []} onClose={() => setAdding(false)} />}
+      {adding && !business && (
+        <AddPackDialog workstations={q.data?.workstations ?? []} onClose={() => setAdding(false)} />
+      )}
     </div>
   );
 }

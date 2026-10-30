@@ -3,6 +3,7 @@ import {
   isOrgOperational,
   ORG_ROLE_LABEL,
   type OrgFeature,
+  type OrgMode,
   type OrgRole,
   type OrgStatus,
   type Rank,
@@ -25,6 +26,8 @@ export interface OrgRow extends Row {
   features: Record<string, boolean>;
   require_two_factor: boolean;
   diagnostics_sharing: boolean;
+  /** Optional so extensions that build an `OrgRow` still compile; absent means `dev`. */
+  mode?: OrgMode;
 }
 
 /** A signed-in member acting in one organization. */

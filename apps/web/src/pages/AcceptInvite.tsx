@@ -1,4 +1,4 @@
-import { AcceptInvitationRequestSchema } from '@aom/shared';
+import { AcceptInvitationRequestSchema, type OrgMode } from '@aom/shared';
 import { KeyRound } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
@@ -13,6 +13,7 @@ import { BRAND } from '../brand.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { DigestCheckbox } from '../components/blog/DigestCheckbox.tsx';
+import { OrgModePicker } from '../components/orgsettings/OrgModePicker.tsx';
 import { Button, ButtonLink, Callout, EmptyState, ErrorBox, Skeleton, TextInput } from '../components/ui.tsx';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
@@ -80,6 +81,7 @@ export function AcceptInvite() {
   const nav = useNavigate();
   const [displayName, setDisplayName] = useState('');
   const [orgName, setOrgName] = useState('');
+  const [mode, setMode] = useState<OrgMode>('dev');
   const [digest, setDigest] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -120,6 +122,7 @@ export function AcceptInvite() {
       hint={inv.terms ?? undefined}
     />
   );
+  const modeField = startsOrg && <OrgModePicker value={mode} onChange={setMode} />;
 
   // 1) A different account is signed in.
   if (signedIn && !sameAccount)
@@ -149,6 +152,7 @@ export function AcceptInvite() {
         </div>
         <div className="flex flex-col gap-4">
           {orgField}
+          {modeField}
           <DigestCheckbox checked={digestOn} onChange={setDigest} owner={startsOrg} />
           <ErrorBox error={acceptExisting.error} />
           <div className="flex flex-wrap gap-2">
@@ -158,7 +162,13 @@ export function AcceptInvite() {
               loading={acceptExisting.isPending}
               onClick={() =>
                 acceptExisting.mutate(
-                  startsOrg ? { orgName: name.trim(), blogDigest: digestOn } : { blogDigest: digestOn },
+                  startsOrg
+                    ? {
+                        orgName: name.trim(),
+                        blogDigest: digestOn,
+                        ...(mode === 'business' ? { mode } : {}),
+                      }
+                    : { blogDigest: digestOn },
                   {
                     onSuccess: () => nav('/', { replace: true }),
                   },
@@ -206,6 +216,7 @@ export function AcceptInvite() {
       password,
       ...(startsOrg && name.trim() ? { orgName: name.trim() } : {}),
       blogDigest: digestOn,
+      ...(startsOrg && mode === 'business' ? { mode } : {}),
     });
     if (!parsed.success) {
       for (const i of parsed.error.issues) {
@@ -271,6 +282,7 @@ export function AcceptInvite() {
             hint={inv.terms ?? undefined}
           />
         )}
+        {modeField}
         <TextInput
           id="invite-displayName"
           label="Your name"

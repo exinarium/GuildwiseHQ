@@ -51,6 +51,15 @@ export const ARTICLES: Article[] = Object.entries(FILES)
   .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 
 /** Slugs an article had before it was renamed: old links, bookmarks and the guide keep working. */
+/** Articles about developer surfaces (repositories, branches, DevOps): not shown in a Business mode organization. */
+export const DEV_ONLY_HELP_SLUGS: readonly string[] = [
+  'devops-and-hygiene',
+  'testing-and-finalization',
+  'project-conversion',
+];
+export const helpArticlesFor = (business: boolean): Article[] =>
+  business ? ARTICLES.filter((a) => !DEV_ONLY_HELP_SLUGS.includes(a.slug)) : ARTICLES;
+
 export const ARTICLE_ALIASES: Record<string, string> = {
   'schedules-and-integrations': 'automations-and-integrations',
 };

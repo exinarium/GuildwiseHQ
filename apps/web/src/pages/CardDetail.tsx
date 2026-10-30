@@ -2,6 +2,7 @@ import {
   type CardDetailResponse,
   COMPLETION_ACTION_LABELS,
   fieldCatalogue,
+  isBusinessOrg,
   isMockField,
   type SubworkflowChildDto,
   type WorkflowDefinition,
@@ -218,6 +219,7 @@ export function CardDetailView({
   const rehome = useRehomeCard(card.id);
   const me = useMe();
   const expert = me.data?.user?.gitExpert === true;
+  const business = isBusinessOrg(me.data?.activeOrg);
   const [dialog, setDialog] = useState<'move' | 'moveto' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(
     null,
   );
@@ -693,7 +695,7 @@ export function CardDetailView({
                       )}
                     </>
                   )}
-                  {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
+                  {expert && !business && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
                   {permissions.canEditPriority ? (
                     <PriorityControl card={card} />
                   ) : (

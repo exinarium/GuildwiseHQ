@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OrgModeSchema } from '../orgs/mode.ts';
 import { OrgFeatureSchema, OrgLimitsSchema } from '../orgs/plans.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
@@ -32,6 +33,8 @@ export const orgEvents = [
       invitationId: Id.optional(),
       /** Created as a simulation organization by a super admin (mock workstation, never billed). */
       simulation: z.boolean().optional(),
+      /** How the organization works (absent = `dev`). */
+      mode: OrgModeSchema.optional(),
     }),
   ),
   defineEvent(
@@ -140,6 +143,8 @@ export const orgEvents = [
   ),
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
+  /** An Owner or Admin changed how the organization works (Developer or Business mode). */
+  defineEvent('OrgModeSet', z.object({ orgId: Id, mode: OrgModeSchema, previous: OrgModeSchema, by: Id })),
   /**
    * The Owner switched the organization-level consent "Share diagnostic data with Guildwise" on or off
    * (docs/design/ceo-blog-topics.md section 11). `consentVersion` is the version of the consent text that was shown.

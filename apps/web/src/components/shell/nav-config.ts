@@ -61,13 +61,22 @@ export function buildNav(opts: {
   canManage?: boolean;
   /** Feature flags of the active organization (a switched-off feature leaves the nav; its data is kept). */
   features?: Record<string, boolean>;
+  /** Business mode: no deploy surfaces (Environments, Releases). */
+  business?: boolean;
   /** A platform account has no work nav at all. */
   platform?: boolean;
 }): {
   sections: NavSection[];
   footer: NavEntry[];
 } {
-  const { projectKey, hasResearch = false, hasEnvironments = false, canManage = false, features = {} } = opts;
+  const {
+    projectKey,
+    hasResearch = false,
+    hasEnvironments = false,
+    canManage = false,
+    features = {},
+    business = false,
+  } = opts;
   const on = (f: string) => features[f] !== false;
   const work: NavEntry[] = [
     {
@@ -88,7 +97,7 @@ export function buildNav(opts: {
       testId: 'nav-backlog',
       match: (p) => p.endsWith('/backlog'),
     });
-  if (projectKey && hasEnvironments)
+  if (projectKey && hasEnvironments && !business)
     work.push({
       id: 'environments',
       label: 'Environments',
@@ -187,7 +196,9 @@ export function buildNav(opts: {
           match: (p) =>
             (p === '/workstations' || p.startsWith('/workstations/')) && !WORKSTATION_INTEGRATIONS.test(p),
         },
-        { id: 'releases', label: 'Releases', to: '/releases', icon: Rocket, testId: 'nav-releases' },
+        ...(business
+          ? []
+          : [{ id: 'releases', label: 'Releases', to: '/releases', icon: Rocket, testId: 'nav-releases' }]),
         {
           id: 'integrations',
           label: 'Integrations',

@@ -11,6 +11,7 @@ import {
   DEVOPS_ROLE_KEY,
   DIRECT_RUNTIME,
   type HireAgentRequest,
+  isDevOnlyRoleKey,
   isOrgManager,
   type PackPersonaRef,
   type PackProvenance,
@@ -31,6 +32,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { assertDevMode, BUSINESS_MODE_MSG } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { mcpServerCandidates } from './mcp-servers.ts';
@@ -363,6 +365,8 @@ export async function hireAgentIn(
   // a role made from someone's private pack is that person's alone
   if (isOthersPrivateRole(roleDef.definition.source, user.id))
     throw badRequest('unknown_role', `role '${roleKey}' does not exist`);
+  if (isDevOnlyRoleKey(roleDef.definition.key))
+    await assertDevMode(tx, orgId, BUSINESS_MODE_MSG.hire(roleDef.definition.name));
   if (roleDef.definition.key === DEVOPS_ROLE_KEY)
     throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
   if (roleDef.definition.key === 'ceo')
