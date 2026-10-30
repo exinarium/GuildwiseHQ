@@ -27,6 +27,8 @@ import {
   runRecordedEvent,
   scheduleScope,
 } from './schedule-actions.ts';
+import { attemptDelivery } from './schedule-delivery.ts';
+import { queueOutputDeliveries } from './schedule-output.ts';
 import { afterRun, assertOwnerStillAllowed } from './schedules.ts';
 
 /**
@@ -288,7 +290,8 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
   // Are there event schedules at all? Most deployments have none: skip the read, still move the cursor.
   const any = await one(
     ctx.pool,
-    `SELECT 1 FROM schedules WHERE enabled AND trigger->>'kind' IN ('event','intake_ticket') LIMIT 1`,
+    `SELECT 1 FROM schedules WHERE enabled AND (trigger->>'kind' IN ('event','intake_ticket')
+        OR action->'deliverOutput' IS NOT NULL) LIMIT 1`,
   );
   // Mail is always read: a reply to a thread that has a card becomes a card comment whether or not an automation exists.
   const types = any ? [...EVENT_TYPES.keys()] : ['MailReceived'];
@@ -322,6 +325,8 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
   for (const name of EVENT_TYPES.get(e.type as string) ?? []) {
     const ec = await contextOf(ctx.pool, e, name);
     if (!ec) continue;
+    // A card an automation made is done: send its output where the automation says (once per card and destination).
+    if (name === 'card_done' && ec.card?.scheduleId && ec.sourceId) n += await sendCardOutput(ctx, ec);
     const list = await rows(
       ctx.pool,
       `SELECT s.* FROM schedules s
@@ -349,6 +354,24 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
       );
   }
   return n;
+}
+
+/** Records the output deliveries of a done card and makes the first try of each. Never fails the sweep. */
+async function sendCardOutput(ctx: Ctx, ec: EventContext): Promise<number> {
+  try {
+    const runIds = await queueOutputDeliveries(
+      ctx,
+      ec.card?.scheduleId as string,
+      ec.sourceId as string,
+      assertOwnerStillAllowed,
+    );
+    for (const id of runIds)
+      await attemptDelivery(ctx, id).catch((err) => ctx.log.warn({ err, runId: id }, 'output delivery failed'));
+    return runIds.length;
+  } catch (err) {
+    ctx.log.warn({ err, cardId: ec.sourceId }, 'could not queue the output deliveries');
+    return 0;
+  }
 }
 
 /**

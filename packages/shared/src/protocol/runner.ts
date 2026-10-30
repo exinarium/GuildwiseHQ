@@ -654,6 +654,43 @@ export const IntegrationRunPayloadSchema = z.object({
 });
 export type IntegrationRunPayload = z.infer<typeof IntegrationRunPayloadSchema>;
 
+/**
+ * `delivery.send`: send the output of an automation by WhatsApp or into a Google Sheet with the credential kept on the
+ * owner's workstation. Terminal (never re-sent blindly): the retries come from the schedule's own backoff. The server
+ * empties the payload when the answer arrives or the command expires; it holds the message text.
+ */
+export const DeliverySendPayloadSchema = z.object({
+  runId: z.uuid(),
+  attempt: z.number().int().positive(),
+  test: z.boolean().default(false),
+  channel: z.enum(['whatsapp', 'google_sheet']),
+  /** The connected integration instance: the phone number ID, or the service account e-mail. */
+  instance: z.string().max(200),
+  whatsapp: z
+    .object({
+      to: z.array(z.string().max(30)).min(1).max(5),
+      template: z.object({ name: z.string().max(512), language: z.string().max(15) }).optional(),
+      text: z.string().max(1200),
+    })
+    .optional(),
+  sheet: z
+    .object({
+      spreadsheetId: z.string().max(100),
+      sheet: z.string().max(100),
+      row: z.array(z.string().max(50_000)).length(5),
+    })
+    .optional(),
+});
+export type DeliverySendPayload = z.infer<typeof DeliverySendPayloadSchema>;
+
+export const DeliverySendResultSchema = z.object({
+  ok: z.boolean(),
+  httpStatus: z.number().int().optional(),
+  error: z.string().max(500).optional(),
+  retryable: z.boolean(),
+});
+export type DeliverySendResult = z.infer<typeof DeliverySendResultSchema>;
+
 export const PolledIssueSchema = z.object({
   key: z.string().min(1).max(300),
   title: z.string().max(500),
@@ -799,6 +836,7 @@ export const RunnerCommandNameSchema = z.enum([
   'branch.check_merged',
   'worktrees.sweep',
   'integration.run',
+  'delivery.send',
   'repo.clone',
   'env.ensure',
   'rights.verify',
@@ -896,6 +934,7 @@ export const CommandPayloadSchemas = {
   'branch.check_merged': BranchCheckMergedPayloadSchema,
   'worktrees.sweep': WorktreesSweepPayloadSchema,
   'integration.run': IntegrationRunPayloadSchema,
+  'delivery.send': DeliverySendPayloadSchema,
   'repo.clone': RepoClonePayloadSchema,
   'env.ensure': EnvEnsurePayloadSchema,
   'rights.verify': RightsVerifyPayloadSchema,

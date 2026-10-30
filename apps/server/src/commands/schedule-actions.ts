@@ -643,7 +643,16 @@ export function failedRun(runId: string, s: Row, spec: RunSpec, error: string): 
 }
 
 /** Decrypts the signing secret of a webhook action. */
-export async function webhookSecret(ctx: Ctx, action: ScheduleAction): Promise<string | null> {
+export async function webhookSecret(
+  ctx: Ctx,
+  action: ScheduleAction,
+  mode?: 'output',
+): Promise<string | null> {
+  // `output`: the secret of a `create_card` automation's output webhooks (`deliverOutput.secretEnc`).
+  if (mode === 'output') {
+    const enc = action.kind === 'create_card' ? action.deliverOutput?.secretEnc : undefined;
+    return enc ? decryptSecret(ctx, enc) : null;
+  }
   if (!isWebhookAction(action) || !action.secretEnc) return null;
   return decryptSecret(ctx, action.secretEnc);
 }

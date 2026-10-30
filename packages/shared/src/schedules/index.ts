@@ -368,3 +368,4 @@ export const isMailTrigger = (
   t: ScheduleTrigger,
 ): t is Extract<ScheduleTrigger, { kind: 'email_received' | 'email_reply' }> =>
   t.kind === 'email_received' || t.kind === 'email_reply';
+export * from './output.ts';

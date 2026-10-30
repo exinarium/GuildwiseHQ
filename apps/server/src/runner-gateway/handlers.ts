@@ -74,6 +74,7 @@ import {
   applyRunStartResult,
   applyRunStatus,
 } from '../commands/runs.ts';
+import { applyDeliverySendResult } from '../commands/schedule-delivery.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
 import { setupProposeRpc } from '../commands/setup-proposals.ts';
 import {
@@ -514,6 +515,13 @@ export class RunnerHandlers {
       // cron fire asks again); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyIntegrationResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'delivery.send') {
+      // Terminal: no blind re-send; the schedule's own backoff makes the next try. The text is emptied at once.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+        msg.commandId,
+      ]);
+      await applyDeliverySendResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'repo.create') {
       // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

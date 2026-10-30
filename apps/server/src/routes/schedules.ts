@@ -73,8 +73,9 @@ export function scheduleRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: PatchScheduleRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await patchSchedule(ctx, s.user, await orgOf(req, s), req.params.id, req.body);
-        return getScheduleDto(ctx.pool, s.user.id, req.params.id);
+        const r = await patchSchedule(ctx, s.user, await orgOf(req, s), req.params.id, req.body);
+        const dto = await getScheduleDto(ctx.pool, s.user.id, req.params.id);
+        return r.webhookSecret ? { ...dto, webhookSecret: r.webhookSecret } : dto;
       },
     );
 

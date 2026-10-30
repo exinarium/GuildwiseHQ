@@ -148,7 +148,9 @@ export const ScheduleRunDtoSchema = z.object({
   error: z.string().nullable(),
   result: ScheduleRunResultSchema.nullable(),
   /** Deliveries only: what is sent where, and the tries so far. */
-  delivery: z.object({ kind: z.enum(['webhook', 'email']), target: z.string() }).nullable(),
+  delivery: z
+    .object({ kind: z.enum(['webhook', 'email', 'whatsapp', 'google_sheet']), target: z.string() })
+    .nullable(),
   attempts: z.number().int().nonnegative(),
   nextAttemptAt: IsoTime.nullable(),
   startedAt: IsoTime,
@@ -174,6 +176,23 @@ export const ScheduleTestResponseSchema = z.object({
   error: z.string().nullable(),
   durationMs: z.number().int().nullable(),
   runId: z.uuid(),
+  /** Output deliveries: one entry per destination (`ok` above covers all of them). */
+  results: z
+    .array(
+      z.object({
+        index: z.number().int().nonnegative(),
+        kind: z.enum(['email', 'webhook', 'whatsapp', 'google_sheet']),
+        target: z.string(),
+        ok: z.boolean(),
+        /** Sent to the workstation; the result appears in the history. */
+        pending: z.boolean().optional(),
+        httpStatus: z.number().int().nullable(),
+        error: z.string().nullable(),
+        durationMs: z.number().int().nullable(),
+        runId: z.uuid(),
+      }),
+    )
+    .optional(),
 });
 export type ScheduleTestResponse = z.infer<typeof ScheduleTestResponseSchema>;
 

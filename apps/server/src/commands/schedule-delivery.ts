@@ -2,20 +2,26 @@ import { createHmac } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import {
+  type DeliverySendPayload,
+  DeliverySendResultSchema,
   isRetryableStatus,
   type ScheduleAction,
   type ScheduleDelivery,
+  sheetRow,
   streamId,
   WEBHOOK_MAX_ATTEMPTS,
   webhookBackoffMs,
+  whatsappText,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest } from '../errors.ts';
 import { scheduledReportMail } from '../mail/templates.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { SYSTEM_ACTOR } from './common.ts';
 import { scheduleScope, webhookSecret } from './schedule-actions.ts';
+import { cardOutput, deliverOutputOf, sampleOutput } from './schedule-output.ts';
 
 const TIMEOUT_MS = 10_000;
 
@@ -97,7 +103,7 @@ async function postWebhook(
   try {
     const u = assertWebhookUrl(ctx, d.url);
     await assertResolvesPublic(ctx, u);
-    const secret = await webhookSecret(ctx, s.action as ScheduleAction);
+    const secret = await webhookSecret(ctx, s.action as ScheduleAction, d.secret);
     const timestamp = String(Math.floor(ctx.clock.now().getTime() / 1000));
     const res = await fetch(u, {
       method: 'POST',
@@ -163,31 +169,26 @@ async function sendMail(
   }
 }
 
+/** The runner has this long to answer a `delivery.send` before the try counts as failed (an offline workstation). */
+export const RUNNER_DISPATCH_MS = 15 * 60_000;
+
 /**
- * One try of a pending delivery. The HTTP call or the mail is made outside any transaction; the outcome is one
- * `ScheduleDeliveryAttempted`. A retryable failure schedules the next try with a growing pause (1 min, 5 min, 30 min,
- * 2 h) up to five tries; `single` (a test) never retries.
+ * Records one try of a delivery (one `ScheduleDeliveryAttempted`) and schedules the next with a growing pause (1 min,
+ * 5 min, 30 min, 2 h) up to five tries; `single` (a test) never retries. A try already answered elsewhere is ignored.
  */
-export async function attemptDelivery(
+export async function recordAttempt(
   ctx: Ctx,
-  runId: string,
+  run: Row,
+  s: Row,
+  attempt: number,
+  result: AttemptResult,
   opts: { single?: boolean } = {},
-): Promise<AttemptResult | null> {
-  const run = await one(ctx.pool, `SELECT * FROM schedule_runs WHERE id=$1 AND status='pending'`, [runId]);
-  const delivery = run?.delivery as ScheduleDelivery | null | undefined;
-  if (!run || !delivery) return null;
-  const s = await one(ctx.pool, 'SELECT * FROM schedules WHERE id=$1', [run.schedule_id]);
-  if (!s) return null;
-  const attempt = Number(run.attempts) + 1;
-  const result =
-    delivery.kind === 'webhook'
-      ? await postWebhook(ctx, s, runId, delivery)
-      : await sendMail(ctx, delivery, (s.org_id as string | null) ?? null);
+): Promise<void> {
   const now = ctx.clock.now();
   const retry = !result.ok && result.retryable && !opts.single && attempt < WEBHOOK_MAX_ATTEMPTS;
   const nextAttemptAt = retry ? new Date(now.getTime() + webhookBackoffMs(attempt)) : null;
   await withAppendTx(ctx.pool, async (tx) => {
-    const cur = await one(tx, `SELECT attempts, status FROM schedule_runs WHERE id=$1 FOR UPDATE`, [runId]);
+    const cur = await one(tx, `SELECT attempts, status FROM schedule_runs WHERE id=$1 FOR UPDATE`, [run.id]);
     if (!cur || cur.status !== 'pending' || Number(cur.attempts) !== Number(run.attempts)) return; // answered elsewhere
     await ctx.store.append(
       [
@@ -196,7 +197,7 @@ export async function attemptDelivery(
           event: {
             type: 'ScheduleDeliveryAttempted',
             payload: {
-              runId,
+              runId: run.id,
               scheduleId: s.id,
               attempt,
               ok: result.ok,
@@ -214,7 +215,169 @@ export async function attemptDelivery(
       { tx },
     );
   });
+}
+
+/**
+ * A WhatsApp or Sheets delivery: the runner sends it with the credential it keeps. Returns the result of an earlier
+ * try that never got an answer (so it can be recorded), or null after handing a new try to the runner (the answer
+ * comes through `recordAttempt` in the gateway). The text exists only in the command payload.
+ */
+async function dispatchToRunner(
+  ctx: Ctx,
+  run: Row,
+  s: Row,
+  d: Extract<ScheduleDelivery, { kind: 'runner' }>,
+  attempt: number,
+  single: boolean,
+): Promise<AttemptResult | null> {
+  const started = Date.now();
+  const fail = (error: string, retryable: boolean): AttemptResult => ({
+    ok: false,
+    error,
+    retryable,
+    durationMs: Date.now() - started,
+  });
+  const now = ctx.clock.now();
+  // 1. An earlier command that nobody answered by its deadline: close it, empty its text, count a failed try.
+  const open = await one(
+    ctx.pool,
+    `SELECT id FROM runner_commands WHERE type='delivery.send'
+        AND (status IN ('pending','sent') OR (status='failed' AND last_error='expired'))
+        AND payload->>'runId' = $1 AND (payload->>'attempt')::int = $2 LIMIT 1`,
+    [run.id, attempt],
+  );
+  const ws = await one(ctx.pool, `SELECT id, name, status, user_id FROM workstations WHERE id=$1`, [
+    d.workstationId,
+  ]);
+  if (open) {
+    await ctx.pool.query(
+      `UPDATE runner_commands SET status='failed', payload='{}'::jsonb, last_error='no answer', done_at=$2 WHERE id=$1`,
+      [open.id, now],
+    );
+    return fail(`the workstation ${ws?.name ?? ''} did not answer (offline?)`.replace('  ', ' '), true);
+  }
+  // 2. The workstation must still be active and belong to the schedule's owner.
+  if (!ws || ws.status !== 'active' || (s.owner_user_id && ws.user_id !== s.owner_user_id))
+    return fail('the workstation of this destination is not available: choose another one', false);
+  const out = deliverOutputOf(s.action as ScheduleAction);
+  const dest = out?.destinations[d.destination];
+  if (!dest || (dest.kind !== 'whatsapp' && dest.kind !== 'google_sheet'))
+    return fail('this destination no longer exists on the automation', false);
+  const test = single || run.trigger === 'test';
+  const o = test ? await sampleOutput(ctx, ctx.pool, s) : await cardOutput(ctx, ctx.pool, d.cardId);
+  if (!o) return fail('the card is gone', false);
+  const payload: DeliverySendPayload =
+    dest.kind === 'whatsapp'
+      ? {
+          runId: run.id,
+          attempt,
+          test,
+          channel: 'whatsapp',
+          instance: dest.instance,
+          whatsapp: {
+            to: dest.to,
+            ...(dest.template ? { template: dest.template } : {}),
+            text: whatsappText(o),
+          },
+        }
+      : {
+          runId: run.id,
+          attempt,
+          test,
+          channel: 'google_sheet',
+          instance: dest.instance,
+          sheet: {
+            spreadsheetId: dest.spreadsheetId,
+            sheet: dest.sheet,
+            row: sheetRow(now.toISOString(), s.name, o),
+          },
+        };
+  const deadline = new Date(now.getTime() + RUNNER_DISPATCH_MS);
+  const commandId = await enqueueRunnerCommand(ctx.pool, d.workstationId, 'delivery.send', payload, deadline);
+  // 3. Not due again before the deadline.
+  await withAppendTx(ctx.pool, (tx) =>
+    ctx.store.append(
+      [
+        {
+          streamId: streamId.schedule(s.id),
+          event: {
+            type: 'ScheduleDeliveryDispatched',
+            payload: {
+              runId: run.id,
+              scheduleId: s.id,
+              attempt,
+              commandId,
+              deadline: deadline.toISOString(),
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: scheduleScope(s),
+        },
+      ],
+      { tx },
+    ),
+  );
+  await ctx.services.gateway.deliverPending(d.workstationId);
+  return null;
+}
+
+/**
+ * One try of a pending delivery. The HTTP call or the mail is made outside any transaction; the outcome is one
+ * `ScheduleDeliveryAttempted` (see `recordAttempt`). A runner delivery is handed to the workstation and answers later.
+ */
+export async function attemptDelivery(
+  ctx: Ctx,
+  runId: string,
+  opts: { single?: boolean } = {},
+): Promise<AttemptResult | null> {
+  const run = await one(ctx.pool, `SELECT * FROM schedule_runs WHERE id=$1 AND status='pending'`, [runId]);
+  const delivery = run?.delivery as ScheduleDelivery | null | undefined;
+  if (!run || !delivery) return null;
+  const s = await one(ctx.pool, 'SELECT * FROM schedules WHERE id=$1', [run.schedule_id]);
+  if (!s) return null;
+  const attempt = Number(run.attempts) + 1;
+  // A test is never retried, also when its deadline lapses and the scheduler picks it up.
+  const single = Boolean(opts.single) || run.trigger === 'test';
+  const result =
+    delivery.kind === 'webhook'
+      ? await postWebhook(ctx, s, runId, delivery)
+      : delivery.kind === 'runner'
+        ? await dispatchToRunner(ctx, run, s, delivery, attempt, single)
+        : await sendMail(ctx, delivery, (s.org_id as string | null) ?? null);
+  if (!result) return null;
+  await recordAttempt(ctx, run, s, attempt, result, { single });
   return result;
+}
+
+/**
+ * The workstation answered a `delivery.send`. The answer is one recorded try of the run (an answer for a run that is no
+ * longer pending, or for another try, is ignored by `recordAttempt`). Nothing of the payload is logged.
+ */
+export async function applyDeliverySendResult(
+  ctx: Ctx,
+  payload: { runId?: string; attempt?: number; test?: boolean },
+  ok: boolean,
+  result: unknown,
+  error: string | undefined,
+): Promise<void> {
+  if (!payload.runId || !payload.attempt) return;
+  const run = await one(ctx.pool, `SELECT * FROM schedule_runs WHERE id=$1 AND status='pending'`, [payload.runId]);
+  if (!run || Number(run.attempts) + 1 !== payload.attempt) return;
+  const s = await one(ctx.pool, 'SELECT * FROM schedules WHERE id=$1', [run.schedule_id]);
+  if (!s) return;
+  const parsed = DeliverySendResultSchema.safeParse(result);
+  const outcome: AttemptResult = !ok
+    ? { ok: false, error: (error ?? 'the workstation could not send').slice(0, 500), retryable: true, durationMs: 0 }
+    : !parsed.success
+      ? { ok: false, error: 'the workstation answered something unexpected', retryable: true, durationMs: 0 }
+      : {
+          ok: parsed.data.ok,
+          retryable: parsed.data.retryable,
+          ...(parsed.data.httpStatus ? { httpStatus: parsed.data.httpStatus } : {}),
+          ...(parsed.data.error ? { error: parsed.data.error.slice(0, 500) } : {}),
+          durationMs: 0,
+        };
+  await recordAttempt(ctx, run, s, payload.attempt, outcome, { single: Boolean(payload.test) });
 }
 
 /** Every delivery whose try is due (the scheduler's tick). */

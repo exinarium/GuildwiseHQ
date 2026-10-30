@@ -139,6 +139,50 @@ export const DIGEST_KINDS = ['floor_report', 'project_summary', 'interests'] as 
 export const DigestKind = z.enum(DIGEST_KINDS);
 export type DigestKind = z.infer<typeof DigestKind>;
 
+const E164 = z.string().regex(/^\+[1-9]\d{6,14}$/);
+
+/** Where the output of the agent that did the work goes when the card is done (`create_card` + `deliverOutput`). */
+export const OUTPUT_DESTINATION_KINDS = ['email', 'webhook', 'whatsapp', 'google_sheet'] as const;
+export const OutputDestinationSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('email'),
+    to: z.array(z.string().max(254)).min(1).max(10),
+    subject: z.string().max(200).default(''),
+  }),
+  z.object({
+    kind: z.literal('webhook'),
+    url: z.string().min(1).max(2000),
+    format: WebhookFormat.default('generic'),
+  }),
+  z.object({
+    kind: z.literal('whatsapp'),
+    workstationId: Id,
+    /** The phone number ID of the connected WhatsApp integration. */
+    instance: z.string().min(1).max(200),
+    to: z.array(E164).min(1).max(5),
+    /** An approved message template (needed outside the 24-hour window); absent: a plain text message. */
+    template: z
+      .object({ name: z.string().min(1).max(512), language: z.string().min(2).max(15) })
+      .optional(),
+  }),
+  z.object({
+    kind: z.literal('google_sheet'),
+    workstationId: Id,
+    /** The service account e-mail of the connected Google Sheets integration. */
+    instance: z.string().min(1).max(200),
+    spreadsheetId: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/),
+    sheet: z.string().min(1).max(100).default('Sheet1'),
+  }),
+]);
+export type OutputDestination = z.infer<typeof OutputDestinationSchema>;
+
+export const DeliverOutputSchema = z.object({
+  destinations: z.array(OutputDestinationSchema).min(1).max(5),
+  /** Signing secret of the webhook destinations (one per automation), encrypted with `AOM_SECRET_KEY`. Never sent to the browser. */
+  secretEnc: z.string().max(500).optional(),
+});
+export type DeliverOutput = z.infer<typeof DeliverOutputSchema>;
+
 /** One action per schedule. `{date}`, `{week}`, `{event}`, `{ref}` and `{issue}` in titles and texts are expanded at fire time. */
 export const ScheduleActionSchema = z.union([
   z.object({
@@ -149,6 +193,8 @@ export const ScheduleActionSchema = z.union([
     ratePerHour: z.number().int().min(1).max(1000).optional(),
     /** Do not create a second card for the same mail thread, subject and sender, or at all. Absent: `none`. */
     dedupe: z.enum(['thread', 'subject_from', 'none']).optional(),
+    /** Send what the agent produced when the card is done. Absent: nothing is sent. */
+    deliverOutput: DeliverOutputSchema.optional(),
   }),
   z.object({ kind: z.literal('regression_run'), projectId: Id, template: CardTemplateSchema }),
   z.object({
@@ -222,6 +268,8 @@ export const ScheduleRunResultSchema = z.object({
   /** Keys of the issues taken into intake. */
   issueKeys: z.array(z.string()).optional(),
   deskItemId: Id.optional(),
+  /** Output deliveries: the card whose result was sent. Not `cardIds`: rate limits and dedupe count those. */
+  outputCardId: Id.optional(),
 });
 export type ScheduleRunResult = z.infer<typeof ScheduleRunResultSchema>;
 
@@ -232,12 +280,25 @@ export const ScheduleDeliverySchema = z.discriminatedUnion('kind', [
     url: z.string(),
     body: z.string(),
     event: z.string(),
+    /** `output`: signed with `deliverOutput.secretEnc` instead of the webhook action's own secret. */
+    secret: z.literal('output').optional(),
   }),
   z.object({
     kind: z.literal('email'),
     to: z.array(z.string()),
     subject: z.string(),
     text: z.string(),
+  }),
+  /**
+   * WhatsApp and Google Sheets are sent by the runner with the credential kept on the workstation. This record holds
+   * no message text: the text is rebuilt from the card for each try and lives only in the runner command.
+   */
+  z.object({
+    kind: z.literal('runner'),
+    channel: z.enum(['whatsapp', 'google_sheet']),
+    destination: z.number().int().min(0).max(4),
+    cardId: Id,
+    workstationId: Id,
   }),
 ]);
 export type ScheduleDelivery = z.infer<typeof ScheduleDeliverySchema>;
@@ -309,6 +370,17 @@ export const scheduleEvents = [
       error: z.string().max(2000).optional(),
       delivery: ScheduleDeliverySchema.optional(),
       nextAttemptAt: IsoDate.optional(),
+    }),
+  ),
+  /** A try was handed to the runner: the run is not picked again before `deadline`. Holds no message text. */
+  defineEvent(
+    'ScheduleDeliveryDispatched',
+    z.object({
+      runId: Id,
+      scheduleId: Id,
+      attempt: z.number().int().positive(),
+      commandId: Id,
+      deadline: IsoDate,
     }),
   ),
   /** One try of a delivery: the delivery log. `status` is the run's status after it. */
