@@ -1,4 +1,10 @@
-import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  type DeskItemDto,
+  isBusinessOrg,
+  isPhaseDeskSubkind,
+  WORKING_BRANCH_SUBKIND,
+} from '@aom/shared';
 import {
   Bell,
   CheckCheck,
@@ -114,6 +120,7 @@ function DeskSkeleton() {
 
 export function Desk() {
   const me = useMe();
+  const business = isBusinessOrg(me.data?.activeOrg);
   const open = useDesk({ status: 'open' });
   const closed = useDesk({ status: 'closed' });
   const [chatOpen, setChatOpen] = useState(false);
@@ -294,7 +301,7 @@ export function Desk() {
                   {mobile ? (
                     <DeskCard item={item} onOpen={() => setOpenId(item.id)} />
                   ) : (
-                    <DeskItem item={item} />
+                    <DeskItem item={item} business={business} />
                   )}
                 </li>
               ))}
@@ -369,7 +376,7 @@ export function Desk() {
             (isCeoDecision(openItem) ? (
               <CeoDecisionItem item={openItem} bare />
             ) : (
-              <DeskItem item={openItem} bare />
+              <DeskItem item={openItem} bare business={business} />
             ))}
         </BottomSheet>
       )}
@@ -431,7 +438,18 @@ function usesAnswerForm(item: DeskItemDto): boolean {
 }
 
 /** One desk item: who asks, what they were doing, the question, options and the answer form. */
-export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?: number; bare?: boolean }) {
+/** `business`: the organization works in Business mode, so there is no Ask DevOps on the item. */
+export function DeskItem({
+  item,
+  now,
+  bare = false,
+  business = false,
+}: {
+  item: DeskItemDto;
+  now?: number;
+  bare?: boolean;
+  business?: boolean;
+}) {
   const Icon = KIND_ICON[item.kind] ?? CircleHelp;
   return (
     <article
@@ -612,7 +630,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
       ) : (
         <ResolveButtons item={item} />
       )}
-      {item.kind !== 'question' && item.kind !== 'rating' && (
+      {!business && item.kind !== 'question' && item.kind !== 'rating' && (
         <div className="mt-3">
           <AskDevOpsButton
             variant="quiet"

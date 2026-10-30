@@ -1,16 +1,25 @@
-import { codeWorkflowV1, type ProjectDto, researchWorkflowV1 } from '@aom/shared';
+import {
+  type CardDetailResponse,
+  codeWorkflowV1,
+  type DeskItemDto,
+  type ProjectDto,
+  researchWorkflowV1,
+} from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
+import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
 import { DevOnly } from '../components/DevOnly.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
 import { seatAllowed } from '../lib/orgMode.ts';
+import { CardDetailView } from '../pages/CardDetail.tsx';
+import { DeskItem } from '../pages/Desk.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const USER = ID(1);
@@ -254,5 +263,147 @@ describe('convert dialog', () => {
     expect(screen.queryByTestId('convert-workflow-code')).toBeNull();
     expect(screen.queryByTestId('convert-repo-url')).toBeNull();
     expect(screen.queryByTestId('convert-new-name')).toBeNull();
+  });
+});
+
+const meLoaded = () =>
+  waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([u]) => ['/api/auth/me', '/api/me'].includes(String(u).split('?')[0] ?? '')),
+    ).toBe(true),
+  );
+
+describe('Ask DevOps on a card', () => {
+  const NOW = '2026-10-01T10:00:00.000Z';
+  const detail = {
+    card: {
+      id: ID(10),
+      ref: 'APP-4',
+      title: 'Send the quote',
+      cardType: 'feature',
+      stage: 'build',
+      status: 'queued',
+      assignee: null,
+      updatedAt: NOW,
+      queuedAt: null,
+      riskTier: null,
+      blocked: false,
+      reworkRound: 0,
+      priority: 3,
+      projectId: ID(70),
+      number: 4,
+      workflowKey: 'code',
+      workflowVersion: 1,
+      column: 'Build',
+      fields: {},
+      ownerUserId: USER,
+      decisionPolicy: 'owner_only',
+      riskTierOverridden: false,
+      docsNeeded: false,
+      completionAction: null,
+      repoId: null,
+      baseBranch: null,
+      branchName: null,
+      homeWorkstationId: null,
+      parentCardId: null,
+      origin: 'manual',
+      scheduled: false,
+      claimedByAgentId: null,
+      claimedByAgentName: null,
+      claimedAt: null,
+      blockedSince: null,
+      dependencies: [],
+      createdAt: NOW,
+      finalizedAt: null,
+    },
+    handoffs: [],
+    transitions: [],
+    activity: [],
+    threadId: ID(11),
+    thread: [],
+    currentShift: null,
+    permissions: {
+      canEdit: false,
+      canSpecify: false,
+      canMove: true,
+      canRelease: false,
+      canCancel: true,
+      canComment: true,
+    },
+    blockers: [],
+  } as unknown as CardDetailResponse;
+  const open = () => wrap(<CardDetailView data={detail} workflow={codeWorkflowV1} />);
+  it('is offered in dev mode', async () => {
+    open();
+    await meLoaded();
+    expect(screen.getAllByRole('button', { name: 'Ask DevOps' }).length).toBeGreaterThan(0);
+  });
+  it('is gone in business mode', async () => {
+    mode = 'business';
+    open();
+    await meLoaded();
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: 'Ask DevOps' })).toHaveLength(0));
+  });
+  const openOnPhone = async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    open();
+    await meLoaded();
+    await userEvent.setup().click(await screen.findByTestId('card-actions'));
+    return screen.findByTestId('card-actions-sheet');
+  };
+  it('is in the phone actions sheet in dev mode', async () => {
+    const sheet = await openOnPhone();
+    expect(within(sheet).getByRole('button', { name: 'Ask DevOps' })).toBeInTheDocument();
+  });
+  it('is not in the phone actions sheet in business mode', async () => {
+    mode = 'business';
+    const sheet = await openOnPhone();
+    await waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Ask DevOps' })).toBeNull());
+    expect(within(sheet).getByRole('button', { name: /Move/ })).toBeInTheDocument();
+  });
+});
+
+describe('Ask DevOps on a desk item', () => {
+  const item = {
+    id: ID(50),
+    kind: 'alert',
+    subkind: 'runner_offline',
+    status: 'open',
+    routedTo: 'manager',
+    title: 'The runner is offline',
+    body: 'The workstation stopped reporting.',
+    doing: '',
+    options: [],
+    recommendation: null,
+    blocking: false,
+    pinned: false,
+    urgent: false,
+    affectedCardIds: [],
+    affectedCount: 0,
+    askedBy: { kind: 'system' },
+    card: null,
+    projectId: null,
+    dedupEntries: [],
+    answer: null,
+    answerOption: null,
+    answeredAt: null,
+    answeredByName: null,
+    decisionPolicy: null,
+    canAnswer: true,
+    createdAt: '2026-10-01T10:00:00.000Z',
+  } as unknown as DeskItemDto;
+  it('is offered in dev mode (the default)', () => {
+    wrap(<DeskItem item={item} />);
+    expect(screen.getByRole('button', { name: 'Ask DevOps about this' })).toBeInTheDocument();
+  });
+  it('is gone in business mode, and the item itself still shows', () => {
+    wrap(<DeskItem item={item} business />);
+    expect(screen.queryByRole('button', { name: 'Ask DevOps about this' })).toBeNull();
+    expect(screen.getByText('The runner is offline')).toBeInTheDocument();
   });
 });

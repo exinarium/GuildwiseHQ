@@ -378,19 +378,21 @@ export function CardDetailView({
                   }}
                 />
               )}
-              <AskDevOpsButton
-                variant="quiet"
-                label="Ask DevOps"
-                request={{
-                  origin: 'card',
-                  projectId: card.projectId,
-                  cardId: card.id,
-                  cardLabel: `${card.ref} ${card.title}`,
-                  ...(data.workability?.ok === false && data.workability.reason
-                    ? { errorText: data.workability.reason }
-                    : {}),
-                }}
-              />
+              {!business && (
+                <AskDevOpsButton
+                  variant="quiet"
+                  label="Ask DevOps"
+                  request={{
+                    origin: 'card',
+                    projectId: card.projectId,
+                    cardId: card.id,
+                    cardLabel: `${card.ref} ${card.title}`,
+                    ...(data.workability?.ok === false && data.workability.reason
+                      ? { errorText: data.workability.reason }
+                      : {}),
+                  }}
+                />
+              )}
               {permissions.canReleaseBackoff && (
                 <Button
                   data-testid="release-backoff"
@@ -863,16 +865,18 @@ export function CardDetailView({
                 Re-home
               </Button>
             )}
-            <AskDevOpsButton
-              variant="quiet"
-              label="Ask DevOps"
-              request={{
-                origin: 'card',
-                projectId: card.projectId,
-                cardId: card.id,
-                cardLabel: `${card.ref} ${card.title}`,
-              }}
-            />
+            {!business && (
+              <AskDevOpsButton
+                variant="quiet"
+                label="Ask DevOps"
+                request={{
+                  origin: 'card',
+                  projectId: card.projectId,
+                  cardId: card.id,
+                  cardLabel: `${card.ref} ${card.title}`,
+                }}
+              />
+            )}
             {canCancel && (
               <Button
                 variant="danger-ghost"
