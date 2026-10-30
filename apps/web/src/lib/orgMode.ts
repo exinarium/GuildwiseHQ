@@ -7,4 +7,5 @@ export function useBusinessMode(): boolean {
 }
 
 /** A seat a pack agent can take: the developer seats are not offered in a Business mode organization. */
-export const seatAllowed = (seat: string, business: boolean): boolean => !(business && isDevOnlyRoleKey(seat));
+export const seatAllowed = (seat: string, business: boolean): boolean =>
+  !(business && isDevOnlyRoleKey(seat));

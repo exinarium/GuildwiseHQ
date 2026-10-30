@@ -74,7 +74,7 @@ describe('organization mode', () => {
     expect(await q(`SELECT 1 FROM events WHERE type='OrgModeSet'`)).toHaveLength(1);
 
     // replay gives the same state
-    await rebuildProjections(w.t.app.ctx);
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
     expect((await getOrg()).mode).toBe('business');
   });
 

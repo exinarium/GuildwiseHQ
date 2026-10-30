@@ -55,7 +55,9 @@ const ROLE_LABEL: Record<string, string> = {
 export function blockersMessage(b: ModeSwitchBlockers): string {
   const parts: string[] = [];
   if (b.repositories.length)
-    parts.push(`remove ${b.repositories.map((r) => `repository ${r.name} (project ${r.project})`).join(', ')}`);
+    parts.push(
+      `remove ${b.repositories.map((r) => `repository ${r.name} (project ${r.project})`).join(', ')}`,
+    );
   if (b.agents.length)
     parts.push(`let go of ${b.agents.map((a) => `${a.name} (${ROLE_LABEL[a.role] ?? a.role})`).join(', ')}`);
   return `Business mode needs an organization without code work. First ${parts.join('; ')}.`;
