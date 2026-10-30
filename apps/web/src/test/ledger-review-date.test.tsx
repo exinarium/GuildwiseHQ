@@ -146,7 +146,11 @@ describe('review dates on the Ledger page', () => {
   it('shows a past-date rejection under the date field', async () => {
     const user = userEvent.setup();
     wrapLedger();
-    failWith = { status: 400, code: 'review_date_past', message: 'the review date is in the past; pick today' };
+    failWith = {
+      status: 400,
+      code: 'review_date_past',
+      message: 'the review date is in the past; pick today',
+    };
     await user.click(await screen.findByRole('button', { name: 'Review date of No date' }));
     const form = await screen.findByRole('form', { name: 'Review date' });
     await user.type(within(form).getByLabelText('Review date'), '2020-01-01');
@@ -187,7 +191,11 @@ describe('review date in the add form', () => {
   it('shows review_date_past under the field', async () => {
     const user = userEvent.setup();
     wrapForm();
-    failWith = { status: 400, code: 'review_date_past', message: 'the review date is in the past; pick today' };
+    failWith = {
+      status: 400,
+      code: 'review_date_past',
+      message: 'the review date is in the past; pick today',
+    };
     await user.type(screen.getByLabelText('Title'), 'Rule');
     await user.type(screen.getByLabelText('Text'), 'Do it.');
     await user.type(screen.getByLabelText('Review date (optional)'), '2020-01-01');

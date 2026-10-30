@@ -1,12 +1,12 @@
 import { ledgerToday, streamId } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, type Row } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { assertCanManageEntry } from './ledger-retire.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
+import { assertCanManageEntry } from './ledger-retire.ts';
 
 /** A review date given when an entry is added: today or later. */
 export function assertReviewDateNotPast(reviewDate: string | null | undefined, today: string): void {
@@ -14,7 +14,7 @@ export function assertReviewDateNotPast(reviewDate: string | null | undefined, t
     throw badRequest('review_date_past', 'the review date is in the past; pick today or a later date');
 }
 
-interface ReviewRow {
+export interface ReviewRow extends Row {
   id: string;
   org_id: string;
   project_id: string | null;
@@ -39,7 +39,10 @@ export function reviewDateEvents(
   if (opts.confirmed) {
     if (!due) throw conflict('not_due', 'this entry is not due for review');
     if (reviewDate && reviewDate <= opts.today)
-      throw badRequest('review_date_past', 'the review date is in the past; pick a date after today, or no date');
+      throw badRequest(
+        'review_date_past',
+        'the review date is in the past; pick a date after today, or no date',
+      );
   } else {
     if (reviewDate === e.review_date_text) return [];
     assertReviewDateNotPast(reviewDate, opts.today);
@@ -65,14 +68,14 @@ export async function setLedgerReviewDate(
   req: { reviewDate: string | null; confirmed: boolean },
 ): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const e = await one(
+    const e = await one<ReviewRow>(
       tx,
       'SELECT *, review_date::text AS review_date_text FROM ledger_entries WHERE id=$1 FOR UPDATE',
       [entryId],
     );
     if (!e) throw notFound('ledger entry not found');
     await assertCanManageEntry(tx, user.id, e, 'change the review date of');
-    const events = reviewDateEvents(e as ReviewRow, req.reviewDate, {
+    const events = reviewDateEvents(e, req.reviewDate, {
       confirmed: req.confirmed,
       today: ledgerToday(ctx.clock.now()),
       actor: userActor(user.id),

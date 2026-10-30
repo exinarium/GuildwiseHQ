@@ -3,8 +3,8 @@ import {
   CreateLedgerEntryRequestSchema,
   EditLedgerEntryRequestSchema,
   EscalateStandingOrderRequestSchema,
-  ledgerToday,
   LedgerQuerySchema,
+  ledgerToday,
   RetireLedgerEntryRequestSchema,
   ReviewLedgerEntryRequestSchema,
 } from '@aom/shared';
@@ -79,7 +79,10 @@ export function ledgerRoutes(ctx: Ctx) {
       { schema: { params: IdParams, body: ReviewLedgerEntryRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await setLedgerReviewDate(ctx, s.user, req.params.id, { reviewDate: req.body.reviewDate, confirmed: true });
+        await setLedgerReviewDate(ctx, s.user, req.params.id, {
+          reviewDate: req.body.reviewDate,
+          confirmed: true,
+        });
         const entry = await getLedgerDto(ctx.pool, req.params.id, today(), s.user.id);
         if (!entry) throw notFound('ledger entry not found');
         return { entry };

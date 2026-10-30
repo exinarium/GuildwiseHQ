@@ -92,7 +92,11 @@ export async function retireLedgerEntry(
   entryId: string,
   req: RetireInput,
 ): Promise<boolean> {
-  const e = await one(ctx.pool, 'SELECT org_id, project_id FROM ledger_entries WHERE id=$1', [entryId]);
+  const e = await one<{ org_id: string; project_id: string | null }>(
+    ctx.pool,
+    'SELECT org_id, project_id FROM ledger_entries WHERE id=$1',
+    [entryId],
+  );
   if (!e) throw notFound('ledger entry not found');
   await assertCanManageEntry(ctx.pool, user.id, e);
   return retireLedgerEntryAs(ctx, entryId, req, { actor: userActor(user.id), label: 'owner' });

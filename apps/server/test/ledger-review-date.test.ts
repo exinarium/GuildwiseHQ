@@ -49,7 +49,7 @@ describe('review dates through the API', () => {
       body: { scope: 'standing_order', title: 'Past', body: 'Past date.', reviewDate: day(-1) },
     });
     expect(r.status).toBe(400);
-    expect(JSON.stringify(await r.json())).toContain('review_date_past');
+    expect(JSON.stringify(r.body)).toContain('review_date_past');
     const e = await add({ title: 'Edit me', body: 'Edit me text, lemur.' });
     await call('PATCH', `/api/ledger/${e.id}`, { reviewDate: day(-1) }, 400);
   });
@@ -65,7 +65,9 @@ describe('review dates through the API', () => {
     expect(types).not.toContain('LedgerEntryEdited');
 
     const dec = await add({ scope: 'decision', title: 'A decision', body: 'Text.', projectId: w.projectId });
-    expect((await call('PATCH', `/api/ledger/${dec.id}`, { reviewDate: day(4) })).entry.reviewDate).toBe(day(4));
+    expect((await call('PATCH', `/api/ledger/${dec.id}`, { reviewDate: day(4) })).entry.reviewDate).toBe(
+      day(4),
+    );
     // wording of a decision still cannot be changed
     await call('PATCH', `/api/ledger/${dec.id}`, { title: 'New' }, 409);
   });

@@ -127,7 +127,8 @@ export const EditLedgerEntryRequestSchema = z
     reviewDate: CalendarDate.nullable().optional(),
   })
   .refine(
-    (v) => v.title !== undefined || v.body !== undefined || v.tags !== undefined || v.reviewDate !== undefined,
+    (v) =>
+      v.title !== undefined || v.body !== undefined || v.tags !== undefined || v.reviewDate !== undefined,
     { message: 'give a new title, text, tags or review date' },
   );
 export type EditLedgerEntryRequest = z.infer<typeof EditLedgerEntryRequestSchema>;

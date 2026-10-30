@@ -20,7 +20,7 @@ import { plannedVaultPath } from './decisions.ts';
 import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { findContradictions, findNearDuplicate } from './ledger-checks.ts';
 import { assertCanManageEntry } from './ledger-retire.ts';
-import { assertReviewDateNotPast, reviewDateEvents } from './ledger-review.ts';
+import { assertReviewDateNotPast, type ReviewRow, reviewDateEvents } from './ledger-review.ts';
 
 export interface AddLedgerResult {
   entryId: string;
@@ -199,7 +199,7 @@ export async function editLedgerEntry(
   req: EditLedgerEntryRequest,
 ): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const e = await one(
+    const e = await one<ReviewRow>(
       tx,
       'SELECT *, review_date::text AS review_date_text FROM ledger_entries WHERE id=$1 FOR UPDATE',
       [entryId],

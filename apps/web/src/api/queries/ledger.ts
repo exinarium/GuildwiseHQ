@@ -25,7 +25,14 @@ export interface LedgerFilter {
 export function useLedger(f: LedgerFilter = {}) {
   const scope = f.scope ?? 'all';
   return useQuery({
-    queryKey: ['ledger', f.projectId ?? 'all', scope, f.q ?? '', f.includeRetired ? 'retired' : 'live', f.due ? 'due' : 'any'],
+    queryKey: [
+      'ledger',
+      f.projectId ?? 'all',
+      scope,
+      f.q ?? '',
+      f.includeRetired ? 'retired' : 'live',
+      f.due ? 'due' : 'any',
+    ],
     queryFn: async () =>
       (
         await get<LedgerListResponse>(

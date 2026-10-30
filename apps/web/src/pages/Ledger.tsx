@@ -301,7 +301,12 @@ function Entry({ e }: { e: LedgerEntry }) {
       {!retired && e.canRetire && (
         <div className="mt-2 flex flex-wrap gap-2">
           {e.reviewDue && (
-            <Button size="sm" variant="primary" onClick={() => setReviewing('confirm')} aria-label={`Confirm ${e.title}`}>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => setReviewing('confirm')}
+              aria-label={`Confirm ${e.title}`}
+            >
               Confirm
             </Button>
           )}

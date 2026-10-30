@@ -1,4 +1,9 @@
-import { decisionFilePath, projectVaultFolder, renderDecisionFile, renderStandingOrderBlock } from '@aom/shared';
+import {
+  decisionFilePath,
+  projectVaultFolder,
+  renderDecisionFile,
+  renderStandingOrderBlock,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';

@@ -394,7 +394,14 @@ export async function dueForReview(
   today: string,
   limit = 20,
 ): Promise<
-  Array<{ id: string; scope: string; title: string; body: string; review_date: string; project_key: string | null }>
+  Array<{
+    id: string;
+    scope: string;
+    title: string;
+    body: string;
+    review_date: string;
+    project_key: string | null;
+  }>
 > {
   return rows(
     db,

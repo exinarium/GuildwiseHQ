@@ -16,8 +16,8 @@ import { trainingScores } from './commands.ts';
 import { buildFloorDigest } from './digest.ts';
 import { relevantMemories } from './memory.ts';
 import { ordersBriefSection } from './orders.ts';
-import { reviewDueBriefSection } from './review-due.ts';
 import { decisionReviewBrief } from './review.ts';
+import { reviewDueBriefSection } from './review-due.ts';
 import type { CeoState } from './state.ts';
 import { topicsBriefSection } from './topics.ts';
 
