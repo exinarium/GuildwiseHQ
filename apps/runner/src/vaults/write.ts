@@ -98,9 +98,11 @@ function checkedBinaryTarget(dir: string, path: string): string {
 export async function vaultFileHasHash(dir: string, path: string, sha256: string): Promise<boolean> {
   const file = checkedBinaryTarget(dir, path);
   if (!existsSync(file)) return false;
-  return createHash('sha256')
-    .update(await readFile(file))
-    .digest('hex') === sha256;
+  return (
+    createHash('sha256')
+      .update(await readFile(file))
+      .digest('hex') === sha256
+  );
 }
 
 /**

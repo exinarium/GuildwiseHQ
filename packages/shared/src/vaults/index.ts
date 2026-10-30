@@ -73,7 +73,11 @@ export const VaultWriteFileCommandSchema = z.object({
   path: z.string().min(1),
   documentId: z.uuid(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  size: z.number().int().min(1).max(20 * 1024 * 1024),
+  size: z
+    .number()
+    .int()
+    .min(1)
+    .max(20 * 1024 * 1024),
   commitMessage: z.string().min(1),
   push: z.boolean().default(true),
 });

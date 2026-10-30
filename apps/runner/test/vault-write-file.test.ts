@@ -99,7 +99,7 @@ describe('VaultManager.writeFile', () => {
     };
     const r = await m.writeFile(cmd(), fetchBytes);
     expect(r).toMatchObject({ written: true, committed: true, pushed: true });
-    expect(originLog(v)).toContain('docs: file plan');
+    expect(originLog(v).some((l) => l.endsWith('|docs: file plan'))).toBe(true);
     const again = await m.writeFile(cmd(), fetchBytes);
     expect(again).toMatchObject({ written: false, committed: false });
     expect(fetched).toBe(1);
@@ -113,7 +113,7 @@ describe('VaultManager.writeFile', () => {
     await expect(m.writeFile(cmd({ size: bytes.byteLength + 1 }), async () => bytes)).rejects.toThrow(
       /does not match/,
     );
-    expect(originLog(v)).not.toContain('docs: file plan');
+    expect(originLog(v).some((l) => l.endsWith('|docs: file plan'))).toBe(false);
   });
 
   it('fails for a vault that is not configured', async () => {

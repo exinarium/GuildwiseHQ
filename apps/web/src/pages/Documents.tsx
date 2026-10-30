@@ -103,7 +103,11 @@ function UploadDialog({
   };
   const pick = (f: File | null) => {
     setFile(f);
-    setProblem(f && f.size > MAX_ATTACHMENT_BYTES ? `The file is larger than ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB` : null);
+    setProblem(
+      f && f.size > MAX_ATTACHMENT_BYTES
+        ? `The file is larger than ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
+        : null,
+    );
     if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ''));
   };
   const submit = async (e: FormEvent) => {

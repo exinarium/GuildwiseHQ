@@ -10,12 +10,12 @@ import {
   DOCUMENT_TEXT_UPLOAD_EXTENSIONS,
   type DocumentDto,
   type DocumentKind,
-  type DocumentTagCountDto,
   type DocumentStatus,
+  type DocumentTagCountDto,
   type DocumentVersionDto,
   type DocumentWithContentDto,
-  documentIsEditable,
   documentFileVaultPath,
+  documentIsEditable,
   documentSlug,
   documentVaultPath,
   isOrgManager,
@@ -383,7 +383,8 @@ export async function uploadDocument(
     const slug = await uniqueSlug(tx, who.orgId, input.projectId ?? null, title);
     const scope = input.projectId ? projectScope(who.orgId, input.projectId) : orgScope(who.orgId);
     const actor = userActor(who.userId);
-    if (file) await exec(tx, 'INSERT INTO document_file_data (document_id, data) VALUES ($1,$2)', [id, input.bytes]);
+    if (file)
+      await exec(tx, 'INSERT INTO document_file_data (document_id, data) VALUES ($1,$2)', [id, input.bytes]);
     const status = (from: DocumentStatus, to: DocumentStatus): AppendInput => ({
       streamId: streamId.document(id),
       event: {
@@ -437,10 +438,7 @@ export async function readDocumentFile(
   return fileOf(ctx.pool, d);
 }
 
-async function fileOf(
-  db: Queryable,
-  d: Row,
-): Promise<{ name: string; contentType: string; data: Buffer }> {
+async function fileOf(db: Queryable, d: Row): Promise<{ name: string; contentType: string; data: Buffer }> {
   const f = d.file_name
     ? await one(db, 'SELECT data FROM document_file_data WHERE document_id=$1', [d.id])
     : null;
@@ -569,7 +567,8 @@ export async function changeDocumentStatus(
         docId,
         d.current_version,
       ]);
-      if (!d.file_name && !cur?.content?.trim()) throw conflict('document_empty', 'an empty document cannot be approved');
+      if (!d.file_name && !cur?.content?.trim())
+        throw conflict('document_empty', 'an empty document cannot be approved');
     }
     await ctx.store.append(
       [
@@ -666,21 +665,21 @@ export async function publishDocument(ctx: Ctx, docId: string): Promise<PublishR
     ctx.pool,
     vaultId,
     {
-    path,
-    mode: 'replace',
-    content: renderDocumentFile({
-      id: d.id,
-      title: d.title,
-      kind: d.kind,
-      version: d.publish_version,
-      status: 'approved',
-      content: v.content,
-      approvedAt: iso(d.updated_at) as string,
-      sourceThreadIds: d.source_thread_ids ?? [],
-      tags: d.tags ?? [],
-      file,
-    }),
-    commitMessage: `docs: ${d.kind} ${d.title.replace(/\s+/g, ' ').slice(0, 60)} v${d.publish_version}`,
+      path,
+      mode: 'replace',
+      content: renderDocumentFile({
+        id: d.id,
+        title: d.title,
+        kind: d.kind,
+        version: d.publish_version,
+        status: 'approved',
+        content: v.content,
+        approvedAt: iso(d.updated_at) as string,
+        sourceThreadIds: d.source_thread_ids ?? [],
+        tags: d.tags ?? [],
+        file,
+      }),
+      commitMessage: `docs: ${d.kind} ${d.title.replace(/\s+/g, ' ').slice(0, 60)} v${d.publish_version}`,
     },
     target,
   );

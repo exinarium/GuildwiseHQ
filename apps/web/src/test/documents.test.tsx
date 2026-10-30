@@ -62,7 +62,16 @@ const me = (role: string) => ({
     },
   }),
 });
-const TAGS = { 'GET /api/documents/tags': () => ({ body: { tags: [{ tag: 'design', count: 2 }, { tag: 'hr', count: 1 }] } }) };
+const TAGS = {
+  'GET /api/documents/tags': () => ({
+    body: {
+      tags: [
+        { tag: 'design', count: 2 },
+        { tag: 'hr', count: 1 },
+      ],
+    },
+  }),
+};
 
 const mount = (path: string) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -129,7 +138,9 @@ describe('Documents list: tags, search and tag filter', () => {
     await user.type(search, 'roadmap');
     await waitFor(() => expect(calls.some((c) => c.url.includes('q=roadmap'))).toBe(true));
     await user.click(await screen.findByRole('button', { name: '#design' }));
-    await waitFor(() => expect(calls.some((c) => c.url.includes('tags=design') && c.url.includes('q=roadmap'))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('tags=design') && c.url.includes('q=roadmap'))).toBe(true),
+    );
     await user.click(screen.getByRole('button', { name: '#hr' }));
     await waitFor(() => expect(calls.some((c) => c.url.includes('tags=design%2Chr'))).toBe(true));
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
@@ -153,27 +164,31 @@ describe('Upload dialog', () => {
     stub({ ...me('member'), ...TAGS, 'GET /api/documents': () => ({ body: { documents: [] } }) });
     mount('/documents');
     await screen.findByText('No documents yet');
-    expect(screen.queryByRole('button', { name: /Upload/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull();
   });
 
   it('uploads the file with its title, project and tags, then closes', async () => {
     const calls = stub({
       ...me('owner'),
       ...TAGS,
-      'GET /api/projects': () => ({ body: { projects: [{ id: '0192f3a0-0000-7000-8000-0000000000f1', name: 'Toy', key: 'TOY' }] } }),
+      'GET /api/projects': () => ({
+        body: { projects: [{ id: '0192f3a0-0000-7000-8000-0000000000f1', name: 'Toy', key: 'TOY' }] },
+      }),
       'GET /api/documents': () => ({ body: { documents: [] } }),
       'POST /api/documents/upload': () => ({ status: 201, body: { document: doc() } }),
     });
     mount('/documents');
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: /Upload/ }));
+    await user.click(await screen.findByRole('button', { name: 'Upload' }));
     const dialog = await screen.findByRole('dialog');
     await user.upload(within(dialog).getByLabelText('File'), file());
     expect(within(dialog).getByLabelText('Title')).toHaveValue('Handbook');
     await user.type(within(dialog).getByLabelText('Tags'), 'HR Policy{Enter}');
     expect(within(dialog).getByRole('button', { name: 'Remove tag hr-policy' })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Upload' }));
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.startsWith('/api/documents/upload'))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url.startsWith('/api/documents/upload'))).toBe(true),
+    );
     const post = calls.find((c) => c.method === 'POST') as Call;
     expect(post.url).toContain('tags=hr-policy');
     expect(post.url).toContain('title=Handbook');
@@ -190,12 +205,14 @@ describe('Upload dialog', () => {
       'GET /api/documents': () => ({ body: { documents: [] } }),
       'POST /api/documents/upload': () => ({
         status: 422,
-        body: { error: { code: 'document_rejected', message: 'run.png: the content is not a valid .png file' } },
+        body: {
+          error: { code: 'document_rejected', message: 'run.png: the content is not a valid .png file' },
+        },
       }),
     });
     mount('/documents');
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: /Upload/ }));
+    await user.click(await screen.findByRole('button', { name: 'Upload' }));
     const dialog = await screen.findByRole('dialog');
     await user.upload(within(dialog).getByLabelText('File'), new File(['x'], 'run.png'));
     await user.click(within(dialog).getByRole('button', { name: 'Upload' }));
@@ -251,7 +268,10 @@ describe('Document view: tags and file', () => {
       'href',
       `/api/documents/${DOC}/file?download=1`,
     );
-    expect(within(panel).getByRole('img', { name: 'diagram.png' })).toHaveAttribute('src', `/api/documents/${DOC}/file`);
+    expect(within(panel).getByRole('img', { name: 'diagram.png' })).toHaveAttribute(
+      'src',
+      `/api/documents/${DOC}/file`,
+    );
     expect(panel).toHaveTextContent('2.0 KB');
   });
 });

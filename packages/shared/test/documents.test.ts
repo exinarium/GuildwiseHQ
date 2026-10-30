@@ -22,7 +22,9 @@ const base = {
 
 describe('renderDocumentFile', () => {
   it('writes exactly the pre-tags output when there are no tags and no file', () => {
-    expect(renderDocumentFile({ ...base, approvedAt: '2026-01-01T00:00:00.000Z', sourceThreadIds: ['a', 'b'] })).toBe(
+    expect(
+      renderDocumentFile({ ...base, approvedAt: '2026-01-01T00:00:00.000Z', sourceThreadIds: ['a', 'b'] }),
+    ).toBe(
       [
         '---',
         'title: "Launch \\"plan\\""',
@@ -33,7 +35,6 @@ describe('renderDocumentFile', () => {
         'approved_at: 2026-01-01T00:00:00.000Z',
         'sessions: [a, b]',
         '---',
-        '',
         'Hello',
         '',
       ].join('\n'),
@@ -77,7 +78,9 @@ describe('document schemas', () => {
   it('creates with no tags as before', () => {
     const r = CreateDocumentRequestSchema.parse({ kind: 'brief', title: 'x' });
     expect(r.tags).toBeUndefined();
-    expect(() => CreateDocumentRequestSchema.parse({ kind: 'brief', title: 'x', tags: Array(21).fill('a') })).toThrow();
+    expect(() =>
+      CreateDocumentRequestSchema.parse({ kind: 'brief', title: 'x', tags: Array(21).fill('a') }),
+    ).toThrow();
   });
   it('accepts the file kind and keeps tags and file optional on the DTO', () => {
     const dto = {

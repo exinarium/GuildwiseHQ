@@ -64,15 +64,11 @@ const asOrg = (cookie: string, method: string, url: string, body?: unknown) =>
   });
 const ids = (list: Array<{ id: string }>) => list.map((d) => d.id);
 const listIds = async (query: string, cookie = w.owner.cookie) =>
-  ids((await ok<{ documents: Array<{ id: string }> }>(w.t.req('GET', `/api/documents${query}`, { cookie })))
-    .documents);
-const upload = (
-  cookie: string,
-  name: string,
-  body: Buffer,
-  query = '',
-  origin: string | null = ORIGIN,
-) =>
+  ids(
+    (await ok<{ documents: Array<{ id: string }> }>(w.t.req('GET', `/api/documents${query}`, { cookie })))
+      .documents,
+  );
+const upload = (cookie: string, name: string, body: Buffer, query = '', origin: string | null = ORIGIN) =>
   w.t.app.inject({
     method: 'POST',
     url: `/api/documents/upload?name=${encodeURIComponent(name)}${query}`,
@@ -100,10 +96,13 @@ describe('document tags', () => {
     expect('file' in untagged).toBe(false);
     const listed = (await call('GET', '/api/documents')).documents as Array<Record<string, unknown>>;
     expect('tags' in (listed.find((d) => d.id === untagged.id) as object)).toBe(false);
-    expect((listed.find((d) => d.id === tagged.id) as { tags: string[] }).tags).toEqual(['release-notes', 'q4']);
-    expect((await raw('POST', '/api/documents', { kind: 'prd', title: 'x', tags: Array(21).fill('a') })).status).toBe(
-      400,
-    );
+    expect((listed.find((d) => d.id === tagged.id) as { tags: string[] }).tags).toEqual([
+      'release-notes',
+      'q4',
+    ]);
+    expect(
+      (await raw('POST', '/api/documents', { kind: 'prd', title: 'x', tags: Array(21).fill('a') })).status,
+    ).toBe(400);
   });
 
   it('edits tags later and keeps them across new versions and status changes', async () => {
@@ -139,9 +138,13 @@ describe('document tags', () => {
 
   it('only an Owner or Admin changes tags, and a stranger cannot see the document', async () => {
     const d = await create({ title: 'Guarded tags' });
-    expect((await asOrg(plain.cookie, 'PUT', `/api/documents/${d.id}/tags`, { tags: ['x'] })).status).toBe(403);
+    expect((await asOrg(plain.cookie, 'PUT', `/api/documents/${d.id}/tags`, { tags: ['x'] })).status).toBe(
+      403,
+    );
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
-    expect((await raw('PUT', `/api/documents/${d.id}/tags`, { tags: ['x'] }, stranger.cookie)).status).not.toBe(200);
+    expect(
+      (await raw('PUT', `/api/documents/${d.id}/tags`, { tags: ['x'] }, stranger.cookie)).status,
+    ).not.toBe(200);
   });
 
   it('survives a projection rebuild', async () => {
@@ -188,7 +191,12 @@ describe('searching and filtering', () => {
 
   it('never returns documents (or tag counts) of a project the user cannot see', async () => {
     const secret = await create({ title: 'Secret plan zzq', tags: ['secretonly'], content: 'zzq' });
-    const open = await create({ title: 'Org zzq', projectId: undefined, kind: 'brief', tags: ['secretonly'] });
+    const open = await create({
+      title: 'Org zzq',
+      projectId: undefined,
+      kind: 'brief',
+      tags: ['secretonly'],
+    });
     const outsider = await w.t.userSession(uniqueEmail('outsider'));
     await w.t.addOrgMember(orgId, outsider.id, 'member');
     const asOutsider = (url: string) => asOrg(outsider.cookie, 'GET', url);
@@ -205,7 +213,12 @@ describe('searching and filtering', () => {
 describe('uploading a document', () => {
   it('turns a markdown file into an approved text document and publishes it through the vault queue', async () => {
     const before = commands('vault.write').length;
-    const res = await upload(w.owner.cookie, 'Handbook.md', Buffer.from('# Handbook\n\nHello'), `&projectId=${w.projectId}&tags=Policy,hr`);
+    const res = await upload(
+      w.owner.cookie,
+      'Handbook.md',
+      Buffer.from('# Handbook\n\nHello'),
+      `&projectId=${w.projectId}&tags=Policy,hr`,
+    );
     expect(res.statusCode).toBe(201);
     const d = res.json().document;
     expect(d).toMatchObject({
@@ -224,10 +237,18 @@ describe('uploading a document', () => {
     expect(cmd).toMatchObject({ path: 'projects/toy/docs/handbook.md', mode: 'replace' });
     expect(cmd.content).toContain('tags: ["policy", "hr"]');
     expect(cmd.content).toContain('# Handbook');
-    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(0);
+    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(
+      0,
+    );
     // the trail respects the allowed transitions
-    const trail = await q(`SELECT payload FROM events WHERE type='DocumentStatusChanged' AND payload->>'docId'=$1 ORDER BY seq`, [d.id]);
-    expect(trail.map((e) => `${e.payload.from}>${e.payload.to}`)).toEqual(['draft>in_review', 'in_review>approved']);
+    const trail = await q(
+      `SELECT payload FROM events WHERE type='DocumentStatusChanged' AND payload->>'docId'=$1 ORDER BY seq`,
+      [d.id],
+    );
+    expect(trail.map((e) => `${e.payload.from}>${e.payload.to}`)).toEqual([
+      'draft>in_review',
+      'in_review>approved',
+    ]);
   });
 
   it('keeps a binary file as a file document: the file command comes before the sidecar, same workstation', async () => {
@@ -241,9 +262,17 @@ describe('uploading a document', () => {
       title: 'Architecture diagram',
       status: 'approved',
       tags: ['design'],
-      file: { name: 'diagram.png', contentType: 'image/png', size: PNG.length, sha256: sha(PNG), image: true },
+      file: {
+        name: 'diagram.png',
+        contentType: 'image/png',
+        size: PNG.length,
+        sha256: sha(PNG),
+        image: true,
+      },
     });
-    await until(async () => commands('vault.write_file').length > files && commands('vault.write').length > writes);
+    await until(
+      async () => commands('vault.write_file').length > files && commands('vault.write').length > writes,
+    );
     const fileCmd = commands('vault.write_file').at(-1);
     const parsed = VaultWriteFileCommandSchema.parse(fileCmd?.payload);
     expect(parsed).toMatchObject({
@@ -261,7 +290,11 @@ describe('uploading a document', () => {
     expect(order.lastIndexOf('vault.write_file')).toBeLessThan(order.lastIndexOf('vault.write'));
 
     // the owner can download it, safely
-    const file = await w.t.app.inject({ method: 'GET', url: `/api/documents/${d.id}/file`, headers: { cookie: w.owner.cookie } });
+    const file = await w.t.app.inject({
+      method: 'GET',
+      url: `/api/documents/${d.id}/file`,
+      headers: { cookie: w.owner.cookie },
+    });
     expect(file.statusCode).toBe(200);
     expect(file.rawPayload.equals(PNG)).toBe(true);
     expect(file.headers['x-content-type-options']).toBe('nosniff');
@@ -269,10 +302,16 @@ describe('uploading a document', () => {
 
     // the runner may fetch it only while its command is waiting
     const get = (token: string) =>
-      w.t.app.inject({ method: 'GET', url: `/api/runner/document-files/${d.id}`, headers: { authorization: `Bearer ${token}` } });
+      w.t.app.inject({
+        method: 'GET',
+        url: `/api/runner/document-files/${d.id}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
     expect((await get(w.runnerToken)).statusCode).toBe(200);
     expect((await get(member.runnerToken)).statusCode).toBe(404);
-    expect((await w.t.app.inject({ method: 'GET', url: `/api/runner/document-files/${d.id}` })).statusCode).toBe(401);
+    expect(
+      (await w.t.app.inject({ method: 'GET', url: `/api/runner/document-files/${d.id}` })).statusCode,
+    ).toBe(401);
     r.send('command.result', { commandId: fileCmd?.commandId, ok: true, result: { committed: true } });
     await until(async () => (await get(w.runnerToken)).statusCode === 404);
   });
@@ -284,7 +323,9 @@ describe('uploading a document', () => {
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     const again = (await call('GET', `/api/documents/${d.id}`)).document;
     expect(again.file).toMatchObject({ name: 'pic.png', size: PNG.length });
-    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(1);
+    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(
+      1,
+    );
     expect(await listIds('?q=pic.png')).toContain(d.id);
   });
 
@@ -299,21 +340,40 @@ describe('uploading a document', () => {
     await check(await upload(w.owner.cookie, 'empty.txt', Buffer.alloc(0)), 400);
     await check(await upload(w.owner.cookie, 'fake.png', Buffer.from('not a png')), 422, 'not a valid');
     await check(await upload(w.owner.cookie, 'bad.txt', Buffer.from([0xff, 0xfe, 0xfd])), 422);
-    await check(await upload(w.owner.cookie, 'big.png', Buffer.concat([PNG, Buffer.alloc(21 * 1024 * 1024)])), 413);
-    await check(await upload(w.owner.cookie, 'many.txt', Buffer.from('x'), `&tags=${Array.from({ length: 21 }, (_, i) => `t${i}`).join(',')}`), 400, 'too_many_tags');
+    await check(
+      await upload(w.owner.cookie, 'big.png', Buffer.concat([PNG, Buffer.alloc(21 * 1024 * 1024)])),
+      413,
+    );
+    await check(
+      await upload(
+        w.owner.cookie,
+        'many.txt',
+        Buffer.from('x'),
+        `&tags=${Array.from({ length: 21 }, (_, i) => `t${i}`).join(',')}`,
+      ),
+      400,
+      'too_many_tags',
+    );
     // an organization member who is no Owner or Admin may not upload
     await check(await upload(plain.cookie, 'a.txt', Buffer.from('x')), 403);
     // an Admin who is not on the project cannot upload into it: the project does not exist for them
     const admin = await w.t.userSession(uniqueEmail('admin'));
     await w.t.addOrgMember(orgId, admin.id, 'admin');
     await check(await upload(admin.cookie, 'a.txt', Buffer.from('x'), `&projectId=${w.projectId}`), 404);
-    const unknown = await upload(w.owner.cookie, 'a.txt', Buffer.from('x'), '&projectId=00000000-0000-4000-8000-000000000000');
+    const unknown = await upload(
+      w.owner.cookie,
+      'a.txt',
+      Buffer.from('x'),
+      '&projectId=00000000-0000-4000-8000-000000000000',
+    );
     expect(unknown.statusCode).toBe(404);
     await new Promise((res) => setTimeout(res, 200));
     expect(await counts()).toEqual(before);
   });
 
   it('refuses a cross-site upload', async () => {
-    expect((await upload(w.owner.cookie, 'x.txt', Buffer.from('x'), '', 'https://evil.example')).statusCode).toBe(403);
+    expect(
+      (await upload(w.owner.cookie, 'x.txt', Buffer.from('x'), '', 'https://evil.example')).statusCode,
+    ).toBe(403);
   });
 });
