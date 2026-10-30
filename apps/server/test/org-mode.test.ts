@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
-import { uniqueEmail } from './helpers/app.ts';
+import { ORIGIN, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { latestInviteToken } from './helpers/mailpit.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 let w: World;
@@ -136,5 +137,35 @@ describe('organization mode', () => {
     await ok(hireReq('Linus', 'reviewer'), 201);
     const agents = await ok<any[]>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
     expect(agents.map((a) => a.name)).toContain('Anna');
+  });
+
+  it('a new organization accepted from an invitation can start in business mode, with its event', async () => {
+    const root = await w.t.superAdminSession();
+    const email = uniqueEmail('business-invitee');
+    await ok(
+      w.t.req('POST', '/api/platform/invitations', {
+        cookie: root.cookie,
+        body: { email, proposedOrgName: 'Bizco', plan: 'founding', status: 'active' },
+      }),
+      201,
+    );
+    const token = await latestInviteToken(email, ORIGIN);
+    const accept = await w.t.req('POST', `/api/invitations/${token}/accept`, {
+      body: {
+        displayName: 'Biz Person',
+        password: 'a-long-enough-password',
+        orgName: 'Bizco',
+        mode: 'business',
+      },
+    });
+    expect(accept.status).toBe(201);
+    expect(accept.body.activeOrg).toMatchObject({ name: 'Bizco', mode: 'business' });
+    const [row] = await q('SELECT mode FROM organizations WHERE id=$1', [accept.body.activeOrg.id]);
+    expect(row?.mode).toBe('business');
+    const [ev] = await q(
+      `SELECT payload FROM events WHERE type = 'OrganizationCreated' AND payload->>'orgId' = $1`,
+      [accept.body.activeOrg.id],
+    );
+    expect((ev?.payload as { mode?: string } | undefined)?.mode).toBe('business');
   });
 });

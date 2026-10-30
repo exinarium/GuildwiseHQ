@@ -316,6 +316,7 @@ export function CardDetailView({
               workability={data.workability}
               projectId={card.projectId}
               className="w-full max-w-xl rounded-control border"
+              business={business}
             />
           </div>
         }

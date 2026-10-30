@@ -71,11 +71,13 @@ export function CardTile({
   now,
   projectId,
   flash = false,
+  business = false,
 }: {
   card: BoardCard;
   now?: number;
   projectId?: string;
   flash?: boolean;
+  business?: boolean;
 }) {
   const railed = card.blocked
     ? 'before:bg-danger-fill'
@@ -198,7 +200,7 @@ export function CardTile({
       <BudgetNotice budget={card.budget} projectId={projectId} />
       <HygieneNotice findings={card.hygiene} projectId={projectId} />
       <BackoffBadge backoff={card.backoff} banner />
-      <WorkabilityWarning workability={card.workability} projectId={projectId} />
+      <WorkabilityWarning workability={card.workability} projectId={projectId} business={business} />
       {card.status === 'waiting' && card.waitingOn && (
         <Link
           to={`/cards/${card.waitingOn.id}`}
@@ -230,10 +232,13 @@ export function BoardView({
   board,
   now,
   filter = NO_FILTER,
+  business = false,
 }: {
   board: BoardResponse;
   now?: number;
   filter?: BoardFilter;
+  /** A Business mode organization: the cards offer no repository or developer-role links. */
+  business?: boolean;
 }) {
   const wide = useMediaQuery('(min-width: 768px)', true);
   const [hideEmpty, setHideEmpty] = useState(readHide);
@@ -396,6 +401,7 @@ export function BoardView({
                       card={c}
                       projectId={board.projectId}
                       flash={flash.has(c.id)}
+                      business={business}
                       {...(now !== undefined ? { now } : {})}
                     />
                   ))}
