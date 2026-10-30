@@ -2,7 +2,9 @@ import { ledgerToday } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { reviewDueBriefSection } from '../src/ceo/review-due.ts';
 import { standingOrdersFor } from '../src/queries/ledger.ts';
+import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { addMember } from './helpers/members.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 // Release 1.4.0: review dates on ledger entries. A passed date marks an entry; it never unbinds it.
@@ -127,6 +129,81 @@ describe('visibility', () => {
   it('an unknown entry gives 404', async () => {
     await call('POST', '/api/ledger/0192f3a0-0000-7000-8000-000000000999/review', { reviewDate: null }, 404);
     await call('PATCH', '/api/ledger/0192f3a0-0000-7000-8000-000000000999', { reviewDate: null }, 404);
+  });
+});
+
+describe('visibility by role', () => {
+  const as = (cookie: string, method: string, url: string, body: unknown, status: number) =>
+    ok<any>(w.t.req(method, url, { cookie, body }), status);
+
+  it('only managers set or confirm a date; people outside the scope get 404', async () => {
+    const orgEntry = await add({
+      title: 'Org vis',
+      body: 'Org visibility text, dugong.',
+      reviewDate: day(0),
+    });
+    const projEntry = await add({
+      title: 'Proj vis',
+      body: 'Project visibility text, quoll.',
+      projectId: w.projectId,
+      reviewDate: day(0),
+    });
+    const orgMember = await w.t.userSession(uniqueEmail('orgmember'));
+    await w.t.addOrgMember(w.owner.id, orgMember.id, 'member');
+    const projMember = await addMember(w, 'projmember');
+    const outsider = await w.t.userSession(uniqueEmail('outsider'));
+
+    for (const [id, who] of [
+      [orgEntry.id, orgMember],
+      [projEntry.id, projMember],
+    ] as const) {
+      await as(who.cookie, 'PATCH', `/api/ledger/${id}`, { reviewDate: day(9) }, 403);
+      await as(who.cookie, 'POST', `/api/ledger/${id}/review`, { reviewDate: day(9) }, 403);
+    }
+    for (const id of [orgEntry.id, projEntry.id]) {
+      await as(outsider.cookie, 'PATCH', `/api/ledger/${id}`, { reviewDate: day(9) }, 404);
+      await as(outsider.cookie, 'POST', `/api/ledger/${id}/review`, { reviewDate: day(9) }, 404);
+    }
+    const row = (await q('SELECT review_date::text AS d FROM ledger_entries WHERE id=$1', [orgEntry.id]))[0];
+    expect(row?.d).toBe(day(0));
+  });
+});
+
+describe('confirm rules and merge', () => {
+  it('refuses a not-due entry (409 not_due) and a date that is not after today (400 review_date_past)', async () => {
+    const future = await add({ title: 'Not due', body: 'Not due text, pangolin.', reviewDate: day(20) });
+    const r = await w.t.req('POST', `/api/ledger/${future.id}/review`, {
+      cookie: w.owner.cookie,
+      body: { reviewDate: day(30) },
+    });
+    expect(r.status).toBe(409);
+    expect(JSON.stringify(r.body)).toContain('not_due');
+    const due = await add({ title: 'Due now', body: 'Due now text, serval.', reviewDate: day(0) });
+    const p = await w.t.req('POST', `/api/ledger/${due.id}/review`, {
+      cookie: w.owner.cookie,
+      body: { reviewDate: day(0) },
+    });
+    expect(p.status).toBe(400);
+    expect(JSON.stringify(p.body)).toContain('review_date_past');
+  });
+
+  it('a merge into a duplicate passes the review date on', async () => {
+    const first = await add({ title: 'Merge title', body: 'Merge the review date into the first order.' });
+    const merged = await call(
+      'POST',
+      '/api/ledger',
+      {
+        scope: 'standing_order',
+        title: 'Merge title',
+        body: 'Merge the review date into the first order, please.',
+        onDuplicate: 'merge',
+        reviewDate: day(12),
+      },
+      200,
+    );
+    expect(merged.merged).toBe(true);
+    expect(merged.entry.id).toBe(first.id);
+    expect(merged.entry.reviewDate).toBe(day(12));
   });
 });
 
