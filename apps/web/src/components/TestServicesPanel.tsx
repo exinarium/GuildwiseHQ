@@ -1,4 +1,5 @@
 import {
+  type LocalTestService,
   LocalTestServicesSchema,
   MAX_TEST_SERVICES,
   type ProjectDetailResponse,
@@ -73,7 +74,12 @@ export function TestServicesPanel({
     setTried(true);
     if (!check.valid) return;
     set.mutate(
-      shown.map((r) => ({ name: r.name.trim(), host: r.host.trim(), port: Number(r.port) })),
+      // every row passed the schema above, so the host is one of the loopback names
+      shown.map((r) => ({
+        name: r.name.trim(),
+        host: r.host.trim(),
+        port: Number(r.port),
+      })) as LocalTestService[],
       {
         onSuccess: () => {
           setRows(null);
@@ -87,10 +93,10 @@ export function TestServicesPanel({
     <Panel data-testid="test-services-panel">
       <h2 className="mb-1 text-lg font-semibold text-fg">Local test services</h2>
       <p className="mb-3 text-sm text-muted">
-        Build, review and test shifts of this project may connect to exactly these ports on the workstation (for
-        example a test database), and to no other local port. Only 127.0.0.1, ::1 and localhost are accepted.
-        Credentials stay in the test configuration, not here. Declare throwaway test services only. A change
-        applies from the next shift that starts.
+        Build, review and test shifts of this project may connect to exactly these ports on the workstation
+        (for example a test database), and to no other local port. Only 127.0.0.1, ::1 and localhost are
+        accepted. Credentials stay in the test configuration, not here. Declare throwaway test services only.
+        A change applies from the next shift that starts.
       </p>
       <datalist id={hostsId}>
         {TEST_SERVICE_HOSTS.map((h) => (
@@ -106,8 +112,12 @@ export function TestServicesPanel({
         {shown.map((r, i) => {
           const e = tried || dirty ? check.errors[i] : undefined;
           return (
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity until saved
-            <li key={i} className="flex flex-col gap-2 sm:flex-row sm:items-start" data-testid="test-service-row">
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity until saved
+              key={i}
+              className="flex flex-col gap-2 sm:flex-row sm:items-start"
+              data-testid="test-service-row"
+            >
               <div className="min-w-0 flex-1">
                 <input
                   className={inputCls}
@@ -122,7 +132,11 @@ export function TestServicesPanel({
                   onFocus={keepInView}
                   onChange={(ev) => edit(i, { name: ev.target.value })}
                 />
-                {e?.name && <p className="mt-1 text-sm text-danger" data-testid="test-service-error">{e.name}</p>}
+                {e?.name && (
+                  <p className="mt-1 text-sm text-danger" data-testid="test-service-error">
+                    {e.name}
+                  </p>
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <input
@@ -139,7 +153,11 @@ export function TestServicesPanel({
                   onFocus={keepInView}
                   onChange={(ev) => edit(i, { host: ev.target.value })}
                 />
-                {e?.host && <p className="mt-1 text-sm text-danger" data-testid="test-service-error">{e.host}</p>}
+                {e?.host && (
+                  <p className="mt-1 text-sm text-danger" data-testid="test-service-error">
+                    {e.host}
+                  </p>
+                )}
               </div>
               <div className="min-w-0 sm:w-32">
                 <input
@@ -154,7 +172,11 @@ export function TestServicesPanel({
                   onFocus={keepInView}
                   onChange={(ev) => edit(i, { port: ev.target.value })}
                 />
-                {e?.port && <p className="mt-1 text-sm text-danger" data-testid="test-service-error">{e.port}</p>}
+                {e?.port && (
+                  <p className="mt-1 text-sm text-danger" data-testid="test-service-error">
+                    {e.port}
+                  </p>
+                )}
               </div>
               {canChange && (
                 <Button

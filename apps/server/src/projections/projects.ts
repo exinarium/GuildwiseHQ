@@ -373,7 +373,10 @@ export const projectProjectors: Record<string, Projector> = {
   },
   ProjectTestServicesSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectTestServicesSet'>).payload;
-    await exec(tx, 'UPDATE projects SET test_services=$2::jsonb WHERE id=$1', [p.projectId, JSON.stringify(p.services)]);
+    await exec(tx, 'UPDATE projects SET test_services=$2::jsonb WHERE id=$1', [
+      p.projectId,
+      JSON.stringify(p.services),
+    ]);
   },
   ProjectConcurrencyCapSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;

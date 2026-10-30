@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { testServicesFor } from '../src/runner-gateway/brief.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
+import { testServicesFor } from '../src/runner-gateway/brief.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
@@ -14,8 +14,10 @@ const PG = { name: 'postgres-test', host: '127.0.0.1', port: 5433 };
 
 const put = (cookie: string, services: unknown, id = w.projectId) =>
   w.t.req('PUT', `/api/projects/${id}/test-services`, { cookie, body: { services } });
-const detail = (cookie = w.owner.cookie) => ok<any>(w.t.req('GET', `/api/projects/${w.projectId}`, { cookie }));
-const column = async () => (await q('SELECT test_services FROM projects WHERE id=$1', [w.projectId]))[0]?.test_services;
+const detail = (cookie = w.owner.cookie) =>
+  ok<any>(w.t.req('GET', `/api/projects/${w.projectId}`, { cookie }));
+const column = async () =>
+  (await q('SELECT test_services FROM projects WHERE id=$1', [w.projectId]))[0]?.test_services;
 
 beforeAll(async () => {
   w = await createWorld();
@@ -64,9 +66,14 @@ describe('local test services: the setting', () => {
 
   it('removing an entry takes it out of the next shift start', async () => {
     const agent = { role_key: 'builder', is_devops: false };
-    expect((await testServicesFor(w.t.app.ctx, agent, w.projectId)).map((s) => s.name)).toEqual(['postgres-test', 'v6']);
+    expect((await testServicesFor(w.t.app.ctx, agent, w.projectId)).map((s) => s.name)).toEqual([
+      'postgres-test',
+      'v6',
+    ]);
     await ok(put(w.owner.cookie, [PG]));
-    expect((await testServicesFor(w.t.app.ctx, agent, w.projectId)).map((s) => s.name)).toEqual(['postgres-test']);
+    expect((await testServicesFor(w.t.app.ctx, agent, w.projectId)).map((s) => s.name)).toEqual([
+      'postgres-test',
+    ]);
   });
 });
 
@@ -81,7 +88,9 @@ describe('local test services: what the runner is told', () => {
   });
 
   it('the DevOps engineer gets nothing, even in a builder role', async () => {
-    expect(await testServicesFor(w.t.app.ctx, { role_key: 'builder', is_devops: true }, w.projectId)).toEqual([]);
+    expect(await testServicesFor(w.t.app.ctx, { role_key: 'builder', is_devops: true }, w.projectId)).toEqual(
+      [],
+    );
   });
 
   it('another project does not get the list', async () => {

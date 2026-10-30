@@ -67,7 +67,13 @@ describe('TestServicesPanel', () => {
 
   it('edits an entry in place', async () => {
     const user = userEvent.setup();
-    wrap(<TestServicesPanel projectId={PROJECT} project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])} canChange />);
+    wrap(
+      <TestServicesPanel
+        projectId={PROJECT}
+        project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])}
+        canChange
+      />,
+    );
     const port = screen.getByLabelText('Port of service 1');
     await user.clear(port);
     await user.type(port, '5434');
@@ -79,7 +85,13 @@ describe('TestServicesPanel', () => {
 
   it('removes an entry and saves an empty list', async () => {
     const user = userEvent.setup();
-    wrap(<TestServicesPanel projectId={PROJECT} project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])} canChange />);
+    wrap(
+      <TestServicesPanel
+        projectId={PROJECT}
+        project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])}
+        canChange
+      />,
+    );
     await user.click(screen.getByRole('button', { name: 'Remove service 1' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -89,7 +101,13 @@ describe('TestServicesPanel', () => {
 
   it('shows a message for a non-loopback host and does not save', async () => {
     const user = userEvent.setup();
-    wrap(<TestServicesPanel projectId={PROJECT} project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])} canChange />);
+    wrap(
+      <TestServicesPanel
+        projectId={PROJECT}
+        project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])}
+        canChange
+      />,
+    );
     const host = screen.getByLabelText('Host of service 1');
     await user.clear(host);
     await user.type(host, '10.0.0.5');
@@ -100,7 +118,13 @@ describe('TestServicesPanel', () => {
 
   it('shows a message for a bad port and does not save', async () => {
     const user = userEvent.setup();
-    wrap(<TestServicesPanel projectId={PROJECT} project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])} canChange />);
+    wrap(
+      <TestServicesPanel
+        projectId={PROJECT}
+        project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])}
+        canChange
+      />,
+    );
     const port = screen.getByLabelText('Port of service 1');
     await user.clear(port);
     await user.type(port, '70000');
@@ -110,7 +134,13 @@ describe('TestServicesPanel', () => {
   });
 
   it('is read-only when the person cannot change it', () => {
-    wrap(<TestServicesPanel projectId={PROJECT} project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])} canChange={false} />);
+    wrap(
+      <TestServicesPanel
+        projectId={PROJECT}
+        project={project([{ name: 'pg', host: '127.0.0.1', port: 5433 }])}
+        canChange={false}
+      />,
+    );
     expect(screen.getByLabelText('Port of service 1')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
     expect(screen.getByTestId('test-services-readonly')).toBeInTheDocument();

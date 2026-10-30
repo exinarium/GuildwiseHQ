@@ -25,7 +25,6 @@ import {
 } from './adapters/claude-account-provision.ts';
 import { displayDir, expandHome } from './adapters/claude-accounts.ts';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
-import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -55,6 +54,7 @@ import {
   saveIndex,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
@@ -368,7 +368,9 @@ function unpair(selector: string, opts: { dataDir?: string; purge?: boolean }): 
 /** The local test services the running runner recorded in its status file (none: an old or stopped runner). */
 function recordedTestServices(statusFile: string): Record<string, TestServicesSeen> | undefined {
   try {
-    const s = JSON.parse(readFileSync(statusFile, 'utf8')) as { testServices?: Record<string, TestServicesSeen> };
+    const s = JSON.parse(readFileSync(statusFile, 'utf8')) as {
+      testServices?: Record<string, TestServicesSeen>;
+    };
     return s.testServices && typeof s.testServices === 'object' ? s.testServices : undefined;
   } catch {
     return undefined;

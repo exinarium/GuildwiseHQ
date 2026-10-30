@@ -2,11 +2,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import net from 'node:net';
 import { join } from 'node:path';
-import { BUILTIN_ROLES } from '@aom/shared';
+import { BUILTIN_ROLES, type LocalTestService } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
-  buildChatSettings,
   buildCeoSettings,
+  buildChatSettings,
   buildMentionWorkSettings,
   buildShiftSettings,
   REGISTRY_DOMAINS,
@@ -29,7 +29,9 @@ import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 cleanupTmp();
 
-const PG = { name: 'postgres-test', host: '127.0.0.1', port: 5433 };
+const PG: LocalTestService = { name: 'postgres-test', host: '127.0.0.1', port: 5433 };
+/** A service the schema would refuse, to check the runner refuses it too. */
+const bad = (s: { name: string; host: string; port: number }) => s as LocalTestService;
 const role = (key: string) => {
   const r = BUILTIN_ROLES.find((x) => x.key === key);
   if (!r) throw new Error(key);
@@ -69,16 +71,20 @@ describe('decideTestServices', () => {
   });
 
   it('refuses without opening anything where the sandbox cannot enforce one port', () => {
-    expect(reason(decideTestServices(input({ platform: 'darwin' }))[0])).toMatch(/cannot open a single loopback port/);
+    expect(reason(decideTestServices(input({ platform: 'darwin' }))[0])).toMatch(
+      /cannot open a single loopback port/,
+    );
     expect(reason(decideTestServices(input({ sandbox: 'unsandboxed' }))[0])).toMatch(/nothing was opened/);
     expect(reason(decideTestServices(input({ sandbox: 'unavailable' }))[0])).toMatch(/nothing was opened/);
     expect(reason(decideTestServices(input({ runtime: 'codex' }))[0])).toMatch(/codex runtime/);
     expect(reason(decideTestServices(input({ hasShell: false }))[0])).toMatch(/no shell/);
-    expect(reason(decideTestServices(input({ claudeVersion: '2.1.228' }))[0])).toMatch(/cannot limit the sandbox to one port/);
+    expect(reason(decideTestServices(input({ claudeVersion: '2.1.228' }))[0])).toMatch(
+      /cannot limit the sandbox to one port/,
+    );
     expect(reason(decideTestServices(input({ claudeVersion: undefined }))[0])).toMatch(/unknown version/);
   });
 
-  it('never opens the runner\'s own ports, the environment ports or the proxy ports', () => {
+  it("never opens the runner's own ports, the environment ports or the proxy ports", () => {
     const d = decideTestServices(
       input({
         services: [
@@ -102,8 +108,8 @@ describe('decideTestServices', () => {
     const d = decideTestServices(
       input({
         services: [
-          { name: 'a', host: '10.0.0.5', port: 5433 },
-          { name: 'b', host: '127.0.0.2', port: 5434 },
+          bad({ name: 'a', host: '10.0.0.5', port: 5433 }),
+          bad({ name: 'b', host: '127.0.0.2', port: 5434 }),
           { name: 'c', host: '127.0.0.1', port: 0 },
           { name: 'd', host: '127.0.0.1', port: 70000 },
         ],
@@ -161,7 +167,7 @@ describe('sandbox settings', () => {
     buildShiftSettings(role(roleKey).permissions, policyCtx(over), paths, roleKey);
   const domains = (s: ReturnType<typeof settings>) => s.sandbox?.network.allowedDomains;
 
-  it('a build, review and test shift gets exactly the declared host:port pairs on top of today\'s list', () => {
+  it("a build, review and test shift gets exactly the declared host:port pairs on top of today's list", () => {
     for (const roleKey of ['builder', 'reviewer', 'tester']) {
       const d = domains(settings(roleKey, { testServiceDomains: ['127.0.0.1:5433', '[::1]:6379'] }));
       expect(d).toEqual([...REGISTRY_DOMAINS, '127.0.0.1:5433', '[::1]:6379']);
@@ -173,7 +179,10 @@ describe('sandbox settings', () => {
   it('changes nothing else in the settings', () => {
     const base = settings('builder');
     const withSvc = settings('builder', { testServiceDomains: ['127.0.0.1:5433'] });
-    expect({ ...withSvc.sandbox?.network, allowedDomains: [] }).toEqual({ ...base.sandbox?.network, allowedDomains: [] });
+    expect({ ...withSvc.sandbox?.network, allowedDomains: [] }).toEqual({
+      ...base.sandbox?.network,
+      allowedDomains: [],
+    });
     expect({ ...withSvc, sandbox: { ...withSvc.sandbox, network: undefined } }).toEqual({
       ...base,
       sandbox: { ...base.sandbox, network: undefined },
@@ -201,7 +210,9 @@ describe('sandbox settings', () => {
     ).toBe(JSON.stringify(buildMentionWorkSettings(role('builder').permissions, policyCtx(), paths)));
     expect(
       JSON.stringify(buildShiftSettings(role('devops').permissions, policyCtx(carry), paths, 'devops', true)),
-    ).toBe(JSON.stringify(buildShiftSettings(role('devops').permissions, policyCtx(), paths, 'devops', true)));
+    ).toBe(
+      JSON.stringify(buildShiftSettings(role('devops').permissions, policyCtx(), paths, 'devops', true)),
+    );
     expect(JSON.stringify(buildShiftSettings(role('ceo').permissions, policyCtx(carry), paths, 'ceo'))).toBe(
       JSON.stringify(buildShiftSettings(role('ceo').permissions, policyCtx(), paths, 'ceo')),
     );
@@ -213,8 +224,12 @@ describe('sandbox settings', () => {
     expect(JSON.stringify(buildChatSettings(false, [], carry, paths))).toBe(
       JSON.stringify(buildChatSettings(false, [], plain, paths)),
     );
-    expect(JSON.stringify(buildCeoSettings(carry, paths))).toBe(JSON.stringify(buildCeoSettings(plain, paths)));
-    expect(JSON.stringify(scanSandboxBlock(carry, paths))).toBe(JSON.stringify(scanSandboxBlock(plain, paths)));
+    expect(JSON.stringify(buildCeoSettings(carry, paths))).toBe(
+      JSON.stringify(buildCeoSettings(plain, paths)),
+    );
+    expect(JSON.stringify(scanSandboxBlock(carry, paths))).toBe(
+      JSON.stringify(scanSandboxBlock(plain, paths)),
+    );
     for (const s of [buildChatSettings(false, [], carry, paths), buildCeoSettings(carry, paths)])
       expect(JSON.stringify(s)).not.toContain('5433');
   });
@@ -226,7 +241,9 @@ describe('sandbox settings', () => {
 });
 
 describe('doctor lines', () => {
-  const seen = (decisions: ReturnType<typeof decideTestServices>) => ({ GWP: { at: '2026-10-30T10:00:00.000Z', decisions } });
+  const seen = (decisions: ReturnType<typeof decideTestServices>) => ({
+    GWP: { at: '2026-10-30T10:00:00.000Z', decisions },
+  });
   it('lists the allowed and refused services per project', () => {
     const lines = sandboxDoctorLines(
       { state: 'enforced', reason: 'bubblewrap + socat' },
@@ -244,7 +261,9 @@ describe('doctor lines', () => {
       'GWP postgres-test 127.0.0.1:5433 (build, review and test shifts; as of 2026-10-30T10:00:00.000Z)',
     );
     const warn = lines.find((l) => l.ok === 'warn');
-    expect(warn?.detail).toMatch(/^GWP redis 127\.0\.0\.1:43548 not opened: port 43548 belongs to the runner/);
+    expect(warn?.detail).toMatch(
+      /^GWP redis 127\.0\.0\.1:43548 not opened: port 43548 belongs to the runner/,
+    );
   });
 
   it('says none declared when nothing is recorded, and leaves the sandbox line as it was', () => {
@@ -252,7 +271,11 @@ describe('doctor lines', () => {
     expect(testServiceDoctorLines(undefined)[0]?.detail).toMatch(/none declared/);
     expect(sandboxDoctorLines(sb, 'linux', {})).toHaveLength(2);
     expect(sandboxDoctorLines(sb, 'linux')).toHaveLength(1);
-    expect(sandboxDoctorLines(sb, 'linux')[0]).toEqual({ ok: true, name: 'sandbox', detail: 'enforced (bubblewrap + socat)' });
+    expect(sandboxDoctorLines(sb, 'linux')[0]).toEqual({
+      ok: true,
+      name: 'sandbox',
+      detail: 'enforced (bubblewrap + socat)',
+    });
   });
 });
 
@@ -267,7 +290,9 @@ describe('aom-env test services', () => {
     });
   const aomEnv = (dir: string, args: string[], env: Record<string, string>) =>
     new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
-      const c = spawn('bash', [join(dir, 'aom-env'), ...args], { env: { PATH: process.env.PATH ?? '', ...env } });
+      const c = spawn('bash', [join(dir, 'aom-env'), ...args], {
+        env: { PATH: process.env.PATH ?? '', ...env },
+      });
       let stdout = '';
       let stderr = '';
       c.stdout.on('data', (d) => {
@@ -311,7 +336,9 @@ describe('aom-env test services', () => {
       expect(r.stdout).toBe('pg-hello');
       expect(connects).toHaveLength(1);
       expect(connects[0]?.target).toBe(`127.0.0.1:${declared}`);
-      expect(Buffer.from((connects[0]?.auth ?? '').replace('Basic ', ''), 'base64').toString()).toBe('srt.user:s3cret');
+      expect(Buffer.from((connects[0]?.auth ?? '').replace('Basic ', ''), 'base64').toString()).toBe(
+        'srt.user:s3cret',
+      );
       expect(r.stdout + r.stderr).not.toContain('s3cret');
     } finally {
       proxy.close();
@@ -324,8 +351,14 @@ describe('aom-env test services', () => {
     const dir = tmp();
     await writeShims(dir);
     const declared = await freePort();
-    for (const env of [{}, { HTTPS_PROXY: 'socks5://x:y@127.0.0.1:1080' }, { HTTPS_PROXY: 'garbage' }]) {
-      const r = await aomEnv(dir, ['--timeout', '1', '--', process.execPath, '-e', NODE_PROBE(declared)], {
+    for (const env of [
+      {} as Record<string, string>,
+      { HTTPS_PROXY: 'socks5://x:y@127.0.0.1:1080' },
+      { HTTPS_PROXY: 'garbage' },
+    ]) {
+      // `env -u`: the probe itself must not choke on the unusable proxy value Node would read from the environment
+      const probe = ['env', '-u', 'HTTPS_PROXY', process.execPath, '-e', NODE_PROBE(declared)];
+      const r = await aomEnv(dir, ['--timeout', '1', '--', ...probe], {
         AOM_TEST_SERVICES: `127.0.0.1:${declared}`,
         ...env,
       });

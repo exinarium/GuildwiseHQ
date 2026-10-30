@@ -18,7 +18,6 @@ import {
   SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
   SetManualQaRequestSchema,
-  SetTestServicesRequestSchema,
   SetMergePolicyRequestSchema,
   SetOwnerApprovalRequestSchema,
   SetProjectMcpServersRequestSchema,
@@ -26,6 +25,7 @@ import {
   SetProviderAccountRequestSchema,
   SetReferenceReposRequestSchema,
   SetStopLossRequestSchema,
+  SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -53,12 +53,12 @@ import {
   setConcurrencyCap,
   setFullSuite,
   setManualQa,
-  setTestServices,
   setMergePolicy,
   setProjectPolicy,
   setProviderAccount,
   setReferenceRepos,
   setStopLoss,
+  setTestServices,
   updateProject,
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';

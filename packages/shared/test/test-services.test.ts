@@ -7,7 +7,12 @@ import {
   testServiceDomain,
 } from '../src/index.ts';
 
-const svc = (over: Record<string, unknown> = {}) => ({ name: 'postgres-test', host: '127.0.0.1', port: 5433, ...over });
+const svc = (over: Record<string, unknown> = {}) => ({
+  name: 'postgres-test',
+  host: '127.0.0.1',
+  port: 5433,
+  ...over,
+});
 const first = (list: unknown[]) => {
   const r = LocalTestServicesSchema.safeParse(list);
   return r.success ? null : r.error.issues[0]?.message;
@@ -23,9 +28,12 @@ describe('local test services (GWP-41)', () => {
     expect(r.map((s) => s.host)).toEqual(['127.0.0.1', '::1', 'localhost']);
   });
 
-  it.each(['10.0.0.5', 'db.example.com', '0.0.0.0', '127.0.0.2', 'x.localhost', '', '::'])('refuses host %s', (host) => {
-    expect(first([svc({ host })])).toMatch(/only 127\.0\.0\.1, ::1 or localhost/);
-  });
+  it.each(['10.0.0.5', 'db.example.com', '0.0.0.0', '127.0.0.2', 'x.localhost', '', '::'])(
+    'refuses host %s',
+    (host) => {
+      expect(first([svc({ host })])).toMatch(/only 127\.0\.0\.1, ::1 or localhost/);
+    },
+  );
 
   it.each([0, 65536, -1, 1.5, 'abc', '5433', null, 3128, 1080])('refuses port %s', (port) => {
     expect(first([svc({ port })])).toBeTruthy();
@@ -56,11 +64,16 @@ describe('local test services (GWP-41)', () => {
 
   it('request, project dto and event carry the list', () => {
     expect(SetTestServicesRequestSchema.safeParse({ services: [svc()] }).success).toBe(true);
-    expect(SetTestServicesRequestSchema.safeParse({ services: [svc({ host: '10.0.0.5' })] }).success).toBe(false);
+    expect(SetTestServicesRequestSchema.safeParse({ services: [svc({ host: '10.0.0.5' })] }).success).toBe(
+      false,
+    );
     expect(ProjectDtoSchema.shape.testServices.safeParse([svc()]).success).toBe(true);
     const id = '5b6d3c0e-9b0c-4d6e-8d2e-1f2a3b4c5d6e';
     expect(
-      DomainEventSchema.safeParse({ type: 'ProjectTestServicesSet', payload: { projectId: id, services: [svc()], by: id } }).success,
+      DomainEventSchema.safeParse({
+        type: 'ProjectTestServicesSet',
+        payload: { projectId: id, services: [svc()], by: id },
+      }).success,
     ).toBe(true);
   });
 });

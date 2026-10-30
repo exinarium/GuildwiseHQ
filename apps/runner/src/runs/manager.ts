@@ -1888,7 +1888,8 @@ export class RunManager {
   /** Every port of every environment this manager tracks (live or not): never opened as a local test service. */
   ownedPorts(): Set<number> {
     const out = new Set<number>();
-    for (const env of this.envs.values()) for (const s of env.services) for (const p of s.ports) out.add(p.port);
+    for (const env of this.envs.values())
+      for (const s of env.services) for (const p of s.ports) out.add(p.port);
     return out;
   }
 

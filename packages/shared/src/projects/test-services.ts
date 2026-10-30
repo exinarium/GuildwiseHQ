@@ -28,11 +28,17 @@ export const LocalTestServiceSchema = z.object({
     .trim()
     .min(1, 'give the service a name')
     .max(40, 'the name can have at most 40 characters')
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'the name can have letters, digits, dot, dash and underscore only'),
+    .regex(
+      /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+      'the name can have letters, digits, dot, dash and underscore only',
+    ),
   host: z
     .string()
     .transform(normaliseTestServiceHost)
-    .refine(isTestServiceHost, 'only 127.0.0.1, ::1 or localhost: a test service must run on this workstation'),
+    .refine(
+      isTestServiceHost,
+      'only 127.0.0.1, ::1 or localhost: a test service must run on this workstation',
+    ),
   port: z
     .number({ error: PORT_MESSAGE })
     .int(PORT_MESSAGE)
@@ -50,10 +56,12 @@ export const LocalTestServicesSchema = z
     const ports = new Set<number>();
     list.forEach((s, i) => {
       const key = s.name.toLowerCase();
-      if (names.has(key)) ctx.addIssue({ code: 'custom', path: [i, 'name'], message: 'names must be unique' });
+      if (names.has(key))
+        ctx.addIssue({ code: 'custom', path: [i, 'name'], message: 'names must be unique' });
       names.add(key);
       // Inside the sandbox each declared port is bound on one loopback, so a port can be declared once.
-      if (ports.has(s.port)) ctx.addIssue({ code: 'custom', path: [i, 'port'], message: 'each port can be declared once' });
+      if (ports.has(s.port))
+        ctx.addIssue({ code: 'custom', path: [i, 'port'], message: 'each port can be declared once' });
       ports.add(s.port);
     });
   });

@@ -973,7 +973,9 @@ export function testServiceDoctorLines(
   seen: Record<string, TestServicesSeen> | undefined,
 ): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
   const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [];
-  for (const [project, { at, decisions }] of Object.entries(seen ?? {}).sort(([a], [b]) => a.localeCompare(b)))
+  for (const [project, { at, decisions }] of Object.entries(seen ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  ))
     for (const d of decisions)
       out.push(
         d.state === 'allowed'

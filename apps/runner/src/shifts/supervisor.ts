@@ -129,8 +129,8 @@ import {
 import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
 import {
   decideTestServices,
-  TEST_SERVICE_ROLES,
   refusedProgress,
+  TEST_SERVICE_ROLES,
   type TestServiceDecision,
   type TestServicesSeen,
   testServiceDomains,
@@ -1214,7 +1214,8 @@ export class ShiftSupervisor {
     const testDecisions = await this.decideTestServices(msg, adapter, hasEnv ? testEnv : undefined);
     const testNote = testServicesNote(testDecisions);
     if (testNote) texts.instructions += `\n${testNote}\n`;
-    for (const d of testDecisions) if (d.state === 'refused') this.addProgress(s, 'status', refusedProgress(d));
+    for (const d of testDecisions)
+      if (d.state === 'refused') this.addProgress(s, 'status', refusedProgress(d));
     this.recordTestServices(msg, testDecisions);
     // Delegation (R3b): only an agent that was granted targets is told about `aom delegate`, and only a Claude Code agent gets
     // native subagents (the same targets, in its own process). The work a child shares with this shift is its working directory.

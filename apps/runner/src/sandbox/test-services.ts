@@ -80,7 +80,8 @@ export function decideTestServices(i: TestServiceInput): TestServiceDecision[] {
   return services.map((s): TestServiceDecision => {
     if (!(TEST_SERVICE_HOSTS as readonly string[]).includes(s.host))
       return refuse(s, 'only 127.0.0.1, ::1 and localhost can be opened');
-    if (!Number.isInteger(s.port) || s.port < 1 || s.port > 65535) return refuse(s, `port ${s.port} is not valid`);
+    if (!Number.isInteger(s.port) || s.port < 1 || s.port > 65535)
+      return refuse(s, `port ${s.port} is not valid`);
     if (shiftWide) return refuse(s, shiftWide);
     if (i.runnerPorts.has(s.port))
       return refuse(s, `port ${s.port} belongs to the runner (its local HTTP port or a run environment)`);
@@ -107,7 +108,9 @@ export function testServicesSpec(d: TestServiceDecision[]): string {
 export function testServicesNote(d: TestServiceDecision[]): string {
   if (d.length === 0) return '';
   const ok = allowed(d);
-  const refused = d.filter((x): x is Extract<TestServiceDecision, { state: 'refused' }> => x.state === 'refused');
+  const refused = d.filter(
+    (x): x is Extract<TestServiceDecision, { state: 'refused' }> => x.state === 'refused',
+  );
   const lines = ['## Local test services'];
   if (ok.length > 0) {
     lines.push(

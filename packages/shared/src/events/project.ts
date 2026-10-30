@@ -322,7 +322,10 @@ export const projectEvents = [
    * that have not yet passed Finalize are affected.
    */
   /** The project's local test services (the whole list) that build, review and test shifts may reach. */
-  defineEvent('ProjectTestServicesSet', z.object({ projectId: Id, services: LocalTestServicesSchema, by: Id })),
+  defineEvent(
+    'ProjectTestServicesSet',
+    z.object({ projectId: Id, services: LocalTestServicesSchema, by: Id }),
+  ),
   defineEvent('ProjectManualQaSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
    * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &
