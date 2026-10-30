@@ -337,6 +337,7 @@ export class RunnerHandlers {
           error: r.error,
           message: r.message,
           matches: r.matches,
+          ...(r.continueShift ? { continueShift: true } : {}),
         });
         return;
       }

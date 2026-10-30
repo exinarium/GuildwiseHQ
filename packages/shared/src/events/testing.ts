@@ -105,6 +105,28 @@ export const testingEvents = [
     'TestEnvironmentParked',
     z.object({ cardId: Id, requestId: Id, problem: TestEnvProblem, detail: z.string().default('') }),
   ),
+  /** "Test without an environment": a builder's test-run question went to DevOps without parking the card. */
+  defineEvent(
+    'BuilderTestsNotRun',
+    z.object({
+      cardId: Id,
+      requestId: Id,
+      agentId: Id,
+      stage: z.string(),
+      reason: z.literal('test_without_environment'),
+      detail: z.string().default(''),
+    }),
+  ),
+  /** The DevOps request of a `BuilderTestsNotRun` completed (done or failed); the card's stage, status and claim do not change. */
+  defineEvent(
+    'BuilderTestsResultArrived',
+    z.object({
+      cardId: Id,
+      requestId: Id,
+      status: z.enum(['done', 'failed']),
+      summary: z.string().default(''),
+    }),
+  ),
   /** The parked card's DevOps request completed: the card returns to the Test queue. */
   defineEvent('TestEnvironmentReady', z.object({ cardId: Id, requestId: Id })),
   /** Large-tier merge: the manager must approve on the desk before `finalize.execute` is queued. */

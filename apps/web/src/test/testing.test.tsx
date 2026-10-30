@@ -161,6 +161,30 @@ describe('evidence panel', () => {
   });
 });
 
+describe('the test gap notice', () => {
+  const gap = {
+    requestId: ID(8),
+    stage: 'build',
+    at: '2026-10-30T10:00:00.000Z',
+    detail: 'run the DB tests',
+  };
+  it('says the builder did not run the DB-backed tests and that the result has not arrived', () => {
+    wrap(<TestingLinks testing={testing({ testGaps: [{ ...gap, result: null }] })} status="queued" />);
+    const text = screen.getByTestId('test-gap-notice').textContent ?? '';
+    expect(text).toContain('did not run the DB-backed tests');
+    expect(text).toContain('result not arrived yet');
+  });
+  it('shows the result once it arrived', () => {
+    const result = { status: 'done' as const, summary: '42 passed', at: '2026-10-30T11:00:00.000Z' };
+    wrap(<TestingLinks testing={testing({ testGaps: [{ ...gap, result }] })} status="queued" />);
+    expect(screen.getByTestId('test-gap-notice').textContent).toContain('result arrived: done, 42 passed');
+  });
+  it('shows nothing for a card without a gap', () => {
+    wrap(<TestingLinks testing={testing()} status="queued" />);
+    expect(screen.queryByTestId('test-gap-notice')).toBeNull();
+  });
+});
+
 describe('the waiting line', () => {
   const bug = {
     id: ID(3),

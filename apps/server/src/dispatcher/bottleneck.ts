@@ -12,10 +12,59 @@ const ONLINE_WINDOW_MS = 45_000;
 export async function testingPass(ctx: Ctx): Promise<void> {
   try {
     await unparkPass(ctx);
+    await testGapResultPass(ctx);
     await testerBottleneckCheck(ctx);
   } catch (err) {
     ctx.log.error({ err }, 'testing pass failed');
   }
+}
+
+/**
+ * The DevOps request of a builder's test gap completed: post the result on the card thread and mark the gap. The card's
+ * stage, status and claim do not change, whatever stage it is in by now. Idempotent (row lock, `result_at IS NULL`).
+ */
+export async function testGapResultPass(ctx: Ctx): Promise<number> {
+  const done = await rows(
+    ctx.pool,
+    `SELECT g.card_id, g.request_id, r.status, r.result_summary, c.org_id, c.project_id, c.ref
+       FROM card_test_gaps g JOIN devops_requests r ON r.id = g.request_id JOIN cards c ON c.id = g.card_id
+      WHERE g.result_at IS NULL AND r.status IN ('done','failed')`,
+  );
+  let posted = 0;
+  for (const g of done) {
+    await withAppendTx(ctx.pool, async (tx) => {
+      const cur = await tx.query(
+        'SELECT 1 FROM card_test_gaps WHERE card_id=$1 AND request_id=$2 AND result_at IS NULL FOR UPDATE',
+        [g.card_id, g.request_id],
+      );
+      if (cur.rowCount === 0) return;
+      const summary = String(g.result_summary ?? '');
+      const ok = g.status === 'done';
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.card(g.card_id),
+            event: {
+              type: 'BuilderTestsResultArrived',
+              payload: { cardId: g.card_id, requestId: g.request_id, status: g.status, summary },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: projectScope(g.org_id, g.project_id),
+          },
+          cardMessage(
+            { id: g.card_id, org_id: g.org_id, project_id: g.project_id },
+            { kind: 'system' },
+            'system',
+            `DevOps ${ok ? 'finished' : 'could not run'} the DB-backed tests the builder did not run (request ${g.request_id}): ${summary || 'no summary'}`,
+            { requestId: g.request_id, status: g.status },
+          ),
+        ],
+        { tx },
+      );
+      posted++;
+    });
+  }
+  return posted;
 }
 
 /** A tester card parked on a DevOps request returns to the Test queue once the request completed (or failed: the next check decides). */

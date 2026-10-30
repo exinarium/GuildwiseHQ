@@ -67,6 +67,20 @@ export const CardTestingSchema = z.object({
   waitingOn: RelatedCardSchema.nullable(),
   /** Set while a tester shift is parked on a DevOps request (app not deployed / Docker missing). */
   parkedOn: z.object({ requestId: z.uuid(), problem: z.string() }).nullable(),
+  /** Builder test runs that went to DevOps under "Test without an environment" (the DB-backed tests were not run). */
+  testGaps: z
+    .array(
+      z.object({
+        requestId: z.uuid(),
+        stage: z.string(),
+        at: z.string(),
+        detail: z.string(),
+        result: z
+          .object({ status: z.enum(['done', 'failed']), summary: z.string(), at: z.string() })
+          .nullable(),
+      }),
+    )
+    .optional(),
   finalize: z.object({
     /** The manager may press Finalize now (stage finalize, queued, unclaimed). */
     available: z.boolean(),

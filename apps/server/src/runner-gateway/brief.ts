@@ -370,6 +370,10 @@ export async function buildBrief(
     ledger: cardLedger.entries,
     ...(cardLedger.total > cardLedger.entries.length ? { ledgerTotal: cardLedger.total } : {}),
     ...(await testerEnvironment(ctx, card, agent, shift)),
+    ...(await testGapsOf(ctx, card, agent)),
+    ...(project.test_without_environment && agent.role_key === 'builder' && !agent.is_devops
+      ? { builderTestsNonBlocking: true }
+      : {}),
     ...(await leanBrief(ctx, card, project, stage.id, agent)),
     ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
       ? { testWithoutEnvironment: true }
@@ -383,6 +387,36 @@ export async function buildBrief(
           },
         }
       : {}),
+  };
+}
+
+/** The builder test runs of the card that went to DevOps without an environment: the reviewer and the tester must know. */
+async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?: ShiftBrief['testGaps'] }> {
+  if (agent.is_devops) return {};
+  const gaps = await rows(
+    ctx.pool,
+    `SELECT g.*, a.name AS agent_name FROM card_test_gaps g LEFT JOIN agents a ON a.id = g.agent_id
+      WHERE g.card_id=$1 ORDER BY g.created_at`,
+    [card.id],
+  );
+  if (gaps.length === 0) return {};
+  return {
+    testGaps: gaps.map((g) => ({
+      requestId: g.request_id,
+      stage: g.stage,
+      agentName: g.agent_name ?? 'the builder',
+      at: iso(g.created_at) as string,
+      detail: g.detail,
+      ...(g.result_at
+        ? {
+            result: {
+              status: g.result_status,
+              summary: g.result_summary ?? '',
+              at: iso(g.result_at) as string,
+            },
+          }
+        : {}),
+    })),
   };
 }
 

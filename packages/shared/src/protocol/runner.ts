@@ -337,6 +337,23 @@ export const ShiftBriefSchema = z.object({
     /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */
     projectDoc: z.string().optional(),
   }),
+  /** Builder test runs that went to DevOps without an environment (`BuilderTestsNotRun`): the reviewer and the tester must know. */
+  testGaps: z
+    .array(
+      z.object({
+        requestId: z.string(),
+        stage: z.string(),
+        agentName: z.string(),
+        at: z.string(),
+        detail: z.string(),
+        result: z
+          .object({ status: z.enum(['done', 'failed']), summary: z.string(), at: z.string() })
+          .optional(),
+      }),
+    )
+    .optional(),
+  /** The builder may ask for environment-dependent tests with `aom question --topic tests` without parking the card. */
+  builderTestsNonBlocking: z.boolean().optional(),
   role: z.object({
     key: z.string(),
     name: z.string(),
@@ -814,6 +831,8 @@ export const ShiftLimitSettingSchema = z.union([
 export type ShiftLimitSetting = z.infer<typeof ShiftLimitSettingSchema>;
 /** What the wire carries for "no limit": a count nobody reaches. UIs show a value at or above it as unlimited. */
 export const UNLIMITED_SHIFTS = 100_000;
+/** Announced in `hello.capabilities` by a runner that keeps a shift going after `shift.report.result{continueShift}`. */
+export const QUESTION_CONTINUE_CAPABILITY = 'question-continue:1';
 /** Announced in `hello.capabilities` by a runner that applies `limits.shiftLimit` and the `shifts.limit` command. */
 export const SHIFT_LIMIT_CAPABILITY = 'shift-limit:1';
 /**
@@ -1638,6 +1657,8 @@ export const ShiftReportResultSchema = msg('shift.report.result', {
   message: z.string().optional(),
   /** Ledger entries that matched a question (duplicate check). */
   matches: z.array(LedgerMatchSchema).optional(),
+  /** Accepted, but not terminal: the shift carries on (a builder's test question under "Test without an environment"). */
+  continueShift: z.boolean().optional(),
 });
 export const RpcResponseSchema = msg('rpc.response', {
   rpcId: z.string(),
