@@ -288,3 +288,22 @@ describe('payload text in agent briefs', () => {
     expect(String(dev?.title)).toContain('UNTRUSTED CONTENT');
   });
 });
+
+describe('an incoming webhook and an output webhook', () => {
+  it('are refused together, so the hook URL always carries the hook secret', async () => {
+    const r = await owner('POST', '/api/schedules', {
+      name: 'Hook with output',
+      trigger: { kind: 'webhook_in' },
+      action: {
+        kind: 'create_card',
+        projectId: w.projectId,
+        template: { title: 'Hook', fields: {} },
+        deliverOutput: {
+          destinations: [{ kind: 'webhook', url: 'https://example.com/h', format: 'generic' }],
+        },
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('invalid_output_destination');
+  });
+});

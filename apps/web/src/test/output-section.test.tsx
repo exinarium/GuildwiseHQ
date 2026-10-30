@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { OutputSection } from '../components/schedules/OutputSection.tsx';
-import { draftsFrom, emptyOutput, type OutputDraft } from '../lib/schedules.ts';
+import { draftsFrom, emptyOutput, hasOutputWebhook, type OutputDraft } from '../lib/schedules.ts';
 
 function Harness({ initial = [] as OutputDraft[] }: { initial?: OutputDraft[] }) {
   const [outputs, setOutputs] = useState(initial);
@@ -50,5 +50,18 @@ describe('OutputSection', () => {
       draftsFrom([{ kind: 'whatsapp', workstationId: '', instance: '', to: ['+27821234567'] } as never]),
     );
     expect(screen.getByLabelText(/to numbers/i).getAttribute('inputmode')).toBe('tel');
+  });
+});
+
+describe('hasOutputWebhook', () => {
+  it('is true only for a create-card automation with a webhook destination', () => {
+    const out = (kinds: string[]) => ({
+      kind: 'create_card',
+      deliverOutput: { destinations: kinds.map((kind) => ({ kind })) },
+    });
+    expect(hasOutputWebhook(out(['email', 'webhook']))).toBe(true);
+    expect(hasOutputWebhook(out(['email']))).toBe(false);
+    expect(hasOutputWebhook({ kind: 'create_card' })).toBe(false);
+    expect(hasOutputWebhook({ kind: 'integration' })).toBe(false);
   });
 });

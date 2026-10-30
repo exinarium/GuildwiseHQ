@@ -314,6 +314,12 @@ export interface OutputDraft {
   tab: string;
 }
 
+/** A create-card automation that sends its result to a webhook: it has a signing secret to show or renew. */
+export const hasOutputWebhook = (a: {
+  kind: string;
+  deliverOutput?: { destinations: Array<{ kind: string }> };
+}) => a.kind === 'create_card' && Boolean(a.deliverOutput?.destinations.some((d) => d.kind === 'webhook'));
+
 export const emptyOutput = (kind: OutputDraft['kind'] = 'email'): OutputDraft => ({
   kind,
   to: '',

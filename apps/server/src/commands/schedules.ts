@@ -423,6 +423,7 @@ async function validate(
   project: Row | null,
   n: Normalized,
   isManager: boolean,
+  ownerUserId: string = user.id,
 ): Promise<void> {
   const t = n.trigger;
   if (!isTriggerImplemented(t))
@@ -469,8 +470,15 @@ async function validate(
           n.action = { ...a, template: { ...a.template, start: 'draft' } };
         }
       }
-      if (a.kind === 'create_card' && a.deliverOutput)
-        await validateDeliverOutput(ctx, tx, user, a.deliverOutput, isManager);
+      if (a.kind === 'create_card' && a.deliverOutput) {
+        // The incoming-webhook secret and the output signing secret are both shown once, in one field: not together.
+        if (t.kind === 'webhook_in' && a.deliverOutput.destinations.some((d) => d.kind === 'webhook'))
+          throw badRequest(
+            'invalid_output_destination',
+            'an automation started by an incoming webhook cannot deliver its result to a webhook; choose another destination',
+          );
+        await validateDeliverOutput(ctx, tx, user, a.deliverOutput, isManager, ownerUserId);
+      }
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
       if (wf?.definition.fieldSet === 'feed')
         throw badRequest('use_interests', 'a feed is an interest now: create it on the Interests page');
@@ -546,6 +554,7 @@ async function validateDeliverOutput(
   user: AuthSession['user'],
   out: DeliverOutput,
   isManager: boolean,
+  ownerUserId: string,
 ): Promise<void> {
   let mine: string | undefined;
   for (const d of out.destinations) {
@@ -568,10 +577,13 @@ async function validateDeliverOutput(
       const ws = await one(
         tx,
         `SELECT name FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
-        [d.workstationId, user.id],
+        [d.workstationId, ownerUserId],
       );
       if (!ws)
-        throw badRequest('invalid_workstation', 'choose one of your own workstations for this destination');
+        throw badRequest(
+          'invalid_workstation',
+          "choose one of the automation owner's workstations for this destination",
+        );
       const kind = INTEGRATION_KIND_OF[d.kind];
       const st = await one(
         tx,
@@ -778,6 +790,7 @@ export async function patchSchedule(
         project,
         n,
         isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) }),
+        (s.owner_user_id as string | null) ?? user.id,
       );
     }
     // A changed trigger, or re-enabling, recomputes the next fire; otherwise the pending fire is kept.

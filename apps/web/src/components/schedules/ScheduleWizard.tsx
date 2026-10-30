@@ -275,8 +275,10 @@ function WizardDialog({
           },
         },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
             toast.success('Automation saved');
+            // The first output webhook was added: its signing secret is shown once, as after creating.
+            if (saved.webhookSecret) onCreated?.(saved);
             onOpenChange(false);
           },
         },

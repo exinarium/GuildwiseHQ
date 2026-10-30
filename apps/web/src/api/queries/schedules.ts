@@ -56,7 +56,7 @@ export const useCreateSchedule = () =>
   );
 export const usePatchSchedule = () =>
   useScheduleAction((v: { id: string; body: PatchScheduleRequest }) =>
-    patch<ScheduleDto>(`/schedules/${v.id}`, v.body),
+    patch<CreateScheduleResponse>(`/schedules/${v.id}`, v.body),
   );
 export const useDeleteSchedule = () => useScheduleAction((id: string) => del(`/schedules/${id}`));
 export const useRunSchedule = () =>

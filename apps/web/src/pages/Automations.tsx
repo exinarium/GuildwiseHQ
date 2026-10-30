@@ -43,7 +43,7 @@ import {
   Panel,
   useToast,
 } from '../components/ui.tsx';
-import { actionLabel, describeAction, describeTrigger } from '../lib/schedules.ts';
+import { actionLabel, describeAction, describeTrigger, hasOutputWebhook } from '../lib/schedules.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 /**
@@ -252,6 +252,7 @@ function ScheduleRow({
   const [history, setHistory] = useState(false);
   const webhook = isWebhookAction(s.action);
   const incoming = s.trigger.kind === 'webhook_in';
+  const outputHook = hasOutputWebhook(s.action);
   const testable =
     webhook ||
     (s.action.kind === 'integration' && s.action.integration === 'email') ||
@@ -402,7 +403,7 @@ function ScheduleRow({
               )}
               {s.enabled ? 'Pause' : 'Resume'}
             </Button>
-            {(webhook || incoming) && (
+            {(webhook || incoming || outputHook) && (
               <Button
                 loading={rotate.isPending && rotate.variables === s.id}
                 onClick={() =>
