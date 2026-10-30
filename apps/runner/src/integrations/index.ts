@@ -25,6 +25,7 @@ import { type AuditEntry, AuditLog } from './audit-log.ts';
 import { ClaudeCodeIntegration } from './claude-code.ts';
 import { AzureDevOpsIntegration, BitbucketIntegration, GitLabIntegration } from './forge-tokens.ts';
 import { GitHubIntegration } from './github.ts';
+import { GoogleSheetsIntegration } from './google-sheets.ts';
 import { JiraIntegration } from './jira.ts';
 import { LoginRuntimeIntegration } from './login-runtimes.ts';
 import { McpIntegration } from './mcp.ts';
@@ -32,6 +33,7 @@ import type { LoginSpawner } from './pty.ts';
 import { ReplayCache } from './seen.ts';
 import { LoginSession } from './session.ts';
 import { SshIntegration } from './ssh.ts';
+import { WhatsappIntegration } from './whatsapp.ts';
 import {
   type AdapterEnv,
   type IntegrationAdapter,
@@ -62,6 +64,8 @@ export function buildIntegrationAdapters(
     new SshIntegration(env),
     new JiraIntegration(env, opts.jiraFetch ? { fetch: opts.jiraFetch } : {}),
     new McpIntegration(env),
+    new WhatsappIntegration(env),
+    new GoogleSheetsIntegration(env),
   ];
   return new Map(list.map((a) => [a.kind, a]));
 }

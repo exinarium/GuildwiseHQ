@@ -119,6 +119,7 @@ import { sanitizeError } from './health/runner-error.ts';
 import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './integrations/claude-store.ts';
 import { type AdapterEnv, type IntegrationAdapter, IntegrationService } from './integrations/index.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
+import { OutboundDelivery } from './outbound-delivery/send.ts';
 import type { LoginSpawner } from './integrations/pty.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
@@ -281,6 +282,7 @@ export class Runner {
   /** M8: posts approved drafts to Jira and the code host with this workstation's credentials. */
   readonly outbound: OutboundExecutor;
   private readonly poller: IntegrationPoller;
+  private readonly outboundDelivery: OutboundDelivery;
   readonly repoCreator: RepoCreator;
   readonly repoCloner: RepoCloner;
   /** The project graph: indexes repositories into the project vault and answers `aom graph` (docs/design/project-graphs.md). */
@@ -746,6 +748,12 @@ export class Runner {
       jira: () => this.jiraConfig(),
       ...(opts.config.runtimes.mock?.enabled ? { mockFile: join(this.paths.root, 'mock-issues.json') } : {}),
     });
+    this.outboundDelivery = new OutboundDelivery({
+      secretsDir: this.paths.secrets,
+      keyOf: (name) => this.keys.deriveFileKey(name),
+      // Channel, run, status and duration only: never the text.
+      log: (line) => this.log.info(line),
+    });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.serverFeatures = new Set(w.features ?? []);
@@ -836,6 +844,7 @@ export class Runner {
       repoHosts: () => this.repoHosts(),
       sessionCwd: join(this.paths.root, 'tmp', 'integrations'),
       touchRecheck: () => touchRecheck(this.paths.secrets),
+      sealKey: (name) => this.keys.deriveFileKey(name),
     };
   }
 
@@ -1969,6 +1978,9 @@ export class Runner {
       } else if (command === 'integration.run') {
         // A failed poll is an answer (ok:true, result.ok:false): the server shows it in the schedule's history.
         done(true, await this.poller.run(CommandPayloadSchemas['integration.run'].parse(payload)));
+      } else if (command === 'delivery.send') {
+        // A failed send is an answer (ok:true, result.ok:false, retryable): the schedule's history shows the reason.
+        done(true, await this.outboundDelivery.run(CommandPayloadSchemas['delivery.send'].parse(payload)));
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));

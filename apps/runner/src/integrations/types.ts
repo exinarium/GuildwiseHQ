@@ -69,6 +69,8 @@ export interface AdapterEnv {
   repoHosts(): Partial<Record<'github' | 'gitlab', string[]>>;
   /** Directory the sign-in CLIs run in (never a repository). */
   sessionCwd: string;
+  /** The key of one encrypted secrets file (`secrets/sealed-file.ts`), derived from this runner's private key. */
+  sealKey?(fileName: string): Buffer;
   /** Marks that git/jira state changed, so the legacy reports go out soon. */
   touchRecheck(): void;
 }

@@ -79,6 +79,8 @@ export interface IntegrationKind {
 
 export const INTEGRATIONS_REGISTRY_VERSION = 1;
 const MIN_RUNNER = '0.1.11';
+/** The runner that can store WhatsApp and Google Sheets credentials and send for an automation. */
+const WHATSAPP_MIN_RUNNER = '0.1.63';
 
 const tokenField = (label: string, help?: string): IntegrationField => ({
   key: 'token',
@@ -565,6 +567,86 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
       "~/.claude/.credentials.json (Claude Code's own store), shared by every pairing on this machine.",
     cli: 'claude mcp login <server> --no-browser',
     minRunner: MIN_RUNNER,
+    minIntegrationsVersion: 1,
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp (Meta Cloud API)',
+    group: 'other',
+    instances: { by: 'organization', label: 'Phone number ID', placeholder: '106540352242922' },
+    scope: 'workstation',
+    methods: [
+      {
+        id: 'token',
+        label: 'Access token',
+        flow: 'fields',
+        fields: [tokenField('System user access token')],
+        steps: [
+          {
+            text: 'In Meta Business, add a WhatsApp phone number and copy its Phone number ID (the instance above).',
+            link: {
+              href: 'https://developers.facebook.com/docs/whatsapp/cloud-api/get-started',
+              label: 'WhatsApp Cloud API, get started',
+            },
+          },
+          { text: 'Create a system user, give it the whatsapp_business_messaging permission and generate a token.' },
+          {
+            text: 'A message you start outside the 24-hour window must use an approved template: set its name on the automation.',
+          },
+        ],
+        expiry: 'System user tokens can be set to never expire; temporary test tokens last 24 hours.',
+      },
+    ],
+    help: { summary: 'Sends the result of an automation to WhatsApp numbers with your own Meta account.' },
+    test: { label: 'Ask WhatsApp about the number', what: 'GET /<phone number ID> (name and number).' },
+    storage: 'secrets/whatsapp.json, encrypted (AES-256-GCM) with this runner\'s key, this workstation only.',
+    cli: 'guildwise-runner integrations connect whatsapp {instance}',
+    minRunner: WHATSAPP_MIN_RUNNER,
+    minIntegrationsVersion: 1,
+  },
+  {
+    id: 'google-sheets',
+    label: 'Google Sheets',
+    group: 'other',
+    instances: {
+      by: 'server',
+      label: 'Service account e-mail',
+      placeholder: 'reports@your-project.iam.gserviceaccount.com',
+    },
+    scope: 'workstation',
+    methods: [
+      {
+        id: 'service_account',
+        label: 'Service account key',
+        flow: 'fields',
+        fields: [
+          {
+            key: 'keyJson',
+            label: 'Service account JSON key',
+            type: 'secret',
+            required: true,
+            maxLength: 8000,
+            help: 'Paste the whole file you downloaded from Google Cloud.',
+          },
+        ],
+        steps: [
+          {
+            text: 'In your Google Cloud project, create a service account and a JSON key for it.',
+            link: {
+              href: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
+              label: 'Google Cloud, service accounts',
+            },
+          },
+          { text: 'Enable the Google Sheets API for the project.' },
+          { text: 'Share each sheet with the service account e-mail address as Editor.' },
+        ],
+      },
+    ],
+    help: { summary: 'Adds one row per result to a sheet you shared with the service account.' },
+    test: { label: 'Get an access token', what: 'Exchanges the key for a token at Google.' },
+    storage: 'secrets/google-sheets.json, encrypted (AES-256-GCM) with this runner\'s key, this workstation only.',
+    cli: 'guildwise-runner integrations connect google-sheets {instance}',
+    minRunner: WHATSAPP_MIN_RUNNER,
     minIntegrationsVersion: 1,
   },
 ] as const;
