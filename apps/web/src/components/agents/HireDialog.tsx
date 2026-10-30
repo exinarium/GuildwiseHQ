@@ -98,7 +98,9 @@ export function HireDialog({
     [roles.data, business],
   );
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');
-  const effectiveRoleKey = roleKey || hireable[0]?.definition.key || '';
+  const effectiveRoleKey = hireable.some((r) => r.definition.key === roleKey)
+    ? roleKey
+    : (hireable[0]?.definition.key ?? roleKey);
   const draftRole: RoleDefinition | undefined = draft
     ? {
         key: 'draft',

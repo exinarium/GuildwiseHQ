@@ -10,6 +10,7 @@ import { GitBranch, Plus, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
 
@@ -20,10 +21,12 @@ type RepoEntry =
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The latest version of each workflow the project could be converted to (feed and code-bugfix are never targets). */
-function targets(all: WorkflowDefinition[], currentKey: string): WorkflowDefinition[] {
+function targets(all: WorkflowDefinition[], currentKey: string, business: boolean): WorkflowDefinition[] {
   const latest = new Map<string, WorkflowDefinition>();
   for (const d of all) {
     if (d.fieldSet === 'feed' || d.key === 'code-bugfix' || d.key === currentKey) continue;
+    // A Business mode organization has no repositories, so it is never offered a repository workflow.
+    if (business && workflowUsesRepos(d)) continue;
     const had = latest.get(d.key);
     if (!had || d.version > had.version) latest.set(d.key, d);
   }
@@ -50,9 +53,10 @@ export function ConvertProjectDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const workflows = useWorkflows(project.id);
+  const business = useBusinessMode();
   const options = useMemo(
-    () => targets(workflows.data?.map((w) => w.definition) ?? [], project.workflowKey),
-    [workflows.data, project.workflowKey],
+    () => targets(workflows.data?.map((w) => w.definition) ?? [], project.workflowKey, business),
+    [workflows.data, project.workflowKey, business],
   );
   const [toKey, setToKey] = useState<string | null>(null);
   const [entries, setEntries] = useState<RepoEntry[]>([]);

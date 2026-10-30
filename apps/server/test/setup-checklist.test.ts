@@ -56,6 +56,25 @@ describe('setup checklist', () => {
     expect(c.complete).toBe(false);
   });
 
+  it('a Business mode organization has no repository step and needs no builder, reviewer or tester', async () => {
+    await freshState();
+    await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [orgId]);
+    try {
+      let c = await get();
+      expect(c.steps.map((s: any) => s.id)).toEqual(['project', 'workstation', 'team', 'ba']);
+      expect(step(c, 'team')).toMatchObject({
+        done: false,
+        link: '/agents?hire=ba',
+        missing: ['business analyst'],
+      });
+      await w.hire('Ben', 'ba', 'senior');
+      c = await get();
+      expect(step(c, 'team')).toMatchObject({ done: true, link: null });
+    } finally {
+      await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [orgId]);
+    }
+  });
+
   it('the DevOps agent does not count as part of the team', async () => {
     await freshState();
     await w.hire('Ben', 'ba', 'senior');

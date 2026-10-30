@@ -1,7 +1,9 @@
+import { codeWorkflowV1, type ProjectDto, researchWorkflowV1 } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
 import { DevOnly } from '../components/DevOnly.tsx';
@@ -80,6 +82,15 @@ beforeEach(() => {
           role('devops', 'DevOps'),
           role('ba', 'Business analyst'),
         ],
+      });
+    if (path === '/api/workflows')
+      return json({
+        workflows: [codeWorkflowV1, researchWorkflowV1].map((definition, i) => ({
+          id: ID(200 + i),
+          orgId: null,
+          status: 'active',
+          definition,
+        })),
       });
     if (path === '/api/packs')
       return json({ packs: [], workstationsOnline: 1, workstations: [], readableNow: true });
@@ -210,5 +221,38 @@ describe('packs tab', () => {
     wrap(<PacksTab />);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Add a pack by git URL' })).toBeNull());
     expect(screen.queryByTestId('packs-format-note')).toBeNull();
+  });
+});
+
+describe('hire dialog with a developer role prefilled', () => {
+  it('falls back to a hireable role in business mode', async () => {
+    mode = 'business';
+    wrap(<HireDialog open onOpenChange={() => {}} prefill={{ roleKey: 'builder', projectId: ID(70) }} />);
+    const form = await screen.findByRole('form', { name: 'Hire agent' });
+    await waitFor(() => expect(within(form).getByLabelText('Role')).toHaveValue('architect'));
+  });
+});
+
+describe('convert dialog', () => {
+  const project = {
+    id: ID(70),
+    key: 'APP',
+    name: 'App',
+    workflowKey: 'research',
+    startedAs: 'research',
+  } as ProjectDto;
+  const open = () => wrap(<ConvertProjectDialog project={project} repos={[]} open onOpenChange={() => {}} />);
+  it('offers the code workflow and the repository forms in dev mode', async () => {
+    open();
+    expect(await screen.findByTestId('convert-workflow-code')).toBeInTheDocument();
+    expect(await screen.findByTestId('convert-repo-url')).toBeInTheDocument();
+  });
+  it('offers no repository workflow and no repository form in business mode', async () => {
+    mode = 'business';
+    open();
+    expect(await screen.findByText('There is no other workflow to convert to.')).toBeInTheDocument();
+    expect(screen.queryByTestId('convert-workflow-code')).toBeNull();
+    expect(screen.queryByTestId('convert-repo-url')).toBeNull();
+    expect(screen.queryByTestId('convert-new-name')).toBeNull();
   });
 });
