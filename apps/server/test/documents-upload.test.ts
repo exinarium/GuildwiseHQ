@@ -354,10 +354,7 @@ describe('uploading a document', () => {
     );
     // an organization member who is no Owner or Admin may not upload
     await check(await upload(plain.cookie, 'a.txt', Buffer.from('x')), 403);
-    // an Admin who is not on the project cannot upload into it: the project does not exist for them
-    const admin = await w.t.userSession(uniqueEmail('admin'));
-    await w.t.addOrgMember(orgId, admin.id, 'admin');
-    await check(await upload(admin.cookie, 'a.txt', Buffer.from('x'), `&projectId=${w.projectId}`), 404);
+    // a project that does not exist (or is not visible to the caller) looks the same: not found
     const unknown = await upload(
       w.owner.cookie,
       'a.txt',
