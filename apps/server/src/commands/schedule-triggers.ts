@@ -358,21 +358,27 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
 
 /** Records the output deliveries of a done card and makes the first try of each. Never fails the sweep. */
 async function sendCardOutput(ctx: Ctx, ec: EventContext): Promise<number> {
-  try {
-    const runIds = await queueOutputDeliveries(
-      ctx,
-      ec.card?.scheduleId as string,
-      ec.sourceId as string,
-      assertOwnerStillAllowed,
-    );
-    for (const id of runIds)
-      await attemptDelivery(ctx, id).catch((err) =>
-        ctx.log.warn({ err, runId: id }, 'output delivery failed'),
+  // The sweep moves its cursor past this event whatever happens here, so a failed queue step is tried again right
+  // away. Queueing is safe to repeat: `output:<cardId>:<index>` is the dedupe key of each destination.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const runIds = await queueOutputDeliveries(
+        ctx,
+        ec.card?.scheduleId as string,
+        ec.sourceId as string,
+        assertOwnerStillAllowed,
       );
-    return runIds.length;
-  } catch (err) {
-    ctx.log.warn({ err, cardId: ec.sourceId }, 'could not queue the output deliveries');
-    return 0;
+      // A failed first try stays pending with a next attempt: the delivery sweep retries it.
+      for (const id of runIds)
+        await attemptDelivery(ctx, id).catch((err) =>
+          ctx.log.warn({ err, runId: id }, 'output delivery failed'),
+        );
+      return runIds.length;
+    } catch (err) {
+      if (attempt < 3) continue;
+      ctx.log.error({ err, cardId: ec.sourceId }, 'could not queue the output deliveries');
+      return 0;
+    }
   }
 }
 

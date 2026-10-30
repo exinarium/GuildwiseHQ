@@ -254,7 +254,18 @@ export function contentSecurityPolicy(
 
 /** pino `redact` options: a sealed envelope of the Integrations page never reaches a log line, whatever object holds it. */
 export const LOG_REDACT = {
-  paths: ['req.body.envelope', '*.envelope', 'body.envelope', 'payload.envelope', 'err.body.envelope'],
+  paths: [
+    'req.body.envelope',
+    '*.envelope',
+    'body.envelope',
+    'payload.envelope',
+    'err.body.envelope',
+    // The text of an automation's result for the runner channels never reaches a log line.
+    '*.whatsapp.text',
+    '*.sheet.row',
+    'payload.whatsapp.text',
+    'payload.sheet.row',
+  ],
   censor: '[redacted]',
 };
 
