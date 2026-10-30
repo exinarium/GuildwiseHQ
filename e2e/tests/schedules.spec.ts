@@ -1,14 +1,24 @@
+import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, request, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, paths, SCHEDGUEST, SCHEDULER } from '../support/env.ts';
-import { waitForMail } from '../support/mail.ts';
-import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import {
+  ADMIN,
+  BASE_URL,
+  DATABASE_URL,
+  E2E_DIR,
+  paths,
+  SCHEDGUEST,
+  SCHEDULER,
+  SMTP_URL,
+} from '../support/env.ts';
+import { deleteMailFor, waitForMail, waitForMailMatching } from '../support/mail.ts';
+import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Part B of the restructure: schedules are a trigger and one action. One owner with a mock runner (a BA, a builder and
 // a reviewer), one guest on a shared project, a local HTTP server standing in for Slack, Mailpit for the digests and a
@@ -27,6 +37,11 @@ let hooks: Server;
 let hookUrl = '';
 const hits: Array<{ headers: IncomingHttpHeaders; body: string }> = [];
 let hookStatuses: number[] = [];
+// A second receiver for the agent's output: the "Tell Slack" hook fires for every finalized card in SCH.
+let outHooks: Server;
+let outUrl = '';
+const outHits: Array<{ headers: IncomingHttpHeaders; body: string }> = [];
+let outStatuses: number[] = [];
 
 const clock = async (advanceMs: number): Promise<string> => {
   const r = await fetch(`${BASE_URL}/api/test/clock`, {
@@ -75,10 +90,62 @@ test.beforeAll(async ({ browser }) => {
   });
   await new Promise<void>((r) => hooks.listen(0, '127.0.0.1', r));
   hookUrl = `http://127.0.0.1:${(hooks.address() as AddressInfo).port}/hook`;
+  outHooks = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+    });
+    req.on('end', () => {
+      outHits.push({ headers: req.headers, body });
+      res.statusCode = outStatuses.shift() ?? 200;
+      res.end('ok');
+    });
+  });
+  await new Promise<void>((r) => outHooks.listen(0, '127.0.0.1', r));
+  outUrl = `http://127.0.0.1:${(outHooks.address() as AddressInfo).port}/output`;
 });
 test.afterAll(async () => {
   hooks?.close();
+  outHooks?.close();
 });
+
+const signatureOf = (secret: string, hit: { headers: IncomingHttpHeaders; body: string }) =>
+  `sha256=${createHmac('sha256', secret)
+    .update(`${String(hit.headers['x-aom-timestamp'])}.${hit.body}`)
+    .digest('hex')}`;
+
+/**
+ * The lean flow plans and designs every card; this spec hires no planner, architect or pre-reviewer. The card is moved
+ * to Build (the mock builder hands off with a note), then from Pre-review to Finalize (the BA merges), and is done.
+ */
+async function buildAndFinalize(c: { id: string; ref: string }): Promise<void> {
+  await waitFor(
+    `${c.ref} queued`,
+    async () => (await q<any>('SELECT stage, status FROM cards WHERE id=$1', [c.id]))[0],
+    (x) => x?.status === 'queued',
+    30_000,
+  );
+  const build = await api.post(`/api/cards/${c.id}/move`, {
+    data: { toStage: 'build', reason: 'planned and designed elsewhere' },
+  });
+  expect(build.ok(), await build.text()).toBeTruthy();
+  await waitFor(
+    `${c.ref} built`,
+    async () => (await q<any>('SELECT stage FROM cards WHERE id=$1', [c.id]))[0],
+    (x) => x?.stage === 'pre_review' || x?.stage === 'review',
+    120_000,
+  );
+  const move = await api.post(`/api/cards/${c.id}/move`, {
+    data: { toStage: 'finalize', reason: 'review and test done elsewhere' },
+  });
+  expect(move.ok(), await move.text()).toBeTruthy();
+  await waitFor(
+    `${c.ref} finalized`,
+    async () => (await q<any>('SELECT status FROM cards WHERE id=$1', [c.id]))[0],
+    (x) => x?.status === 'done',
+    120_000,
+  );
+}
 
 test('setup: a runner with a BA, a builder and a reviewer, project SCH on the toy repo, shared with a guest', async () => {
   mkdirSync(paths.vaults, { recursive: true });
@@ -233,22 +300,7 @@ test('an event trigger with a signed Slack webhook: the card is finalized, the h
   });
   expect(res.status(), await res.text()).toBe(201);
   const c = (await res.json()).card as { id: string; ref: string };
-  await waitFor(
-    `${c.ref} in review`,
-    async () => (await q<any>('SELECT stage FROM cards WHERE id=$1', [c.id]))[0],
-    (x) => x?.stage === 'review',
-    120_000,
-  );
-  const move = await api.post(`/api/cards/${c.id}/move`, {
-    data: { toStage: 'finalize', reason: 'review and test done elsewhere' },
-  });
-  expect(move.ok(), await move.text()).toBeTruthy();
-  await waitFor(
-    `${c.ref} finalized`,
-    async () => (await q<any>('SELECT status FROM cards WHERE id=$1', [c.id]))[0],
-    (x) => x?.status === 'done',
-    120_000,
-  );
+  await buildAndFinalize(c);
   await waitFor(
     'the webhook was called',
     async () => hits.length,
@@ -398,7 +450,9 @@ test('issue polling into intake: new GitHub issues become intakes once', async (
   expect(await q(`SELECT 1 FROM intakes WHERE external_key='acme/toy#41'`)).toHaveLength(1);
 });
 
-test('a BA task with free-text instructions reports to the desk', async () => {
+// The BA reporter is retired (docs/design/ceo-front-door.md step 3): a `ba_task` action is a `scheduled_brief` wake of
+// the CEO, which does what the instructions ask.
+test('a BA task with free-text instructions asks the CEO', async () => {
   const create = await api.post('/api/schedules', {
     data: {
       name: 'Friday review',
@@ -418,14 +472,33 @@ test('a BA task with free-text instructions reports to the desk', async () => {
     .getByRole('button', { name: /Run now/ })
     .click();
   const id = await scheduleId('Friday review');
-  const item = await waitFor(
-    'the BA report on the desk',
-    async () => (await q<any>(`SELECT title, body FROM desk_items WHERE data->>'scheduleId'=$1`, [id]))[0],
-    (x) => !!x,
-    90_000,
+  const run = await waitFor(
+    'the run',
+    async () => (await runsOf('Friday review'))[0],
+    (r) => !!r,
+    30_000,
   );
-  expect(item.title).toBe('Friday review: BA report');
-  expect(item.body).toContain('List what is open on');
+  expect(run).toMatchObject({ trigger: 'manual', status: 'ok', summary: 'Asked the CEO' });
+  const wake = await waitFor(
+    'the CEO is asked',
+    async () =>
+      (
+        await q<any>(
+          `SELECT reason, urgency, subject_label, detail FROM ceo_wakes WHERE subject_kind='schedule' AND subject_id LIKE $1`,
+          [`${id}:%`],
+        )
+      )[0],
+    (x) => !!x,
+    30_000,
+  );
+  expect(wake).toMatchObject({
+    reason: 'scheduled_brief',
+    urgency: 'scheduled',
+    subject_label: 'Friday review',
+    detail: { scheduleId: id, scheduleName: 'Friday review', deliver: 'desk_notice' },
+  });
+  expect(wake.detail.instructions).toContain('List what is open on');
+  expect(wake.detail.instructions).not.toContain('{date}');
 });
 
 test('a guest manages schedules tied to the shared project, and nothing for the whole organization', async () => {
@@ -473,4 +546,531 @@ test('a guest manages schedules tied to the shared project, and nothing for the 
   const ownerBa = await scheduleId('Friday review');
   const touch = await guestApi.patch(`/api/schedules/${ownerBa}`, { data: { enabled: false } });
   expect([403, 404]).toContain(touch.status());
+});
+
+// Delivering the agent's output: a create_card automation sends what the agent produced when its card is done.
+let outputSecret = '';
+const scheduleDto = async (name: string) =>
+  ((await (await api.get('/api/schedules')).json()).schedules as any[]).find((s) => s.name === name);
+
+test('agent output: the wizard adds a webhook and an e-mail, and Send test reaches both, signed', async () => {
+  await deleteMailFor(SCHEDULER.email);
+  await page.goto('/schedules');
+  await page.getByTestId('new-schedule').click();
+  const wiz = page.getByTestId('schedule-wizard');
+  await wiz.getByTestId('tile-manual').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByTestId('tile-create_card').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByLabel('Name', { exact: true }).first().fill('Result to the team');
+  await wiz.getByLabel('Project').selectOption({ label: 'SCH Scheduled work' });
+  await wiz.getByLabel('Title').fill('Write the weekly note');
+  const out = wiz.getByTestId('output-section');
+  await expect(out).toContainText('Send the result when the card is done');
+  await out.getByRole('button', { name: 'Add a destination' }).click();
+  const hook = out.getByTestId('output-0');
+  await hook.getByLabel('Send it to').selectOption({ label: 'Webhook' });
+  await hook.getByLabel('URL').fill(outUrl);
+  await out.getByRole('button', { name: 'Add a destination' }).click();
+  const mail = out.getByTestId('output-1');
+  await expect(mail.getByLabel('Send it to')).toHaveValue('email');
+  await mail.getByLabel('To', { exact: true }).fill(SCHEDULER.email);
+  await mail.getByLabel('Subject (optional)').fill('Result {ref}: {title}');
+  await page.screenshot({ path: join(paths.vaults, 'schedules-output-section.png'), fullPage: true });
+  await page.getByTestId('wizard-save').click();
+  // the signing secret of the output webhook is shown once, like that of a webhook action
+  outputSecret = (await page.getByTestId('secret-value').textContent())?.trim() ?? '';
+  expect(outputSecret).toMatch(/^whsec_/);
+  await page.getByRole('button', { name: 'I have saved it' }).click();
+  await expect(page.getByTestId('secret-value')).toHaveCount(0);
+  // and never sent back: the list carries the destinations without the encrypted secret
+  const dto = await scheduleDto('Result to the team');
+  expect(dto.action.deliverOutput.destinations).toHaveLength(2);
+  expect(dto.action.deliverOutput.secretEnc).toBeUndefined();
+  expect(JSON.stringify(dto)).not.toContain(outputSecret);
+
+  const row = page.getByTestId('schedule-Result to the team');
+  const before = outHits.length;
+  await row.getByTestId('test-delivery').click();
+  const result = row.getByTestId('test-result');
+  await expect(result).toContainText(`${new URL(outUrl).host}: delivered`);
+  await expect(result).toContainText(`${SCHEDULER.email}: delivered`);
+  const hit = outHits[before];
+  expect(hit).toBeTruthy();
+  const body = JSON.parse(hit?.body ?? '{}');
+  expect(body).toMatchObject({
+    event: 'schedule.test',
+    trigger: 'test',
+    schedule: { name: 'Result to the team' },
+  });
+  expect(body.text).toContain('Test delivery from the automation "Result to the team"');
+  expect(hit?.headers['x-aom-event']).toBe('schedule.test');
+  expect(hit?.headers['x-guildwise-signature']).toBe(signatureOf(outputSecret, hit as never));
+  const m = await waitForMail(SCHEDULER.email, 30_000);
+  expect(m.subject).toBe('Result TEST-1: Test delivery');
+  expect(m.text).toContain('Test delivery from the automation "Result to the team"');
+});
+
+test("agent output: when the automation's card is done, the agent's note reaches the webhook and the inbox", async () => {
+  await deleteMailFor(SCHEDULER.email);
+  // the card needs a spec for Build, and the mock builder's script; an edit keeps the destinations and the secret
+  const dto = await scheduleDto('Result to the team');
+  const patch = await api.patch(`/api/schedules/${dto.id}`, {
+    data: {
+      action: {
+        ...dto.action,
+        template: { ...dto.action.template, fields: { ...SPEC, mock: { build: ['ok'] } } },
+      },
+    },
+  });
+  expect(patch.status(), await patch.text()).toBe(200);
+  expect((await scheduleDto('Result to the team')).action.deliverOutput.destinations).toHaveLength(2);
+
+  await page.goto('/schedules');
+  const row = page.getByTestId('schedule-Result to the team');
+  await row.getByRole('button', { name: /Run now/ }).click();
+  const c = await waitFor(
+    'the card the automation made',
+    async () => (await q<any>('SELECT id, ref, title FROM cards WHERE schedule_id=$1', [dto.id]))[0],
+    (x) => !!x,
+    30_000,
+  );
+  const before = outHits.length;
+  await buildAndFinalize(c);
+  await waitFor(
+    'the output webhook was called',
+    async () => outHits.length,
+    (n) => n > before,
+    30_000,
+  );
+  const note = (
+    await q<any>(
+      `SELECT m.body FROM thread_messages m JOIN threads t ON t.id = m.thread_id
+        WHERE t.card_id=$1 AND t.kind='card' AND m.kind='handoff' AND m.author_kind='agent'
+        ORDER BY m.created_at DESC LIMIT 1`,
+      [c.id],
+    )
+  )[0]?.body as string;
+  expect(note?.trim()).toBeTruthy();
+  const hit = outHits[before];
+  const body = JSON.parse(hit?.body ?? '{}');
+  expect(body).toMatchObject({
+    event: 'schedule.output',
+    trigger: 'event',
+    schedule: { id: dto.id, name: 'Result to the team' },
+    text: note.trim(),
+    data: {
+      card: { ref: c.ref, title: c.title, url: `${BASE_URL}/cards/${c.ref}` },
+      output: { source: 'handoff' },
+    },
+  });
+  expect(hit?.headers['x-aom-event']).toBe('schedule.output');
+  // signed with the secret shown when the automation was saved, also after the edit
+  expect(hit?.headers['x-guildwise-signature']).toBe(signatureOf(outputSecret, hit as never));
+  expect(hit?.headers['x-aom-signature']).toBe(signatureOf(outputSecret, hit as never));
+  const m = await waitForMailMatching(SCHEDULER.email, new RegExp(`^Result ${c.ref}:`), 30_000);
+  expect(m.subject).toBe(`Result ${c.ref}: ${c.title}`);
+  expect(m.text).toContain(note.trim().split('\n')[0] as string);
+  expect(m.text).toContain(`${BASE_URL}/cards/${c.ref}`);
+  // once per card and destination, and not counted as cards the automation made
+  await new Promise((r) => setTimeout(r, 3000));
+  expect(outHits.length).toBe(before + 1);
+  const runs = (await runsOf('Result to the team')).filter((r) => r.result?.outputCardId === c.id);
+  expect(runs.map((r) => [r.delivery?.kind, r.status, r.attempts]).sort()).toEqual([
+    ['email', 'ok', 1],
+    ['webhook', 'ok', 1],
+  ]);
+  for (const r of runs) expect(r.result?.cardIds).toBeUndefined();
+
+  await page.reload();
+  const again = page.getByTestId('schedule-Result to the team');
+  await again.getByTestId('toggle-history').click();
+  await expect(again.getByText('Webhook: 1 try').first()).toBeVisible();
+  await expect(again.getByText('E-mail: 1 try').first()).toBeVisible();
+  await expect(
+    again.getByRole('link', { name: 'Open the card whose result was sent' }).first(),
+  ).toBeVisible();
+  await page.screenshot({ path: join(paths.vaults, 'schedules-output-history.png'), fullPage: true });
+  // the signing secret is never written to the server log
+  expect(readFileSync(paths.serverLog, 'utf8')).not.toContain(outputSecret);
+});
+
+test('agent output: a failing webhook is retried with a growing pause, then shown as failed with the reason', async () => {
+  const dto = await scheduleDto('Result to the team');
+  // webhook only from here on: the inbox needs nothing more
+  const patch = await api.patch(`/api/schedules/${dto.id}`, {
+    data: {
+      action: {
+        ...dto.action,
+        deliverOutput: { destinations: [dto.action.deliverOutput.destinations[0]] },
+      },
+    },
+  });
+  expect(patch.status(), await patch.text()).toBe(200);
+  outStatuses = [503, 503, 503, 503, 503];
+  const run = await api.post(`/api/schedules/${dto.id}/run`);
+  expect(run.ok(), await run.text()).toBeTruthy();
+  const c = await waitFor(
+    'the second card',
+    async () => (await q<any>('SELECT id, ref FROM cards WHERE schedule_id=$1 ORDER BY number', [dto.id]))[1],
+    (x) => !!x,
+    30_000,
+  );
+  const before = outHits.length;
+  await buildAndFinalize(c);
+  const outputRun = async () =>
+    (await runsOf('Result to the team')).find((r) => r.result?.outputCardId === c.id);
+  await waitFor('the first try', outputRun, (r) => r?.attempts === 1, 30_000);
+  const first = await outputRun();
+  expect(first).toMatchObject({ status: 'pending', attempts: 1 });
+  // 1 min, 5 min, 30 min, 2 h between the five tries
+  for (const [attempt, pause] of [
+    [2, 60_000],
+    [3, 300_000],
+    [4, 1_800_000],
+    [5, 7_200_000],
+  ] as const) {
+    await clock(pause + 1000);
+    await waitFor(`try ${attempt}`, outputRun, (r) => r?.attempts === attempt, 30_000);
+  }
+  const last = await waitFor('the delivery failed', outputRun, (r) => r?.status === 'failed', 30_000);
+  expect(last.error).toContain('503');
+  expect(outHits.length).toBe(before + 5);
+  const tries = await q<any>(
+    'SELECT attempt, ok, http_status FROM schedule_attempts WHERE run_id=$1 ORDER BY attempt',
+    [last.id],
+  );
+  expect(tries).toEqual([1, 2, 3, 4, 5].map((attempt) => ({ attempt, ok: false, http_status: 503 })));
+  // no sixth try
+  await clock(8 * 3_600_000);
+  await new Promise((r) => setTimeout(r, 3000));
+  expect(outHits.length).toBe(before + 5);
+
+  await page.goto('/schedules');
+  const row = page.getByTestId('schedule-Result to the team');
+  await row.getByTestId('toggle-history').click();
+  await expect(row.getByText('Webhook: 5 tries').first()).toBeVisible();
+  const failed = row.getByTestId('run-row').filter({ hasText: 'Webhook: 5 tries' }).first();
+  await expect(failed).toContainText('Failed');
+  await expect(failed).toContainText('503');
+  await expect(failed.getByTestId('run-error')).toContainText('503');
+  await expect(failed.getByRole('table', { name: 'Tries' })).toContainText('HTTP 503');
+});
+
+test("agent output: WhatsApp sends from the owner's workstation; a guest may not change it, its owner may", async () => {
+  const instance = '109876543210';
+  // The workstation reports a connected WhatsApp number (its token stays on the workstation, never on the server).
+  const connect = () =>
+    q(
+      `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
+       VALUES ($1,'whatsapp',$2,$3::jsonb,now())
+       ON CONFLICT DO NOTHING`,
+      [workstationId, instance, JSON.stringify({ kind: 'whatsapp', instance, state: 'connected' })],
+    );
+  await q(`DELETE FROM workstation_integrations WHERE workstation_id=$1 AND kind='whatsapp'`, [
+    workstationId,
+  ]);
+  await connect();
+  const dest = { kind: 'whatsapp', workstationId, instance, to: ['+27821234567'] };
+  const action = (title: string, d: Record<string, unknown>[] = [dest]) => ({
+    kind: 'create_card',
+    projectId,
+    template: { title, fields: {} },
+    deliverOutput: { destinations: d },
+  });
+  const create = await api.post('/api/schedules', {
+    data: { name: 'Result to WhatsApp', trigger: { kind: 'manual' }, action: action('Daily plan') },
+  });
+  expect(create.status(), await create.text()).toBe(201);
+  const id = (await create.json()).id as string;
+
+  // Send test: the workstation sends it; this one has no token for the number, so it answers with the reason
+  await page.goto('/schedules');
+  const row = page.getByTestId('schedule-Result to WhatsApp');
+  await row.getByTestId('test-delivery').click();
+  // pending while the workstation sends; a quick answer is shown at once
+  await expect(row.getByTestId('test-result')).toContainText(
+    /\+27821234567: (sent to the workstation; the result appears in the history|failed: WhatsApp is not connected on this workstation)/,
+  );
+  const run = await waitFor(
+    "the workstation's answer",
+    async () => (await runsOf('Result to WhatsApp'))[0],
+    (r) => r?.status === 'failed',
+    30_000,
+  );
+  expect(run.trigger).toBe('test');
+  expect(run.error).toContain('WhatsApp is not connected on this workstation');
+  // the run keeps no message text, and the command's payload is emptied once answered
+  expect(run.delivery).toMatchObject({ kind: 'runner', channel: 'whatsapp', destination: 0 });
+  expect(JSON.stringify(run.delivery)).not.toContain('Test delivery');
+  const cmds = await q<any>(
+    `SELECT payload FROM runner_commands WHERE type='delivery.send' AND workstation_id=$1`,
+    [workstationId],
+  );
+  expect(cmds.length).toBeGreaterThan(0);
+  for (const cmd of cmds) expect(cmd.payload).toEqual({});
+  await row.getByTestId('toggle-history').click();
+  await expect(row.getByTestId('run-row').first()).toContainText(
+    'WhatsApp is not connected on this workstation',
+  );
+
+  // a guest of the project may edit the automation, but not where the owner's WhatsApp account sends to
+  await connect();
+  const changed = { ...dest, to: ['+27829999999'] };
+  const byGuest = await guestApi.patch(`/api/schedules/${id}`, {
+    data: { action: action('Daily plan', [changed]) },
+  });
+  expect(byGuest.status(), await byGuest.text()).toBe(403);
+  const added = await guestApi.patch(`/api/schedules/${id}`, {
+    data: { action: action('Daily plan', [dest, changed]) },
+  });
+  expect(added.status()).toBe(403);
+  const titleOnly = await guestApi.patch(`/api/schedules/${id}`, {
+    data: { action: action('Daily plan for the team') },
+  });
+  expect(titleOnly.status(), await titleOnly.text()).toBe(200);
+  // the automation's owner (here also the organization's Owner) may change it
+  const byOwner = await api.patch(`/api/schedules/${id}`, {
+    data: { action: action('Daily plan for the team', [changed]) },
+  });
+  expect(byOwner.status(), await byOwner.text()).toBe(200);
+  const stored = (await q<any>('SELECT action FROM schedules WHERE id=$1', [id]))[0].action;
+  expect(stored.template.title).toBe('Daily plan for the team');
+  expect(stored.deliverOutput.destinations[0].to).toEqual(['+27829999999']);
+});
+
+test("agent output: a Google Sheet from the wizard is sent by the owner's workstation; a guest may not change it", async () => {
+  const instance = 'reports@pilot-project.iam.gserviceaccount.com';
+  const spreadsheetId = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+  // The workstation reports a connected service account (its key stays on the workstation, never on the server).
+  await q(`DELETE FROM workstation_integrations WHERE workstation_id=$1 AND kind='google-sheets'`, [
+    workstationId,
+  ]);
+  await q(
+    `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
+     VALUES ($1,'google-sheets',$2,$3::jsonb,now())`,
+    [
+      workstationId,
+      instance,
+      JSON.stringify({
+        kind: 'google-sheets',
+        instance,
+        state: 'connected',
+        method: 'api_key',
+        account: instance,
+        checkedAt: new Date().toISOString(),
+        scope: 'workstation',
+      }),
+    ],
+  );
+  // the workstation's Integrations list (what the wizard offers) shows it
+  const listed = await api.get(`/api/workstations/${workstationId}/integrations`);
+  expect(listed.ok(), await listed.text()).toBeTruthy();
+  expect(
+    ((await listed.json()).integrations as Array<{ kind: string; instance: string; state: string }>).some(
+      (i) => i.kind === 'google-sheets' && i.instance === instance && i.state === 'connected',
+    ),
+  ).toBe(true);
+
+  await page.goto('/schedules');
+  await page.getByTestId('new-schedule').click();
+  const wiz = page.getByTestId('schedule-wizard');
+  await wiz.getByTestId('tile-manual').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByTestId('tile-create_card').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByLabel('Name', { exact: true }).first().fill('Result to a sheet');
+  await wiz.getByLabel('Project').selectOption({ label: 'SCH Scheduled work' });
+  await wiz.getByLabel('Title').fill('Log the weekly note');
+  const out = wiz.getByTestId('output-section');
+  await out.getByRole('button', { name: 'Add a destination' }).click();
+  const sheet = out.getByTestId('output-0');
+  await sheet.getByLabel('Send it to').selectOption({ label: 'Google Sheet' });
+  await sheet.getByLabel('Workstation').selectOption(workstationId);
+  await sheet.getByLabel('Service account').selectOption(instance);
+  await expect(sheet).toContainText(`Share the sheet with ${instance} as Editor.`);
+  // no key or token is typed in the automation
+  await expect(sheet.locator('input[type="password"]')).toHaveCount(0);
+  await sheet
+    .getByLabel('Sheet address')
+    .fill(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=0`);
+  await sheet.getByLabel('Tab').fill('Log');
+  await page.getByTestId('wizard-save').click();
+  await expect(page.getByTestId('schedule-Result to a sheet')).toBeVisible();
+  const dto = await scheduleDto('Result to a sheet');
+  expect(dto.action.deliverOutput.destinations).toEqual([
+    { kind: 'google_sheet', workstationId, instance, spreadsheetId, sheet: 'Log' },
+  ]);
+
+  // Send test: the workstation appends the row; this one has no key for the account, so it answers with the reason
+  const row = page.getByTestId('schedule-Result to a sheet');
+  await row.getByTestId('test-delivery').click();
+  await expect(row.getByTestId('test-result')).toContainText(
+    /(sent to the workstation; the result appears in the history|failed: Google Sheets is not connected on this workstation)/,
+  );
+  const run = await waitFor(
+    "the workstation's answer",
+    async () => (await runsOf('Result to a sheet'))[0],
+    (r) => r?.status === 'failed',
+    30_000,
+  );
+  expect(run.trigger).toBe('test');
+  expect(run.error).toContain('Google Sheets is not connected on this workstation');
+  expect(run.delivery).toMatchObject({ kind: 'runner', channel: 'google_sheet', destination: 0 });
+  expect(JSON.stringify(run.delivery)).not.toContain('Test delivery');
+  const cmds = await q<any>(
+    `SELECT payload FROM runner_commands WHERE type='delivery.send' AND workstation_id=$1`,
+    [workstationId],
+  );
+  for (const cmd of cmds) expect(cmd.payload).toEqual({});
+  await row.getByTestId('toggle-history').click();
+  await expect(row.getByTestId('run-row').first()).toContainText(
+    'Google Sheets is not connected on this workstation',
+  );
+
+  // a guest may not point the owner's service account at another sheet
+  const moved = { ...dto.action.deliverOutput.destinations[0], spreadsheetId: 'ZZZZzzzzYYYYyyyyXXXXxxxx01' };
+  const byGuest = await guestApi.patch(`/api/schedules/${dto.id}`, {
+    data: { action: { ...dto.action, deliverOutput: { destinations: [moved] } } },
+  });
+  expect(byGuest.status(), await byGuest.text()).toBe(403);
+  const stored = (await q<any>('SELECT action FROM schedules WHERE id=$1', [dto.id]))[0].action;
+  expect(stored.deliverOutput.destinations[0].spreadsheetId).toBe(spreadsheetId);
+});
+
+test('agent output: without the local-network allowance, a webhook to this machine or a private network is refused', async () => {
+  // The suite's server lets webhooks reach this machine (its receivers listen here). A second server on the same
+  // database runs with the production default, briefly, to show the guard.
+  const port = 4611;
+  const origin = `http://localhost:${port}`;
+  const log = openSync(join(E2E_DIR, 'server-strict.log'), 'a');
+  const strict = spawn('node', [paths.server], {
+    env: {
+      ...process.env,
+      DATABASE_URL,
+      AOM_PORT: String(port),
+      AOM_HOST: '127.0.0.1',
+      AOM_PUBLIC_ORIGIN: origin,
+      AOM_SMTP_URL: SMTP_URL,
+      AOM_RATE_LIMIT: 'false',
+      AOM_MIGRATE_ON_BOOT: 'false',
+      AOM_DATA_MIGRATIONS: 'false',
+      AOM_HYGIENE_SCHEDULE: 'false',
+      AOM_BLOG_DIGEST: 'false',
+      AOM_WEEKLY_BRIEFING: 'false',
+      AOM_WEBHOOK_ALLOW_PRIVATE: 'false',
+      LOG_LEVEL: 'warn',
+    },
+    stdio: ['ignore', log, log],
+  });
+  closeSync(log);
+  try {
+    await waitFor(
+      'the second server',
+      async () => (await fetch(`${origin}/api/health`).catch(() => null))?.ok ?? false,
+      (ok) => ok,
+      30_000,
+    );
+    const strictApi = await request.newContext({ baseURL: origin, extraHTTPHeaders: { Origin: origin } });
+    const login = await strictApi.post('/api/auth/login', {
+      data: { email: SCHEDULER.email, password: SCHEDULER.password },
+    });
+    expect(login.ok(), await login.text()).toBeTruthy();
+    const withHook = (url: string) => ({
+      name: `Private ${url}`,
+      trigger: { kind: 'manual' },
+      action: {
+        kind: 'create_card',
+        projectId,
+        template: { title: 'Note', fields: {} },
+        deliverOutput: { destinations: [{ kind: 'webhook', url }] },
+      },
+    });
+    for (const url of [
+      outUrl,
+      'http://localhost:8080/output',
+      'http://10.1.2.3/output',
+      'http://192.168.1.10/output',
+      'http://169.254.169.254/latest/meta-data',
+      'http://[::1]/output',
+    ]) {
+      const r = await strictApi.post('/api/schedules', { data: withHook(url) });
+      expect(r.status(), `${url}: ${await r.text()}`).toBe(400);
+      expect(await r.text()).toContain('private');
+    }
+    // a public address is accepted (nothing is sent until a card is done)
+    const pub = await strictApi.post('/api/schedules', {
+      data: withHook('https://hooks.example.com/output'),
+    });
+    expect(pub.status(), await pub.text()).toBe(201);
+    await strictApi.delete(`/api/schedules/${(await pub.json()).id}`);
+    // a stored automation whose webhook points at this machine is not called by Send test either
+    const before = outHits.length;
+    const id = (await scheduleDto('Result to the team')).id;
+    const tried = await strictApi.post(`/api/schedules/${id}/test`);
+    const body = await tried.text();
+    expect(body).toMatch(/private/);
+    expect(body).not.toMatch(/"ok":true/);
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(outHits.length).toBe(before);
+    await strictApi.dispose();
+  } finally {
+    strict.kill('SIGTERM');
+  }
+});
+
+test('agent output: with the workstation offline, a WhatsApp send fails after the 15-minute deadline with the reason', async () => {
+  const id = (await scheduleDto('Result to WhatsApp')).id as string;
+  killRunner('SIGTERM', HOME);
+  try {
+    await waitFor(
+      'the workstation is offline',
+      async () => (await q<any>('SELECT connected FROM workstations WHERE id=$1', [workstationId]))[0],
+      (w) => w?.connected === false,
+      30_000,
+    );
+    // the workstation does not answer within the wait of Send test: the result follows in the history
+    const tried = await api.post(`/api/schedules/${id}/test`);
+    expect(tried.ok(), await tried.text()).toBeTruthy();
+    const results = ((await tried.json()).results ?? []) as Array<{ pending?: boolean; ok: boolean }>;
+    expect(results).toHaveLength(1);
+    expect(results[0]?.pending).toBe(true);
+    const pending = (await runsOf('Result to WhatsApp')).filter((r) => r.status === 'pending');
+    expect(pending).toHaveLength(1);
+    const run = pending[0];
+    expect(run).toMatchObject({ trigger: 'test', attempts: 0 });
+
+    // nothing happens before the deadline
+    await clock(14 * 60_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    const still = (await q<any>('SELECT status FROM schedule_runs WHERE id=$1', [run.id]))[0];
+    expect(still.status).toBe('pending');
+    // after it: one failed try with the reason, and no further try for a test
+    await clock(2 * 60_000);
+    const failed = await waitFor(
+      'the deadline lapsed',
+      async () => (await q<any>('SELECT * FROM schedule_runs WHERE id=$1', [run.id]))[0],
+      (r) => r?.status === 'failed',
+      30_000,
+    );
+    expect(failed.error).toContain('did not answer (offline?)');
+    expect(failed.attempts).toBe(1);
+    const cmds = await q<any>(
+      `SELECT status, payload FROM runner_commands WHERE type='delivery.send' AND workstation_id=$1`,
+      [workstationId],
+    );
+    for (const cmd of cmds) expect(cmd.payload).toEqual({});
+    await clock(3 * 3_600_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    expect((await q<any>('SELECT attempts FROM schedule_runs WHERE id=$1', [run.id]))[0].attempts).toBe(1);
+
+    await page.goto('/schedules');
+    const row = page.getByTestId('schedule-Result to WhatsApp');
+    await row.getByTestId('toggle-history').click();
+    await expect(
+      row.getByTestId('run-row').filter({ hasText: 'did not answer (offline?)' }).first(),
+    ).toBeVisible();
+  } finally {
+    startRunner({ AOM_MOCK_STEP_MS: '200' }, HOME);
+  }
 });

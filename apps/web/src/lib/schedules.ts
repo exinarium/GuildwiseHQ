@@ -6,12 +6,14 @@ import {
   isPollAction,
   isWebhookAction,
   normaliseAllowEntry,
+  type OutputDestination,
   SCHEDULE_EVENT_TRIGGERS,
   SCHEDULE_PRESETS,
   type ScheduleAction,
   type ScheduleDto,
   type ScheduleEventName,
   type ScheduleTrigger,
+  spreadsheetIdFrom,
   unknownMappingTokens,
   type WebhookFormat,
   type WorkflowDefinition,
@@ -268,6 +270,8 @@ export interface WizardState {
   /** '' = as the server decides (queued, or draft for members). */
   start: '' | 'draft' | 'queued';
   ratePerHour: string;
+  /** "Send the result when the card is done": empty = off. */
+  outputs: OutputDraft[];
   dedupe: 'none' | 'thread' | 'subject_from';
   platform: 'web' | 'mobile' | 'both';
   // devops
@@ -288,6 +292,133 @@ export interface WizardState {
   subject: string;
   emailDigest: 'floor_report' | 'project_summary';
 }
+
+/** One destination of "Send the result when the card is done", as typed in the wizard (no secrets). */
+export interface OutputDraft {
+  kind: OutputDestination['kind'];
+  /** email */
+  to: string;
+  subject: string;
+  /** webhook */
+  url: string;
+  format: WebhookFormat;
+  /** whatsapp, google_sheet */
+  workstationId: string;
+  instance: string;
+  /** whatsapp: numbers separated by commas or spaces; template */
+  numbers: string;
+  templateName: string;
+  templateLanguage: string;
+  /** google_sheet: a pasted sheet URL or the id; the tab */
+  sheet: string;
+  tab: string;
+}
+
+/** A create-card automation that sends its result to a webhook: it has a signing secret to show or renew. */
+export const hasOutputWebhook = (a: {
+  kind: string;
+  deliverOutput?: { destinations: Array<{ kind: string }> };
+}) => a.kind === 'create_card' && Boolean(a.deliverOutput?.destinations.some((d) => d.kind === 'webhook'));
+
+export const emptyOutput = (kind: OutputDraft['kind'] = 'email'): OutputDraft => ({
+  kind,
+  to: '',
+  subject: '',
+  url: '',
+  format: 'generic',
+  workstationId: '',
+  instance: '',
+  numbers: '',
+  templateName: '',
+  templateLanguage: 'en_US',
+  sheet: '',
+  tab: 'Sheet1',
+});
+
+const splitList = (v: string): string[] =>
+  v
+    .split(/[\s,;]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+/** One draft as a destination, or the reason it is not valid. */
+function outputOf(d: OutputDraft): OutputDestination | string {
+  if (d.kind === 'email') {
+    const to = splitList(d.to);
+    if (!to.length || to.some((x) => !isEmailAddress(x))) return 'Enter one or more e-mail addresses';
+    return { kind: 'email', to, subject: d.subject.trim() };
+  }
+  if (d.kind === 'webhook') {
+    if (!/^https?:\/\/\S+$/i.test(d.url.trim())) return 'Enter the URL, starting with https://';
+    return { kind: 'webhook', url: d.url.trim(), format: d.format };
+  }
+  if (d.kind === 'whatsapp') {
+    const to = splitList(d.numbers);
+    if (!d.workstationId || !d.instance) return 'Choose the connected WhatsApp number';
+    if (!to.length || to.some((x) => !/^\+[1-9]\d{6,14}$/.test(x)))
+      return 'Enter numbers with the country code, like +27821234567';
+    if (!!d.templateName.trim() !== !!d.templateLanguage.trim())
+      return 'Enter the template name and language';
+    return {
+      kind: 'whatsapp',
+      workstationId: d.workstationId,
+      instance: d.instance,
+      to,
+      ...(d.templateName.trim()
+        ? { template: { name: d.templateName.trim(), language: d.templateLanguage.trim() } }
+        : {}),
+    };
+  }
+  const id = spreadsheetIdFrom(d.sheet.trim());
+  if (!d.workstationId || !d.instance) return 'Choose the connected Google service account';
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(id)) return 'Paste the address of the sheet';
+  return {
+    kind: 'google_sheet',
+    workstationId: d.workstationId,
+    instance: d.instance,
+    spreadsheetId: id,
+    sheet: d.tab.trim() || 'Sheet1',
+  };
+}
+
+/** The drafts as destinations, or the reason a draft is not valid (keyed `output.<index>`). */
+export function buildOutputs(drafts: OutputDraft[]): {
+  destinations: OutputDestination[];
+  errors: Record<string, string>;
+} {
+  const errors: Record<string, string> = {};
+  const destinations: OutputDestination[] = [];
+  for (const [i, d] of drafts.entries()) {
+    const r = outputOf(d);
+    if (typeof r === 'string') errors[`output.${i}`] = r;
+    else destinations.push(r);
+  }
+  return { destinations, errors };
+}
+
+/** The drafts of a saved destination list. */
+export const draftsFrom = (destinations: OutputDestination[]): OutputDraft[] =>
+  destinations.map((d) => {
+    const e = emptyOutput(d.kind);
+    if (d.kind === 'email') return { ...e, to: d.to.join(', '), subject: d.subject };
+    if (d.kind === 'webhook') return { ...e, url: d.url, format: d.format };
+    if (d.kind === 'whatsapp')
+      return {
+        ...e,
+        workstationId: d.workstationId,
+        instance: d.instance,
+        numbers: d.to.join(', '),
+        templateName: d.template?.name ?? '',
+        templateLanguage: d.template?.language ?? 'en_US',
+      };
+    return {
+      ...e,
+      workstationId: d.workstationId,
+      instance: d.instance,
+      sheet: d.spreadsheetId,
+      tab: d.sheet,
+    };
+  });
 
 export const CUSTOM_PRESET = 'custom';
 
@@ -321,6 +452,7 @@ export const emptyWizard = (over: Partial<WizardState> = {}): WizardState => ({
   mapping: [],
   start: '',
   ratePerHour: '',
+  outputs: [],
   dedupe: 'none',
   platform: 'web',
   devopsText: '',
@@ -399,6 +531,7 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
       st.mapping = Object.entries(a.template.mapping ?? {}).map(([target, text]) => ({ target, text }));
       st.start = a.template.start ?? '';
       st.ratePerHour = a.ratePerHour ? String(a.ratePerHour) : '';
+      st.outputs = draftsFrom(a.deliverOutput?.destinations ?? []);
       st.dedupe = a.dedupe === 'thread' || a.dedupe === 'subject_from' ? a.dedupe : 'none';
     }
   } else if (a.kind === 'devops_request') {
@@ -569,6 +702,8 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
         const rate = s.ratePerHour.trim() ? Number(s.ratePerHour) : undefined;
         if (rate !== undefined && (!Number.isInteger(rate) || rate < 1 || rate > 1000))
           errors.ratePerHour = 'A whole number from 1 to 1000';
+        const outputs = buildOutputs(s.outputs);
+        Object.assign(errors, outputs.errors);
         if (projectId && Object.keys(errors).length === 0) {
           const automation = isReactiveKind(s.triggerKind);
           action = {
@@ -584,6 +719,7 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
             },
             ...(automation && rate ? { ratePerHour: rate } : {}),
             ...(automation && s.dedupe !== 'none' ? { dedupe: s.dedupe } : {}),
+            ...(outputs.destinations.length ? { deliverOutput: { destinations: outputs.destinations } } : {}),
           };
         }
       } else if (projectId) errors['card.title'] = 'Loading the project workflow';

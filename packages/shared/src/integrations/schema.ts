@@ -17,6 +17,8 @@ export const INTEGRATION_KIND_IDS = [
   'ssh',
   'jira',
   'mcp',
+  'whatsapp',
+  'google-sheets',
 ] as const;
 export const IntegrationKindIdSchema = z.enum(INTEGRATION_KIND_IDS);
 export type IntegrationKindId = z.infer<typeof IntegrationKindIdSchema>;

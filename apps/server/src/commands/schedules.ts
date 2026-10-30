@@ -6,6 +6,7 @@ import {
   actionWorkstationId,
   type CardTemplate,
   type CreateScheduleRequest,
+  type DeliverOutput,
   effectiveFeatures,
   emptyFields,
   getStage,
@@ -21,6 +22,8 @@ import {
   isWebhookAction,
   normaliseAllowEntry,
   type OrgRole,
+  type OutputDestination,
+  outputTarget,
   type PatchScheduleRequest,
   parseCardFields,
   RegressionPlatform,
@@ -28,6 +31,7 @@ import {
   type ScheduleAction,
   type ScheduleDto,
   type ScheduleRunDto,
+  type ScheduleTestResponse,
   type ScheduleTrigger,
   type SystemScheduleDto,
   scheduleBackoffMs,
@@ -61,6 +65,7 @@ import {
 } from './schedule-actions.ts';
 import { assertWebhookUrl, attemptDelivery, attemptsOf } from './schedule-delivery.ts';
 import { digestAvailable } from './schedule-digest.ts';
+import { deliverOutputOf, outputDelivery, outputRunEvent, sampleOutput } from './schedule-output.ts';
 
 /** The next time `cron` fires strictly after `from`, evaluated in the IANA zone `timezone`. Null: it never fires again. */
 export function nextFireAfter(cron: string, timezone: string, from: Date): Date | null {
@@ -104,6 +109,10 @@ function publicAction(a: ScheduleAction | null): ScheduleAction | null {
     const { secretEnc: _s, ...rest } = a;
     return rest;
   }
+  if (a?.kind === 'create_card' && a.deliverOutput) {
+    const { secretEnc: _s, ...out } = a.deliverOutput;
+    return { ...a, deliverOutput: out };
+  }
   return a;
 }
 
@@ -145,7 +154,9 @@ const toDto = (r: Row, roles: Map<string, OrgRole>): ScheduleDto => {
     hasWebhookSecret:
       stored.kind === 'webhook_in'
         ? !!stored.secretHash
-        : !!action && isWebhookAction(action) && !!action.secretEnc,
+        : !!action &&
+          ((isWebhookAction(action) && !!action.secretEnc) ||
+            (action.kind === 'create_card' && !!action.deliverOutput?.secretEnc)),
     ...(stored.kind === 'webhook_in' ? { hookUrl: `/api/hooks/${r.id}` } : {}),
     lastStatus: r.last_status ?? null,
     lastSummary: r.last_summary ?? null,
@@ -412,6 +423,8 @@ async function validate(
   project: Row | null,
   n: Normalized,
   isManager: boolean,
+  ownerUserId: string = user.id,
+  stored?: DeliverOutput,
 ): Promise<void> {
   const t = n.trigger;
   if (!isTriggerImplemented(t))
@@ -457,6 +470,15 @@ async function validate(
             );
           n.action = { ...a, template: { ...a.template, start: 'draft' } };
         }
+      }
+      if (a.kind === 'create_card' && a.deliverOutput) {
+        // The incoming-webhook secret and the output signing secret are both shown once, in one field: not together.
+        if (t.kind === 'webhook_in' && a.deliverOutput.destinations.some((d) => d.kind === 'webhook'))
+          throw badRequest(
+            'invalid_output_destination',
+            'an automation started by an incoming webhook cannot deliver its result to a webhook; choose another destination',
+          );
+        await validateDeliverOutput(ctx, tx, user, a.deliverOutput, isManager, ownerUserId, stored);
       }
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
       if (wf?.definition.fieldSet === 'feed')
@@ -520,6 +542,95 @@ async function validate(
             );
         }
       }
+    }
+  }
+}
+
+const INTEGRATION_KIND_OF = { whatsapp: 'whatsapp', google_sheet: 'google-sheets' } as const;
+
+/** Key order and absent optional fields do not make a destination different. */
+const canon = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canon)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.entries(v)
+            .filter(([, x]) => x !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([k, x]) => [k, canon(x)]),
+        )
+      : v;
+
+/** The WhatsApp and Google Sheet destinations of `next` that are not, unchanged, among the `stored` ones. */
+export function newRunnerDestinations(
+  next: DeliverOutput,
+  stored: DeliverOutput | undefined,
+): OutputDestination[] {
+  const kept = new Set(
+    (stored?.destinations ?? [])
+      .filter((d) => d.kind === 'whatsapp' || d.kind === 'google_sheet')
+      .map((d) => JSON.stringify(canon(d))),
+  );
+  return next.destinations.filter(
+    (d) => (d.kind === 'whatsapp' || d.kind === 'google_sheet') && !kept.has(JSON.stringify(canon(d))),
+  );
+}
+
+/** Each destination of `deliverOutput` can be checked now rather than when the card is done. */
+async function validateDeliverOutput(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  out: DeliverOutput,
+  isManager: boolean,
+  ownerUserId: string,
+  stored: DeliverOutput | undefined,
+): Promise<void> {
+  // WhatsApp and Sheets send from the owner's workstation with the owner's own credentials: someone else may change
+  // them only as an Owner or Admin. A member editing another member's automation keeps those destinations as they are.
+  if (ownerUserId !== user.id && !isManager && newRunnerDestinations(out, stored).length)
+    throw forbidden(
+      "only the automation's owner, an Owner or an Admin can add or change a WhatsApp or Google Sheet destination: it sends with the owner's account",
+    );
+  let mine: string | undefined;
+  for (const d of out.destinations) {
+    if (d.kind === 'email') {
+      for (const to of d.to)
+        if (!isEmailAddress(to)) throw badRequest('invalid_email', `'${to}' is not an e-mail address`);
+      if (!isManager) {
+        // As with digests: a member or guest may mail only themselves.
+        mine ??= String(
+          (await one(tx, 'SELECT email FROM users WHERE id=$1', [user.id]))?.email ?? '',
+        ).toLowerCase();
+        if (d.to.some((x) => x.toLowerCase() !== mine))
+          throw forbidden(
+            'you can send the result to your own address only; ask an Owner or Admin for others',
+          );
+      }
+    } else if (d.kind === 'webhook') {
+      assertWebhookUrl(ctx, d.url);
+    } else {
+      const ws = await one(
+        tx,
+        `SELECT name FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+        [d.workstationId, ownerUserId],
+      );
+      if (!ws)
+        throw badRequest(
+          'invalid_workstation',
+          "choose one of the automation owner's workstations for this destination",
+        );
+      const kind = INTEGRATION_KIND_OF[d.kind];
+      const st = await one(
+        tx,
+        `SELECT status FROM workstation_integrations WHERE workstation_id=$1 AND kind=$2 AND instance=$3`,
+        [d.workstationId, kind, d.instance],
+      );
+      if ((st?.status as { state?: string } | undefined)?.state !== 'connected')
+        throw badRequest(
+          'integration_not_connected',
+          `connect ${d.kind === 'whatsapp' ? 'WhatsApp' : 'Google Sheets'} on the Integrations page of ${ws.name} first`,
+        );
     }
   }
 }
@@ -590,6 +701,17 @@ export async function createSchedule(
       webhookSecret = newSecret();
       n.action = { ...n.action, secretEnc: await encryptSecret(ctx, webhookSecret) };
     }
+    if (n.action.kind === 'create_card' && n.action.deliverOutput) {
+      // A client never supplies the signing secret: the server makes it when there is a webhook destination.
+      const { secretEnc: _drop, ...out } = n.action.deliverOutput;
+      if (out.destinations.some((d) => d.kind === 'webhook')) {
+        webhookSecret = newSecret();
+        n.action = {
+          ...n.action,
+          deliverOutput: { ...out, secretEnc: await encryptSecret(ctx, webhookSecret) },
+        };
+      } else n.action = { ...n.action, deliverOutput: out };
+    }
     const id = randomUUID();
     const nextFireAt = nextFor(n.trigger, n.enabled, ctx.clock.now());
     await ctx.store.append(
@@ -637,7 +759,8 @@ export async function patchSchedule(
   org: OrgCtx | null,
   id: string,
   patch: PatchScheduleRequest,
-): Promise<void> {
+): Promise<{ webhookSecret?: string }> {
+  let newOutputSecret: string | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
     const { s, project, orgId } = await lockManaged(tx, user, org, id);
     const cur = s.action as ScheduleAction;
@@ -666,6 +789,21 @@ export async function patchSchedule(
       throw badRequest('action_kind_fixed', 'what a schedule does cannot be changed: create a new schedule');
     if (isWebhookAction(action) && isWebhookAction(cur))
       action = { ...action, secretEnc: cur.secretEnc as string };
+    if (action.kind === 'create_card') {
+      // The signing secret of the output webhooks is never sent by a client: keep the stored one, make one when the
+      // first webhook destination appears (it is shown once, in the answer of this call).
+      const kept = cur.kind === 'create_card' ? cur.deliverOutput?.secretEnc : undefined;
+      if (action.deliverOutput) {
+        const { secretEnc: _drop, ...rest } = action.deliverOutput;
+        const needs = rest.destinations.some((d) => d.kind === 'webhook');
+        let enc = kept;
+        if (needs && !enc) {
+          newOutputSecret = newSecret();
+          enc = await encryptSecret(ctx, newOutputSecret);
+        }
+        action = { ...action, deliverOutput: { ...rest, ...(needs && enc ? { secretEnc: enc } : {}) } };
+      }
+    }
     if (trigger.kind === 'webhook_in') {
       const kept = curTrigger.kind === 'webhook_in' ? curTrigger.secretHash : undefined;
       trigger = { ...stripHash(trigger), ...(kept ? { secretHash: kept } : {}) } as ScheduleTrigger;
@@ -688,6 +826,8 @@ export async function patchSchedule(
         project,
         n,
         isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) }),
+        (s.owner_user_id as string | null) ?? user.id,
+        cur.kind === 'create_card' ? cur.deliverOutput : undefined,
       );
     }
     // A changed trigger, or re-enabling, recomputes the next fire; otherwise the pending fire is kept.
@@ -712,6 +852,7 @@ export async function patchSchedule(
       { tx },
     );
   });
+  return newOutputSecret ? { webhookSecret: newOutputSecret } : {};
 }
 
 /** A new signing secret for a webhook schedule; the old one stops working at once. Shown to the caller this once. */
@@ -725,13 +866,19 @@ export async function rotateWebhookSecret(
     const { s } = await lockManaged(tx, user, org, id);
     const cur = s.action as ScheduleAction;
     const curTrigger: ScheduleTrigger = s.trigger ?? { kind: 'cron', cron: s.cron, timezone: s.timezone };
-    if (curTrigger.kind !== 'webhook_in' && !isWebhookAction(cur))
+    const outputHook =
+      cur.kind === 'create_card' && cur.deliverOutput?.destinations.some((d) => d.kind === 'webhook');
+    if (curTrigger.kind !== 'webhook_in' && !isWebhookAction(cur) && !outputHook)
       throw badRequest('not_a_webhook', 'only a webhook schedule has a signing secret');
     const secret = curTrigger.kind === 'webhook_in' ? newHookSecret() : newSecret();
     const action: ScheduleAction =
-      curTrigger.kind === 'webhook_in' || !isWebhookAction(cur)
+      curTrigger.kind === 'webhook_in'
         ? cur
-        : { ...cur, secretEnc: await encryptSecret(ctx, secret) };
+        : isWebhookAction(cur)
+          ? { ...cur, secretEnc: await encryptSecret(ctx, secret) }
+          : cur.kind === 'create_card' && cur.deliverOutput
+            ? { ...cur, deliverOutput: { ...cur.deliverOutput, secretEnc: await encryptSecret(ctx, secret) } }
+            : cur;
     const trigger: ScheduleTrigger =
       curTrigger.kind === 'webhook_in' ? { ...curTrigger, secretHash: hashHookSecret(secret) } : curTrigger;
     await ctx.store.append(
@@ -888,19 +1035,19 @@ export async function runScheduleNow(
   };
 }
 
-/** `POST /api/schedules/:id/test`: one signed test delivery of a webhook (or e-mail) schedule. Not retried. */
+/** `POST /api/schedules/:id/test`: one signed test delivery of a webhook (or e-mail) schedule, or of each output destination. Not retried. */
 export async function testSchedule(
   ctx: Ctx,
   user: AuthSession['user'],
   org: OrgCtx | null,
   id: string,
-): Promise<{
-  ok: boolean;
-  httpStatus: number | null;
-  error: string | null;
-  durationMs: number | null;
-  runId: string;
-}> {
+): Promise<ScheduleTestResponse> {
+  const preview = await withAppendTx(ctx.pool, async (tx) => {
+    const { s } = await lockManaged(tx, user, org, id);
+    return s;
+  });
+  const out = deliverOutputOf(preview.action as ScheduleAction);
+  if (out) return testOutputDeliveries(ctx, user, org, id, out);
   const outcome = await withAppendTx(ctx.pool, async (tx) => {
     const { s } = await lockManaged(tx, user, org, id);
     const a = s.action as ScheduleAction;
@@ -937,6 +1084,93 @@ export async function testSchedule(
   };
 }
 
+/** How long a test waits for the workstation to answer a WhatsApp or Sheets test before it says "sent". */
+const RUNNER_TEST_WAIT_MS = 20_000;
+
+/** A test of a `create_card` automation with `deliverOutput`: one test run per destination. */
+async function testOutputDeliveries(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: OrgCtx | null,
+  id: string,
+  out: DeliverOutput,
+): Promise<ScheduleTestResponse> {
+  const queued = await withAppendTx(ctx.pool, async (tx) => {
+    const { s } = await lockManaged(tx, user, org, id);
+    const sample = await sampleOutput(ctx, tx, s);
+    const cardId = (await one(tx, `SELECT id FROM cards WHERE ref=$1 AND org_id=$2`, [sample.ref, s.org_id]))
+      ?.id as string | undefined;
+    const now = ctx.clock.now();
+    const events: AppendInput[] = [];
+    const list: Array<{ runId: string; index: number; dest: OutputDestination }> = [];
+    const fixed = (s.action as ScheduleAction & { kind: 'create_card' }).deliverOutput ?? out;
+    for (const [i, dest] of fixed.destinations.entries()) {
+      const runId = randomUUID();
+      // A runner test rebuilds its sample text on dispatch (`sampleOutput`); the card id is a placeholder when no card is done yet.
+      const delivery = outputDelivery(ctx, s, dest, i, sample, cardId ?? s.id, { at: now, test: true });
+      events.push(
+        outputRunEvent(s, dest, sample, delivery, cardId, {
+          runId,
+          trigger: 'test',
+          now,
+          byUserId: user.id,
+        }),
+      );
+      list.push({ runId, index: i, dest });
+    }
+    await ctx.store.append(events, { tx });
+    return list;
+  });
+  const results: NonNullable<ScheduleTestResponse['results']> = [];
+  for (const q of queued) {
+    const r = await attemptDelivery(ctx, q.runId, { single: true });
+    let ok = r?.ok ?? false;
+    let pending = false;
+    let error = r?.error ?? null;
+    let httpStatus = r?.httpStatus ?? null;
+    let durationMs = r?.durationMs ?? null;
+    if (!r) {
+      // Handed to the workstation: wait a little for its answer.
+      const until = Date.now() + RUNNER_TEST_WAIT_MS;
+      let row = await one(ctx.pool, 'SELECT status, error FROM schedule_runs WHERE id=$1', [q.runId]);
+      while (row?.status === 'pending' && Date.now() < until) {
+        await new Promise((res) => setTimeout(res, 500));
+        row = await one(ctx.pool, 'SELECT status, error FROM schedule_runs WHERE id=$1', [q.runId]);
+      }
+      pending = row?.status === 'pending';
+      ok = row?.status === 'ok';
+      error = row?.status === 'failed' ? (row.error ?? 'failed') : null;
+      const att = await one(
+        ctx.pool,
+        'SELECT http_status, duration_ms FROM schedule_attempts WHERE run_id=$1',
+        [q.runId],
+      );
+      httpStatus = att?.http_status ?? null;
+      durationMs = att?.duration_ms ?? null;
+    }
+    results.push({
+      index: q.index,
+      kind: q.dest.kind,
+      target: outputTarget(q.dest),
+      ok,
+      ...(pending ? { pending: true } : {}),
+      httpStatus,
+      error,
+      durationMs,
+      runId: q.runId,
+    });
+  }
+  const first = results[0];
+  return {
+    ok: results.every((x) => x.ok),
+    httpStatus: first?.httpStatus ?? null,
+    error: results.find((x) => x.error)?.error ?? null,
+    durationMs: first?.durationMs ?? null,
+    runId: first?.runId as string,
+    results,
+  };
+}
+
 function testBody(format: string, s: Row, original: string, now: Date): Record<string, unknown> {
   const text = `Test delivery from the schedule "${s.name}". If you can read this, the webhook works.`;
   const o = JSON.parse(original) as Record<string, unknown>;
@@ -952,7 +1186,8 @@ export async function listRuns(
   scheduleId: string,
   limit = 50,
 ): Promise<ScheduleRunDto[]> {
-  await getScheduleDto(ctx.pool, userId, scheduleId);
+  const sched = await getScheduleDto(ctx.pool, userId, scheduleId);
+  const out = deliverOutputOf(sched.action);
   const list = await rows(
     ctx.pool,
     `SELECT * FROM schedule_runs WHERE schedule_id=$1 ORDER BY started_at DESC, id DESC LIMIT $2`,
@@ -963,7 +1198,13 @@ export async function listRuns(
     list.map((r) => r.id),
   );
   return list.map((r) => {
-    const d = r.delivery as { kind: 'webhook' | 'email'; url?: string; to?: string[] } | null;
+    const d = r.delivery as {
+      kind: 'webhook' | 'email' | 'runner';
+      url?: string;
+      to?: string[];
+      channel?: 'whatsapp' | 'google_sheet';
+      destination?: number;
+    } | null;
     return {
       id: r.id,
       scheduleId: r.schedule_id,
@@ -974,7 +1215,15 @@ export async function listRuns(
       error: r.error ?? null,
       result: r.result ?? null,
       delivery: d
-        ? { kind: d.kind, target: d.kind === 'webhook' ? (d.url as string) : (d.to ?? []).join(', ') }
+        ? d.kind === 'runner'
+          ? {
+              kind: d.channel as 'whatsapp' | 'google_sheet',
+              target: (() => {
+                const dest = out?.destinations[d.destination ?? -1];
+                return dest ? outputTarget(dest) : (d.channel as string);
+              })(),
+            }
+          : { kind: d.kind, target: d.kind === 'webhook' ? (d.url as string) : (d.to ?? []).join(', ') }
         : null,
       attempts: r.attempts,
       nextAttemptAt: iso(r.next_attempt_at),

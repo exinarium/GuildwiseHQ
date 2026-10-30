@@ -51,6 +51,7 @@ import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
 import { MappingEditor } from './MappingEditor.tsx';
+import { OutputSection } from './OutputSection.tsx';
 
 const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
   cron: CalendarClock,
@@ -274,8 +275,10 @@ function WizardDialog({
           },
         },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
             toast.success('Automation saved');
+            // The first output webhook was added: its signing secret is shown once, as after creating.
+            if (saved.webhookSecret) onCreated?.(saved);
             onOpenChange(false);
           },
         },
@@ -993,6 +996,12 @@ function ActionFields({
               {isReactiveKind(s.triggerKind) && (
                 <AutomationCardOptions s={s} set={set} errors={errors} isManager={isManager} />
               )}
+              <OutputSection
+                outputs={s.outputs}
+                onChange={(outputs) => set({ outputs })}
+                errors={errors}
+                workstations={workstations}
+              />
             </div>
           )}
         </>

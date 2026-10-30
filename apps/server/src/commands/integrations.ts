@@ -286,6 +286,14 @@ export async function sweepIntegrations(ctx: Ctx): Promise<void> {
       RETURNING id`,
     [[...ENVELOPE_COMMANDS], now],
   );
+  // An output delivery nobody collected holds message text: empty it (the run's own deadline records the failed try).
+  await exec(
+    ctx.pool,
+    `UPDATE runner_commands SET status='failed', last_error='expired',
+            payload=jsonb_build_object('runId', payload->'runId', 'attempt', payload->'attempt')
+      WHERE type='delivery.send' AND status IN ('pending','sent') AND expires_at IS NOT NULL AND expires_at < $1`,
+    [now],
+  );
   if (dead.length > 0)
     await exec(
       ctx.pool,

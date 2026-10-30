@@ -38,10 +38,18 @@ function StatusBadge({ status }: { status: ScheduleRunDto['status'] }) {
  * The run history of a schedule, and (for webhooks and e-mail) its delivery log with every try. Refreshes every few
  * seconds while open: a delivery that is waiting for its retry changes under the reader's eyes.
  */
+const DELIVERY_LABEL = {
+  webhook: 'Webhook',
+  email: 'E-mail',
+  whatsapp: 'WhatsApp',
+  google_sheet: 'Google Sheet',
+} as const;
+
 export function RunHistory({ schedule }: { schedule: ScheduleDto }) {
   const runs = useScheduleRuns(schedule.id);
   const hasDeliveries =
-    schedule.action.kind === 'integration' && ['webhook', 'email'].includes(schedule.action.integration);
+    (schedule.action.kind === 'integration' && ['webhook', 'email'].includes(schedule.action.integration)) ||
+    (schedule.action.kind === 'create_card' && !!schedule.action.deliverOutput);
   const [view, setView] = useState<'runs' | 'deliveries'>(hasDeliveries ? 'deliveries' : 'runs');
   const list = (runs.data ?? []).filter((r) => (view === 'deliveries' ? r.delivery : true));
   return (
@@ -91,7 +99,7 @@ export function RunHistory({ schedule }: { schedule: ScheduleDto }) {
                     )
                   }
                 >
-                  {r.attempts} {r.attempts === 1 ? 'try' : 'tries'}
+                  {DELIVERY_LABEL[r.delivery.kind]}: {r.attempts} {r.attempts === 1 ? 'try' : 'tries'}
                 </Badge>
               )}
             </div>
@@ -108,6 +116,13 @@ export function RunHistory({ schedule }: { schedule: ScheduleDto }) {
             {r.delivery && (
               <p className="mt-1 text-xs text-subtle [overflow-wrap:anywhere]">To {r.delivery.target}</p>
             )}
+            {r.result?.outputCardId ? (
+              <p className="mt-1 text-xs">
+                <Link to={`/cards/${r.result.outputCardId}`} className="text-brand-text underline">
+                  Open the card whose result was sent
+                </Link>
+              </p>
+            ) : null}
             {r.result?.cardIds?.length ? (
               <p className="mt-1 text-xs">
                 <Link to={`/cards/${r.result.cardIds[0]}`} className="text-brand-text underline">

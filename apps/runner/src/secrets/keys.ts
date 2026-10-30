@@ -5,6 +5,7 @@ import {
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
+  hkdfSync,
   privateDecrypt,
 } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -69,6 +70,15 @@ export class RunnerKeys {
       keyId: createHash('sha256').update(der).digest('hex').slice(0, 16),
       publicKey: der.toString('base64'),
     };
+  }
+
+  /**
+   * A 32-byte key for one local secrets file (`secrets/sealed-file.ts`): HKDF-SHA256 over this runner's private key. A
+   * copy of the encrypted file alone, without `runner-key.pem`, is useless.
+   */
+  deriveFileKey(fileName: string): Buffer {
+    const der = createPrivateKey(this.privatePem).export({ type: 'pkcs8', format: 'der' });
+    return Buffer.from(hkdfSync('sha256', der, 'guildwise-local-secrets', `v1:${fileName}`, 32));
   }
 
   /** Decrypts a base64 RSA-OAEP (SHA-256) ciphertext to UTF-8 text. Throws on a wrong key or damaged data. */

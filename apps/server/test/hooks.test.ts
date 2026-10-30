@@ -288,3 +288,82 @@ describe('payload text in agent briefs', () => {
     expect(String(dev?.title)).toContain('UNTRUSTED CONTENT');
   });
 });
+
+describe('an incoming webhook and an output webhook', () => {
+  it('are refused together, so the hook URL always carries the hook secret', async () => {
+    const r = await owner('POST', '/api/schedules', {
+      name: 'Hook with output',
+      trigger: { kind: 'webhook_in' },
+      action: {
+        kind: 'create_card',
+        projectId: w.projectId,
+        template: { title: 'Hook', fields: {} },
+        deliverOutput: {
+          destinations: [{ kind: 'webhook', url: 'https://example.com/h', format: 'generic' }],
+        },
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('invalid_output_destination');
+  });
+});
+
+describe("another member's WhatsApp destination", () => {
+  it('is kept but not changed by a member; an Owner or Admin may change it', async () => {
+    const a = await addMember(w, 'outowner');
+    const b = await addMember(w, 'outeditor');
+    const instance = '109876543210';
+    await q(
+      `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
+       VALUES ($1,'whatsapp',$2,$3::jsonb,now())`,
+      [a.workstationId, instance, JSON.stringify({ kind: 'whatsapp', instance, state: 'connected' })],
+    );
+    const dest = { kind: 'whatsapp', workstationId: a.workstationId, instance, to: ['+27821234567'] };
+    const created = await ok<any>(
+      w.t.req('POST', '/api/schedules', {
+        cookie: a.cookie,
+        body: {
+          name: 'Result to WhatsApp',
+          trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
+          action: {
+            kind: 'create_card',
+            projectId: w.projectId,
+            template: { title: 'Daily', fields: {} },
+            deliverOutput: { destinations: [dest] },
+          },
+        },
+      }),
+      201,
+    );
+    const action = (over: Record<string, unknown>, d: Record<string, unknown> = dest) => ({
+      action: {
+        kind: 'create_card',
+        projectId: w.projectId,
+        template: { title: 'Daily', fields: {}, ...over },
+        deliverOutput: { destinations: [d] },
+      },
+    });
+    const changed = { ...dest, to: ['+27829999999'] };
+
+    const byMember = await w.t.req('PATCH', `/api/schedules/${created.id}`, {
+      cookie: b.cookie,
+      body: action({}, changed),
+    });
+    expect(byMember.status).toBe(403);
+    const added = await w.t.req('PATCH', `/api/schedules/${created.id}`, {
+      cookie: b.cookie,
+      body: { action: { ...action({}).action, deliverOutput: { destinations: [dest, changed] } } },
+    });
+    expect(added.status).toBe(403);
+    // The destination itself unchanged: another member may still edit the rest of the automation.
+    await ok(
+      w.t.req('PATCH', `/api/schedules/${created.id}`, {
+        cookie: b.cookie,
+        body: action({ title: 'Daily plan' }),
+      }),
+    );
+    await ok(owner('PATCH', `/api/schedules/${created.id}`, action({ title: 'Daily plan' }, changed)));
+    const stored = (await q('SELECT action FROM schedules WHERE id=$1', [created.id]))[0]?.action as any;
+    expect(stored.deliverOutput.destinations[0].to).toEqual(['+27829999999']);
+  });
+});

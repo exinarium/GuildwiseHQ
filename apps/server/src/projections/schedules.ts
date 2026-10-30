@@ -178,6 +178,14 @@ export const scheduleProjectors: Record<string, Projector> = {
       );
     }
   },
+  /** Handed to the runner: no new try before the deadline. */
+  ScheduleDeliveryDispatched: async (tx, e) => {
+    const p = (e.event as EventOf<'ScheduleDeliveryDispatched'>).payload;
+    await exec(tx, `UPDATE schedule_runs SET next_attempt_at=$2 WHERE id=$1 AND status='pending'`, [
+      p.runId,
+      p.deadline,
+    ]);
+  },
   ScheduleDeliveryAttempted: async (tx, e) => {
     const p = (e.event as EventOf<'ScheduleDeliveryAttempted'>).payload;
     await exec(
