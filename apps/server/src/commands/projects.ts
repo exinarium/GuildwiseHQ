@@ -9,6 +9,7 @@ import {
   isKeyScope,
   isOrgManager,
   isResearchStage,
+  LocalTestServicesSchema,
   normalizeProjectPath,
   normalizeRemoteUrl,
   ORG_ACCOUNT,
@@ -428,6 +429,49 @@ export async function setManualQa(
         {
           streamId: streamId.project(projectId),
           event: { type: 'ProjectManualQaSet', payload: { projectId, enabled, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
+ * The project's local test services (GWP-41): the loopback host:port pairs that build, review and test shifts may reach
+ * from their sandbox. The project's Owner or an organization Owner/Admin sets the whole list; it takes effect from the
+ * next shift. The list is validated again here, and an unchanged list appends nothing.
+ */
+export async function setTestServices(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  services: unknown,
+) {
+  const parsed = LocalTestServicesSchema.safeParse(services);
+  if (!parsed.success)
+    throw badRequest('invalid_test_service', parsed.error.issues[0]?.message ?? 'invalid test service', {
+      issues: parsed.error.issues,
+    });
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    const current = LocalTestServicesSchema.safeParse(p.test_services).data ?? [];
+    // compared field by field: the stored jsonb does not keep the key order
+    const flat = (l: typeof current) => JSON.stringify(l.map((s) => [s.name, s.host, s.port]));
+    if (flat(current) === flat(parsed.data)) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectTestServicesSet',
+            payload: { projectId, services: parsed.data, by: user.id },
+          },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
         },

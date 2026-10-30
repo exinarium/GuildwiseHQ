@@ -18,6 +18,7 @@ import {
   SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
   SetManualQaRequestSchema,
+  SetTestServicesRequestSchema,
   SetMergePolicyRequestSchema,
   SetOwnerApprovalRequestSchema,
   SetProjectMcpServersRequestSchema,
@@ -52,6 +53,7 @@ import {
   setConcurrencyCap,
   setFullSuite,
   setManualQa,
+  setTestServices,
   setMergePolicy,
   setProjectPolicy,
   setProviderAccount,
@@ -327,6 +329,23 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Local test services (loopback host and port) that build, review and test shifts may reach. */
+    app.put(
+      '/api/projects/:id/test-services',
+      { schema: { params: IdParamsSchema, body: SetTestServicesRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setTestServices(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.services,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },

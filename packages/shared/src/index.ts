@@ -44,6 +44,7 @@ export * from './orgs/index.ts';
 export * from './phases/index.ts';
 export * from './platform/index.ts';
 export * from './playbooks/index.ts';
+export * from './projects/index.ts';
 export * from './prompt/index.ts';
 export * from './protocol/index.ts';
 export * from './questions/index.ts';

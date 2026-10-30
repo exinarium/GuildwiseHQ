@@ -1885,6 +1885,13 @@ export class RunManager {
     return new Set(env.services.flatMap((s) => s.ports.map((p) => p.port)));
   }
 
+  /** Every port of every environment this manager tracks (live or not): never opened as a local test service. */
+  ownedPorts(): Set<number> {
+    const out = new Set<number>();
+    for (const env of this.envs.values()) for (const s of env.services) for (const p of s.ports) out.add(p.port);
+    return out;
+  }
+
   /** Every secret value of the environment's services (env files): removed from anything the tester attaches. */
   secretsOf(envId: string): Set<string> {
     const out = new Set<string>();

@@ -96,6 +96,7 @@ import {
 } from '../models/direct.ts';
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
+import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
@@ -1622,6 +1623,11 @@ export const ShiftStartSchema = msg('shift.start', {
   resumeSessionId: z.string().optional(),
   /** Lean Team v3: the first message of a resumed session (the answer to its question, or the review findings). */
   resumeMessage: z.string().max(40_000).optional(),
+  /**
+   * The project's local test services (loopback host:port), sent only for builder, reviewer and tester card shifts. The
+   * runner opens exactly these ports in the sandbox. Absent: none (an older runner ignores the field and opens nothing).
+   */
+  testServices: z.array(LocalTestServiceSchema).optional(),
   /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
   playbookGrants: z.array(z.string().max(130)).max(40).optional(),
   /** R3b: the delegation targets this agent was granted (absent or empty: it may not delegate). The server checks every call again. */

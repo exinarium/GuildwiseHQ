@@ -367,6 +367,9 @@ export class Runner {
     this.fatalResolve = resolve;
   });
 
+  /** The connection state last written to the status file. */
+  private connected = false;
+
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
@@ -636,6 +639,7 @@ export class Runner {
       git: this.agentGit,
       toolchains: this.toolchains,
       runs: this.runs,
+      onTestServices: () => this.writeStatus(this.connected),
       targetSecrets: this.targetSecrets,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
@@ -1106,6 +1110,7 @@ export class Runner {
   }
 
   private writeStatus(connected: boolean): void {
+    this.connected = connected;
     try {
       writeFileSync(
         this.paths.status,
@@ -1116,6 +1121,7 @@ export class Runner {
           activeShifts: this.supervisor.size,
           repos: this.repos.length,
           outboxPending: this.outbox.count(),
+          testServices: this.supervisor.testServices(),
         }),
       );
     } catch {

@@ -18,6 +18,7 @@ import {
 import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
+import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
 import {
@@ -183,6 +184,8 @@ export const ProjectDtoSchema = z.object({
   testWithoutEnvironment: z.boolean().optional(),
   /** Manual QA after Finalize: the person who started a card tests it before it is done (default true). */
   manualQa: z.boolean().optional(),
+  /** Local test services (loopback host and port) that build, review and test shifts may reach; empty by default. */
+  testServices: LocalTestServicesSchema.optional(),
   /** Architect settings: run Investigate & design before build by default (off unless the project opts in). */
   designStep: z.boolean().optional(),
   /** Merge the latest main branch into the working branch before work starts (default on). */
