@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { LOG_REDACT } from '../src/app.ts';
 import { cardOutput, outputDelivery, sampleOutput } from '../src/commands/schedule-output.ts';
+import { newRunnerDestinations } from '../src/commands/schedules.ts';
 import type { Ctx } from '../src/context.ts';
 import type { Queryable } from '../src/db/sql.ts';
 
@@ -116,5 +117,41 @@ describe('log redaction of output text', () => {
     expect(out).not.toContain('WA-MARK');
     expect(out).not.toContain('ROW-MARK');
     expect(out).toContain('[redacted]');
+  });
+});
+
+describe('newRunnerDestinations', () => {
+  const wa = { kind: 'whatsapp', workstationId: 'w1', instance: '123', to: ['+27821234567'] } as const;
+  const sheet = {
+    kind: 'google_sheet',
+    workstationId: 'w1',
+    instance: 'sa@x.iam',
+    spreadsheetId: 's1',
+    sheet: 'Sheet1',
+  } as const;
+  const out = (...d: unknown[]) => ({ destinations: d }) as never;
+  it('is empty when the runner destinations are kept as they are, in any key order', () => {
+    const reordered = {
+      to: ['+27821234567'],
+      instance: '123',
+      kind: 'whatsapp',
+      workstationId: 'w1',
+      template: undefined,
+    };
+    expect(
+      newRunnerDestinations(out(reordered, { kind: 'email', to: ['x@y.z'], subject: '' }), out(wa)),
+    ).toEqual([]);
+    expect(newRunnerDestinations(out(), out(wa, sheet))).toEqual([]);
+  });
+  it('lists a changed or added WhatsApp or Sheet destination', () => {
+    const changed = { ...wa, to: ['+27829999999'] };
+    expect(newRunnerDestinations(out(changed), out(wa))).toEqual([changed]);
+    expect(newRunnerDestinations(out(wa, sheet), out(wa))).toEqual([sheet]);
+    expect(newRunnerDestinations(out(wa), undefined)).toEqual([wa]);
+  });
+  it('ignores e-mail and webhook destinations', () => {
+    expect(
+      newRunnerDestinations(out({ kind: 'webhook', url: 'https://e.x', format: 'generic' }), undefined),
+    ).toEqual([]);
   });
 });

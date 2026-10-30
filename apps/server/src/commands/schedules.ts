@@ -424,6 +424,7 @@ async function validate(
   n: Normalized,
   isManager: boolean,
   ownerUserId: string = user.id,
+  stored?: DeliverOutput,
 ): Promise<void> {
   const t = n.trigger;
   if (!isTriggerImplemented(t))
@@ -477,7 +478,7 @@ async function validate(
             'invalid_output_destination',
             'an automation started by an incoming webhook cannot deliver its result to a webhook; choose another destination',
           );
-        await validateDeliverOutput(ctx, tx, user, a.deliverOutput, isManager, ownerUserId);
+        await validateDeliverOutput(ctx, tx, user, a.deliverOutput, isManager, ownerUserId, stored);
       }
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
       if (wf?.definition.fieldSet === 'feed')
@@ -547,6 +548,34 @@ async function validate(
 
 const INTEGRATION_KIND_OF = { whatsapp: 'whatsapp', google_sheet: 'google-sheets' } as const;
 
+/** Key order and absent optional fields do not make a destination different. */
+const canon = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canon)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.entries(v)
+            .filter(([, x]) => x !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([k, x]) => [k, canon(x)]),
+        )
+      : v;
+
+/** The WhatsApp and Google Sheet destinations of `next` that are not, unchanged, among the `stored` ones. */
+export function newRunnerDestinations(
+  next: DeliverOutput,
+  stored: DeliverOutput | undefined,
+): OutputDestination[] {
+  const kept = new Set(
+    (stored?.destinations ?? [])
+      .filter((d) => d.kind === 'whatsapp' || d.kind === 'google_sheet')
+      .map((d) => JSON.stringify(canon(d))),
+  );
+  return next.destinations.filter(
+    (d) => (d.kind === 'whatsapp' || d.kind === 'google_sheet') && !kept.has(JSON.stringify(canon(d))),
+  );
+}
+
 /** Each destination of `deliverOutput` can be checked now rather than when the card is done. */
 async function validateDeliverOutput(
   ctx: Ctx,
@@ -555,7 +584,14 @@ async function validateDeliverOutput(
   out: DeliverOutput,
   isManager: boolean,
   ownerUserId: string,
+  stored: DeliverOutput | undefined,
 ): Promise<void> {
+  // WhatsApp and Sheets send from the owner's workstation with the owner's own credentials: someone else may change
+  // them only as an Owner or Admin. A member editing another member's automation keeps those destinations as they are.
+  if (ownerUserId !== user.id && !isManager && newRunnerDestinations(out, stored).length)
+    throw forbidden(
+      "only the automation's owner, an Owner or an Admin can add or change a WhatsApp or Google Sheet destination: it sends with the owner's account",
+    );
   let mine: string | undefined;
   for (const d of out.destinations) {
     if (d.kind === 'email') {
@@ -791,6 +827,7 @@ export async function patchSchedule(
         n,
         isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) }),
         (s.owner_user_id as string | null) ?? user.id,
+        cur.kind === 'create_card' ? cur.deliverOutput : undefined,
       );
     }
     // A changed trigger, or re-enabling, recomputes the next fire; otherwise the pending fire is kept.
