@@ -161,9 +161,7 @@ export const OutputDestinationSchema = z.discriminatedUnion('kind', [
     instance: z.string().min(1).max(200),
     to: z.array(E164).min(1).max(5),
     /** An approved message template (needed outside the 24-hour window); absent: a plain text message. */
-    template: z
-      .object({ name: z.string().min(1).max(512), language: z.string().min(2).max(15) })
-      .optional(),
+    template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(15) }).optional(),
   }),
   z.object({
     kind: z.literal('google_sheet'),

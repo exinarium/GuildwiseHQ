@@ -366,7 +366,9 @@ async function sendCardOutput(ctx: Ctx, ec: EventContext): Promise<number> {
       assertOwnerStillAllowed,
     );
     for (const id of runIds)
-      await attemptDelivery(ctx, id).catch((err) => ctx.log.warn({ err, runId: id }, 'output delivery failed'));
+      await attemptDelivery(ctx, id).catch((err) =>
+        ctx.log.warn({ err, runId: id }, 'output delivery failed'),
+      );
     return runIds.length;
   } catch (err) {
     ctx.log.warn({ err, cardId: ec.sourceId }, 'could not queue the output deliveries');

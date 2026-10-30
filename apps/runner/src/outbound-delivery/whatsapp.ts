@@ -33,7 +33,12 @@ export function whatsappBody(to: string, m: WhatsappSend): Record<string, unknow
         components: [{ type: 'body', parameters: [{ type: 'text', text: m.text }] }],
       },
     };
-  return { messaging_product: 'whatsapp', to: number, type: 'text', text: { preview_url: true, body: m.text } };
+  return {
+    messaging_product: 'whatsapp',
+    to: number,
+    type: 'text',
+    text: { preview_url: true, body: m.text },
+  };
 }
 
 /** The reason shown on the schedule: the provider's code and a short message. Never the message text or the token. */
@@ -50,10 +55,9 @@ function reasonOf(status: number, body: GraphError, hasTemplate: boolean): { err
     };
   const msg = (body.error?.message ?? '').slice(0, 200);
   return {
-    error: redactSecrets(`WhatsApp answered ${status}${code ? ` (code ${code})` : ''}${msg ? `: ${msg}` : ''}`).slice(
-      0,
-      300,
-    ),
+    error: redactSecrets(
+      `WhatsApp answered ${status}${code ? ` (code ${code})` : ''}${msg ? `: ${msg}` : ''}`,
+    ).slice(0, 300),
     final: !retryable(status),
   };
 }
@@ -67,13 +71,16 @@ export async function sendWhatsapp(
   const failed: Array<{ to: string; error: string; final: boolean; status?: number }> = [];
   for (const to of m.to) {
     try {
-      const res = await fetchImpl(`https://graph.facebook.com/${GRAPH_VERSION}/${creds.phoneNumberId}/messages`, {
-        method: 'POST',
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${creds.accessToken}` },
-        body: JSON.stringify(whatsappBody(to, m)),
-      });
+      const res = await fetchImpl(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${creds.phoneNumberId}/messages`,
+        {
+          method: 'POST',
+          redirect: 'manual',
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${creds.accessToken}` },
+          body: JSON.stringify(whatsappBody(to, m)),
+        },
+      );
       if (res.status >= 200 && res.status < 300) {
         sent++;
         continue;
@@ -84,7 +91,9 @@ export async function sendWhatsapp(
     } catch (err) {
       failed.push({
         to,
-        error: redactSecrets(`could not reach WhatsApp: ${err instanceof Error ? err.message : String(err)}`).slice(0, 200),
+        error: redactSecrets(
+          `could not reach WhatsApp: ${err instanceof Error ? err.message : String(err)}`,
+        ).slice(0, 200),
         final: false,
       });
     }
@@ -131,7 +140,9 @@ export async function checkWhatsapp(
     return {
       ok: false,
       refused: false,
-      error: redactSecrets(`could not reach WhatsApp: ${err instanceof Error ? err.message : String(err)}`).slice(0, 200),
+      error: redactSecrets(
+        `could not reach WhatsApp: ${err instanceof Error ? err.message : String(err)}`,
+      ).slice(0, 200),
     };
   }
 }

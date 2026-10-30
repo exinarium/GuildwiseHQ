@@ -66,7 +66,10 @@ async function accessToken(
       error?: string;
     };
     if (res.status === 200 && body.access_token) {
-      cache.set(sa.clientEmail, { token: body.access_token, expiresAt: now() + (body.expires_in ?? 3600) * 1000 });
+      cache.set(sa.clientEmail, {
+        token: body.access_token,
+        expiresAt: now() + (body.expires_in ?? 3600) * 1000,
+      });
       return { token: body.access_token, cached: false };
     }
     const retry = res.status >= 500 || res.status === 429;
@@ -79,7 +82,9 @@ async function accessToken(
     };
   } catch (err) {
     return {
-      error: redactSecrets(`could not reach Google: ${err instanceof Error ? err.message : String(err)}`).slice(0, 200),
+      error: redactSecrets(
+        `could not reach Google: ${err instanceof Error ? err.message : String(err)}`,
+      ).slice(0, 200),
       final: false,
     };
   }
@@ -99,7 +104,8 @@ export async function appendSheetRow(
   now: () => number = Date.now,
 ): Promise<DeliverySendResult> {
   const t = await accessToken(sa, fetchImpl, now);
-  if ('error' in t) return { ok: false, error: t.error, retryable: !t.final, ...(t.status ? { httpStatus: t.status } : {}) };
+  if ('error' in t)
+    return { ok: false, error: t.error, retryable: !t.final, ...(t.status ? { httpStatus: t.status } : {}) };
   try {
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(m.spreadsheetId)}/values/${encodeURIComponent(sheetRange(m.sheet))}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
     const res = await fetchImpl(url, {
@@ -141,7 +147,9 @@ export async function appendSheetRow(
   } catch (err) {
     return {
       ok: false,
-      error: redactSecrets(`could not reach Google Sheets: ${err instanceof Error ? err.message : String(err)}`).slice(0, 200),
+      error: redactSecrets(
+        `could not reach Google Sheets: ${err instanceof Error ? err.message : String(err)}`,
+      ).slice(0, 200),
       retryable: true,
     };
   }

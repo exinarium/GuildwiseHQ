@@ -25,7 +25,10 @@ export const outputText = (o: CardOutput): string => o.text.trim() || OUTPUT_EMP
 
 /** Subject of an output e-mail: the destination's own subject (with `{ref}` and `{title}`), or "<automation>: <ref> <title>". */
 export function outputEmailSubject(o: CardOutput, scheduleName: string, subject: string): string {
-  const own = subject.replace(/\{ref\}/g, o.ref).replace(/\{title\}/g, o.title).trim();
+  const own = subject
+    .replace(/\{ref\}/g, o.ref)
+    .replace(/\{title\}/g, o.title)
+    .trim();
   return cut(own || `${scheduleName}: ${o.ref} ${o.title}`, 200);
 }
 

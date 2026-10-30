@@ -119,7 +119,6 @@ import { sanitizeError } from './health/runner-error.ts';
 import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './integrations/claude-store.ts';
 import { type AdapterEnv, type IntegrationAdapter, IntegrationService } from './integrations/index.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
-import { OutboundDelivery } from './outbound-delivery/send.ts';
 import type { LoginSpawner } from './integrations/pty.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
@@ -131,6 +130,7 @@ import {
   reportOf,
 } from './mcp/plugins.ts';
 import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-folder.ts';
+import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
 import { RepoAccessUpdater } from './repo/access.ts';

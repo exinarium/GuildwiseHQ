@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { type DeliverySendPayload, type DeliverySendResult } from '@aom/shared';
+import type { DeliverySendPayload, DeliverySendResult } from '@aom/shared';
 import { z } from 'zod';
 import { SealedFile } from '../secrets/sealed-file.ts';
 import { appendSheetRow, type ServiceAccount } from './google-sheets.ts';
@@ -64,10 +64,10 @@ export class OutboundDelivery {
         this.deps.fetch,
       );
     }
-    const sa: ServiceAccount | undefined = sheetsStore(this.deps.secretsDir, this.deps.keyOf).load()?.accounts[
-      p.instance
-    ];
-    if (!sa) return { ok: false, error: 'Google Sheets is not connected on this workstation', retryable: false };
+    const sa: ServiceAccount | undefined = sheetsStore(this.deps.secretsDir, this.deps.keyOf).load()
+      ?.accounts[p.instance];
+    if (!sa)
+      return { ok: false, error: 'Google Sheets is not connected on this workstation', retryable: false };
     if (!p.sheet) return { ok: false, error: 'the command has no row', retryable: false };
     return appendSheetRow(sa, p.sheet, this.deps.fetch, this.deps.now);
   }

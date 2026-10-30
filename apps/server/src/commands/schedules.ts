@@ -5,8 +5,8 @@ import {
   actionProjectId,
   actionWorkstationId,
   type CardTemplate,
-  type DeliverOutput,
   type CreateScheduleRequest,
+  type DeliverOutput,
   effectiveFeatures,
   emptyFields,
   getStage,
@@ -30,8 +30,8 @@ import {
   SCHEDULE_EVENT_TRIGGERS,
   type ScheduleAction,
   type ScheduleDto,
-  type ScheduleTestResponse,
   type ScheduleRunDto,
+  type ScheduleTestResponse,
   type ScheduleTrigger,
   type SystemScheduleDto,
   scheduleBackoffMs,
@@ -64,8 +64,8 @@ import {
   scheduleScope,
 } from './schedule-actions.ts';
 import { assertWebhookUrl, attemptDelivery, attemptsOf } from './schedule-delivery.ts';
-import { deliverOutputOf, outputDelivery, outputRunEvent, sampleOutput } from './schedule-output.ts';
 import { digestAvailable } from './schedule-digest.ts';
+import { deliverOutputOf, outputDelivery, outputRunEvent, sampleOutput } from './schedule-output.ts';
 
 /** The next time `cron` fires strictly after `from`, evaluated in the IANA zone `timezone`. Null: it never fires again. */
 export function nextFireAfter(cron: string, timezone: string, from: Date): Date | null {
@@ -558,7 +558,9 @@ async function validateDeliverOutput(
           (await one(tx, 'SELECT email FROM users WHERE id=$1', [user.id]))?.email ?? '',
         ).toLowerCase();
         if (d.to.some((x) => x.toLowerCase() !== mine))
-          throw forbidden('you can send the result to your own address only; ask an Owner or Admin for others');
+          throw forbidden(
+            'you can send the result to your own address only; ask an Owner or Admin for others',
+          );
       }
     } else if (d.kind === 'webhook') {
       assertWebhookUrl(ctx, d.url);
@@ -568,7 +570,8 @@ async function validateDeliverOutput(
         `SELECT name FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
         [d.workstationId, user.id],
       );
-      if (!ws) throw badRequest('invalid_workstation', 'choose one of your own workstations for this destination');
+      if (!ws)
+        throw badRequest('invalid_workstation', 'choose one of your own workstations for this destination');
       const kind = INTEGRATION_KIND_OF[d.kind];
       const st = await one(
         tx,
@@ -655,7 +658,10 @@ export async function createSchedule(
       const { secretEnc: _drop, ...out } = n.action.deliverOutput;
       if (out.destinations.some((d) => d.kind === 'webhook')) {
         webhookSecret = newSecret();
-        n.action = { ...n.action, deliverOutput: { ...out, secretEnc: await encryptSecret(ctx, webhookSecret) } };
+        n.action = {
+          ...n.action,
+          deliverOutput: { ...out, secretEnc: await encryptSecret(ctx, webhookSecret) },
+        };
       } else n.action = { ...n.action, deliverOutput: out };
     }
     const id = randomUUID();
@@ -1042,9 +1048,8 @@ async function testOutputDeliveries(
   const queued = await withAppendTx(ctx.pool, async (tx) => {
     const { s } = await lockManaged(tx, user, org, id);
     const sample = await sampleOutput(ctx, tx, s);
-    const cardId = (
-      await one(tx, `SELECT id FROM cards WHERE ref=$1 AND org_id=$2`, [sample.ref, s.org_id])
-    )?.id as string | undefined;
+    const cardId = (await one(tx, `SELECT id FROM cards WHERE ref=$1 AND org_id=$2`, [sample.ref, s.org_id]))
+      ?.id as string | undefined;
     const now = ctx.clock.now();
     const events: AppendInput[] = [];
     const list: Array<{ runId: string; index: number; dest: OutputDestination }> = [];
@@ -1085,9 +1090,11 @@ async function testOutputDeliveries(
       pending = row?.status === 'pending';
       ok = row?.status === 'ok';
       error = row?.status === 'failed' ? (row.error ?? 'failed') : null;
-      const att = await one(ctx.pool, 'SELECT http_status, duration_ms FROM schedule_attempts WHERE run_id=$1', [
-        q.runId,
-      ]);
+      const att = await one(
+        ctx.pool,
+        'SELECT http_status, duration_ms FROM schedule_attempts WHERE run_id=$1',
+        [q.runId],
+      );
       httpStatus = att?.http_status ?? null;
       durationMs = att?.duration_ms ?? null;
     }

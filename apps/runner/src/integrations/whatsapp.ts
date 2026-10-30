@@ -1,6 +1,6 @@
 import type { IntegrationScope, IntegrationStatus } from '@aom/shared';
-import { checkWhatsapp } from '../outbound-delivery/whatsapp.ts';
 import { whatsappStore } from '../outbound-delivery/send.ts';
+import { checkWhatsapp } from '../outbound-delivery/whatsapp.ts';
 import { type AdapterEnv, baseStatus, type IntegrationAdapter, type Outcome } from './types.ts';
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -45,7 +45,11 @@ export class WhatsappIntegration implements IntegrationAdapter {
         detail: 'No WhatsApp access token is saved for this phone number on this workstation.',
       });
     const r = await checkWhatsapp({ phoneNumberId: instance, accessToken: acct.accessToken }, this.fetchImpl);
-    if (r.ok) return baseStatus('whatsapp', instance, 'workstation', now, 'connected', { method: 'token', account: r.account });
+    if (r.ok)
+      return baseStatus('whatsapp', instance, 'workstation', now, 'connected', {
+        method: 'token',
+        account: r.account,
+      });
     return baseStatus('whatsapp', instance, 'workstation', now, r.refused ? 'refused' : 'unreachable', {
       method: 'token',
       detail: r.error.slice(0, 400),
@@ -57,16 +61,20 @@ export class WhatsappIntegration implements IntegrationAdapter {
   }
 
   async connect(instance: string, method: string, fields: Record<string, string>): Promise<Outcome> {
-    if (method !== 'token') return { error: 'This method cannot be connected from here.', code: 'unsupported' };
+    if (method !== 'token')
+      return { error: 'This method cannot be connected from here.', code: 'unsupported' };
     const token = fields.token?.trim();
     if (!/^\d{5,30}$/.test(instance))
       return { error: 'Enter the Phone number ID (digits only) as the instance.', code: 'failed' };
     if (!token) return { error: 'Enter the access token.', code: 'failed' };
     const r = await checkWhatsapp({ phoneNumberId: instance, accessToken: token }, this.fetchImpl);
-    if (!r.ok) return { error: `WhatsApp did not accept this token: ${r.error}. Nothing was saved.`, code: 'refused' };
+    if (!r.ok)
+      return { error: `WhatsApp did not accept this token: ${r.error}. Nothing was saved.`, code: 'refused' };
     const store = this.store();
     const cur = store.load() ?? { accounts: {} };
-    store.save({ accounts: { ...cur.accounts, [instance]: { ...(cur.accounts[instance] ?? {}), accessToken: token } } });
+    store.save({
+      accounts: { ...cur.accounts, [instance]: { ...(cur.accounts[instance] ?? {}), accessToken: token } },
+    });
     this.env.touchRecheck();
     return this.status(instance);
   }

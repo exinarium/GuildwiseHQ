@@ -33,7 +33,6 @@ import type { LoginSpawner } from './pty.ts';
 import { ReplayCache } from './seen.ts';
 import { LoginSession } from './session.ts';
 import { SshIntegration } from './ssh.ts';
-import { WhatsappIntegration } from './whatsapp.ts';
 import {
   type AdapterEnv,
   type IntegrationAdapter,
@@ -41,6 +40,7 @@ import {
   isFailure,
   type Outcome,
 } from './types.ts';
+import { WhatsappIntegration } from './whatsapp.ts';
 
 export { AuditLog } from './audit-log.ts';
 export { ReplayCache } from './seen.ts';

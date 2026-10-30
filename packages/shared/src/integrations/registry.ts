@@ -589,7 +589,9 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
               label: 'WhatsApp Cloud API, get started',
             },
           },
-          { text: 'Create a system user, give it the whatsapp_business_messaging permission and generate a token.' },
+          {
+            text: 'Create a system user, give it the whatsapp_business_messaging permission and generate a token.',
+          },
           {
             text: 'A message you start outside the 24-hour window must use an approved template: set its name on the automation.',
           },
@@ -599,7 +601,7 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
     ],
     help: { summary: 'Sends the result of an automation to WhatsApp numbers with your own Meta account.' },
     test: { label: 'Ask WhatsApp about the number', what: 'GET /<phone number ID> (name and number).' },
-    storage: 'secrets/whatsapp.json, encrypted (AES-256-GCM) with this runner\'s key, this workstation only.',
+    storage: "secrets/whatsapp.json, encrypted (AES-256-GCM) with this runner's key, this workstation only.",
     cli: 'guildwise-runner integrations connect whatsapp {instance}',
     minRunner: WHATSAPP_MIN_RUNNER,
     minIntegrationsVersion: 1,
@@ -644,7 +646,8 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
     ],
     help: { summary: 'Adds one row per result to a sheet you shared with the service account.' },
     test: { label: 'Get an access token', what: 'Exchanges the key for a token at Google.' },
-    storage: 'secrets/google-sheets.json, encrypted (AES-256-GCM) with this runner\'s key, this workstation only.',
+    storage:
+      "secrets/google-sheets.json, encrypted (AES-256-GCM) with this runner's key, this workstation only.",
     cli: 'guildwise-runner integrations connect google-sheets {instance}',
     minRunner: WHATSAPP_MIN_RUNNER,
     minIntegrationsVersion: 1,

@@ -361,13 +361,20 @@ export async function applyDeliverySendResult(
   error: string | undefined,
 ): Promise<void> {
   if (!payload.runId || !payload.attempt) return;
-  const run = await one(ctx.pool, `SELECT * FROM schedule_runs WHERE id=$1 AND status='pending'`, [payload.runId]);
+  const run = await one(ctx.pool, `SELECT * FROM schedule_runs WHERE id=$1 AND status='pending'`, [
+    payload.runId,
+  ]);
   if (!run || Number(run.attempts) + 1 !== payload.attempt) return;
   const s = await one(ctx.pool, 'SELECT * FROM schedules WHERE id=$1', [run.schedule_id]);
   if (!s) return;
   const parsed = DeliverySendResultSchema.safeParse(result);
   const outcome: AttemptResult = !ok
-    ? { ok: false, error: (error ?? 'the workstation could not send').slice(0, 500), retryable: true, durationMs: 0 }
+    ? {
+        ok: false,
+        error: (error ?? 'the workstation could not send').slice(0, 500),
+        retryable: true,
+        durationMs: 0,
+      }
     : !parsed.success
       ? { ok: false, error: 'the workstation answered something unexpected', retryable: true, durationMs: 0 }
       : {

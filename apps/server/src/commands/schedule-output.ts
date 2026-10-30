@@ -28,11 +28,9 @@ export const deliverOutputOf = (a: ScheduleAction | null | undefined) =>
 
 /** The card's result: the last agent handoff note, or the investigation summary for an investigation-only card. */
 export async function cardOutput(ctx: Ctx, db: Queryable, cardId: string): Promise<CardOutput | null> {
-  const c = await one(
-    db,
-    'SELECT id, ref, title, investigation, investigation_only FROM cards WHERE id=$1',
-    [cardId],
-  );
+  const c = await one(db, 'SELECT id, ref, title, investigation, investigation_only FROM cards WHERE id=$1', [
+    cardId,
+  ]);
   if (!c) return null;
   const link = `${ctx.config.publicOrigin}/cards/${encodeURIComponent(c.ref as string)}`;
   const report = (c.investigation as { summary?: string } | null)?.summary?.trim() ?? '';
@@ -88,16 +86,12 @@ export function outputDelivery(
         kind: 'webhook',
         url: dest.url,
         body: JSON.stringify(
-          outputWebhookBody(
-            dest.format,
-            o,
-            {
-              scheduleId: s.id,
-              scheduleName: s.name,
-              at: opts.at.toISOString(),
-              ...(opts.test ? { test: true } : {}),
-            },
-          ),
+          outputWebhookBody(dest.format, o, {
+            scheduleId: s.id,
+            scheduleName: s.name,
+            at: opts.at.toISOString(),
+            ...(opts.test ? { test: true } : {}),
+          }),
         ),
         event: opts.test ? 'schedule.test' : 'schedule.output',
         secret: 'output',
@@ -138,10 +132,11 @@ export function outputRunEvent(
         ...(spec.sourceKey ? { sourceKey: spec.sourceKey } : {}),
         label: test ? `Test to ${outputTarget(dest)}` : runLabel(o, dest),
         status: 'pending',
-        summary: `${test ? 'Test: ' : ''}${dest.kind === 'google_sheet' ? 'Sheet row' : dest.kind === 'whatsapp' ? 'WhatsApp' : dest.kind === 'email' ? 'E-mail' : 'Webhook'} to ${outputTarget(dest)}`.slice(
-          0,
-          1900,
-        ),
+        summary:
+          `${test ? 'Test: ' : ''}${dest.kind === 'google_sheet' ? 'Sheet row' : dest.kind === 'whatsapp' ? 'WhatsApp' : dest.kind === 'email' ? 'E-mail' : 'Webhook'} to ${outputTarget(dest)}`.slice(
+            0,
+            1900,
+          ),
         ...(cardId ? { result: { outputCardId: cardId } } : {}),
         delivery,
         // A test is sent now and never retried.
@@ -178,7 +173,9 @@ export async function queueOutputDeliveries(
     const ids: string[] = [];
     for (const [i, dest] of out.destinations.entries()) {
       const sourceKey = `output:${cardId}:${i}`;
-      if (await one(tx, 'SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND source_key=$2', [s.id, sourceKey]))
+      if (
+        await one(tx, 'SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND source_key=$2', [s.id, sourceKey])
+      )
         continue;
       const runId = randomUUID();
       events.push(

@@ -73,7 +73,8 @@ export class GoogleSheetsIntegration implements IntegrationAdapter {
         code: 'failed',
       };
     const r = await checkServiceAccount(sa, this.fetchImpl, () => this.env.now().getTime());
-    if (!r.ok) return { error: `Google did not accept this key: ${r.error}. Nothing was saved.`, code: 'refused' };
+    if (!r.ok)
+      return { error: `Google did not accept this key: ${r.error}. Nothing was saved.`, code: 'refused' };
     const store = this.store();
     const cur = store.load() ?? { accounts: {} };
     store.save({ accounts: { ...cur.accounts, [instance]: sa } });

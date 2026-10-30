@@ -252,7 +252,10 @@ function ScheduleRow({
   const [history, setHistory] = useState(false);
   const webhook = isWebhookAction(s.action);
   const incoming = s.trigger.kind === 'webhook_in';
-  const testable = webhook || (s.action.kind === 'integration' && s.action.integration === 'email');
+  const testable =
+    webhook ||
+    (s.action.kind === 'integration' && s.action.integration === 'email') ||
+    (s.action.kind === 'create_card' && !!s.action.deliverOutput);
   const editable = s.canEdit !== false;
   const Chevron = history ? ChevronDown : ChevronRight;
 
@@ -327,9 +330,24 @@ function ScheduleRow({
           role="status"
           data-testid="test-result"
         >
-          {test.data.ok
-            ? `Test delivered${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}.`
-            : `Test failed${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}: ${test.data.error ?? 'unknown error'}`}
+          {test.data.results ? (
+            <span className="flex flex-col gap-1">
+              {test.data.results.map((r) => (
+                <span key={r.runId} className={r.ok || r.pending ? 'text-success' : 'text-danger'}>
+                  {r.target}:{' '}
+                  {r.pending
+                    ? 'sent to the workstation; the result appears in the history'
+                    : r.ok
+                      ? 'delivered'
+                      : `failed: ${r.error ?? 'unknown error'}`}
+                </span>
+              ))}
+            </span>
+          ) : test.data.ok ? (
+            `Test delivered${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}.`
+          ) : (
+            `Test failed${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}: ${test.data.error ?? 'unknown error'}`
+          )}
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
