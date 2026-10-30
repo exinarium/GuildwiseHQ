@@ -450,7 +450,9 @@ test('issue polling into intake: new GitHub issues become intakes once', async (
   expect(await q(`SELECT 1 FROM intakes WHERE external_key='acme/toy#41'`)).toHaveLength(1);
 });
 
-test('a BA task with free-text instructions reports to the desk', async () => {
+// The BA reporter is retired (docs/design/ceo-front-door.md step 3): a `ba_task` action is a `scheduled_brief` wake of
+// the CEO, which does what the instructions ask.
+test('a BA task with free-text instructions asks the CEO', async () => {
   const create = await api.post('/api/schedules', {
     data: {
       name: 'Friday review',
@@ -470,14 +472,33 @@ test('a BA task with free-text instructions reports to the desk', async () => {
     .getByRole('button', { name: /Run now/ })
     .click();
   const id = await scheduleId('Friday review');
-  const item = await waitFor(
-    'the BA report on the desk',
-    async () => (await q<any>(`SELECT title, body FROM desk_items WHERE data->>'scheduleId'=$1`, [id]))[0],
-    (x) => !!x,
-    90_000,
+  const run = await waitFor(
+    'the run',
+    async () => (await runsOf('Friday review'))[0],
+    (r) => !!r,
+    30_000,
   );
-  expect(item.title).toBe('Friday review: BA report');
-  expect(item.body).toContain('List what is open on');
+  expect(run).toMatchObject({ trigger: 'manual', status: 'ok', summary: 'Asked the CEO' });
+  const wake = await waitFor(
+    'the CEO is asked',
+    async () =>
+      (
+        await q<any>(
+          `SELECT reason, urgency, subject_label, detail FROM ceo_wakes WHERE subject_kind='schedule' AND subject_id LIKE $1`,
+          [`${id}:%`],
+        )
+      )[0],
+    (x) => !!x,
+    30_000,
+  );
+  expect(wake).toMatchObject({
+    reason: 'scheduled_brief',
+    urgency: 'scheduled',
+    subject_label: 'Friday review',
+    detail: { scheduleId: id, scheduleName: 'Friday review', deliver: 'desk_notice' },
+  });
+  expect(wake.detail.instructions).toContain('List what is open on');
+  expect(wake.detail.instructions).not.toContain('{date}');
 });
 
 test('a guest manages schedules tied to the shared project, and nothing for the whole organization', async () => {
