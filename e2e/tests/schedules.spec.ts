@@ -18,7 +18,7 @@ import {
   SMTP_URL,
 } from '../support/env.ts';
 import { deleteMailFor, waitForMail, waitForMailMatching } from '../support/mail.ts';
-import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Part B of the restructure: schedules are a trigger and one action. One owner with a mock runner (a BA, a builder and
 // a reviewer), one guest on a shared project, a local HTTP server standing in for Slack, Mailpit for the digests and a
@@ -849,8 +849,28 @@ test("agent output: a Google Sheet from the wizard is sent by the owner's workst
   await q(
     `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
      VALUES ($1,'google-sheets',$2,$3::jsonb,now())`,
-    [workstationId, instance, JSON.stringify({ kind: 'google-sheets', instance, state: 'connected' })],
+    [
+      workstationId,
+      instance,
+      JSON.stringify({
+        kind: 'google-sheets',
+        instance,
+        state: 'connected',
+        method: 'api_key',
+        account: instance,
+        checkedAt: new Date().toISOString(),
+        scope: 'workstation',
+      }),
+    ],
   );
+  // the workstation's Integrations list (what the wizard offers) shows it
+  const listed = await api.get(`/api/workstations/${workstationId}/integrations`);
+  expect(listed.ok(), await listed.text()).toBeTruthy();
+  expect(
+    ((await listed.json()).integrations as Array<{ kind: string; instance: string; state: string }>).some(
+      (i) => i.kind === 'google-sheets' && i.instance === instance && i.state === 'connected',
+    ),
+  ).toBe(true);
 
   await page.goto('/schedules');
   await page.getByTestId('new-schedule').click();
@@ -996,5 +1016,61 @@ test('agent output: without the local-network allowance, a webhook to this machi
     await strictApi.dispose();
   } finally {
     strict.kill('SIGTERM');
+  }
+});
+
+test('agent output: with the workstation offline, a WhatsApp send fails after the 15-minute deadline with the reason', async () => {
+  const id = (await scheduleDto('Result to WhatsApp')).id as string;
+  killRunner('SIGTERM', HOME);
+  try {
+    await waitFor(
+      'the workstation is offline',
+      async () => (await q<any>('SELECT connected FROM workstations WHERE id=$1', [workstationId]))[0],
+      (w) => w?.connected === false,
+      30_000,
+    );
+    // the workstation does not answer within the wait of Send test: the result follows in the history
+    const tried = await api.post(`/api/schedules/${id}/test`);
+    expect(tried.ok(), await tried.text()).toBeTruthy();
+    const results = ((await tried.json()).results ?? []) as Array<{ pending?: boolean; ok: boolean }>;
+    expect(results).toHaveLength(1);
+    expect(results[0]?.pending).toBe(true);
+    const pending = (await runsOf('Result to WhatsApp')).filter((r) => r.status === 'pending');
+    expect(pending).toHaveLength(1);
+    const run = pending[0];
+    expect(run).toMatchObject({ trigger: 'test', attempts: 0 });
+
+    // nothing happens before the deadline
+    await clock(14 * 60_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    const still = (await q<any>('SELECT status FROM schedule_runs WHERE id=$1', [run.id]))[0];
+    expect(still.status).toBe('pending');
+    // after it: one failed try with the reason, and no further try for a test
+    await clock(2 * 60_000);
+    const failed = await waitFor(
+      'the deadline lapsed',
+      async () => (await q<any>('SELECT * FROM schedule_runs WHERE id=$1', [run.id]))[0],
+      (r) => r?.status === 'failed',
+      30_000,
+    );
+    expect(failed.error).toContain('did not answer (offline?)');
+    expect(failed.attempts).toBe(1);
+    const cmds = await q<any>(
+      `SELECT status, payload FROM runner_commands WHERE type='delivery.send' AND workstation_id=$1`,
+      [workstationId],
+    );
+    for (const cmd of cmds) expect(cmd.payload).toEqual({});
+    await clock(3 * 3_600_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    expect((await q<any>('SELECT attempts FROM schedule_runs WHERE id=$1', [run.id]))[0].attempts).toBe(1);
+
+    await page.goto('/schedules');
+    const row = page.getByTestId('schedule-Result to WhatsApp');
+    await row.getByTestId('toggle-history').click();
+    await expect(
+      row.getByTestId('run-row').filter({ hasText: 'did not answer (offline?)' }).first(),
+    ).toBeVisible();
+  } finally {
+    startRunner({ AOM_MOCK_STEP_MS: '200' }, HOME);
   }
 });
