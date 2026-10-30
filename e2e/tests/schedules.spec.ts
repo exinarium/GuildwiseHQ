@@ -1,12 +1,22 @@
+import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, request, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, paths, SCHEDGUEST, SCHEDULER } from '../support/env.ts';
+import {
+  ADMIN,
+  BASE_URL,
+  DATABASE_URL,
+  E2E_DIR,
+  paths,
+  SCHEDGUEST,
+  SCHEDULER,
+  SMTP_URL,
+} from '../support/env.ts';
 import { deleteMailFor, waitForMail, waitForMailMatching } from '../support/mail.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 
@@ -806,4 +816,164 @@ test("agent output: WhatsApp sends from the owner's workstation; a guest may not
   const stored = (await q<any>('SELECT action FROM schedules WHERE id=$1', [id]))[0].action;
   expect(stored.template.title).toBe('Daily plan for the team');
   expect(stored.deliverOutput.destinations[0].to).toEqual(['+27829999999']);
+});
+
+test("agent output: a Google Sheet from the wizard is sent by the owner's workstation; a guest may not change it", async () => {
+  const instance = 'reports@pilot-project.iam.gserviceaccount.com';
+  const spreadsheetId = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+  // The workstation reports a connected service account (its key stays on the workstation, never on the server).
+  await q(`DELETE FROM workstation_integrations WHERE workstation_id=$1 AND kind='google-sheets'`, [
+    workstationId,
+  ]);
+  await q(
+    `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
+     VALUES ($1,'google-sheets',$2,$3::jsonb,now())`,
+    [workstationId, instance, JSON.stringify({ kind: 'google-sheets', instance, state: 'connected' })],
+  );
+
+  await page.goto('/schedules');
+  await page.getByTestId('new-schedule').click();
+  const wiz = page.getByTestId('schedule-wizard');
+  await wiz.getByTestId('tile-manual').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByTestId('tile-create_card').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByLabel('Name', { exact: true }).first().fill('Result to a sheet');
+  await wiz.getByLabel('Project').selectOption({ label: 'SCH Scheduled work' });
+  await wiz.getByLabel('Title').fill('Log the weekly note');
+  const out = wiz.getByTestId('output-section');
+  await out.getByRole('button', { name: 'Add a destination' }).click();
+  const sheet = out.getByTestId('output-0');
+  await sheet.getByLabel('Send it to').selectOption({ label: 'Google Sheet' });
+  await sheet.getByLabel('Workstation').selectOption(workstationId);
+  await sheet.getByLabel('Service account').selectOption(instance);
+  await expect(sheet).toContainText(`Share the sheet with ${instance} as Editor.`);
+  // no key or token is typed in the automation
+  await expect(sheet.locator('input[type="password"]')).toHaveCount(0);
+  await sheet
+    .getByLabel('Sheet address')
+    .fill(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=0`);
+  await sheet.getByLabel('Tab').fill('Log');
+  await page.getByTestId('wizard-save').click();
+  await expect(page.getByTestId('schedule-Result to a sheet')).toBeVisible();
+  const dto = await scheduleDto('Result to a sheet');
+  expect(dto.action.deliverOutput.destinations).toEqual([
+    { kind: 'google_sheet', workstationId, instance, spreadsheetId, sheet: 'Log' },
+  ]);
+
+  // Send test: the workstation appends the row; this one has no key for the account, so it answers with the reason
+  const row = page.getByTestId('schedule-Result to a sheet');
+  await row.getByTestId('test-delivery').click();
+  await expect(row.getByTestId('test-result')).toContainText(
+    /(sent to the workstation; the result appears in the history|failed: Google Sheets is not connected on this workstation)/,
+  );
+  const run = await waitFor(
+    "the workstation's answer",
+    async () => (await runsOf('Result to a sheet'))[0],
+    (r) => r?.status === 'failed',
+    30_000,
+  );
+  expect(run.trigger).toBe('test');
+  expect(run.error).toContain('Google Sheets is not connected on this workstation');
+  expect(run.delivery).toMatchObject({ kind: 'runner', channel: 'google_sheet', destination: 0 });
+  expect(JSON.stringify(run.delivery)).not.toContain('Test delivery');
+  const cmds = await q<any>(
+    `SELECT payload FROM runner_commands WHERE type='delivery.send' AND workstation_id=$1`,
+    [workstationId],
+  );
+  for (const cmd of cmds) expect(cmd.payload).toEqual({});
+  await row.getByTestId('toggle-history').click();
+  await expect(row.getByTestId('run-row').first()).toContainText(
+    'Google Sheets is not connected on this workstation',
+  );
+
+  // a guest may not point the owner's service account at another sheet
+  const moved = { ...dto.action.deliverOutput.destinations[0], spreadsheetId: 'ZZZZzzzzYYYYyyyyXXXXxxxx01' };
+  const byGuest = await guestApi.patch(`/api/schedules/${dto.id}`, {
+    data: { action: { ...dto.action, deliverOutput: { destinations: [moved] } } },
+  });
+  expect(byGuest.status(), await byGuest.text()).toBe(403);
+  const stored = (await q<any>('SELECT action FROM schedules WHERE id=$1', [dto.id]))[0].action;
+  expect(stored.deliverOutput.destinations[0].spreadsheetId).toBe(spreadsheetId);
+});
+
+test('agent output: without the local-network allowance, a webhook to this machine or a private network is refused', async () => {
+  // The suite's server lets webhooks reach this machine (its receivers listen here). A second server on the same
+  // database runs with the production default, briefly, to show the guard.
+  const port = 4611;
+  const origin = `http://localhost:${port}`;
+  const log = openSync(join(E2E_DIR, 'server-strict.log'), 'a');
+  const strict = spawn('node', [paths.server], {
+    env: {
+      ...process.env,
+      DATABASE_URL,
+      AOM_PORT: String(port),
+      AOM_HOST: '127.0.0.1',
+      AOM_PUBLIC_ORIGIN: origin,
+      AOM_SMTP_URL: SMTP_URL,
+      AOM_RATE_LIMIT: 'false',
+      AOM_MIGRATE_ON_BOOT: 'false',
+      AOM_DATA_MIGRATIONS: 'false',
+      AOM_HYGIENE_SCHEDULE: 'false',
+      AOM_BLOG_DIGEST: 'false',
+      AOM_WEEKLY_BRIEFING: 'false',
+      AOM_WEBHOOK_ALLOW_PRIVATE: 'false',
+      LOG_LEVEL: 'warn',
+    },
+    stdio: ['ignore', log, log],
+  });
+  closeSync(log);
+  try {
+    await waitFor(
+      'the second server',
+      async () => (await fetch(`${origin}/api/health`).catch(() => null))?.ok ?? false,
+      (ok) => ok,
+      30_000,
+    );
+    const strictApi = await request.newContext({ baseURL: origin, extraHTTPHeaders: { Origin: origin } });
+    const login = await strictApi.post('/api/auth/login', {
+      data: { email: SCHEDULER.email, password: SCHEDULER.password },
+    });
+    expect(login.ok(), await login.text()).toBeTruthy();
+    const withHook = (url: string) => ({
+      name: `Private ${url}`,
+      trigger: { kind: 'manual' },
+      action: {
+        kind: 'create_card',
+        projectId,
+        template: { title: 'Note', fields: {} },
+        deliverOutput: { destinations: [{ kind: 'webhook', url }] },
+      },
+    });
+    for (const url of [
+      outUrl,
+      'http://localhost:8080/output',
+      'http://10.1.2.3/output',
+      'http://192.168.1.10/output',
+      'http://169.254.169.254/latest/meta-data',
+      'http://[::1]/output',
+    ]) {
+      const r = await strictApi.post('/api/schedules', { data: withHook(url) });
+      expect(r.status(), `${url}: ${await r.text()}`).toBe(400);
+      expect(await r.text()).toContain('private');
+    }
+    // a public address is accepted (nothing is sent until a card is done)
+    const pub = await strictApi.post('/api/schedules', {
+      data: withHook('https://hooks.example.com/output'),
+    });
+    expect(pub.status(), await pub.text()).toBe(201);
+    await strictApi.delete(`/api/schedules/${(await pub.json()).id}`);
+    // a stored automation whose webhook points at this machine is not called by Send test either
+    const before = outHits.length;
+    const id = (await scheduleDto('Result to the team')).id;
+    const tried = await strictApi.post(`/api/schedules/${id}/test`);
+    const body = await tried.text();
+    expect(body).toMatch(/private/);
+    expect(body).not.toMatch(/"ok":true/);
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(outHits.length).toBe(before);
+    await strictApi.dispose();
+  } finally {
+    strict.kill('SIGTERM');
+  }
 });
