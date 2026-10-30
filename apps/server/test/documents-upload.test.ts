@@ -81,6 +81,8 @@ const upload = (cookie: string, name: string, body: Buffer, query = '', origin: 
     payload: body,
   });
 const commands = (type: string) => r.of('command').filter((c) => c.command === type);
+const fileRows = async (id: string) =>
+  Number((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [id]))[0]?.n);
 const counts = async () => ({
   docs: Number((await q('SELECT count(*) AS n FROM documents'))[0]?.n),
   data: Number((await q('SELECT count(*) AS n FROM document_file_data'))[0]?.n),
@@ -237,9 +239,7 @@ describe('uploading a document', () => {
     expect(cmd).toMatchObject({ path: 'projects/toy/docs/handbook.md', mode: 'replace' });
     expect(cmd.content).toContain('tags: ["policy", "hr"]');
     expect(cmd.content).toContain('# Handbook');
-    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(
-      0,
-    );
+    expect(await fileRows(d.id)).toBe(0);
     // the trail respects the allowed transitions
     const trail = await q(
       `SELECT payload FROM events WHERE type='DocumentStatusChanged' AND payload->>'docId'=$1 ORDER BY seq`,
@@ -323,9 +323,7 @@ describe('uploading a document', () => {
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     const again = (await call('GET', `/api/documents/${d.id}`)).document;
     expect(again.file).toMatchObject({ name: 'pic.png', size: PNG.length });
-    expect((await q('SELECT count(*) AS n FROM document_file_data WHERE document_id=$1', [d.id]))[0]?.n).toBe(
-      1,
-    );
+    expect(await fileRows(d.id)).toBe(1);
     expect(await listIds('?q=pic.png')).toContain(d.id);
   });
 
@@ -337,7 +335,7 @@ describe('uploading a document', () => {
     };
     await check(await upload(w.owner.cookie, 'run.exe', Buffer.from('MZ\x90\x00')), 422, 'document_rejected');
     await check(await upload(w.owner.cookie, 'notes.xyz', Buffer.from('x')), 422, 'not an allowed');
-    await check(await upload(w.owner.cookie, 'empty.txt', Buffer.alloc(0)), 400);
+    await check(await upload(w.owner.cookie, 'empty.txt', Buffer.alloc(0)), 422, 'the file is empty');
     await check(await upload(w.owner.cookie, 'fake.png', Buffer.from('not a png')), 422, 'not a valid');
     await check(await upload(w.owner.cookie, 'bad.txt', Buffer.from([0xff, 0xfe, 0xfd])), 422);
     await check(
