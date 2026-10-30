@@ -63,6 +63,23 @@ export const VaultWriteCommandSchema = z
 export type VaultWriteCommand = z.infer<typeof VaultWriteCommandSchema>;
 
 /**
+ * `vault.write_file`: a binary file (an uploaded document) for the vault. The bytes are not in the command: the runner
+ * fetches them from the server (`GET /api/runner/document-files/:documentId`), checks size and hash, and writes them
+ * through the same safe-path, no-symlink and commit code as `vault.write`. Idempotent: identical bytes are success.
+ */
+export const VaultWriteFileCommandSchema = z.object({
+  vaultId: VaultIdSchema,
+  /** Vault-relative, forward slashes, no `..`. */
+  path: z.string().min(1),
+  documentId: z.uuid(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  size: z.number().int().min(1).max(20 * 1024 * 1024),
+  commitMessage: z.string().min(1),
+  push: z.boolean().default(true),
+});
+export type VaultWriteFileCommand = z.infer<typeof VaultWriteFileCommandSchema>;
+
+/**
  * `vault.move` (the restructure migration, docs/design/restructure.md owner decision 6): moves a folder of the vault with
  * the history kept (a rename, one commit, pushed). Idempotent and safe to repeat after an interruption: a folder that is
  * already moved is success, and files that exist at both places are merged without overwriting anything.

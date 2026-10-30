@@ -56,7 +56,7 @@ export function serveAttachment(
 }
 
 /** The workstation a runner request belongs to (`Authorization: Bearer aomr_...`, the token of the WebSocket). */
-async function runnerOf(ctx: Ctx, req: FastifyRequest): Promise<{ workstationId: string }> {
+export async function runnerOf(ctx: Ctx, req: FastifyRequest): Promise<{ workstationId: string }> {
   const token = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
   if (!token || !token.startsWith(RUNNER_TOKEN_PREFIX)) throw unauthorized();
   const ws =

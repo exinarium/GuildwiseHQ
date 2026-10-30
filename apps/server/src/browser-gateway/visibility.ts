@@ -133,6 +133,7 @@ const DOCUMENT_EVENTS = new Set([
   'DocumentVersionSaved',
   'DocumentStatusChanged',
   'DocumentPublishQueued',
+  'DocumentTagsChanged',
 ]);
 
 export interface SessionAudience {

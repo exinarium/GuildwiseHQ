@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, lstatSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -6,6 +7,7 @@ import {
   isSafeVaultPath,
   type VaultMoveCommand,
   type VaultWriteCommand,
+  type VaultWriteFileCommand,
 } from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
 import { type VaultIdentity, vaultCommitEnv } from './sync.ts';
@@ -72,14 +74,52 @@ export async function writeVaultFile(
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, next);
   if (opts.commit === false) return { written: true, committed: false };
+  return commitVaultPath(dir, cmd.path, cmd.commitMessage);
+}
+
+/** Stages and commits one path of the vault clone; no change, no commit. */
+async function commitVaultPath(dir: string, path: string, message: string): Promise<VaultWriteResult> {
   const env = await vaultCommitEnv(dir);
-  await gitOk(dir, ['add', '--', cmd.path], { env });
-  const staged = await git(dir, ['diff', '--cached', '--quiet', '--', cmd.path], { env });
+  await gitOk(dir, ['add', '--', path], { env });
+  const staged = await git(dir, ['diff', '--cached', '--quiet', '--', path], { env });
   if (staged.exitCode === 0) return { written: true, committed: false };
-  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', cmd.commitMessage, '--', cmd.path], {
-    env,
-  });
+  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', message, '--', path], { env });
   return { written: true, committed: true };
+}
+
+/** The vault path of a binary write after the checks every write makes: safe, no symlink on the way. */
+function checkedBinaryTarget(dir: string, path: string): string {
+  if (!isSafeVaultPath(path)) throw new VaultWriteError(`unsafe vault path: ${path}`);
+  refuseSymlinks(dir, path);
+  return join(dir, ...path.split('/'));
+}
+
+/** Whether the vault already holds exactly this file (nothing to fetch or write). */
+export async function vaultFileHasHash(dir: string, path: string, sha256: string): Promise<boolean> {
+  const file = checkedBinaryTarget(dir, path);
+  if (!existsSync(file)) return false;
+  return createHash('sha256')
+    .update(await readFile(file))
+    .digest('hex') === sha256;
+}
+
+/**
+ * `vault.write_file`: writes the bytes of an uploaded document into the vault clone and commits them. Same checks as
+ * `vault.write` (safe path, no symlinks); identical bytes already there are success without a commit, different bytes
+ * are replaced (a re-upload of the document).
+ */
+export async function writeVaultBinary(
+  dir: string,
+  cmd: Pick<VaultWriteFileCommand, 'path' | 'commitMessage'>,
+  bytes: Buffer,
+  opts: { commit?: boolean } = {},
+): Promise<VaultWriteResult> {
+  const file = checkedBinaryTarget(dir, cmd.path);
+  if (existsSync(file) && (await readFile(file)).equals(bytes)) return { written: false, committed: false };
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, bytes);
+  if (opts.commit === false) return { written: true, committed: false };
+  return commitVaultPath(dir, cmd.path, cmd.commitMessage);
 }
 
 /** Refuses a path that runs through a symlink (a vault committed with `docs -> /etc` must not redirect a write). */

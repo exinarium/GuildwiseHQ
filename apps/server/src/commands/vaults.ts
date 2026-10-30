@@ -11,6 +11,7 @@ import {
   type VaultConfigureCommand,
   type VaultDto,
   type VaultWriteCommand,
+  type VaultWriteFileCommand,
 } from '@aom/shared';
 import { orgOwnerId, orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -507,37 +508,59 @@ export async function chooseVaultWriteTarget(
   return r?.id ?? null;
 }
 
-/** Queues a `vault.write` command for the vault and delivers it if the target runner is connected. */
-export async function enqueueVaultWrite(
-  ctx: Ctx,
-  db: Queryable,
-  vaultId: string,
-  cmd: Omit<VaultWriteCommand, 'vaultId' | 'push'> & { push?: boolean },
-): Promise<{ queued: boolean; workstationId?: string; commandId?: string; reason?: string }> {
+export type VaultWriteTarget = { workstationId: string; push: boolean } | { reason: string };
+
+/** Where a write to the vault goes: the one workstation of a local vault, else the chosen connected workstation. */
+export async function vaultWriteTarget(db: Queryable, vaultId: string): Promise<VaultWriteTarget> {
   const vault = await one(
     db,
     'SELECT id, org_id, project_id, storage, local_workstation_id FROM vaults WHERE id=$1',
     [vaultId],
   );
-  if (!vault) return { queued: false, reason: 'vault_not_found' };
+  if (!vault) return { reason: 'vault_not_found' };
   if (vault.storage === 'local') {
     // A local vault exists on one workstation only: the write goes there (queued until it connects).
-    if (!vault.local_workstation_id) return { queued: false, reason: 'no_workstation' };
-    const commandId = await enqueueRunnerCommand(db, vault.local_workstation_id, 'vault.write', {
-      vaultId,
-      push: false,
-      ...cmd,
-    });
-    return { queued: true, workstationId: vault.local_workstation_id, commandId };
+    if (!vault.local_workstation_id) return { reason: 'no_workstation' };
+    return { workstationId: vault.local_workstation_id, push: false };
   }
   const workstationId = await chooseVaultWriteTarget(db, vault as never);
-  if (!workstationId) return { queued: false, reason: 'no_workstation' };
-  const commandId = await enqueueRunnerCommand(db, workstationId, 'vault.write', {
+  if (!workstationId) return { reason: 'no_workstation' };
+  return { workstationId, push: true };
+}
+
+/**
+ * Queues a `vault.write` command for the vault and delivers it if the target runner is connected. `target` (from
+ * `vaultWriteTarget`) sends it to the workstation already chosen for a related command.
+ */
+export async function enqueueVaultWrite(
+  ctx: Ctx,
+  db: Queryable,
+  vaultId: string,
+  cmd: Omit<VaultWriteCommand, 'vaultId' | 'push'> & { push?: boolean },
+  target?: VaultWriteTarget,
+): Promise<{ queued: boolean; workstationId?: string; commandId?: string; reason?: string }> {
+  const t = target ?? (await vaultWriteTarget(db, vaultId));
+  if ('reason' in t) return { queued: false, reason: t.reason };
+  const commandId = await enqueueRunnerCommand(db, t.workstationId, 'vault.write', {
     vaultId,
-    push: true,
+    push: t.push,
     ...cmd,
   });
-  return { queued: true, workstationId, commandId };
+  return { queued: true, workstationId: t.workstationId, commandId };
+}
+
+/** Queues a `vault.write_file` command: the runner fetches the document's bytes from the server and commits them. */
+export async function enqueueVaultFileWrite(
+  db: Queryable,
+  vaultId: string,
+  cmd: Omit<VaultWriteFileCommand, 'vaultId' | 'push'>,
+  target: Exclude<VaultWriteTarget, { reason: string }>,
+): Promise<string> {
+  return enqueueRunnerCommand(db, target.workstationId, 'vault.write_file', {
+    vaultId,
+    push: target.push,
+    ...cmd,
+  });
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
