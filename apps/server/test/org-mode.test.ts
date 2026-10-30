@@ -60,19 +60,24 @@ describe('organization mode', () => {
   });
 
   it('switches once the repositories and dev agents are gone, records the event, and switching back always works', async () => {
-    const agents = await ok<any[]>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
-    const ken = agents.find((a) => a.name === 'Ken');
+    const list = await ok<{ agents: any[] }>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
+    const ken = list.agents.find((a) => a.name === 'Ken');
     await ok(w.t.req('POST', `/api/agents/${ken.id}/fire`, { cookie: w.owner.cookie }));
     await ok(w.t.req('DELETE', `/api/projects/${w.projectId}/repos/${w.repoId}`, { cookie: w.owner.cookie }));
 
     const on = await ok<any>(patch(w.owner.cookie, { mode: 'business' }));
     expect(on.mode).toBe('business');
-    const [ev] = await q(`SELECT payload FROM events WHERE type='OrgModeSet' ORDER BY seq DESC`);
+    const [ev] = await q(
+      `SELECT payload FROM events WHERE type='OrgModeSet' AND payload->>'orgId'=$1 ORDER BY seq DESC`,
+      [orgId()],
+    );
     expect(ev?.payload).toMatchObject({ orgId: orgId(), mode: 'business', previous: 'dev', by: w.owner.id });
 
     // the same mode again appends nothing
     await ok(patch(w.owner.cookie, { mode: 'business' }));
-    expect(await q(`SELECT 1 FROM events WHERE type='OrgModeSet'`)).toHaveLength(1);
+    expect(
+      await q(`SELECT 1 FROM events WHERE type='OrgModeSet' AND payload->>'orgId'=$1`, [orgId()]),
+    ).toHaveLength(1);
 
     // replay gives the same state
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
@@ -135,8 +140,8 @@ describe('organization mode', () => {
     const added = await addRepoReq();
     expect(added.status).toBe(201);
     await ok(hireReq('Linus', 'reviewer'), 201);
-    const agents = await ok<any[]>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
-    expect(agents.map((a) => a.name)).toContain('Anna');
+    const list = await ok<{ agents: any[] }>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
+    expect(list.agents.map((a) => a.name)).toContain('Anna');
   });
 
   it('a new organization accepted from an invitation can start in business mode, with its event', async () => {
