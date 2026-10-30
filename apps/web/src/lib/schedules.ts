@@ -141,6 +141,18 @@ export const ACTION_TILES: Array<{
   },
 ];
 
+/** Actions a Business mode organization is not offered: DevOps requests and tester regression runs. */
+export const DEV_ONLY_ACTION_TILES: readonly ActionTile[] = ['devops_request', 'regression_run'];
+
+/**
+ * The action tiles the wizard offers. A Business mode organization does not get the developer actions,
+ * except `keep`: the action of an existing automation being edited stays as it is.
+ */
+export const actionTilesFor = (business: boolean, keep?: ActionTile): typeof ACTION_TILES =>
+  business
+    ? ACTION_TILES.filter((t) => t.id === keep || !DEV_ONLY_ACTION_TILES.includes(t.id))
+    : ACTION_TILES;
+
 export const actionTileOf = (a: ScheduleAction): ActionTile => {
   if (a.kind !== 'integration') return a.kind;
   if (isWebhookAction(a)) return 'webhook';

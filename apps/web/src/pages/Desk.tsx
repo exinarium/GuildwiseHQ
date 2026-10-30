@@ -437,8 +437,10 @@ function usesAnswerForm(item: DeskItemDto): boolean {
   );
 }
 
-/** One desk item: who asks, what they were doing, the question, options and the answer form. */
-/** `business`: the organization works in Business mode, so there is no Ask DevOps on the item. */
+/**
+ * One desk item: who asks, what they were doing, the question, options and the answer form.
+ * `business`: the organization works in Business mode, so there is no Ask DevOps on the item.
+ */
 export function DeskItem({
   item,
   now,

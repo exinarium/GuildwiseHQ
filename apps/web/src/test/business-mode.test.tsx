@@ -14,10 +14,12 @@ import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
 import { DevOnly } from '../components/DevOnly.tsx';
+import { ScheduleWizard } from '../components/schedules/ScheduleWizard.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
 import { seatAllowed } from '../lib/orgMode.ts';
+import { ACTION_TILES, type ActionTile, actionTilesFor } from '../lib/schedules.ts';
 import { CardDetailView } from '../pages/CardDetail.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
 
@@ -405,5 +407,39 @@ describe('Ask DevOps on a desk item', () => {
     wrap(<DeskItem item={item} business />);
     expect(screen.queryByRole('button', { name: 'Ask DevOps about this' })).toBeNull();
     expect(screen.getByText('The runner is offline')).toBeInTheDocument();
+  });
+});
+
+describe('automation wizard actions', () => {
+  async function actionStep() {
+    const user = userEvent.setup();
+    wrap(<ScheduleWizard open onOpenChange={() => {}} />);
+    const wizard = await screen.findByTestId('schedule-wizard');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/auth/me', expect.anything()));
+    await user.click(screen.getByTestId('wizard-next'));
+    return within(wizard);
+  }
+  it('offers Ask DevOps and the regression run in dev mode (the default)', async () => {
+    const w = await actionStep();
+    expect(await w.findByTestId('tile-create_card')).toBeInTheDocument();
+    expect(w.getByTestId('tile-devops_request')).toHaveTextContent('Ask DevOps');
+    expect(w.getByTestId('tile-regression_run')).toBeInTheDocument();
+  });
+  it('leaves out Ask DevOps and the regression run in business mode', async () => {
+    mode = 'business';
+    const w = await actionStep();
+    expect(await w.findByTestId('tile-create_card')).toBeInTheDocument();
+    await waitFor(() => expect(w.queryByTestId('tile-devops_request')).toBeNull());
+    expect(w.queryByTestId('tile-regression_run')).toBeNull();
+    expect(w.queryByText('Ask DevOps')).toBeNull();
+    expect(w.getByTestId('tile-ba_task')).toBeInTheDocument();
+  });
+  it('keeps the action of an existing automation being edited, and dev mode lists every tile', () => {
+    const ids = (business: boolean, keep?: ActionTile) => actionTilesFor(business, keep).map((t) => t.id);
+    expect(ids(false)).toEqual(ACTION_TILES.map((t) => t.id));
+    expect(ids(true)).not.toContain('devops_request');
+    expect(ids(true)).not.toContain('regression_run');
+    expect(ids(true, 'devops_request')).toContain('devops_request');
+    expect(ids(true, 'devops_request')).not.toContain('regression_run');
   });
 });
