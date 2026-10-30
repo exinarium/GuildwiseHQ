@@ -8,8 +8,8 @@ export const ledgerProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ledger_entries (id, org_id, project_id, card_id, scope, title, body, tags, source_desk_item_id, vault_path,
-         created_by_kind, created_by_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         created_by_kind, created_by_id, created_at, review_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::date)`,
       [
         p.entryId,
         e.scope.orgId,
@@ -24,6 +24,7 @@ export const ledgerProjectors: Record<string, Projector> = {
         e.actor.kind,
         e.actor.kind === 'user' || e.actor.kind === 'agent' ? e.actor.id : null,
         e.createdAt,
+        p.reviewDate ?? null,
       ],
     );
   },
@@ -57,6 +58,15 @@ export const ledgerProjectors: Record<string, Projector> = {
       `UPDATE ledger_entries SET retired_at=COALESCE(retired_at, $2), retired_reason=COALESCE(retired_reason, $3),
               retired_by=COALESCE(retired_by, $4), superseded_by=COALESCE(superseded_by, $5::uuid) WHERE id=$1`,
       [p.entryId, e.createdAt, p.reason, p.by ?? e.actor.kind, p.supersededBy ?? null],
+    );
+  },
+  LedgerEntryReviewDateSet: async (tx, e) => {
+    const p = (e.event as EventOf<'LedgerEntryReviewDateSet'>).payload;
+    await exec(
+      tx,
+      `UPDATE ledger_entries SET review_date=$2::date, reviewed_at=CASE WHEN $3::boolean THEN $4::timestamptz ELSE reviewed_at END
+        WHERE id=$1`,
+      [p.entryId, p.reviewDate, p.confirmed, e.createdAt],
     );
   },
   LedgerEntryFlagged: async (tx, e) => {

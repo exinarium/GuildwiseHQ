@@ -3,8 +3,10 @@ import {
   CreateLedgerEntryRequestSchema,
   EditLedgerEntryRequestSchema,
   EscalateStandingOrderRequestSchema,
+  ledgerToday,
   LedgerQuerySchema,
   RetireLedgerEntryRequestSchema,
+  ReviewLedgerEntryRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -13,6 +15,7 @@ import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
 import { authorizeOrder, escalateOrder, revokeOrder } from '../ceo/orders.ts';
 import { addLedgerEntryChecked, editLedgerEntry } from '../commands/ledger.ts';
 import { retireLedgerEntry } from '../commands/ledger-retire.ts';
+import { setLedgerReviewDate } from '../commands/ledger-review.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
 import { getLedgerDto, getVisibleLedgerDto, ledgerVersions, listLedger } from '../queries/ledger.ts';
@@ -21,11 +24,12 @@ import { typed } from './util.ts';
 export function ledgerRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
+    const today = () => ledgerToday(ctx.clock.now());
 
     app.get('/api/ledger', { schema: { querystring: LedgerQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
-      return { entries: await listLedger(ctx.pool, s.user.id, orgId, req.query) };
+      return { entries: await listLedger(ctx.pool, s.user.id, orgId, { ...req.query, today: today() }) };
     });
 
     app.post('/api/ledger', { schema: { body: CreateLedgerEntryRequestSchema } }, async (req, reply) => {
@@ -36,7 +40,7 @@ export function ledgerRoutes(ctx: Ctx) {
         await resolveOrgId(ctx, s, requestedOrgId(req)),
         req.body,
       );
-      const entry = await getLedgerDto(ctx.pool, r.entryId, s.user.id);
+      const entry = await getLedgerDto(ctx.pool, r.entryId, today(), s.user.id);
       if (!entry) throw notFound('ledger entry not found');
       reply.code(r.merged ? 200 : 201);
       return {
@@ -51,7 +55,7 @@ export function ledgerRoutes(ctx: Ctx) {
     /** An entry with its history of wordings (newest first). */
     app.get('/api/ledger/:id/history', { schema: { params: IdParams } }, async (req) => {
       const s = await requireUser(ctx, req);
-      const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+      const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id, today());
       if (!entry) throw notFound('ledger entry not found');
       return { entry, versions: await ledgerVersions(ctx.pool, entry) };
     });
@@ -63,7 +67,20 @@ export function ledgerRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await retireLedgerEntry(ctx, s.user, req.params.id, req.body);
-        const entry = await getLedgerDto(ctx.pool, req.params.id, s.user.id);
+        const entry = await getLedgerDto(ctx.pool, req.params.id, today(), s.user.id);
+        if (!entry) throw notFound('ledger entry not found');
+        return { entry };
+      },
+    );
+
+    /** The owner confirms a due entry at a review: it stays, with a later review date or none. */
+    app.post(
+      '/api/ledger/:id/review',
+      { schema: { params: IdParams, body: ReviewLedgerEntryRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setLedgerReviewDate(ctx, s.user, req.params.id, { reviewDate: req.body.reviewDate, confirmed: true });
+        const entry = await getLedgerDto(ctx.pool, req.params.id, today(), s.user.id);
         if (!entry) throw notFound('ledger entry not found');
         return { entry };
       },
@@ -76,7 +93,7 @@ export function ledgerRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await authorizeOrder(ctx, s.user, req.params.id, req.body);
-        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id, today());
         if (!entry) throw notFound('ledger entry not found');
         return { entry };
       },
@@ -85,7 +102,7 @@ export function ledgerRoutes(ctx: Ctx) {
     app.post('/api/ledger/:id/revoke', { schema: { params: IdParams } }, async (req) => {
       const s = await requireUser(ctx, req);
       await revokeOrder(ctx, s.user, req.params.id);
-      const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+      const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id, today());
       if (!entry) throw notFound('ledger entry not found');
       return { entry };
     });
@@ -97,7 +114,7 @@ export function ledgerRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await escalateOrder(ctx, s.user, req.params.id, req.body?.note ?? '');
-        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id, today());
         if (!entry) throw notFound('ledger entry not found');
         return { entry };
       },
@@ -110,7 +127,7 @@ export function ledgerRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await editLedgerEntry(ctx, s.user, req.params.id, req.body);
-        const entry = await getLedgerDto(ctx.pool, req.params.id, s.user.id);
+        const entry = await getLedgerDto(ctx.pool, req.params.id, today(), s.user.id);
         if (!entry) throw notFound('ledger entry not found');
         return { entry };
       },

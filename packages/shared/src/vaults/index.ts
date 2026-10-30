@@ -164,3 +164,13 @@ export function renderDecisionFile(d: DecisionFileInput): string {
   ];
   return lines.join('\n');
 }
+
+/** One standing-order block of `standing-orders.md`. Without a review date the text is what it has always been. */
+export function renderStandingOrderBlock(o: {
+  title: string;
+  body: string;
+  addedDay: string;
+  reviewDate?: string | null;
+}): string {
+  return `\n## ${o.title.trim()}\n\n${o.body.trim()}\n\n_Added ${o.addedDay}._\n${o.reviewDate ? `_Review by ${o.reviewDate}._\n` : ''}`;
+}

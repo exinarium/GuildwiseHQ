@@ -3,6 +3,7 @@ import {
   type CreateLedgerEntryRequest,
   type EditLedgerEntryRequest,
   isOrgManager,
+  ledgerToday,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -18,6 +19,8 @@ import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { findContradictions, findNearDuplicate } from './ledger-checks.ts';
+import { assertCanManageEntry } from './ledger-retire.ts';
+import { assertReviewDateNotPast, reviewDateEvents } from './ledger-review.ts';
 
 export interface AddLedgerResult {
   entryId: string;
@@ -68,6 +71,8 @@ export async function addLedgerEntryChecked(
   req: CreateLedgerEntryRequest,
 ): Promise<AddLedgerResult> {
   let mergeInto: { id: string; title: string } | undefined;
+  // Before the duplicate check, so a bad date never merges.
+  assertReviewDateNotPast(req.reviewDate, ledgerToday(ctx.clock.now()));
   const result = await withAppendTx(ctx.pool, async (tx): Promise<AddLedgerResult | undefined> => {
     let projectId = req.projectId;
     let cardId = req.cardId;
@@ -127,6 +132,7 @@ export async function addLedgerEntryChecked(
             body: req.body,
             tags: req.tags,
             ...(vaultPath ? { vaultPath } : {}),
+            ...(req.reviewDate ? { reviewDate: req.reviewDate } : {}),
           },
         },
         actor: userActor(user.id),
@@ -172,7 +178,11 @@ export async function addLedgerEntryChecked(
   if (result) return result;
   // Merge: the existing order takes the new wording (its permissions apply; the earlier wording stays in its history).
   const existing = mergeInto as { id: string; title: string };
-  await editLedgerEntry(ctx, user, existing.id, { body: req.body, tags: req.tags });
+  await editLedgerEntry(ctx, user, existing.id, {
+    body: req.body,
+    tags: req.tags,
+    ...(req.reviewDate ? { reviewDate: req.reviewDate } : {}),
+  });
   return { entryId: existing.id, merged: true, conflictsWith: [] };
 }
 
@@ -189,8 +199,27 @@ export async function editLedgerEntry(
   req: EditLedgerEntryRequest,
 ): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const e = await one(tx, 'SELECT * FROM ledger_entries WHERE id=$1 FOR UPDATE', [entryId]);
+    const e = await one(
+      tx,
+      'SELECT *, review_date::text AS review_date_text FROM ledger_entries WHERE id=$1 FOR UPDATE',
+      [entryId],
+    );
     if (!e) throw notFound('ledger entry not found');
+    // A date change is its own event: it never voids full power (only an edit of the wording does).
+    let dateEvents: AppendInput[] = [];
+    if (req.reviewDate !== undefined) {
+      await assertCanManageEntry(tx, user.id, e, 'change the review date of');
+      dateEvents = reviewDateEvents(e, req.reviewDate, {
+        confirmed: false,
+        today: ledgerToday(ctx.clock.now()),
+        actor: userActor(user.id),
+      });
+    }
+    if (req.title === undefined && req.body === undefined && req.tags === undefined) {
+      if (dateEvents.length === 0) return false;
+      await ctx.store.append(dateEvents, { tx });
+      return true;
+    }
     if (e.project_id) {
       // Not a member of the project: it does not exist for the caller.
       const project = await loadVisibleProject(tx, user.id, e.project_id);
@@ -209,7 +238,11 @@ export async function editLedgerEntry(
     const title = req.title?.trim() ?? e.title;
     const body = req.body?.trim() ?? e.body;
     const tags = req.tags ?? e.tags;
-    if (title === e.title && body === e.body && JSON.stringify(tags) === JSON.stringify(e.tags)) return false;
+    if (title === e.title && body === e.body && JSON.stringify(tags) === JSON.stringify(e.tags)) {
+      if (dateEvents.length === 0) return false;
+      await ctx.store.append(dateEvents, { tx });
+      return true;
+    }
     const scope = e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id);
     const events: AppendInput[] = [
       {
@@ -250,7 +283,7 @@ export async function editLedgerEntry(
         });
       }
     }
-    await ctx.store.append(events, { tx });
+    await ctx.store.append([...events, ...dateEvents], { tx });
     return true;
   });
 }

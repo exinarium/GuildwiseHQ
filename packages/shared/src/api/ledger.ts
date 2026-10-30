@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LedgerScope } from '../events/ledger.ts';
+import { CalendarDate, LedgerScope } from '../events/ledger.ts';
 import { IsoTime } from './common.ts';
 
 export const LedgerEntryDtoSchema = z.object({
@@ -31,6 +31,12 @@ export const LedgerEntryDtoSchema = z.object({
   canRetire: z.boolean().default(false),
   /** The caller may edit this entry (a live standing order they may manage). */
   canEdit: z.boolean().default(false),
+  /** Optional date the owner wants to look at this entry again. */
+  reviewDate: CalendarDate.nullable().default(null),
+  /** Computed by the server: live, has a review date, and the date is today or earlier. */
+  reviewDue: z.boolean().default(false),
+  /** When the owner last confirmed the entry at a review. */
+  reviewedAt: IsoTime.nullable().default(null),
   /** Full-text rank when a query was given. */
   rank: z.number().optional(),
   /** Standing orders: whether the CEO may enforce this order with full power (docs/design/ceo-front-door.md section 3.4). */
@@ -63,6 +69,8 @@ export const LedgerQuerySchema = z.object({
   scope: z.enum(['all', 'feature', 'decision', 'standing_order']).default('all'),
   /** Also list retired entries (the web page greys them out). */
   includeRetired: z.enum(['true', 'false']).optional(),
+  /** Only entries that are due for review. */
+  due: z.enum(['true', 'false']).optional(),
 });
 export type LedgerQuery = z.infer<typeof LedgerQuerySchema>;
 
@@ -83,6 +91,8 @@ export const CreateLedgerEntryRequestSchema = z
      * entry) or `merge` (the existing entry takes the new wording; nothing new is saved).
      */
     onDuplicate: z.enum(['refuse', 'merge']).optional(),
+    /** Optional review date (today or later). */
+    reviewDate: CalendarDate.optional(),
   })
   .refine((v) => v.scope === 'standing_order' || !!v.projectId || !!v.cardId, {
     message: 'feature and decision entries need a projectId or a cardId',
@@ -113,11 +123,27 @@ export const EditLedgerEntryRequestSchema = z
     tags: z.array(z.string().min(1).max(60)).max(20).optional(),
     /** The Owner re-authorizes the new wording for full power in the same edit (any other edit voids the authority). */
     keepFullPower: z.boolean().optional(),
+    /** A new review date (today or later); null clears it. Never voids full power. */
+    reviewDate: CalendarDate.nullable().optional(),
   })
-  .refine((v) => v.title !== undefined || v.body !== undefined || v.tags !== undefined, {
-    message: 'give a new title, text or tags',
-  });
+  .refine(
+    (v) => v.title !== undefined || v.body !== undefined || v.tags !== undefined || v.reviewDate !== undefined,
+    { message: 'give a new title, text, tags or review date' },
+  );
 export type EditLedgerEntryRequest = z.infer<typeof EditLedgerEntryRequestSchema>;
+
+/** `POST /api/ledger/:id/review`: the owner confirms a due entry; a later review date, or null for none. */
+export const ReviewLedgerEntryRequestSchema = z.object({ reviewDate: CalendarDate.nullable() });
+export type ReviewLedgerEntryRequest = z.infer<typeof ReviewLedgerEntryRequestSchema>;
+
+/** The server's calendar date (UTC) for review dates: the one "today" the ledger uses. */
+export const ledgerToday = (now: Date): string => now.toISOString().slice(0, 10);
+
+/** Due for review: the entry is live and its date is today or earlier (YYYY-MM-DD strings compare as dates). */
+export const isReviewDue = (
+  e: { reviewDate: string | null; retired?: boolean; superseded?: boolean },
+  today: string,
+): boolean => !!e.reviewDate && !e.retired && !e.superseded && e.reviewDate <= today;
 
 /** One wording of a standing order, newest first; `current` is the one agents are briefed with. */
 export const LedgerVersionDtoSchema = z.object({

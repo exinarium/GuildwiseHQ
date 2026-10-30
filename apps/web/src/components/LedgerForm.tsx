@@ -25,6 +25,7 @@ export function LedgerForm({
   const [projectId, setProjectId] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [reviewDate, setReviewDate] = useState('');
   const [err, setErr] = useState('');
   const needsProject = kind !== 'standing_order';
 
@@ -38,12 +39,14 @@ export function LedgerForm({
       body: body.trim(),
       tags: [],
       ...(projectId ? { projectId } : {}),
+      ...(reviewDate ? { reviewDate } : {}),
       ...(merge ? { onDuplicate: 'merge' as const } : {}),
     };
     add.mutate(req, {
       onSuccess: () => {
         setTitle('');
         setBody('');
+        setReviewDate('');
         toast.success('Added to the ledger');
         onDone?.();
       },
@@ -53,6 +56,7 @@ export function LedgerForm({
     e.preventDefault();
     send(false);
   };
+  const datePast = add.error instanceof ApiError && add.error.code === 'review_date_past';
   const duplicate = add.error instanceof ApiError && add.error.code === 'duplicate_order';
 
   return (
@@ -76,7 +80,15 @@ export function LedgerForm({
       </Select>
       <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <TextArea label="Text" value={body} onChange={(e) => setBody(e.target.value)} error={err} />
-      <ErrorBox error={add.error} />
+      <TextInput
+        type="date"
+        label="Review date (optional)"
+        hint="Agents keep following it after this date; it is only marked for you to look at again."
+        value={reviewDate}
+        onChange={(e) => setReviewDate(e.target.value)}
+        error={datePast ? add.error?.message : undefined}
+      />
+      {!datePast && <ErrorBox error={add.error} />}
       {duplicate && (
         <Button type="button" onClick={() => send(true)} className="self-start">
           Merge into the existing order instead

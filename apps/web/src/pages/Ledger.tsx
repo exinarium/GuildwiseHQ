@@ -1,11 +1,13 @@
 import { BookOpen, Search } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
+import { ApiError } from '../api/client.ts';
 import {
   useEditLedgerEntry,
   useLedger,
   useLedgerHistory,
   useRetireLedgerEntry,
+  useReviewLedgerEntry,
 } from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { FullPowerControl } from '../components/ceo/FullPowerControl.tsx';
@@ -25,7 +27,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
-import { formatDateTime } from '../lib/time.ts';
+import { formatCalendarDate, formatDateTime } from '../lib/time.ts';
 
 const SCOPES = [
   { value: 'all', label: 'All' },
@@ -133,6 +135,76 @@ function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   );
 }
 
+/**
+ * Review date of an entry: `set` saves, changes or removes it; `confirm` (an entry that is due) keeps the entry with a
+ * later date or none, so the "review due" marker goes.
+ */
+function ReviewDateForm({
+  e,
+  mode,
+  onDone,
+}: {
+  e: LedgerEntry;
+  mode: 'set' | 'confirm';
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const edit = useEditLedgerEntry(e.id);
+  const confirm = useReviewLedgerEntry(e.id);
+  const m = mode === 'set' ? edit : confirm;
+  const [date, setDate] = useState(mode === 'set' ? (e.reviewDate ?? '') : '');
+  const [err, setErr] = useState('');
+  const dateErr = m.error instanceof ApiError && m.error.code === 'review_date_past' ? m.error.message : '';
+  const send = (reviewDate: string | null, done: string) => {
+    setErr('');
+    const opts = {
+      onSuccess: () => {
+        toast.success(done);
+        onDone();
+      },
+    };
+    if (mode === 'set') edit.mutate({ reviewDate }, opts);
+    else confirm.mutate({ reviewDate }, opts);
+  };
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    if (mode === 'set' && !date) return setErr('Pick a date, or remove the review date');
+    send(date || null, mode === 'set' ? 'Review date saved' : 'Entry confirmed');
+  };
+  return (
+    <form
+      onSubmit={submit}
+      aria-label={mode === 'set' ? 'Review date' : 'Confirm review'}
+      className="flex flex-col gap-4"
+      noValidate
+    >
+      <TextInput
+        type="date"
+        label={mode === 'set' ? 'Review date' : 'Next review date (optional)'}
+        hint={
+          mode === 'confirm'
+            ? 'Leave empty for no further review. The entry stays as it is.'
+            : 'Agents keep following the entry after this date; it is only marked for you to look at again.'
+        }
+        value={date}
+        onChange={(ev) => setDate(ev.target.value)}
+        error={err || dateErr || undefined}
+      />
+      {!dateErr && <ErrorBox error={m.error} />}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" loading={m.isPending}>
+          {mode === 'set' ? 'Save' : 'Confirm'}
+        </Button>
+        {mode === 'set' && e.reviewDate && (
+          <Button type="button" onClick={() => send(null, 'Review date removed')}>
+            Remove review date
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
 /** Every wording of an entry, newest first. */
 function History({ id }: { id: string }) {
   const h = useLedgerHistory(id, true);
@@ -159,6 +231,7 @@ function Entry({ e }: { e: LedgerEntry }) {
   const [editing, setEditing] = useState(false);
   const [history, setHistory] = useState(false);
   const [retiring, setRetiring] = useState(false);
+  const [reviewing, setReviewing] = useState<'set' | 'confirm' | null>(null);
   const retired = !!e.retiredAt;
   const long = e.body.length > 260 || e.body.split('\n').length > 4;
   return (
@@ -191,6 +264,14 @@ function Entry({ e }: { e: LedgerEntry }) {
             <span data-testid="ledger-conflict">May contradict another order</span>
           </Badge>
         )}
+        {e.reviewDate && (
+          <span data-testid="ledger-review-date">review {formatCalendarDate(e.reviewDate)}</span>
+        )}
+        {e.reviewDue && !retired && (
+          <Badge tone="amber">
+            <span data-testid="ledger-review-due">Review due</span>
+          </Badge>
+        )}
         {e.version > 1 && e.editedAt && (
           <span data-testid="ledger-edited">
             edited {formatDateTime(e.editedAt)}
@@ -218,7 +299,20 @@ function Entry({ e }: { e: LedgerEntry }) {
         </p>
       )}
       {!retired && e.canRetire && (
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap gap-2">
+          {e.reviewDue && (
+            <Button size="sm" variant="primary" onClick={() => setReviewing('confirm')} aria-label={`Confirm ${e.title}`}>
+              Confirm
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setReviewing('set')}
+            aria-label={`Review date of ${e.title}`}
+          >
+            Review date
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -260,6 +354,18 @@ function Entry({ e }: { e: LedgerEntry }) {
         <RetireForm e={e} onDone={() => setRetiring(false)} />
       </Dialog>
       <Dialog
+        open={reviewing !== null}
+        onOpenChange={(o) => !o && setReviewing(null)}
+        title={reviewing === 'confirm' ? 'Confirm entry' : 'Review date'}
+        description={
+          reviewing === 'confirm'
+            ? 'Keep this entry as it is and set when to look at it again. To change the wording or withdraw it, use Edit or Retire.'
+            : 'When you want to look at this entry again.'
+        }
+      >
+        {reviewing && <ReviewDateForm e={e} mode={reviewing} onDone={() => setReviewing(null)} />}
+      </Dialog>
+      <Dialog
         open={editing}
         onOpenChange={setEditing}
         title="Edit standing order"
@@ -278,13 +384,15 @@ export function Ledger() {
   const [projectId, setProjectId] = useState('');
   const [adding, setAdding] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
+  const [dueOnly, setDueOnly] = useState(false);
   const entries = useLedger({
     ...(q.trim() ? { q: q.trim() } : {}),
     scope,
     includeRetired: showRetired,
+    due: dueOnly,
     ...(projectId ? { projectId } : {}),
   });
-  const filtered = !!q.trim() || scope !== 'all' || !!projectId;
+  const filtered = !!q.trim() || scope !== 'all' || !!projectId || dueOnly;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -334,6 +442,9 @@ export function Ledger() {
           <FilterChip pressed={showRetired} onClick={() => setShowRetired((v) => !v)}>
             Show retired
           </FilterChip>
+          <FilterChip pressed={dueOnly} onClick={() => setDueOnly((v) => !v)}>
+            Due for review
+          </FilterChip>
         </div>
       </search>
       {entries.isPending && <ListSkeleton label="Loading the ledger" />}
@@ -351,6 +462,7 @@ export function Ledger() {
                   setQ('');
                   setScope('all');
                   setProjectId('');
+                  setDueOnly(false);
                 }}
               >
                 Clear filters
