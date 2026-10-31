@@ -6,7 +6,7 @@ playwright-report/
 *.tsbuildinfo
 .env
 .env.local
-release/
+/release/
 .claude/worktrees/
 docs/guide/raw/
 media/videos/manifest.json
