@@ -8,6 +8,7 @@ import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { useCard } from '../../api/queries/cards.ts';
 import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { useDesk } from '../../api/queries/desk.ts';
+import { useRelayOfflineNotice } from '../../api/queries/relay.ts';
 import { BRAND } from '../../brand.ts';
 import { useContact } from '../../extension/contact.tsx';
 import { ext } from '../../extension/index.ts';
@@ -121,6 +122,7 @@ function Shell({ name, live }: { name: string; live: string }) {
 
   const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
   const org = me.data?.activeOrg ?? null;
+  const relayOffline = useRelayOfflineNotice(org);
   const canManage = org?.role === 'owner' || org?.role === 'admin';
   const terms = useOrgTerms();
   const { sections, footer } = buildNav({
@@ -335,7 +337,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                 </header>
               )}
               <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
-                {me.data && <OrgBanner me={me.data} project={project} />}
+                {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
                 <div className="px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8">
                   <Outlet />
                 </div>

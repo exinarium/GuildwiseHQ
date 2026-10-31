@@ -85,6 +85,17 @@ export const RelayIntegrationWithUrlSchema = z.object({
 });
 export type RelayIntegrationWithUrl = z.infer<typeof RelayIntegrationWithUrlSchema>;
 
+/** The newest request seen at an integration: metadata only (never a body, header or query). */
+export const RelayLastEventSchema = z.object({
+  at: z.iso.datetime(),
+  /** One of RELAY_OUTCOMES; a string so an older or newer value never breaks the parse. */
+  outcome: z.string(),
+  /** The HTTP status the provider got. */
+  status: z.number().int(),
+  sizeBytes: z.number().int(),
+});
+export type RelayLastEvent = z.infer<typeof RelayLastEventSchema>;
+
 export const RelayIntegrationStatusSchema = z.object({
   integrationId: z.uuid(),
   /** A serving runner is connected now. */
@@ -94,5 +105,7 @@ export const RelayIntegrationStatusSchema = z.object({
   /** Null while connected, or when no runner ever served it. */
   offlineSince: z.iso.datetime().nullable(),
   refusedSinceOffline: z.object({ count: z.number().int(), lastAt: z.iso.datetime().nullable() }),
+  /** Null when no request is recorded (none yet, or all pruned). */
+  lastEvent: RelayLastEventSchema.nullable(),
 });
 export type RelayIntegrationStatus = z.infer<typeof RelayIntegrationStatusSchema>;
