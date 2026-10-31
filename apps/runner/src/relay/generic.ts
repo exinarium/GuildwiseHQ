@@ -2,6 +2,12 @@ import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RelayEvent, RelayHandler } from './dispatch.ts';
 
+/** The file `FileRelaySink.put` writes for an event. */
+export function relayEventFile(dir: string, e: RelayEvent): string {
+  const stamp = e.receivedAt.toISOString().replace(/[:.]/g, '-');
+  return join(dir, e.integrationId, `${stamp}-${e.requestId}.json`);
+}
+
 /** Where a relayed event goes on this workstation. */
 export interface RelaySink {
   put(e: RelayEvent): Promise<void>;
@@ -19,8 +25,7 @@ export class FileRelaySink implements RelaySink {
     const folder = join(this.dir, e.integrationId);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     chmodSync(folder, 0o700);
-    const stamp = e.receivedAt.toISOString().replace(/[:.]/g, '-');
-    const file = join(folder, `${stamp}-${e.requestId}.json`);
+    const file = relayEventFile(this.dir, e);
     const tmp = `${file}.tmp`;
     const record = {
       requestId: e.requestId,

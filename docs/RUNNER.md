@@ -372,6 +372,8 @@ sessions.json                   the Claude sessions this runner started (agent, 
 claude-accounts-state.json      the usage limit and expired logins of each Claude account (kept across restarts)
 claude-credentials.lock         lock for the main account's credential copies (additional accounts lock inside their own folder)
 secrets/claude-accounts/        token accounts only: <key>.json (mode 0600)
+secrets/relay-whatsapp.json     WhatsApp relay secrets, sealed with the runner key (mode 0600; see "WhatsApp Cloud API through the relay")
+relay/inbox/<integrationId>/    raw events received through the inbound relay, one JSON file each (mode 0600)
 logs/
   runner.log                    JSON Lines log of runner events
   devops-audit.jsonl            every shell command of the DevOps engineer, allowed or refused (see "DevOps guardrails")
@@ -668,6 +670,23 @@ a new generation. Doing it again undoes it. Claude Code (runner 0.1.60, `claude-
 
 **Old runners.** A runner without `provider-accounts:1` is told to update (tile "Runner too old"); the server sends it no
 named account and no key command with an account name, and pauses or falls back for a project that names one.
+
+## WhatsApp Cloud API through the relay
+
+A WhatsApp Cloud API webhook reaches this runner through the server's inbound relay. The server only forwards the request; the runner checks the Meta signature and answers the verification handshake, using secrets that exist only on this workstation.
+
+1. In the web app create an integration of kind WhatsApp and copy its relay URL (it is shown once).
+2. On the workstation run `guildwise-runner whatsapp-connect <integrationId> [--pairing <id>] [--phone-number-id <id>]`. Enter the Meta app secret (App Dashboard > App settings > Basic) and a verify token, or leave the token empty to generate one (shown once). Values are read hidden or from a pipe (line 1 the app secret, line 2 the token), never from arguments. They are sealed with this runner's key into `secrets/relay-whatsapp.json` (mode 0600, bound to the integration id and the key), registered for log redaction and never sent to the server. No `relay add` and no restart is needed: a running runner announces the integration within about 10 seconds.
+3. In the Meta App Dashboard > WhatsApp > Configuration set the Callback URL to the relay URL and the Verify token to the same token, click Verify and save, then subscribe the `messages` field.
+4. `guildwise-runner whatsapp-connect --status` lists what is bound (never the secrets). `whatsapp-connect <integrationId> --disconnect` removes the binding; the server then answers 503. Running the command again replaces the secrets. If `runner-key.pem` is regenerated the old binding is shown as unreadable and must be bound again.
+
+What the runner does: a GET with `hub.mode=subscribe` and the right `hub.verify_token` is answered 200 with exactly the `hub.challenge` text, otherwise 403. A POST must carry a valid `X-Hub-Signature-256` (HMAC-SHA256 of the exact raw bytes with the app secret): missing is 401, malformed or wrong is 403, and the event is dropped. A valid event is written unchanged to `relay/inbox/<integrationId>/<time>-<requestId>.json` (or `relay.sinkDir`; the body is base64 of the exact bytes), answered 200, and only then handed to the local intake. With `--phone-number-id` events for other numbers are answered 200 and not stored. Duplicates are possible; consumers deduplicate on the message ids. Two workstations bound to the same integration both announce, and the server routes to one of them.
+
+**Retry window.** Meta documents: "If a webhook request to your endpoint receives an HTTP status code other than 200, or if the webhook cannot be delivered for another reason, Meta retries delivery with decreasing frequency until the request succeeds, for up to 7 days" ([WhatsApp: set up webhooks](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks)); and "delivery is retried immediately, then a few more times with decreasing frequency over the next 7 days. Unacknowledged responses will be dropped after 7 days" ([create a webhook endpoint](https://developers.facebook.com/docs/whatsapp/webhooks/create-webhook-endpoint)). So with the runner offline, messages wait at Meta for up to 7 days. The generic Graph API page names 36 hours; that does not apply to WhatsApp. Meta does not document a response timeout; the runner answers within milliseconds.
+
+**Payload size.** Meta documents webhook payloads of up to 3 MB. The server's single limit `AOM_RELAY_MAX_BODY_BYTES` defaults to 1 MiB; set it to `3145728` on the server to accept Meta's maximum (see SELF-HOSTING.md). An over-limit event gets 413 and Meta retries it.
+
+A `kind_mismatch` refusal in the runner log means the web app integration is not of kind WhatsApp.
 
 ## Running and connecting
 
