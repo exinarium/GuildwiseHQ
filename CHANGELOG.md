@@ -18,6 +18,8 @@ Runner 0.1.64. Migration 2751. New optional environment variables `AOM_RELAY_MAX
 
 ### Fixed
 
+- A deploy of a repository that holds another as a git submodule (the cloud holds the core) builds again: the runner fills each submodule of the deploy checkout at its pinned commit, from this workstation's own clone of that repository when it has one (a missing commit is fetched into that clone first), and removes such a checkout afterwards without leaving a worktree entry. Before, the submodule folder stayed empty and the build failed.
+
 - Run regression (the manual full suite) in a project with several repositories asks which repository; before, it ran on the first by id. `POST /api/projects/:id/full-suite` takes an optional `repoId` (an active repository of the project); without it a project with several repositories is refused with `choose_repo` naming them, and a project with one behaves as before. Project settings shows a repository picker (name and working branch) when there is more than one.
 - Every `after_merge` deploy failed with `commit_unavailable` in a project whose cards merge into one repository while the environment deploys another: the merge commit of the card's repository was handed to a clone of the other. A merge commit is now only used for the deploy of its own repository (the newest merge of that repository, else the head of its working branch), in the trigger, the automated-commit allow-list and the default commit. `deploy_trigger_queue` remembers the repository of the merge (migration 2751).
 

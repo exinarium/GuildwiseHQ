@@ -26,6 +26,7 @@ import {
   readBundleFromDir,
 } from './bundle.ts';
 import type { DeployKeys } from './deploy-keys.ts';
+import { fillDeploySubmodules } from './submodules.ts';
 
 /**
  * Runs an approved deploy (docs/design/ceo-front-door.md 9.5). Everything here is deterministic code: no model, no prompt.
@@ -228,7 +229,9 @@ export class DeployExecutor {
   private async prepareCheckout(
     p: DeployExecPayload,
     dest: string,
-  ): Promise<{ path: string; commit: string; cleanup: () => Promise<void> } | { refused: string }> {
+  ): Promise<
+    { path: string; commit: string; cleanup: () => Promise<void> } | { refused: string; summary?: string }
+  > {
     if (!p.repo) return { refused: 'no_checkout' };
     const repo = await this.deps.findRepo(p.repo.remoteUrlNormalized);
     if (!repo) return { refused: 'no_checkout' };
@@ -247,14 +250,19 @@ export class DeployExecutor {
     rmSync(dest, { recursive: true, force: true });
     const add = await git(repo.localPath, ['worktree', 'add', '--detach', dest, commit]);
     if (add.exitCode !== 0) return { refused: 'no_checkout' };
-    return {
-      path: dest,
-      commit,
-      cleanup: async () => {
-        await git(repo.localPath, ['worktree', 'remove', '--force', dest]);
-        rmSync(dest, { recursive: true, force: true });
-      },
+    const cleanup = async () => {
+      // git refuses `worktree remove` for a worktree with submodules: delete the folder and prune its entry instead
+      const rm = await git(repo.localPath, ['worktree', 'remove', '--force', dest]);
+      rmSync(dest, { recursive: true, force: true });
+      if (rm.exitCode !== 0) await git(repo.localPath, ['worktree', 'prune']);
     };
+    // A repository that holds another as a submodule (the cloud holds the core) builds only with it filled in.
+    const sub = await fillDeploySubmodules(dest, repo.localPath, (n) => this.deps.findRepo(n));
+    if (sub) {
+      await cleanup();
+      return { refused: 'no_checkout', summary: `refused: no_checkout (${sub})`.slice(0, 300) };
+    }
+    return { path: dest, commit, cleanup };
   }
 
   private async execute(p: DeployExecPayload): Promise<DeployExecResult> {
@@ -296,7 +304,8 @@ export class DeployExecutor {
     let checkout: { path: string; commit: string; cleanup: () => Promise<void> } | undefined;
     if (p.repo) {
       const c = await this.prepareCheckout(p, join(work, 'checkout'));
-      if ('refused' in c) return refused(c.refused, { hash: bundle.hash });
+      if ('refused' in c)
+        return refused(c.refused, { hash: bundle.hash, ...(c.summary ? { summary: c.summary } : {}) });
       checkout = c;
     }
     const commit = checkout?.commit ?? p.commit ?? '';
