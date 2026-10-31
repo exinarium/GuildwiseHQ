@@ -1,6 +1,7 @@
 import {
   type CardTemplate,
   type CreateScheduleResponse,
+  isBusinessOrg,
   SCHEDULE_EVENT_TRIGGERS,
   SCHEDULE_PRESETS,
   type ScheduleDto,
@@ -32,6 +33,8 @@ import { useWorkstations } from '../../api/queries/workstations.ts';
 import {
   ACTION_TILES,
   type ActionTile,
+  actionTileOf,
+  actionTilesFor,
   buildScheduleRequest,
   CUSTOM_PRESET,
   emptyWizard,
@@ -175,6 +178,7 @@ function WizardDialog({
   initial: Partial<WizardState> | undefined;
 }) {
   const me = useMe().data;
+  const business = isBusinessOrg(me?.activeOrg);
   const projects = useProjects();
   const workstations = useWorkstations();
   const create = useCreateSchedule();
@@ -294,6 +298,7 @@ function WizardDialog({
     }
   };
 
+  const actionTiles = actionTilesFor(business, editing ? actionTileOf(editing.action) : undefined);
   const orgLevel = wizardIsOrgLevel(s);
   const blockedOrgLevel = orgLevel && !isManager;
   const tileDisabled = (id: ActionTile): string | null => {
@@ -419,7 +424,7 @@ function WizardDialog({
               label="Action"
               value={s.tile}
               onChange={(v) => set({ tile: v })}
-              tiles={ACTION_TILES}
+              tiles={actionTiles}
               icons={ACTION_ICON}
               disabled={tileDisabled}
             />

@@ -72,6 +72,8 @@ export const canCreateProject = isOrgManager;
 export const canConvertProject = isOrgManager;
 export const canAddPeople = isOrgManager;
 export const canRenameOrg = isOrgManager;
+/** Switching the organization between Developer and Business mode. */
+export const canSetOrgMode = isOrgManager;
 export const canInviteOrgMember = (a: Pick<OrgActor, 'orgRole'>, role: 'admin' | 'member'): boolean =>
   role === 'member' ? isOrgManager(a) : isOrgOwner(a);
 export const canChangeOrgRole = isOrgOwner;

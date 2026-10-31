@@ -19,6 +19,7 @@ import { one, type Queryable, type Row } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertDevMode, BUSINESS_MODE_MSG } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadCommitAs } from './commit-as.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -291,6 +292,7 @@ export async function repoCreateRequestEvents(
   spec: { name: string; visibility: 'private' | 'public'; description?: string },
   context: string,
 ): Promise<{ events: AppendInput[]; requestId: string; deskItemId: string }> {
+  await assertDevMode(tx, project.org_id, BUSINESS_MODE_MSG.repo);
   const live = await one(
     tx,
     `SELECT 1 FROM repo_requests WHERE project_id=$1 AND lower(name)=lower($2) AND status = ANY($3)`,

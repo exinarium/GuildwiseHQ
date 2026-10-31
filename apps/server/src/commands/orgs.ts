@@ -6,6 +6,7 @@ import {
   canInviteOrgMember,
   canRemoveOrgMember,
   canRenameOrg,
+  canSetOrgMode,
   canSetOrgSecurity,
   canTransferOwnership,
   DIAGNOSTICS_CONSENT_VERSION,
@@ -14,6 +15,7 @@ import {
   type OrgGuestDto,
   type OrgInvitationDto,
   type OrgMemberDto,
+  type OrgMode,
   type OrgRemovalPreview,
   type OrgRole,
   streamId,
@@ -40,6 +42,7 @@ import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { blockersMessage, modeSwitchBlockers } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
 import { invitationLink } from './invitations.ts';
@@ -125,6 +128,39 @@ export async function setDiagnosticsSharing(
   ]);
   // Withdrawal: topics that were handed on but not yet written are taken out of the blog queue now, not at the next sweep.
   if (!on) await withdrawTopicsOfOrgs(ctx, a.orgId);
+}
+
+/**
+ * Owner and Admins choose how the organization works. Switching to Business is refused while it has a connected
+ * repository or an active builder, reviewer, tester or DevOps agent; switching back to Developer always works and
+ * deletes nothing.
+ */
+export async function setOrgMode(ctx: Ctx, a: OrgAccess, mode: OrgMode): Promise<void> {
+  if (!canSetOrgMode({ orgRole: a.role }))
+    throw forbidden('only the Owner and Admins can change how the organization works');
+  await withAppendTx(ctx.pool, async (tx) => {
+    const cur = await one<{ mode: OrgMode }>(tx, 'SELECT mode FROM organizations WHERE id=$1 FOR UPDATE', [
+      a.orgId,
+    ]);
+    const previous: OrgMode = cur?.mode === 'business' ? 'business' : 'dev';
+    if (previous === mode) return;
+    if (mode === 'business') {
+      const b = await modeSwitchBlockers(tx, a.orgId);
+      if (b.repositories.length || b.agents.length)
+        throw conflict('business_mode_blocked', blockersMessage(b), b);
+    }
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.org(a.orgId),
+          event: { type: 'OrgModeSet', payload: { orgId: a.orgId, mode, previous, by: a.session.user.id } },
+          actor: userActor(a.session.user.id),
+          scope: orgScope(a.orgId),
+        },
+      ],
+      { tx },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------------------------- members

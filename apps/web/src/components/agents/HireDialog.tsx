@@ -1,6 +1,7 @@
 import {
   type AgentDraftDto,
   backendDef,
+  isDevOnlyRoleKey,
   modelChoicesFor,
   NAME_THEMES,
   type RoleDefinition,
@@ -14,6 +15,7 @@ import { useMe } from '../../api/queries/auth.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { getLastProjectKey } from '../../lib/lastProject.ts';
+import { useBusinessMode } from '../../lib/orgMode.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
@@ -83,13 +85,22 @@ export function HireDialog({
     setSkills(draft.skills.join(', '));
   }, [draft]);
 
+  const business = useBusinessMode();
   const hireable = useMemo(
     // The CEO is appointed on the CEO page, never hired here.
-    () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops' && r.definition.key !== 'ceo'),
-    [roles.data],
+    () =>
+      (roles.data ?? []).filter(
+        (r) =>
+          r.definition.key !== 'devops' &&
+          r.definition.key !== 'ceo' &&
+          !(business && isDevOnlyRoleKey(r.definition.key)),
+      ),
+    [roles.data, business],
   );
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');
-  const effectiveRoleKey = roleKey || hireable[0]?.definition.key || '';
+  const effectiveRoleKey = hireable.some((r) => r.definition.key === roleKey)
+    ? roleKey
+    : (hireable[0]?.definition.key ?? roleKey);
   const draftRole: RoleDefinition | undefined = draft
     ? {
         key: 'draft',

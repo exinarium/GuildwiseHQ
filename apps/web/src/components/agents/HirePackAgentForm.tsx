@@ -8,6 +8,7 @@ import { packHireMessage, useHirePackAgent, usePackTeam } from '../../api/querie
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { getLastProjectKey } from '../../lib/lastProject.ts';
+import { seatAllowed, useBusinessMode } from '../../lib/orgMode.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
@@ -63,7 +64,10 @@ export function HirePackAgentForm({ onDone, onCancel }: { onDone: () => void; on
     (a) => !needle || `${a.key} ${a.name} ${a.description}`.toLowerCase().includes(needle),
   );
   const chosen = (team.data?.agents ?? []).find((a) => a.key === agentKey) ?? agents[0];
-  const seat: PackSeat = seatPick || chosen?.suggestedSeat || 'own';
+  const business = useBusinessMode();
+  const suggested =
+    chosen && seatAllowed(chosen.suggestedSeat ?? 'own', business) ? chosen.suggestedSeat : undefined;
+  const seat: PackSeat = seatPick || suggested || 'own';
   const seatRole = roles.data?.find((r) => r.definition.key === seat)?.definition;
   const name = nameEdit ?? chosen?.name ?? '';
 
@@ -218,12 +222,14 @@ export function HirePackAgentForm({ onDone, onCancel }: { onDone: () => void; on
               }}
               hint="The built-in role decides what it may do, its gates and the workflow steps it takes. The agent joins those already on it."
             >
-              {team.data.seats.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.name}
-                  {chosen?.suggestedSeat === s.key ? ' (suggested)' : ''}
-                </option>
-              ))}
+              {team.data.seats
+                .filter((s) => seatAllowed(s.key, business))
+                .map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.name}
+                    {chosen?.suggestedSeat === s.key ? ' (suggested)' : ''}
+                  </option>
+                ))}
               <option value="own">Own role{chosen?.suggestedSeat === 'own' ? ' (suggested)' : ''}</option>
             </Select>
             <TextInput

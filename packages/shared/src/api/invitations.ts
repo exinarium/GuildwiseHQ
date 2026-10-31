@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { OrgRoleSchema } from '../orgs/index.ts';
+import { OrgModeSchema, OrgRoleSchema } from '../orgs/index.ts';
 import { PasswordSchema } from './auth.ts';
 import { IsoTime } from './common.ts';
 
@@ -29,12 +29,15 @@ export const AcceptInvitationRequestSchema = z.object({
   orgName: z.string().trim().min(1).max(120).optional(),
   /** The "send me the weekly blog digest" checkbox (the choice is kept as the consent record). */
   blogDigest: z.boolean().optional(),
+  /** new_org: how the organization works (default Developer). */
+  mode: OrgModeSchema.optional(),
 });
 export type AcceptInvitationRequest = z.infer<typeof AcceptInvitationRequestSchema>;
 /** `POST /api/invitations/:token/accept-existing`: signed in with the invited email. */
 export const AcceptExistingInvitationRequestSchema = z.object({
   orgName: z.string().trim().min(1).max(120).optional(),
   blogDigest: z.boolean().optional(),
+  mode: OrgModeSchema.optional(),
 });
 export type AcceptExistingInvitationRequest = z.infer<typeof AcceptExistingInvitationRequestSchema>;
 export const InvitationTokenParamsSchema = z.object({ token: z.string().min(16) });

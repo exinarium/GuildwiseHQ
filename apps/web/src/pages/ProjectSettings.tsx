@@ -48,6 +48,7 @@ import {
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
@@ -76,6 +77,9 @@ export function ProjectSettings() {
   const projectList = useProjects();
   const projectKey = projectList.data?.find((p) => p.id === id)?.key ?? project?.key;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
+  const business = useBusinessMode();
+  // The repository, branch, environment and merge sections: none of them in a Business mode organization.
+  const repoUi = traits.usesRepos && !business;
   const canConvert = useCanConvert(project);
 
   useEffect(() => {
@@ -116,19 +120,19 @@ export function ProjectSettings() {
   const prPrefixOk = isSafePrBranchPrefix(prPrefix.trim());
   const save = (e: FormEvent) => {
     e.preventDefault();
-    if (traits.usesRepos && !prPrefixOk) return;
+    if (repoUi && !prPrefixOk) return;
     patch.mutate(
       {
         name: name.trim(),
-        ...(expert ? { workingBranch: branch.trim() } : {}),
-        ...(traits.usesRepos
+        ...(expert && !business ? { workingBranch: branch.trim() } : {}),
+        ...(repoUi
           ? {
               defaultCompletion: landing,
               removeFinishedBranches: removeBranches,
               prBranchPrefix: prPrefix.trim(),
             }
           : {}),
-        ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
+        ...(repoUi ? { architecturalGlobs: lines(arch) } : {}),
         ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
       },
       { onSuccess: () => toast.success('Settings saved') },
@@ -138,8 +142,8 @@ export function ProjectSettings() {
     { id: 'general', label: 'Basics' },
     { id: 'stage', label: 'Stage' },
     ...(project && traits.usesRepos ? [{ id: 'workflows', label: 'Workflows' }] : []),
-    ...(traits.usesRepos || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
-    ...(project && traits.usesRepos
+    ...(repoUi || (!business && activeRepos.length > 0) ? [{ id: 'repos', label: 'Repos' }] : []),
+    ...(project && repoUi
       ? [
           { id: 'phase-list', label: 'Phases' },
           { id: 'environments', label: 'Environments' },
@@ -193,7 +197,7 @@ export function ProjectSettings() {
           settingsTo={`/projects/${id}/settings#budget`}
         />
       )}
-      {!traits.usesRepos && (
+      {!traits.usesRepos && !business && (
         <Callout tone="info">
           This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
           folder. Convert it to a delivery project to add repositories.
@@ -203,7 +207,7 @@ export function ProjectSettings() {
         <Panel title="General">
           <form onSubmit={save} className="flex flex-col gap-4" aria-label="Project settings">
             <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-            {expert && (
+            {expert && !business && (
               <TextInput
                 label="Working branch"
                 hint="The project's default working branch. Each repository can have its own below; a branch that does not exist is created from the main branch."
@@ -211,7 +215,7 @@ export function ProjectSettings() {
                 onChange={(e) => setBranch(e.target.value)}
               />
             )}
-            {traits.usesRepos && (
+            {repoUi && (
               <Select
                 label="How finished work lands"
                 data-testid="default-completion"
@@ -227,7 +231,7 @@ export function ProjectSettings() {
                 <option value="pr">Pull request I approve</option>
               </Select>
             )}
-            {traits.usesRepos && (
+            {repoUi && (
               <TextInput
                 label="Pull request branch prefix"
                 data-testid="pr-branch-prefix"
@@ -238,7 +242,7 @@ export function ProjectSettings() {
                 onChange={(e) => setPrPrefix(e.target.value)}
               />
             )}
-            {traits.usesRepos && (
+            {repoUi && (
               <label className="flex items-start gap-2 text-sm text-fg">
                 <input
                   type="checkbox"
@@ -257,7 +261,7 @@ export function ProjectSettings() {
                 </span>
               </label>
             )}
-            {traits.usesRepos && (
+            {repoUi && (
               <TextArea
                 label="Architectural globs"
                 hint="One glob per line. Large diffs touching these are risk tier large."
@@ -265,7 +269,7 @@ export function ProjectSettings() {
                 onChange={(e) => setArch(e.target.value)}
               />
             )}
-            {traits.hasTestStage && (
+            {traits.hasTestStage && !business && (
               <TextArea
                 label="E2E globs"
                 hint="One glob per line"
@@ -290,7 +294,7 @@ export function ProjectSettings() {
           <ProjectWorkflows projectId={id} projectKey={project.key} />
         </div>
       )}
-      {(traits.usesRepos || activeRepos.length > 0) && (
+      {(repoUi || (!business && activeRepos.length > 0)) && (
         <div id="repos" className="scroll-mt-20">
           <Panel title="Repositories">
             {!traits.usesRepos && (
@@ -351,12 +355,12 @@ export function ProjectSettings() {
           </Panel>
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="commit-as" className="scroll-mt-20">
           <CommitAsPanel projectId={id} canEdit={project.myRole === 'owner' || canConvert} />
         </div>
       )}
-      {project && traits.usesRepos && (q.data.environments ?? []).length > 0 && (
+      {project && repoUi && (q.data.environments ?? []).length > 0 && (
         <div id="environment" className="scroll-mt-20">
           <EnvironmentPanel
             projectId={id}
@@ -365,17 +369,17 @@ export function ProjectSettings() {
           />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="phase-list" className="scroll-mt-20">
           <PhasesPanel projectId={id} />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="environments" className="scroll-mt-20">
           <EnvironmentsPointer projectId={id} projectKey={project.key} />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="reference-repos" className="scroll-mt-20">
           <ReferenceReposPanel
             projectId={id}
@@ -397,7 +401,7 @@ export function ProjectSettings() {
           />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="merge" className="scroll-mt-20">
           <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
         </div>
@@ -456,7 +460,7 @@ export function ProjectSettings() {
           />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="full-suite" className="scroll-mt-20">
           <FullSuitePanel
             projectId={id}
@@ -465,7 +469,7 @@ export function ProjectSettings() {
           />
         </div>
       )}
-      {project && traits.usesRepos && (
+      {project && repoUi && (
         <div id="code-map" className="scroll-mt-20">
           <GraphStatusPanel projectId={id} canChange={project.myRole === 'owner' || canConvert} />
         </div>

@@ -2,6 +2,7 @@ import {
   type CardDetailResponse,
   COMPLETION_ACTION_LABELS,
   fieldCatalogue,
+  isBusinessOrg,
   isMockField,
   type SubworkflowChildDto,
   type WorkflowDefinition,
@@ -218,6 +219,7 @@ export function CardDetailView({
   const rehome = useRehomeCard(card.id);
   const me = useMe();
   const expert = me.data?.user?.gitExpert === true;
+  const business = isBusinessOrg(me.data?.activeOrg);
   const [dialog, setDialog] = useState<'move' | 'moveto' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(
     null,
   );
@@ -314,6 +316,7 @@ export function CardDetailView({
               workability={data.workability}
               projectId={card.projectId}
               className="w-full max-w-xl rounded-control border"
+              business={business}
             />
           </div>
         }
@@ -375,19 +378,21 @@ export function CardDetailView({
                   }}
                 />
               )}
-              <AskDevOpsButton
-                variant="quiet"
-                label="Ask DevOps"
-                request={{
-                  origin: 'card',
-                  projectId: card.projectId,
-                  cardId: card.id,
-                  cardLabel: `${card.ref} ${card.title}`,
-                  ...(data.workability?.ok === false && data.workability.reason
-                    ? { errorText: data.workability.reason }
-                    : {}),
-                }}
-              />
+              {!business && (
+                <AskDevOpsButton
+                  variant="quiet"
+                  label="Ask DevOps"
+                  request={{
+                    origin: 'card',
+                    projectId: card.projectId,
+                    cardId: card.id,
+                    cardLabel: `${card.ref} ${card.title}`,
+                    ...(data.workability?.ok === false && data.workability.reason
+                      ? { errorText: data.workability.reason }
+                      : {}),
+                  }}
+                />
+              )}
               {permissions.canReleaseBackoff && (
                 <Button
                   data-testid="release-backoff"
@@ -693,7 +698,7 @@ export function CardDetailView({
                       )}
                     </>
                   )}
-                  {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
+                  {expert && !business && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
                   {permissions.canEditPriority ? (
                     <PriorityControl card={card} />
                   ) : (
@@ -860,16 +865,18 @@ export function CardDetailView({
                 Re-home
               </Button>
             )}
-            <AskDevOpsButton
-              variant="quiet"
-              label="Ask DevOps"
-              request={{
-                origin: 'card',
-                projectId: card.projectId,
-                cardId: card.id,
-                cardLabel: `${card.ref} ${card.title}`,
-              }}
-            />
+            {!business && (
+              <AskDevOpsButton
+                variant="quiet"
+                label="Ask DevOps"
+                request={{
+                  origin: 'card',
+                  projectId: card.projectId,
+                  cardId: card.id,
+                  cardLabel: `${card.ref} ${card.title}`,
+                }}
+              />
+            )}
             {canCancel && (
               <Button
                 variant="danger-ghost"

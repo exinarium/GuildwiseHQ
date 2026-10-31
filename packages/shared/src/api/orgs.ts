@@ -5,7 +5,13 @@ import {
   OffboardingReportSchema,
   OffboardingStepSchema,
 } from '../governance/index.ts';
-import { AssignableOrgRoleSchema, BannerSchema, OrgRoleSchema, OrgStatusSchema } from '../orgs/index.ts';
+import {
+  AssignableOrgRoleSchema,
+  BannerSchema,
+  OrgModeSchema,
+  OrgRoleSchema,
+  OrgStatusSchema,
+} from '../orgs/index.ts';
 import { OrgLimitsSchema } from '../orgs/plans.ts';
 import { IsoTime } from './common.ts';
 
@@ -42,6 +48,8 @@ export const ActiveOrgSchema = z.object({
   trialEndsAt: IsoTime.nullable().optional(),
   licenseExpiresAt: IsoTime.nullable().optional(),
   graceDays: z.number().int().optional(),
+  /** How the organization works: Developer (default) or Business (no repositories or code roles). */
+  mode: OrgModeSchema.default('dev'),
   /** The Owner requires two-factor login of every member. */
   requireTwoFactor: z.boolean().default(false),
   /** The Owner's consent "Share diagnostic data with Guildwise" (off by default). */
@@ -97,11 +105,17 @@ export const PatchOrgRequestSchema = z
     /** Owner only. Switching it on needs `consentVersion`: the version of the consent text the Owner saw. */
     diagnosticsSharing: z.boolean(),
     consentVersion: z.string().min(1).max(40),
+    /** Owner and Admins. Switching to business is refused while repositories or code agents exist. */
+    mode: OrgModeSchema,
   })
   .partial()
   .refine(
-    (v) => v.name !== undefined || v.requireTwoFactor !== undefined || v.diagnosticsSharing !== undefined,
-    'name, requireTwoFactor or diagnosticsSharing is required',
+    (v) =>
+      v.name !== undefined ||
+      v.requireTwoFactor !== undefined ||
+      v.diagnosticsSharing !== undefined ||
+      v.mode !== undefined,
+    'name, requireTwoFactor, diagnosticsSharing or mode is required',
   );
 export type PatchOrgRequest = z.infer<typeof PatchOrgRequestSchema>;
 

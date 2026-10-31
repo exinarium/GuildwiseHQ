@@ -1,5 +1,7 @@
 import {
   effectiveFeatures,
+  isBusinessOrg,
+  isDevOnlyRoleKey,
   isOrgManager,
   type OrgRole,
   SETUP_TEAM_ROLES,
@@ -35,9 +37,9 @@ export async function getSetupChecklist(
     )?.d === true;
   if (role === null) return { steps: [], doneCount: 0, complete: false, dismissed };
   const manager = isOrgManager({ orgRole: role });
-  const org = await one<{ plan: string; features: unknown }>(
+  const org = await one<{ plan: string; features: unknown; mode: string | null }>(
     ctx.pool,
-    'SELECT plan, features FROM organizations WHERE id=$1',
+    'SELECT plan, features, mode FROM organizations WHERE id=$1',
     [orgId],
   );
   // The intake page is part of the integrations feature; when it is off, everyone chats from the desk.
@@ -67,7 +69,9 @@ export async function getSetupChecklist(
     [orgId],
   );
   const have = new Set(hired?.roles ?? []);
-  const missing = SETUP_TEAM_ROLES.filter((r) => !have.has(r));
+  // A Business mode organization has no repository and no builder, reviewer or tester to hire.
+  const business = isBusinessOrg(org);
+  const missing = SETUP_TEAM_ROLES.filter((r) => !have.has(r) && !(business && isDevOnlyRoleKey(r)));
   const talked = await one(
     ctx.pool,
     `SELECT 1 WHERE EXISTS (SELECT 1 FROM intakes WHERE org_id=$1)
@@ -110,7 +114,7 @@ export async function getSetupChecklist(
     {
       id: 'team',
       title: 'Hire your team',
-      hint: 'A business analyst, a builder, a reviewer and a tester.',
+      hint: business ? 'A business analyst.' : 'A business analyst, a builder, a reviewer and a tester.',
       done: missing.length === 0,
       actionable: true,
       link: missing.length === 0 ? null : `/agents?hire=${missing[0]}`,
@@ -126,6 +130,11 @@ export async function getSetupChecklist(
       link: talked ? null : manager && intakeOn ? '/intake' : '/desk',
     },
   ];
+  if (business)
+    steps.splice(
+      steps.findIndex((x) => x.id === 'repository'),
+      1,
+    );
   const required = steps.filter((s) => !s.optional);
   const doneCount = required.filter((s) => s.done).length;
   return { steps, doneCount, complete: doneCount === required.length, dismissed };

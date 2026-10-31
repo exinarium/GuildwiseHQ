@@ -10,9 +10,18 @@ import { panelId, Tabs, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader, Panel } from '../components/ui.tsx';
 import { useAllWhatsNew, WhatsNewDialog } from '../components/whatsnew/WhatsNew.tsx';
 import { ext } from '../extension/index.ts';
-import { ARTICLES, articleBySlug, glossaryId, helpBase, helpPath, searchHelp } from '../help/articles.ts';
+import {
+  articleBySlug,
+  DEV_ONLY_HELP_SLUGS,
+  glossaryId,
+  helpArticlesFor,
+  helpBase,
+  helpPath,
+  searchHelp,
+} from '../help/articles.ts';
 import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { videosForArticle } from '../lib/videos.ts';
@@ -175,7 +184,9 @@ function HelpCentre() {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
   const glossary = pathname === `${base}/glossary`;
-  const article = slug && !glossary ? articleBySlug(slug) : undefined;
+  const business = useBusinessMode();
+  const article =
+    slug && !glossary && !(business && DEV_ONLY_HELP_SLUGS.includes(slug)) ? articleBySlug(slug) : undefined;
   const setQ = (v: string) =>
     setParams(
       (p) => {
@@ -219,7 +230,8 @@ function HelpCentre() {
 }
 
 function Results({ q, base }: { q: string; base: string }) {
-  const hits = useMemo(() => searchHelp(q), [q]);
+  const business = useBusinessMode();
+  const hits = useMemo(() => searchHelp(q, helpArticlesFor(business)), [q, business]);
   return (
     <section aria-label="Search results" data-testid="help-results">
       <p className="mb-2 text-sm text-muted" role="status">
@@ -266,6 +278,7 @@ function Results({ q, base }: { q: string; base: string }) {
 }
 
 function Home({ base }: { base: string }) {
+  const business = useBusinessMode();
   return (
     <>
       <GettingStartedVideo />
@@ -277,7 +290,7 @@ function Home({ base }: { base: string }) {
           Articles
         </h2>
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="help-article-list">
-          {ARTICLES.map((a) => (
+          {helpArticlesFor(business).map((a) => (
             <li key={a.slug}>
               <Link
                 to={helpPath(a.slug, base)}

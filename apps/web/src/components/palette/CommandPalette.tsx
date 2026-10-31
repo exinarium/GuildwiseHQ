@@ -163,14 +163,16 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
           >
             Chat with an agent
           </Item>
-          <Item
-            value="action ask devops"
-            keywords={['install', 'docker', 'sudo', 'fix', 'environment', 'deploy', 'build', 'command']}
-            icon={Wrench}
-            onSelect={run(() => ctx.onAskDevOps?.())}
-          >
-            Ask DevOps...
-          </Item>
+          {ctx.onAskDevOps && (
+            <Item
+              value="action ask devops"
+              keywords={['install', 'docker', 'sudo', 'fix', 'environment', 'deploy', 'build', 'command']}
+              icon={Wrench}
+              onSelect={run(() => ctx.onAskDevOps?.())}
+            >
+              Ask DevOps...
+            </Item>
+          )}
           <Item
             value="action toggle theme"
             keywords={['dark', 'light', 'mode', 'appearance']}

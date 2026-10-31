@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, useParams } from 'react-router';
 import { useInterests } from './api/queries/interests.ts';
 import { useProjects } from './api/queries/projects.ts';
+import { DevOnly } from './components/DevOnly.tsx';
 import { RequireAuth } from './components/Layout.tsx';
 import { PlatformShell } from './components/platform/PlatformShell.tsx';
 import { RouteError } from './components/RouteError.tsx';
@@ -110,7 +111,14 @@ export const routes = [
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
-      { path: '/p/:projectKey/environments', element: <ProjectEnvironments /> },
+      {
+        path: '/p/:projectKey/environments',
+        element: (
+          <DevOnly>
+            <ProjectEnvironments />
+          </DevOnly>
+        ),
+      },
       { path: '/automations', element: <Automations /> },
       { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
@@ -138,7 +146,14 @@ export const routes = [
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
-      { path: '/releases', element: <Releases /> },
+      {
+        path: '/releases',
+        element: (
+          <DevOnly>
+            <Releases />
+          </DevOnly>
+        ),
+      },
       { path: '/deploys', element: <Navigate to="/releases" replace /> },
       { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },

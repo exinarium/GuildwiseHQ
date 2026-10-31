@@ -458,6 +458,8 @@ If you belong to several organizations, the **organization switcher** at the top
 
 > **In the app:** watch the video "Your organization" (Help, "Organizations and roles", `/help/organizations-and-roles#members-and-invitations`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
+**Developer and Business mode.** The **General** tab also has **How this organization works**: **Developer** (the default, for software delivery) or **Business**. A Business organization does not show repositories, worktrees, branches, the builder, reviewer, tester and DevOps hires, Environments, Releases, DevOps access or packs added by git URL; those screens say "Not available in Business mode" if you open them by address, and the server refuses the same actions. The Owner chooses the mode when the organization starts (on the invitation page); Owners and Admins can change it later. Switching to Business is refused while the organization has a connected repository or an active builder, reviewer, tester or DevOps agent you hired, and the message lists them. The DevOps engineer that comes with each paired workstation stays, out of sight. Switching back to Developer always works, shows everything again and loses nothing. Every change is recorded in the organization's audit history.
+
 ### 4.2 Members, invitations and guests
 
 On **Organization, Members** you see everybody with their role.

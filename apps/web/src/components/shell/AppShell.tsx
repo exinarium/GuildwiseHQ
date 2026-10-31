@@ -1,4 +1,4 @@
-import { ORG_ROLE_LABEL } from '@aom/shared';
+import { isBusinessOrg, ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 'lucide-react';
@@ -129,6 +129,7 @@ function Shell({ name, live }: { name: string; live: string }) {
       ((project.publishedNotes ?? 0) > 0 || (project.startedAs ?? project.workflowKey) === 'research'),
     canManage,
     features: org?.features ?? {},
+    business: isBusinessOrg(org),
   });
   const intakeOn = canUseIntake(org);
   const intake = intakeOn
@@ -271,17 +272,19 @@ function Shell({ name, live }: { name: string; live: string }) {
                       </kbd>
                     </button>
                     <PageHelpButton onClick={() => setPageHelp(true)} />
-                    <button
-                      type="button"
-                      onClick={() => askDevOps()}
-                      aria-label="Ask DevOps"
-                      data-testid="ask-devops-button"
-                      data-tour="ask-devops"
-                      className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
-                    >
-                      <Wrench aria-hidden="true" className="size-4" />
-                      <span className="hidden xl:inline">Ask DevOps</span>
-                    </button>
+                    {!isBusinessOrg(org) && (
+                      <button
+                        type="button"
+                        onClick={() => askDevOps()}
+                        aria-label="Ask DevOps"
+                        data-testid="ask-devops-button"
+                        data-tour="ask-devops"
+                        className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
+                      >
+                        <Wrench aria-hidden="true" className="size-4" />
+                        <span className="hidden xl:inline">Ask DevOps</span>
+                      </button>
+                    )}
                     <AskCeoButton />
                     <button
                       type="button"
@@ -398,7 +401,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               projects,
               projectKey: project?.key ?? null,
               onChat: () => setChat(true),
-              onAskDevOps: () => askDevOps(),
+              ...(isBusinessOrg(org) ? {} : { onAskDevOps: () => askDevOps() }),
               onHelp: () => setHelp(true),
               ...(contact.available ? { onContact: () => contact.open() } : {}),
               onPageHelp: () => setPageHelp(true),

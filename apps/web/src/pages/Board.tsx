@@ -43,6 +43,7 @@ import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { canUseIntake } from '../lib/intake.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { priorityLabel } from '../lib/priority.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 import { stageStyle } from '../lib/stages.ts';
@@ -102,6 +103,7 @@ function StageStrip({ columns }: { columns: { name: string; cards: unknown[] }[]
 
 export function Board() {
   const { projectKey = '' } = useParams();
+  const business = useBusinessMode();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
   // The key of an interest's hidden project is not a project: its board is the interest.
@@ -436,7 +438,9 @@ export function Board() {
           }
         />
       )}
-      {board.data && (cards.length > 0 || phaseId) && <BoardView board={board.data} filter={filter} />}
+      {board.data && (cards.length > 0 || phaseId) && (
+        <BoardView board={board.data} filter={filter} business={business} />
+      )}
       {isMobile && (
         <ButtonLink
           to={`/cards/new?project=${project.key}`}

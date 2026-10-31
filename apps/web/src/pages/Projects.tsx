@@ -35,6 +35,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 
 const TYPE_ICON = { code: Code2, research: FlaskConical, feed: Rss } as const;
 
@@ -315,18 +316,22 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
-  const [workflowKey, setWorkflowKey] = useState('code');
+  const [picked, setWorkflowKey] = useState('code');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
-  const noRepo = selected ? !workflowUsesRepos(selected) : false;
-  // `code-bugfix` runs only the bug cards a failed test files under a code card: never a project's workflow
+  const business = useBusinessMode();
+  // `code-bugfix` runs only the bug cards a failed test files under a code card: never a project's workflow.
+  // A Business mode organization has no repositories, so it is never offered a repository workflow.
   const keys = [
     ...new Set(
-      workflows.data?.map((w) => w.definition.key).filter((k) => !NOT_A_PROJECT_WORKFLOW.includes(k)) ?? [
-        'code',
-      ],
+      workflows.data
+        ?.filter((w) => !(business && workflowUsesRepos(w.definition)))
+        .map((w) => w.definition.key)
+        .filter((k) => !NOT_A_PROJECT_WORKFLOW.includes(k)) ?? (business ? [] : ['code']),
     ),
   ];
+  const workflowKey = business && !keys.includes(picked) ? (keys[0] ?? '') : picked;
+  const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
+  const noRepo = selected ? !workflowUsesRepos(selected) : false;
   const nameOf = (k: string) => workflows.data?.find((w) => w.definition.key === k)?.definition.name ?? k;
 
   const onName = (v: string) => {
@@ -370,7 +375,11 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       open={open}
       onOpenChange={onOpenChange}
       title="New project"
-      description="A project owns a board and agents. Code projects also own repositories."
+      description={
+        business
+          ? 'A project owns a board and agents.'
+          : 'A project owns a board and agents. Code projects also own repositories.'
+      }
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-4" aria-label="New project">
         <TextInput label="Name" value={name} onChange={(e) => onName(e.target.value)} error={errors.name} />
@@ -418,7 +427,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
           })}
         </fieldset>
         <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
-          {noRepo
+          {noRepo || business
             ? "No repository needed; results go to the project's vault folder."
             : 'Add repositories in project settings.'}
         </p>

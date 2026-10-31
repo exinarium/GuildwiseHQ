@@ -29,6 +29,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { assertDevMode, BUSINESS_MODE_MSG } from '../orgs/mode.ts';
 import { specifyStuckBugCards } from '../platform-team/intake.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
@@ -547,6 +548,8 @@ export async function setReferenceRepos(
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+    if (wanted.length > 0 || (workstationRepos?.length ?? 0) > 0)
+      await assertDevMode(tx, p.org_id, BUSINESS_MODE_MSG.repo);
     if (wanted.length > 0) {
       // the same rule as the picker: org owners and admins any project of the organization, others their own projects
       const ok = await eligibleProjectRepos(tx, {
@@ -650,6 +653,7 @@ export async function repoAddedEvent(
   input: AddRepoRequest,
   actor: Parameters<typeof ctx.store.append>[0][number]['actor'],
 ): Promise<{ repoId: string; event: AppendInput }> {
+  await assertDevMode(tx, project.org_id, BUSINESS_MODE_MSG.repo);
   // In a simulation organization the repository is a local throwaway origin on the server, whatever URL was typed:
   // nothing ever contacts GitHub or another host.
   if (await isSimulationOrg(tx, project.org_id)) {

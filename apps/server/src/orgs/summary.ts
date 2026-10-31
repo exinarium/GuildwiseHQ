@@ -69,6 +69,7 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     planName: planDefinition(org.plan).name,
     features: effectiveFeatures(org.plan, org.features),
     ...(manager ? { limits, usage } : {}),
+    mode: org.mode === 'business' ? 'business' : 'dev',
     requireTwoFactor: Boolean(org.require_two_factor),
     diagnosticsSharing: Boolean(org.diagnostics_sharing),
     diagnosticsSharingAvailable: await diagnosticsConsentAvailable(ctx, org.id),

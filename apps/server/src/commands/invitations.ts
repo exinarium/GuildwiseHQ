@@ -4,6 +4,7 @@ import {
   type NewOrgInvitationRequest,
   NO_LIMITS,
   type OrgLimits,
+  type OrgMode,
   type OrgRole,
   type PlatformInvitationDto,
   planDefinition,
@@ -295,6 +296,8 @@ interface Accepting {
   userId: string;
   displayName: string;
   orgName?: string | undefined;
+  /** new_org: how the organization works (default Developer). */
+  mode?: OrgMode | undefined;
   /** The account is created by this accept (a password and name were given). */
   newUser?: { email: string; passwordHash: string } | undefined;
 }
@@ -418,6 +421,7 @@ async function acceptEvents(
           createdVia: 'invitation',
           invitationId: inv.id,
           ...(terms.simulation ? { simulation: true } : {}),
+          ...(a.mode === 'business' ? { mode: 'business' as const } : {}),
         },
       },
       actor: { kind: 'user', id: userId },
@@ -460,7 +464,7 @@ const lockPending = (tx: Tx, ctx: Ctx, token: string) =>
 export async function acceptInvitation(
   ctx: Ctx,
   token: string,
-  input: { displayName: string; password: string; orgName?: string | undefined },
+  input: { displayName: string; password: string; orgName?: string | undefined; mode?: OrgMode | undefined },
 ): Promise<string> {
   const passwordHash = await hashPassword(input.password);
   const userId = randomUUID();
@@ -476,6 +480,7 @@ export async function acceptInvitation(
       userId,
       displayName: input.displayName,
       orgName: input.orgName,
+      mode: input.mode,
       newUser: { email: inv.email, passwordHash },
     });
     await ctx.store.append(events, { tx });
@@ -501,7 +506,7 @@ export async function acceptInvitationExisting(
   ctx: Ctx,
   session: AuthSession,
   token: string,
-  input: { orgName?: string | undefined },
+  input: { orgName?: string | undefined; mode?: OrgMode | undefined },
 ): Promise<string> {
   const r = await withAppendTx(ctx.pool, async (tx) => {
     const inv = await lockPending(tx, ctx, token);
@@ -527,6 +532,7 @@ export async function acceptInvitationExisting(
       userId: session.user.id,
       displayName: session.user.displayName,
       orgName: input.orgName,
+      mode: input.mode,
     });
     await ctx.store.append(events, { tx });
     await ensureOrgInbox(ctx, tx, orgId, ctx.config.inbound.domain);

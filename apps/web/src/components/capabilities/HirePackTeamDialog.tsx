@@ -14,6 +14,7 @@ import { useOrg } from '../../api/queries/orgs.ts';
 import { packHireMessage, useHirePackTeam, usePackTeam } from '../../api/queries/pack-team.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
+import { seatAllowed, useBusinessMode } from '../../lib/orgMode.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { hireSkills, PackAgentSkills } from '../agents/PackAgentSkills.tsx';
 import { type Access, ProjectAccessEditor } from '../agents/ProjectAccess.tsx';
@@ -71,6 +72,8 @@ export function HirePackTeamDialog({
   onClose: () => void;
 }) {
   const team = usePackTeam(packId);
+  const business = useBusinessMode();
+  const seatOf = (seat: PackSeat): PackSeat => (seatAllowed(seat, business) ? seat : OWN);
   const roles = useRoles();
   const stations = useWorkstations();
   const packs = usePacks();
@@ -112,8 +115,8 @@ export function HirePackTeamDialog({
         team.data.agents.map((a) => [
           a.key,
           {
-            on: preTick && a.suggestedSeat !== OWN,
-            seat: a.suggestedSeat,
+            on: preTick && seatOf(a.suggestedSeat) !== OWN,
+            seat: seatOf(a.suggestedSeat),
             count: 1,
             name: '',
             seniority: '',
@@ -142,7 +145,7 @@ export function HirePackTeamDialog({
   const rowOf = (a: TeamAgent): Row =>
     rows[a.key] ?? {
       on: false,
-      seat: a.suggestedSeat,
+      seat: seatOf(a.suggestedSeat),
       count: 1,
       name: '',
       seniority: '',
@@ -421,11 +424,13 @@ export function HirePackTeamDialog({
                           value={r.seat}
                           onChange={(e) => patch(a.key, { seat: e.target.value as PackSeat, seniority: '' })}
                         >
-                          {(team.data?.seats ?? []).map((s) => (
-                            <option key={s.key} value={s.key}>
-                              {s.name}
-                            </option>
-                          ))}
+                          {(team.data?.seats ?? [])
+                            .filter((s) => seatAllowed(s.key, business))
+                            .map((s) => (
+                              <option key={s.key} value={s.key}>
+                                {s.name}
+                              </option>
+                            ))}
                           <option value={OWN}>Own role</option>
                         </Select>
                       </div>
