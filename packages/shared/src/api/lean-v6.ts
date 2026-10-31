@@ -9,6 +9,10 @@ export type SetOwnerApprovalRequest = z.infer<typeof SetOwnerApprovalRequestSche
 export const SetE2eAreasRequestSchema = z.object({ mapping: E2eAreaMapSchema.nullable() });
 export type SetE2eAreasRequest = z.infer<typeof SetE2eAreasRequestSchema>;
 
+/** Body of `POST /api/projects/:id/full-suite`: the repository to run on (required when the project has several; absent: its only one). */
+export const FullSuiteRequestSchema = z.object({ repoId: z.uuid().optional() });
+export type FullSuiteRequest = z.infer<typeof FullSuiteRequestSchema>;
+
 /** `POST /api/projects/:id/full-suite`: the manual full E2E regression run on the working branch (the lean team workflow turns the automatic run off). */
 export const FullSuiteResponseSchema = z.object({ cardId: z.uuid(), ref: z.string() });
 export type FullSuiteResponse = z.infer<typeof FullSuiteResponseSchema>;

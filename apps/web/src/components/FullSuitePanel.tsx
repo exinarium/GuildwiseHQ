@@ -1,4 +1,5 @@
 import type { ProjectDetailResponse } from '@aom/shared';
+import { useState } from 'react';
 import { useRunFullSuite, useSetFullSuite } from '../api/queries/projects.ts';
 import { Badge, Button, ErrorBox, Panel } from './ui.tsx';
 
@@ -10,11 +11,16 @@ export function FullSuitePanel({
   projectId,
   project,
   canChange,
+  repos = [],
 }: {
   projectId: string;
   project: ProjectDetailResponse['project'];
   canChange: boolean;
+  /** The project's active repositories: with more than one, the run asks which one. */
+  repos?: Array<{ id: string; name: string; workingBranch: string | null }>;
 }) {
+  const [repoId, setRepoId] = useState('');
+  const chosen = repos.find((r) => r.id === repoId) ?? repos[0];
   const set = useSetFullSuite(projectId);
   const run = useRunFullSuite(projectId);
   const on = project.fullSuiteAfterFinalize ?? true;
@@ -55,12 +61,29 @@ export function FullSuitePanel({
           Run the whole suite now, for example after several cards are merged. It takes 10 to 20 minutes and
           starts one "Full E2E suite" card for a tester.
         </p>
+        {repos.length > 1 && (
+          <label className="mb-2 flex items-center gap-2 text-sm text-fg">
+            Repository
+            <select
+              className="rounded border border-line bg-surface px-2 py-1"
+              data-testid="full-suite-repo"
+              value={chosen?.id ?? ''}
+              onChange={(e) => setRepoId(e.target.value)}
+            >
+              {repos.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.workingBranch ?? 'no working branch yet'})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button
           variant="secondary"
           loading={run.isPending}
           disabled={run.isPending}
           data-testid="full-suite-run"
-          onClick={() => run.mutate()}
+          onClick={() => run.mutate(repos.length > 1 ? chosen?.id : undefined)}
         >
           Run the full suite now
         </Button>

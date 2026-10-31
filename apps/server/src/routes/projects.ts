@@ -5,6 +5,7 @@ import {
   ConvertProjectRequestSchema,
   CreateProjectRequestSchema,
   DeleteProjectRequestSchema,
+  FullSuiteRequestSchema,
   IdParamsSchema,
   PatchProjectRequestSchema,
   PatchRepoRequestSchema,
@@ -252,13 +253,17 @@ export function projectRoutes(ctx: Ctx) {
     });
 
     /** The manual full E2E suite run (the automatic run after every merge is off in the lean team flow). */
-    app.post('/api/projects/:id/full-suite', { schema: { params: IdParamsSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
-      const r = await requestFullSuite(ctx, s.user, req.params.id);
-      ctx.services.dispatcher.trigger();
-      reply.code(201);
-      return r;
-    });
+    app.post(
+      '/api/projects/:id/full-suite',
+      { schema: { params: IdParamsSchema, body: FullSuiteRequestSchema.optional() } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestFullSuite(ctx, s.user, req.params.id, { repoId: req.body?.repoId });
+        ctx.services.dispatcher.trigger();
+        reply.code(201);
+        return r;
+      },
+    );
 
     app.put(
       '/api/projects/:id/full-suite',

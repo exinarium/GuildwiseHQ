@@ -483,6 +483,7 @@ export function ProjectSettings() {
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}
+            repos={activeRepos}
           />
         </div>
       )}

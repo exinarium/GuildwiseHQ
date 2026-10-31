@@ -244,3 +244,34 @@ describe('merge conflicts at Finalize in the lean team flow', () => {
     expect((await cardRow(card.id)).rework_round).toBeGreaterThan(0);
   });
 });
+
+describe('the manual full suite in a project with several repositories', () => {
+  it("asks which repository; runs on the one named; refuses one that is not the project's", async () => {
+    await freshKeepDevops();
+    const second = '0192f3a0-0000-7000-8000-0000000000c2';
+    await q(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch)
+       VALUES ($1,$2,'aaa-cloud','git@github.com:acme/cloud.git','github.com/acme/cloud','release/1.4.0')`,
+      [second, w.projectId],
+    );
+    const refused = await call('POST', `/api/projects/${w.projectId}/full-suite`, {}, 409);
+    expect(JSON.stringify(refused)).toContain('choose_repo');
+    expect(JSON.stringify(refused)).toContain('aaa-cloud');
+    expect(JSON.stringify(refused)).toContain('toy');
+    // a repository of no project of ours, and a removed one
+    await call(
+      'POST',
+      `/api/projects/${w.projectId}/full-suite`,
+      { repoId: '0192f3a0-0000-7000-8000-0000000000ff' },
+      404,
+    );
+    const res = await call('POST', `/api/projects/${w.projectId}/full-suite`, { repoId: second }, 201);
+    const card = (await q('SELECT * FROM cards WHERE id=$1', [res.cardId]))[0]!;
+    expect(card.repo_id).toBe(second);
+    expect(card.fields).toMatchObject({ suiteBranch: 'release/1.4.0' });
+    await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
+    await call('POST', `/api/projects/${w.projectId}/full-suite`, { repoId: second }, 404);
+    // one repository left: no repoId needed, as before
+    await call('POST', `/api/projects/${w.projectId}/full-suite`, {}, 201);
+  });
+});

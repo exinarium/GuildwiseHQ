@@ -6,7 +6,7 @@ import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
 import { spawnCardEvent } from './spawn.ts';
 
@@ -75,12 +75,15 @@ export async function setE2eAreas(
 
 /**
  * The manual full E2E regression run on the project's working branch (the lean team flow turns the automatic run after every merge
- * off): one suite card queued at Test for a tester. Same card the automatic run makes.
+ * off): one suite card queued at Test for a tester. Same card the automatic run makes. The suite runs in one repository:
+ * the one named (`opts.repoId`, which must be an active repository of the project), else the only one; a project with
+ * several repositories must be told which (`choose_repo`): which one holds the e2e suite is not something the server knows.
  */
 export async function requestFullSuite(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
+  opts: { repoId?: string | undefined } = {},
 ): Promise<{ cardId: string; ref: string }> {
   return withAppendTx(ctx.pool, async (tx) => {
     const project = await loadVisibleProject(tx, user.id, projectId);
@@ -88,13 +91,21 @@ export async function requestFullSuite(
     const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key, project.id);
     const hasTest = wf?.definition.stages.some((s) => s.id === 'test');
     if (!wf || !hasTest) throw conflict('no_test_stage', 'this project workflow has no test stage');
-    const repo = (
-      await rows(
-        tx,
-        `SELECT * FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY id LIMIT 1`,
-        [project.id],
-      )
-    )[0] as Row | undefined;
+    const repoRows = (await rows(
+      tx,
+      `SELECT * FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name, id`,
+      [project.id],
+    )) as Row[];
+    let repo: Row | undefined;
+    if (opts.repoId) {
+      repo = repoRows.find((r) => r.id === opts.repoId);
+      if (!repo) throw notFound('repository not found in this project');
+    } else if (repoRows.length > 1) {
+      throw conflict(
+        'choose_repo',
+        `this project has several repositories: choose the one to run the suite on (${repoRows.map((r) => r.name).join(', ')})`,
+      );
+    } else repo = repoRows[0];
     if (!repo) throw conflict('no_repo', 'the project has no repository to run the suite on');
     const branch = (repo.working_branch ?? project.working_branch) as string;
     const suite = await spawnCardEvent(tx, {

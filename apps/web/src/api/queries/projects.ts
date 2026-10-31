@@ -235,7 +235,8 @@ export function useSetOwnerApproval(id: string) {
 export function useRunFullSuite(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => post<{ cardId: string; ref: string }>(`/projects/${id}/full-suite`, {}),
+    mutationFn: (repoId?: string) =>
+      post<{ cardId: string; ref: string }>(`/projects/${id}/full-suite`, repoId ? { repoId } : {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
   });
 }
