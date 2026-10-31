@@ -9,8 +9,8 @@ import type { CardFormValues } from '../lib/cardForm.ts';
 import { effectiveDesign, FIND_REPO, formFieldList } from '../lib/cardForm.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { DEFAULT_PRIORITY } from '../lib/priority.ts';
-import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
 import { useOrgTerms } from '../lib/terms.ts';
+import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
 
 type Workflow = Parameters<typeof formFieldList>[0];
 
@@ -182,7 +182,9 @@ export function CardFormFields({
               label="Report path (optional)"
               value={v.fields.reportPath ?? ''}
               error={errors.reportPath}
-              hint={t.reword("A file or folder in the repository, or vault:<path> (vault: only works when the project has a knowledge vault). Default: the project's investigation folder.")}
+              hint={t.reword(
+                "A file or folder in the repository, or vault:<path> (vault: only works when the project has a knowledge vault). Default: the project's investigation folder.",
+              )}
               onChange={(e) => setField('reportPath', e.target.value)}
             />
           )}

@@ -26,6 +26,7 @@ import { SkillPicker } from '../components/capabilities/SkillPicker.tsx';
 import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
 import { ListInput } from '../components/org/ListInput.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
+import { Reword } from '../components/Reword.tsx';
 import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
@@ -45,7 +46,6 @@ import {
 } from '../components/ui.tsx';
 import { blankRole, errorCount, roleToInput } from '../lib/designer.ts';
 import { claimableWorkflows } from '../lib/role-builder.ts';
-import { Reword } from '../components/Reword.tsx';
 import { useOrgTerms } from '../lib/terms.ts';
 
 type Tab = 'roles' | 'workflows' | 'departments' | 'design';
@@ -116,7 +116,11 @@ export function OrgDesigner() {
       <LargerScreenNote />
       {cat.data && !cat.data.canEdit && (
         <Callout tone="info" role="note" data-testid="read-only-note" className="mb-4">
-          <Reword>{"You are an additional manager here: this is the owner's catalogue. Their roles, workflows and standing orders apply to the shared project's cards, and only the owner can change them."}</Reword>
+          <Reword>
+            {
+              "You are an additional manager here: this is the owner's catalogue. Their roles, workflows and standing orders apply to the shared project's cards, and only the owner can change them."
+            }
+          </Reword>
         </Callout>
       )}
       <Tabs
@@ -308,7 +312,11 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
       <section aria-label="Built-in roles">
         <h2 className="mb-3 text-lg font-semibold text-fg">Built-in roles</h2>
         <p className="mb-2 text-xs text-subtle">
-          <Reword>{'They ship with the app and can never be removed. The owner can extend them with extra instructions, skills and standing orders; their core rules (test ownership, review gates) cannot be changed.'}</Reword>
+          <Reword>
+            {
+              'They ship with the app and can never be removed. The owner can extend them with extra instructions, skills and standing orders; their core rules (test ownership, review gates) cannot be changed.'
+            }
+          </Reword>
         </p>
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="builtin-roles">
           {builtIn.map((r) => {

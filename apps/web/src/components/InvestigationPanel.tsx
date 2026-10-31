@@ -1,7 +1,7 @@
 import type { CardDto } from '@aom/shared';
 import { safeHref } from '../lib/links.ts';
-import { Badge, Callout, Panel } from './ui.tsx';
 import { useOrgTerms } from '../lib/terms.ts';
+import { Badge, Callout, Panel } from './ui.tsx';
 
 /** What the runner did with the latest main branch before work on the card started, in plain words. */
 const SYNC_TEXT: Record<string, string> = {

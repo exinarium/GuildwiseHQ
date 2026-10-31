@@ -16,6 +16,7 @@ import { ResearchThisDialog } from '../components/interests/ResearchThisDialog.t
 import { RunLog } from '../components/interests/RunLog.tsx';
 import { SettingsTab } from '../components/interests/SettingsTab.tsx';
 import { TasteTab } from '../components/interests/TasteTab.tsx';
+import { Reword } from '../components/Reword.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
@@ -32,7 +33,6 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
-import { Reword } from '../components/Reword.tsx';
 import { useOrgTerms } from '../lib/terms.ts';
 
 const TABS = [
@@ -85,7 +85,8 @@ export function InterestDetail() {
         documentTitle={`${i.name} · Interests`}
         sub={
           <span className="text-sm text-subtle" data-testid="interest-sub">
-            <Reword>{'Organization vault'}</Reword>{i.vaultDir ? ` · ${i.vaultDir}` : ''}
+            <Reword>{'Organization vault'}</Reword>
+            {i.vaultDir ? ` · ${i.vaultDir}` : ''}
             {i.createdBy ? ` · created by ${i.createdBy.name}` : ''}
           </span>
         }
@@ -220,7 +221,9 @@ export function InterestDetail() {
         open={deleting}
         onOpenChange={setDeleting}
         title={`Delete "${i.name}" for good?`}
-        description={reword(`This removes its cards, items, seen-list and run log from the site. The vault folder ${i.vaultDir ?? ''} is never touched.`)}
+        description={reword(
+          `This removes its cards, items, seen-list and run log from the site. The vault folder ${i.vaultDir ?? ''} is never touched.`,
+        )}
         footer={
           <>
             <Button onClick={() => setDeleting(false)}>Cancel</Button>

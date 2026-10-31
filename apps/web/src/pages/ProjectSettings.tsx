@@ -30,6 +30,7 @@ import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { Reword } from '../components/Reword.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
@@ -51,7 +52,6 @@ import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
 import { useBusinessMode } from '../lib/orgMode.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
-import { Reword } from '../components/Reword.tsx';
 
 const lines = (s: string) =>
   s

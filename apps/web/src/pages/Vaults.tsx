@@ -26,7 +26,6 @@ import {
 import { useOrgTerms } from '../lib/terms.ts';
 import { formatDateTime } from '../lib/time.ts';
 
-
 /** Settings > Vaults: git URLs of the knowledge vaults. The site stores URLs and sync status, never vault content. */
 export function Vaults() {
   const t = useOrgTerms();
@@ -295,7 +294,9 @@ function RegisterVault({
   const t = useOrgTerms();
   const kinds = [
     ...(canOrg ? [{ value: 'org', label: t.reword('Organization vault (for the whole organization)') }] : []),
-    ...(projects.length > 0 ? [{ value: 'project', label: t.reword('Project vault (shared with members)') }] : []),
+    ...(projects.length > 0
+      ? [{ value: 'project', label: t.reword('Project vault (shared with members)') }]
+      : []),
   ];
   const [kind, setKind] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -331,7 +332,12 @@ function RegisterVault({
     );
   };
   return (
-    <form onSubmit={submit} noValidate aria-label={t.reword('Register vault')} className="flex flex-col gap-4">
+    <form
+      onSubmit={submit}
+      noValidate
+      aria-label={t.reword('Register vault')}
+      className="flex flex-col gap-4"
+    >
       <Select label="Kind" value={effKind} onChange={(e) => setKind(e.target.value)}>
         {kinds.map((k) => (
           <option key={k.value} value={k.value}>

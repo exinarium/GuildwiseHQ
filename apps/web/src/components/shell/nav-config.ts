@@ -29,7 +29,6 @@ import {
   Workflow,
 } from 'lucide-react';
 
-
 export interface NavEntry {
   /** Stable key (also the test-id suffix). */
   id: string;

@@ -1,15 +1,17 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
+import { useOrgTerms } from '../lib/terms.ts';
 import { helpBase } from './articles.ts';
 import type { Block, Inline } from './markdown.ts';
 
 function InlineNodes({ c }: { c: Inline[] }): ReactNode {
   const base = helpBase(useLocation().pathname);
+  const t = useOrgTerms();
   return c.map((n, i) => {
     const key = `${i}-${n.t}`;
     switch (n.t) {
       case 'text':
-        return <Fragment key={key}>{n.v}</Fragment>;
+        return <Fragment key={key}>{t.reword(n.v)}</Fragment>;
       case 'code':
         return (
           <code key={key} className="rounded-[6px] bg-sunken px-1.5 py-0.5 font-mono text-[0.9em] text-fg">
@@ -73,18 +75,19 @@ export function Markdown({
 }
 
 function BlockView({ b, i }: { b: Block; i: number }): ReactNode {
+  const t = useOrgTerms();
   const key = `${i}-${b.t}`;
   switch (b.t) {
     case 'h':
       return b.level === 2 ? (
         <h2 key={key} id={b.id} className="group mt-5 scroll-mt-20 text-xl font-semibold text-fg">
           <a href={`#${b.id}`} className="no-underline hover:underline">
-            {b.text}
+            {t.reword(b.text)}
           </a>
         </h2>
       ) : (
         <h3 key={key} id={b.id} className="mt-3 scroll-mt-20 text-base font-semibold text-fg">
-          {b.text}
+          {t.reword(b.text)}
         </h3>
       );
     case 'p':

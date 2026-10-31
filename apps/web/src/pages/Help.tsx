@@ -22,6 +22,7 @@ import {
 import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
 import { useBusinessMode } from '../lib/orgMode.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { videosForArticle } from '../lib/videos.ts';
@@ -231,6 +232,7 @@ function HelpCentre() {
 
 function Results({ q, base }: { q: string; base: string }) {
   const business = useBusinessMode();
+  const t = useOrgTerms();
   const hits = useMemo(() => searchHelp(q, helpArticlesFor(business)), [q, business]);
   return (
     <section aria-label="Search results" data-testid="help-results">
@@ -264,10 +266,10 @@ function Results({ q, base }: { q: string; base: string }) {
               className="block rounded-card border border-line bg-surface p-3.5 hover:bg-sunken"
             >
               <span className="flex flex-wrap items-center gap-2">
-                <span className="text-base font-semibold text-fg">{h.title}</span>
-                <Badge tone={h.kind === 'glossary' ? 'neutral' : 'brand'}>{h.where}</Badge>
+                <span className="text-base font-semibold text-fg">{t.reword(h.title)}</span>
+                <Badge tone={h.kind === 'glossary' ? 'neutral' : 'brand'}>{t.reword(h.where)}</Badge>
               </span>
-              <span className="mt-1 block text-sm text-muted">{h.snippet}</span>
+              <span className="mt-1 block text-sm text-muted">{t.reword(h.snippet)}</span>
             </Link>
           </li>
         ))}
@@ -279,6 +281,7 @@ function Results({ q, base }: { q: string; base: string }) {
 
 function Home({ base }: { base: string }) {
   const business = useBusinessMode();
+  const t = useOrgTerms();
   return (
     <>
       <GettingStartedVideo />
@@ -297,8 +300,8 @@ function Home({ base }: { base: string }) {
                 data-testid={`help-article-${a.slug}`}
                 className="flex h-full flex-col rounded-card border border-line bg-surface p-4 hover:bg-sunken"
               >
-                <span className="text-base font-semibold text-fg">{a.title}</span>
-                <span className="mt-1 text-sm text-muted">{a.summary}</span>
+                <span className="text-base font-semibold text-fg">{t.reword(a.title)}</span>
+                <span className="mt-1 text-sm text-muted">{t.reword(a.summary)}</span>
               </Link>
             </li>
           ))}
@@ -325,7 +328,9 @@ function Home({ base }: { base: string }) {
                 Glossary
               </span>
               <span className="mt-1 text-sm text-muted">
-                What card, stage, shift, desk, ledger, vault, phase and the other words of Guildwise HQ mean.
+                {t.reword(
+                  'What card, stage, shift, desk, ledger, vault, phase and the other words of Guildwise HQ mean.',
+                )}
               </span>
             </Link>
           </li>
@@ -345,6 +350,7 @@ function Home({ base }: { base: string }) {
 }
 
 function ArticleView({ article, base }: { article: ReturnType<typeof articleBySlug>; base: string }) {
+  const t = useOrgTerms();
   if (!article)
     return (
       <EmptyState
@@ -372,9 +378,9 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
           All articles
         </Link>
         <h2 className="text-2xl font-semibold text-fg" data-testid="help-article-title">
-          {article.title}
+          {t.reword(article.title)}
         </h2>
-        <p className="mt-1 mb-4 text-base text-muted">{article.summary}</p>
+        <p className="mt-1 mb-4 text-base text-muted">{t.reword(article.summary)}</p>
         {article.slug === 'getting-started' && (
           <div className="mb-5">
             <GettingStartedVideo />
@@ -418,7 +424,7 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
                     href={`#${h.id}`}
                     className="-ml-px block border-l border-transparent py-0.5 pl-3 text-muted hover:border-brand hover:text-fg"
                   >
-                    {h.text}
+                    {t.reword(h.text)}
                   </a>
                 </li>
               ))}
@@ -431,7 +437,8 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
 }
 
 function Glossary({ base }: { base: string }) {
-  const terms = [...GLOSSARY].sort((a, b) => a.term.localeCompare(b.term));
+  const t = useOrgTerms();
+  const terms = [...GLOSSARY].sort((a, b) => t.reword(a.term).localeCompare(t.reword(b.term)));
   return (
     <section aria-labelledby="glossary-h" data-testid="help-glossary">
       <Link
@@ -449,13 +456,15 @@ function Glossary({ base }: { base: string }) {
         {terms.map((g) => (
           <div key={g.term} id={glossaryId(g.term)} className="scroll-mt-20 px-4 py-3.5 sm:px-5">
             <dt className="text-base font-semibold text-fg">
-              {g.term}
+              {t.reword(g.term)}
               {g.aka && g.aka.length > 0 && (
-                <span className="ml-2 text-sm font-normal text-subtle">also: {g.aka.join(', ')}</span>
+                <span className="ml-2 text-sm font-normal text-subtle">
+                  also: {t.reword(g.aka.join(', '))}
+                </span>
               )}
             </dt>
             <dd className="mt-1 text-sm text-muted">
-              {g.definition}
+              {t.reword(g.definition)}
               {g.article && (
                 <>
                   {' '}

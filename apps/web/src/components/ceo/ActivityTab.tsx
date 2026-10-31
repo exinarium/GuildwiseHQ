@@ -3,14 +3,14 @@ import { CheckCircle2, CircleSlash, Lightbulb } from 'lucide-react';
 import { useState } from 'react';
 import { type CeoActionFilters, ceoActionsCsvUrl, useCeoActions } from '../../api/queries/ceo.ts';
 import { useCeoOrderTurns } from '../../api/queries/ceo-chat.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { getActiveOrgId } from '../../lib/activeOrg.ts';
 import { classLabel, MODE_LABEL, pct } from '../../lib/ceo.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ErrorBox, Panel, Select, Spinner, TextInput } from '../ui.tsx';
 import { CorrectButton } from './CorrectDialog.tsx';
 import { UndoButton } from './UndoButton.tsx';
-import { Reword } from '../../components/Reword.tsx';
-import { useOrgTerms } from '../../lib/terms.ts';
 
 const RESPONSE: Record<string, string> = {
   accepted: 'You accepted it',

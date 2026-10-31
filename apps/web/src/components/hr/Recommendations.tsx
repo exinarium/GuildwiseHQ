@@ -7,9 +7,9 @@ import {
   useDismissRecommendation,
   useResetRole,
 } from '../../api/queries/hr.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Dialog, ErrorBox, Panel, TextArea } from '../ui.tsx';
-import { Reword } from '../../components/Reword.tsx';
 
 const KIND_LABEL: Record<Recommendation['kind'], string> = {
   blocked_ledger: 'Blocked',

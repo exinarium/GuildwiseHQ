@@ -10,10 +10,10 @@ import {
   useEditCorrection,
 } from '../../api/queries/ceo-chat.ts';
 import { useRelease, useReleaseQueue } from '../../api/queries/delivery.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
 import { Button, Callout, ErrorBox, TextInput } from '../ui.tsx';
 import { UndoButton } from './UndoButton.tsx';
-import { Reword } from '../../components/Reword.tsx';
 
 /** The full-power status line (chat header and CEO Overview). */
 export function fullPowerText(fp: CeoChatStateDto['fullPower'], ceoName: string): string {
@@ -125,7 +125,12 @@ export function PermissionCard({ p }: { p: CeoPermissionDto }) {
       <p className="flex items-center gap-1.5 font-semibold">
         <ShieldQuestion aria-hidden="true" className="size-4" />
         Authorize this execution?
-        {p.mode === 'order' && <span className="font-normal"> <Reword>{'(standing order: the turn does not wait)'}</Reword></span>}
+        {p.mode === 'order' && (
+          <span className="font-normal">
+            {' '}
+            <Reword>{'(standing order: the turn does not wait)'}</Reword>
+          </span>
+        )}
       </p>
       <p className="mt-1">
         <span className="font-mono">{p.tool}</span>

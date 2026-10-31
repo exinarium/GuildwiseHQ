@@ -77,8 +77,8 @@ import {
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { canUseIntake } from '../lib/intake.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
-import { ageLabel, formatDateTime } from '../lib/time.ts';
 import { useOrgTerms } from '../lib/terms.ts';
+import { ageLabel, formatDateTime } from '../lib/time.ts';
 
 type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices' | 'ceo' | 'ceoDecisions';
 const FILTERS: Array<{ key: FilterKey; label: string; test: (i: DeskItemDto) => boolean }> = [
@@ -224,7 +224,9 @@ export function Desk() {
         open={showLedger}
         onOpenChange={setShowLedger}
         title={t.reword('Add a requirement or standing order')}
-        description={t.reword('Agents read the ledger before they ask. Add something they should always know.')}
+        description={t.reword(
+          'Agents read the ledger before they ask. Add something they should always know.',
+        )}
       >
         <LedgerForm onDone={() => setShowLedger(false)} />
       </Dialog>
@@ -978,7 +980,11 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         onSuccess: () => {
           setConfirmApprove(false);
           toast.success(
-            item.subkind === 'ceo_recommendation' ? 'Done' : merge ? t.reword('Merged into the ledger') : 'Approved',
+            item.subkind === 'ceo_recommendation'
+              ? 'Done'
+              : merge
+                ? t.reword('Merged into the ledger')
+                : 'Approved',
           );
         },
         onError: (err) => {
@@ -1006,13 +1012,20 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
       />
       {editable && (
         <TextArea
-          label={item.subkind === 'standing_order' ? t.reword('Standing order (editable)') : 'Rule (editable)'}
+          label={
+            item.subkind === 'standing_order' ? t.reword('Standing order (editable)') : 'Rule (editable)'
+          }
           value={rule}
           onChange={(e) => setRule(e.target.value)}
         />
       )}
       {duplicate ? (
-        <Callout tone="warning" role="alert" data-testid="desk-duplicate" title={t.reword('Already in the ledger')}>
+        <Callout
+          tone="warning"
+          role="alert"
+          data-testid="desk-duplicate"
+          title={t.reword('Already in the ledger')}
+        >
           <p>{duplicate.message}</p>
           <Button
             className="mt-2"

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useInterest, useResyncInterestTaste, useSaveInterestTaste } from '../../api/queries/interests.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { Button, ErrorBox, Panel, Spinner, useToast } from '../ui.tsx';
 import { TasteRulesEditor } from './TasteRulesEditor.tsx';
-import { useOrgTerms } from '../../lib/terms.ts';
 
 /**
  * Taste rules built into the interest: the explicit rules (they come first and win on a conflict, mirrored to the

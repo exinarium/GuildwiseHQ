@@ -75,7 +75,12 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
     );
   };
   return (
-    <form onSubmit={submit} aria-label={t.reword('Edit standing order')} className="flex flex-col gap-4" noValidate>
+    <form
+      onSubmit={submit}
+      aria-label={t.reword('Edit standing order')}
+      className="flex flex-col gap-4"
+      noValidate
+    >
       <TextInput label="Title" value={title} onChange={(ev) => setTitle(ev.target.value)} />
       <TextArea label="Text" value={body} onChange={(ev) => setBody(ev.target.value)} error={err} />
       {hasPower && (

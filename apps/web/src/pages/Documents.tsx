@@ -39,8 +39,8 @@ import {
   TextInput,
 } from '../components/ui.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
-import { ageLabel } from '../lib/time.ts';
 import { useOrgTerms } from '../lib/terms.ts';
+import { ageLabel } from '../lib/time.ts';
 
 const KIND_LABEL: Record<DocumentKind, string> = {
   brief: 'Product brief',
@@ -228,7 +228,9 @@ export function DocumentsList() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Documents"
-        sub={t.reword('Briefs and PRDs from your discovery sessions, and files you upload. Approved ones are copied to your vault.')}
+        sub={t.reword(
+          'Briefs and PRDs from your discovery sessions, and files you upload. Approved ones are copied to your vault.',
+        )}
         actions={
           canManage ? (
             <Button onClick={() => setUploading(true)}>
@@ -478,7 +480,11 @@ export function DocumentView() {
               {DOC_STATUS_LABEL[d.status]}
             </Badge>
             <span className="tnum">version {d.currentVersion}</span>
-            {d.vaultPath && d.publishedVersion !== null && <span>{t.reword('Copied to the vault as')} {d.vaultPath}</span>}
+            {d.vaultPath && d.publishedVersion !== null && (
+              <span>
+                {t.reword('Copied to the vault as')} {d.vaultPath}
+              </span>
+            )}
           </span>
         }
         actions={

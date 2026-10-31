@@ -45,7 +45,9 @@ export function Capabilities() {
     <div className="mx-auto flex max-w-5xl flex-col">
       <PageHeader
         title="Capabilities"
-        sub={t.reword('The skills, personas and playbooks your agents can use: built in, from your vaults and projects, from packs you approve, or written by you.')}
+        sub={t.reword(
+          'The skills, personas and playbooks your agents can use: built in, from your vaults and projects, from packs you approve, or written by you.',
+        )}
       />
       {manager && <RoleOffers />}
       <Tabs

@@ -5,12 +5,12 @@ import { Link } from 'react-router';
 import { useMe } from '../../api/queries/auth.ts';
 import { useHandToBa, useRequestDraft, useRequestValidation } from '../../api/queries/discovery.ts';
 import { useChangeDocumentStatus, useDocument, useDocumentVersion } from '../../api/queries/documents.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { canUseIntake } from '../../lib/intake.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { Markdown } from '../chat/Markdown.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, Spinner } from '../ui.tsx';
 import { HireBa } from './HireBa.tsx';
-import { Reword } from '../../components/Reword.tsx';
 
 const STATUS_TONE = {
   draft: 'neutral',

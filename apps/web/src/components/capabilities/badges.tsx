@@ -1,5 +1,5 @@
-import { Badge } from '../ui.tsx';
 import { useOrgTerms } from '../../lib/terms.ts';
+import { Badge } from '../ui.tsx';
 
 export const SOURCE_LABEL = {
   builtin: 'built-in',

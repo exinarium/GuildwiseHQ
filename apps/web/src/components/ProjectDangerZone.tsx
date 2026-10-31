@@ -1,8 +1,8 @@
 import type { ProjectDto } from '@aom/shared';
 import { useState } from 'react';
 import { useArchiveProject, useProjectImpact, useRestoreProject } from '../api/queries/projects.ts';
-import { Badge, Button, Dialog, ErrorBox, Panel, Spinner, useToast } from './ui.tsx';
 import { Reword } from './Reword.tsx';
+import { Badge, Button, Dialog, ErrorBox, Panel, Spinner, useToast } from './ui.tsx';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -27,7 +27,11 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
       {archived ? (
         <>
           <p className="text-sm text-muted" data-testid="archived-note">
-            <Reword>{'This project is archived. It is hidden from boards, pickers and the dispatcher; its cards, history and vault folder are kept. Restore it to work on it again (cards that were closed stay closed and schedules stay off).'}</Reword>
+            <Reword>
+              {
+                'This project is archived. It is hidden from boards, pickers and the dispatcher; its cards, history and vault folder are kept. Restore it to work on it again (cards that were closed stay closed and schedules stay off).'
+              }
+            </Reword>
           </p>
           <Button
             className="mt-3"
@@ -83,7 +87,11 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
             </ul>
           )}
           <p className="text-xs text-subtle">
-            <Reword>{'Agents hired for this project are not fired; they just stop getting its work. The vault folder is never touched.'}</Reword>
+            <Reword>
+              {
+                'Agents hired for this project are not fired; they just stop getting its work. The vault folder is never touched.'
+              }
+            </Reword>
           </p>
           <ErrorBox error={archive.error} />
           <div className="flex justify-end gap-2">

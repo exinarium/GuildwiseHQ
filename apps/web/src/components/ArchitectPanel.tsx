@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAgents } from '../api/queries/agents.ts';
 import { useSetArchitectSettings } from '../api/queries/projects.ts';
-import { Badge, Button, Callout, ErrorBox, Panel, Select, TextInput, useToast } from './ui.tsx';
 import { useOrgTerms } from '../lib/terms.ts';
+import { Badge, Button, Callout, ErrorBox, Panel, Select, TextInput, useToast } from './ui.tsx';
 
 type Project = ProjectDetailResponse['project'];
 
@@ -124,7 +124,9 @@ export function ArchitectPanel({
             onChange={(e) => setPath(e.target.value)}
             hint={
               noVault
-                ? t.reword('This project has no knowledge vault, so reports go in the repository until a vault is registered. A report is named <card ref>-<title>.md.')
+                ? t.reword(
+                    'This project has no knowledge vault, so reports go in the repository until a vault is registered. A report is named <card ref>-<title>.md.',
+                  )
                 : 'A report is named <card ref>-<title>.md. A card can name its own report path.'
             }
           />

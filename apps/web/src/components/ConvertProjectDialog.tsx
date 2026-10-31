@@ -11,9 +11,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts';
 import { useBusinessMode } from '../lib/orgMode.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
-import { useOrgTerms } from '../lib/terms.ts';
 
 type RepoEntry =
   | { id: number; kind: 'url'; name: string; remoteUrl: string; workingBranch: string }

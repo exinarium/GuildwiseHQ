@@ -4,6 +4,7 @@ import { useMe } from '../../api/queries/auth.ts';
 import { useMarkWhatsNewSeen } from '../../api/queries/whatsNew.ts';
 import { helpBase } from '../../help/articles.ts';
 import { Markdown } from '../../help/Markdown.tsx';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { entriesFor, unseenFor, type WhatsNewEntry } from '../../whats-new/entries.ts';
 import { useTour } from '../tour/TourContext.tsx';
 import { Button, Dialog } from '../ui.tsx';
@@ -28,6 +29,7 @@ export function WhatsNewDialog({
   confirmLabel?: string;
 }) {
   const base = helpBase(useLocation().pathname);
+  const t = useOrgTerms();
   return (
     <Dialog
       open={open}
@@ -48,7 +50,7 @@ export function WhatsNewDialog({
         <ul className="flex flex-col divide-y divide-line" data-testid="whats-new-list">
           {entries.map((e) => (
             <li key={e.id} className="py-3 first:pt-0 last:pb-0" data-testid={`whats-new-${e.id}`}>
-              <h3 className="text-base font-semibold text-fg">{e.title}</h3>
+              <h3 className="text-base font-semibold text-fg">{t.reword(e.title)}</h3>
               <p className="mb-1 text-xs text-subtle">{dateLabel(e.date)}</p>
               <Markdown blocks={e.blocks} />
               {e.help && (

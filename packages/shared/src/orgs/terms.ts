@@ -82,7 +82,7 @@ const REWRITES: Array<[string, (t: OrgTerms, upper: boolean) => string]> = [
   ['vault', (t, u) => (u ? t.Vault : t.vault)],
 ];
 const REWRITE_RE = new RegExp(
-  `(?<![\\w/#.:@-])(${REWRITES.map(([k]) => k).join('|')})(?![\\w/:_-])`,
+  `(?<![\\w/#.:@-])(${REWRITES.map(([k]) => k).join('|')})(?![\\w/_-]|:\\S)`,
   'gi',
 );
 

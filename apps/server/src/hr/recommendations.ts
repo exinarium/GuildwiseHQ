@@ -8,6 +8,7 @@ import {
   type Recommendation,
   type RecommendationKind,
   type ReworkReason,
+  rewordForOrg,
   shiftModel,
   THIN_SPEC_STANDING_ORDER,
   topicWords,
@@ -47,6 +48,10 @@ export async function computeRecommendations(
     [orgId],
   );
   if (agentRows.length === 0) return [];
+  const orgRow = await one<{ mode: string | null }>(ctx.pool, 'SELECT mode FROM organizations WHERE id=$1', [
+    orgId,
+  ]);
+  const rw = (text: string) => rewordForOrg(text, orgRow?.mode);
   const agents: StatsAgent[] = agentRows.map((a) => ({
     id: a.id,
     roleKey: a.role_key,
@@ -98,12 +103,12 @@ export async function computeRecommendations(
     if (known.length / qs.length >= HR_RULES.ledgerMissRate) {
       push(
         mk('blocked_ledger', a.id, a, null, {
-          title: `${a.name} asks what the ledger already answers`,
-          summary: `${known.length} of ${qs.length} questions had a similar ledger entry when they were asked: agents re-ask settled questions. The server attaches the best ledger matches to an answer brief, so this is advice only: tighten the ledger entries on the cited cards.`,
+          title: `${a.name} ${rw('asks what the ledger already answers')}`,
+          summary: `${known.length} of ${qs.length} ${rw('questions had a similar ledger entry when they were asked: agents re-ask settled questions. The server attaches the best ledger matches to an answer brief, so this is advice only: tighten the ledger entries on the cited cards.')}`,
           evidence: {
             metrics: [
               ...metrics,
-              { label: 'Questions with a ledger match', value: `${known.length} of ${qs.length}` },
+              { label: rw('Questions with a ledger match'), value: `${known.length} of ${qs.length}` },
             ],
             items: known.slice(0, 5).map((q) => ({ text: trunc(q.title), ...(q.ref ? { ref: q.ref } : {}) })),
           },
@@ -205,7 +210,7 @@ export async function computeRecommendations(
         push(
           mk('rework_reason', `${a.id}:${reason}`, a, null, {
             title: `${a.name}'s work keeps coming back: ${REWORK_REASON_LABEL[reason].toLowerCase()}`,
-            summary: `${logs.length} review bounces in ${HR_WINDOW_DAYS} days cite "${REWORK_REASON_LABEL[reason]}". A standing order addresses the recurring cause.`,
+            summary: `${logs.length} review bounces in ${HR_WINDOW_DAYS} days cite "${REWORK_REASON_LABEL[reason]}". ${rw('A standing order addresses the recurring cause.')}`,
             evidence: {
               metrics: [
                 {

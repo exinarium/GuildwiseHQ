@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
+  defaultVaultName,
   isOrgManager,
   LOCAL_VAULT_CAPABILITY,
   type OrgRole,
+  orgTerms,
   type PatchVaultRequest,
   projectVaultFolder,
   type RegisterVaultRequest,
@@ -624,10 +626,11 @@ export async function applyVaultConflict(
     v.id,
   ]);
   if (wv?.paused) return;
+  const orgMode = await one(tx, 'SELECT mode FROM organizations WHERE id=$1', [v.org_id]);
   const { deskItemId } = await raiseDeskItem(ctx, tx, {
     kind: 'escalation',
     subkind: 'vault_conflict',
-    title: `Vault sync conflict: ${v.name}`,
+    title: `${orgTerms(orgMode?.mode).Vault} sync conflict: ${defaultVaultName(v.name, orgMode?.mode)}`,
     body: `Local and remote edits to ${msg.files.length ? msg.files.join(', ') : 'the vault'} cannot be merged automatically. Syncing of this vault is paused on this workstation until you resolve it.`,
     pinned: true,
     blocking: false,

@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { type RegistryItem, useCapabilities } from '../../api/queries/capabilities.ts';
 import { useProjects } from '../../api/queries/projects.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { Reword } from '../Reword.tsx';
 import { Badge, Callout, EmptyState, ErrorBox, ListSkeleton, Select, TextInput } from '../ui.tsx';
 import { SourceBadge, UnusableBadge } from './badges.tsx';
 import { ChatWithPersona } from './ChatWithPersona.tsx';
-import { useOrgTerms } from '../../lib/terms.ts';
-import { Reword } from '../Reword.tsx';
 
 const KINDS = ['skill', 'persona', 'playbook'] as const;
 const SOURCES = ['builtin', 'org-vault', 'project-repo', 'pack'] as const;
@@ -79,7 +79,9 @@ export function RegistryTab() {
       {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
       {(q.data?.issues?.length ?? 0) > 0 && (
         <Callout tone="warning" data-testid="registry-issues">
-          <p className="font-medium"><Reword>{'Some files in your vault could not be read'}</Reword></p>
+          <p className="font-medium">
+            <Reword>{'Some files in your vault could not be read'}</Reword>
+          </p>
           <ul className="mt-1 list-disc pl-5">
             {q.data?.issues?.map((i) => (
               <li key={`${i.path}:${i.message}`}>

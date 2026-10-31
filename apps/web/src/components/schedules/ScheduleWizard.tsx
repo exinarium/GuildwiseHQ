@@ -49,13 +49,13 @@ import {
   type WizardState,
   wizardIsOrgLevel,
 } from '../../lib/schedules.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { CardFormFields } from '../CardFormFields.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
 import { MappingEditor } from './MappingEditor.tsx';
 import { OutputSection } from './OutputSection.tsx';
-import { useOrgTerms } from '../../lib/terms.ts';
 
 const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
   cron: CalendarClock,
@@ -1068,7 +1068,9 @@ function ActionFields({
         <div className="flex flex-col gap-4">
           <TextArea
             label="Instructions for the BA"
-            hint={t.reword('The BA only reads: the ledger, the desk, the vault and the repositories. Use {date} and {week} if you like.')}
+            hint={t.reword(
+              'The BA only reads: the ledger, the desk, the vault and the repositories. Use {date} and {week} if you like.',
+            )}
             rows={5}
             value={s.prompt}
             onChange={(e) => set({ prompt: e.target.value })}
