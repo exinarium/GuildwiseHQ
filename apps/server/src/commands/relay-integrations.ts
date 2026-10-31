@@ -167,8 +167,11 @@ export async function relayStatuses(ctx: Ctx, orgId: string): Promise<RelayInteg
                 AND q.at >= coalesce(p.offline_since, i.created_at)) AS refused,
             (SELECT max(q.at) FROM relay_requests q
               WHERE q.integration_id = i.id AND q.outcome = 'runner_offline'
-                AND q.at >= coalesce(p.offline_since, i.created_at)) AS refused_at
+                AND q.at >= coalesce(p.offline_since, i.created_at)) AS refused_at,
+            le.at AS last_at, le.outcome AS last_outcome, le.status AS last_status, le.size_bytes AS last_size
        FROM relay_integrations i LEFT JOIN relay_presence p ON p.integration_id = i.id
+       LEFT JOIN LATERAL (SELECT q.at, q.outcome, q.status, q.size_bytes FROM relay_requests q
+                           WHERE q.integration_id = i.id ORDER BY q.at DESC, q.id DESC LIMIT 1) le ON true
       WHERE i.org_id=$1 AND i.status='active' ORDER BY i.created_at, i.id`,
     [orgId],
   );
@@ -182,6 +185,14 @@ export async function relayStatuses(ctx: Ctx, orgId: string): Promise<RelayInteg
       offlineSince: serving > 0 ? null : iso(r.offline_since),
       refusedSinceOffline:
         serving > 0 ? { count: 0, lastAt: null } : { count: Number(r.refused), lastAt: iso(r.refused_at) },
+      lastEvent: r.last_at
+        ? {
+            at: iso(r.last_at) as string,
+            outcome: String(r.last_outcome),
+            status: Number(r.last_status),
+            sizeBytes: Number(r.last_size),
+          }
+        : null,
     };
   });
 }

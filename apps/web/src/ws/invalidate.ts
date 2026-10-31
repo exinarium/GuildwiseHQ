@@ -105,7 +105,18 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'departments':
       return [['roles'], ['workflows'], ['org'], ['hr'], ['agents'], ['projects'], ['board'], ['card']];
     case 'workstation':
-      return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr'], ['board'], ['card']];
+      return [
+        ['workstations'],
+        ['admin', 'workstations'],
+        ['agents'],
+        ['hr'],
+        ['board'],
+        ['card'],
+        ['relay'],
+      ];
+    case 'relay':
+      // RelayIntegration* events (create, rotate, revoke) stream as relay-<integrationId>
+      return [['relay']];
     case 'repo':
       // Repository requests (a conversion that waits for its repository): the project and the desk item change.
       return [['project'], ['projects'], ['desk'], ['board']];
