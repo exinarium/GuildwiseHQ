@@ -15,6 +15,8 @@ export function addRelayIntegration(
   if (!UUID_RE.test(id)) return { ok: false, error: `'${id}' is not an integration id (a UUID)` };
   if (!(RELAY_KINDS as readonly string[]).includes(kind))
     return { ok: false, error: `'${kind}' is not a kind (${RELAY_KINDS.join(', ')})` };
+  if (kind === 'whatsapp_cloud')
+    return { ok: false, error: 'use `guildwise-runner whatsapp-connect <integration-id>` for WhatsApp' };
   const key = id.toLowerCase();
   const rest = config.relay.integrations.filter((i) => i.id.toLowerCase() !== key);
   const entry = { id: key, kind: kind as RelayKind, ...(label ? { label } : {}) };

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import {
   ClaudeAccountKeySchema,
@@ -55,8 +56,10 @@ import {
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
+import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { RunnerKeys } from './secrets/keys.ts';
+import { registerSecret } from './secrets/redact.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
@@ -618,6 +621,66 @@ function relayList(opts: { dataDir?: string; pairing?: string }): void {
       'No relay integration is served. Use `guildwise-runner relay add <integration-id> --kind <kind>`.',
     );
   for (const i of config.relay.integrations) console.log(`${i.id}\t${i.kind}\t${i.label ?? ''}`);
+}
+
+interface WhatsAppConnectOpts {
+  dataDir?: string;
+  pairing?: string;
+  phoneNumberId?: string;
+  status?: boolean;
+  disconnect?: boolean;
+}
+
+/**
+ * `guildwise-runner whatsapp-connect [integration-id]`: binds the Meta app secret and the verify token to a relay
+ * integration. They are sealed with this runner's key in `secrets/relay-whatsapp.json` and never leave this machine.
+ */
+async function whatsappConnect(idArg: string | undefined, opts: WhatsAppConnectOpts): Promise<void> {
+  const { entries } = selectPairings(opts);
+  if (entries.length > 1 && !opts.pairing)
+    throw new Error(
+      `An integration belongs to one organization: pick a pairing with --pairing (${entries.map((e) => e.id).join(', ')})`,
+    );
+  const paths = pairingPaths(opts);
+  const keys = new RunnerKeys(join(paths.secrets, 'runner-key.pem'));
+  const store = new WhatsAppSecretStore({ file: join(paths.secrets, 'relay-whatsapp.json'), keys });
+  if (opts.status) {
+    const rows = store.list().filter((r) => !idArg || r.id === idArg.toLowerCase());
+    if (rows.length === 0) console.log('No WhatsApp secrets are bound on this workstation.');
+    for (const r of rows)
+      console.log(
+        `${r.id}\t${r.readable ? 'bound' : 'unreadable: bind it again'}\t${r.phoneNumberId ?? ''}\t${r.setAt}`,
+      );
+    if (rows.length === 0 || rows.some((r) => !r.readable)) process.exitCode = 1;
+    return;
+  }
+  if (!idArg) throw new Error('give the integration id: guildwise-runner whatsapp-connect <integration-id>');
+  const id = WhatsAppSecretStore.normalizeId(idArg);
+  if (opts.disconnect) {
+    const had = store.remove(id);
+    touchRecheck(paths.secrets);
+    console.log(
+      had
+        ? 'Removed. A running runner stops serving this integration within about 10 seconds; Meta will get 503 and keep the messages for up to 7 days.'
+        : `No WhatsApp secrets are bound for ${id}.`,
+    );
+    return;
+  }
+  console.log('Nothing you type here leaves this machine.');
+  const appSecret = await promptSecret('Meta app secret (hidden): ');
+  if (appSecret) registerSecret(appSecret);
+  let verifyToken = await promptSecret('Verify token (hidden, empty = generate one): ');
+  const generated = verifyToken === '';
+  if (generated) verifyToken = randomBytes(24).toString('base64url');
+  registerSecret(verifyToken);
+  const phoneNumberId = opts.phoneNumberId ?? ((await promptLine('Phone number id (optional): ')) || undefined);
+  await store.set(id, { appSecret, verifyToken, phoneNumberId });
+  touchRecheck(paths.secrets);
+  console.log(`Saved for ${id}. A running runner picks it up within about 10 seconds; no restart is needed.`);
+  if (generated) console.log(`Verify token (shown once, enter it in Meta's dashboard): ${verifyToken}`);
+  console.log(
+    'In the Meta App Dashboard > WhatsApp > Configuration: set Callback URL to the relay URL of this integration, Verify token to the token above, verify and save, then subscribe the "messages" field.',
+  );
 }
 
 async function reposList(opts: { dataDir?: string; pairing?: string }): Promise<void> {
@@ -1265,6 +1328,17 @@ export function buildProgram(): Command {
     .option(...dataDirOpt)
     .action(gitConnect);
   program
+    .command('whatsapp-connect [integration-id]')
+    .description(
+      'bind the Meta app secret and verify token of a WhatsApp relay integration; they stay encrypted on this machine',
+    )
+    .option('--phone-number-id <id>', 'only deliver events for this business phone number')
+    .option('--status', 'show what is bound (never the secrets)')
+    .option('--disconnect', 'remove the secrets and stop serving the integration')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(whatsappConnect);
+  program
     .command('jira-connect')
     .description(
       "set up this workstation's Jira login (to download ticket attachments for agents and post approved updates); the API token stays on this machine",
@@ -1383,7 +1457,7 @@ export function buildProgram(): Command {
     .description('the inbound webhook integrations this workstation serves (Business mode)');
   relay
     .command('add <integration-id>')
-    .requiredOption('--kind <kind>', 'whatsapp_cloud, form_webhook, webhook_in, calendar_push or generic')
+    .requiredOption('--kind <kind>', 'form_webhook, webhook_in, calendar_push or generic')
     .option('--label <text>', 'a name for the list')
     .option(...pairingOpt)
     .option(...dataDirOpt)

@@ -139,6 +139,8 @@ import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
 import { RelayDispatcher } from './relay/dispatch.ts';
 import { FileRelaySink, genericHandler } from './relay/generic.ts';
+import { noopIntake, whatsAppHandler } from './relay/whatsapp/handler.ts';
+import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
@@ -323,6 +325,8 @@ export class Runner {
   private readonly log: Logger;
   /** Inbound webhook relay: hands each relayed provider request to the handler of its kind. */
   private readonly relay: RelayDispatcher;
+  /** WhatsApp secrets of the relay integrations this workstation serves (encrypted at rest). */
+  private whatsapp!: WhatsAppSecretStore;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
   private repos: RepoReport[] = [];
@@ -381,11 +385,16 @@ export class Runner {
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
-    this.relay = new RelayDispatcher({ integrations: () => opts.config.relay.integrations, log: this.log });
-    this.relay.register(
-      'generic',
-      genericHandler(new FileRelaySink(opts.config.relay.sinkDir ?? join(this.paths.relay, 'inbox'))),
-    );
+    this.relay = new RelayDispatcher({
+      integrations: () => [
+        ...opts.config.relay.integrations.filter((i) => i.kind !== 'whatsapp_cloud'),
+        ...(this.whatsapp?.ids() ?? []).map((id) => ({ id, kind: 'whatsapp_cloud' as const })),
+      ],
+      log: this.log,
+    });
+    const sinkDir = opts.config.relay.sinkDir ?? join(this.paths.relay, 'inbox');
+    const relaySink = new FileRelaySink(sinkDir);
+    this.relay.register('generic', genericHandler(relaySink));
     this.outbox = new Outbox(this.paths.outbox);
     this.serverHttp = new ServerHttp({
       base: () => opts.config.serverUrl,
@@ -405,6 +414,15 @@ export class Runner {
     };
     this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
+    this.whatsapp = new WhatsAppSecretStore({ file: join(this.paths.secrets, 'relay-whatsapp.json'), keys: this.keys });
+    this.relay.register(
+      'whatsapp_cloud',
+      whatsAppHandler({ store: this.whatsapp, sink: relaySink, sinkDir, intake: noopIntake }),
+    );
+    if (opts.config.relay.integrations.some((i) => i.kind === 'whatsapp_cloud'))
+      this.log.warn(
+        'relay: a whatsapp_cloud entry in the config is ignored; use `guildwise-runner whatsapp-connect <integration-id>`',
+      );
     this.sudo = new SudoVault({
       file: join(this.paths.secrets, 'sudo.enc'),
       keys: this.keys,
@@ -775,8 +793,7 @@ export class Runner {
     this.client.on('welcome', (w) => {
       this.serverFeatures = new Set(w.features ?? []);
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
-      if (this.serverFeatures.has(RELAY_FEATURE))
-        this.client.send('relay.serve', { integrations: this.relay.served() });
+      this.announceRelay();
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
@@ -1101,6 +1118,7 @@ export class Runner {
           this.lastRecheck = m;
           void this.reportGit(false);
           void this.reportIntegrations(false);
+          if (this.whatsapp.reload()) this.announceRelay();
         }
       } catch {
         // no marker yet
@@ -1109,6 +1127,12 @@ export class Runner {
     g.unref();
     this.timers.push(g);
     this.writeStatus(false);
+  }
+
+  /** Tells the server which relay integrations this workstation serves (ids and kind only); replaces the previous set. */
+  private announceRelay(): void {
+    // Also with nothing to serve: the server then drops whatever an earlier announcement named.
+    if (this.serverFeatures.has(RELAY_FEATURE)) this.client.send('relay.serve', { integrations: this.relay.served() });
   }
 
   async stop(): Promise<void> {
