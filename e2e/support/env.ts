@@ -37,6 +37,12 @@ export const BIZORG = {
 };
 /** Owner of a dev organization switched to Business mode and back (business-mode spec). */
 export const MODESW = { email: 'modesw@e2e.test', name: 'E2E ModeSwitch', password: 'modesw-password-12345' };
+/** Owner of a dev organization that switches to Business mode and runs the business card types (business-card-types spec). */
+export const BIZCARDS = {
+  email: 'bizcards@e2e.test',
+  name: 'E2E BizCards',
+  password: 'bizcards-password-12345',
+};
 /** A Member invited to the admin's organization by the Owner (org-members spec). */
 export const ORGMEM = { email: 'orgmem@e2e.test', name: 'E2E OrgMem', password: 'orgmem-password-12345' };
 export const OTHER = { email: 'other@e2e.test', name: 'E2E Other', password: 'other-password-12345' };
