@@ -20,7 +20,13 @@ import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
-import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
+import {
+  ComponentRulesSchema,
+  RepoDescriptionSchema,
+  RepoNameSchema,
+  RepoVisibilitySchema,
+  repoNameError,
+} from '../repo/index.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -47,6 +53,8 @@ export const ProjectRepoDtoSchema = z.object({
   accessMethod: GitAccessMethodSchema.nullable().optional(),
   /** The main branch (where pull requests go) when the owner named one; null: the repository's default branch. */
   mainBranch: z.string().nullable().optional(),
+  /** The component version rules (expert mode); empty: a release only gets the release version. */
+  componentRules: ComponentRulesSchema.optional(),
   /** When the runner created the missing working branch, from which branch, and whether it was pushed; null: not (yet). */
   workingBranchCreated: z
     .object({ at: IsoTime, from: z.string(), pushed: z.boolean() })
@@ -528,14 +536,17 @@ export const PatchRepoRequestSchema = z
     accessMethod: GitAccessMethodSchema.nullable().optional(),
     /** The main branch (null: the repository's default branch). */
     mainBranch: GitRefSchema.nullable().optional(),
+    /** The full list of component version rules (`[]` clears them). */
+    componentRules: ComponentRulesSchema.optional(),
   })
   .refine(
     (b) =>
       b.forge !== undefined ||
       b.projectPath !== undefined ||
       b.accessMethod !== undefined ||
-      b.mainBranch !== undefined,
-    { message: 'send forge, projectPath, accessMethod or mainBranch' },
+      b.mainBranch !== undefined ||
+      b.componentRules !== undefined,
+    { message: 'send forge, projectPath, accessMethod, mainBranch or componentRules' },
   );
 
 /** `POST /api/projects/:id/repos/:repoId/release-pr` answer: the request was queued for the repository's workstation. */

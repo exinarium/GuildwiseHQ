@@ -1,4 +1,5 @@
 import {
+  type ComponentRule,
   type ConnectableForge,
   type ForgeKind,
   type ForgeRepoList,
@@ -113,5 +114,15 @@ export function useGitSsh() {
       for (const ms of [1500, 4000, 8000, 15000])
         setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
     },
+  });
+}
+
+/** The owner replaces the component version rules of a repository (`[]` clears them). */
+export function useSetRepoComponentRules(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; rules: ComponentRule[] }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { componentRules: v.rules }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   });
 }

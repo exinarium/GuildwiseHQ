@@ -32,6 +32,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
+import { setRepoComponentRules } from '../commands/component-rules.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
@@ -467,6 +468,8 @@ export function projectRoutes(ctx: Ctx) {
           await setRepoProjectPath(ctx, s.user, req.params.id, req.params.repoId, req.body.projectPath);
         if (req.body.mainBranch !== undefined)
           await setRepoMainBranch(ctx, s.user, req.params.id, req.params.repoId, req.body.mainBranch);
+        if (req.body.componentRules !== undefined)
+          await setRepoComponentRules(ctx, s.user, req.params.id, req.params.repoId, req.body.componentRules);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

@@ -1,5 +1,6 @@
 import {
   type BudgetDto,
+  ComponentRulesSchema,
   DEFAULT_MAX_RUN_ENVIRONMENTS,
   DEFAULT_STOP_LOSS,
   detectForgeKind,
@@ -292,6 +293,7 @@ export async function getProjectDetail(
       projectPath: r.project_path ?? null,
       accessMethod: r.access_method ?? null,
       mainBranch: r.main_branch ?? null,
+      componentRules: ComponentRulesSchema.catch([]).parse(r.component_rules ?? []),
       workingBranchCreated: r.working_branch_created_at
         ? {
             at: iso(r.working_branch_created_at) as string,
