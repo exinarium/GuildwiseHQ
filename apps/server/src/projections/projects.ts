@@ -105,6 +105,8 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   }
   await exec(tx, 'DELETE FROM shifts WHERE card_id IN (SELECT id FROM cards WHERE project_id=$1)', P);
   await exec(tx, `DELETE FROM thread_messages WHERE thread_id IN (${threads})`, P);
+  await exec(tx, `DELETE FROM chat_archives WHERE thread_id IN (${threads})`, P);
+  await exec(tx, `DELETE FROM chat_reads WHERE thread_id IN (${threads})`, P);
   await exec(tx, `DELETE FROM threads WHERE id IN (${threads})`, P);
   await exec(
     tx,
