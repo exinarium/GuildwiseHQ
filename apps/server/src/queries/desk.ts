@@ -283,7 +283,7 @@ async function withPhase(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskI
 /** A Ship release item carries the live proposal (facts and rules read now). */
 async function withRelease(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskItemDto> {
   return r.subkind === 'ship_release'
-    ? { ...dto, release: await releaseViewFor({ pool: db as never }, r) }
+    ? { ...dto, release: await releaseViewFor(db, r) }
     : dto;
 }
 
