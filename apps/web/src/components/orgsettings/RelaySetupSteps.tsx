@@ -31,11 +31,13 @@ export function RelaySetupSteps({
   const whatsapp = integration.kind === 'whatsapp_cloud';
   return (
     <ol className="list-decimal space-y-3 pl-5 text-sm text-muted" data-testid="relay-setup-steps">
-      <li>
-        <span className="font-medium text-fg">Serve it from your workstation.</span> On the workstation that
-        runs your runner (signed in as an Owner or Admin), run this command, then restart the runner:
-        <Command text={relayServeCommand(integration)} testId="relay-serve-command" />
-      </li>
+      {whatsapp ? null : (
+        <li>
+          <span className="font-medium text-fg">Serve it from your workstation.</span> On the workstation that
+          runs your runner (signed in as an Owner or Admin), run this command, then restart the runner:
+          <Command text={relayServeCommand(integration)} testId="relay-serve-command" />
+        </li>
+      )}
       {whatsapp ? (
         <>
           <li>
@@ -48,8 +50,9 @@ export function RelaySetupSteps({
             never here.
           </li>
           <li>
-            On that workstation, enter the app secret and the verify token with this command. They are stored
-            encrypted on that workstation and never reach Guildwise HQ:
+            On the workstation that runs your runner (signed in as an Owner or Admin), enter the app secret
+            and the verify token with this command. It also makes the runner serve this address, with no
+            restart needed. They are stored encrypted on that workstation and never reach Guildwise HQ:
             <Command text={relayWhatsAppCommand(integration)} testId="relay-whatsapp-command" />
           </li>
           <li>

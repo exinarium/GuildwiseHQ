@@ -157,14 +157,17 @@ describe('creating, rotating and revoking', () => {
       // every kind gets the serve command; WhatsApp also the runner command for the secrets
       const id = (integrations.at(-1) as Row).id;
       const dialog = within(screen.getByRole('dialog'));
-      expect(dialog.getByTestId('relay-serve-command')).toHaveTextContent(
-        `guildwise-runner relay add ${id} --kind ${kind}`,
-      );
-      if (kind === 'whatsapp_cloud')
+      if (kind === 'whatsapp_cloud') {
+        expect(dialog.queryByTestId('relay-serve-command')).toBeNull();
         expect(dialog.getByTestId('relay-whatsapp-command')).toHaveTextContent(
           `guildwise-runner whatsapp-connect ${id}`,
         );
-      else expect(dialog.queryByTestId('relay-whatsapp-command')).toBeNull();
+      } else {
+        expect(dialog.getByTestId('relay-serve-command')).toHaveTextContent(
+          `guildwise-runner relay add ${id} --kind ${kind}`,
+        );
+        expect(dialog.queryByTestId('relay-whatsapp-command')).toBeNull();
+      }
       // closing removes the address from the page for good, and the list has the new row
       await user.click(screen.getByTestId('relay-url-done'));
       await waitFor(() => expect(screen.queryByTestId('relay-url')).toBeNull());

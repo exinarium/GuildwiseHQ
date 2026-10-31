@@ -97,7 +97,9 @@ describe('the offline notice rule', () => {
 
 describe('commands', () => {
   it('shows the serve command with the id and kind, and the runner CLI for the secrets', () => {
-    expect(relayServeCommand(dto(1))).toBe(`guildwise-runner relay add ${ID(1)} --kind whatsapp_cloud`);
+    expect(relayServeCommand(dto(1, { kind: 'webhook_in' }))).toBe(
+      `guildwise-runner relay add ${ID(1)} --kind webhook_in`,
+    );
     expect(RELAY_WHATSAPP_CLI).toBe('guildwise-runner whatsapp-connect');
   });
 });
