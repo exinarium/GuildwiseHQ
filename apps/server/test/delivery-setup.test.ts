@@ -615,7 +615,10 @@ describe('probes and the reachability of a server', () => {
       },
     });
     await until(
-      async () => (await call('GET', `${base()}/delivery/setup`)).probes.some((x: any) => x.report),
+      async () =>
+        (await call('GET', `${base()}/delivery/setup`)).probes.some(
+          (x: any) => x.report?.composeFiles?.length > 0,
+        ), // this answer, not an older one
       5000,
       'probe stored',
     );

@@ -702,10 +702,10 @@ describe('the workstation refuses or fails: answers, never retries', () => {
     });
     await until(async () => (await run(id)).status === 'failed', 4000, 'failed');
     expect((await run(id)).log_tail).toContain('boom');
-    expect(
-      (await q(`SELECT urgency FROM ceo_wakes WHERE reason='deploy_finished' AND subject_id=$1`, [id]))[0]!
-        .urgency,
-    ).toBe('urgent');
+    const wake = () =>
+      q(`SELECT urgency FROM ceo_wakes WHERE reason='deploy_finished' AND subject_id=$1`, [id]);
+    await until(async () => (await wake()).length === 1, 4000, 'deploy_finished wake'); // enqueued after the result event
+    expect((await wake())[0]!.urgency).toBe('urgent');
   });
 
   it('stores the log tail masked: secrets, paths and e-mail addresses never reach the server as written', async () => {
