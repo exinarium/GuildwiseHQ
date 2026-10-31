@@ -13,8 +13,8 @@ import {
   type ReleasePublishStep,
   repoTagUrl,
 } from '@aom/shared';
-import { forgeForUrl } from '../forge/index.ts';
 import { errText, ForgeUnavailableError } from '../forge/http.ts';
+import { forgeForUrl } from '../forge/index.ts';
 import type { ChangeState, ForgeEnv } from '../forge/types.ts';
 import { detectSignOff } from './dco.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
@@ -150,7 +150,7 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   }
 
   if (decision.action === 'create') {
-    let identity;
+    let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
     try {
       identity = await requireCommitIdentity(repoPath, p.commitAs);
     } catch (err) {
@@ -322,7 +322,7 @@ async function landByMerge(
 ): Promise<{ sha: string; signedOff: boolean } | { result: ReleasePublishResult }> {
   const { payload: p, repoPath } = input;
   const R = p.releaseCommitSha;
-  let identity;
+  let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs);
   } catch (err) {
