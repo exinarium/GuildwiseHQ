@@ -368,3 +368,23 @@ settings. Rename UI text only; routes, API paths, event names and columns keep t
   read-only for members and shows the blocker list on 409.
 - E2E (`@aom/e2e`, the tester): create a business org through an invitation, check the dev surfaces are absent and
   the direct URLs blocked; switch a clean dev org to business and back.
+
+## Addendum (2026-10-31): merging into release/1.4.0
+
+The change is a linear series of patches on top of `release/1.4.0`. To check that it still merges cleanly, run these
+against a freshly fetched origin:
+
+- `git merge-base --is-ancestor origin/release/1.4.0 HEAD` passes: the merge is a fast-forward.
+- `git rev-list --count HEAD..origin/release/1.4.0` is 0. If it is not, rebase onto `origin/release/1.4.0`. The release
+  commits seen so far touched no file this change touches, and the rebases were clean.
+- Migrations: three files share the number 2750 (`2750_document_tags_files.sql`, `2750_ledger_review_date.sql`,
+  `2750_org_mode.sql`). They touch different tables, and the numbers 2250 and 2743 are already shared the same way, so
+  this is not a conflict. After a rebase, check that the release has not added another migration that touches
+  `organizations`.
+
+Merge target: `release/1.4.0`. `main` is an ancestor of this branch too, so merging into `main` would fast-forward the
+whole release into `main`.
+
+Still open: the full `apps/server` suite (including `test/org-mode.test.ts`) needs Postgres at 127.0.0.1:5433 and has
+to pass before the merge is approved.
+
