@@ -28,7 +28,10 @@ async function newProject(world: World, key: string): Promise<string> {
 }
 async function newChat(world: World, agent: string, projectId?: string): Promise<string> {
   return (
-    await ok<any>(owner(world, 'POST', '/api/chats', { agentId: agent, ...(projectId ? { projectId } : {}) }), 201)
+    await ok<any>(
+      owner(world, 'POST', '/api/chats', { agentId: agent, ...(projectId ? { projectId } : {}) }),
+      201,
+    )
   ).chat.threadId;
 }
 const close = (world: World, t: string) => ok(owner(world, 'POST', `/api/chats/${t}/close`));
@@ -44,8 +47,7 @@ const archiveAndDelete = async (world: World, id: string, key: string) => {
   await ok(owner(world, 'POST', `/api/projects/${id}/archive`));
   return owner(world, 'POST', `/api/projects/${id}/delete`, { confirmKey: key });
 };
-const count = async (sql: string, ids: string[]) =>
-  (await q(sql, [ids]))[0]!.n as number;
+const count = async (sql: string, ids: string[]) => (await q(sql, [ids]))[0]!.n as number;
 const archivesOf = (ids: string[]) =>
   count('SELECT count(*)::int AS n FROM chat_archives WHERE thread_id = ANY($1::uuid[])', ids);
 const readsOf = (ids: string[]) =>
@@ -135,7 +137,9 @@ describe('deleting a project with chats', () => {
       expect(await threadsOf([t])).toBe(1);
       expect(await archivesOf([t])).toBe(1);
       expect(await readsOf([t])).toBe(1);
-      expect(await q(`SELECT 1 FROM events WHERE type='ProjectDeleted' AND payload->>'projectId'=$1`, [id])).toHaveLength(0);
+      expect(
+        await q(`SELECT 1 FROM events WHERE type='ProjectDeleted' AND payload->>'projectId'=$1`, [id]),
+      ).toHaveLength(0);
     } finally {
       await q(`DROP TRIGGER IF EXISTS ${fn} ON projects`);
       await q(`DROP FUNCTION IF EXISTS ${fn}()`);
