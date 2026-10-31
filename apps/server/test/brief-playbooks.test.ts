@@ -62,6 +62,8 @@ describe('a business organization', () => {
     const m = await addMember(w, 'member');
     const res = await w.t.req('POST', '/api/brief-playbooks/weekly_owner_brief/install', {
       cookie: m.cookie,
+      // the member's own organization is another one (they own it); address the Owner's organization
+      headers: { 'x-aom-org': w.owner.id },
       body: { destinations: [mail] },
     });
     expect(res.status).toBe(403);

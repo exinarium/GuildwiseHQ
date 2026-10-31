@@ -83,7 +83,8 @@ describe('review dates through the API', () => {
 
 describe('a date that has come', () => {
   it('is due, filterable, still binding, and listed in the CEO brief; confirming removes the marker', async () => {
-    const e = await add({ title: 'Soon due', body: 'Soon due order, narwhal.', reviewDate: day(1) });
+    const dueDay = day(1); // read before the clock moves: day() is relative to the clock's current time
+    const e = await add({ title: 'Soon due', body: 'Soon due order, narwhal.', reviewDate: dueDay });
     const other = await add({ title: 'Never due', body: 'Never due order, okapi.', reviewDate: day(300) });
     w.t.clock.advance(2 * 86_400_000);
     const today = ledgerToday(w.t.clock.now());
@@ -102,7 +103,7 @@ describe('a date that has come', () => {
     const section = await reviewDueBriefSection(w.t.app.ctx.pool, orgId, today);
     expect(section).toContain('Ledger entries due for review');
     expect(section).toContain('Soon due');
-    expect(section).toContain(day(1));
+    expect(section).toContain(dueDay);
     expect(section).not.toContain('Never due');
     expect(await reviewDueBriefSection(w.t.app.ctx.pool, orgId, '2000-01-01')).toBeUndefined();
 

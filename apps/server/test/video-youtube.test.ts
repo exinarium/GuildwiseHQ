@@ -1705,7 +1705,12 @@ describe('scheduling: slots, render timing, destinations', () => {
     const b = await approved('article', 'long', 'rf-b');
     const c = await approved('article', 'long', 'rf-c');
     // a post inside its render lead (or 3 hours) is never moved: shrink the lead so these three are movable
-    await settings({ schedule: { long: { days: ['mon'], renderLeadHours: 1 } } });
+    // A post already on a slot of the new schedule stays (no compacting), so pick a weekday none of the three sits on:
+    // whichever weekday today is, the three consecutive slots then all move, in order.
+    const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const used = new Set([a, b, c].map((p) => new Date(p.slotAt as string).getUTCDay()));
+    const target = [1, 2, 3, 4, 5, 6, 0].find((d) => !used.has(d)) as number;
+    await settings({ schedule: { long: { days: [WEEKDAYS[target]], renderLeadHours: 1 } } });
     const before = await ok(api('GET', '/api/platform/video/status'));
     expect(before.offSchedule).toBeGreaterThanOrEqual(2);
     const out = await ok(api('POST', '/api/platform/video/reflow'));
@@ -1714,7 +1719,7 @@ describe('scheduling: slots, render timing, destinations', () => {
     const times = after.map((p) => Date.parse(p.slotAt));
     expect(times).toEqual([...times].sort((x, y) => x - y)); // the order is kept
     expect(new Set(times).size).toBe(3);
-    for (const p of after) expect(new Date(p.slotAt).getUTCDay()).toBe(1); // 10:00 SAST on a Monday
+    for (const p of after) expect(new Date(p.slotAt).getUTCDay()).toBe(target); // 10:00 SAST on that weekday
     expect((await ok(api('GET', '/api/platform/video/status'))).offSchedule).toBe(0);
     expect((await ok(api('POST', '/api/platform/video/reflow'))).moved).toBe(0); // nothing left to do
     // a rebuild from the events agrees

@@ -177,8 +177,14 @@ describe('business setup steps: each done check in isolation', () => {
   it('Knowledge: an uploaded file or a user-written document counts; a chat-drafted or archived one does not', async () => {
     await freshState();
     expect(await done('knowledge')).toBe(false);
-    const doc = (await owner('POST', '/api/documents', { kind: 'prd', title: 'Notes', projectId: w.projectId, content: 'x' }, 201))
-      .document;
+    const doc = (
+      await owner(
+        'POST',
+        '/api/documents',
+        { kind: 'prd', title: 'Notes', projectId: w.projectId, content: 'x' },
+        201,
+      )
+    ).document;
     // drafted by an agent from a chat
     await q(`UPDATE documents SET source_thread_ids = ARRAY[gen_random_uuid()] WHERE id=$1`, [doc.id]);
     expect(await done('knowledge')).toBe(false);
@@ -189,7 +195,10 @@ describe('business setup steps: each done check in isolation', () => {
     await q(`UPDATE documents SET status='archived' WHERE id=$1`, [doc.id]);
     expect(await done('knowledge')).toBe(false);
     // an uploaded file, even with a source thread, counts; an archived upload does not
-    await q(`UPDATE documents SET kind='file', source_thread_ids = ARRAY[gen_random_uuid()], status='draft' WHERE id=$1`, [doc.id]);
+    await q(
+      `UPDATE documents SET kind='file', source_thread_ids = ARRAY[gen_random_uuid()], status='draft' WHERE id=$1`,
+      [doc.id],
+    );
     expect(await done('knowledge')).toBe(true);
     await q(`UPDATE documents SET status='archived' WHERE id=$1`, [doc.id]);
     expect(await done('knowledge')).toBe(false);
@@ -209,11 +218,10 @@ describe('business setup steps: each done check in isolation', () => {
       return id;
     };
     const link = (vaultId: string, notes: number) =>
-      q(`INSERT INTO workstation_vaults (workstation_id, vault_id, local_path, note_count) VALUES ($1,$2,'/v',$3)`, [
-        w.workstationId,
-        vaultId,
-        notes,
-      ]);
+      q(
+        `INSERT INTO workstation_vaults (workstation_id, vault_id, local_path, note_count) VALUES ($1,$2,'/v',$3)`,
+        [w.workstationId, vaultId, notes],
+      );
     const personal = await vault('personal');
     await link(personal, 5);
     expect(await done('knowledge')).toBe(false);
@@ -237,16 +245,36 @@ describe('business setup steps: each done check in isolation', () => {
 
   it('Rules: a live standing order ticks it; a retired one or a decision does not', async () => {
     await freshState();
-    await q(`UPDATE ledger_entries SET retired_at = now() WHERE org_id=$1 AND scope='standing_order' AND retired_at IS NULL`, [orgId]);
+    await q(
+      `UPDATE ledger_entries SET retired_at = now() WHERE org_id=$1 AND scope='standing_order' AND retired_at IS NULL`,
+      [orgId],
+    );
     expect(await done('rules')).toBe(false);
-    await owner('POST', '/api/ledger', { scope: 'decision', title: 'Use pnpm', body: 'We use pnpm everywhere.' }, 201);
-    expect(await done('rules')).toBe(false);
-    const e = await owner('POST', '/api/ledger', { scope: 'standing_order', title: 'Greet clients', body: 'Always greet clients by name.' }, 201);
-    expect(await done('rules')).toBe(true);
+    // the link to the ledger is offered while the step is open
     expect(step(await get(), 'rules')).toMatchObject({ link: '/ledger' });
+    await owner(
+      'POST',
+      '/api/ledger',
+      { scope: 'decision', title: 'Use pnpm', body: 'We use pnpm everywhere.', projectId: w.projectId },
+      201,
+    );
+    expect(await done('rules')).toBe(false);
+    const e = await owner(
+      'POST',
+      '/api/ledger',
+      { scope: 'standing_order', title: 'Greet clients', body: 'Always greet clients by name.' },
+      201,
+    );
+    expect(await done('rules')).toBe(true);
+    expect(step(await get(), 'rules')).toMatchObject({ link: null });
     await owner('POST', `/api/ledger/${e.entry.id}/retire`, { reason: 'obsolete' });
     expect(await done('rules')).toBe(false);
-    const f = await owner('POST', '/api/ledger', { scope: 'standing_order', title: 'Sign off', body: 'Sign every mail.' }, 201);
+    const f = await owner(
+      'POST',
+      '/api/ledger',
+      { scope: 'standing_order', title: 'Sign off', body: 'Sign every mail.' },
+      201,
+    );
     await q(`UPDATE ledger_entries SET superseded_by = $2 WHERE id=$1`, [f.entry.id, e.entry.id]);
     expect(await done('rules')).toBe(false);
   });
@@ -277,7 +305,9 @@ describe('business setup steps: each done check in isolation', () => {
           kind: 'create_card',
           projectId: w.projectId,
           template: { title: 'Daily', fields: {} },
-          deliverOutput: { destinations: [{ kind: 'webhook', url: 'https://example.com/h', format: 'generic' }] },
+          deliverOutput: {
+            destinations: [{ kind: 'webhook', url: 'https://example.com/h', format: 'generic' }],
+          },
         },
       },
       201,
@@ -287,9 +317,15 @@ describe('business setup steps: each done check in isolation', () => {
     expect(await done('connections')).toBe(false);
 
     // a webhook or e-mail integration automation
-    await q(`UPDATE schedules SET enabled=true, action = jsonb_build_object('kind','integration','integration','email') WHERE id=$1`, [s.id]);
+    await q(
+      `UPDATE schedules SET enabled=true, action = jsonb_build_object('kind','integration','integration','email') WHERE id=$1`,
+      [s.id],
+    );
     expect(await done('connections')).toBe(true);
-    await q(`UPDATE schedules SET action = jsonb_build_object('kind','integration','integration','jira') WHERE id=$1`, [s.id]);
+    await q(
+      `UPDATE schedules SET action = jsonb_build_object('kind','integration','integration','jira') WHERE id=$1`,
+      [s.id],
+    );
     expect(await done('connections')).toBe(false);
     await q(`DELETE FROM schedules WHERE id=$1`, [s.id]);
   });

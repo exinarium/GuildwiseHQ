@@ -477,6 +477,9 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
 
   it('the scheduler starts no interest run for a project that is over budget, and a manual run is refused', async () => {
     await fresh();
+    // Pinned to mid-month: the next daily scan must fall in the same budget month as the spend, or a month
+    // boundary (the real date being the last day of a month) resets the budget and the run is legitimately started.
+    await setNow(new Date('2026-10-15T12:00:00Z'));
     const i = await createFeedInterest(w, { name: 'Pausable', scan: { cron: '0 7 * * *' } });
     await ok(
       w.t.req('PUT', `/api/interests/${i.id}/budget`, { cookie: w.owner.cookie, body: { monthly: 1 } }),
@@ -510,6 +513,8 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
     // override from the interest settings: the run is allowed again
     await ok(w.t.req('POST', `/api/interests/${i.id}/budget/override`, { cookie: w.owner.cookie }));
     expect((await owner('POST', `/api/interests/${i.id}/run`, {})).status).toBe(201);
+    // back to the real time, with the sessions' last-seen time moved forward again (they idle out otherwise)
+    await setNow(new Date());
     resetClock();
   });
 

@@ -1,3 +1,4 @@
+import { BUSINESS_ROLE_KEYS } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { registerBuiltins } from '../src/catalogue/boot.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
@@ -16,7 +17,9 @@ describe('catalogue boot', () => {
   it('registers built-in workflow and role versions exactly once', async () => {
     const before = await q('SELECT count(*)::int AS n FROM workflow_versions WHERE org_id IS NULL');
     expect(before[0]!.n).toBe(9); // code v1 to v6, code-bugfix, research, feed
-    expect((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id IS NULL'))[0]!.n).toBe(15);
+    expect((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id IS NULL'))[0]!.n).toBe(
+      15 + BUSINESS_ROLE_KEYS.length,
+    ); // 15 before the seven business roles (a95cb545)
     expect((await q('SELECT count(*)::int AS n FROM workflow_stages'))[0]!.n).toBeGreaterThan(10);
     const again = await registerBuiltins(t.app.ctx);
     expect(again).toEqual({ workflows: 0, roles: 0 });
