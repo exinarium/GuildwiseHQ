@@ -40,7 +40,7 @@ const input = (over: Partial<OwnerTurnInput> = {}): OwnerTurnInput => ({
 });
 
 describe('buildClaudeOwnerTurnCommand (the full-power profile)', () => {
-  it("is the owner's own Claude Code: his settings, no private config dir, no strict MCP, no disabled skills, auto mode", () => {
+  it("is the owner's own Claude Code: his settings, no private config dir, no strict MCP, no disabled skills, no prompts", () => {
     const c = buildClaudeOwnerTurnCommand(input(), cfg, {
       HOME: '/home/owner',
       CLAUDE_CONFIG_DIR: undefined,
@@ -49,7 +49,7 @@ describe('buildClaudeOwnerTurnCommand (the full-power profile)', () => {
     const a = c.args;
     expect(a.slice(0, 2)).toEqual(['-p', 'hello CEO']);
     expect(a[a.indexOf('--setting-sources') + 1]).toBe('user,project,local');
-    expect(a[a.indexOf('--permission-mode') + 1]).toBe('auto');
+    expect(a[a.indexOf('--permission-mode') + 1]).toBe('bypassPermissions');
     expect(a[a.indexOf('--permission-prompt-tool') + 1]).toBe('mcp__aom_permission__ask');
     expect(a.slice(a.indexOf('--allowedTools') + 1, a.indexOf('--allowedTools') + 4)).toEqual([
       'Bash(aom:*)',
@@ -118,7 +118,12 @@ describe('turn files', () => {
     });
     const floor = JSON.parse(readFileSync(join(dir, 'floor.json'), 'utf8'));
     expect(floor.permissions.deny).toEqual(
-      expect.arrayContaining(['Bash(systemctl * aom-runner*)', 'Bash(pkill *aom*)', 'Bash(kill * 4242)']),
+      expect.arrayContaining([
+        'Bash(systemctl *stop *aom-runner*)',
+        'Bash(systemctl *restart *aom-runner*)',
+        'Bash(pkill *aom*)',
+        'Bash(kill * 4242)',
+      ]),
     );
     expect(
       floor.permissions.deny.some((d: string) => d.startsWith('Read(//home/owner/.aom-runner/secrets')),
@@ -126,7 +131,7 @@ describe('turn files', () => {
     expect(floor.permissions.deny.some((d: string) => d.startsWith('Edit(//data/runner/config.json'))).toBe(
       true,
     );
-    expect(floor.hooks.PreToolUse[0].matcher).toBe('Edit|Write|NotebookEdit');
+    expect(floor.hooks.PreToolUse[0].matcher).toBe('Edit|Write|NotebookEdit|Bash');
     expect(floor.hooks.PreToolUse[0].hooks[0].command).toContain('guard');
     expect(existsSync(join(dir, 'guard.json'))).toBe(true);
   });

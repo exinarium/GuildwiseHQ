@@ -7,6 +7,7 @@ import type { Clock } from './clock.ts';
 import type { CloudServices } from './cloud/service.ts';
 import type { Config } from './config.ts';
 import type { Pool } from './db/pool.ts';
+import type { LogRing } from './diagnostics/log-ring.ts';
 import type { Dispatcher } from './dispatcher/dispatcher.ts';
 import type { Reaper } from './dispatcher/reaper.ts';
 import type { Notifier } from './eventstore/notifier.ts';
@@ -41,6 +42,8 @@ export interface Ctx {
   /** Registered extensions (billing, support, ... in a hosted build; empty for a self-hosted server). */
   ext: ExtensionHost;
   log: FastifyBaseLogger;
+  /** The server's recent log lines, for the CEO's full-power owner turn (`aom ceo diag server --kind logs`). */
+  logRing?: LogRing;
   /** Late-bound long-lived services (assigned by createApp before any request is served). */
   services: Services;
 }

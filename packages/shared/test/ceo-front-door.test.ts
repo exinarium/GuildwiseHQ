@@ -87,14 +87,14 @@ describe('policy by provenance (docs section 6.2)', () => {
       evaluatePolicy(DEFAULT_CEO_POLICY, 'card.reprioritise', { confidence: 0.2, origin: { kind: 'owner' } })
         .inline,
     ).toBe(true);
-    // a limit or missing evidence is not for the owner to approve inline
+    // a limit or missing evidence: the Owner approves inline too (full power, docs/investigations/ceo-full-power.md)
     expect(
       evaluatePolicy(DEFAULT_CEO_POLICY, 'card.reprioritise', {
         ...base,
         origin: { kind: 'owner' },
         limitReached: 'x',
       }).inline,
-    ).toBeUndefined();
+    ).toBe(true);
     // hard-never and `never` stay never in an owner turn
     expect(
       evaluatePolicy(DEFAULT_CEO_POLICY, 'billing', { ...base, origin: { kind: 'owner' } }).verdict,

@@ -18,6 +18,7 @@ import {
   isSessionRpc,
   JIRA_SKILL_PATH,
   type ReadableFolder,
+  type RunnerDiagnosticsResult,
   renderChatInstructions,
   renderDirectSystemPrompt,
   renderSessionTurnInstructions,
@@ -95,6 +96,10 @@ export interface ChatDeps {
   delegateUsage?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
+  /** `ceo.ownerPermissions`, read fresh at each turn (default: `bypass`). */
+  ceoOwnerPermissions?: () => 'bypass' | 'auto';
+  /** `aom runner status|logs` in a full-power owner turn: this workstation's status and logs, secrets masked. */
+  diagnostics?: (request: unknown) => Promise<RunnerDiagnosticsResult>;
   /** The repository clones on this workstation (the use-the-system hook nudges edits inside them). */
   guardClones?: () => GuardClone[];
   /** `aom runner restart` in an owner turn: the restart that waits for the reply to be acknowledged. */
@@ -504,6 +509,9 @@ export class ChatManager {
             markJobStarted(chat.turnDir);
           return this.deps.rpc(chatId, req.method, req.params);
         }
+        // `aom runner status|logs`: this workstation's status and logs for the Owner's own CEO chat (read-only, masked).
+        if (req.method === 'runner.status' || req.method === 'runner.logs')
+          return this.runnerDiagnostics(chat, req.method, req.params);
         // `aom runner restart`: only in a full-power owner turn; the restart waits for this turn's reply (design 5.6).
         if (req.method === 'runner.restart') return this.runnerRestart(chat, req.params);
         if (req.method === 'source.read') return this.readSource(chat, req.params);
@@ -546,6 +554,25 @@ export class ChatManager {
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },
     };
+  }
+
+  /** `aom runner status|logs [--kind ..] [--name ..] [--lines N] [--grep ..] [--since ..]`: the Owner's CEO chat only. */
+  private async runnerDiagnostics(
+    chat: ActiveChat,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    if (chat.fullPower !== 'owner' || !this.deps.diagnostics)
+      return {
+        ok: false,
+        error:
+          '`aom runner status|logs` is available in the CEO chat with the Owner (full power) only. ' +
+          "A standing-order turn, a wake and every other agent cannot read the runner's logs.",
+      };
+    const result = await this.deps.diagnostics(
+      method === 'runner.status' ? { ...params, kind: 'status' } : params,
+    );
+    return { ok: true, result };
   }
 
   private async runnerRestart(chat: ActiveChat, params: Record<string, unknown>): Promise<IpcRpcResponse> {
@@ -724,6 +751,9 @@ export class ChatManager {
         `runtime ${msg.agent.runtime} is not available for the CEO's full-power turns on this workstation`,
       );
     chat.fullPower = mode;
+    const permissionMode = this.deps.ceoOwnerPermissions?.() ?? 'bypass';
+    const effective = mode === 'owner' && permissionMode === 'bypass' ? 'bypass' : 'auto';
+    this.auditCommands(msg.chatId, [`# ${mode} turn, permission mode: ${effective}`]);
     const turnDir = turnDirOf(paths.root, msg.chatId);
     chat.turnDir = turnDir;
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
@@ -757,14 +787,21 @@ export class ChatManager {
       turnDir,
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       ...(msg.addDirs?.length ? { addDirs: msg.addDirs } : {}),
+      permissionMode,
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
-    await this.finishTurn(chat, { fullPower: true });
+    await this.finishTurn(chat, {
+      fullPower: true,
+      ...(mode === 'owner' ? { permissionMode: effective } : {}),
+    });
   }
 
   /** Reads a session to its end and reports it: `chat.done` (or `chat.error`). */
-  private async finishTurn(chat: ActiveChat, o: { fullPower: boolean; degraded?: string }): Promise<void> {
+  private async finishTurn(
+    chat: ActiveChat,
+    o: { fullPower: boolean; degraded?: string; permissionMode?: 'bypass' | 'auto' },
+  ): Promise<void> {
     const { msg } = chat;
     const session = chat.session;
     if (!session) return;
@@ -888,6 +925,7 @@ export class ChatManager {
             }
           : {}),
         ...(o.degraded ? { degraded: o.degraded } : {}),
+        ...(o.permissionMode ? { permissionMode: o.permissionMode } : {}),
         ...(usage.model ? { model: usage.model } : {}),
       }),
     );

@@ -286,6 +286,16 @@ export async function sweepIntegrations(ctx: Ctx): Promise<void> {
       RETURNING id`,
     [[...ENVELOPE_COMMANDS], now],
   );
+  // A diagnostics answer the CEO's call stopped waiting for holds log text: it goes after the request's two minutes.
+  await exec(
+    ctx.pool,
+    `UPDATE runner_commands SET result=NULL, payload='{}'::jsonb,
+            status=CASE WHEN status IN ('pending','sent') THEN 'failed' ELSE status END,
+            last_error=CASE WHEN status IN ('pending','sent') THEN 'expired' ELSE last_error END
+      WHERE type='runner.diagnostics' AND (result IS NOT NULL OR status IN ('pending','sent'))
+        AND created_at < $1`,
+    [new Date(now.getTime() - 5 * 60_000)],
+  );
   // An output delivery nobody collected holds message text: empty it (the run's own deadline records the failed try).
   await exec(
     ctx.pool,

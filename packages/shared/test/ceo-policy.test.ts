@@ -210,3 +210,48 @@ describe('a stored policy with the retired cooling-off field', () => {
     expect(parsed).toEqual(DEFAULT_CEO_POLICY);
   });
 });
+
+describe('full power: what the Owner present changes, and what no mode changes', () => {
+  const owner = { kind: 'owner' as const };
+  const order = { kind: 'order' as const, covers: [] as string[] };
+
+  it('a missing citation or a reached limit asks the Owner in the chat instead of refusing', () => {
+    for (const extra of [{ evidenceMissing: true }, { limitReached: '30 actions an hour' }]) {
+      const v = evaluatePolicy(P, 'card.move', { ...base, ...extra, origin: owner });
+      expect(v).toMatchObject({ verdict: 'recommend', inline: true });
+    }
+  });
+
+  it('a wake and an order turn keep the exact verdicts they had: a recommendation, never an inline card', () => {
+    for (const origin of [undefined, { kind: 'wake' as const }, order]) {
+      for (const extra of [{ evidenceMissing: true }, { limitReached: '30 actions an hour' }]) {
+        const v = evaluatePolicy(P, 'card.move', { ...base, ...extra, origin });
+        expect(v.verdict).toBe('recommend');
+        expect(v.inline).toBeUndefined();
+        expect(v.cause).toBe(extra.evidenceMissing ? 'evidence' : 'limit');
+      }
+    }
+  });
+
+  it('what the owner set to never, hard-never matters and unknown actions stay refused in every mode, with a reason that says where to go', () => {
+    const never = clonePolicy(P);
+    never.classes['card.move'] = { mode: 'never' };
+    for (const origin of [owner, order, { kind: 'wake' as const }, undefined]) {
+      const v = evaluatePolicy(never, 'card.move', { ...base, origin });
+      expect(v).toMatchObject({ verdict: 'deny', cause: 'never' });
+      expect(v.reason).toContain('Settings, CEO, Policy');
+      const hard = evaluatePolicy(P, 'billing', { ...base, origin });
+      expect(hard).toMatchObject({ verdict: 'deny', cause: 'never' });
+      expect(hard.reason).toContain('owner-only action in the Guildwise UI');
+      expect(evaluatePolicy(P, 'no.such.class', { ...base, origin }).reason).toContain('Tell the owner');
+    }
+  });
+
+  it('the owner-reserved and low-confidence cases are unchanged: inline for the Owner, plain recommendations elsewhere', () => {
+    const reserved = { ...base, reservedKey: 'finalize_merge' as const };
+    expect(evaluatePolicy(P, 'card.move', { ...reserved, origin: owner })).toMatchObject({ inline: true });
+    expect(evaluatePolicy(P, 'card.move', reserved).inline).toBeUndefined();
+    expect(evaluatePolicy(P, 'card.move', { confidence: 0.1, origin: owner }).inline).toBe(true);
+    expect(evaluatePolicy(P, 'card.move', { confidence: 0.1 }).inline).toBeUndefined();
+  });
+});

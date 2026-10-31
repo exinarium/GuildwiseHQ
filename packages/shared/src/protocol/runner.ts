@@ -18,6 +18,7 @@ import {
 import { CapabilityMetaSchema } from '../capabilities/parse.ts';
 import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
+import { RunnerDiagnosticsRequestSchema } from '../ceo/diagnostics.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
 import { CeoOrderSpecSchema, ToolCountsSchema } from '../ceo/turns.ts';
 import {
@@ -94,12 +95,12 @@ import {
   ProviderKeySetPayloadSchema,
   ReportedProviderSchema,
 } from '../models/direct.ts';
-import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
-import { RELEASE_TAG_RE } from '../release/tags.ts';
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
+import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
+import { RELEASE_TAG_RE } from '../release/tags.ts';
 import {
   CommitAsSchema,
   ComponentRuleSchema,
@@ -1127,6 +1128,7 @@ export const RunnerCommandNameSchema = z.enum([
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
+  'runner.diagnostics',
   'graph.index',
   'graph.update',
   'graph.org',
@@ -1240,6 +1242,8 @@ export const CommandPayloadSchemas = {
   'runner.pin': z.object({ version: z.string().max(40).nullable() }),
   /** "Check for updates" on the Workstations page: run the updater's check now instead of at the next timer. */
   'runner.update.check': z.object({}),
+  /** The CEO's full-power owner turn reads this runner's logs and status (read-only, masked; runner 0.1.65+). */
+  'runner.diagnostics': RunnerDiagnosticsRequestSchema,
   /** Project graphs: index a repository into the project vault / bring the graph up to a merge commit (docs/design/project-graphs.md). */
   'graph.index': GraphIndexPayloadSchema,
   'graph.update': GraphIndexPayloadSchema,
@@ -1776,6 +1780,8 @@ export const ChatDoneSchema = msg('chat.done', {
   degraded: z.string().max(40).optional(),
   /** Order turns: the Bash commands the session ran (redacted), for the audit. */
   commands: z.array(z.string().max(500)).max(200).optional(),
+  /** CEO owner turns: how the session was permitted (`bypass`: no prompts, the deny floor still applies; `auto`: the classifier plus the desk relay). */
+  permissionMode: z.enum(['bypass', 'auto']).optional(),
   /** The model that answered, when the runtime says. */
   model: z.string().max(120).optional(),
   /** Additive: the full ordered turn (text, tool calls, thinking). `messageText` stays the final answer. */

@@ -1,10 +1,25 @@
-import { BacklogFilter, CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderCeoData, streamId } from '@aom/shared';
+import {
+  BacklogFilter,
+  CEO_ROLE_KEY,
+  type CeoRpc,
+  CeoRpcSchema,
+  type RunnerDiagnosticsRequest,
+  renderCeoData,
+  streamId,
+} from '@aom/shared';
 import { agentActor, orgScope, runnerActor, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
 import { backlogLine, findBacklogItems } from './actions5.ts';
 import { recordCorrection } from './corrections.ts';
+import {
+  collectWorkstationDiagnostics,
+  fullPowerRefusal,
+  serverLogs,
+  serverStatus,
+  startWorkstationDiagnostics,
+} from './diagnostics.ts';
 import {
   type CallOrigin,
   defaultKey,
@@ -305,6 +320,40 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
           [orgId, `restart:${shift.workstation_id}`, rpc.reason ?? '', ctx.clock.now()],
         );
         return [true, { status: 'executed', message: 'Restart scheduled after this reply.' }];
+      }
+      case 'diag': {
+        // Full power only: the owner's own turn, on the Owner's own workstation with the opt-in on. Read-only and masked.
+        if (kind !== 'owner' || !turn)
+          return [
+            false,
+            undefined,
+            "diagnostics belong to the owner's full-power chat (not a wake or a standing-order turn)",
+          ];
+        const refusal = await fullPowerRefusal(ctx, agent, orgId);
+        if (refusal) return [false, undefined, refusal];
+        ctx.log.info(
+          { orgId, turnId: turn.id, target: rpc.target, kind: rpc.kind, ref: rpc.ref, grep: !!rpc.grep },
+          'ceo diagnostics read in a full-power turn',
+        );
+        if (rpc.target === 'server') {
+          if (rpc.kind === 'logs')
+            return [true, { text: serverLogs(ctx, { lines: rpc.lines, level: rpc.level, grep: rpc.grep }) }];
+          if (rpc.kind === 'status' || rpc.kind === '')
+            return [true, { text: await serverStatus(ctx, orgId) }];
+          return [false, undefined, 'server diagnostics: --kind status or logs'];
+        }
+        if (rpc.requestId) return [true, await collectWorkstationDiagnostics(ctx, orgId, rpc.requestId)];
+        if (!rpc.ref) return [false, undefined, 'give the workstation: aom ceo diag workstation <name>'];
+        return [
+          true,
+          await startWorkstationDiagnostics(ctx, orgId, rpc.ref, {
+            kind: (rpc.kind || 'runner') as RunnerDiagnosticsRequest['kind'],
+            lines: rpc.lines,
+            ...(rpc.grep ? { grep: rpc.grep } : {}),
+            ...(rpc.name ? { name: rpc.name } : {}),
+            ...(rpc.since ? { since: rpc.since } : {}),
+          }),
+        ];
       }
       case 'snapshot':
         return [true, { text: await buildSnapshot(ctx, orgId, rpc.section) }];

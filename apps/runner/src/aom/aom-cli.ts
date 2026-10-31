@@ -798,7 +798,7 @@ async function investigationReport(
 const CEO_CONTROL_FLAGS = new Set(['reason', 'confidence', 'evidence', 'dry-run', 'key', 'json']);
 const camel = (k: string): string => k.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase());
 
-const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | route "<request>" | route --drafts | costs [--days n]
+const CEO_USAGE = `usage: aom ceo diag server|workstation <name> ... (diagnostics) | snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | route "<request>" | route --drafts | costs [--days n]
        aom ceo act <action> [--<param> <value>]... --reason "<why>" --confidence 0.0-1.0 [--evidence ledger:<id>|memory:<id>|signal:<id>|hr:<id>]... [--dry-run] [--key <k>]
        aom ceo recommend --item <desk id> [--option <o1>|--text "..."] --reason "..." --confidence 0.0-1.0  |  --action <name> [--<param> <value>]... --reason "..." --confidence ...
        aom ceo notify --kind needs_you|urgent|task_done --text "..." [--title "..."] [--task <id>] [--item <id>]
@@ -815,6 +815,8 @@ const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|
        aom ceo backlog add|list|update|send ...   (the project backlog: wanted work outside development; send hands items to the BA)
        aom ceo dir add <path>   (an extra working directory of this conversation)
        aom runner restart [--reason "..."]   (restarts the runner after your reply; never use systemctl or kill)
+       aom runner status | aom runner logs [--kind runner|service|shifts|env|audit] [--name <file>] [--lines N] [--grep <text>] [--since "-3 hours"]   (this workstation's status and logs, secrets masked; \`--kind shifts\` lists shift and chat logs, \`--name\` reads one)
+       aom ceo diag server [--kind status|logs] [--lines N] [--grep <text>] [--level info|warn|error]  |  aom ceo diag workstation <name> [--kind status|runner|service|shifts|env|audit] [--name <file>] [--lines N] [--grep <text>]   (diagnostics, read-only, secrets masked)
        aom ceo done --summary "..."   (a wake, terminal)   |   aom ceo report --summary-file <md>   (the daily review, terminal)`;
 
 function ceoPrint(ctx: AomContext, p: Parsed, r: unknown): void {
@@ -1319,6 +1321,42 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       }
       throw new UsageError(CEO_USAGE);
     }
+    case 'diag': {
+      // diagnostics of the server or of one of the owner's workstations (owner turns only; read-only, secrets masked)
+      const target = args[0];
+      if (target !== 'server' && (target !== 'workstation' || !args[1]))
+        throw new UsageError(
+          'usage: aom ceo diag server [--kind status|logs] [--lines N] [--grep <text>] [--level info|warn|error] | aom ceo diag workstation <name> [--kind status|runner|service|shifts|env|audit] [--name <file>] [--lines N] [--grep <text>] [--since "-3 hours"]',
+        );
+      let r = (await rpc(ctx, 'ceo', {
+        op: 'diag',
+        target,
+        ...(target === 'workstation' ? { ref: args.slice(1).join(' ') } : {}),
+        ...(one(p, 'kind') ? { kind: one(p, 'kind') } : {}),
+        ...(one(p, 'name') ? { name: one(p, 'name') } : {}),
+        ...(one(p, 'grep') ? { grep: one(p, 'grep') } : {}),
+        ...(one(p, 'since') ? { since: one(p, 'since') } : {}),
+        ...(one(p, 'level') ? { level: one(p, 'level') } : {}),
+        ...(one(p, 'lines') ? { lines: Number(one(p, 'lines')) } : {}),
+      })) as { status?: string; requestId?: string; text?: string };
+      // A workstation's runner answers in seconds: ask for the answer until it is there (about 40 seconds at most).
+      const now = ctx.now ?? Date.now;
+      const deadline = now() + 40_000;
+      while (r.status === 'pending' && r.requestId && now() < deadline) {
+        await sleepOf(ctx)(1500);
+        r = (await rpc(ctx, 'ceo', {
+          op: 'diag',
+          target: 'workstation',
+          requestId: r.requestId,
+        })) as typeof r;
+      }
+      if (r.status === 'pending')
+        r = {
+          text: `the workstation has not answered in 40 seconds (request ${r.requestId}); try again, or ask for fewer lines`,
+        };
+      ceoPrint(ctx, p, r);
+      return 0;
+    }
     case 'dir': {
       if (args[0] !== 'add' || !args[1]) throw new UsageError('usage: aom ceo dir add <path>');
       ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'dir', sub: 'add', path: args.slice(1).join(' ') }));
@@ -1437,7 +1475,25 @@ const VERBS: Record<string, Verb> = {
   },
   /** `aom runner restart [--reason ".."]`: restarts the runner after this reply (owner turns and DevOps shifts only). */
   runner: async (ctx, p) => {
-    if (p.positionals[0] !== 'restart') throw new UsageError('usage: aom runner restart [--reason "<why>"]');
+    const sub = p.positionals[0];
+    if (sub === 'status' || sub === 'logs') {
+      const lines = one(p, 'lines');
+      const r = (await rpc(ctx, `runner.${sub}`, {
+        ...(one(p, 'kind') ? { kind: one(p, 'kind') } : {}),
+        ...(one(p, 'name') ? { name: one(p, 'name') } : {}),
+        ...(one(p, 'grep') ? { grep: one(p, 'grep') } : {}),
+        ...(one(p, 'since') ? { since: one(p, 'since') } : {}),
+        ...(lines !== undefined ? { lines: Number(lines) } : {}),
+      })) as { text?: string; truncated?: boolean; runnerVersion?: string; kind?: string };
+      ctx.io.out(
+        `# runner ${r?.runnerVersion ?? '?'}, ${r?.kind ?? sub}${r?.truncated ? ' (cut: the end is shown)' : ''}\n${r?.text ?? ''}\n`,
+      );
+      return 0;
+    }
+    if (sub !== 'restart')
+      throw new UsageError(
+        'usage: aom runner restart [--reason "<why>"] | status | logs [--kind runner|service|shifts|env|audit] [--name <file>] [--lines N] [--grep <text>] [--since "-3 hours"]',
+      );
     const r = (await rpc(ctx, 'runner.restart', one(p, 'reason') ? { reason: one(p, 'reason') } : {})) as {
       message?: string;
     };
@@ -2791,6 +2847,7 @@ export const USAGE = `usage: aom <verb> [options]
   deploy probe --local | --ssh-hosts | --target <name> [--dir D] [--compose-file F] [--url U]   DevOps, in a scan: fixed read-only look at Docker here or a server (names and shapes only)
   setup propose --area run|deploy --file <proposal.json>   DevOps, in a "Scan with DevOps" request: submit the proposal (read-only scan; the user reviews it)
   runner restart [--reason "<why>"]          CEO owner turns and DevOps shifts: restart the runner after your reply
+  runner status | logs [--kind ..] [--name ..] [--lines N] [--grep ..]   CEO owner turns: this workstation's status and logs, secrets masked
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;
 

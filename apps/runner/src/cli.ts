@@ -1190,7 +1190,7 @@ function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?:
 }
 
 /** `aom-runner ceo full-power on|off|status`: the local switch for the CEO's full-power turns (the Owner's own Claude Code). */
-function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string }): void {
+function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string; strict?: boolean }): void {
   if (value !== 'on' && value !== 'off' && value !== 'status')
     throw new Error('use: guildwise-runner ceo full-power on|off|status');
   const { root, entries } = selectPairings(opts);
@@ -1198,12 +1198,27 @@ function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string 
     const file = entryConfigPath(root, e);
     const config = loadConfig(file);
     if (value !== 'status')
-      saveConfig(file, { ...config, ceo: { ...config.ceo, fullPower: value === 'on' } });
-    const now = value === 'status' ? config.ceo.fullPower : value === 'on';
+      saveConfig(file, {
+        ...config,
+        ceo: {
+          ...config.ceo,
+          fullPower: value === 'on',
+          // `on` sets the permission style: the default (no prompts, like your terminal), or `--strict` (classifier + desk questions)
+          ...(value === 'on'
+            ? { ownerPermissions: opts.strict ? ('auto' as const) : ('bypass' as const) }
+            : {}),
+        },
+      });
+    const after = value === 'status' ? config : loadConfig(file);
+    const now = after.ceo.fullPower;
     console.log(
       `${entries.length > 1 ? `${e.id}: ` : ''}CEO full power is ${now ? 'ON' : 'off'}${
         now
-          ? ': the CEO chat with the Owner runs as your own Claude Code (your ~/.claude, your home directory, no sandbox).'
+          ? `: the CEO chat with the Owner runs as your own Claude Code (your ~/.claude, your home directory, no sandbox), ${
+              after.ceo.ownerPermissions === 'bypass'
+                ? 'with no permission prompts (the safety floor, the audit and the masking of secrets still apply; `--strict` brings back the classifier and the desk questions)'
+                : 'in strict mode (Claude Code auto mode plus desk questions for what it lacks)'
+            }.`
           : '.'
       }`,
     );
@@ -1410,6 +1425,10 @@ export function buildProgram(): Command {
     .command('full-power <on|off|status>')
     .description(
       "let the CEO's chat with the Owner run as your own Claude Code on this machine (on), refuse it (off), or show the state",
+    )
+    .option(
+      '--strict',
+      'with `on`: keep the permission classifier and the desk questions instead of running without prompts',
     )
     .option(...pairingOpt)
     .option(...dataDirOpt)
