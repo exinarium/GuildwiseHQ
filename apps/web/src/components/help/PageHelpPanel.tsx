@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { helpBase, helpPath } from '../../help/articles.ts';
 import { pageHelpFor } from '../../help/pageHelp.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { useTour } from '../tour/TourContext.tsx';
 import { Button } from '../ui.tsx';
 import { PageVideo } from './SectionVideo.tsx';
@@ -14,6 +15,8 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
   const tour = useTour();
   const base = helpBase(pathname);
   const help = found?.help;
+  const terms = useOrgTerms();
+  const rw = terms.reword;
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
@@ -34,7 +37,7 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
                 What is on this page
               </p>
               <RadixDialog.Title className="mt-0.5 text-lg font-semibold text-fg">
-                {help?.title ?? 'This page'}
+                {rw(help?.title ?? 'This page')}
               </RadixDialog.Title>
             </div>
             <RadixDialog.Close
@@ -49,7 +52,7 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
             {help ? (
               <>
                 <p id="page-help-intro" className="text-base text-muted">
-                  {help.intro}
+                  {rw(help.intro)}
                 </p>
                 <h3 className="mt-5 mb-2 text-xs font-semibold tracking-wide text-subtle uppercase">
                   Controls on this page
@@ -57,8 +60,8 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
                 <dl className="flex flex-col divide-y divide-line" data-testid="page-help-controls">
                   {help.controls.map((c) => (
                     <div key={c.name} className="py-2.5 first:pt-0">
-                      <dt className="text-sm font-semibold text-fg">{c.name}</dt>
-                      <dd className="mt-0.5 text-sm text-muted">{c.text}</dd>
+                      <dt className="text-sm font-semibold text-fg">{rw(c.name)}</dt>
+                      <dd className="mt-0.5 text-sm text-muted">{rw(c.text)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -68,8 +71,8 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
                       Tips
                     </h3>
                     <ul className="ml-4 flex list-disc flex-col gap-1.5 text-sm text-muted marker:text-subtle">
-                      {help.tips.map((t) => (
-                        <li key={t}>{t}</li>
+                      {help.tips.map((tip) => (
+                        <li key={tip}>{rw(tip)}</li>
                       ))}
                     </ul>
                   </>

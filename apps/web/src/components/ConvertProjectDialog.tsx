@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts';
 import { useBusinessMode } from '../lib/orgMode.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
 
@@ -52,6 +53,7 @@ export function ConvertProjectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useOrgTerms();
   const workflows = useWorkflows(project.id);
   const business = useBusinessMode();
   const options = useMemo(
@@ -240,7 +242,7 @@ export function ConvertProjectDialog({
                     <span className="block text-sm text-muted">
                       {workflowUsesRepos(o)
                         ? 'Works in repositories: builders, reviewers and testers.'
-                        : 'Works in the project vault: no repository needed.'}
+                        : t.reword('Works in the project vault: no repository needed.')}
                     </span>
                   </span>
                 </label>
@@ -474,8 +476,8 @@ export function ConvertProjectDialog({
           </h3>
           {(preview.data?.publishedNotes ?? 0) > 0 && (
             <p className="text-sm text-muted" data-testid="convert-handover">
-              {plural(preview.data?.publishedNotes ?? 0, 'research note')} will be listed in PROJECT.md of the
-              project vault, so every agent reads them.
+              {plural(preview.data?.publishedNotes ?? 0, 'research note')}{' '}
+              {t.reword('will be listed in PROJECT.md of the project vault, so every agent reads them.')}
             </p>
           )}
           <TextInput

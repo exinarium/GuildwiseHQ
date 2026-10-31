@@ -5,6 +5,7 @@ import {
   OWNER_RESERVED_KEYS,
   renderCeoData,
   streamId,
+  rewordForOrg,
 } from '@aom/shared';
 import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -293,6 +294,7 @@ export async function escalateOrder(
   await withAppendTx(ctx.pool, async (tx) => {
     const e = await lockOrder(tx, entryId);
     const ownerId = await orgOwnerId(tx, e.org_id);
+    const orgMode = await one(tx, 'SELECT mode FROM organizations WHERE id=$1', [e.org_id]);
     const events: AppendInput[] = [
       {
         streamId: streamId.ledger(entryId),
@@ -312,8 +314,8 @@ export async function escalateOrder(
           deskItemId,
           kind: 'alert',
           subkind: 'order_escalation',
-          title: `Take over this standing order as your own? ${String(e.title).slice(0, 120)}`,
-          body: `${(await one(tx, 'SELECT display_name FROM users WHERE id=$1', [user.id]))?.display_name ?? 'An Admin'} asks you to take over the standing order "${e.title}". Only you can let the CEO enforce an order with full power. Open the Ledger, read the order, and mark it as yours.${note ? `\n\nTheir note: ${note}` : ''}`,
+          title: `${rewordForOrg('Take over this standing order as your own?', orgMode?.mode)} ${String(e.title).slice(0, 120)}`,
+          body: `${(await one(tx, 'SELECT display_name FROM users WHERE id=$1', [user.id]))?.display_name ?? 'An Admin'} ${rewordForOrg('asks you to take over the standing order', orgMode?.mode)} "${e.title}". ${rewordForOrg('Only you can let the CEO enforce an order with full power. Open the Ledger, read the order, and mark it as yours.', orgMode?.mode)}${note ? `\n\nTheir note: ${note}` : ''}`,
           options: [],
           blocking: false,
           pinned: false,

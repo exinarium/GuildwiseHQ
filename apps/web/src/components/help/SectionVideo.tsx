@@ -1,5 +1,6 @@
 import { Clapperboard } from 'lucide-react';
 import { useState } from 'react';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { publishedVideo, videoForPath, videoInfoUrl } from '../../lib/videos.ts';
 import { Button } from '../ui.tsx';
 import { useVideoInfo, VideoPlayer } from './GettingStartedVideo.tsx';
@@ -10,19 +11,20 @@ import { useVideoInfo, VideoPlayer } from './GettingStartedVideo.tsx';
  * a video that has not been recorded is never advertised, not even as "coming soon".
  */
 export function SectionVideo({ slug, className }: { slug: string; className?: string }) {
+  const t = useOrgTerms();
   const entry = publishedVideo(slug);
   const info = useVideoInfo(entry ? videoInfoUrl(slug) : null);
   const [broken, setBroken] = useState(false);
   if (!entry || info === null || info === 'none' || broken) return null;
   return (
     <section
-      aria-label={`Video: ${entry.title}`}
+      aria-label={`Video: ${t.reword(entry.title)}`}
       data-testid={`section-video-${slug}`}
       className={className ?? 'rounded-card border border-line bg-surface p-4 sm:p-5'}
     >
       <h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-fg">
         <Clapperboard aria-hidden="true" className="size-4 text-brand-text" />
-        {entry.title}
+        {t.reword(entry.title)}
       </h3>
       <VideoPlayer info={info} slug={slug} onBroken={() => setBroken(true)} />
     </section>

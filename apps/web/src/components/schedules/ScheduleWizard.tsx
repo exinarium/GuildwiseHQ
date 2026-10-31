@@ -49,6 +49,7 @@ import {
   type WizardState,
   wizardIsOrgLevel,
 } from '../../lib/schedules.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { CardFormFields } from '../CardFormFields.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
@@ -938,6 +939,7 @@ function ActionFields({
   isManager: boolean;
   mockUi: boolean;
 }): ReactNode {
+  const t = useOrgTerms();
   const lockedProject = editing && (s.tile === 'create_card' || s.tile === 'regression_run');
   const ws = (
     <Select
@@ -1066,7 +1068,9 @@ function ActionFields({
         <div className="flex flex-col gap-4">
           <TextArea
             label="Instructions for the BA"
-            hint="The BA only reads: the ledger, the desk, the vault and the repositories. Use {date} and {week} if you like."
+            hint={t.reword(
+              'The BA only reads: the ledger, the desk, the vault and the repositories. Use {date} and {week} if you like.',
+            )}
             rows={5}
             value={s.prompt}
             onChange={(e) => set({ prompt: e.target.value })}

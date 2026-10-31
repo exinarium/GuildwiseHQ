@@ -3,8 +3,10 @@ import { CheckCircle2, CircleSlash, Lightbulb } from 'lucide-react';
 import { useState } from 'react';
 import { type CeoActionFilters, ceoActionsCsvUrl, useCeoActions } from '../../api/queries/ceo.ts';
 import { useCeoOrderTurns } from '../../api/queries/ceo-chat.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { getActiveOrgId } from '../../lib/activeOrg.ts';
 import { classLabel, MODE_LABEL, pct } from '../../lib/ceo.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ErrorBox, Panel, Select, Spinner, TextInput } from '../ui.tsx';
 import { CorrectButton } from './CorrectDialog.tsx';
@@ -33,6 +35,7 @@ function ModeBadge({ a }: { a: CeoActionDto }) {
 }
 
 function ActionRow({ a, owner }: { a: CeoActionDto; owner: boolean }) {
+  const { reword } = useOrgTerms();
   return (
     <tr className="align-top" data-testid="ceo-action" data-mode={a.mode} data-status={a.status}>
       <td className="px-3 py-2 text-xs whitespace-nowrap text-muted">{formatDateTime(a.at)}</td>
@@ -86,7 +89,7 @@ function ActionRow({ a, owner }: { a: CeoActionDto; owner: boolean }) {
         ) : null}
         {a.order && (
           <span className="block text-xs text-subtle" data-testid="ceo-action-order">
-            Standing order: {a.order.title ?? a.order.entryId.slice(0, 8)}
+            <Reword>{'Standing order:'}</Reword> {a.order.title ?? a.order.entryId.slice(0, 8)}
           </span>
         )}
         {a.correction ? (
@@ -293,11 +296,12 @@ export function ActivityTab({ owner }: { owner: boolean }) {
 
 /** Turns the CEO ran for an Owner-authorized standing order: what it did, the commands, and "I'd rather you didn't". */
 function OrderTurns({ enabled }: { enabled: boolean }) {
+  const { reword } = useOrgTerms();
   const q = useCeoOrderTurns(enabled);
   const turns = q.data?.turns ?? [];
   if (!enabled || turns.length === 0) return null;
   return (
-    <Panel title="Standing order turns">
+    <Panel title={reword('Standing order turns')}>
       <ul className="divide-y divide-line" data-testid="ceo-order-turns">
         {turns.map((t) => (
           <li key={t.turnId} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
@@ -326,7 +330,7 @@ function OrderTurns({ enabled }: { enabled: boolean }) {
               <CorrectButton
                 label="I'd rather you didn't"
                 testId={`correct-order-${t.turnId}`}
-                target={{ orderTurnId: t.turnId, label: `Standing order: ${t.orderTitle}` }}
+                target={{ orderTurnId: t.turnId, label: `${reword('Standing order:')} ${t.orderTitle}` }}
               />
             )}
           </li>

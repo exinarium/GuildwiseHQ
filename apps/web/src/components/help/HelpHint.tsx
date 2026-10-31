@@ -2,6 +2,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { CircleHelp } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { helpBase, helpPath } from '../../help/articles.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 
 /**
  * A small "?" next to a complex control: a sentence of explanation and a link to the matching help article. The link
@@ -20,10 +21,11 @@ export function HelpHint({
   children: string;
 }) {
   const base = helpBase(useLocation().pathname);
+  const t = useOrgTerms();
   return (
     <Popover.Root>
       <Popover.Trigger
-        aria-label={label}
+        aria-label={t.reword(label)}
         data-testid="help-hint"
         data-article={article}
         className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-subtle hover:bg-sunken hover:text-brand-text data-[state=open]:bg-brand-soft data-[state=open]:text-brand-soft-fg [@media(pointer:coarse)]:size-8"
@@ -38,7 +40,7 @@ export function HelpHint({
           collisionPadding={12}
           className="z-90 w-[min(20rem,calc(100vw-1.5rem))] animate-fade rounded-card border border-line bg-surface p-3.5 text-sm text-fg shadow-lg"
         >
-          <p className="text-muted">{children}</p>
+          <p className="text-muted">{t.reword(children)}</p>
           <Link
             to={helpPath(article, base)}
             target="_blank"

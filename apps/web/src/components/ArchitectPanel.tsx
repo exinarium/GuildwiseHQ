@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAgents } from '../api/queries/agents.ts';
 import { useSetArchitectSettings } from '../api/queries/projects.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { Badge, Button, Callout, ErrorBox, Panel, Select, TextInput, useToast } from './ui.tsx';
 
 type Project = ProjectDetailResponse['project'];
@@ -21,6 +22,7 @@ export function ArchitectPanel({
   project: Project;
   canChange: boolean;
 }) {
+  const t = useOrgTerms();
   const set = useSetArchitectSettings(projectId);
   const toast = useToast();
   const agents = useAgents();
@@ -110,11 +112,11 @@ export function ArchitectPanel({
           >
             <option value="repo">The repository (merged with the card)</option>
             <option value="vault" disabled={noVault}>
-              The knowledge vault{noVault ? ' (this project has no vault)' : ''}
+              {t.reword(`The knowledge vault${noVault ? ' (this project has no vault)' : ''}`)}
             </option>
           </Select>
           <TextInput
-            label={location === 'repo' ? 'Folder in the repository' : 'Folder in the project vault'}
+            label={location === 'repo' ? 'Folder in the repository' : t.reword('Folder in the project vault')}
             value={path}
             disabled={!canChange}
             error={pathError}
@@ -122,7 +124,9 @@ export function ArchitectPanel({
             onChange={(e) => setPath(e.target.value)}
             hint={
               noVault
-                ? 'This project has no knowledge vault, so reports go in the repository until a vault is registered. A report is named <card ref>-<title>.md.'
+                ? t.reword(
+                    'This project has no knowledge vault, so reports go in the repository until a vault is registered. A report is named <card ref>-<title>.md.',
+                  )
                 : 'A report is named <card ref>-<title>.md. A card can name its own report path.'
             }
           />

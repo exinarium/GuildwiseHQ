@@ -17,6 +17,7 @@ import {
   randomAvatarSeed,
   streamId,
   type WorkQuality,
+  rewordForOrg,
 } from '@aom/shared';
 import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -229,6 +230,7 @@ export async function applyRecommendation(
           `SELECT id FROM desk_items WHERE org_id=$1 AND subkind=$2 AND status='open' AND lower(body)=lower($3)`,
           [orgId, HR_DESK_SUBKIND.standingOrder, action.text],
         );
+        const orgMode = await one(tx, 'SELECT mode FROM organizations WHERE id=$1', [orgId]);
         const deskItemId = open?.id ?? randomUUID();
         const effect = 'Proposed a standing order on the desk';
         const events: AppendInput[] = [];
@@ -241,7 +243,7 @@ export async function applyRecommendation(
                 deskItemId,
                 kind: 'approval',
                 subkind: HR_DESK_SUBKIND.standingOrder,
-                title: `Add a standing order: ${action.topic ?? rec.title}`,
+                title: `${rewordForOrg('Add a standing order:', orgMode?.mode)} ${action.topic ?? rec.title}`,
                 body: action.text,
                 blocking: false,
                 pinned: false,

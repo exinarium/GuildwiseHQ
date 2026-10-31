@@ -5,6 +5,7 @@ import { useMe } from '../../api/queries/auth.ts';
 import { useSetTour } from '../../api/queries/tour.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { helpBase, helpPath } from '../../help/articles.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { type TourStep, tourRoleOf, tourSteps, WORKSTATION_OFFER } from '../../lib/tour.ts';
 import { videoForNav } from '../../lib/videos.ts';
 import { Button } from '../ui.tsx';
@@ -113,6 +114,7 @@ function Card({
   onRead: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useOrgTerms();
   const base = helpBase(useLocation().pathname);
   const [size, setSize] = useState({ w: CARD_W, h: 220 });
   const [videoShown, setVideoShown] = useState(false);
@@ -182,11 +184,11 @@ function Card({
       </div>
       <div aria-live="polite" className="flex flex-col gap-1.5">
         <RadixDialog.Title id="tour-title" data-testid="tour-title" className="text-lg font-semibold text-fg">
-          {step.title}
+          {step.id === 'vaults' ? t.vaultsPage : t.reword(step.title)}
         </RadixDialog.Title>
         <RadixDialog.Description id="tour-body" className="text-base text-muted">
-          {step.body}
-          {last && offer && ` ${WORKSTATION_OFFER.text}`}
+          {t.reword(step.body)}
+          {last && offer && ` ${t.reword(WORKSTATION_OFFER.text)}`}
         </RadixDialog.Description>
         {step.video && <TourVideo onShown={setVideoShown} />}
         {!step.video && sectionVideo && (

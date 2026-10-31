@@ -39,6 +39,7 @@ import {
   TextInput,
 } from '../components/ui.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { ageLabel } from '../lib/time.ts';
 
 const KIND_LABEL: Record<DocumentKind, string> = {
@@ -85,6 +86,7 @@ function UploadDialog({
   onOpenChange: (o: boolean) => void;
   tagSuggestions: string[];
 }) {
+  const t = useOrgTerms();
   const upload = useUploadDocument();
   const projects = useProjects();
   const fileId = useId();
@@ -134,7 +136,7 @@ function UploadDialog({
         onOpenChange(o);
       }}
       title="Upload a document"
-      description="The file is saved with your documents and copied to your vault."
+      description={t.reword('The file is saved with your documents and copied to your vault.')}
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -193,6 +195,7 @@ function UploadDialog({
 
 /** Briefs, PRDs, minutes, session logs and uploaded files of the organization. */
 export function DocumentsList() {
+  const t = useOrgTerms();
   const [kind, setKind] = useState<DocumentKind | null>(null);
   const [status, setStatus] = useState<DocumentStatus | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -225,7 +228,9 @@ export function DocumentsList() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Documents"
-        sub="Briefs and PRDs from your discovery sessions, and files you upload. Approved ones are copied to your vault."
+        sub={t.reword(
+          'Briefs and PRDs from your discovery sessions, and files you upload. Approved ones are copied to your vault.',
+        )}
         actions={
           canManage ? (
             <Button onClick={() => setUploading(true)}>
@@ -447,6 +452,7 @@ function FilePanel({ d }: { d: DocumentDto }) {
 
 /** One document: its text as markdown, its versions, its status and the sessions it came from. */
 export function DocumentView() {
+  const t = useOrgTerms();
   const { id = '' } = useParams();
   const doc = useDocument(id);
   const status = useChangeDocumentStatus(id);
@@ -474,7 +480,11 @@ export function DocumentView() {
               {DOC_STATUS_LABEL[d.status]}
             </Badge>
             <span className="tnum">version {d.currentVersion}</span>
-            {d.vaultPath && d.publishedVersion !== null && <span>Copied to the vault as {d.vaultPath}</span>}
+            {d.vaultPath && d.publishedVersion !== null && (
+              <span>
+                {t.reword('Copied to the vault as')} {d.vaultPath}
+              </span>
+            )}
           </span>
         }
         actions={

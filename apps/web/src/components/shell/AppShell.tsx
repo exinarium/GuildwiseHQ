@@ -14,6 +14,7 @@ import { ext } from '../../extension/index.ts';
 import { canUseIntake } from '../../lib/intake.ts';
 import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
 import { AgentFacesSync } from '../AgentFacesSync.tsx';
@@ -121,6 +122,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
   const org = me.data?.activeOrg ?? null;
   const canManage = org?.role === 'owner' || org?.role === 'admin';
+  const terms = useOrgTerms();
   const { sections, footer } = buildNav({
     projectKey: project?.key ?? null,
     hasEnvironments: !!project && project.workflowKey !== 'research',
@@ -130,6 +132,7 @@ function Shell({ name, live }: { name: string; live: string }) {
     canManage,
     features: org?.features ?? {},
     business: isBusinessOrg(org),
+    terms,
   });
   const intakeOn = canUseIntake(org);
   const intake = intakeOn
@@ -208,7 +211,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const cardParam = matchPath('/cards/:ref', pathname)?.params.ref;
   const shownCard = useCard(cardParam && cardParam !== 'new' ? cardParam : undefined);
   const shownCardRef = shownCard.data?.card;
-  const crumbs = crumbsFor(pathname, search, projects, shownCardRef);
+  const crumbs = crumbsFor(pathname, search, projects, shownCardRef, terms);
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
   const backTo = backTargetFor(pathname, crumbs);
 

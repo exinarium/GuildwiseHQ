@@ -1,8 +1,10 @@
 import type { DeskItemDto } from '@aom/shared';
 import { Bot } from 'lucide-react';
 import { useCeoStatus } from '../../api/queries/ceo.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { agreementText, classLabel, MODE_LABEL, pct } from '../../lib/ceo.ts';
 import { useActiveOrgRole } from '../../lib/orgRole.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { Badge, Button, Callout } from '../ui.tsx';
 import { CorrectButton } from './CorrectDialog.tsx';
 import { RepeatsSection } from './RepeatsSection.tsx';
@@ -88,6 +90,7 @@ export function CeoReportBlock({ item }: { item: DeskItemDto }) {
 }
 
 function CeoReportBody({ report: r }: { report: NonNullable<DeskItemDto['ceoReport']> }) {
+  const { reword } = useOrgTerms();
   const owner = useActiveOrgRole() === 'owner';
   const totals = r.scores.reduce((a, s) => ({ agreed: a.agreed + s.agreed, total: a.total + s.total }), {
     agreed: 0,
@@ -158,7 +161,9 @@ function CeoReportBody({ report: r }: { report: NonNullable<DeskItemDto['ceoRepo
       </div>
       {r.orderTurns && r.orderTurns.length > 0 && (
         <div data-testid="ceo-report-order-turns">
-          <h3 className="text-sm font-semibold text-fg">Standing order turns</h3>
+          <h3 className="text-sm font-semibold text-fg">
+            <Reword>{'Standing order turns'}</Reword>
+          </h3>
           <ul className="mt-1 divide-y divide-line">
             {r.orderTurns.map((t) => (
               <li key={t.turnId} className="flex flex-wrap items-start justify-between gap-2 py-1.5 text-sm">
@@ -175,7 +180,10 @@ function CeoReportBody({ report: r }: { report: NonNullable<DeskItemDto['ceoRepo
                     <CorrectButton
                       label="I'd rather you didn't"
                       testId={`report-correct-order-${t.turnId}`}
-                      target={{ orderTurnId: t.turnId, label: `Standing order: ${t.orderTitle}` }}
+                      target={{
+                        orderTurnId: t.turnId,
+                        label: `${reword('Standing order:')} ${t.orderTitle}`,
+                      }}
                     />
                   )
                 )}

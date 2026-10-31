@@ -306,6 +306,35 @@ describe('note count in vault status', () => {
   });
 });
 
+describe('sync conflict wording by org mode', () => {
+  it('the desk title and body use the vault words in a dev org and Knowledge words in a business org', async () => {
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
+    const resolve = async () => {
+      const item = (await q(`SELECT id FROM desk_items WHERE subkind='vault_conflict' AND status='open'`))[0]!;
+      await owner().post(`/api/desk/${item.id}/resolve`, { resolution: 'acknowledged' });
+    };
+    const latest = async () =>
+      (await q(`SELECT title, body FROM desk_items WHERE subkind='vault_conflict' ORDER BY created_at DESC LIMIT 1`))[0]!;
+    try {
+      const a = r.send('vault.conflict', { vaultId: work.id, files: [] });
+      await r.waitFor('ack', (f) => f.ackOf === a);
+      expect(await latest()).toMatchObject({ title: 'Vault sync conflict: Organization vault' });
+      expect((await latest()).body).toContain('the vault');
+      await resolve();
+      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w.owner.id]);
+      const b = r.send('vault.conflict', { vaultId: work.id, files: [] });
+      await r.waitFor('ack', (f) => f.ackOf === b);
+      const t = await latest();
+      expect(t.title).toBe('Knowledge folder sync conflict: Organization knowledge');
+      expect(t.body).toContain('the knowledge folder');
+      expect(t.body).not.toMatch(/vault/i);
+      await resolve();
+    } finally {
+      await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [w.owner.id]);
+    }
+  });
+});
+
 describe('project vaults and shared projects', () => {
   let m: Member;
   let mr: FakeRunner;

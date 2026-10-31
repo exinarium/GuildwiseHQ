@@ -30,6 +30,7 @@ import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { Reword } from '../components/Reword.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
@@ -200,8 +201,7 @@ export function ProjectSettings() {
       )}
       {!traits.usesRepos && !business && (
         <Callout tone="info">
-          This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
-          folder. Convert it to a delivery project to add repositories.
+          <Reword>{`This is a ${project?.workflowKey} project: it needs no repository, and results go to its vault folder. Convert it to a delivery project to add repositories.`}</Reword>
         </Callout>
       )}
       <div id="general" className="scroll-mt-20">

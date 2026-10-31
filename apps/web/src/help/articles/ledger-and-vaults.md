@@ -1,7 +1,7 @@
 ---
 title: Ledger and vaults
 summary: The ledger, searching it, vaults and shared knowledge, vault conflicts.
-keywords: [ledger, decision, vault, knowledge, search, shared knowledge]
+keywords: [ledger, decision, vault, knowledge, search, shared knowledge, rules, rules & decisions, knowledge folder]
 order: 9
 ---
 

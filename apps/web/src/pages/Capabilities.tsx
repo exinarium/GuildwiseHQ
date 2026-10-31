@@ -9,6 +9,7 @@ import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
 import { StarterGalleryTab } from '../components/capabilities/StarterGallery.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
+import { useOrgTerms } from '../lib/terms.ts';
 
 const MANAGER_TABS = [
   { id: 'registry', label: 'Registry' },
@@ -27,6 +28,7 @@ const MEMBER_TABS = [
 
 /** Settings > Capabilities: the skills, personas and playbooks your agents can use, and the packs that add more. */
 export function Capabilities() {
+  const t = useOrgTerms();
   const me = useMe();
   const [params, setParams] = useSearchParams();
   const role = me.data?.activeOrg?.role;
@@ -43,7 +45,9 @@ export function Capabilities() {
     <div className="mx-auto flex max-w-5xl flex-col">
       <PageHeader
         title="Capabilities"
-        sub="The skills, personas and playbooks your agents can use: built in, from your vaults and projects, from packs you approve, or written by you."
+        sub={t.reword(
+          'The skills, personas and playbooks your agents can use: built in, from your vaults and projects, from packs you approve, or written by you.',
+        )}
       />
       {manager && <RoleOffers />}
       <Tabs

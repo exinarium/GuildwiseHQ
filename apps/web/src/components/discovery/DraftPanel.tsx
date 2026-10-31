@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { useMe } from '../../api/queries/auth.ts';
 import { useHandToBa, useRequestDraft, useRequestValidation } from '../../api/queries/discovery.ts';
 import { useChangeDocumentStatus, useDocument, useDocumentVersion } from '../../api/queries/documents.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { canUseIntake } from '../../lib/intake.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { Markdown } from '../chat/Markdown.tsx';
@@ -186,7 +187,7 @@ function DocBlock({
       </div>
       {doc.status === 'approved' && full && full.publishState !== 'queued' && (
         <p className="text-xs text-subtle">
-          It will be copied to your vault as soon as a workstation is available.
+          <Reword>{'It will be copied to your vault as soon as a workstation is available.'}</Reword>
         </p>
       )}
       <ErrorBox error={err} />

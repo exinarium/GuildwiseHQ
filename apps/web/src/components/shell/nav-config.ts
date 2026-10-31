@@ -1,3 +1,4 @@
+import { ORG_TERMS, type OrgTerms } from '@aom/shared';
 import {
   BookOpen,
   BookOpenText,
@@ -65,10 +66,13 @@ export function buildNav(opts: {
   business?: boolean;
   /** A platform account has no work nav at all. */
   platform?: boolean;
+  /** The words of the org's mode (default: the developer words). */
+  terms?: OrgTerms;
 }): {
   sections: NavSection[];
   footer: NavEntry[];
 } {
+  const terms = opts.terms ?? ORG_TERMS.dev;
   const {
     projectKey,
     hasResearch = false,
@@ -147,13 +151,13 @@ export function buildNav(opts: {
       testId: 'nav-interests',
     });
   knowledge.push(
-    { id: 'ledger', label: 'Ledger', to: '/ledger', icon: BookOpen, testId: 'nav-ledger' },
+    { id: 'ledger', label: terms.ledger, to: '/ledger', icon: BookOpen, testId: 'nav-ledger' },
     { id: 'documents', label: 'Documents', to: '/documents', icon: FileText, testId: 'nav-documents' },
   );
   if (canManage)
     knowledge.push({
       id: 'vaults',
-      label: 'Vaults',
+      label: terms.vaultsPage,
       to: '/settings/vaults',
       icon: Vault,
       testId: 'nav-vaults',

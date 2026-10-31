@@ -4,6 +4,7 @@ import {
   type EditLedgerEntryRequest,
   isOrgManager,
   ledgerToday,
+  rewordForOrg,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -153,6 +154,8 @@ export async function addLedgerEntryChecked(
         actor: SYSTEM_ACTOR,
         scope,
       });
+      const orgMode = (await one(tx, 'SELECT mode FROM organizations WHERE id=$1', [orgId]))?.mode;
+      const rw = (text: string) => rewordForOrg(text, orgMode);
       await raiseOrCoalesce(
         ctx,
         {
@@ -160,10 +163,10 @@ export async function addLedgerEntryChecked(
           orgId,
           kind: 'alert',
           subkind: 'ledger_conflict',
-          title: `A new standing order may contradict an existing one: ${req.title}`.slice(0, 200),
-          body: `"${req.title}" was saved, but it looks like it says the opposite of: ${clashes
+          title: `${rw('A new standing order may contradict an existing one:')} ${req.title}`.slice(0, 200),
+          body: `"${req.title}" ${rw('was saved, but it looks like it says the opposite of:')} ${clashes
             .map((c) => `"${c.title}"`)
-            .join(', ')}. Agents get both until one is retired. Open the ledger to retire or reword one.`,
+            .join(', ')}. ${rw('Agents get both until one is retired. Open the ledger to retire or reword one.')}`,
           pinned: false,
           ...(projectId ? { projectId } : {}),
           data: { entryId, conflictsWith: clashes.map((c) => c.id) },

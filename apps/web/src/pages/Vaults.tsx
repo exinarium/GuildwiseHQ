@@ -1,4 +1,4 @@
-import type { VaultDto } from '@aom/shared';
+import { defaultVaultName, type VaultDto } from '@aom/shared';
 import { Vault as VaultIcon } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useMe } from '../api/queries/auth.ts';
@@ -23,12 +23,12 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { useOrgTerms } from '../lib/terms.ts';
 import { formatDateTime } from '../lib/time.ts';
-
-const KIND_LABEL = { org: 'Organization vault', project: 'Project vault' } as const;
 
 /** Settings > Vaults: git URLs of the knowledge vaults. The site stores URLs and sync status, never vault content. */
 export function Vaults() {
+  const t = useOrgTerms();
   const q = useVaults();
   const me = useMe();
   const projects = useProjects();
@@ -47,17 +47,19 @@ export function Vaults() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
       <PageHeader
-        title="Vaults"
-        sub="Git repositories of markdown that your agents read and your DevOps engineer keeps in sync. One organization vault holds your organization's knowledge (and your interests); a project can have a vault of its own."
+        title={t.vaultsPage}
+        sub={t.reword(
+          "Git repositories of markdown that your agents read and your DevOps engineer keeps in sync. One organization vault holds your organization's knowledge (and your interests); a project can have a vault of its own.",
+        )}
         actions={
           canRegister && (
             <Button variant="primary" onClick={() => setRegistering(true)}>
-              Register a vault
+              {t.reword('Register a vault')}
             </Button>
           )
         }
       />
-      {q.isPending && <ListSkeleton label="Loading vaults" rows={2} />}
+      {q.isPending && <ListSkeleton label={t.reword('Loading vaults')} rows={2} />}
       {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
       <ul className="flex flex-col gap-4" data-testid="vaults">
         {vaults.map((v) => (
@@ -69,12 +71,14 @@ export function Vaults() {
       {vaults.length === 0 && q.data && (
         <EmptyState
           icon={VaultIcon}
-          title="No vault yet"
-          description="A vault is a git repository of markdown notes your agents read. Decisions and standing orders are written to it."
+          title={t.reword('No vault yet')}
+          description={t.reword(
+            'A vault is a git repository of markdown notes your agents read. Decisions and standing orders are written to it.',
+          )}
           action={
             canRegister ? (
               <Button variant="primary" onClick={() => setRegistering(true)}>
-                Register a vault
+                {t.reword('Register a vault')}
               </Button>
             ) : (
               <p className="text-sm text-muted" data-testid="vault-ask-admin">
@@ -87,7 +91,7 @@ export function Vaults() {
       <Dialog
         open={registering}
         onOpenChange={setRegistering}
-        title="Register a vault"
+        title={t.reword('Register a vault')}
         description="Give the git URL of an existing repository. Agents never see credentials: the workstation uses its own git access."
       >
         <RegisterVault
@@ -101,6 +105,8 @@ export function Vaults() {
 }
 
 function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string | undefined }) {
+  const t = useOrgTerms();
+  const shownName = defaultVaultName(vault.name, t.mode);
   const patch = usePatchVault();
   const resolve = useResolveVaultConflict();
   const toast = useToast();
@@ -124,7 +130,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       },
       {
         onSuccess: () => {
-          toast.success('Vault saved');
+          toast.success(t.reword('Vault saved'));
           setEditing(false);
         },
       },
@@ -135,7 +141,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
     <Panel>
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-fg">
-          {vault.projectId ? vault.name : KIND_LABEL[vault.kind]}
+          {vault.projectId ? shownName : vault.kind === 'org' ? t.orgVault : t.projectVault}
           {projectKey && <span className="ml-1 font-normal text-subtle">({projectKey})</span>}
         </h2>
         <Badge>{vault.kind === 'org' ? 'organization' : vault.kind}</Badge>
@@ -150,7 +156,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           <Button
             className="ml-auto"
             size="sm"
-            aria-label={`Edit ${vault.name}`}
+            aria-label={`Edit ${shownName}`}
             onClick={() => setEditing(true)}
           >
             Edit
@@ -159,9 +165,9 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       </div>
       {vault.storage === 'local' ? (
         <Callout tone="warning">
-          This vault is a folder on one workstation. It is not synced and has no copy anywhere else: back it
-          up yourself (it may sit in OneDrive or iCloud), or register a git repository for the project to keep
-          it in sync. The map of your code that your agents use is kept here too, and can be rebuilt.
+          {t.reword(
+            'This vault is a folder on one workstation. It is not synced and has no copy anywhere else: back it up yourself (it may sit in OneDrive or iCloud), or register a git repository for the project to keep it in sync. The map of your code that your agents use is kept here too, and can be rebuilt.',
+          )}
         </Callout>
       ) : (
         <p className="font-mono text-xs break-all text-subtle">
@@ -171,7 +177,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       <Dialog
         open={editing}
         onOpenChange={setEditing}
-        title={`Edit ${vault.name}`}
+        title={`Edit ${shownName}`}
         footer={
           <>
             <Button variant="ghost" onClick={() => setEditing(false)}>
@@ -193,7 +199,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           id={`vault-form-${vault.id}`}
           onSubmit={save}
           className="flex flex-col gap-4"
-          aria-label={`Edit ${vault.name} form`}
+          aria-label={`Edit ${shownName} form`}
         >
           <TextInput label="Git URL" value={url} onChange={(e) => setUrl(e.target.value)} />
           <TextInput
@@ -214,7 +220,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           <li className="pt-3 text-subtle">
             {vault.storage === 'local'
               ? 'The folder is created on the workstation that holds it.'
-              : 'Add a workstation to sync this vault.'}
+              : t.reword('Add a workstation to sync this vault.')}
           </li>
         )}
         {vault.workstations.map((w) => (
@@ -285,9 +291,12 @@ function RegisterVault({
 }) {
   const register = useRegisterVault();
   const toast = useToast();
+  const t = useOrgTerms();
   const kinds = [
-    ...(canOrg ? [{ value: 'org', label: 'Organization vault (for the whole organization)' }] : []),
-    ...(projects.length > 0 ? [{ value: 'project', label: 'Project vault (shared with members)' }] : []),
+    ...(canOrg ? [{ value: 'org', label: t.reword('Organization vault (for the whole organization)') }] : []),
+    ...(projects.length > 0
+      ? [{ value: 'project', label: t.reword('Project vault (shared with members)') }]
+      : []),
   ];
   const [kind, setKind] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -315,7 +324,7 @@ function RegisterVault({
       },
       {
         onSuccess: () => {
-          toast.success('Vault registered');
+          toast.success(t.reword('Vault registered'));
           setUrl('');
           onDone();
         },
@@ -323,7 +332,12 @@ function RegisterVault({
     );
   };
   return (
-    <form onSubmit={submit} noValidate aria-label="Register vault" className="flex flex-col gap-4">
+    <form
+      onSubmit={submit}
+      noValidate
+      aria-label={t.reword('Register vault')}
+      className="flex flex-col gap-4"
+    >
       <Select label="Kind" value={effKind} onChange={(e) => setKind(e.target.value)}>
         {kinds.map((k) => (
           <option key={k.value} value={k.value}>
@@ -356,7 +370,7 @@ function RegisterVault({
       />
       <ErrorBox error={register.error} />
       <Button type="submit" variant="primary" loading={register.isPending} className="self-end">
-        Register vault
+        {t.reword('Register vault')}
       </Button>
     </form>
   );

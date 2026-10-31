@@ -7,6 +7,7 @@ import {
   useDismissRecommendation,
   useResetRole,
 } from '../../api/queries/hr.ts';
+import { Reword } from '../../components/Reword.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Dialog, ErrorBox, Panel, TextArea } from '../ui.tsx';
 
@@ -110,7 +111,7 @@ export function RecommendationList({
                       });
                     }}
                   >
-                    {APPLY_LABEL[r.action.type]}
+                    <Reword>{APPLY_LABEL[r.action.type]}</Reword>
                   </Button>
                 ) : (
                   <Badge title="Only the owner or the manager who hired the agent can apply this">
@@ -145,7 +146,7 @@ export function RecommendationList({
                   className="rounded-control bg-sunken px-3 py-2 text-sm text-muted italic"
                   data-testid="rec-proposal"
                 >
-                  Proposed standing order: {r.action.text}
+                  <Reword>{'Proposed standing order:'}</Reword> {r.action.text}
                 </p>
               )}
               <details>
@@ -172,7 +173,13 @@ export function RecommendationList({
               </details>
               {done[r.id] && (
                 <p className="text-sm text-success" data-testid="rec-applied">
-                  {done[r.id]?.effect}.{' '}
+                  {/* only the proposal's effect is fixed server text; the others carry agent names */}
+                  {r.action.type === 'standing_order' ? (
+                    <Reword>{done[r.id]?.effect ?? ''}</Reword>
+                  ) : (
+                    done[r.id]?.effect
+                  )}
+                  .{' '}
                   {done[r.id]?.deskItemId && (
                     <Link to="/desk" className="underline">
                       Approve it on the desk
@@ -273,7 +280,9 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
                   <li key={`skill-${s}`}>Skill: {s}</li>
                 ))}
                 {ext.standingOrders.map((s) => (
-                  <li key={`order-${s}`}>Standing order: {s}</li>
+                  <li key={`order-${s}`}>
+                    <Reword>{'Standing order:'}</Reword> {s}
+                  </li>
                 ))}
                 {!ext.instructions.trim() && ext.skills.length === 0 && ext.standingOrders.length === 0 && (
                   <li>Nothing: you have no extensions on this role.</li>

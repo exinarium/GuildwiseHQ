@@ -104,8 +104,11 @@ const titleCase = (raw: string) => {
 };
 
 /** The human label of a desk item's kind: shown on the badge in the list and in the item detail. */
-export function deskKindLabel(item: Pick<DeskItemDto, 'kind' | 'subkind'>): string {
-  if (item.subkind && SUBKIND_LABEL[item.subkind]) return SUBKIND_LABEL[item.subkind] as string;
+export function deskKindLabel(
+  item: Pick<DeskItemDto, 'kind' | 'subkind'>,
+  reword: (text: string) => string = (text) => text,
+): string {
+  if (item.subkind && SUBKIND_LABEL[item.subkind]) return reword(SUBKIND_LABEL[item.subkind] as string);
   if (item.subkind) return titleCase(item.subkind);
-  return KIND_LABEL[item.kind] ?? titleCase(item.kind);
+  return reword(KIND_LABEL[item.kind] ?? titleCase(item.kind));
 }
