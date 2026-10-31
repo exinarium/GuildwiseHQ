@@ -32,15 +32,14 @@ const addVault = async (body: Record<string, unknown>) =>
     )
   ).vault?.id as string | undefined;
 
-const builderStart = async (title: string) => {
+const builderStart = async () => {
   await freshState();
   await q('DELETE FROM vaults');
-  return { title };
 };
 
 describe('a card shift carries the organization vault and the project vault', () => {
   it('both vaults: vaults lists both, vault stays the project vault (the write target)', async () => {
-    await builderStart('both');
+    await builderStart();
     const orgId = await addVault({ kind: 'org' });
     const prjId = await addVault({ kind: 'project', projectId: w.projectId });
     await w.hire('Bo', 'builder', 'senior');
@@ -51,7 +50,7 @@ describe('a card shift carries the organization vault and the project vault', ()
   });
 
   it('a project without a vault: only the organization vault, no error', async () => {
-    await builderStart('org only');
+    await builderStart();
     const orgId = await addVault({ kind: 'org' });
     await w.hire('Bo2', 'builder', 'senior');
     await w.card({ title: 'Org only' });
@@ -60,7 +59,7 @@ describe('a card shift carries the organization vault and the project vault', ()
   });
 
   it('no organization vault: only the project vault', async () => {
-    await builderStart('project only');
+    await builderStart();
     const prjId = await addVault({ kind: 'project', projectId: w.projectId });
     await w.hire('Bo3', 'builder', 'senior');
     await w.card({ title: 'Project only' });
@@ -69,11 +68,26 @@ describe('a card shift carries the organization vault and the project vault', ()
   });
 
   it('no vault at all: no vaults key, the shift still starts', async () => {
-    await builderStart('none');
+    await builderStart();
     await w.hire('Bo4', 'builder', 'senior');
     await w.card({ title: 'No vault' });
     const start = await p.next('Bo4');
     expect(start.vault).toBeNull();
     expect(start.vaults).toBeUndefined();
+  });
+
+  it('a workstation user who is not an owner or admin does not get the organization vault', async () => {
+    await builderStart();
+    await addVault({ kind: 'org' });
+    const prjId = await addVault({ kind: 'project', projectId: w.projectId });
+    await q(`UPDATE org_members SET role='member' WHERE user_id=$1`, [w.owner.id]);
+    try {
+      await w.hire('Bo5', 'builder', 'senior');
+      await w.card({ title: 'Non manager' });
+      const start = await p.next('Bo5');
+      expect(start.vaults?.map((v: any) => v.vaultId)).toEqual([prjId]);
+    } finally {
+      await q(`UPDATE org_members SET role='owner' WHERE user_id=$1`, [w.owner.id]);
+    }
   });
 });

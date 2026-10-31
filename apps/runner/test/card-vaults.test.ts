@@ -1,7 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ShiftBrief } from '@aom/shared';
+import { BUILTIN_ROLES } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import {
   readVaultContext,
   readVaultContexts,
@@ -10,6 +12,7 @@ import {
 } from '../src/vaults/context.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
+import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 import { IDENTITY, makeVault } from './vault-fixtures.ts';
 
@@ -133,5 +136,37 @@ describe('readVaultContexts / withVaultContexts', () => {
     expect(ctxs).toHaveLength(2);
     const titles = withVaultContexts(brief, ctxs).standingOrders.map((o) => o.title);
     expect(titles).toEqual(['Project vault standing orders', 'Organization vault standing orders']);
+  });
+});
+
+describe('policy: both vaults of a builder are read-only folders', () => {
+  it('readable, never writable, secret files denied in each', () => {
+    const base = tmp('aom-vaults-');
+    const dirs = ['vault-org', 'vault-prj'].map((id) => {
+      const root = join(base, id);
+      mkdirSync(join(root, 'projects/toy'), { recursive: true });
+      writeFileSync(join(root, 'standing-orders.md'), 'rules\n');
+      writeFileSync(join(root, '.env'), 'SECRET=1\n');
+      writeFileSync(join(root, 'projects/toy/server.pem'), 'x\n');
+      return root;
+    });
+    const builder = BUILTIN_ROLES.find((r) => r.key === 'builder');
+    const s = buildShiftSettings(
+      (builder as NonNullable<typeof builder>).permissions,
+      policyCtx({ readDirs: dirs }),
+      POLICY_PATHS,
+      'builder',
+    );
+    const fs = s.sandbox?.filesystem;
+    for (const d of dirs) {
+      expect(s.permissions.additionalDirectories).toContain(d);
+      expect(s.permissions.deny).toContain(`Edit(//${d.slice(1)}/**)`);
+      expect(s.permissions.deny).toContain(`Read(//${d.slice(1)}/**/.env)`);
+      expect(s.permissions.deny).toContain(`Read(//${d.slice(1)}/**/*.pem)`);
+      expect(fs?.denyWrite).toContain(d);
+      expect(fs?.allowWrite).not.toContain(d);
+      expect(fs?.allowRead).toContain(join(d, 'standing-orders.md'));
+    }
+    expect(fs?.allowRead.some((p) => p.endsWith('.env') || p.endsWith('.pem'))).toBe(false);
   });
 });

@@ -280,6 +280,8 @@ describe('one task at a time, failed attempts, lost shifts', () => {
     await dispatcher().run();
     const first = await baShift(from, 'phase_report');
     expect(first.baTask.phase.ref).toBe(a.phase.ref);
+    // BA task shifts keep the single-vault shape: no `vaults` list
+    expect(first.vaults).toBeUndefined();
     await dispatcher().run();
     await r.barrier();
     expect(
