@@ -37,6 +37,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { orgModeOf } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { needsRepoScoping, singleRepoDefault } from './card-repo.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -261,6 +262,12 @@ export async function createCardIn(
     );
   }
   const def = wf.definition;
+  // A business organization works without code: a workflow that uses repositories does not run there.
+  if (workflowUsesRepos(def) && (await orgModeOf(tx, project.org_id)) === 'business')
+    throw conflict(
+      'business_mode_code_workflow',
+      'This organization works without code projects. Pick one of: Enquiry, Follow-up, Document request, Reminder, Report, Quote.',
+    );
   await assertNoMockFields(ctx, tx, project.id, req.fields);
   if (req.interestId) {
     // A research card in a project that cites an interest: the interest must be visible to the user.

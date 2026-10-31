@@ -1,4 +1,4 @@
-import type { CompletionAction } from '@aom/shared';
+import { type CompletionAction, isBusinessCardType } from '@aom/shared';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 
 /**
@@ -11,6 +11,8 @@ export interface EffectiveCompletion {
 }
 
 export async function effectiveCompletion(db: Queryable, card: Row): Promise<EffectiveCompletion> {
+  // A business card ends on an approved output, never on a git step, whatever the project default says.
+  if (isBusinessCardType(card.card_type)) return { action: null, source: 'card' };
   // `push_branch` was retired (backlog #61): a card that still carries it follows the project instead.
   if (card.completion_action && card.completion_action !== 'push_branch')
     return { action: card.completion_action as CompletionAction, source: 'card' };

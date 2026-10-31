@@ -22,6 +22,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
+import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -29,7 +30,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
-import { assertDevMode, BUSINESS_MODE_MSG } from '../orgs/mode.ts';
+import { assertDevMode, BUSINESS_MODE_MSG, orgModeOf } from '../orgs/mode.ts';
 import { specifyStuckBugCards } from '../platform-team/intake.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
@@ -90,6 +91,8 @@ export async function createProject(
     );
     // Every project always has a vault (docs/design/project-graphs.md section 3): a local one if the owner gave none.
     await ensureProjectVaultIn(ctx, tx, projectId, 'created');
+    // A business organization's projects offer the business card types from the start.
+    if ((await orgModeOf(tx, org.id)) === 'business') await ensureBusinessWorkflows(ctx, tx, org.id);
   });
   return projectId;
 }

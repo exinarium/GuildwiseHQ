@@ -1,6 +1,11 @@
-import type { CompletionAction } from '@aom/shared';
+import {
+  BUSINESS_CARD_TYPE_LABELS,
+  type BusinessCardType,
+  type CompletionAction,
+  isBusinessCardType,
+} from '@aom/shared';
 import { FolderKanban } from 'lucide-react';
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -25,6 +30,7 @@ import {
 } from '../components/ui.tsx';
 import { buildCardRequest, type CardFormValues, emptyForm, FIND_REPO, fieldLabel } from '../lib/cardForm.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
+import { useBusinessMode } from '../lib/orgMode.ts';
 
 export function CardNew() {
   const [params] = useSearchParams();
@@ -38,6 +44,7 @@ export function CardNew() {
   const detail = useProject(project?.id);
   const enabledWorkflows = useProjectWorkflows(project?.id);
   const mockUi = useMe().data?.features?.mockUi ?? false;
+  const business = useBusinessMode();
   const workflow = useMemo(
     () =>
       workflows.data
@@ -46,7 +53,7 @@ export function CardNew() {
     [workflows.data, project?.workflowKey],
   );
 
-  if (projects.isPending || workflows.isPending)
+  if (projects.isPending || workflows.isPending || (business && enabledWorkflows.isPending && !!project))
     return (
       <div className="mx-auto max-w-2xl">
         <PageSkeleton label="Loading the form" />
@@ -113,6 +120,7 @@ export function CardNew() {
       defaultWorkflowFor={defaults}
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
       mockUi={mockUi}
+      business={business}
       designDefault={detail.data?.project.designStep ?? false}
       projectDefault={detail.data?.project.defaultCompletion}
     />
@@ -131,6 +139,7 @@ export function CardNewForm({
   defaultWorkflowFor = {},
   repos,
   mockUi = false,
+  business = false,
   designDefault = false,
   projectDefault,
   initialType,
@@ -147,6 +156,8 @@ export function CardNewForm({
   repos: Array<{ id: string; name: string }>;
   /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
   mockUi?: boolean;
+  /** The organization works in Business mode: only the business card types are offered. */
+  business?: boolean;
   /** The project's "Investigate & design before build" setting. */
   designDefault?: boolean;
   /** How the project lands finished work (the default a new card follows). */
@@ -157,9 +168,23 @@ export function CardNewForm({
   const nav = useNavigate();
   const create = useCreateCard();
   const toast = useToast();
+  // A business organization offers the business card types only; a developer one never offers them.
+  const cardTypes = [
+    ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
+  ].filter((t) => isBusinessCardType(t) === business);
   const [v, setV] = useState<CardFormValues>(() =>
-    emptyForm(initialType ?? projectWorkflow.cardTypes[0] ?? ''),
+    emptyForm(
+      initialType && cardTypes.includes(initialType)
+        ? initialType
+        : (cardTypes[0] ?? projectWorkflow.cardTypes[0] ?? ''),
+    ),
   );
+  // Business mode: when the offered types change (workflows loaded late) and the chosen one is no longer offered, move to the first.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follows the offered types by value, not by array identity
+  useEffect(() => {
+    if (business && cardTypes.length && !cardTypes.includes(v.cardType))
+      setV(emptyForm(cardTypes[0] as string));
+  }, [business, cardTypes.join('|'), v.cardType]);
   const [picked, setPicked] = useState<{ type: string; key: string } | null>(null);
   // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
   // When the project enabled more than one workflow for the type, the default (or the user's pick) decides.
@@ -169,9 +194,6 @@ export function CardNewForm({
   const wanted = picked?.type === v.cardType ? picked.key : defaultWorkflowFor[v.cardType];
   const workflow = choices.find((w) => w.key === wanted) ?? choices[0] ?? projectWorkflow;
   const chooseWorkflow = choices.length > 1;
-  const cardTypes = [
-    ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
-  ];
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
   // Files picked on the form: attached right after the card is created.
@@ -242,7 +264,11 @@ export function CardNewForm({
       <PageHeader
         title="New card"
         back={{ to: `/p/${projectKey}/board`, label: 'Back to the board' }}
-        sub={`${projectKey} · ${projectWorkflow.name} workflow${workflow !== projectWorkflow ? `, this card runs on ${workflow.name}` : ''}`}
+        sub={
+          business
+            ? `${projectKey} · ${workflow.name}`
+            : `${projectKey} · ${projectWorkflow.name} workflow${workflow !== projectWorkflow ? `, this card runs on ${workflow.name}` : ''}`
+        }
       />
       <form onSubmit={onSubmit} noValidate aria-label="New card" className="flex flex-col gap-4">
         <Panel>
@@ -263,7 +289,7 @@ export function CardNewForm({
               >
                 {cardTypes.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {BUSINESS_CARD_TYPE_LABELS[t as BusinessCardType] ?? t}
                   </option>
                 ))}
               </Select>

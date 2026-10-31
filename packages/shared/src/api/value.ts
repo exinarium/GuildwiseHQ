@@ -14,6 +14,12 @@ export const DEFAULT_HOURS_PER_CARD: Record<CardType, number> = {
   research: 4,
   feed: 0,
   regression: 0,
+  enquiry: 0.5,
+  follow_up: 0.25,
+  document_request: 0.25,
+  reminder: 0.1,
+  report: 2,
+  quote: 1,
 };
 /** The card types the Costs page lets an organization estimate (feed and regression cards are not counted). */
 export const VALUE_CARD_TYPES = ['feature', 'bug', 'support', 'refactor', 'docs', 'research'] as const;

@@ -196,6 +196,8 @@ export const CustomFieldSchema = z.object({
   label: z.string(),
   type: z.enum(['text', 'markdown', 'list', 'number', 'boolean', 'url-list']),
   required: z.boolean(),
+  /** `date`: a text field holding `YYYY-MM-DD`, entered with a date picker. Absent: plain. */
+  format: z.enum(['date']).optional(),
 });
 export type CustomField = z.infer<typeof CustomFieldSchema>;
 

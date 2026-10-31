@@ -1,6 +1,7 @@
 import {
   COMPLETION_ACTION_LABELS,
   CompletionAction,
+  isBusinessCardType,
   ResearchDepth,
   workflowHasDesignStage,
   workflowSupportsInvestigationOnly,
@@ -50,7 +51,12 @@ export function CardFormFields({
   const v = values;
   const list = formFieldList(workflow, mockUi);
   // Repository and completion action belong to code work; research and feed cards live in the vault.
-  const codeCard = !template && workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
+  // Business card types never use a repository, a completion action or documentation.
+  const business = isBusinessCardType(v.cardType);
+  const codeCard = !template && !business && workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
+  const dateKeys = new Set(
+    (workflow.customFields ?? []).filter((c) => c.format === 'date').map((c) => c.key),
+  );
   const setField = (k: string, val: string) => onChange({ ...v, fields: { ...v.fields, [k]: val } });
   return (
     <>
@@ -196,6 +202,10 @@ export function CardFormFields({
           value: v.fields[k] ?? '',
           error: errors[k],
         };
+        if (meta.kind === 'text' && dateKeys.has(k)) {
+          // The native date picker: no typing on a soft keyboard. Stored as YYYY-MM-DD.
+          return <TextInput key={k} {...common} type="date" onChange={(e) => setField(k, e.target.value)} />;
+        }
         if (meta.kind === 'text') {
           return <TextInput key={k} {...common} onChange={(e) => setField(k, e.target.value)} />;
         }
@@ -204,7 +214,7 @@ export function CardFormFields({
             <TextInput
               key={k}
               {...common}
-              inputMode="numeric"
+              inputMode={business ? 'decimal' : 'numeric'}
               onChange={(e) => setField(k, e.target.value)}
             />
           );

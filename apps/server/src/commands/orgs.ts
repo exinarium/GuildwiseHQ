@@ -23,6 +23,7 @@ import {
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
+import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
@@ -160,6 +161,7 @@ export async function setOrgMode(ctx: Ctx, a: OrgAccess, mode: OrgMode): Promise
       ],
       { tx },
     );
+    if (mode === 'business') await ensureBusinessWorkflows(ctx, tx, a.orgId);
   });
 }
 

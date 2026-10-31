@@ -9,8 +9,37 @@ export const CardType = z.enum([
   'research',
   'feed',
   'regression',
+  // Business mode (no repository): the default workflows are in workflows/business.ts.
+  'enquiry',
+  'follow_up',
+  'document_request',
+  'reminder',
+  'report',
+  'quote',
 ]);
 export type CardType = z.infer<typeof CardType>;
+
+/** The card types of business organizations. They never use a repository. */
+export const BUSINESS_CARD_TYPES = [
+  'enquiry',
+  'follow_up',
+  'document_request',
+  'reminder',
+  'report',
+  'quote',
+] as const;
+export type BusinessCardType = (typeof BUSINESS_CARD_TYPES)[number];
+export const isBusinessCardType = (t: string | null | undefined): t is BusinessCardType =>
+  (BUSINESS_CARD_TYPES as readonly string[]).includes(t ?? '');
+/** UI labels of the business types (the developer types keep showing their raw value). */
+export const BUSINESS_CARD_TYPE_LABELS: Record<BusinessCardType, string> = {
+  enquiry: 'Enquiry',
+  follow_up: 'Follow-up',
+  document_request: 'Document request',
+  reminder: 'Reminder',
+  report: 'Report',
+  quote: 'Quote',
+};
 
 export const CardStatus = z.enum([
   'draft',

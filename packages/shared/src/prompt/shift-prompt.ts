@@ -251,6 +251,21 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   );
 
   if (card.cardType === 'feed') parts.push(section('Feed context', feedContext(brief)));
+  // Business card types: the fields the person filled in, under their labels (a field from outside stays untrusted).
+  if (card.fieldLabels) {
+    const lines: string[] = [];
+    for (const [key, label] of Object.entries(card.fieldLabels)) {
+      const v = f[key];
+      const body = typeof v === 'string' ? v.trim() : v === undefined || v === null ? '' : JSON.stringify(v);
+      if (!body) continue;
+      lines.push(
+        outside.has(key)
+          ? `- ${label}:\n${renderUntrusted(`${what}${from}: ${label}`, body)}`
+          : `- ${label}: ${body}`,
+      );
+    }
+    if (lines.length > 0) parts.push(section('Details', lines.join('\n')));
+  }
   parts.push(guarded('context', 'Context', text(f.context)));
   parts.push(guarded('requirements', 'Requirements', text(f.requirements)));
   const criteria = list(f.acceptanceCriteria);
@@ -299,7 +314,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
     'testPlan',
   ]);
   for (const key of outside) {
-    if (known.has(key)) continue;
+    if (known.has(key) || card.fieldLabels?.[key] !== undefined) continue;
     const v = f[key];
     const body = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
     parts.push(section(`Field: ${key}`, renderUntrusted(`${what}${from}: ${key}`, body)));

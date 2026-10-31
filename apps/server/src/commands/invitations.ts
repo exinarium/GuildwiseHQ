@@ -12,6 +12,7 @@ import {
 } from '@aom/shared';
 import { hashPassword } from '../auth/password.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { businessWorkflowEvents } from '../catalogue/business-workflows.ts';
 import { ceoProvisionEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
@@ -440,6 +441,8 @@ async function acceptEvents(
     events.push(
       ...(await ceoProvisionEvents(tx, ctx, orgId, userId, { simulation: terms.simulation === true })),
     );
+    // A business organization starts with its business card types (it has no project yet to enable them on).
+    if (a.mode === 'business') events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
   }
   if (inv.kind !== 'legacy')
     events.push({

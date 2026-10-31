@@ -2,6 +2,16 @@ import { handlesNote, packAgentSection } from '../capabilities/pack-team.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { AOM_NO_PIPES_NOTE, commandForOutcome, QUESTION_COMMAND } from './commands.ts';
 
+/** The boundaries of a card that works in a repository. */
+const BOUNDARIES = [
+  '- Work only inside your current working directory (the card worktree).',
+  '- Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.',
+  '- Search the ledger with `aom ledger search` before asking a question.',
+  '- The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.',
+  '- .NET: plain `dotnet build` and `dotnet test` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass `-m`/`-maxcpucount` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (`SocketException` in `NamedPipeServerStream`, or a build that hangs).',
+  '- Tests: run unit tests only, in the foreground, with a hang limit (`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none`; any other long command: `timeout <seconds> <command>`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with `sleep` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.',
+].join('\n');
+
 /**
  * Renders the agent's instructions file (`CLAUDE.md` in the agent's own config dir, regenerated each shift).
  * Sections in order: who you are, role instructions, core rules, standing orders, project, boundaries, how to report
@@ -41,21 +51,19 @@ export function renderInstructions(brief: ShiftBrief): string {
   );
 
   out.push('# Project');
-  const projectLines = [
-    `- Key: ${brief.project.key}`,
-    `- Name: ${brief.project.name}`,
-    `- Working branch: ${brief.project.workingBranch}`,
-  ];
+  const repoless = brief.project.repoless === true;
+  const projectLines = [`- Key: ${brief.project.key}`, `- Name: ${brief.project.name}`];
+  if (!repoless) projectLines.push(`- Working branch: ${brief.project.workingBranch}`);
   if (brief.project.projectPath)
     projectLines.push(
       `- Project path: the project lives in \`${brief.project.projectPath}\` inside the repository; build and test there (run builds, tests and package commands from that folder).`,
     );
-  if (brief.project.architecturalGlobs.length > 0) {
+  if (!repoless && brief.project.architecturalGlobs.length > 0) {
     projectLines.push(
       `- Architectural paths (changes here make a card large): ${brief.project.architecturalGlobs.join(', ')}`,
     );
   }
-  if (brief.project.e2eGlobs.length > 0)
+  if (!repoless && brief.project.e2eGlobs.length > 0)
     projectLines.push(`- End-to-end test paths: ${brief.project.e2eGlobs.join(', ')}`);
   out.push(projectLines.join('\n'));
   if (brief.project.projectDoc?.trim()) {
@@ -65,14 +73,12 @@ export function renderInstructions(brief: ShiftBrief): string {
 
   out.push('# Boundaries');
   out.push(
-    [
-      '- Work only inside your current working directory (the card worktree).',
-      '- Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.',
-      '- Search the ledger with `aom ledger search` before asking a question.',
-      '- The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.',
-      '- .NET: plain `dotnet build` and `dotnet test` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass `-m`/`-maxcpucount` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (`SocketException` in `NamedPipeServerStream`, or a build that hangs).',
-      '- Tests: run unit tests only, in the foreground, with a hang limit (`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none`; any other long command: `timeout <seconds> <command>`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with `sleep` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.',
-    ].join('\n'),
+    repoless
+      ? [
+          '- Work only inside your current working directory.',
+          '- Search the ledger with `aom ledger search` before asking a question.',
+        ].join('\n')
+      : BOUNDARIES,
   );
 
   out.push('# How to report');
