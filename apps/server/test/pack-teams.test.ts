@@ -1,6 +1,10 @@
 import {
+  BUILTIN_ROLES,
+  BUSINESS_ROLE_KEYS,
   type CapabilityMeta,
   indexPack,
+  isBusinessRoleKey,
+  PACK_SEAT_KEYS,
   PACKS_CAPABILITY,
   type PackSnapshot,
   packSnapshotOf,
@@ -677,6 +681,89 @@ describe('scope and isolation', () => {
   it('a hirable list counts skills marked as agents', async () => {
     const list = (await asMember('GET', '/api/packs-hirable')).packs;
     expect(list.find((p: { id: string }) => p.id === packId)?.personaCount).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe('business roles as seats (mode)', () => {
+  const setMode = (mode: 'dev' | 'business') =>
+    q('UPDATE organizations SET mode=$2 WHERE id=$1', [w.owner.id, mode]);
+  const orgRoleCount = async () =>
+    Number((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id=$1', [w.owner.id]))[0]?.n);
+  const seatKeys = async () =>
+    (await owner('GET', `/api/packs/${packId}/team`)).seats.map((s: { key: string }) => s.key);
+
+  it('a dev organization is offered exactly the seats it had, and refuses a business seat', async () => {
+    await setMode('dev');
+    const keys = await seatKeys();
+    for (const k of PACK_SEAT_KEYS) expect(keys).toContain(k);
+    expect(keys.filter((k: string) => isBusinessRoleKey(k))).toEqual([]);
+    const roles = (await owner('GET', '/api/roles')).roles.map(
+      (r: { definition: { key: string } }) => r.definition.key,
+    );
+    expect(roles.filter((k: string) => isBusinessRoleKey(k))).toEqual([]);
+    const before = (await agents()).length;
+    await owner(
+      'POST',
+      `/api/packs/${packId}/agents/hire`,
+      hireBody([{ key: 'crew-agent-ux', seat: 'front_desk' }]),
+      409,
+    );
+    expect((await agents()).length).toBe(before);
+  });
+
+  it('a business organization is offered the business seats and seats a pack agent on one, with no new role', async () => {
+    await setMode('business');
+    try {
+      const keys = await seatKeys();
+      for (const k of BUSINESS_ROLE_KEYS) expect(keys).toContain(k);
+      const rolesBefore = await orgRoleCount();
+      const res = await owner(
+        'POST',
+        `/api/packs/${packId}/agents/hire`,
+        hireBody([{ key: 'crew-agent-ux', seat: 'front_desk', name: 'Sally Desk' }]),
+        201,
+      );
+      const row = (await agents()).find((a) => a.id === res.agents[0].agentId) as any;
+      expect(row.role_key).toBe('front_desk');
+      expect(row.pack_persona).toMatchObject({ packId, key: 'crew-agent-ux' });
+      const def = BUILTIN_ROLES.find((r) => r.key === 'front_desk');
+      expect(row.permissions).toEqual(def?.permissions);
+      expect(row.permissions.allowedTools).not.toContain('shell');
+      expect(row.permissions.mayCommit).toBe(false);
+      expect(await orgRoleCount()).toBe(rolesBefore);
+    } finally {
+      await setMode('dev');
+    }
+  });
+
+  it('the persona list shows a persona named like a business role as seated on it (business) and not (dev)', async () => {
+    const pack = (await q('SELECT snapshot FROM packs WHERE id=$1', [packId]))[0] as any;
+    const original = JSON.stringify(pack.snapshot);
+    const snapshot = JSON.parse(original);
+    const persona = snapshot.items.find((i: { key: string }) => i.key.endsWith('test-runner'));
+    persona.name = 'Front Desk';
+    delete persona.displayName;
+    const key = persona.key.split(':').pop();
+    const personaOf = async () =>
+      (await owner('GET', `/api/packs/${packId}/personas`)).personas.find(
+        (p: { key: string }) => p.key === key,
+      );
+    await q('UPDATE packs SET snapshot=$2::jsonb WHERE id=$1', [packId, JSON.stringify(snapshot)]);
+    try {
+      await setMode('business');
+      const def = BUILTIN_ROLES.find((r) => r.key === 'front_desk');
+      expect(await personaOf()).toMatchObject({
+        roleKey: 'front_desk',
+        role: { version: def?.version, upToDate: true },
+      });
+      await setMode('dev');
+      const dev = await personaOf();
+      expect(dev.roleKey).not.toBe('front_desk');
+      expect(dev.role).toBeNull();
+    } finally {
+      await setMode('dev');
+      await q('UPDATE packs SET snapshot=$2::jsonb WHERE id=$1', [packId, original]);
+    }
   });
 });
 

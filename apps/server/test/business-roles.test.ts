@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  BUILTIN_ROLES,
-  BUSINESS_ROLE_KEYS,
-  isBusinessRoleKey,
-  PACK_SEAT_KEYS,
-  type PackSnapshot,
-} from '@aom/shared';
+import { BUILTIN_ROLES, BUSINESS_ROLE_KEYS, isBusinessRoleKey, type PackSnapshot } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hireChecks } from '../src/ceo/actions2.ts';
 import { ensureRole } from '../src/commands/pack-hire.ts';
@@ -112,14 +106,6 @@ describe('a dev organization: more lists (AC 5)', () => {
     const c = await hireChecks(env, 'front_desk', [], 1);
     expect(c.refuse).toBeTruthy();
   });
-
-  it('does not refuse a business role for the CEO in a business organization on mode grounds', async () => {
-    await setMode('business');
-    const env = { ctx: w.t.app.ctx, orgId: w.owner.id } as never;
-    const c = await hireChecks(env, 'front_desk', [], 1);
-    expect(c.refuse ?? '').not.toMatch(/business role/i);
-    await setMode('dev');
-  });
 });
 
 describe('a persona that matches a business role (AC 2)', () => {
@@ -167,6 +153,8 @@ describe('a persona that matches a business role (AC 2)', () => {
   });
 
   it('a persona role made earlier keeps its role in a business organization, and still gets versions', async () => {
+    await setMode('dev');
+    await run(item('Front Desk', 'h1'), 'h1', true); // the dev-era role (made here, so the test stands alone)
     await setMode('business');
     const before = await ownRoles();
     expect((await run(item('Front Desk', 'h1'), 'h1', true)).key).toBe('crew-front-desk');
@@ -224,9 +212,5 @@ describe('a business role in an organization with no repository (AC 3)', () => {
     expect(start.readRepos ?? []).toEqual([]);
     runner.close();
     await setMode('dev');
-  });
-
-  it('keeps the pack seat list of a dev organization as it was', () => {
-    expect(PACK_SEAT_KEYS.some((k) => isBusinessRoleKey(k))).toBe(false);
   });
 });
