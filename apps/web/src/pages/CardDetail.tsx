@@ -1,4 +1,6 @@
 import {
+  BUSINESS_CARD_TYPE_LABELS,
+  type BusinessCardType,
   type CardDetailResponse,
   COMPLETION_ACTION_LABELS,
   fieldCatalogue,
@@ -309,7 +311,7 @@ export function CardDetailView({
               {card.ref}
             </span>
             <Badge tone={statusTone(card.status)}>{STATUS_WORD[card.status] ?? card.status}</Badge>
-            <Badge>{card.cardType}</Badge>
+            <Badge>{BUSINESS_CARD_TYPE_LABELS[card.cardType as BusinessCardType] ?? card.cardType}</Badge>
             {card.reworkRound > 0 && <Badge tone="violet">Rework {card.reworkRound}</Badge>}
             <BackoffBadge backoff={card.backoff} />
             <WorkabilityWarning

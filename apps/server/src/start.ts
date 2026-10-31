@@ -1,5 +1,6 @@
 import { createApp } from './app.ts';
 import { registerBuiltins } from './catalogue/boot.ts';
+import { ensureBusinessWorkflowsAtBoot } from './catalogue/business-workflows.ts';
 import { createClock } from './clock.ts';
 import { loadConfig } from './config.ts';
 import { runDataMigrations } from './data-migrations/index.ts';
@@ -51,6 +52,8 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
   const app = await createApp(config, { background: true, extensions });
   const reg = await registerBuiltins(app.ctx);
   if (reg.workflows || reg.roles) app.log.info(reg, 'registered built-in catalogue');
+  const biz = await ensureBusinessWorkflowsAtBoot(app.ctx);
+  if (biz) app.log.info({ orgs: biz }, 'business workflows checked');
   // Hired agents follow their role's current version (permissions = role + the agent's own deviations).
   const rebased = await rebaseAgentsToCurrentRoles(app.ctx);
   if (rebased) app.log.info({ rebased }, 'agents rebased onto their current role version');

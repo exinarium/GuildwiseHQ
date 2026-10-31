@@ -298,6 +298,8 @@ export const ShiftBriefSchema = z.object({
     riskTier: z.enum(['small', 'large']).nullable(),
     reworkRound: z.number().int().nonnegative(),
     completionAction: StoredCompletionAction.nullable(),
+    /** Business card types: the label of each custom field (key to label), shown as a Details section. Absent: none. */
+    fieldLabels: z.record(z.string(), z.string()).optional(),
     docsNeeded: z.boolean(),
     /** Run the Investigate & design stage before build (absent: older servers). */
     designNeeded: z.boolean().optional(),
@@ -340,6 +342,8 @@ export const ShiftBriefSchema = z.object({
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),
+    /** The project works without a repository (business card types): no branch, worktree or build text. */
+    repoless: z.boolean().optional(),
     /** The sub directory of the card's repository the project lives in; absent: the repository root. */
     projectPath: z.string().optional(),
     /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */

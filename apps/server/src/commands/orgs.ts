@@ -42,6 +42,7 @@ import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { blockersMessage, modeSwitchBlockers } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
@@ -160,6 +161,7 @@ export async function setOrgMode(ctx: Ctx, a: OrgAccess, mode: OrgMode): Promise
       ],
       { tx },
     );
+    if (mode === 'business') await ensureBusinessWorkflows(ctx, tx, a.orgId);
   });
 }
 

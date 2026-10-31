@@ -13,6 +13,7 @@ import {
   type InvestigationLocation,
   type LocalTestService,
   LocalTestServicesSchema,
+  isBusinessCardType,
   type PackAgentBrief,
   type PackPersonaRef,
   packAgentBriefOf,
@@ -205,6 +206,7 @@ export async function buildBrief(
   const stage = wf ? getStage(wf.definition, shift.stage ?? card.stage) : undefined;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!wf || !stage || !role) return null;
+  const businessCard = isBusinessCardType(card.card_type);
   const ext = await one(ctx.pool, 'SELECT extensions FROM role_extensions WHERE org_id=$1 AND role_key=$2', [
     agent.org_id,
     agent.role_key,
@@ -280,6 +282,9 @@ export async function buildBrief(
       riskTier: card.risk_tier,
       reworkRound: card.rework_round,
       completionAction: await effectiveCompletionAction(ctx.pool, card),
+      ...(businessCard
+        ? { fieldLabels: Object.fromEntries(wf.definition.customFields.map((c) => [c.key, c.label])) }
+        : {}),
       docsNeeded: card.docs_needed,
       designNeeded: card.design_needed ?? false,
       investigationOnly: card.investigation_only ?? false,
@@ -315,6 +320,7 @@ export async function buildBrief(
       e2eGlobs: project.e2e_globs,
       architecturalGlobs: project.architectural_globs,
       vaultFolder: project.vault_folder ?? undefined,
+      ...(businessCard ? { repoless: true as const } : {}),
       ...(repo?.project_path ? { projectPath: repo.project_path as string } : {}),
     },
     role: {
