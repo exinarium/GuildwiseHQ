@@ -26,6 +26,8 @@ export const streamId = {
   /** The blog writer's topic queue: one stream for the platform, with no organization in it (ceo-blog-topics.md 3.2). */
   blogTopics: () => 'blog-topics',
   ledger: (id: string) => `ledger-${id}`,
+  /** One stream per organization and rule pack (business mode). */
+  rulePack: (orgId: string, packId: string) => `rule-pack-${orgId}-${packId}`,
   intake: (id: string) => `intake-${id}`,
   outbound: (id: string) => `outbound-${id}`,
   mailInbox: (id: string) => `mailinbox-${id}`,

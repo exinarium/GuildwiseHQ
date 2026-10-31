@@ -11,7 +11,9 @@ import {
 } from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { FullPowerControl } from '../components/ceo/FullPowerControl.tsx';
+import { EnforcedByBadge } from '../components/EnforcedByBadge.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
+import { RulePacksDialog } from '../components/RulePacksDialog.tsx';
 import {
   Badge,
   Button,
@@ -26,6 +28,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { useBusinessMode } from '../lib/orgMode.ts';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { formatCalendarDate, formatDateTime } from '../lib/time.ts';
@@ -135,7 +138,9 @@ function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
     <form onSubmit={submit} aria-label="Retire entry" className="flex flex-col gap-4" noValidate>
       <p className="text-sm text-muted">
         {`"${e.title}" `}
-        {t.reword('stays in the ledger for the record, but agents no longer see it and a search no longer finds it.')}
+        {t.reword(
+          'stays in the ledger for the record, but agents no longer see it and a search no longer finds it.',
+        )}
       </p>
       <TextArea label="Reason" value={reason} onChange={(ev) => setReason(ev.target.value)} error={err} />
       <ErrorBox error={retire.error} />
@@ -239,6 +244,7 @@ function History({ id }: { id: string }) {
 
 function Entry({ e }: { e: LedgerEntry }) {
   const t = useOrgTerms();
+  const business = useBusinessMode();
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState(false);
   const [history, setHistory] = useState(false);
@@ -257,6 +263,10 @@ function Entry({ e }: { e: LedgerEntry }) {
         <Badge tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}>
           {scopeLabel(e.scope, t.reword)}
         </Badge>
+        {business && e.scope === 'standing_order' && (
+          <EnforcedByBadge value={e.enforcedBy ?? 'agent_instruction'} />
+        )}
+        {business && e.rulePack && <span data-testid="ledger-rule-pack">from {e.rulePack.name}</span>}
         {e.projectKey ? <span className="font-mono">{e.projectKey}</span> : <span>every project</span>}
         {e.cardRef && (
           <Link to={`/cards/${e.cardRef}`} className="font-mono text-brand-text hover:underline">
@@ -401,6 +411,8 @@ export function Ledger() {
   const [scope, setScope] = useState<(typeof SCOPES)[number]['value']>('all');
   const [projectId, setProjectId] = useState('');
   const [adding, setAdding] = useState(false);
+  const business = useBusinessMode();
+  const [packs, setPacks] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
   const [dueOnly, setDueOnly] = useState(false);
   const entries = useLedger({
@@ -418,9 +430,16 @@ export function Ledger() {
         title={t.ledger}
         sub={t.reword('Requirements, decisions and standing orders agents rely on')}
         actions={
-          <Button variant="primary" onClick={() => setAdding(true)}>
-            Add entry
-          </Button>
+          <>
+            {business && (
+              <Button variant="secondary" onClick={() => setPacks(true)}>
+                Rule packs
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              Add entry
+            </Button>
+          </>
         }
       />
       <search aria-label={t.reword('Search the ledger')} className="mb-4 flex flex-col gap-3">
@@ -520,6 +539,7 @@ export function Ledger() {
       >
         <LedgerForm onDone={() => setAdding(false)} />
       </Dialog>
+      {business && <RulePacksDialog open={packs} onOpenChange={setPacks} />}
     </div>
   );
 }

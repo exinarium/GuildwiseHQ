@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CalendarDate, LedgerScope } from '../events/ledger.ts';
+import { EnforcedBy } from '../ledger/rule-packs.ts';
 import { IsoTime } from './common.ts';
 
 export const LedgerEntryDtoSchema = z.object({
@@ -37,6 +38,10 @@ export const LedgerEntryDtoSchema = z.object({
   reviewDue: z.boolean().default(false),
   /** When the owner last confirmed the entry at a review. */
   reviewedAt: IsoTime.nullable().default(null),
+  /** Set when the entry came from a rule pack (business mode). */
+  rulePack: z.object({ id: z.string(), name: z.string(), ruleId: z.string() }).nullable().optional(),
+  /** Standing orders: how the rule is held (business mode shows it as a badge). */
+  enforcedBy: EnforcedBy.optional(),
   /** Full-text rank when a query was given. */
   rank: z.number().optional(),
   /** Standing orders: whether the CEO may enforce this order with full power (docs/design/ceo-front-door.md section 3.4). */
@@ -184,3 +189,48 @@ export type AuthorizeStandingOrderRequest = z.infer<typeof AuthorizeStandingOrde
 
 /** `POST /api/ledger/:id/escalate` (Admin): ask the Owner to take this order over as his own. */
 export const EscalateStandingOrderRequestSchema = z.object({ note: z.string().trim().max(1000).default('') });
+
+/** Rule packs (business mode): the list, a preview with the status of each rule, install and remove results. */
+export const RulePackSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  kind: z.enum(['general', 'industry']),
+  industry: z.enum(['real_estate', 'accounting', 'law']).nullable(),
+  ruleCount: z.number().int(),
+  installed: z.boolean(),
+});
+export type RulePackSummary = z.infer<typeof RulePackSummarySchema>;
+export const RulePackListResponseSchema = z.object({ packs: z.array(RulePackSummarySchema) });
+export type RulePackListResponse = z.infer<typeof RulePackListResponseSchema>;
+
+export const RulePackRuleStatus = z.enum(['new', 'installed', 'edited', 'covered', 'may_conflict']);
+export type RulePackRuleStatus = z.infer<typeof RulePackRuleStatus>;
+export const RulePackPreviewSchema = RulePackSummarySchema.extend({
+  rules: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      body: z.string(),
+      enforcedBy: EnforcedBy,
+      status: RulePackRuleStatus,
+      /** The org's own rules a `covered` or `may_conflict` rule meets. */
+      existing: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
+    }),
+  ),
+});
+export type RulePackPreview = z.infer<typeof RulePackPreviewSchema>;
+
+export const RulePackInstallResultSchema = z.object({
+  added: z.array(z.string()),
+  kept: z.array(z.string()),
+  skipped: z.array(z.object({ ruleId: z.string(), existingId: z.string(), existingTitle: z.string() })),
+  flagged: z.array(z.string()),
+});
+export type RulePackInstallResult = z.infer<typeof RulePackInstallResultSchema>;
+
+export const RulePackRemoveResultSchema = z.object({
+  retired: z.array(z.string()),
+  kept: z.array(z.string()),
+});
+export type RulePackRemoveResult = z.infer<typeof RulePackRemoveResultSchema>;

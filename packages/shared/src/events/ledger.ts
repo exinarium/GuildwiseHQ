@@ -25,6 +25,14 @@ export const ledgerEvents = [
       vaultPath: z.string().optional(),
       /** Optional date the owner wants to look at this entry again (release 1.4.0). */
       reviewDate: CalendarDate.optional(),
+      /** Set only by a rule pack install (business mode): which pack rule this entry is. */
+      rulePack: z
+        .object({
+          packId: z.string().min(1).max(80),
+          ruleId: z.string().min(1).max(80),
+          packVersion: z.number().int().positive(),
+        })
+        .optional(),
     }),
   ),
   /**
@@ -70,5 +78,31 @@ export const ledgerEvents = [
   defineEvent(
     'LedgerEntryReviewDateSet',
     z.object({ entryId: Id, reviewDate: CalendarDate.nullable(), confirmed: z.boolean().default(false) }),
+  ),
+  /** A rule pack was installed in an organization (business mode). */
+  defineEvent(
+    'RulePackInstalled',
+    z.object({
+      packId: z.string().min(1).max(80),
+      packVersion: z.number().int().positive(),
+      /** New entries. */
+      added: z.array(Id).max(200),
+      /** Already installed (edited or not). */
+      kept: z.array(Id).max(200).default([]),
+      /** Covered by the organization's own rule: nothing added. */
+      skipped: z
+        .array(z.object({ ruleId: z.string(), existingId: Id }))
+        .max(200)
+        .default([]),
+    }),
+  ),
+  /** A rule pack was removed: unedited rules retired, edited ones stay as the organization's own. */
+  defineEvent(
+    'RulePackRemoved',
+    z.object({
+      packId: z.string().min(1).max(80),
+      retired: z.array(Id).max(200),
+      kept: z.array(Id).max(200).default([]),
+    }),
   ),
 ] as const;

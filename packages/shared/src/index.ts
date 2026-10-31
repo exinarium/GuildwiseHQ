@@ -37,6 +37,7 @@ export * from './intake/index.ts';
 export * from './integrations/index.ts';
 export * from './interests/index.ts';
 export * from './investigation/index.ts';
+export * from './ledger/index.ts';
 export * from './mail/index.ts';
 export * from './mcp/index.ts';
 export * from './models/index.ts';

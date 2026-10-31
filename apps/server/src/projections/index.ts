@@ -215,6 +215,7 @@ export const PROJECTION_TABLES = [
   'card_blockers',
   'ledger_entries',
   'ledger_entry_versions',
+  'org_rule_packs',
   'vaults',
   'project_graphs',
   'shift_context_metrics',
