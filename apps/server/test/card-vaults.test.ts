@@ -30,7 +30,7 @@ const addVault = async (body: Record<string, unknown>) =>
       }),
       201,
     )
-  ).vault?.id as string | undefined;
+  ).id as string;
 
 const builderStart = async () => {
   await freshState();
@@ -80,14 +80,18 @@ describe('a card shift carries the organization vault and the project vault', ()
     await builderStart();
     await addVault({ kind: 'org' });
     const prjId = await addVault({ kind: 'project', projectId: w.projectId });
-    await q(`UPDATE org_members SET role='member' WHERE user_id=$1`, [w.owner.id]);
+    await w.hire('Bo5', 'builder', 'senior');
+    await w.card({ title: 'Non manager' });
+    // the workstation's user loses the Owner role just before the shift is dispatched
+    await q(`UPDATE org_members SET role='member' WHERE user_id=$1 AND org_id=$2`, [w.owner.id, w.owner.id]);
     try {
-      await w.hire('Bo5', 'builder', 'senior');
-      await w.card({ title: 'Non manager' });
       const start = await p.next('Bo5');
       expect(start.vaults?.map((v: any) => v.vaultId)).toEqual([prjId]);
     } finally {
-      await q(`UPDATE org_members SET role='owner' WHERE user_id=$1`, [w.owner.id]);
+      await q(`UPDATE org_members SET role='owner' WHERE user_id=$1 AND org_id=$2`, [
+        w.owner.id,
+        w.owner.id,
+      ]);
     }
   });
 });
