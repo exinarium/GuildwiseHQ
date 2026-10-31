@@ -117,6 +117,13 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       };
   }
 
+  // Already on the working branch (merged by hand, or an earlier finalize whose answer was lost): nothing to rebase or
+  // merge, the card is done. Checked before the rebase so a landed branch is never sent back as a "conflict".
+  if (action === 'merge') {
+    const landed = await withRepoLock(input.repoPath, () => alreadyLanded(input, wt));
+    if (landed) return { ok: true, action, mergeCommit: landed };
+  }
+
   try {
     await rebaseOntoBase(wt, p.baseBranch, p.commitAs);
   } catch (err) {
@@ -199,6 +206,20 @@ async function pushBranch(input: CompletionInput, wt: string, remoteName?: strin
   return git(wt, [...a.args, 'push', 'origin', '--', spec], { env: a.env });
 }
 
+/**
+ * The tip of `origin/<base>` (or `<base>` without a remote) when the card branch's head is already part of it, else null.
+ * Fetches the base first; a failed fetch just means the local view is used.
+ */
+async function alreadyLanded(input: CompletionInput, wt: string): Promise<string | null> {
+  const base = input.payload.baseBranch;
+  if (await hasRemote(input.repoPath)) await git(input.repoPath, ['fetch', '--', 'origin', base]);
+  const target = await baseTarget(input.repoPath, base);
+  const tip = await revParse(input.repoPath, target);
+  const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+  if (!tip || !head) return null;
+  return (await git(input.repoPath, ['merge-base', '--is-ancestor', head, tip])).exitCode === 0 ? tip : null;
+}
+
 async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
   // One integration into the working branch at a time per clone (the "merge latest main first" step shares the lock).
   return withRepoLock(input.repoPath, () => mergeLocked(input, wt));
@@ -234,6 +255,13 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
           .split('\n')
           .filter(Boolean);
         await git(integration, ['merge', '--abort']);
+        // No conflicted file: git failed for another reason (a lock, a missing ref, the identity...). That is not a
+        // conflict for the builder to fix: report git's own words so the owner sees what happened.
+        if (files.length === 0)
+          return fail(
+            'merge',
+            `git merge ${p.branchName} failed: ${(m.stderr || m.stdout).trim() || `exit ${m.exitCode}`}`,
+          );
         return {
           ok: false,
           action: 'merge',

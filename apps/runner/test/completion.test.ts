@@ -189,6 +189,39 @@ describe('completion: merge', () => {
     expect(sh(repo.clone, 'git', ['worktree', 'list', '--porcelain'])).not.toMatch(/integration/);
   });
 
+  it('a card branch already merged into the working branch (by hand) is reported merged: no rebase, no second merge', async () => {
+    const { repo, path } = await cardWorktree();
+    const cardTip = sh(path, 'git', ['rev-parse', 'HEAD']);
+    // someone merges the card branch by hand elsewhere (--no-ff) and pushes the working branch
+    sh(repo.clone, 'git', ['push', 'origin', `${BRANCH}:refs/heads/by-hand`]);
+    const other = join(tmp(), 'other');
+    sh(repo.root, 'git', ['clone', repo.origin, other]);
+    sh(other, 'git', ['merge', '--no-ff', '-m', 'Merge by hand', 'origin/by-hand']);
+    sh(other, 'git', ['push', 'origin', 'main']);
+    const landed = sh(repo.origin, 'git', ['rev-parse', 'main']);
+    const res = await run(repo, { ...payload(repo, path, 'merge'), expectedSha: cardTip });
+    expect(res).toMatchObject({ ok: true, action: 'merge', mergeCommit: landed });
+    expect(res.conflict).toBeUndefined();
+    // nothing new on origin, and the card branch is where it was (not rebased onto the merge)
+    expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(landed);
+    expect(originLog(repo).match(/^Merge /gm)).toHaveLength(1);
+    expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(cardTip);
+  });
+
+  it('a merge git refuses without a conflicted file is a failure with git’s own message, never an empty "conflict"', async () => {
+    const { repo, path } = await cardWorktree();
+    // git refuses the merge before touching a file: no conflict, just an error
+    sh(repo.clone, 'git', ['config', 'merge.verifySignatures', 'true']);
+    const before = sh(repo.origin, 'git', ['rev-parse', 'main']);
+    const res = await run(repo, payload(repo, path, 'merge'));
+    expect(res.ok).toBe(false);
+    expect(res.conflict).toBeUndefined();
+    expect(res.conflictedFiles).toBeUndefined();
+    expect(res.error).toMatch(/^git merge aom\/toy-1-add-thing failed: .+/);
+    expect(res.error).toMatch(/signature/i);
+    expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(before);
+  });
+
   it('refuses a worktree with uncommitted changes', async () => {
     const { repo, path } = await cardWorktree();
     writeFileSync(join(path, 'dirty.txt'), 'x');

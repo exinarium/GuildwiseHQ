@@ -2,6 +2,14 @@
 
 All notable changes to Guildwise HQ are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses semantic versioning.
 
+## [Unreleased]
+
+Runner 0.1.63.
+
+### Fixed
+
+- Finalize no longer sends a card back to Rework with an empty "conflict" when nothing conflicted. A card branch that is already on the working branch (merged by hand, or by an earlier finalize whose answer was lost) is reported merged straight away, before any rebase. A merge that git refuses without a conflicted file (a lock, a missing ref, a refused signature) is reported as a finalize failure with git's own message, which reaches the desk, instead of a conflict for the builder that loops back through review.
+
 ## [1.3.0] - 2026-10-29
 
 Runner 0.1.62 (unchanged). The video schedule, Short destinations and worker roles. Migrations 2740 to 2742 and a data migration (`video-schedule-2026-10`). New optional environment variables `AOM_VIDEO_MAX_BYTES`, `AOM_VIDEO_ROLE`, `AOM_VIDEO_WORKER_TOKEN`, `AOM_VIDEO_WORKER_PORT`, `AOM_VIDEO_PUSH_URL` (now requires `AOM_VIDEO_WORKER_TOKEN`), `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET`.
