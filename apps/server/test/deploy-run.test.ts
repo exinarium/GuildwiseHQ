@@ -155,9 +155,14 @@ describe('an automatic environment (the recipe says `auto`)', () => {
       summary: 'deployed run-abc1234',
     });
     expect((await run(id)).log_tail).toContain('P5 DEPLOY READY');
-    expect(
-      await q(`SELECT 1 FROM ceo_wakes WHERE reason='deploy_finished' AND subject_id=$1`, [id]),
-    ).toHaveLength(1);
+    // the wake is enqueued after the run's result event (a few awaits later): wait for it
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM ceo_wakes WHERE reason='deploy_finished' AND subject_id=$1`, [id])).length ===
+        1,
+      4000,
+      'deploy_finished wake',
+    );
     // the command is done and a second answer of the same command changes nothing
     expect((await q('SELECT status FROM runner_commands WHERE id=$1', [cmd!.commandId]))[0]!.status).toBe(
       'done',
