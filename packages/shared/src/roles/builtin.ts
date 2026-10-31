@@ -1,15 +1,9 @@
+import { BUSINESS_ROLES } from './business.ts';
+
+import { COMMON_DENIED_SHELL } from './denied-shell.ts';
 import { type AgentPermissions, type RoleDefinition, RoleDefinitionSchema } from './schema.ts';
 
-/** The shell patterns every role denies (no pushing, rebasing, branch switching, force resets, sudo). */
-export const COMMON_DENIED_SHELL = [
-  'git push*',
-  'git rebase*',
-  'git checkout*',
-  'git switch*',
-  'git reset --hard*',
-  'rm -rf /*',
-  'sudo *',
-];
+export { COMMON_DENIED_SHELL };
 
 const perms = (p: Partial<AgentPermissions> = {}): AgentPermissions => ({
   allowedTools: ['read', 'edit', 'shell'],
@@ -656,6 +650,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     skills: [],
     claimableStages: [{ workflowKey: 'feed', stageId: 'curate' }],
   }),
+  // Business mode roles (GWP-33): appended, so every role above keeps its place and version.
+  ...BUSINESS_ROLES,
 ];
 
 export function getBuiltinRole(key: string): RoleDefinition | undefined {

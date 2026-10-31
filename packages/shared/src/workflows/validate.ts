@@ -1,4 +1,5 @@
 import { fieldCatalogue } from '../cards/fields.ts';
+import { isBusinessRoleKey } from '../roles/business.ts';
 import { type RoleDefinition, roleClaimsStage } from '../roles/schema.ts';
 
 import { type Stage, WorkflowDefinitionSchema } from './schema.ts';
@@ -9,6 +10,7 @@ export type IssueCode =
   | 'duplicate_stage_id'
   | 'duplicate_outcome_id'
   | 'missing_initial_stage'
+  | 'business_role_worktree'
   // rule 2
   | 'no_terminal_stage'
   | 'terminal_has_outcomes'
@@ -179,6 +181,14 @@ export function validateWorkflow(
       !(def.extends && roleClaimsStage(role, def.extends.key, s.id))
     ) {
       err(3, 'role_cannot_claim_stage', `role '${role.key}' cannot claim stage '${def.key}.${s.id}'`, s.id);
+    }
+    if (isBusinessRoleKey(role.key) && s.worktree !== 'none') {
+      err(
+        3,
+        'business_role_worktree',
+        `stage '${s.id}': ${role.name} works without a repository; set the step to use no worktree`,
+        s.id,
+      );
     }
     if (s.seniorOnly && !role.seniorityLevels.includes('senior')) {
       err(

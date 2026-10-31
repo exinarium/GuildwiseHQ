@@ -1,3 +1,4 @@
+import { getBuiltinRole, isBusinessRoleKey } from '@aom/shared';
 import { useState } from 'react';
 import { useMe } from '../../api/queries/auth.ts';
 import { useHireFromPack, usePackPersonas } from '../../api/queries/my-capabilities.ts';
@@ -241,13 +242,20 @@ export function HirePackDialog({
             <div data-testid="hire-review">
               <p className="text-sm font-medium">Review</p>
               <ul className="list-disc pl-5 text-sm text-muted">
-                {chosen.map((p) => (
-                  <li key={p.key}>
-                    {(picked[p.key] ?? p.name).trim() || p.name}: role <code>{p.roleKey}</code>
-                    {p.role ? ` (version ${p.role.version} exists)` : ' (new)'}, tools{' '}
-                    {toolsText(p.permissions.allowedTools)}, tagged {p.provenanceLabel}
-                  </li>
-                ))}
+                {chosen.map((p) =>
+                  isBusinessRoleKey(p.roleKey) ? (
+                    <li key={p.key}>
+                      {(picked[p.key] ?? p.name).trim() || p.name}: seated on{' '}
+                      {getBuiltinRole(p.roleKey)?.name ?? p.roleKey}, tagged {p.provenanceLabel}
+                    </li>
+                  ) : (
+                    <li key={p.key}>
+                      {(picked[p.key] ?? p.name).trim() || p.name}: role <code>{p.roleKey}</code>
+                      {p.role ? ` (version ${p.role.version} exists)` : ' (new)'}, tools{' '}
+                      {toolsText(p.permissions.allowedTools)}, tagged {p.provenanceLabel}
+                    </li>
+                  ),
+                )}
               </ul>
             </div>
           </div>

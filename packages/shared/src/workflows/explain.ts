@@ -99,6 +99,11 @@ const SPEC: Record<IssueCode, Spec> = {
     text: ({ step, q }) =>
       `The role ${q(0) ? `'${q(0)}' ` : ''}is not allowed to take ${step}. Add this step to the role's steps, or pick another role.`,
   },
+  business_role_worktree: {
+    field: 'role',
+    text: ({ step }) =>
+      `${step} is owned by a business role, which works without a repository. Set the step to use no worktree, or pick another role.`,
+  },
   role_not_senior: {
     field: 'seniorOnly',
     text: ({ step }) =>

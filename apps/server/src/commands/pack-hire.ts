@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  businessSeatFor,
+  getBuiltinRole,
   type HirablePacksResponse,
   type HireFromPackRequest,
   isOrgManager,
@@ -7,6 +9,7 @@ import {
   type PackHireStatus,
   type PackItem,
   PackPersonaReadResultSchema,
+  type PackPersonaRef,
   type PackPersonasResponse,
   type PackProvenance,
   type PackSnapshot,
@@ -32,6 +35,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { rebaseAgentsToCurrentRoles } from '../hr/follow-role.ts';
+import { orgModeOf } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { hireAgent } from './agents.ts';
 import { orgScope, userActor } from './common.ts';
@@ -138,6 +142,7 @@ export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Prom
     [who.orgId, packId],
   );
   const reader = trusted ? await readerFor(ctx, p, undefined) : null;
+  const orgMode = await orgModeOf(ctx.pool, who.orgId);
   return {
     packId,
     packName: p.name,
@@ -150,8 +155,16 @@ export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Prom
             const cap = shortKey(p.name, i.key);
             const prov = provenanceOf(p, i);
             const m = permissionsForPersona(i.tools, { mayWiden });
-            const roleKey = roleKeyForPackPersona(p.name, cap, { visibility: p.visibility, packId: p.id });
-            const role = roles.find((r) => r.key === roleKey);
+            const ownKey = roleKeyForPackPersona(p.name, cap, { visibility: p.visibility, packId: p.id });
+            const ownRole = roles.find((r) => r.key === ownKey);
+            // a business organization seats a persona that matches a business role on that built-in role
+            const seat =
+              orgMode === 'business' && !ownRole
+                ? businessSeatFor({ key: cap, name: i.displayName ?? i.name })
+                : null;
+            const seated = seat ? getBuiltinRole(seat) : undefined;
+            const roleKey = seated ? seated.key : ownKey;
+            const role = seated ? { version: seated.version, upToDate: true } : null;
             return {
               key: cap,
               name: i.name,
@@ -162,9 +175,11 @@ export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Prom
               withheld: m.withheld,
               provenanceLabel: provenanceLabel(prov),
               roleKey,
-              role: role
-                ? { version: role.version, upToDate: role.definition?.source?.hash === i.hash }
-                : null,
+              role: seated
+                ? role
+                : ownRole
+                  ? { version: ownRole.version, upToDate: ownRole.definition?.source?.hash === i.hash }
+                  : null,
               hiredAgentIds: hired.filter((h) => h.cap === cap).map((h) => h.id as string),
             };
           })
@@ -392,6 +407,8 @@ export async function ensureRole(
   read: { text: string; hash: string; sha: string },
   /** Whether the hirer may grant the widest tool profile (an Owner or Admin). Decides what a PRIVATE pack's role carries. */
   hirerMayWiden: boolean,
+  /** `seat`: in a business organization a persona that matches a business role takes that built-in role (no role is made). */
+  opts: { seat?: boolean } = {},
 ): Promise<RoleDefinition> {
   const snap = p.snapshot as PackSnapshot;
   const cap = shortKey(p.name, item.key);
@@ -407,6 +424,11 @@ export async function ensureRole(
     );
   if (existing?.definition.source?.hash === read.hash && existing.definition.source.packId === p.id)
     return existing.definition;
+  if (opts.seat && !existing && (await orgModeOf(tx as never, orgId)) === 'business') {
+    const seat = businessSeatFor({ key: cap, name: item.displayName ?? item.name });
+    const seatRole = seat ? await loadRole(tx as never, orgId, seat) : null;
+    if (seatRole) return seatRole.definition;
+  }
   // A pack adds versions only to a role that IS its own. A role of the same key that came from another pack, from the role
   // designer or from the built-in catalogue is not touched (a private pack named like an organization pack must not become a new
   // version of the organization's role, and every agent on that role follows the newest version). The one exception is an
@@ -481,6 +503,17 @@ export async function ensureRole(
   return def;
 }
 
+const personaRefOf = (p: Row, item: PackItem, sha: string): PackPersonaRef => ({
+  packId: p.id,
+  packName: p.name,
+  key: shortKey(p.name, item.key),
+  kind: 'persona',
+  name: (item.displayName ?? item.name).slice(0, 100),
+  sha,
+  hash: item.hash,
+  ref: (p.snapshot as PackSnapshot | null)?.ref ?? null,
+});
+
 async function completeHire(ctx: Ctx, req: Row): Promise<void> {
   const p = await one(ctx.pool, 'SELECT * FROM packs WHERE id=$1 AND removed_at IS NULL', [req.pack_id]);
   const params = req.params as HireFromPackRequest;
@@ -498,7 +531,9 @@ async function completeHire(ctx: Ctx, req: Row): Promise<void> {
       if (!item || !read || read.hash !== item.hash || read.sha !== p.pinned_sha || !isTrustedRow(p))
         throw conflict('pack_changed', 'the pack changed while it was being read: try again');
       const def = await withAppendTx(ctx.pool, async (tx) =>
-        ensureRole(ctx, tx, req.org_id, req.requested_by, p, item, read, isOrgManager({ orgRole: role })),
+        ensureRole(ctx, tx, req.org_id, req.requested_by, p, item, read, isOrgManager({ orgRole: role }), {
+          seat: true,
+        }),
       );
       const provenance = provenanceOf(p, item);
       const mapped = permissionsForPersona(item.tools, { mayWiden: isOrgManager({ orgRole: role }) });
@@ -518,7 +553,10 @@ async function completeHire(ctx: Ctx, req: Row): Promise<void> {
           capacity: params.capacity,
           ...(params.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
         },
-        { provenance, permissions: mapped.permissions },
+        def.builtIn
+          ? // seated on a built-in business role: its own permissions (the persona's tools never apply), and the pack-agent block
+            { provenance, packPersona: personaRefOf(p, item, read.sha) }
+          : { provenance, permissions: mapped.permissions },
       );
       agents.push({ agentId, name: it.name, roleKey: def.key });
     }
