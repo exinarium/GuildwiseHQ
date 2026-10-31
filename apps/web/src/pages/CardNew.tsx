@@ -180,6 +180,7 @@ export function CardNewForm({
     ),
   );
   // Business mode: when the offered types change (workflows loaded late) and the chosen one is no longer offered, move to the first.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follows the offered types by value, not by array identity
   useEffect(() => {
     if (business && cardTypes.length && !cardTypes.includes(v.cardType))
       setV(emptyForm(cardTypes[0] as string));

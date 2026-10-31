@@ -1,9 +1,9 @@
 import {
   BUSINESS_CARD_FIELDS,
-  BUSINESS_CARD_TYPES,
   BUSINESS_CARD_TYPE_LABELS,
-  type CardDetailResponse,
+  BUSINESS_CARD_TYPES,
   businessWorkflow,
+  type CardDetailResponse,
 } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -30,7 +30,15 @@ beforeEach(() => {
           account: { kind: 'user' },
           isAdmin: true,
           orgs: [{ id: ID(1), name: 'Org', role: 'owner', status: 'active' }],
-          activeOrg: { id: ID(1), name: 'Org', role: 'owner', status: 'active', features: {}, mode, banners: [] },
+          activeOrg: {
+            id: ID(1),
+            name: 'Org',
+            role: 'owner',
+            status: 'active',
+            features: {},
+            mode,
+            banners: [],
+          },
           guestIn: [],
           guestProjectIds: [],
           visibleProjectIds: [],
@@ -43,7 +51,6 @@ beforeEach(() => {
   );
 });
 afterEach(() => vi.unstubAllGlobals());
-
 
 function open(type: (typeof BUSINESS_CARD_TYPES)[number]) {
   const wf = businessWorkflow(type);
@@ -100,7 +107,14 @@ function open(type: (typeof BUSINESS_CARD_TYPES)[number]) {
     threadId: ID(11),
     thread: [],
     currentShift: null,
-    permissions: { canEdit: false, canSpecify: false, canMove: true, canRelease: false, canCancel: true, canComment: true },
+    permissions: {
+      canEdit: false,
+      canSpecify: false,
+      canMove: true,
+      canRelease: false,
+      canCancel: true,
+      canComment: true,
+    },
     blockers: [],
   } as unknown as CardDetailResponse;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -131,6 +145,8 @@ describe('the fields of a business card on the card page', () => {
     open('quote');
     await screen.findByTestId('card-spec');
     await waitFor(() => expect(screen.queryByText('What to build')).toBeNull());
-    expect(within(screen.getByTestId('card-spec')).getByRole('heading', { name: 'Details' })).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('card-spec')).getByRole('heading', { name: 'Details' }),
+    ).toBeInTheDocument();
   });
 });

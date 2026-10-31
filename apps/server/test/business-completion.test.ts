@@ -7,14 +7,17 @@ const db = (projectDefault: string | null) => ({
 });
 
 describe('effectiveCompletion', () => {
-  it.each(BUSINESS_CARD_TYPES)('a %s card has no git completion even when the project default is merge', async (t) => {
-    const r = await effectiveCompletion(db('merge') as never, {
-      card_type: t,
-      project_id: 'p',
-      completion_action: 'merge',
-    });
-    expect(r.action).toBeNull();
-  });
+  it.each(BUSINESS_CARD_TYPES)(
+    'a %s card has no git completion even when the project default is merge',
+    async (t) => {
+      const r = await effectiveCompletion(db('merge') as never, {
+        card_type: t,
+        project_id: 'p',
+        completion_action: 'merge',
+      });
+      expect(r.action).toBeNull();
+    },
+  );
 
   it('a dev card follows the project default', async () => {
     const r = await effectiveCompletion(db('merge') as never, {
