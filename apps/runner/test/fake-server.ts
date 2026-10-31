@@ -28,7 +28,9 @@ export interface FakeServerOptions {
   /** Verdict for each `shift.report` (default: accept). */
   reportResult?: (
     msg: RunnerToServerOf<'shift.report'>,
-  ) => { accepted: boolean; error?: string; message?: string; matches?: unknown[] } | 'ignore';
+  ) =>
+    | { accepted: boolean; error?: string; message?: string; matches?: unknown[]; continueShift?: boolean }
+    | 'ignore';
   rpc?: (msg: RunnerToServerOf<'rpc.request'>) => { ok: boolean; result?: unknown; error?: string };
   pairCode?: string;
   /** Answer to each `worktrees.query`: the paths still in use. Unset: the query is not answered. */

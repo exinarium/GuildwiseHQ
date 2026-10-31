@@ -185,7 +185,7 @@ describe('renderInstructions', () => {
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
-      - \`aom question ... --wait [10m]\`: ask and keep working in this shift; the command prints the answer (or, with no answer in time, parks the card and you resume it later). Add \`--topic environment|sandbox|tooling|dependency|order|requirements|design|code\` so the right colleague gets it.
+      - \`aom question ... --wait [10m]\`: ask and keep working in this shift; the command prints the answer (or, with no answer in time, parks the card and you resume it later). Add \`--topic environment|sandbox|tooling|tests|dependency|order|requirements|design|code\` so the right colleague gets it.
       - \`aom card facts [<REF>]\`: environment status, whether dependencies have merged, branch, stage and blockers. The server answers these: look before you ask.
       - \`aom backlog suggest --title "<title>" [--description "..."] [--priority critical|high|normal|low] [--tag <t>]...\`: a follow-up you found that is outside this card goes on the project backlog as a suggestion (never on the board); the owner decides.
 
@@ -258,7 +258,7 @@ describe('renderInstructions', () => {
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
-      - \`aom question ... --wait [10m]\`: ask and keep working in this shift; the command prints the answer (or, with no answer in time, parks the card and you resume it later). Add \`--topic environment|sandbox|tooling|dependency|order|requirements|design|code\` so the right colleague gets it.
+      - \`aom question ... --wait [10m]\`: ask and keep working in this shift; the command prints the answer (or, with no answer in time, parks the card and you resume it later). Add \`--topic environment|sandbox|tooling|tests|dependency|order|requirements|design|code\` so the right colleague gets it.
       - \`aom card facts [<REF>]\`: environment status, whether dependencies have merged, branch, stage and blockers. The server answers these: look before you ask.
       - \`aom backlog suggest --title "<title>" [--description "..."] [--priority critical|high|normal|low] [--tag <t>]...\`: a follow-up you found that is outside this card goes on the project backlog as a suggestion (never on the board); the owner decides.
 
@@ -383,5 +383,39 @@ describe('runner-owned branches', () => {
     expect(isNotWorkingBranchCandidate('guildwise/integration/web-1')).toBe(true);
     expect(isNotWorkingBranchCandidate('main')).toBe(false);
     expect(isNotWorkingBranchCandidate('release/aom')).toBe(false);
+  });
+});
+
+describe('test gaps and the builder hint', () => {
+  const gap = {
+    requestId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b1',
+    stage: 'build',
+    agentName: 'Bea',
+    at: '2026-10-30T10:00:00.000Z',
+    detail: 'run the DB tests',
+  };
+  it('names the tests the builder did not run, with the request and the result state', () => {
+    const open = renderShiftPrompt({ ...buildBrief(), testGaps: [gap] });
+    expect(open).toContain('## Tests the builder did not run');
+    expect(open).toContain('did not run the DB-backed (environment-dependent) tests');
+    expect(open).toContain(gap.requestId);
+    expect(open).toContain('Result: not arrived yet.');
+    const arrived = renderShiftPrompt({
+      ...buildBrief(),
+      testGaps: [
+        { ...gap, result: { status: 'done', summary: '42 passed', at: '2026-10-30T11:00:00.000Z' } },
+      ],
+    });
+    expect(arrived).toContain('(done): 42 passed');
+  });
+  it('has neither section without a gap or the builder flag', () => {
+    const p = renderShiftPrompt(buildBrief());
+    expect(p).not.toContain('did not run the DB-backed');
+    expect(p).not.toContain('Tests that need an environment');
+  });
+  it('tells a builder under "Test without an environment" to ask with --topic tests', () => {
+    const p = renderShiftPrompt({ ...buildBrief(), builderTestsNonBlocking: true });
+    expect(p).toContain('## Tests that need an environment');
+    expect(p).toContain('aom question --topic tests');
   });
 });

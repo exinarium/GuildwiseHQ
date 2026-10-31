@@ -10,6 +10,7 @@ export const QUESTION_TOPICS = [
   'environment',
   'sandbox',
   'tooling',
+  'tests',
   'dependency',
   'order',
   'requirements',
@@ -20,12 +21,14 @@ export const QuestionTopicSchema = z.enum(QUESTION_TOPICS);
 export type QuestionTopic = z.infer<typeof QuestionTopicSchema>;
 
 /** Topics the workstation's DevOps engineer owns (a DevOps request, not a question shift). */
-export const DEVOPS_TOPICS: readonly QuestionTopic[] = ['environment', 'sandbox', 'tooling'];
+/** `tests`: running tests, or the test environment they need. */
+export const DEVOPS_TOPICS: readonly QuestionTopic[] = ['environment', 'sandbox', 'tooling', 'tests'];
 /** Routine or factual topics: the answer shift runs on Sonnet. Design and requirements keep the answerer's model. */
 export const ROUTINE_TOPICS: readonly QuestionTopic[] = [
   'environment',
   'sandbox',
   'tooling',
+  'tests',
   'dependency',
   'order',
   'code',

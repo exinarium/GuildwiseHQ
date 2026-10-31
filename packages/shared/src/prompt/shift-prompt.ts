@@ -354,6 +354,30 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
       ),
     );
   }
+  if (brief.testGaps?.length)
+    parts.push(
+      section(
+        'Tests the builder did not run',
+        [
+          "The builder did not run the DB-backed (environment-dependent) tests: 'Test without an environment' is on for this project. They are not passed; judge the change knowing they did not run.",
+          ...brief.testGaps.map(
+            (g) =>
+              `- DevOps request ${g.requestId} (asked by ${g.agentName} in ${g.stage}, ${g.at})${g.detail ? `: ${g.detail}` : ''}\n  ${
+                g.result
+                  ? `Result arrived ${g.result.at} (${g.result.status}): ${g.result.summary || 'no summary'}`
+                  : 'Result: not arrived yet.'
+              }`,
+          ),
+        ].join('\n'),
+      ),
+    );
+  if (brief.builderTestsNonBlocking)
+    parts.push(
+      section(
+        'Tests that need an environment',
+        'This project tests without an environment. If you need DB-backed or environment-dependent tests run, ask with `aom question --topic tests --text ...`: the DevOps engineer is asked and the card is not parked. Carry on, do not record those tests as passed, and say in your handoff note that they were not run.',
+      ),
+    );
   if (brief.highRisk)
     parts.push(
       section(

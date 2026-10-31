@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { detectLoops } from '../src/ceo/detectors.ts';
+import { testGapResultPass } from '../src/dispatcher/bottleneck.ts';
 import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -18,7 +19,7 @@ let r: FakeRunner;
 let p: ReturnType<typeof pipeline>;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' }, project: {} });
-  r = await w.connectRunner({ capabilities: ['ceo:1'] });
+  r = await w.connectRunner({ capabilities: ['ceo:1', 'question-continue:1'] });
   p = pipeline(w, r);
 });
 afterAll(async () => {
@@ -947,5 +948,154 @@ describe('stop-loss per card', () => {
     const [stop] = (await itemsOf(card.id)).filter((i) => i.subkind === 'stop_loss');
     expect(stop!.title).toMatch(/shifts budget/);
     expect(stop!.routed_agent_id).toBe(await agentId('Arch'));
+  });
+});
+
+describe('a builder\'s test question under "Test without an environment"', () => {
+  const setting = (on: boolean) => q('UPDATE projects SET test_without_environment=$1', [on]);
+  afterAll(() => setting(false));
+  const testQuestion = {
+    text: 'Please run the DB-backed tests of the upload service for me',
+    topic: 'tests',
+    doing: 'finishing the upload retry',
+  };
+
+  it('ON + tests: DevOps is asked, the card is not parked, the claim is kept and the gap is recorded', async () => {
+    await reset();
+    await setting(true);
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Needs DB tests' });
+    const start = await claimCard(card.id);
+    await p.startShift(r, start);
+    expect(start.brief.builderTestsNonBlocking).toBe(true);
+    expect(start.brief.testGaps).toBeUndefined();
+    const before = await cardRow(card.id);
+    const res = await ask(start.shiftId, testQuestion);
+    expect(res).toMatchObject({ accepted: true, continueShift: true });
+    const c = await cardRow(card.id);
+    expect(c).toMatchObject({ status: 'claimed', stage: before.stage, parked_request_id: null });
+    expect(c.claim_shift_id).toBe(before.claim_shift_id);
+    expect(c.claim_id).toBe(before.claim_id);
+    const reqs = await q('SELECT * FROM devops_requests WHERE card_id=$1', [card.id]);
+    expect(reqs).toHaveLength(1);
+    expect(await eventsOfType('TestEnvironmentParked')).toHaveLength(0);
+    expect(await eventsOfType('ClaimReleased')).toHaveLength(0);
+    expect((await itemsOf(card.id)).filter((i) => i.subkind === 'test_environment')).toHaveLength(0);
+    const gaps = await q('SELECT * FROM card_test_gaps WHERE card_id=$1', [card.id]);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({
+      request_id: reqs[0]!.id,
+      reason: 'test_without_environment',
+      result_at: null,
+    });
+    const msgs = await q('SELECT body FROM thread_messages WHERE thread_id=$1', [card.id]);
+    expect(
+      msgs.some(
+        (m) =>
+          String(m.body).includes('did not run the DB-backed tests') && String(m.body).includes(reqs[0]!.id),
+      ),
+    ).toBe(true);
+    // The shift can still hand off, and a second question attaches to the same request.
+    const again = await ask(start.shiftId, {
+      ...testQuestion,
+      text: 'Did the DB-backed tests run yet? Not yet?',
+    });
+    expect(again).toMatchObject({ accepted: true, continueShift: true });
+    expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(1);
+    const done = await p.report(r, start.shiftId, handoff('DB tests not run'), DIFF_SMALL);
+    expect(done.accepted).toBe(true);
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('OFF + tests: the card is parked on the request as today', async () => {
+    await reset();
+    await setting(false);
+    await w.hire('Bea', 'builder', 'junior');
+    const { card, res } = await buildAndAsk('Tests, setting off', testQuestion);
+    expect(res.continueShift).toBeUndefined();
+    const c = await cardRow(card.id);
+    expect(c).toMatchObject({ status: 'waiting', claim_id: null });
+    expect(c.parked_request_id).not.toBeNull();
+    expect(await q('SELECT 1 FROM card_test_gaps WHERE card_id=$1', [card.id])).toHaveLength(0);
+  });
+
+  it('ON + a deploy question (topic environment) still parks the card on a real request', async () => {
+    await reset();
+    await setting(true);
+    await w.hire('Bea', 'builder', 'junior');
+    const { card, res } = await buildAndAsk('Deploy question', {
+      text: 'Please deploy the staging app so I can look at it',
+      topic: 'environment',
+    });
+    expect(res.continueShift).toBeUndefined();
+    const c = await cardRow(card.id);
+    expect(c).toMatchObject({ status: 'waiting', claim_id: null });
+    expect(c.parked_request_id).not.toBeNull();
+    expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(1);
+    expect(await q('SELECT 1 FROM card_test_gaps WHERE card_id=$1', [card.id])).toHaveLength(0);
+  });
+
+  it('the DevOps result arrives after the card moved on: posted once, marker updated, stage and claim unchanged', async () => {
+    await reset();
+    await setting(true);
+    await w.hire('Bea', 'builder', 'junior');
+    await w.hire('Rex', 'reviewer', 'senior');
+    const card = await w.card({ title: 'Result after review' });
+    const start = await claimCard(card.id);
+    await p.startShift(r, start);
+    await ask(start.shiftId, testQuestion);
+    await p.report(r, start.shiftId, handoff('DB tests not run'), DIFF_SMALL);
+    r.ended(start.shiftId, 'reported');
+    await until(
+      async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [start.shiftId, 'ended']))[0],
+      3000,
+      'shift ended',
+    );
+    // The reviewer's brief carries the marker.
+    const review = await nextShift('Rex');
+    expect(review.brief.testGaps).toHaveLength(1);
+    expect(review.brief.testGaps[0]).toMatchObject({ stage: 'build', agentName: 'Bea' });
+    expect(review.brief.builderTestsNonBlocking).toBeUndefined();
+    const [req] = await q('SELECT id FROM devops_requests WHERE card_id=$1', [card.id]);
+    expect(review.brief.testGaps[0].requestId).toBe(req!.id);
+    await q(`UPDATE devops_requests SET status='done', result_summary='42 passed' WHERE id=$1`, [req!.id]);
+    const before = await cardRow(card.id);
+    expect(await testGapResultPass(w.t.app.ctx)).toBe(1);
+    const after = await cardRow(card.id);
+    expect({
+      stage: after.stage,
+      status: after.status,
+      claim_id: after.claim_id,
+      parked: after.parked_request_id,
+    }).toEqual({
+      stage: before.stage,
+      status: before.status,
+      claim_id: before.claim_id,
+      parked: before.parked_request_id,
+    });
+    const [gap] = await q('SELECT * FROM card_test_gaps WHERE card_id=$1', [card.id]);
+    expect(gap).toMatchObject({ result_status: 'done', result_summary: '42 passed' });
+    expect(gap!.result_at).not.toBeNull();
+    const posted = (await q('SELECT body FROM thread_messages WHERE thread_id=$1', [card.id])).filter((m) =>
+      String(m.body).includes('42 passed'),
+    );
+    expect(posted).toHaveLength(1);
+    // idempotent
+    expect(await testGapResultPass(w.t.app.ctx)).toBe(0);
+    expect(await eventsOfType('BuilderTestsResultArrived')).toHaveLength(1);
+  });
+
+  it('a waiting test question that times out keeps the card claimed', async () => {
+    await reset();
+    await setting(true);
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Waiting tests' });
+    const start = await claimCard(card.id);
+    await p.startShift(r, start);
+    await ask(start.shiftId, { ...testQuestion, blocking: false, wait: true });
+    const res = await ask(start.shiftId, { ...testQuestion, blocking: true, converts: true });
+    expect(res).toMatchObject({ accepted: true, continueShift: true });
+    expect(await cardRow(card.id)).toMatchObject({ status: 'claimed', parked_request_id: null });
+    r.ended(start.shiftId, 'stopped');
   });
 });

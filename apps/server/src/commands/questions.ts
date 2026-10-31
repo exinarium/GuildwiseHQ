@@ -33,6 +33,8 @@ export interface QuestionResult {
   error?: string;
   message?: string;
   matches?: LedgerMatch[];
+  /** Accepted, but not terminal: the runner keeps the shift going. */
+  continueShift?: boolean;
 }
 
 /** The card plus the open cards that depend on it: what a blocking question holds up. */

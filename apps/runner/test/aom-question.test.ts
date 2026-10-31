@@ -182,6 +182,39 @@ describe('questions through the runner', () => {
     expect(ended.outcome).toBe('reported');
   });
 
+  it('a blocking question accepted with continueShift does not end the shift: the handoff after it is accepted', async () => {
+    const seen: any = {};
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      seen.ask = await ctl.post('/v1/report', {
+        report: {
+          kind: 'question',
+          text: 'run the DB tests?',
+          options: [],
+          doing: 'x',
+          blocking: true,
+          topic: 'tests',
+        },
+      });
+      seen.after = await ctl.post('/v1/report', {
+        report: { kind: 'outcome', outcomeId: 'handoff', note: 'DB tests not run', data: {} },
+      });
+    });
+    h = await startHarness(
+      {
+        reportResult: (m) =>
+          m.report.kind === 'question'
+            ? { accepted: true, continueShift: true, message: 'Carry on.' }
+            : { accepted: true },
+      },
+      { adapters: new Map([['mock', adapter]]) },
+    );
+    const { ended } = await h.runShift({ stage: 'build' });
+    expect(seen.ask.status).toBe(200);
+    expect(seen.ask.json.message).toBe('Carry on.');
+    expect(seen.after.status).toBe(200);
+    expect(ended.outcome).toBe('reported');
+  });
+
   it('a rejected question returns the matches to the agent so it can retry in the same shift', async () => {
     const seen: any = {};
     const adapter = new ScriptedAdapter(async (_i, ctl) => {

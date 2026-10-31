@@ -4,6 +4,7 @@ import {
   DESK_SUBKIND,
   DEVOPS_TOPICS,
   getStage,
+  QUESTION_CONTINUE_CAPABILITY,
   QUESTION_WAIT,
   type QuestionTopic,
   type ShiftReport,
@@ -28,6 +29,7 @@ interface Result {
   accepted: boolean;
   error?: string;
   message?: string;
+  continueShift?: boolean;
 }
 
 /** The earliest moment a waiting question may be converted: never earlier than this after it was raised. */
@@ -263,7 +265,8 @@ export async function devopsTopicQuestion(
   );
   if (!ws || !(await devopsAgentOn(tx, ws.id, card.org_id))) return undefined;
   const detail = report.text.replace(/\s+/g, ' ').trim().slice(0, 300);
-  const problem = topic === 'environment' ? 'app_not_deployed' : (topic as 'sandbox' | 'tooling');
+  const problem =
+    topic === 'environment' || topic === 'tests' ? 'app_not_deployed' : (topic as 'sandbox' | 'tooling');
   const summary = `${card.ref} (${agent.name}, ${shift.stage ?? card.stage}) asks about ${topic}: ${detail}${report.doing ? `\nWhat it was doing: ${report.doing}` : ''}`;
   const open = await one<{ id: string }>(
     tx,
@@ -272,6 +275,22 @@ export async function devopsTopicQuestion(
     [card.id],
   );
   const requestedBy = { kind: 'agent' as const, id: agent.id as string, name: agent.name as string };
+
+  // "Test without an environment": a builder's test-run question goes to DevOps without parking the card.
+  if (
+    topic === 'tests' &&
+    agent.role_key === 'builder' &&
+    !agent.is_devops &&
+    (await one(tx, 'SELECT 1 AS ok FROM projects WHERE id=$1 AND test_without_environment', [
+      card.project_id,
+    ])) &&
+    (await one(
+      tx,
+      'SELECT 1 AS ok FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+      [ws.id, QUESTION_CONTINUE_CAPABILITY],
+    ))
+  )
+    return builderTestGap(ctx, tx, shift, card, agent, { wsId: ws.id, summary, detail, requestedBy });
 
   if (!report.blocking) {
     if (!open)
@@ -326,7 +345,7 @@ export async function devopsTopicQuestion(
       { id: ws.id, userId: ws.user_id },
       card,
       { problem, detail },
-      { summary, requestedBy },
+      { summary, requestedBy, fromQuestion: true },
     );
   }
   await ctx.store.append(
@@ -344,6 +363,84 @@ export async function devopsTopicQuestion(
   return {
     accepted: true,
     message: `Recorded. The DevOps engineer was asked about ${topic} and ${card.ref} is parked until the request completes. Finish now; do not make further changes.`,
+  };
+}
+
+/**
+ * A builder's test-run question under "Test without an environment": the DevOps engineer is asked, the card is not
+ * parked and keeps its claim, and the card records that the DB-backed tests were not run (`BuilderTestsNotRun`).
+ * An open request is reused only when it already is a test gap of the card.
+ */
+async function builderTestGap(
+  ctx: Ctx,
+  tx: Tx,
+  shift: Row,
+  card: Row,
+  agent: Row,
+  q: {
+    wsId: string;
+    summary: string;
+    detail: string;
+    requestedBy: { kind: 'agent'; id: string; name: string };
+  },
+): Promise<Result> {
+  const existing = await one<{ id: string }>(
+    tx,
+    `SELECT r.id FROM devops_requests r JOIN card_test_gaps g ON g.request_id = r.id AND g.card_id = r.card_id
+      WHERE r.card_id=$1 AND r.status IN ('queued','running','needs_approval')
+      ORDER BY r.created_at DESC LIMIT 1`,
+    [card.id],
+  );
+  const stage = String(shift.stage ?? card.stage);
+  const events: AppendInput[] = [
+    cardMessage(
+      card,
+      { kind: 'agent', agentId: agent.id },
+      'question',
+      `${q.detail}\n\n(asked of DevOps: topic tests${existing ? ', attached to the open request' : ''})`,
+    ),
+  ];
+  let requestId: string;
+  if (existing) requestId = existing.id;
+  else {
+    ({ requestId } = await createDevOpsRequestIn(ctx, tx, {
+      workstationId: q.wsId,
+      summary: q.summary,
+      requestedBy: q.requestedBy,
+      cardId: card.id,
+      orgId: card.org_id,
+    }));
+    events.push(
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'BuilderTestsNotRun',
+          payload: {
+            cardId: card.id,
+            requestId,
+            agentId: agent.id,
+            stage,
+            reason: 'test_without_environment',
+            detail: q.detail,
+          },
+        },
+        actor: agentActor(agent.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `${agent.name} did not run the DB-backed tests: 'Test without an environment' is on for this project. DevOps request ${requestId} was asked to run them; its result is posted here when it arrives.`,
+        { requestId },
+      ),
+    );
+  }
+  await ctx.store.append(events, { tx });
+  return {
+    accepted: true,
+    continueShift: true,
+    message: `Recorded. The DevOps engineer was asked (request ${requestId}). This project tests without an environment, so ${card.ref} is not parked: carry on without those tests, do not record them as passed, and say in your handoff note that they were not run. The result is posted on the card.`,
   };
 }
 
@@ -412,6 +509,15 @@ export async function convertWaitingQuestion(
     [card.id, agent.id, shift.started_at],
   );
   if (!req) return { accepted: false, error: 'there is no waiting question of this shift to convert' };
+  if (
+    await one(tx, 'SELECT 1 AS ok FROM card_test_gaps WHERE card_id=$1 AND request_id=$2', [card.id, req.id])
+  )
+    return {
+      accepted: true,
+      continueShift: true,
+      message:
+        'Recorded. The DevOps engineer has not finished yet; the card is not parked. Carry on without those tests, do not record them as passed, and say in your handoff note that they were not run.',
+    };
   await ctx.store.append(
     await releaseClaimEvents(
       tx,

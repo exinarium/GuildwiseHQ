@@ -56,6 +56,17 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
     parent: parent ? related(parent) : null,
     children: children.map(related),
     waitingOn: card.status === 'waiting' && open ? related(open) : null,
+    testGaps: (
+      await rows(ctx.pool, 'SELECT * FROM card_test_gaps WHERE card_id=$1 ORDER BY created_at', [card.id])
+    ).map((g) => ({
+      requestId: g.request_id,
+      stage: g.stage,
+      at: iso(g.created_at) as string,
+      detail: g.detail,
+      result: g.result_at
+        ? { status: g.result_status, summary: g.result_summary ?? '', at: iso(g.result_at) as string }
+        : null,
+    })),
     parkedOn: card.parked_request_id
       ? { requestId: card.parked_request_id, problem: card.park_problem ?? 'unknown' }
       : null,

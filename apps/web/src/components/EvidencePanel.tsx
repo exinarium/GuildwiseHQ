@@ -75,11 +75,11 @@ export function TestingLinks({
   /** The card waits for a sub-workflow child (shown by its own line), not for a bug fix. */
   hideWaiting?: boolean;
 }) {
-  const { parent, children, waitingOn, parkedOn } = testing;
+  const { parent, children, waitingOn, parkedOn, testGaps = [] } = testing;
   // Only a card that waits on its open bug child (`waitingOn`) says so. A card waiting for the owner's approval, manual
   // QA, a running merge, DevOps or a sub-workflow child waits for something else, shown by its own line.
   const waits = status === 'waiting' && !hideWaiting && !!waitingOn;
-  if (!parent && children.length === 0 && !waitingOn && !parkedOn) return null;
+  if (!parent && children.length === 0 && !waitingOn && !parkedOn && testGaps.length === 0) return null;
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="testing-links">
       {waits && waitingOn && (
@@ -100,6 +100,20 @@ export function TestingLinks({
           Tester is parked waiting on DevOps: {parkedOn.problem.replaceAll('_', ' ')}
         </p>
       )}
+      {testGaps.map((g) => (
+        <p
+          key={g.requestId}
+          role="status"
+          data-testid="test-gap-notice"
+          className="rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-warning-soft-fg"
+        >
+          The builder did not run the DB-backed tests (&apos;Test without an environment&apos; is on). DevOps
+          request {g.requestId.slice(0, 8)}:{' '}
+          {g.result
+            ? `result arrived: ${g.result.status}, ${g.result.summary || 'no summary'}`
+            : 'result not arrived yet'}
+        </p>
+      ))}
       {parent && (
         <p>
           Parent:{' '}

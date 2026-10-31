@@ -83,6 +83,8 @@ export interface ReportResult {
   message?: string;
   /** Ledger entries that matched a question. */
   matches?: LedgerMatch[];
+  /** Accepted, but not terminal: the runner keeps the shift going. */
+  continueShift?: boolean;
 }
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };

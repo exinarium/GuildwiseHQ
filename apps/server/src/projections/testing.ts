@@ -132,6 +132,25 @@ export const testingProjectors: Record<string, Projector> = {
     );
   },
 
+  BuilderTestsNotRun: async (tx, e) => {
+    const p = ev<'BuilderTestsNotRun'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO card_test_gaps (card_id, request_id, agent_id, stage, reason, detail, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+      [p.cardId, p.requestId, p.agentId, p.stage, p.reason, p.detail, e.createdAt],
+    );
+  },
+
+  BuilderTestsResultArrived: async (tx, e) => {
+    const p = ev<'BuilderTestsResultArrived'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE card_test_gaps SET result_status=$3, result_summary=$4, result_at=$5 WHERE card_id=$1 AND request_id=$2`,
+      [p.cardId, p.requestId, p.status, p.summary, e.createdAt],
+    );
+  },
+
   TestEnvironmentReady: async (tx, e) => {
     const p = ev<'TestEnvironmentReady'>(e).payload;
     await mutateCard(tx, e, p.cardId, () =>

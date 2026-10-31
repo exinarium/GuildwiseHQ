@@ -278,6 +278,8 @@ interface ReportVerdict {
   error?: string;
   message?: string;
   matches?: LedgerMatch[];
+  /** Accepted but not terminal: the shift carries on. */
+  continueShift?: boolean;
 }
 
 /** Roles whose stages only read the code and record a verdict: they make no commits of their own. */
@@ -677,6 +679,7 @@ export class ShiftSupervisor {
           ...(msg.error ? { error: msg.error } : {}),
           ...(msg.message ? { message: msg.message } : {}),
           ...(msg.matches ? { matches: msg.matches } : {}),
+          ...(msg.continueShift ? { continueShift: true } : {}),
         });
         return;
       }
@@ -2524,7 +2527,10 @@ export class ShiftSupervisor {
       if (terminal) s.reportState = 'none';
       return rejected(result.error ?? 'the server rejected the report', result.matches);
     }
-    if (terminal) {
+    if (terminal && result.continueShift) {
+      // A builder's test question under "Test without an environment": accepted, but the shift goes on and may still hand off.
+      s.reportState = 'none';
+    } else if (terminal) {
       s.reportState = 'accepted';
       s.reportAccepted = true;
       s.graceTimer = setTimeout(

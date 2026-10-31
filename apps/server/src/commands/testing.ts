@@ -298,6 +298,8 @@ export async function environmentNotReadyEvents(
   opts: {
     summary?: string;
     requestedBy?: { kind: 'agent'; id: string; name?: string };
+    /** A question, not a tester's rejection: the tester-only "test without an environment" shortcut does not apply. */
+    fromQuestion?: boolean;
   } = {},
 ): Promise<AppendInput[]> {
   const problem = env.problem;
@@ -305,7 +307,7 @@ export async function environmentNotReadyEvents(
   const policy = await one(tx, 'SELECT test_without_environment FROM projects WHERE id=$1', [
     card.project_id,
   ]);
-  if (policy?.test_without_environment)
+  if (policy?.test_without_environment && !opts.fromQuestion)
     return [
       cardMessage(
         card,
