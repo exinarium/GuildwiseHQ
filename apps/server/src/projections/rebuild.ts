@@ -28,6 +28,8 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'repo_id IN (SELECT id FROM project_repos) AND workstation_id IN (SELECT id FROM workstations)',
   },
+  // the latest read of a repository for a Ship release proposal (release prep 2/4): operational, refreshed on demand
+  { table: 'repo_release_facts', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
   // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
   { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
