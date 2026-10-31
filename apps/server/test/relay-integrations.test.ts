@@ -262,7 +262,11 @@ describe('integration status API', () => {
 
     const r2 = await w.connectRunner();
     await serve(r2, [{ integrationId: m.integration.id, kind: 'generic' }]);
-    expect(await statusOf(m.integration.id)).toMatchObject({ connected: true, offlineSince: null });
+    expect(await statusOf(m.integration.id)).toMatchObject({
+      connected: true,
+      offlineSince: null,
+      refusedSinceOffline: { count: 0, lastAt: null },
+    });
     r2.ws.close();
   });
 

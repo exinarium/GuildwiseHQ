@@ -81,7 +81,15 @@ export function relayPublicRoutes(ctx: Ctx) {
       const call = req.relay;
       if (!call) {
         const t = Date.now();
-        if (t - unknownWindow.at > 60_000) unknownWindow = { at: t, n: 0 };
+        if (t - unknownWindow.at > 60_000) {
+          if (unknownWindow.n > UNKNOWN_ROWS_PER_MINUTE) {
+            ctx.log.warn(
+              { relay: { outcome: 'unknown_path', unrecorded: unknownWindow.n - UNKNOWN_ROWS_PER_MINUTE } },
+              'relay unknown-path rows over the cap were not recorded',
+            );
+          }
+          unknownWindow = { at: t, n: 0 };
+        }
         if (++unknownWindow.n > UNKNOWN_ROWS_PER_MINUTE) return;
       }
       await hub().record({

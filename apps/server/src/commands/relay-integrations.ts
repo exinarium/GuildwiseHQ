@@ -180,7 +180,8 @@ export async function relayStatuses(ctx: Ctx, orgId: string): Promise<RelayInteg
       servingWorkstations: serving,
       everServed: r.last_served_at != null,
       offlineSince: serving > 0 ? null : iso(r.offline_since),
-      refusedSinceOffline: { count: Number(r.refused), lastAt: iso(r.refused_at) },
+      refusedSinceOffline:
+        serving > 0 ? { count: 0, lastAt: null } : { count: Number(r.refused), lastAt: iso(r.refused_at) },
     };
   });
 }
