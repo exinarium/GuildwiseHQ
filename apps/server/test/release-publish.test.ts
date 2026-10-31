@@ -215,6 +215,9 @@ describe('release.publish on the server', () => {
   it('a failed tag push puts a release_failed alert on the desk; Retry sends release.publish, never release.ship', async () => {
     const id = await committed();
     const ships = (await shipCmds()).length;
+    // events are not truncated between tests: count what this retry adds
+    const startedBefore = await eventCount('ReleaseShipStarted');
+    const retriedBefore = await eventCount('ReleasePublishRetried');
     await applyReleasePublishResult(
       w.t.app.ctx,
       w.workstationId,
@@ -246,8 +249,8 @@ describe('release.publish on the server', () => {
         body: { resolution: 'approved' },
       }),
     );
-    expect(await eventCount('ReleasePublishRetried')).toBe(1);
-    expect(await eventCount('ReleaseShipStarted')).toBe(1);
+    expect(await eventCount('ReleasePublishRetried')).toBe(retriedBefore + 1);
+    expect(await eventCount('ReleaseShipStarted')).toBe(startedBefore);
     expect((await publishCmds()).length).toBe(before + 1);
     expect((await shipCmds()).length).toBe(ships);
     expect((await ship()).status).toBe('committed');

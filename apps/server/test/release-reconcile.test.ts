@@ -1,10 +1,10 @@
-import { type ReleaseFacts, ReleaseFactsSchema } from '@aom/shared';
+import { RELEASE_SHIP_CAPABILITY, type ReleaseFacts, ReleaseFactsSchema } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
-import { addMember } from './helpers/members.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { addMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, ok, type World } from './helpers/world.ts';
+import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
 
 let w: World;
 beforeAll(async () => {
@@ -28,7 +28,9 @@ const facts = (over: Partial<ReleaseFacts> = {}): ReleaseFacts =>
     existingTags: ['v1.3.0'],
     commits: [],
     changedTotal: 4,
-    components: [{ name: 'runner', changedCount: 17, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.62') }],
+    components: [
+      { name: 'runner', changedCount: 17, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.62') },
+    ],
     changelog: CHANGELOG('### Added\n\n- One.\n- Two.\n- Three.\n\n'),
     ...over,
   });
@@ -42,18 +44,28 @@ async function setFacts(f: ReleaseFacts) {
   );
 }
 
-const reconcile = (t: 'release_pr' | 'ahead' | 'manual') => reconcileReleaseProposal(w.t.app.ctx, w.repoId, t);
+const reconcile = (t: 'release_pr' | 'ahead' | 'manual') =>
+  reconcileReleaseProposal(w.t.app.ctx, w.repoId, t);
 type Rows = [any, ...any[]]; // the tests assert the length where it matters
 const proposals = async () =>
   (await q(`SELECT * FROM release_proposals WHERE repo_id=$1 ORDER BY created_at`, [w.repoId])) as Rows;
 const shipItems = async () =>
-  (await q(`SELECT * FROM desk_items WHERE subkind='ship_release' AND data->>'repoId'=$1`, [w.repoId])) as Rows;
+  (await q(`SELECT * FROM desk_items WHERE subkind='ship_release' AND data->>'repoId'=$1`, [
+    w.repoId,
+  ])) as Rows;
 const eventCount = async (type: string) =>
   Number(((await q(`SELECT count(*)::int AS n FROM events WHERE type=$1`, [type])) as Rows)[0].n);
 
 beforeEach(async () => {
   await freshState();
   await q(`TRUNCATE release_proposals, repo_release_facts`);
+  // An approval commits the release on a workstation that holds the clone (f5077b89), so one must be online and capable.
+  await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+  await q(
+    `INSERT INTO workstation_capabilities (workstation_id, capabilities, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (workstation_id) DO UPDATE SET capabilities=$2`,
+    [w.workstationId, [RELEASE_SHIP_CAPABILITY]],
+  );
   await q(`UPDATE project_repos SET component_rules=$2::jsonb WHERE id=$1`, [
     w.repoId,
     JSON.stringify([
@@ -120,7 +132,9 @@ describe('release proposal reconcile (docs/ARCHITECTURE.md 28b)', () => {
     expect(await proposals()).toHaveLength(2);
     // A new tag also allows the heartbeat to propose again.
     await q(`UPDATE release_proposals SET state='dismissed' WHERE state='proposed'`);
-    await setFacts(facts({ lastTag: { name: 'v1.4.0', sha: 'c'.repeat(40) }, existingTags: ['v1.3.0', 'v1.4.0'] }));
+    await setFacts(
+      facts({ lastTag: { name: 'v1.4.0', sha: 'c'.repeat(40) }, existingTags: ['v1.3.0', 'v1.4.0'] }),
+    );
     await reconcile('ahead');
     expect((await proposals()).filter((x) => x.state === 'proposed')).toHaveLength(1);
   });
@@ -144,8 +158,13 @@ describe('release proposal reconcile (docs/ARCHITECTURE.md 28b)', () => {
     await reconcile('ahead');
     expect(await proposals()).toHaveLength(1);
     expect(await shipItems()).toHaveLength(1);
+    // While the release is still being shipped the publish flow owns closing the proposal (53b69c02); once the
+    // ship is published and the tag appears, the heartbeat closes it as released.
+    await q(`UPDATE release_ships SET status='published' WHERE id=$1`, [(await proposals())[0].id]);
     // The tag appears: released.
-    await setFacts(facts({ lastTag: { name: 'v1.4.0', sha: 'c'.repeat(40) }, existingTags: ['v1.3.0', 'v1.4.0'] }));
+    await setFacts(
+      facts({ lastTag: { name: 'v1.4.0', sha: 'c'.repeat(40) }, existingTags: ['v1.3.0', 'v1.4.0'] }),
+    );
     await reconcile('ahead');
     expect((await proposals())[0]).toMatchObject({ state: 'released', closed_reason: 'released' });
   });
@@ -194,19 +213,25 @@ describe('Ship release approval (resolveShipReleaseIn)', () => {
     expect(JSON.stringify(r.body)).toContain('unknown_component');
   });
 
-  it('records ReleaseApproved with server-recomputed bumps and queues nothing', async () => {
+  it('records ReleaseApproved with server-recomputed bumps and queues the release commit (release.ship)', async () => {
     const queued = async () =>
-      Number(((await q(`SELECT count(*)::int AS n FROM runner_commands`)) as Rows)[0].n);
+      Number(
+        ((await q(`SELECT count(*)::int AS n FROM runner_commands WHERE type='release.ship'`)) as Rows)[0].n,
+      );
     const cmdsBefore = await queued();
     const before = await eventCount('ReleaseApproved');
-    const r = await approve({ version: '1.4.0', components: [{ name: 'runner', level: 'minor' }], factsHeadSha: HEAD });
+    const r = await approve({
+      version: '1.4.0',
+      components: [{ name: 'runner', level: 'minor' }],
+      factsHeadSha: HEAD,
+    });
     expect(r.status).toBe(200);
     expect(await eventCount('ReleaseApproved')).toBe(before + 1);
     const [p] = await proposals();
     expect(p).toMatchObject({ state: 'approved', version: '1.4.0', notes_source: 'changelog' });
     // The tag has runner 0.1.62 and head already 0.1.63: the bump is computed from the tagged version.
     expect(JSON.stringify(p.components)).toContain('runner');
-    expect(await queued()).toBe(cmdsBefore);
+    expect(await queued()).toBe(cmdsBefore + 1);
   });
 
   it('409 proposal_closed once the proposal is no longer open', async () => {
