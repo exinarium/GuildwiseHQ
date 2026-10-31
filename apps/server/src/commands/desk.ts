@@ -11,11 +11,11 @@ import {
   isPhaseDeskSubkind,
   PLATFORM_APPROVAL_SUBKINDS,
   type ResolveDeskItemRequest,
+  type ShipReleaseApproval,
   streamId,
   TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
   WORKING_BRANCH_SUBKIND,
-  type ShipReleaseApproval,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';

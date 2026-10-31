@@ -42,6 +42,7 @@ import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
+import { ShipReleaseItem } from '../components/ShipReleaseItem.tsx';
 import { ReminderBadges, SnoozeSelect } from '../components/SnoozeReminder.tsx';
 import { cx } from '../components/ui/cx.ts';
 import {
@@ -625,6 +626,8 @@ export function DeskItem({
         <MappingForm item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
         <OutboundApproval item={item} />
+      ) : item.kind === 'approval' && item.subkind === 'ship_release' ? (
+        <ShipReleaseItem item={item} />
       ) : item.subkind === WORKING_BRANCH_SUBKIND ? (
         <WorkingBranchQuestion item={item} />
       ) : item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict') ? (

@@ -63,13 +63,13 @@ import {
   updateProject,
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
-import { requestReleaseProposal } from '../release/manual.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
 import { gone } from '../errors.ts';
 import { getProjectClaudeAccounts } from '../queries/claude-accounts.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { getProjectProviderAccounts } from '../queries/provider-accounts.ts';
+import { requestReleaseProposal } from '../release/manual.ts';
 import { typed } from './util.ts';
 
 const ProviderAccountParamsSchema = z.object({ id: z.uuid(), scope: AccountScopeSchema });

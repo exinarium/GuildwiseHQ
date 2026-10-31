@@ -126,3 +126,18 @@ export function useSetRepoComponentRules(projectId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   });
 }
+
+/** "Prepare release" and "Refresh" on a Ship release item: a workstation reads the repository again (read-only). */
+export function usePrepareRelease(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (repoId: string) => post(`/projects/${projectId}/repos/${repoId}/release-proposal`, {}),
+    onSuccess: () => {
+      // The workstation answers within a moment; refresh a few times.
+      for (const ms of [1000, 3000, 8000]) {
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['desk'] }), ms);
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['project', projectId] }), ms);
+      }
+    },
+  });
+}

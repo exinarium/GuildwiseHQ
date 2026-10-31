@@ -13,8 +13,8 @@ import {
 } from '@aom/shared';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
 import { userAvatarOf } from '../dto.ts';
-import { digestItemsForDesk } from './digests.ts';
 import { releaseViewFor } from '../release/approve.ts';
+import { digestItemsForDesk } from './digests.ts';
 import { phaseDeskBlock } from './phases.ts';
 
 const SELECT = `
@@ -282,7 +282,9 @@ async function withPhase(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskI
 
 /** A Ship release item carries the live proposal (facts and rules read now). */
 async function withRelease(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskItemDto> {
-  return r.subkind === 'ship_release' ? { ...dto, release: await releaseViewFor({ pool: db as never }, r) } : dto;
+  return r.subkind === 'ship_release'
+    ? { ...dto, release: await releaseViewFor({ pool: db as never }, r) }
+    : dto;
 }
 
 async function orgRolesOf(db: Queryable, userId: string): Promise<Map<string, OrgRole>> {
@@ -381,7 +383,10 @@ export async function getDeskDto(
     db,
     await withPhase(
       db,
-      withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup, await orgRolesOf(db, userId)), digests),
+      withDigest(
+        toDeskDto(r, userId, await rolesOf(db, userId), dedup, await orgRolesOf(db, userId)),
+        digests,
+      ),
       r,
     ),
     r,

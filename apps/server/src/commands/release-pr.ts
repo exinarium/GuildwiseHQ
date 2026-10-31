@@ -95,9 +95,11 @@ export async function applyReleasePrResult(
   );
   // A release PR is open: prepare the "Ship release" proposal (a read-only look at the repository).
   if (state === 'opened') {
-    const req = await one(ctx.pool, 'SELECT repo_id, requested_by FROM repo_pr_requests WHERE request_id=$1', [
-      String(payload.requestId ?? ''),
-    ]);
+    const req = await one(
+      ctx.pool,
+      'SELECT repo_id, requested_by FROM repo_pr_requests WHERE request_id=$1',
+      [String(payload.requestId ?? '')],
+    );
     if (req)
       await requestReleaseFacts(ctx, req.repo_id, 'release_pr', { userId: req.requested_by }).catch((err) =>
         ctx.log.error({ err }, 'release facts request failed'),

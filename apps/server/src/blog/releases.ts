@@ -53,7 +53,8 @@ function scanChangelog(md: string): ScannedBlock[] {
   let intro: string[] = [];
   let item: string[] | null = null;
   const flushItem = () => {
-    if (cur && section && item) cur.release.sections[section].push(item.join(' ').replace(/\s+/g, ' ').trim());
+    if (cur && section && item)
+      cur.release.sections[section].push(item.join(' ').replace(/\s+/g, ' ').trim());
     item = null;
   };
   const finish = () => {
@@ -69,10 +70,18 @@ function scanChangelog(md: string): ScannedBlock[] {
       intro = [];
       const empty = { added: [], changed: [], fixed: [] };
       if (h[1] && /^\d+\.\d+\.\d+$/.test(h[1]) && h[2]) {
-        cur = { release: { version: h[1], date: h[2], intro: '', sections: empty }, unreleased: false, lines: [] };
+        cur = {
+          release: { version: h[1], date: h[2], intro: '', sections: empty },
+          unreleased: false,
+          lines: [],
+        };
         out.push(cur);
       } else if (h[1]?.toLowerCase() === 'unreleased') {
-        cur = { release: { version: 'Unreleased', date: '', intro: '', sections: empty }, unreleased: true, lines: [] };
+        cur = {
+          release: { version: 'Unreleased', date: '', intro: '', sections: empty },
+          unreleased: true,
+          lines: [],
+        };
         out.push(cur);
       }
       continue;

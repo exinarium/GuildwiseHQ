@@ -4,10 +4,10 @@ import { DecisionPolicy } from '../cards/types.ts';
 import { DeskItemKind, DeskItemStatus, DeskOptionSchema } from '../events/desk.ts';
 import { LedgerScope } from '../events/ledger.ts';
 import { EscalationStepSchema } from '../intake/index.ts';
+import { ReleaseProposalViewSchema, ShipReleaseApprovalSchema } from '../release/dto.ts';
 import { FloorDigestSchema } from '../reporter/index.ts';
 import { IsoTime } from './common.ts';
 import { DigestItemDtoSchema } from './digest.ts';
-import { ReleaseProposalViewSchema, ShipReleaseApprovalSchema } from '../release/dto.ts';
 import { PhaseDeskBlockSchema } from './phases.ts';
 
 export const DeskLedgerChoiceSchema = z.object({

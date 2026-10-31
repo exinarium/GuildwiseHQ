@@ -1,7 +1,7 @@
 import type { ProjectRepoDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
-import { useRequestReleasePr, useSetRepoMainBranch } from '../api/queries/forges.ts';
+import { usePrepareRelease, useRequestReleasePr, useSetRepoMainBranch } from '../api/queries/forges.ts';
 import { useSetWorkingBranch } from '../api/queries/projects.ts';
 import { formatDate } from '../lib/time.ts';
 import { Badge, Button, ErrorBox, Select, TextInput } from './ui.tsx';
@@ -62,6 +62,7 @@ export function WorkingBranchControl({
         </p>
       )}
       {isOwner && repo.workingBranch && !sameBranch && <ReleasePr projectId={projectId} repo={repo} />}
+      {isOwner && repo.workingBranch && !sameBranch && <PrepareRelease projectId={projectId} repo={repo} />}
     </div>
   );
 }
@@ -266,6 +267,33 @@ function ReleasePr({ projectId, repo }: { projectId: string; repo: ProjectRepoDt
         </p>
       )}
       <ErrorBox error={request.error} />
+    </div>
+  );
+}
+
+/** "Prepare release": a workstation reads the repository and the "Ship release" item appears on the desk. */
+function PrepareRelease({ projectId, repo }: { projectId: string; repo: ProjectRepoDto }) {
+  const prepare = usePrepareRelease(projectId);
+  const live = repo.releaseProposal ?? null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm" data-testid={`prepare-release-${repo.name}`}>
+      {live ? (
+        <Link to="/desk" className="text-xs underline">
+          {live.state === 'approved'
+            ? `Release ${live.version ?? ''} approved`
+            : 'Ship release waiting on the desk'}
+        </Link>
+      ) : (
+        <Button
+          size="sm"
+          className="min-h-11 sm:min-h-0"
+          loading={prepare.isPending}
+          onClick={() => prepare.mutate(repo.id)}
+        >
+          Prepare release
+        </Button>
+      )}
+      <ErrorBox error={prepare.error} />
     </div>
   );
 }

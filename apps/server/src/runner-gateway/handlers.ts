@@ -65,7 +65,6 @@ import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
-import { applyReleaseFactsResult } from '../release/facts.ts';
 import { riskTierRpc } from '../commands/risk.ts';
 import { applyDevopsAudit, applyRoleSmoke, applyRunnerError } from '../commands/runner-telemetry.ts';
 import {
@@ -128,6 +127,7 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
+import { applyReleaseFactsResult } from '../release/facts.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';

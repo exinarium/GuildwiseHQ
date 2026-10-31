@@ -20,7 +20,9 @@ const facts = (over: Partial<ReleaseFacts> = {}): ReleaseFacts =>
     existingTags: ['v1.3.0'],
     commits: [],
     changedTotal: 4,
-    components: [{ name: 'runner', changedCount: 17, contentAtHead: file('0.1.62'), contentAtTag: file('0.1.62') }],
+    components: [
+      { name: 'runner', changedCount: 17, contentAtHead: file('0.1.62'), contentAtTag: file('0.1.62') },
+    ],
     changelog: CHANGELOG('Runner 0.1.62.\n\n### Added\n\n- One.\n- Two.\n- Three.\n\n'),
     ...over,
   });
@@ -42,10 +44,7 @@ describe('buildProposal', () => {
   });
 
   it('recommends major for a BREAKING entry or a bang commit', () => {
-    const e = buildProposal(
-      facts({ changelog: CHANGELOG('### Changed\n\n- BREAKING: API gone.\n\n') }),
-      [],
-    );
+    const e = buildProposal(facts({ changelog: CHANGELOG('### Changed\n\n- BREAKING: API gone.\n\n') }), []);
     expect(e.recommended.version).toBe('2.0.0');
     const c = buildProposal(
       facts({
@@ -69,7 +68,9 @@ describe('buildProposal', () => {
   it('shows the runner as unchanged and writes the intro for it', () => {
     const b = buildProposal(
       facts({
-        components: [{ name: 'runner', changedCount: 0, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.63') }],
+        components: [
+          { name: 'runner', changedCount: 0, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.63') },
+        ],
       }),
       [rule],
     );
@@ -80,7 +81,9 @@ describe('buildProposal', () => {
   it('does not double-bump a runner version set by hand since the tag', () => {
     const b = buildProposal(
       facts({
-        components: [{ name: 'runner', changedCount: 5, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.62') }],
+        components: [
+          { name: 'runner', changedCount: 5, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.62') },
+        ],
       }),
       [rule],
     );
@@ -98,7 +101,10 @@ describe('buildProposal', () => {
       }),
       [],
     );
-    expect(b.recommended).toMatchObject({ version: '1.4.0', reason: 'minor: 1 feat commit, no breaking changes' });
+    expect(b.recommended).toMatchObject({
+      version: '1.4.0',
+      reason: 'minor: 1 feat commit, no breaking changes',
+    });
     expect(b.changelog).toBeNull();
     expect(b.notes).toBe('- feat: new thing\n- fix: old thing');
     expect(b.notesSource).toBe('commits');

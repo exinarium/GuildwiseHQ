@@ -49,11 +49,13 @@ export const releaseProjectors: Record<string, Projector> = {
   },
   ReleaseProposalClosed: async (tx, e) => {
     const p = ev<'ReleaseProposalClosed'>(e).payload;
-    const state = p.reason === 'released' ? 'released' : p.reason === 'nothing_to_release' ? 'closed' : 'dismissed';
-    await exec(
-      tx,
-      `UPDATE release_proposals SET state=$2, closed_reason=$3, updated_at=$4 WHERE id=$1`,
-      [p.proposalId, state, p.reason, e.createdAt],
-    );
+    const state =
+      p.reason === 'released' ? 'released' : p.reason === 'nothing_to_release' ? 'closed' : 'dismissed';
+    await exec(tx, `UPDATE release_proposals SET state=$2, closed_reason=$3, updated_at=$4 WHERE id=$1`, [
+      p.proposalId,
+      state,
+      p.reason,
+      e.createdAt,
+    ]);
   },
 };

@@ -23,7 +23,11 @@ const TAGS_MAX = 500;
 const CHANGELOG_MAX = 1_048_576;
 const VERSION_FILE_MAX = 262_144;
 
-const nonEmpty = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+const nonEmpty = (s: string): string[] =>
+  s
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
 
 /** The text of `path` at `sha`, or null when it is absent or larger than `max` bytes. */
 async function fileAt(repoPath: string, sha: string, path: string, max: number): Promise<string | null> {
@@ -53,7 +57,11 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
   await git(repoPath, [...a.args, 'fetch', '--', 'origin', base], env);
   await git(repoPath, [...a.args, 'fetch', '--', 'origin', head], env);
   // A failed tag fetch (for example "would clobber existing tag") is not fatal: the local tags are used.
-  await git(repoPath, [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'], env);
+  await git(
+    repoPath,
+    [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'],
+    env,
+  );
 
   const baseRef = (await revParse(repoPath, `refs/remotes/origin/${base}`)) ? `origin/${base}` : base;
   const baseSha = await revParse(repoPath, baseRef);
@@ -66,10 +74,13 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     (await git(repoPath, ['rev-list', '--count', `${baseSha}..${headSha}`])).stdout.trim() || '0',
   );
 
-  const all = nonEmpty((await git(repoPath, ['tag', '--list', 'v*'])).stdout).filter((t) => RELEASE_TAG_RE.test(t));
-  const newestFirst = (xs: string[]) =>
-    [...xs].sort((x, y) => compareSemver(y.slice(1), x.slice(1)) ?? 0);
-  const merged = new Set(nonEmpty((await git(repoPath, ['tag', '--merged', headSha, '--list', 'v*'])).stdout));
+  const all = nonEmpty((await git(repoPath, ['tag', '--list', 'v*'])).stdout).filter((t) =>
+    RELEASE_TAG_RE.test(t),
+  );
+  const newestFirst = (xs: string[]) => [...xs].sort((x, y) => compareSemver(y.slice(1), x.slice(1)) ?? 0);
+  const merged = new Set(
+    nonEmpty((await git(repoPath, ['tag', '--merged', headSha, '--list', 'v*'])).stdout),
+  );
   const lastName = newestFirst(all.filter((t) => merged.has(t)))[0] ?? null;
   const lastSha = lastName ? await revParse(repoPath, `refs/tags/${lastName}`) : null;
   const lastTag = lastName && lastSha ? { name: lastName, sha: lastSha } : null;
@@ -83,10 +94,17 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     '--format=%H%x1f%s%x1f%b%x1e',
     range,
   ]);
-  const rows = log.stdout.split('\x1e').map((r) => r.replace(/^\n/, '')).filter((r) => r.trim() !== '');
+  const rows = log.stdout
+    .split('\x1e')
+    .map((r) => r.replace(/^\n/, ''))
+    .filter((r) => r.trim() !== '');
   const commits = rows.slice(0, COMMITS_MAX).map((r) => {
     const [sha = '', subject = '', body = ''] = r.split('\x1f');
-    return { sha: sha.trim().slice(0, 40), subject: subject.trim().slice(0, 300), breakingFooter: hasBreakingFooter(body) };
+    return {
+      sha: sha.trim().slice(0, 40),
+      subject: subject.trim().slice(0, 300),
+      breakingFooter: hasBreakingFooter(body),
+    };
   });
 
   const paths = (

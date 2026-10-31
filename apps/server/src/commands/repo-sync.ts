@@ -46,8 +46,8 @@ export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: 
   );
   // The heartbeat doubles as the "working branch ahead of main" trigger (throttled to 30 minutes per repository).
   await requestReleaseFacts(ctx, s.repoId, 'sync', { workstationId }).catch((err) =>
-      ctx.log.error({ err }, 'release facts request failed'),
-    );
+    ctx.log.error({ err }, 'release facts request failed'),
+  );
 }
 
 /** Queues `repo.sync` for one clone (the runner knows its path from the remote). */
