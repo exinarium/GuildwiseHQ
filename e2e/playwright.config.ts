@@ -41,6 +41,8 @@ export default defineConfig({
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Business mode: its own user and paired mock workstation (no runner process); needs only the shared stack.
     { name: 'business-mode', testMatch: 'business-mode.spec.ts', dependencies: ['auth'] },
+    // Business mode wording (Knowledge, Rules & decisions): its own user and organization; needs only the shared stack.
+    { name: 'business-terms', testMatch: 'business-terms.spec.ts', dependencies: ['auth'] },
     // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
     { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
     // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
