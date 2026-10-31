@@ -294,27 +294,44 @@ describe('note count in vault status', () => {
         ])
       )[0]?.note_count;
     const report = async (extra: Record<string, unknown>) => {
-      const id = r.send('vault.status', { vaultId: work.id, lastPullAt: null, lastPushAt: null, ...extra });
-      await r.waitFor('ack', (f) => f.ackOf === id);
+      // vault.status is fire-and-forget (the gateway sends no ack), so wait on the stored state instead
+      r.send('vault.status', { vaultId: work.id, lastPullAt: null, lastPushAt: null, ...extra });
     };
     await report({ noteCount: 7 });
-    expect(await count()).toBe(7);
-    await report({});
+    await until(async () => (await count()) === 7, 4000, 'note count 7');
+    // A report without noteCount: wait until it is applied (its error shows), then the count must be unchanged.
+    const lastError = async () =>
+      (
+        await q(`SELECT last_error FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2`, [
+          w.workstationId,
+          work.id,
+        ])
+      )[0]?.last_error;
+    await report({ error: 'no count here' });
+    await until(async () => (await lastError()) === 'no count here', 4000, 'report without count');
     expect(await count()).toBe(7);
     await report({ noteCount: 0 });
-    expect(await count()).toBe(0);
+    await until(async () => (await count()) === 0, 4000, 'note count 0');
   });
 });
 
 describe('sync conflict wording by org mode', () => {
   it('the desk title and body use the vault words in a dev org and Knowledge words in a business org', async () => {
     const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
+    // an earlier test renamed the vault to 'Work notes'; the mode wording applies to the default name only
+    await owner().patch(`/api/vaults/${work.id}`, { name: 'Organization vault' });
     const resolve = async () => {
-      const item = (await q(`SELECT id FROM desk_items WHERE subkind='vault_conflict' AND status='open'`))[0]!;
+      const item = (
+        await q(`SELECT id FROM desk_items WHERE subkind='vault_conflict' AND status='open'`)
+      )[0]!;
       await owner().post(`/api/desk/${item.id}/resolve`, { resolution: 'acknowledged' });
     };
     const latest = async () =>
-      (await q(`SELECT title, body FROM desk_items WHERE subkind='vault_conflict' ORDER BY created_at DESC LIMIT 1`))[0]!;
+      (
+        await q(
+          `SELECT title, body FROM desk_items WHERE subkind='vault_conflict' ORDER BY created_at DESC LIMIT 1`,
+        )
+      )[0]!;
     try {
       const a = r.send('vault.conflict', { vaultId: work.id, files: [] });
       await r.waitFor('ack', (f) => f.ackOf === a);
