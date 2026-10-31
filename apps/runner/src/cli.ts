@@ -42,6 +42,7 @@ import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';
 import { changeOrgFolder, ORG_ID_RE } from './org-folder.ts';
+import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import {
   addPairing,
   entryConfigPath,
@@ -582,6 +583,39 @@ function orgFolderList(opts: { dataDir?: string; pairing?: string }): void {
       'No organization source folder is set. Use `guildwise-runner org-folder set <organization-id> <path>`.',
     );
   for (const [org, folder] of list) console.log(`${org}\t${folder}`);
+}
+
+/** `relay add|remove|list`: the inbound relay integrations this workstation serves. */
+function relayAdd(
+  id: string,
+  opts: { kind: string; label?: string; dataDir?: string; pairing?: string },
+): void {
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const changed = addRelayIntegration(loadConfig(file), id, opts.kind, opts.label);
+    if (!changed.ok) throw new Error(changed.error);
+    saveConfig(file, changed.config);
+  }
+  console.log(`Serving ${id} (${opts.kind}). Restart the runner to apply.`);
+}
+
+function relayRemove(id: string, opts: { dataDir?: string; pairing?: string }): void {
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const changed = removeRelayIntegration(loadConfig(file), id);
+    if (!changed.ok) throw new Error(changed.error);
+    saveConfig(file, changed.config);
+  }
+  console.log(`No longer serving ${id}. Restart the runner to apply.`);
+}
+
+function relayList(opts: { dataDir?: string; pairing?: string }): void {
+  const config = loadConfig(pairingPaths(opts).config);
+  if (config.relay.integrations.length === 0)
+    console.log('No relay integration is served. Use `guildwise-runner relay add <integration-id> --kind <kind>`.');
+  for (const i of config.relay.integrations) console.log(`${i.id}\t${i.kind}\t${i.label ?? ''}`);
 }
 
 async function reposList(opts: { dataDir?: string; pairing?: string }): Promise<void> {
@@ -1342,6 +1376,26 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(reposList);
+  const relay = program
+    .command('relay')
+    .description('the inbound webhook integrations this workstation serves (Business mode)');
+  relay
+    .command('add <integration-id>')
+    .requiredOption('--kind <kind>', 'whatsapp_cloud, form_webhook, webhook_in, calendar_push or generic')
+    .option('--label <text>', 'a name for the list')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(relayAdd);
+  relay
+    .command('remove <integration-id>')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(relayRemove);
+  relay
+    .command('list')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(relayList);
   const orgFolder = program
     .command('org-folder')
     .description("the folder whose git repositories an organization's architect may read (read-only)");

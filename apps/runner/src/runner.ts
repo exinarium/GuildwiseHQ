@@ -40,6 +40,7 @@ import {
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   RELEASE_FACTS_CAPABILITY,
+  RELAY_FEATURE,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -59,6 +60,8 @@ import {
   type WorktreeSweepResult,
 } from '@aom/shared';
 import { ensureClaudeAccount } from './adapters/claude-account-provision.ts';
+import { RelayDispatcher } from './relay/dispatch.ts';
+import { FileRelaySink, genericHandler } from './relay/generic.ts';
 import { ClaudeAccountRegistry } from './adapters/claude-accounts.ts';
 import { probeClaudeLogin } from './adapters/claude-auth.ts';
 import { sweepVertexKeys } from './adapters/claude-backend.ts';
@@ -318,6 +321,8 @@ export class Runner {
   /** Keeps each repository's local working branch in step with origin (fetch, fast-forward when safe, report). */
   readonly sync: SyncService;
   private readonly log: Logger;
+  /** Inbound webhook relay: hands each relayed provider request to the handler of its kind. */
+  private readonly relay: RelayDispatcher;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
   private repos: RepoReport[] = [];
@@ -376,6 +381,11 @@ export class Runner {
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
+    this.relay = new RelayDispatcher({ integrations: () => opts.config.relay.integrations, log: this.log });
+    this.relay.register(
+      'generic',
+      genericHandler(new FileRelaySink(opts.config.relay.sinkDir ?? join(this.paths.relay, 'inbox'))),
+    );
     this.outbox = new Outbox(this.paths.outbox);
     this.serverHttp = new ServerHttp({
       base: () => opts.config.serverUrl,
@@ -764,6 +774,8 @@ export class Runner {
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.serverFeatures = new Set(w.features ?? []);
+      // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
+      if (this.serverFeatures.has(RELAY_FEATURE)) this.client.send('relay.serve', { integrations: this.relay.served() });
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
@@ -1749,6 +1761,18 @@ export class Runner {
         break;
       case 'chat.cancel':
         void this.chat.handleCancel(msg.chatId);
+        break;
+      case 'relay.request':
+        void this.relay
+          .dispatch(msg)
+          .then((p) => {
+            if (p) this.client.send('relay.response', { ...p });
+          })
+          .catch(() => this.log.warn(`relay request ${msg.requestId} could not be answered`));
+        break;
+      case 'relay.serve.result':
+        for (const r of msg.refused)
+          this.log.warn(`relay integration ${r.integrationId} refused by the server: ${r.reason}`);
         break;
       default:
         break;
