@@ -127,10 +127,14 @@ export async function ensureBusinessWorkflowsAtBoot(ctx: Ctx): Promise<number> {
   const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations WHERE mode='business'`, []);
   let n = 0;
   for (const o of orgs) {
-    await withAppendTx(ctx.pool, async (tx) => {
-      await ensureBusinessWorkflows(ctx, tx, o.id);
-    });
-    n++;
+    try {
+      await withAppendTx(ctx.pool, async (tx) => {
+        await ensureBusinessWorkflows(ctx, tx, o.id);
+      });
+      n++;
+    } catch (err) {
+      ctx.log.warn({ orgId: o.id, err }, 'business workflows could not be installed for this organization');
+    }
   }
   return n;
 }

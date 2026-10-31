@@ -5,7 +5,7 @@ import {
   isBusinessCardType,
 } from '@aom/shared';
 import { FolderKanban } from 'lucide-react';
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -53,7 +53,7 @@ export function CardNew() {
     [workflows.data, project?.workflowKey],
   );
 
-  if (projects.isPending || workflows.isPending)
+  if (projects.isPending || workflows.isPending || (business && enabledWorkflows.isPending && !!project))
     return (
       <div className="mx-auto max-w-2xl">
         <PageSkeleton label="Loading the form" />
@@ -179,6 +179,11 @@ export function CardNewForm({
         : (cardTypes[0] ?? projectWorkflow.cardTypes[0] ?? ''),
     ),
   );
+  // Business mode: when the offered types change (workflows loaded late) and the chosen one is no longer offered, move to the first.
+  useEffect(() => {
+    if (business && cardTypes.length && !cardTypes.includes(v.cardType))
+      setV(emptyForm(cardTypes[0] as string));
+  }, [business, cardTypes.join('|'), v.cardType]);
   const [picked, setPicked] = useState<{ type: string; key: string } | null>(null);
   // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
   // When the project enabled more than one workflow for the type, the default (or the user's pick) decides.
