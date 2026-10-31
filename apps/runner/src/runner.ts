@@ -117,6 +117,7 @@ import { readReleaseFacts } from './git/release-facts.ts';
 import { publishRelease } from './git/release-publish.ts';
 import { shipReleaseCommit } from './git/release-ship.ts';
 import { openReleasePr } from './git/release-pr.ts';
+import { bumpSubmodule } from './git/submodule-pin.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { SyncService } from './git/sync-service.ts';
@@ -2104,6 +2105,21 @@ export class Runner {
             remoteUrlNormalized: p.remoteUrlNormalized,
             workingBranch: p.workingBranch,
           });
+      } else if (command === 'repo.bump_submodule') {
+        // "No clone here", "not a submodule", a refused push: answers (ok:true, result.ok:false), the server decides.
+        const p = CommandPayloadSchemas['repo.bump_submodule'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo
+            ? await bumpSubmodule({
+                payload: p,
+                repoPath: repo.localPath,
+                integrationDir: this.paths.integration,
+                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              })
+            : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
+        );
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
         done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));

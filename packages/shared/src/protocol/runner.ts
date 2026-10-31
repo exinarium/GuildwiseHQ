@@ -950,6 +950,49 @@ export const ReleasePublishResultSchema = z.object({
 export type ReleasePublishResult = z.infer<typeof ReleasePublishResultSchema>;
 
 /**
+ * `repo.bump_submodule`: a card merged into repository X (the submodule); repository D (the deploy repository) holds X as a
+ * git submodule. The runner moves D's pin of X to `commit` on D's working branch (a commit and a push, never a force push)
+ * and answers D's new head, which the server then deploys. The runner finds the submodule by URL in D's `.gitmodules`
+ * (`submoduleRemoteUrlNormalized` against each submodule url, normalized the same way), so the owner sets nothing up.
+ * Needs runner 0.1.63.
+ */
+export const RepoBumpSubmodulePayloadSchema = z.object({
+  projectId: z.uuid(),
+  /** D, the repository that holds the pin. */
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  /** D's working branch: the branch the pin is committed to and pushed. */
+  workingBranch: z.string().min(1),
+  /** X, the repository that was merged into (as it appears in D's `.gitmodules`, normalized). */
+  sourceRepoId: z.uuid().optional(),
+  submoduleRemoteUrlNormalized: z.string().min(1),
+  /** X's newest merge commit. */
+  commit: z.string().regex(/^[0-9a-f]{7,64}$/),
+  commitAs: CommitAsSchema.nullable().optional(),
+  forge: ForgeKindSchema.optional(),
+  /** What the server does with the answer (echoed back by the command row, ignored by the runner). */
+  envs: z.array(z.string()).optional(),
+  trigger: z.string().optional(),
+});
+export type RepoBumpSubmodulePayload = z.infer<typeof RepoBumpSubmodulePayloadSchema>;
+
+export const RepoBumpSubmoduleResultSchema = z.object({
+  ok: z.boolean(),
+  /** D's head after the bump (the new pin commit, or the current head when nothing had to change). */
+  commit: z.string().optional(),
+  /** The pin already named `commit`: no commit was made. */
+  unchanged: z.boolean().optional(),
+  /** D's `.gitmodules` has no submodule for this repository (not an error of the deploy: D is deployed as it is). */
+  notSubmodule: z.boolean().optional(),
+  /** The working branch refused the push (branch protection): nobody opened a pull request. */
+  protectedBranch: z.boolean().optional(),
+  /** The submodule path in D. */
+  path: z.string().optional(),
+  error: z.string().optional(),
+});
+export type RepoBumpSubmoduleResult = z.infer<typeof RepoBumpSubmoduleResultSchema>;
+
+/**
  * Organisation source folder (docs/RUNNER.md): the folder inside a repo root whose repositories the architect of one
  * organisation may read. `org.folder` sets (`path`) or clears (`path: null`) it; the runner validates exactly like
  * `aom-runner org-folder set` and answers `{ ok, error? }`. The state is reported in `org.folders`.
@@ -1067,6 +1110,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.release_facts',
   'release.ship',
   'release.publish',
+  'repo.bump_submodule',
   'org.folder',
   'toolchain.remove',
   'repo.sync',
@@ -1169,6 +1213,7 @@ export const CommandPayloadSchemas = {
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
   'release.publish': ReleasePublishPayloadSchema,
+  'repo.bump_submodule': RepoBumpSubmodulePayloadSchema,
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,

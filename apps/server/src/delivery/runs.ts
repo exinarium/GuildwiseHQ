@@ -23,7 +23,7 @@ import { withAppendTx, withTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge } from './gate.ts';
+import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge, MERGE_IN_REPO } from './gate.ts';
 import { releasesPaused } from './mode.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 import { queueReachabilityCheck } from './reachability.ts';
@@ -75,6 +75,12 @@ export interface RequestDeployInput {
    * rules do not apply (the audit says so); a freeze still blocks. Only an Owner or an Admin asks (checked by the caller).
    */
   rollback?: { runId: string; commit: string } | undefined;
+  /**
+   * `commit` is a commit of the environment's own repository that the server made itself (the head after a submodule pin
+   * bump): it is not a card merge, so the allow-list of automated commits does not apply. Set only by the pin-bump result
+   * handler, never from a request.
+   */
+  pinnedCommit?: boolean | undefined;
 }
 
 export interface DeployRunOutcome {
@@ -145,12 +151,41 @@ async function lacksCapability(db: Queryable, workstationId: string): Promise<bo
   return !!r && !r.capabilities.includes(DELIVERY_CAPABILITY);
 }
 
+/**
+ * The repository an environment deploys: the one its recipe names (`repo`), else the first of the project by name. A
+ * commit only ever belongs to one repository, so every commit decision about a deploy is made against this one.
+ */
+export interface EnvRepo {
+  id: string;
+  name: string;
+  remote_url_normalized: string;
+  working_branch: string | null;
+  forge_kind: string | null;
+}
+
+export async function envRepo(
+  db: Queryable,
+  projectId: string,
+  repoName: string | null | undefined,
+): Promise<EnvRepo | null> {
+  return (
+    (await one<EnvRepo>(
+      db,
+      `SELECT id, name, remote_url_normalized, working_branch, forge_kind FROM project_repos
+        WHERE project_id=$1 AND removed_at IS NULL AND ($2::text IS NULL OR lower(name)=lower($2))
+        ORDER BY name, id LIMIT 1`,
+      [projectId, repoName ?? null],
+    )) ?? null
+  );
+}
+
 /** The commit to deploy: the caller's, else what the gate says to promote, else the newest merge. */
 async function resolveCommit(
   db: Queryable,
   projectId: string,
   explicit: string | null | undefined,
   gates: Array<{ gate: Gate }>,
+  repoId: string | null = null,
 ): Promise<string | null> {
   if (explicit) return explicit;
   for (const g of gates)
@@ -165,7 +200,8 @@ async function resolveCommit(
         );
         if (prev?.commit) return prev.commit;
       }
-  return (await latestMerge(db, projectId))?.commit ?? null;
+  // Only a merge of the repository that is deployed: a merge of another repository is not a commit of this clone.
+  return (await latestMerge(db, projectId, repoId))?.commit ?? null;
 }
 
 const samePrefix = (a: string, b: string) => a === b || a.startsWith(b) || b.startsWith(a);
@@ -180,19 +216,21 @@ export async function automatedCommitAllowed(
   projectId: string,
   commit: string,
   gates: Array<{ gate: Gate }>,
+  repoId: string | null = null,
 ): Promise<boolean> {
   if (!/^[0-9a-f]{7,64}$/.test(commit)) return false;
-  const latest = await latestMerge(db, projectId);
+  const latest = await latestMerge(db, projectId, repoId);
   if (latest && samePrefix(latest.commit, commit)) return true;
   if (
     await one(
       db,
-      `SELECT 1 FROM events WHERE project_id=$1 AND type='CardFinalized'
-          AND payload->'resultRef'->>'mergeCommit' IS NOT NULL
-          AND (payload->'resultRef'->>'mergeCommit' = $2 OR starts_with(payload->'resultRef'->>'mergeCommit', $2)
-               OR starts_with($2, payload->'resultRef'->>'mergeCommit'))
+      `SELECT 1 FROM events e WHERE e.project_id=$1 AND e.type='CardFinalized'
+          AND e.payload->'resultRef'->>'mergeCommit' IS NOT NULL
+          AND (e.payload->'resultRef'->>'mergeCommit' = $3 OR starts_with(e.payload->'resultRef'->>'mergeCommit', $3)
+               OR starts_with($3, e.payload->'resultRef'->>'mergeCommit'))
+          AND ($2::uuid IS NULL OR ${MERGE_IN_REPO})
         LIMIT 1`,
-      [projectId, commit],
+      [projectId, repoId, commit],
     )
   )
     return true;
@@ -477,13 +515,7 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
       },
     );
 
-  const repoRow = await one(
-    ctx.pool,
-    `SELECT id, name, remote_url_normalized, working_branch FROM project_repos
-      WHERE project_id=$1 AND removed_at IS NULL AND ($2::text IS NULL OR lower(name)=lower($2))
-      ORDER BY name, id LIMIT 1`,
-    [project.id, env.repo ?? null],
-  );
+  const repoRow = await envRepo(ctx.pool, project.id, env.repo);
 
   const outcomes: DeployRunOutcome[] = [];
   const commands: Array<{ ws: string; payload: DeployExecPayload }> = [];
@@ -541,12 +573,13 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
       if (
         automated &&
         input.commit &&
-        !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, []))
+        !input.pinnedCommit &&
+        !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, [], repoRow?.id ?? null))
       ) {
         refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
         continue;
       }
-      commit = input.commit ?? (await latestMerge(ctx.pool, project.id))?.commit ?? null;
+      commit = input.commit ?? (await latestMerge(ctx.pool, project.id, repoRow?.id ?? null))?.commit ?? null;
     } else {
       const gateInput = {
         orgId: project.org_id as string,
@@ -584,12 +617,13 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
         if (
           automated &&
           input.commit &&
-          !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, gates))
+          !input.pinnedCommit &&
+          !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, gates, repoRow?.id ?? null))
         ) {
           refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
           continue;
         }
-        commit = await resolveCommit(ctx.pool, project.id, input.commit, gates);
+        commit = await resolveCommit(ctx.pool, project.id, input.commit, gates, repoRow?.id ?? null);
         finalVerdict = await evaluateEnvGate(ctx.pool, { ...gateInput, commit });
       }
     }

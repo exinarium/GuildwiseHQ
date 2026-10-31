@@ -124,6 +124,7 @@ import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts
 import { deployRpc } from '../delivery/rpc.ts';
 import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
+import { applySubmodulePinResult } from '../delivery/submodule-pin.ts';
 import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
@@ -580,6 +581,11 @@ export class RunnerHandlers {
         msg.result,
         msg.error,
       );
+    } else if (cmd?.type === 'repo.bump_submodule') {
+      // Terminal: the pin is moved (the environments deploy the commit it answers with), not there to move (they deploy as
+      // they are), or a desk notice says why not. A redelivered command is harmless: an unchanged pin answers the same head.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applySubmodulePinResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'claude.account.ensure') {
       // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

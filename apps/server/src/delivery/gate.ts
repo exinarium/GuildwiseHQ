@@ -59,19 +59,35 @@ export async function effectiveGates(
   return { gates };
 }
 
-/** The newest merge into the project (when it landed), from the events. */
+/** SQL: the `CardFinalized` event `e` merged a card of repository `$2`. */
+export const MERGE_IN_REPO = `EXISTS (SELECT 1 FROM cards c WHERE c.id::text = e.payload->>'cardId'
+          AND (c.repo_id IS NULL OR c.repo_id = $2::uuid))`;
+
+/**
+ * The newest merge into the project (when it landed), from the events. With `repoId`: the newest merge into that
+ * repository only (the card's repository; a card that has none yet counts for every repository, as it did before cards
+ * kept theirs). Merges of other repositories never stand in for it: their commits do not exist in this clone.
+ */
 export async function latestMerge(
   db: Queryable,
   projectId: string,
+  repoId?: string | null,
 ): Promise<{ commit: string; at: Date } | null> {
   const r = await one(
     db,
-    `SELECT payload->'resultRef'->>'mergeCommit' AS commit, created_at FROM events
-      WHERE project_id=$1 AND type='CardFinalized' AND payload->'resultRef'->>'mergeCommit' IS NOT NULL
-      ORDER BY seq DESC LIMIT 1`,
-    [projectId],
+    `SELECT e.payload->'resultRef'->>'mergeCommit' AS commit, e.created_at FROM events e
+      WHERE e.project_id=$1 AND e.type='CardFinalized' AND e.payload->'resultRef'->>'mergeCommit' IS NOT NULL
+        AND ($2::uuid IS NULL OR ${MERGE_IN_REPO})
+      ORDER BY e.seq DESC LIMIT 1`,
+    [projectId, repoId ?? null],
   );
   return r ? { commit: r.commit, at: r.created_at } : null;
+}
+
+/** The repository a merged card belongs to (null: unknown). */
+export async function cardRepoId(db: Queryable, cardId: string): Promise<string | null> {
+  const r = await one<{ repo_id: string | null }>(db, 'SELECT repo_id FROM cards WHERE id=$1', [cardId]);
+  return r?.repo_id ?? null;
 }
 
 export async function collectGateFacts(
