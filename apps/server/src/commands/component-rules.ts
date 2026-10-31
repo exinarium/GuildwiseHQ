@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { type ComponentRule, componentRuleProblems, normalizeComponentRules, streamId } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
@@ -31,7 +32,8 @@ export async function setRepoComponentRules(
       [repoId, projectId],
     );
     if (!r) throw notFound('repository not found');
-    if (JSON.stringify(r.component_rules ?? []) === JSON.stringify(normalized)) return;
+    // jsonb returns object keys in its own order, so compare the values and not their serialization
+    if (isDeepStrictEqual(r.component_rules ?? [], normalized)) return;
     await ctx.store.append(
       [
         {
