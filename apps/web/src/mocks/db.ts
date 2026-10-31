@@ -12,6 +12,7 @@ import {
   type InvitationDto,
   type ProjectDto,
   type ProjectRepoDto,
+  roleOfferedInMode,
   type UserDto,
   type WorkstationDto,
 } from '@aom/shared';
@@ -68,7 +69,8 @@ export const db = {
   nameSeed: 0,
 };
 
-export const roles = BUILTIN_ROLES;
+// The mock organization works in developer mode: the business roles are not offered.
+export const roles = BUILTIN_ROLES.filter((r) => roleOfferedInMode(r.key, 'dev'));
 export const workflows = BUILTIN_WORKFLOWS;
 
 export function emit(type: string, streamId: string, projectId: string | null) {

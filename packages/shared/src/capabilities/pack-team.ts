@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { OrgMode } from '../orgs/mode.ts';
+import { BUSINESS_ROLE_KEYS, BUSINESS_ROLES } from '../roles/business.ts';
 import { type RoleDefinition, Seniority } from '../roles/schema.ts';
 import { permissionsForPersona, provenanceLabel, roleKeyForPackPersona } from './authoring.ts';
 import { renderPackText } from './packs.ts';
@@ -29,8 +31,14 @@ export const PACK_SEAT_KEYS = [
 ] as const;
 export type PackSeatKey = (typeof PACK_SEAT_KEYS)[number];
 /** `own`: a role of its own (chat and sessions only; no workflow stages). */
-export const PackSeatSchema = z.union([z.enum(PACK_SEAT_KEYS), z.literal('own')]);
-export type PackSeat = z.infer<typeof PackSeatSchema>;
+/** The business roles a pack agent can take as its seat in a business organization (GWP-33). */
+export const BUSINESS_SEAT_KEYS: readonly string[] = BUSINESS_ROLE_KEYS;
+export const PackSeatSchema = z.union([
+  z.enum(PACK_SEAT_KEYS),
+  z.string().refine((k) => BUSINESS_SEAT_KEYS.includes(k), 'unknown seat'),
+  z.literal('own'),
+]);
+export type PackSeat = PackSeatKey | string;
 
 /**
  * Words (lower case) in a pack agent's name or key, or its description, that suggest a seat. Ordered: the first rule with a
@@ -49,6 +57,19 @@ export const PACK_SEAT_RULES: ReadonlyArray<{ seat: PackSeatKey; words: readonly
   { seat: 'builder', words: ['developer', 'dev', 'engineer', 'coder', 'programmer', 'builder'] },
 ];
 
+/** Seat words for the business roles: each role's name from the research table, nothing else. Tried first in a business org. */
+export const BUSINESS_SEAT_RULES: ReadonlyArray<{ seat: string; words: readonly string[] }> =
+  BUSINESS_ROLES.map((r) => ({
+    seat: r.key,
+    words: [
+      r.name
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+        .join(' '),
+    ],
+  }));
+
 const tokensOf = (s: string): string[] =>
   s
     .toLowerCase()
@@ -65,10 +86,24 @@ function hasWord(tokens: string[], words: readonly string[]): boolean {
  * The seat suggested for a pack agent, from its name and key. A description alone never suggests a seat (a sentence such as
  * "reviews the work of the engineers" says too little, and a wrong guess could preselect a seat with more rights): `own`.
  */
-export function suggestSeat(a: { key: string; name: string; description?: string }): PackSeat {
+export function suggestSeat(
+  a: { key: string; name: string; description?: string },
+  opts: { mode?: OrgMode | string | null } = {},
+): PackSeat {
   const named = tokensOf(`${a.name} ${a.key}`);
+  if (opts.mode === 'business') {
+    const b = businessSeatFor(a);
+    if (b) return b;
+  }
   for (const r of PACK_SEAT_RULES) if (hasWord(named, r.words)) return r.seat;
   return 'own';
+}
+
+/** The business seat a pack agent's name or key matches (BUSINESS_SEAT_RULES only), or null. */
+export function businessSeatFor(a: { key: string; name: string }): string | null {
+  const named = tokensOf(`${a.name} ${a.key}`);
+  for (const r of BUSINESS_SEAT_RULES) if (hasWord(named, r.words)) return r.seat;
+  return null;
 }
 
 /** `bmad-agent-analyst` as a name: "Bmad Agent Analyst". */
@@ -192,7 +227,7 @@ export const PackTeamResponseSchema = z.object({
   packName: z.string(),
   trusted: z.boolean(),
   /** The seats an agent can take (besides `own`), with the role's name for the picker. */
-  seats: z.array(z.object({ key: z.enum(PACK_SEAT_KEYS), name: z.string() })),
+  seats: z.array(z.object({ key: z.string(), name: z.string() })),
   agents: z.array(PackTeamAgentDtoSchema),
   /** Every skill of the pack with its class, for the classification screen and the skill picker. */
   skills: z.array(

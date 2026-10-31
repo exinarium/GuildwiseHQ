@@ -42,11 +42,13 @@ const role = (key: string, name: string) => ({
 
 let mode: 'dev' | 'business' = 'dev';
 let orgRole = 'owner';
+let withBusinessRoles = false;
 const fetchMock = vi.fn();
 
 beforeEach(() => {
   mode = 'dev';
   orgRole = 'owner';
+  withBusinessRoles = false;
   fetchMock.mockReset().mockImplementation(async (url: string) => {
     const path = url.split('?')[0] as string;
     if (path === '/api/auth/me' || path === '/api/me')
@@ -92,6 +94,9 @@ beforeEach(() => {
           role('tester', 'Tester'),
           role('devops', 'DevOps'),
           role('ba', 'Business analyst'),
+          ...(withBusinessRoles
+            ? [role('billing_clerk', 'Billing Clerk'), role('front_desk', 'Front Desk')]
+            : []),
         ],
       });
     if (path === '/api/workflows')
@@ -219,6 +224,21 @@ describe('hire dialog roles', () => {
     expect(options()).toMatch(/Architect/);
     expect(options()).not.toMatch(/Reviewer/);
     expect(options()).not.toMatch(/Tester/);
+  });
+});
+
+describe('hire dialog business roles', () => {
+  it('lists the business roles first, in the research table order, in business mode', async () => {
+    mode = 'business';
+    withBusinessRoles = true;
+    wrap(<HireDialog open onOpenChange={() => {}} />);
+    const form = await screen.findByRole('form', { name: 'Hire agent' });
+    const names = () =>
+      within(within(form).getByLabelText('Role'))
+        .getAllByRole('option')
+        .map((o) => o.textContent ?? '');
+    await waitFor(() => expect(names()[0]).toMatch(/Front Desk/));
+    expect(names()[1]).toMatch(/Billing Clerk/);
   });
 });
 

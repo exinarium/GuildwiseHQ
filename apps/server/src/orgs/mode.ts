@@ -1,4 +1,4 @@
-import { DEV_ONLY_ROLE_KEYS, isBusinessOrg } from '@aom/shared';
+import { DEV_ONLY_ROLE_KEYS, isBusinessOrg, isBusinessRoleKey } from '@aom/shared';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { conflict } from '../errors.ts';
 
@@ -6,6 +6,28 @@ import { conflict } from '../errors.ts';
 export async function assertDevMode(db: Queryable, orgId: string, message: string): Promise<void> {
   const o = await one<{ mode: string }>(db, 'SELECT mode FROM organizations WHERE id=$1 FOR SHARE', [orgId]);
   if (isBusinessOrg(o)) throw conflict('business_mode', message);
+}
+
+/** The organization's mode (`dev` for an unknown organization). */
+export async function orgModeOf(db: Queryable, orgId: string): Promise<'dev' | 'business'> {
+  const o = await one<{ mode: string }>(db, 'SELECT mode FROM organizations WHERE id=$1', [orgId]);
+  return isBusinessOrg(o) ? 'business' : 'dev';
+}
+
+/** The sentence for a business role asked for in a dev organization. */
+export const businessRoleMsg = (role: string): string =>
+  `${role} is a business role: it can be hired in a business organization only.`;
+
+/** 409 `role_not_in_mode` when a business role is hired in a dev organization. */
+export async function assertBusinessRoleOffered(
+  db: Queryable,
+  orgId: string,
+  roleKey: string,
+  roleName: string,
+) {
+  if (!isBusinessRoleKey(roleKey)) return;
+  if ((await orgModeOf(db, orgId)) !== 'business')
+    throw conflict('role_not_in_mode', businessRoleMsg(roleName));
 }
 
 export const BUSINESS_MODE_MSG = {

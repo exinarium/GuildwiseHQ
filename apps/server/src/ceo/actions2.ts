@@ -4,6 +4,7 @@ import {
   type CeoActionName,
   type CeoInverse,
   effortBelowRoleMinimum,
+  isBusinessRoleKey,
   modelTier,
   streamId,
 } from '@aom/shared';
@@ -28,6 +29,7 @@ import { eligibility } from '../dispatcher/candidates.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
 import { conflict } from '../errors.ts';
 import { applyRecommendation, listRecommendations } from '../hr/hr.ts';
+import { businessRoleMsg, orgModeOf } from '../orgs/mode.ts';
 import { agentByName, appendLocked, cardOf, ceoBy, deskItem, refuse, truncate } from './actions.ts';
 import { budgetBlock, hireEvidenceMissing } from './staffing.ts';
 import type { ActionDef, ActionEnv, Executed, Prepared } from './types.ts';
@@ -478,6 +480,12 @@ async function hireChecks(
   const role = await loadRole(env.ctx.pool, env.orgId, roleKey);
   if (!role || roleKey === 'ceo' || role.definition.key === 'devops')
     return { refuse: `the role ${roleKey} cannot be hired by the CEO` };
+  if (
+    isBusinessRoleKey(role.definition.key) &&
+    role.orgId === null &&
+    (await orgModeOf(env.ctx.pool, env.orgId)) !== 'business'
+  )
+    return { refuse: businessRoleMsg(role.definition.name) };
   if (model) {
     const t = modelTier(model);
     const cap = modelTier(role.definition.defaultModel.model);

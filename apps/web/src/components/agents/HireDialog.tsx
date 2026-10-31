@@ -1,5 +1,6 @@
 import {
   type AgentDraftDto,
+  BUSINESS_ROLE_KEYS,
   backendDef,
   isDevOnlyRoleKey,
   modelChoicesFor,
@@ -88,13 +89,21 @@ export function HireDialog({
   const business = useBusinessMode();
   const hireable = useMemo(
     // The CEO is appointed on the CEO page, never hired here.
-    () =>
-      (roles.data ?? []).filter(
+    () => {
+      const list = (roles.data ?? []).filter(
         (r) =>
           r.definition.key !== 'devops' &&
           r.definition.key !== 'ceo' &&
           !(business && isDevOnlyRoleKey(r.definition.key)),
-      ),
+      );
+      // a business organization lists the business roles first, in the research table's order
+      if (!business) return list;
+      const rank = (k: string) => {
+        const i = BUSINESS_ROLE_KEYS.indexOf(k);
+        return i < 0 ? BUSINESS_ROLE_KEYS.length : i;
+      };
+      return [...list].sort((a, b) => rank(a.definition.key) - rank(b.definition.key));
+    },
     [roles.data, business],
   );
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');

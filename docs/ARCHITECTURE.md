@@ -1076,6 +1076,8 @@ Effective role for a shift = built-in/custom role definition at the agent's `rol
 
 ---
 
+**Business roles** (`roles/business.ts`): seven built-in roles for business organizations (Front Desk, Follow-up Assistant, Billing Clerk, Compliance Officer, Marketing & Reputation, Operations Analyst, Personal Assistant), appended to `BUILTIN_ROLES` and seeded on boot like any built-in. Their permissions are fixed in `BUSINESS_PERMISSIONS`: read and edit only, no shell, `mayCommit` false, `writableGlobs` empty, no repository reads, so a shift works in the scratch folder with no repository, branch or worktree. They claim `('*', '*')`, and validation rule 3 refuses them on a stage that uses a worktree (`business_role_worktree`), which keeps them out of the Code workflow and lets any custom workflow with `worktree: 'none'` stages name them. `roleOfferedInMode` / `roleListedInMode` (`orgs/mode.ts`) decide where they show: a dev organization never lists or hires them (`GET /api/roles`, `roleCatalogue`, `orgCatalogue`, departments, pack seats, CEO `hireChecks`, and a 409 `role_not_in_mode` in `hireAgentIn`). A pack persona whose name matches a business role (`BUSINESS_SEAT_RULES`, the role names) is seated on the built-in role in a business organization, both by the pack team seats and by hire from a pack (`ensureRole(..., { seat: true })`): no role row is made and the agent keeps the role's own permissions.
+
 ## 8. Exclusive claim, lease and release
 
 ### 8.1 Claim (`apps/server/src/dispatcher/claim.ts`)

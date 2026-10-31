@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BUILTIN_ROLES,
+  BUSINESS_SEAT_KEYS,
   type HirePackAgentsRequest,
   type HirePackAgentsResponse,
   humaniseKey,
@@ -14,6 +15,7 @@ import {
   type PackTeamResponse,
   RoleDefinitionSchema,
   roleForPackAgent,
+  roleOfferedInMode,
   runnerAtLeast,
   type Seniority,
   streamId,
@@ -29,6 +31,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { orgModeOf } from '../orgs/mode.ts';
 import { hireAgentIn } from './agents.ts';
 import { orgScope, userActor } from './common.ts';
 import { BUILTIN_ROLE_KEYS, BUILTIN_WORKFLOW_KEYS, nextVersion } from './designer.ts';
@@ -182,6 +185,7 @@ const SEAT_NAMES = new Map(BUILTIN_ROLES.map((r) => [r.key, r.name]));
 
 export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<PackTeamResponse> {
   const p = await orgPack(ctx.pool, who, packId);
+  const orgMode = await orgModeOf(ctx.pool, who.orgId);
   const trusted = !!p.pinned_sha && isTrustedRow(p);
   // an organization pack that is not approved is for the managers to review; others see nothing to hire from it yet
   const show = trusted || isOrgManager({ orgRole: who.role });
@@ -203,7 +207,10 @@ export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<Pack
         name: a.name,
         description: a.item.description,
         icon: a.item.icon ?? null,
-        suggestedSeat: suggestSeat({ key: a.key, name: a.name, description: a.item.description }),
+        suggestedSeat: suggestSeat(
+          { key: a.key, name: a.name, description: a.item.description },
+          { mode: orgMode },
+        ),
         skillRefs: (a.item.skillRefs ?? []).filter(
           (k) => skillKeys.has(k) && !agentKeys.has(k) && k !== a.key,
         ),
@@ -218,7 +225,9 @@ export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<Pack
     packId,
     packName: p.name,
     trusted,
-    seats: PACK_SEAT_KEYS.map((key) => ({ key, name: SEAT_NAMES.get(key) ?? key })),
+    seats: [...PACK_SEAT_KEYS, ...BUSINESS_SEAT_KEYS]
+      .filter((key) => roleOfferedInMode(key, orgMode))
+      .map((key) => ({ key, name: SEAT_NAMES.get(key) ?? key })),
     agents,
     skills: show
       ? skillItems
