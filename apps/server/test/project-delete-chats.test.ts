@@ -1,21 +1,18 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
+import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 let w: World;
-let w2: World;
 let agentId: string;
-let agent2Id: string;
 
 beforeAll(async () => {
   w = await createWorld({ listen: false, env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-  w2 = await createWorld({ listen: false, env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   agentId = (await w.hire('Chatty', 'builder', 'senior')).id;
-  agent2Id = (await w2.hire('Other', 'builder', 'senior')).id;
 });
 afterAll(async () => {
-  await w2.t.close();
   await w.t.close();
   await closeAdminPool();
 });
@@ -39,7 +36,7 @@ async function markRead(world: World, t: string) {
   await q(
     `INSERT INTO thread_messages (id, thread_id, author_kind, author_agent_id, kind, body, event_seq, created_at)
      VALUES (gen_random_uuid(), $1, 'agent', $2, 'chat', 'hi', 0, now())`,
-    [t, world === w ? agentId : agent2Id],
+    [t, agentId],
   );
   await ok(owner(world, 'POST', `/api/chats/${t}/read`));
 }
@@ -73,10 +70,19 @@ describe('deleting a project with chats', () => {
     orgChat = await newChat(w, agentId);
     await close(w, orgChat);
     await markRead(w, orgChat);
-    const p2 = await newProject(w2, 'OTH');
-    const b = await newChat(w2, agent2Id, p2);
-    await close(w2, b);
-    await markRead(w2, b);
+    // a second organisation (its own user and org) with a closed, read chat, written straight into the tables
+    const other = await w.t.userSession(uniqueEmail('other'));
+    const b = randomUUID();
+    await q(
+      `INSERT INTO threads (id, org_id, project_id, kind, title, created_by, created_at)
+       VALUES ($1,$2,NULL,'chat','Other org chat',$2,now())`,
+      [b, other.id],
+    );
+    await q('INSERT INTO chat_archives (thread_id, user_id, archived_at) VALUES ($1,$2,now())', [
+      b,
+      other.id,
+    ]);
+    await q('INSERT INTO chat_reads (thread_id, user_id, read_up_to) VALUES ($1,$2,now())', [b, other.id]);
     otherOrgChats = [b];
   });
 
