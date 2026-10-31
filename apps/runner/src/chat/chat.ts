@@ -96,7 +96,7 @@ export interface ChatDeps {
   delegateUsage?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
-  /** `ceo.ownerPermissions`, read fresh at each turn (default: `bypass`). */
+  /** `ceo.ownerPermissions`, read fresh at each turn (default: `auto`). */
   ceoOwnerPermissions?: () => 'bypass' | 'auto';
   /** `aom runner status|logs` in a full-power owner turn: this workstation's status and logs, secrets masked. */
   diagnostics?: (request: unknown) => Promise<RunnerDiagnosticsResult>;
@@ -751,7 +751,7 @@ export class ChatManager {
         `runtime ${msg.agent.runtime} is not available for the CEO's full-power turns on this workstation`,
       );
     chat.fullPower = mode;
-    const permissionMode = this.deps.ceoOwnerPermissions?.() ?? 'bypass';
+    const permissionMode = this.deps.ceoOwnerPermissions?.() ?? 'auto';
     const effective = mode === 'owner' && permissionMode === 'bypass' ? 'bypass' : 'auto';
     this.auditCommands(msg.chatId, [`# ${mode} turn, permission mode: ${effective}`]);
     const turnDir = turnDirOf(paths.root, msg.chatId);

@@ -8,7 +8,7 @@ import type { OwnerTurnInput } from '../src/adapters/types.ts';
 import { runnerDiagnostics, selectLines } from '../src/ceo/diagnostics.ts';
 import { bashFloorMessage, GUARD_CONFIG_FILE, runGuardHook } from '../src/ceo/guard-hook.ts';
 import { floorDenies, floorSpellings, PRIVATE_ENTRIES, writeTurnFiles } from '../src/ceo/turn-files.ts';
-import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
+import { CeoConfigSchema, ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp } from './helpers.ts';
@@ -47,15 +47,23 @@ const input = (over: Partial<OwnerTurnInput> = {}): OwnerTurnInput => ({
 const modeOf = (c: { args: string[] }) => c.args[c.args.indexOf('--permission-mode') + 1];
 
 describe('permission mode of the CEO turns', () => {
-  it('the Owner chat runs without prompts by default and the provider credential is kept from its shell', () => {
+  it('the default is auto with the relay, whatever the install had before', () => {
     const c = buildClaudeOwnerTurnCommand(input(), cfg, {});
+    expect(modeOf(c)).toBe('auto');
+    expect(c.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(CeoConfigSchema.parse({ fullPower: true }).ownerPermissions).toBe('auto');
+    expect(CeoConfigSchema.parse({}).ownerPermissions).toBe('auto');
+  });
+
+  it('--bypass runs the Owner chat without prompts and keeps the provider credential from its shell', () => {
+    const c = buildClaudeOwnerTurnCommand(input({ permissionMode: 'bypass' }), cfg, {});
     expect(modeOf(c)).toBe('bypassPermissions');
     expect(c.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
     // the deny floor and the hook still ride on the session
     expect(c.args[c.args.indexOf('--settings') + 1]).toBe('/runner/ceo-turns/c1/floor.json');
   });
 
-  it('--strict (ownerPermissions auto) keeps the classifier and the relay', () => {
+  it('an explicit auto (--strict) keeps the classifier and the relay', () => {
     const c = buildClaudeOwnerTurnCommand(input({ permissionMode: 'auto' }), cfg, {});
     expect(modeOf(c)).toBe('auto');
     expect(c.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();

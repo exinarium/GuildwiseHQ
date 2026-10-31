@@ -1059,7 +1059,7 @@ projected).
 
 The five open questions are answered. These answers override the sections they touch.
 
-1. **Permissions (§3.5).** *(Amended for runner 0.1.65, see docs/investigations/ceo-full-power.md: the Owner's own chat runs in `bypassPermissions` behind the deny floor; standing-order turns and every other agent are unchanged.)* CEO turns, and every agent, run in auto mode: there is no prompt at a terminal. When Claude
+1. **Permissions (§3.5).** *(Amended for runner 0.1.65, see docs/investigations/ceo-full-power.md: the Owner's own chat can run in `bypassPermissions` behind the deny floor if the machine owner opts in with `full-power on --bypass`; the default, standing-order turns and every other agent are unchanged.)* CEO turns, and every agent, run in auto mode: there is no prompt at a terminal. When Claude
    Code (or any runtime) needs a permission it does not have, the relay raises an **open question on the desk**:
    "authorize this execution", with the tool, the redacted input and the reason. Any **Owner or Admin** of the
    organization can press **Authorize**; that grants the permission to the waiting session (once, or for the turn).

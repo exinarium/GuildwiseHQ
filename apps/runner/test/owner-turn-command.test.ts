@@ -40,7 +40,7 @@ const input = (over: Partial<OwnerTurnInput> = {}): OwnerTurnInput => ({
 });
 
 describe('buildClaudeOwnerTurnCommand (the full-power profile)', () => {
-  it("is the owner's own Claude Code: his settings, no private config dir, no strict MCP, no disabled skills, no prompts", () => {
+  it("is the owner's own Claude Code: his settings, no private config dir, no strict MCP, no disabled skills, auto mode (the default)", () => {
     const c = buildClaudeOwnerTurnCommand(input(), cfg, {
       HOME: '/home/owner',
       CLAUDE_CONFIG_DIR: undefined,
@@ -49,7 +49,7 @@ describe('buildClaudeOwnerTurnCommand (the full-power profile)', () => {
     const a = c.args;
     expect(a.slice(0, 2)).toEqual(['-p', 'hello CEO']);
     expect(a[a.indexOf('--setting-sources') + 1]).toBe('user,project,local');
-    expect(a[a.indexOf('--permission-mode') + 1]).toBe('bypassPermissions');
+    expect(a[a.indexOf('--permission-mode') + 1]).toBe('auto');
     expect(a[a.indexOf('--permission-prompt-tool') + 1]).toBe('mcp__aom_permission__ask');
     expect(a.slice(a.indexOf('--allowedTools') + 1, a.indexOf('--allowedTools') + 4)).toEqual([
       'Bash(aom:*)',

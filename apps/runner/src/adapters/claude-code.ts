@@ -291,8 +291,8 @@ export const PERMISSION_TOOL = 'mcp__aom_permission__ask';
  * The CEO's full-power turn (docs/design/ceo-front-door.md section 3.3, permissions per section 14.1): the Owner's own Claude
  * Code. His real `~/.claude` loads (user, project and local settings, skills, plugins and his MCP servers), HOME is the real
  * one, there is no sandbox, no `--strict-mcp-config`, no `--disable-slash-commands` and no `CLAUDE_CONFIG_DIR` override.
- * The Owner's own chat runs in `bypassPermissions` (nothing is judged or prompted, like his terminal; `ceo.ownerPermissions =
- * 'auto'` brings back the classifier plus the desk relay); a standing-order turn always runs `auto`, and a permission it lacks
+ * The Owner's own chat runs in `auto` (the classifier plus the desk relay) unless he opted in with `full-power on --bypass`
+ * (`ceo.ownerPermissions = 'bypass'`: `bypassPermissions`, nothing judged or prompted, like his terminal); a standing-order turn always runs `auto`, and a permission it lacks
  * goes to the permission relay (a desk question). The deny floor (`floor.json`) still wins in both modes: deny rules are
  * evaluated before the mode. `Bash(aom:*)` is always allowed. Pure; unit tested.
  */
@@ -347,7 +347,7 @@ export function buildClaudeOwnerTurnCommand(
 
 /** Only the Owner's own chat can run without prompts; a standing-order turn (nobody watching) keeps the classifier and the relay. */
 export const ownerBypasses = (input: Pick<OwnerTurnInput, 'mode' | 'permissionMode'>): boolean =>
-  input.mode === 'owner' && (input.permissionMode ?? 'bypass') === 'bypass';
+  input.mode === 'owner' && input.permissionMode === 'bypass';
 
 const ownerPermissionFlag = (input: Pick<OwnerTurnInput, 'mode' | 'permissionMode'>): string =>
   ownerBypasses(input) ? 'bypassPermissions' : 'auto';

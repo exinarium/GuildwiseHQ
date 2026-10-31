@@ -285,7 +285,7 @@ export interface OwnerTurnInput {
   addDirs?: string[];
   logFile?: string;
   /**
-   * `owner` turns only: `bypass` runs Claude Code in `bypassPermissions` (default), `auto` in the classifier mode with the desk
+   * `owner` turns only: `bypass` (explicit opt-in) runs Claude Code in `bypassPermissions`, `auto` (default) in the classifier mode with the desk
    * relay. An `order` turn always runs `auto`, whatever this says.
    */
   permissionMode?: 'bypass' | 'auto';

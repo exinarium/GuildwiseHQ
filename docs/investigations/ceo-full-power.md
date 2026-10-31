@@ -55,18 +55,19 @@ journal (item 3), and had no other path (item 4).
 Verification I could not do: running a real nested `claude` here to prove that deny rules from `--settings` still win under
 `bypassPermissions` (the harness of this session refused to start one). It is Claude Code's documented order (deny rules are
 checked before the mode); the Owner should confirm once with `aom runner logs` (allowed) versus `cat ~/.aom-runner*/config.json` (blocked)
-after updating (see "Open questions").
+after updating with `--bypass` (see "Open questions").
 
 ## 3. What changed (runner 0.1.65)
 
-1. **Mode.** The Owner's own turn runs `--permission-mode bypassPermissions` (default; `ceo.ownerPermissions`, `guildwise-runner
-   ceo full-power on --strict` for the old `auto`). The most permissive mode is safe here because: (a) only the Owner can start such
+1. **Mode.** The default stays `auto` (classifier plus relay) for every install, new and existing. The machine owner can opt in to
+   `--permission-mode bypassPermissions` for his own chat with `guildwise-runner ceo full-power on --bypass` (`on --strict` goes back;
+   `ceo.ownerPermissions`). It is the most permissive mode and is safe under the rules because: (a) only the Owner can start such
    a turn (server: author must be the Owner now, workstation must be his; runner: his local opt-in), (b) deny rules and the
    `PreToolUse` hook are evaluated before the mode, so the floor still holds, (c) the runner sets
    `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so his shell cannot print the provider credential the runner injected, (d) every Bash command
    is still audited locally (redacted) and its first word reaches the server together with the permission mode, (e) it is the same
    power he has in his own terminal. **Order turns stay `auto` with the relay** whatever the setting says (nobody is watching), as do
-   wakes and every other agent.
+   wakes and every other agent. Without `--bypass`, item 1 of the table (classifier refusals) still applies.
 2. **Floor.** `status.json` is no longer private. `systemctl` is denied only for `stop|restart|try-restart|reload-or-restart|kill|
    disable|mask|start|reenable|edit|revert`; `status`, `cat`, `show`, `is-active`, `journalctl` work. The runner's keys, config,
    queued payloads, pairings, sessions, raw logs, `pkill *aom*`, `kill <pid>` stay denied.
@@ -113,8 +114,7 @@ after updating (see "Open questions").
 
 ## 6. Open questions for the owner
 
-1. The default for existing installs is now `bypass` the next time the runner updates (`full-power on --strict` returns to the
-   classifier). Should an existing opt-in stay on `auto` until he runs `full-power on` again?
+1. Is `--bypass` what you want to run, or should the `auto` default be improved some other way (for example allow-listing the read-only commands the classifier refuses)?
 2. The CEO's `aom ceo act` surface is the set of `CEO_ACTIONS`; UI buttons without an action (members, billing, settings, budgets,
    project deletion) stay UI-only by design. Do you want any of them behind an inline confirmation card for your own turns?
 3. Confirm once on your machine that deny rules still win in `bypassPermissions` (try `cat ~/.aom-runner-guildwise/config.json` in the CEO chat: it must be refused
