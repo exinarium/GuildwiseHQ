@@ -243,7 +243,12 @@ export async function getProjectDetail(
   );
   const liveProposals = await rows(
     ctx.pool,
-    `SELECT repo_id, state, desk_item_id, version FROM release_proposals WHERE project_id=$1 AND state IN ('proposed','approved')`,
+    `SELECT id, repo_id, state, desk_item_id, version FROM release_proposals WHERE project_id=$1 AND state IN ('proposed','approved')`,
+    [projectId],
+  );
+  const ships = await rows(
+    ctx.pool,
+    `SELECT id, version, status, step, commit_sha, error, payload, updated_at FROM release_ships WHERE project_id=$1`,
     [projectId],
   );
   const clones = await rows(
@@ -309,7 +314,24 @@ export async function getProjectDetail(
       releasePr: releasePrOf(prRequests.find((q) => q.repo_id === r.id)),
       releaseProposal: (() => {
         const lp = liveProposals.find((q) => q.repo_id === r.id);
-        return lp ? { state: lp.state, deskItemId: lp.desk_item_id, version: lp.version ?? null } : null;
+        if (!lp) return null;
+        const sh = ships.find((q) => q.id === lp.id);
+        return {
+          state: lp.state,
+          deskItemId: lp.desk_item_id,
+          version: lp.version ?? null,
+          ship: sh
+            ? {
+                version: sh.version,
+                status: sh.status,
+                step: sh.step ?? null,
+                commit: sh.commit_sha ?? null,
+                error: sh.error ?? null,
+                branch: (sh.payload as { workingBranch?: string } | null)?.workingBranch ?? null,
+                updatedAt: iso(sh.updated_at) as string,
+              }
+            : null,
+        };
       })(),
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,

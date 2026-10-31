@@ -154,6 +154,7 @@ describe('desk kind labels', () => {
     ['approval', 'large_merge', 'Merge approval'],
     ['approval', 'repo_create', 'Create repository'],
     ['alert', 'repo_create_failed', 'Repository not created'],
+    ['alert', 'release_failed', 'Release stopped'],
     ['rating', 'digest', 'Digest to rate'],
     ['escalation', null, 'Escalation'],
     ['escalation', 'vault_conflict', 'Vault conflict'],
@@ -258,6 +259,33 @@ describe('DeskItem', () => {
       }),
     );
     renderItem(item({ kind: 'alert', subkind: 'repo_create_failed', options, blocking: false }));
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ url: `/api/desk/${base.id}/resolve`, body: { resolution: 'approved' } });
+  });
+
+  it('a stopped release offers Retry (resolve approved) and Dismiss', async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }),
+    );
+    renderItem(
+      item({
+        kind: 'alert',
+        subkind: 'release_failed',
+        options: [
+          { id: 'retry', label: 'Retry' },
+          { id: 'dismiss', label: 'Dismiss' },
+        ],
+        blocking: false,
+      }),
+    );
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));

@@ -1,4 +1,6 @@
 import {
+  type ComponentFacts,
+  type ComponentRule,
   compareSemver,
   componentRuleApplies,
   hasBreakingFooter,
@@ -36,6 +38,35 @@ async function fileAt(repoPath: string, sha: string, path: string, max: number):
   if (Number(size.stdout.trim()) > max) return null;
   const r = await git(repoPath, ['show', `${sha}:${path}`]);
   return r.exitCode === 0 ? r.stdout : null;
+}
+
+/**
+ * The paths changed since `lastTag` (every tracked file when there is no tag) and, per rule, how many of them it
+ * covers plus the version file at `sha` and at the tag. Read-only; shared by the release proposal and the release commit.
+ */
+export async function componentFactsAt(
+  repoPath: string,
+  rules: readonly ComponentRule[],
+  lastTag: string | null,
+  sha: string,
+): Promise<{ paths: string[]; components: ComponentFacts[] }> {
+  const paths = (
+    lastTag
+      ? (await git(repoPath, ['diff', '--name-only', '-z', lastTag, sha])).stdout
+      : (await git(repoPath, ['ls-tree', '-r', '--name-only', '-z', sha])).stdout
+  )
+    .split('\0')
+    .filter((x) => x !== '');
+  const components: ComponentFacts[] = [];
+  for (const rule of rules) {
+    components.push({
+      name: rule.name,
+      changedCount: componentRuleApplies(rule, paths).matched.length,
+      contentAtHead: await fileAt(repoPath, sha, rule.versionFile, VERSION_FILE_MAX),
+      contentAtTag: lastTag ? await fileAt(repoPath, lastTag, rule.versionFile, VERSION_FILE_MAX) : null,
+    });
+  }
+  return { paths, components };
 }
 
 /**
@@ -107,23 +138,7 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     };
   });
 
-  const paths = (
-    lastName
-      ? (await git(repoPath, ['diff', '--name-only', '-z', lastName, headSha])).stdout
-      : (await git(repoPath, ['ls-tree', '-r', '--name-only', '-z', headSha])).stdout
-  )
-    .split('\0')
-    .filter((x) => x !== '');
-
-  const components = [];
-  for (const rule of p.components) {
-    components.push({
-      name: rule.name,
-      changedCount: componentRuleApplies(rule, paths).matched.length,
-      contentAtHead: await fileAt(repoPath, headSha, rule.versionFile, VERSION_FILE_MAX),
-      contentAtTag: lastName ? await fileAt(repoPath, lastName, rule.versionFile, VERSION_FILE_MAX) : null,
-    });
-  }
+  const { paths, components } = await componentFactsAt(repoPath, p.components, lastName, headSha);
 
   return {
     ok: true,

@@ -1,3 +1,4 @@
+export * from './changelog-rewrite.ts';
 export * from './commits.ts';
 export * from './components.ts';
 export * from './dto.ts';

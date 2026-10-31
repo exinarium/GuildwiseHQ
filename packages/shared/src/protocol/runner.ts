@@ -94,12 +94,15 @@ import {
   ProviderKeySetPayloadSchema,
   ReportedProviderSchema,
 } from '../models/direct.ts';
+import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
+import { RELEASE_TAG_RE } from '../release/tags.ts';
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import {
   CommitAsSchema,
+  ComponentRuleSchema,
   ComponentRulesSchema,
   RepoCreatePayloadSchema,
   RepoIdentityFactSchema,
@@ -811,6 +814,61 @@ export type RepoReleaseFactsResult = z.infer<typeof RepoReleaseFactsResultSchema
 export const RELEASE_FACTS_CAPABILITY = 'release-facts:1';
 
 /**
+ * `release.ship`: the release commit on the working branch (CHANGELOG.md moved to the version, component versions
+ * bumped), pushed without force. Idempotent: a branch that already has the version section answers `alreadyDone`.
+ */
+export const RELEASE_SHIP_CAPABILITY = 'release-ship:1';
+export const ReleaseShipStepSchema = z.enum(['prepare', 'components', 'changelog', 'commit', 'push']);
+export type ReleaseShipStep = z.infer<typeof ReleaseShipStepSchema>;
+export const ReleaseShipPayloadSchema = z.object({
+  /** The proposal id: one ship per approved proposal. */
+  shipId: z.uuid(),
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(500),
+  projectName: z.string().max(200),
+  workingBranch: z.string().min(1).max(200),
+  /** The release version without the leading "v". */
+  version: z
+    .string()
+    .min(1)
+    .max(60)
+    .refine((v) => RELEASE_TAG_RE.test(`v${v}`), 'not a release version'),
+  tag: z.string().min(1).max(100),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  lastTag: z.string().max(100).nullable(),
+  components: z
+    .array(ComponentRuleSchema.extend({ level: BumpLevelSchema, approvedTo: z.string().nullable() }))
+    .max(20)
+    .default([]),
+  /** Only used when the repository has no CHANGELOG.md. */
+  notes: z.string().max(50_000).optional(),
+  commitAs: CommitAsSchema.nullable().optional(),
+  /** Absent: the runner detects whether the repository asks for a DCO sign-off. */
+  signOff: z.boolean().optional(),
+  forge: ForgeKindSchema.optional(),
+});
+export type ReleaseShipPayload = z.infer<typeof ReleaseShipPayloadSchema>;
+
+export const ReleaseShipResultSchema = z.object({
+  ok: z.boolean(),
+  step: ReleaseShipStepSchema.optional(),
+  commit: z.string().optional(),
+  alreadyDone: z.boolean().optional(),
+  resumed: z.boolean().optional(),
+  signedOff: z.boolean().optional(),
+  signOffReason: z.string().max(300).optional(),
+  components: z
+    .array(ComponentBumpSchema.pick({ name: true, state: true, from: true, to: true, changedCount: true }))
+    .default([]),
+  /** The version's changelog section, for the release notes of the next step. */
+  section: z.string().max(50_000).optional(),
+  notices: z.array(z.string().max(500)).default([]),
+  error: z.string().max(4000).optional(),
+});
+export type ReleaseShipResult = z.infer<typeof ReleaseShipResultSchema>;
+
+/**
  * Organisation source folder (docs/RUNNER.md): the folder inside a repo root whose repositories the architect of one
  * organisation may read. `org.folder` sets (`path`) or clears (`path: null`) it; the runner validates exactly like
  * `aom-runner org-folder set` and answers `{ ok, error? }`. The state is reported in `org.folders`.
@@ -926,6 +984,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.access',
   'repo.open_pr',
   'repo.release_facts',
+  'release.ship',
   'org.folder',
   'toolchain.remove',
   'repo.sync',
@@ -1026,6 +1085,7 @@ export const CommandPayloadSchemas = {
   'repo.access': RepoAccessPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
+  'release.ship': ReleaseShipPayloadSchema,
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,

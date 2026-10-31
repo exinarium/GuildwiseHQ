@@ -40,7 +40,8 @@ export async function resolveShipReleaseIn(
   );
   if (!proposal) {
     // The proposal was closed already (nothing to release, released): the item may still be dismissed.
-    if (resolution === 'approved') throw conflict('proposal_closed', 'this release proposal is no longer open');
+    if (resolution === 'approved')
+      throw conflict('proposal_closed', 'this release proposal is no longer open');
     return;
   }
   const scope = projectScope(item.org_id, proposal.project_id);
@@ -65,10 +66,14 @@ export async function resolveShipReleaseIn(
     );
     return;
   }
-  if (!release) throw badRequest('release_required', 'approving a release needs the version and the components');
+  if (!release)
+    throw badRequest('release_required', 'approving a release needs the version and the components');
   const stored = await loadFacts(tx, proposal.repo_id);
   if (!stored?.facts || stored.state === 'failed')
-    throw conflict('facts_missing', 'The repository has not been read yet. Refresh the proposal and try again.');
+    throw conflict(
+      'facts_missing',
+      'The repository has not been read yet. Refresh the proposal and try again.',
+    );
   const facts: ReleaseFacts = stored.facts;
   if (release.factsHeadSha !== facts.headSha)
     throw conflict(
@@ -80,12 +85,12 @@ export async function resolveShipReleaseIn(
   const rules = await loadComponentRules(tx, proposal.repo_id);
   const levels: Record<string, 'patch' | 'minor' | 'major'> = {};
   for (const c of release.components) {
-    if (!rules.some((r) => r.name === c.name)) throw badRequest('unknown_component', `unknown component "${c.name}"`);
+    if (!rules.some((r) => r.name === c.name))
+      throw badRequest('unknown_component', `unknown component "${c.name}"`);
     levels[c.name] = c.level;
   }
   const built = buildProposal(facts, rules, levels);
-  const notes =
-    built.notesSource === 'commits' ? (release.notes?.trim() || built.notes) : built.notes;
+  const notes = built.notesSource === 'commits' ? release.notes?.trim() || built.notes : built.notes;
   await ctx.store.append(
     [
       {

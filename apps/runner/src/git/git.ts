@@ -225,3 +225,17 @@ export async function gitVersion(): Promise<{ raw: string; major: number; minor:
     return null;
   }
 }
+
+/** Fast-forwards the clone's local working branch to the merge commit when that is safe (best effort). */
+export async function advanceLocalBranch(repo: string, base: string, sha: string): Promise<void> {
+  const local = await revParse(repo, `refs/heads/${base}`);
+  if (!local || local === sha) return;
+  if ((await git(repo, ['merge-base', '--is-ancestor', local, sha])).exitCode !== 0) return;
+  const current = (await git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+  if (current === base) {
+    if ((await git(repo, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()) return;
+    await git(repo, ['merge', '--ff-only', sha]);
+  } else {
+    await git(repo, ['update-ref', `refs/heads/${base}`, sha, local]);
+  }
+}

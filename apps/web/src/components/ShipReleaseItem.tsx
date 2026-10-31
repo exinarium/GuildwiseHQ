@@ -24,7 +24,7 @@ function age(at: string | null): string {
 
 /**
  * "Ship release": the recommended version with its reason, the changelog as it will read, and the component bumps. The
- * owner can type another version (refused inline, never as a toast) or raise a component. Approving records the choice;
+ * owner can type another version (refused inline, never as a toast) or raise a component. Approving prepares the release commit;
  * nothing is pushed, tagged or published by this step.
  */
 export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
@@ -209,7 +209,7 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
       </div>
 
       <p className="text-xs text-subtle">
-        Approving records this version and the component versions. Nothing is pushed, tagged or published yet.
+        Approving prepares the release commit (changelog and component versions) and pushes it to the working branch. Nothing is tagged or published yet.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full">
         <Button

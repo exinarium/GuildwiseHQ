@@ -3,7 +3,7 @@ import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
-import { git, gitOk, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
@@ -284,7 +284,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
           return fail('merge', `pushing ${base} failed: ${why}`);
         }
       }
-      await advanceLocalBase(repoPath, base, mergeCommit);
+      await advanceLocalBranch(repoPath, base, mergeCommit);
       return { ok: true, action: 'merge', mergeCommit };
     },
   );
@@ -335,20 +335,6 @@ async function viaChange(
     };
   } catch (err) {
     return fail('pr', errMsg(err));
-  }
-}
-
-/** Fast-forwards the clone's local working branch to the merge commit when that is safe (best effort). */
-async function advanceLocalBase(repo: string, base: string, sha: string): Promise<void> {
-  const local = await revParse(repo, `refs/heads/${base}`);
-  if (!local || local === sha) return;
-  if ((await git(repo, ['merge-base', '--is-ancestor', local, sha])).exitCode !== 0) return;
-  const current = (await git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
-  if (current === base) {
-    if ((await git(repo, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()) return;
-    await git(repo, ['merge', '--ff-only', sha]);
-  } else {
-    await git(repo, ['update-ref', `refs/heads/${base}`, sha, local]);
   }
 }
 
