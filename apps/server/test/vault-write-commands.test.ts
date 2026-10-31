@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { VaultWriteCommandSchema } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { appendStandingOrder, type DecisionRecord, writeDecisionFile } from '../src/commands/decisions.ts';
+import {
+  appendStandingOrder,
+  type DecisionRecord,
+  rewriteStandingOrders,
+  writeDecisionFile,
+} from '../src/commands/decisions.ts';
 import { chooseVaultWriteTarget } from '../src/commands/vaults.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -206,6 +211,36 @@ describe('standing orders (desk -> vault.write append)', () => {
       )
     )[0]!;
     expect(row.payload.vaultId).toBe(vault.id);
+  });
+
+  it('a rewrite shows the review date only for dated orders', async () => {
+    const day = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
+    const add = (title: string, extra: Record<string, unknown>) =>
+      ok(
+        owner('POST', '/api/ledger', {
+          scope: 'standing_order',
+          title,
+          body: `${title} body, binturong.`,
+          projectId: w.projectId,
+          ...extra,
+        }),
+        201,
+      );
+    await add('Rewrite plain', {});
+    await add('Rewrite dated', { reviewDate: day });
+    const res = await rewriteStandingOrders(ctx(), { orgId: w.owner.id, projectId: w.projectId });
+    expect(res).toMatchObject({ queued: true });
+    const cmd = (
+      await q(
+        `SELECT payload FROM runner_commands WHERE type='vault.write' AND payload->>'mode'='replace' AND payload->>'path'='projects/toy/standing-orders.md' ORDER BY created_at DESC LIMIT 1`,
+      )
+    )[0]!.payload;
+    const blocks = (cmd.content as string).split('\n## ').filter((b) => b.includes('Rewrite '));
+    const plain = blocks.find((b) => b.startsWith('Rewrite plain'))!;
+    const dated = blocks.find((b) => b.startsWith('Rewrite dated'))!;
+    expect(plain).not.toContain('Review by');
+    expect(plain.trimEnd()).toMatch(/_Added \d{4}-\d{2}-\d{2}\._$/);
+    expect(dated).toContain(`_Review by ${day}._`);
   });
 
   it('without a work vault an organization-wide order is not written', async () => {

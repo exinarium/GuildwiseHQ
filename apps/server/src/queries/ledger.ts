@@ -1,4 +1,4 @@
-import type { LedgerEntryDto, LedgerMatch, LedgerVersionDto } from '@aom/shared';
+import { isReviewDue, type LedgerEntryDto, type LedgerMatch, type LedgerVersionDto } from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
 import { fullPowerDto } from '../ceo/orders.ts';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -168,13 +168,14 @@ export async function cardLedgerEntries(
 }
 
 const DTO_SELECT = `SELECT e.*, p.key AS project_key, c.ref AS card_ref,
+       e.review_date::text AS review_date_text,
        CASE WHEN e.created_by_kind='user' THEN (SELECT display_name FROM users WHERE id=e.created_by_id)
             WHEN e.created_by_kind='agent' THEN (SELECT name FROM agents WHERE id=e.created_by_id) END AS created_by_name,
        CASE WHEN e.edited_by_kind='user' THEN (SELECT display_name FROM users WHERE id=e.edited_by_id)
             WHEN e.edited_by_kind='agent' THEN (SELECT name FROM agents WHERE id=e.edited_by_id) END AS edited_by_name
   FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN cards c ON c.id = e.card_id`;
 
-export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
+export const toLedgerDto = (r: Row, today: string, rank?: number): LedgerEntryDto => ({
   id: r.id,
   scope: r.scope,
   projectId: r.project_id,
@@ -196,6 +197,12 @@ export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
   retiredAt: iso(r.retired_at) ?? null,
   retiredReason: r.retired_reason ?? null,
   conflictsWith: r.conflicts_with ?? [],
+  reviewDate: r.review_date_text ?? null,
+  reviewedAt: iso(r.reviewed_at) ?? null,
+  reviewDue: isReviewDue(
+    { reviewDate: r.review_date_text ?? null, retired: !!r.retired_at, superseded: !!r.superseded_by },
+    today,
+  ),
   canEdit: false,
   canRetire: false,
   ...(rank !== undefined ? { rank } : {}),
@@ -299,6 +306,9 @@ export async function listLedger(
     projectId?: string | undefined;
     scope: LedgerScopeFilter;
     includeRetired?: string | undefined;
+    due?: string | undefined;
+    /** The server's calendar date (`ledgerToday`): the one "today" review dates are compared with. */
+    today: string;
   },
 ): Promise<LedgerEntryDto[]> {
   const scope = o.scope;
@@ -331,7 +341,8 @@ export async function listLedger(
       db,
       userId,
       found
-        .map((r) => toLedgerDto(r, ids.get(r.id)))
+        .map((r) => toLedgerDto(r, o.today, ids.get(r.id)))
+        .filter((e) => o.due !== 'true' || e.reviewDue)
         .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || b.createdAt.localeCompare(a.createdAt)),
     );
   }
@@ -341,24 +352,27 @@ export async function listLedger(
       WHERE ${VISIBLE} AND ($5::boolean OR (e.superseded_by IS NULL AND e.retired_at IS NULL))
         AND ($2::uuid IS NULL OR e.project_id IS NULL OR e.project_id = $2)
         AND ($3 = 'all' OR e.scope = $3) AND ${IN_ORG('$4')}
+        AND (NOT $6::boolean OR (e.review_date IS NOT NULL AND e.review_date <= $7::date
+             AND e.retired_at IS NULL AND e.superseded_by IS NULL))
       ORDER BY (e.retired_at IS NOT NULL), e.created_at DESC, e.id LIMIT 200`,
-    [userId, o.projectId ?? null, scope, orgId, o.includeRetired === 'true'],
+    [userId, o.projectId ?? null, scope, orgId, o.includeRetired === 'true', o.due === 'true', o.today],
   );
   return withCanEdit(
     db,
     userId,
-    list.map((r) => toLedgerDto(r)),
+    list.map((r) => toLedgerDto(r, o.today)),
   );
 }
 
 export async function getLedgerDto(
   db: Queryable,
   id: string,
+  today: string,
   userId?: string,
 ): Promise<LedgerEntryDto | undefined> {
   const r = (await rows(db, `${DTO_SELECT} WHERE e.id = $1`, [id]))[0];
   if (!r) return undefined;
-  const dto = toLedgerDto(r);
+  const dto = toLedgerDto(r, today);
   return userId ? (await withCanEdit(db, userId, [dto]))[0] : dto;
 }
 
@@ -367,9 +381,37 @@ export async function getVisibleLedgerDto(
   db: Queryable,
   userId: string,
   id: string,
+  today: string,
 ): Promise<LedgerEntryDto | undefined> {
   const r = (await rows(db, `${DTO_SELECT} WHERE e.id = $2 AND ${VISIBLE}`, [userId, id]))[0];
-  return r ? (await withCanEdit(db, userId, [toLedgerDto(r)]))[0] : undefined;
+  return r ? (await withCanEdit(db, userId, [toLedgerDto(r, today)]))[0] : undefined;
+}
+
+/** Live entries of the org whose review date is `today` or earlier, oldest date first (the CEO brief lists them). */
+export async function dueForReview(
+  db: Queryable,
+  orgId: string,
+  today: string,
+  limit = 20,
+): Promise<
+  Array<{
+    id: string;
+    scope: string;
+    title: string;
+    body: string;
+    review_date: string;
+    project_key: string | null;
+  }>
+> {
+  return rows(
+    db,
+    `SELECT e.id, e.scope, e.title, e.body, e.review_date::text AS review_date, p.key AS project_key
+       FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id
+      WHERE e.org_id=$1 AND e.review_date IS NOT NULL AND e.review_date <= $2::date
+        AND e.retired_at IS NULL AND e.superseded_by IS NULL
+      ORDER BY e.review_date, e.created_at, e.id LIMIT $3`,
+    [orgId, today, limit],
+  );
 }
 
 /** The wordings of an entry, newest first: the current one, then every earlier one. */

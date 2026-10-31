@@ -4,7 +4,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { voidAuthorityEvents } from '../ceo/orders.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, type Queryable } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -64,6 +64,27 @@ export async function retireLedgerEntryAs(
   });
 }
 
+/**
+ * Who may manage (retire, or set the review date of) an entry: the people who may edit it (org-wide: Owner and Admins;
+ * project: the project owner). An entry outside the caller's reach does not exist for them (404).
+ */
+export async function assertCanManageEntry(
+  db: Queryable,
+  userId: string,
+  e: { org_id: string; project_id: string | null },
+  what = 'retire',
+): Promise<void> {
+  if (e.project_id) {
+    const project = await loadVisibleProject(db, userId, e.project_id);
+    if (project.my_role !== 'owner') throw forbidden(`only the project owner can ${what} project entries`);
+  } else {
+    const role = await orgRoleOf(db, userId, e.org_id);
+    if (!role) throw notFound('ledger entry not found');
+    if (!isOrgManager({ orgRole: role }))
+      throw forbidden(`only the organization Owner and Admins can ${what} organization-wide entries`);
+  }
+}
+
 /** Who may retire an entry: the people who may edit it (org-wide: Owner and Admins; project: the project owner). */
 export async function retireLedgerEntry(
   ctx: Ctx,
@@ -71,16 +92,12 @@ export async function retireLedgerEntry(
   entryId: string,
   req: RetireInput,
 ): Promise<boolean> {
-  const e = await one(ctx.pool, 'SELECT org_id, project_id FROM ledger_entries WHERE id=$1', [entryId]);
+  const e = await one<{ org_id: string; project_id: string | null }>(
+    ctx.pool,
+    'SELECT org_id, project_id FROM ledger_entries WHERE id=$1',
+    [entryId],
+  );
   if (!e) throw notFound('ledger entry not found');
-  if (e.project_id) {
-    const project = await loadVisibleProject(ctx.pool, user.id, e.project_id);
-    if (project.my_role !== 'owner') throw forbidden('only the project owner can retire project entries');
-  } else {
-    const role = await orgRoleOf(ctx.pool, user.id, e.org_id);
-    if (!role) throw notFound('ledger entry not found');
-    if (!isOrgManager({ orgRole: role }))
-      throw forbidden('only the organization Owner and Admins can retire organization-wide entries');
-  }
+  await assertCanManageEntry(ctx.pool, user.id, e);
   return retireLedgerEntryAs(ctx, entryId, req, { actor: userActor(user.id), label: 'owner' });
 }

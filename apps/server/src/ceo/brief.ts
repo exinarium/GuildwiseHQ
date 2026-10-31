@@ -4,6 +4,7 @@ import {
   type CeoPolicy,
   type CeoShift,
   CLASS_LABEL,
+  ledgerToday,
   OWNER_RESERVED_LABEL,
   renderCeoData,
   renderFloorReportFallback,
@@ -16,6 +17,7 @@ import { buildFloorDigest } from './digest.ts';
 import { relevantMemories } from './memory.ts';
 import { ordersBriefSection } from './orders.ts';
 import { decisionReviewBrief } from './review.ts';
+import { reviewDueBriefSection } from './review-due.ts';
 import type { CeoState } from './state.ts';
 import { topicsBriefSection } from './topics.ts';
 
@@ -201,6 +203,8 @@ export async function buildCeoBrief(
   parts.push(`## What you may do\n${policyInWords(ceo.policy)}`);
   const orders = await ordersBriefSection(ctx.pool, ceo.orgId);
   if (orders) parts.push(orders);
+  const reviewDue = await reviewDueBriefSection(ctx.pool, ceo.orgId, ledgerToday(ctx.clock.now()));
+  if (reviewDue) parts.push(reviewDue);
   const tasks = await rows(
     ctx.pool,
     `SELECT id, title, request, status, due_at FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work') ORDER BY created_at LIMIT 10`,
@@ -291,6 +295,8 @@ export async function buildOwnerBrief(ctx: Ctx, ceo: CeoState, agent: Row): Prom
     parts.push(`## The owner's standing instructions\n${ceo.settings.standingInstructions.trim()}`);
   const orders = await ordersBriefSection(ctx.pool, ceo.orgId);
   if (orders) parts.push(orders);
+  const reviewDue = await reviewDueBriefSection(ctx.pool, ceo.orgId, ledgerToday(ctx.clock.now()));
+  if (reviewDue) parts.push(reviewDue);
   return parts.join('\n\n');
 }
 

@@ -18,3 +18,15 @@ export function formatDate(iso: string | null | undefined): string {
     ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 }
+
+/** A calendar date (YYYY-MM-DD) as text. Read in UTC so the day does not shift in a time zone behind UTC. */
+export function formatCalendarDate(d: string | null | undefined): string {
+  return d
+    ? new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      })
+    : '';
+}

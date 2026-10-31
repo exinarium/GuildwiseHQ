@@ -1,4 +1,9 @@
-import { decisionFilePath, projectVaultFolder, renderDecisionFile } from '@aom/shared';
+import {
+  decisionFilePath,
+  projectVaultFolder,
+  renderDecisionFile,
+  renderStandingOrderBlock,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
@@ -143,7 +148,14 @@ async function appendTarget(
  */
 export async function appendStandingOrder(
   ctx: Ctx,
-  input: { orgId: string; projectId?: string | null; title: string; body: string; at?: Date },
+  input: {
+    orgId: string;
+    projectId?: string | null;
+    title: string;
+    body: string;
+    reviewDate?: string | null;
+    at?: Date;
+  },
 ): Promise<DecisionWriteResult> {
   const target = await appendTarget(ctx, input);
   if ('queued' in target) return target;
@@ -152,7 +164,12 @@ export async function appendStandingOrder(
   const r = await enqueueVaultWrite(ctx, ctx.pool, vaultId, {
     path,
     mode: 'append',
-    content: `\n## ${input.title.trim()}\n\n${input.body.trim()}\n\n_Added ${day}._\n`,
+    content: renderStandingOrderBlock({
+      title: input.title,
+      body: input.body,
+      addedDay: day,
+      reviewDate: input.reviewDate ?? null,
+    }),
     commitMessage: `standing order ${input.title.replace(/\s+/g, ' ').slice(0, 60)}`,
   });
   if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
@@ -173,15 +190,19 @@ export async function rewriteStandingOrders(
   if ('queued' in first) return first;
   const live = await rows(
     ctx.pool,
-    `SELECT title, body, created_at FROM ledger_entries
+    `SELECT title, body, created_at, review_date::text AS review_date FROM ledger_entries
       WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL AND project_id IS NOT DISTINCT FROM $2
       ORDER BY created_at, id`,
     [input.orgId, input.projectId ?? null],
   );
   const content = live
-    .map(
-      (o) =>
-        `\n## ${String(o.title).trim()}\n\n${String(o.body).trim()}\n\n_Added ${(o.created_at as Date).toISOString().slice(0, 10)}._\n`,
+    .map((o) =>
+      renderStandingOrderBlock({
+        title: String(o.title),
+        body: String(o.body),
+        addedDay: (o.created_at as Date).toISOString().slice(0, 10),
+        reviewDate: o.review_date ?? null,
+      }),
     )
     .join('');
   const r = await enqueueVaultWrite(ctx, ctx.pool, first.vaultId, {
@@ -211,6 +232,7 @@ export function registerDecisionHook(ctx: Ctx): () => void {
           projectId: p.projectId ?? null,
           title: p.title,
           body: p.body,
+          reviewDate: p.reviewDate ?? null,
           at: e.createdAt,
         });
         return;
@@ -221,6 +243,39 @@ export function registerDecisionHook(ctx: Ctx): () => void {
         ]);
         if (row?.scope === 'standing_order')
           await rewriteStandingOrders(ctx, { orgId: row.org_id, projectId: row.project_id });
+        return;
+      }
+      if (e.event.type === 'LedgerEntryReviewDateSet') {
+        const p = e.event.payload;
+        const row = await one(
+          ctx.pool,
+          `SELECT org_id, project_id, scope, vault_path FROM ledger_entries WHERE id=$1`,
+          [p.entryId],
+        );
+        if (!row) return;
+        if (row.scope === 'standing_order') {
+          await rewriteStandingOrders(ctx, { orgId: row.org_id, projectId: row.project_id });
+          return;
+        }
+        // A decision file (from an answered question) gets one line per change; no file, nothing to write.
+        if (!row.vault_path || !row.project_id) return;
+        const target = await projectVault(ctx.pool, row.project_id);
+        if (!target?.vaultId) return;
+        const day = e.createdAt.toISOString().slice(0, 10);
+        const line = p.reviewDate
+          ? p.confirmed
+            ? `\n_Reviewed ${day}; next review ${p.reviewDate}._\n`
+            : `\n_Review by ${p.reviewDate} (set ${day})._\n`
+          : p.confirmed
+            ? `\n_Reviewed ${day}; no further review date._\n`
+            : `\n_Review date cleared ${day}._\n`;
+        const r = await enqueueVaultWrite(ctx, ctx.pool, target.vaultId, {
+          path: row.vault_path,
+          mode: 'append',
+          content: line,
+          commitMessage: 'decision review date',
+        });
+        if (r.queued && r.workstationId) await ctx.services.gateway.deliverPending(r.workstationId);
         return;
       }
       if (e.event.type !== 'QuestionAnswered') return;

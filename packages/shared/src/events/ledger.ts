@@ -5,6 +5,9 @@ import { defineEvent, Id } from './define.ts';
 export const LedgerScope = z.enum(['feature', 'decision', 'standing_order']);
 export type LedgerScope = z.infer<typeof LedgerScope>;
 
+/** A calendar date, YYYY-MM-DD (no time, no zone). */
+export const CalendarDate = z.iso.date();
+
 export const ledgerEvents = [
   defineEvent(
     'LedgerEntryAdded',
@@ -20,6 +23,8 @@ export const ledgerEvents = [
       sourceDeskItemId: Id.optional(),
       /** Set when the entry should also be written to the organization or project vault (M3 `vault.write`). */
       vaultPath: z.string().optional(),
+      /** Optional date the owner wants to look at this entry again (release 1.4.0). */
+      reviewDate: CalendarDate.optional(),
     }),
   ),
   /**
@@ -57,5 +62,13 @@ export const ledgerEvents = [
   defineEvent(
     'LedgerEntryFlagged',
     z.object({ entryId: Id, conflictsWith: z.array(Id).min(1).max(10), reason: z.string().max(500) }),
+  ),
+  /**
+   * The review date of an entry was set, changed or cleared (`reviewDate: null`). `confirmed`: the owner reviewed a due
+   * entry and kept it (with a new date or none). Wording, version and full-power authority are not touched.
+   */
+  defineEvent(
+    'LedgerEntryReviewDateSet',
+    z.object({ entryId: Id, reviewDate: CalendarDate.nullable(), confirmed: z.boolean().default(false) }),
   ),
 ] as const;

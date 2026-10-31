@@ -588,6 +588,9 @@ describe('standing orders: full power', () => {
     conflictsWith: [],
     canRetire: true,
     canEdit: true,
+    reviewDate: null,
+    reviewDue: false,
+    reviewedAt: null,
     fullPower: fp,
     ...over,
   });
