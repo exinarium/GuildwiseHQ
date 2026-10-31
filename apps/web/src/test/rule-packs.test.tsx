@@ -194,13 +194,12 @@ describe('Rules & decisions page', () => {
     expect(within(dated).getByTestId('ledger-review-date')).toBeTruthy();
   });
 
-  it('shows no badge, no pack text and no Rule packs button in a developer org', async () => {
+  it('shows the badges, the pack text and the Rule packs button in a software-default org too', async () => {
     mode = 'dev';
     wrap(<Ledger />);
     await screen.findAllByTestId('ledger-entry');
-    expect(screen.queryByTestId('enforced-by')).toBeNull();
-    expect(screen.queryByTestId('ledger-rule-pack')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Rule packs' })).toBeNull();
+    expect((await screen.findAllByTestId('enforced-by')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Rule packs' })).toBeTruthy();
   });
 });
 

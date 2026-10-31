@@ -1,10 +1,4 @@
-import {
-  DESK_SUBKIND,
-  type DeskItemDto,
-  isBusinessOrg,
-  isPhaseDeskSubkind,
-  WORKING_BRANCH_SUBKIND,
-} from '@aom/shared';
+import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
 import {
   Bell,
   CheckCheck,
@@ -123,7 +117,6 @@ function DeskSkeleton() {
 export function Desk() {
   const t = useOrgTerms();
   const me = useMe();
-  const business = isBusinessOrg(me.data?.activeOrg);
   const open = useDesk({ status: 'open' });
   const closed = useDesk({ status: 'closed' });
   const [chatOpen, setChatOpen] = useState(false);
@@ -306,7 +299,7 @@ export function Desk() {
                   {mobile ? (
                     <DeskCard item={item} onOpen={() => setOpenId(item.id)} />
                   ) : (
-                    <DeskItem item={item} business={business} />
+                    <DeskItem item={item} />
                   )}
                 </li>
               ))}
@@ -381,7 +374,7 @@ export function Desk() {
             (isCeoDecision(openItem) ? (
               <CeoDecisionItem item={openItem} bare />
             ) : (
-              <DeskItem item={openItem} bare business={business} />
+              <DeskItem item={openItem} bare />
             ))}
         </BottomSheet>
       )}
@@ -445,19 +438,8 @@ function usesAnswerForm(item: DeskItemDto): boolean {
 
 /**
  * One desk item: who asks, what they were doing, the question, options and the answer form.
- * `business`: the organization works in Business mode, so there is no Ask DevOps on the item.
  */
-export function DeskItem({
-  item,
-  now,
-  bare = false,
-  business = false,
-}: {
-  item: DeskItemDto;
-  now?: number;
-  bare?: boolean;
-  business?: boolean;
-}) {
+export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?: number; bare?: boolean }) {
   const t = useOrgTerms();
   const Icon = KIND_ICON[item.kind] ?? CircleHelp;
   return (
@@ -641,11 +623,11 @@ export function DeskItem({
       ) : (
         <ResolveButtons item={item} />
       )}
-      {!business && item.kind !== 'question' && item.kind !== 'rating' && (
+      {item.kind !== 'question' && item.kind !== 'rating' && (
         <div className="mt-3">
           <AskDevOpsButton
             variant="quiet"
-            label="Ask DevOps about this"
+            label={t.askDevOpsAbout}
             request={{
               origin: 'desk',
               deskItemId: item.id,

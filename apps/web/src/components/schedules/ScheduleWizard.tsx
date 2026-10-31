@@ -1,7 +1,7 @@
 import {
   type CardTemplate,
   type CreateScheduleResponse,
-  isBusinessOrg,
+  isBusinessView,
   SCHEDULE_EVENT_TRIGGERS,
   SCHEDULE_PRESETS,
   type ScheduleDto,
@@ -33,7 +33,6 @@ import { useWorkstations } from '../../api/queries/workstations.ts';
 import {
   ACTION_TILES,
   type ActionTile,
-  actionTileOf,
   actionTilesFor,
   buildScheduleRequest,
   CUSTOM_PRESET,
@@ -53,7 +52,18 @@ import { useOrgTerms } from '../../lib/terms.ts';
 import { CardFormFields } from '../CardFormFields.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
-import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
+import {
+  Button,
+  Callout,
+  Dialog,
+  Disclosure,
+  ErrorBox,
+  Select,
+  Stepper,
+  TextArea,
+  TextInput,
+  useToast,
+} from '../ui.tsx';
 import { MappingEditor } from './MappingEditor.tsx';
 import { OutputSection } from './OutputSection.tsx';
 
@@ -88,6 +98,7 @@ function TileGrid<T extends string>({
   value,
   onChange,
   tiles,
+  moreTiles = [],
   icons,
   disabled,
 }: {
@@ -95,47 +106,59 @@ function TileGrid<T extends string>({
   value: T;
   onChange: (v: T) => void;
   tiles: Array<{ id: T; label: string; description: string }>;
+  /** Tucked under a "More" fold (still selectable). */
+  moreTiles?: Array<{ id: T; label: string; description: string }>;
   icons: Record<string, LucideIcon>;
   disabled?: (id: T) => string | null;
 }) {
+  const renderTile = (t: { id: T; label: string; description: string }) => {
+    const Icon = icons[t.id] as LucideIcon;
+    const why = disabled?.(t.id) ?? null;
+    const selected = value === t.id;
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: a tile-styled radio
+      <button
+        key={t.id}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        disabled={!!why}
+        data-testid={`tile-${t.id}`}
+        onClick={() => onChange(t.id)}
+        className={cx(
+          'flex items-start gap-3 rounded-panel border p-3 text-left transition-colors',
+          selected ? 'border-brand bg-brand-soft' : 'border-line bg-surface hover:border-control',
+          why && 'cursor-not-allowed opacity-60 hover:border-line',
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cx(
+            'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control',
+            selected ? 'bg-brand text-brand-fg' : 'bg-sunken text-muted',
+          )}
+        >
+          <Icon className="size-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-base font-semibold text-fg">{t.label}</span>
+          <span className="block text-sm text-muted">{why ?? t.description}</span>
+        </span>
+      </button>
+    );
+  };
   return (
-    <div role="radiogroup" aria-label={label} className="grid gap-2 sm:grid-cols-2">
-      {tiles.map((t) => {
-        const Icon = icons[t.id] as LucideIcon;
-        const why = disabled?.(t.id) ?? null;
-        const selected = value === t.id;
-        return (
-          // biome-ignore lint/a11y/useSemanticElements: a tile-styled radio
-          <button
-            key={t.id}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={!!why}
-            data-testid={`tile-${t.id}`}
-            onClick={() => onChange(t.id)}
-            className={cx(
-              'flex items-start gap-3 rounded-panel border p-3 text-left transition-colors',
-              selected ? 'border-brand bg-brand-soft' : 'border-line bg-surface hover:border-control',
-              why && 'cursor-not-allowed opacity-60 hover:border-line',
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cx(
-                'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control',
-                selected ? 'bg-brand text-brand-fg' : 'bg-sunken text-muted',
-              )}
-            >
-              <Icon className="size-4" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-base font-semibold text-fg">{t.label}</span>
-              <span className="block text-sm text-muted">{why ?? t.description}</span>
-            </span>
-          </button>
-        );
-      })}
+    <div role="radiogroup" aria-label={label} className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-2">{tiles.map(renderTile)}</div>
+      {moreTiles.length > 0 && (
+        <Disclosure
+          summary="More actions"
+          defaultOpen={moreTiles.some((t) => t.id === value)}
+          data-testid="more-actions"
+        >
+          <div className="grid gap-2 sm:grid-cols-2">{moreTiles.map(renderTile)}</div>
+        </Disclosure>
+      )}
     </div>
   );
 }
@@ -179,7 +202,7 @@ function WizardDialog({
   initial: Partial<WizardState> | undefined;
 }) {
   const me = useMe().data;
-  const business = isBusinessOrg(me?.activeOrg);
+  const business = isBusinessView(me?.activeOrg);
   const projects = useProjects();
   const workstations = useWorkstations();
   const create = useCreateSchedule();
@@ -299,7 +322,7 @@ function WizardDialog({
     }
   };
 
-  const actionTiles = actionTilesFor(business, editing ? actionTileOf(editing.action) : undefined);
+  const actionTiles = actionTilesFor(business);
   const orgLevel = wizardIsOrgLevel(s);
   const blockedOrgLevel = orgLevel && !isManager;
   const tileDisabled = (id: ActionTile): string | null => {
@@ -425,7 +448,8 @@ function WizardDialog({
               label="Action"
               value={s.tile}
               onChange={(v) => set({ tile: v })}
-              tiles={actionTiles}
+              tiles={actionTiles.main}
+              moreTiles={actionTiles.more}
               icons={ACTION_ICON}
               disabled={tileDisabled}
             />

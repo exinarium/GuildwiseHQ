@@ -56,8 +56,14 @@ export const DEV_ONLY_HELP_SLUGS: readonly string[] = [
   'testing-and-finalization',
   'project-conversion',
 ];
+/** Every article is available in every view; the Business view lists the software ones last. */
 export const helpArticlesFor = (business: boolean): Article[] =>
-  business ? ARTICLES.filter((a) => !DEV_ONLY_HELP_SLUGS.includes(a.slug)) : ARTICLES;
+  business
+    ? [
+        ...ARTICLES.filter((a) => !DEV_ONLY_HELP_SLUGS.includes(a.slug)),
+        ...ARTICLES.filter((a) => DEV_ONLY_HELP_SLUGS.includes(a.slug)),
+      ]
+    : ARTICLES;
 
 /** Slugs an article had before it was renamed: old links, bookmarks and the guide keep working. */
 export const ARTICLE_ALIASES: Record<string, string> = {

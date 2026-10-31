@@ -3,16 +3,16 @@ import { useId } from 'react';
 import { cx } from '../ui/cx.ts';
 
 const DESCRIPTION: Record<OrgMode, string> = {
-  dev: 'Software delivery: repositories, branches, builders, reviewers, testers and DevOps.',
-  business: 'Everyday business work: no repositories, branches or code roles.',
+  dev: 'Everything, with the software words: repositories, branches, releases and test environments.',
+  business: 'Everyday business work in plain words. Software features are tucked away, never removed.',
 };
 
-/** Two large choice cards (Developer or Business): full width and touch-sized on phones. */
+/** Two large choice cards (Software view or Business view): full width and touch-sized on phones. */
 export function OrgModePicker({
   value,
   onChange,
   disabled = false,
-  label = 'How this organization works',
+  label = 'Default view',
 }: {
   value: OrgMode;
   onChange: (mode: OrgMode) => void;

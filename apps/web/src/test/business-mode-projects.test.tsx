@@ -93,19 +93,20 @@ describe('New project by organization mode', () => {
     );
   });
 
-  it('offers no repository workflow in business mode and defaults to the first one left', async () => {
+  it('leads with the workflows that need no repository, keeps code under More project types and defaults to the first lead one', async () => {
     page('business');
     const form = await openNewProject();
     const values = radios(form).map((r) => r.value);
-    expect(values).not.toContain('code');
-    expect(values).toEqual(expect.arrayContaining(['research', 'feed']));
-    expect(radios(form).find((r) => r.checked)?.value).toBe(values[0]);
+    expect(values).toEqual(expect.arrayContaining(['research', 'feed', 'code']));
+    const more = within(form).getByTestId('more-project-types');
+    expect(within(more).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toContain('code');
+    expect(radios(form).find((r) => r.checked)?.value).not.toBe('code');
     expect(within(form).getByTestId('workflow-hint')).not.toHaveTextContent('Add repositories');
     expect(screen.queryByText(/Code projects also own repositories/)).toBeNull();
   });
 });
 
-describe('workability warning by organization mode', () => {
+describe('workability warning (the same in every view)', () => {
   const blocked: Workability = {
     ok: false,
     level: 'blocked',
@@ -118,10 +119,10 @@ describe('workability warning by organization mode', () => {
     reason: 'Last attempt failed: the working branch does not exist.',
     settings: 'repositories',
   };
-  const show = (w: Workability, business?: boolean) =>
+  const show = (w: Workability) =>
     render(
       <MemoryRouter>
-        <WorkabilityWarning workability={w} projectId={PROJECT} {...(business ? { business } : {})} />
+        <WorkabilityWarning workability={w} projectId={PROJECT} />
       </MemoryRouter>,
     );
 
@@ -135,19 +136,8 @@ describe('workability warning by organization mode', () => {
     );
   });
 
-  it('keeps the reason but drops the developer hire and repository links in business mode', () => {
-    show(blocked, true);
-    expect(screen.getByTestId('workability-warning')).toHaveTextContent('nobody can take the Build stage');
-    expect(screen.queryByTestId('workability-hire')).toBeNull();
-    show(repoWarning, true);
-    expect(screen.getAllByTestId('workability-warning')[1]).toHaveTextContent(
-      'working branch does not exist',
-    );
-    expect(screen.queryByTestId('workability-settings')).toBeNull();
-  });
-
-  it('still links to hire a business role in business mode', () => {
-    show({ ok: false, level: 'blocked', reason: 'Hire an analyst.', hire: { roleKey: 'ba' } }, true);
+  it('links to hire a business role', () => {
+    show({ ok: false, level: 'blocked', reason: 'Hire an analyst.', hire: { roleKey: 'ba' } });
     expect(screen.getByTestId('workability-hire')).toHaveAttribute(
       'href',
       `/agents?hire=ba&projectId=${PROJECT}`,

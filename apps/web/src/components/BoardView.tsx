@@ -13,7 +13,7 @@ import { DesignHeldBadge } from './DesignHeldBadge.tsx';
 import { AgentAvatar } from './Face.tsx';
 import { MobileBoard } from './MobileBoard.tsx';
 import { cx } from './ui/cx.ts';
-import { Avatar, Badge } from './ui.tsx';
+import { Badge } from './ui.tsx';
 import { WorkabilityWarning } from './WorkabilityWarning.tsx';
 
 const WAITING_LABEL = {
@@ -71,13 +71,11 @@ export function CardTile({
   now,
   projectId,
   flash = false,
-  business = false,
 }: {
   card: BoardCard;
   now?: number;
   projectId?: string;
   flash?: boolean;
-  business?: boolean;
 }) {
   const railed = card.blocked
     ? 'before:bg-danger-fill'
@@ -200,7 +198,7 @@ export function CardTile({
       <BudgetNotice budget={card.budget} projectId={projectId} />
       <HygieneNotice findings={card.hygiene} projectId={projectId} />
       <BackoffBadge backoff={card.backoff} banner />
-      <WorkabilityWarning workability={card.workability} projectId={projectId} business={business} />
+      <WorkabilityWarning workability={card.workability} projectId={projectId} />
       {card.status === 'waiting' && card.waitingOn && (
         <Link
           to={`/cards/${card.waitingOn.id}`}
@@ -232,13 +230,11 @@ export function BoardView({
   board,
   now,
   filter = NO_FILTER,
-  business = false,
 }: {
   board: BoardResponse;
   now?: number;
   filter?: BoardFilter;
-  /** A Business mode organization: the cards offer no repository or developer-role links. */
-  business?: boolean;
+  /** Kept for callers; the cards offer the same links in every view. */
 }) {
   const wide = useMediaQuery('(min-width: 768px)', true);
   const [hideEmpty, setHideEmpty] = useState(readHide);
@@ -401,7 +397,6 @@ export function BoardView({
                       card={c}
                       projectId={board.projectId}
                       flash={flash.has(c.id)}
-                      business={business}
                       {...(now !== undefined ? { now } : {})}
                     />
                   ))}

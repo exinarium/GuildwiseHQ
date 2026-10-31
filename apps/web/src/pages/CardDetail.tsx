@@ -4,7 +4,7 @@ import {
   type CardDetailResponse,
   COMPLETION_ACTION_LABELS,
   fieldCatalogue,
-  isBusinessOrg,
+  isBusinessView,
   isMockField,
   type SubworkflowChildDto,
   type WorkflowDefinition,
@@ -221,7 +221,7 @@ export function CardDetailView({
   const rehome = useRehomeCard(card.id);
   const me = useMe();
   const expert = me.data?.user?.gitExpert === true;
-  const business = isBusinessOrg(me.data?.activeOrg);
+  const business = isBusinessView(me.data?.activeOrg);
   const [dialog, setDialog] = useState<'move' | 'moveto' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(
     null,
   );
@@ -318,7 +318,6 @@ export function CardDetailView({
               workability={data.workability}
               projectId={card.projectId}
               className="w-full max-w-xl rounded-control border"
-              business={business}
             />
           </div>
         }
@@ -380,10 +379,9 @@ export function CardDetailView({
                   }}
                 />
               )}
-              {!business && (
+              {
                 <AskDevOpsButton
                   variant="quiet"
-                  label="Ask DevOps"
                   request={{
                     origin: 'card',
                     projectId: card.projectId,
@@ -394,7 +392,7 @@ export function CardDetailView({
                       : {}),
                   }}
                 />
-              )}
+              }
               {permissions.canReleaseBackoff && (
                 <Button
                   data-testid="release-backoff"
@@ -700,7 +698,7 @@ export function CardDetailView({
                       )}
                     </>
                   )}
-                  {expert && !business && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
+                  {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
                   {permissions.canEditPriority ? (
                     <PriorityControl card={card} />
                   ) : (
@@ -867,10 +865,9 @@ export function CardDetailView({
                 Re-home
               </Button>
             )}
-            {!business && (
+            {
               <AskDevOpsButton
                 variant="quiet"
-                label="Ask DevOps"
                 request={{
                   origin: 'card',
                   projectId: card.projectId,
@@ -878,7 +875,7 @@ export function CardDetailView({
                   cardLabel: `${card.ref} ${card.title}`,
                 }}
               />
-            )}
+            }
             {canCancel && (
               <Button
                 variant="danger-ghost"

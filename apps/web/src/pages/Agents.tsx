@@ -1,24 +1,17 @@
 import {
   type AgentDraftDto,
   type AgentDto,
-  backendDef,
   type HrAgent,
   type McpServerCandidateDto,
-  modelChoicesFor,
-  NAME_THEMES,
   type ProjectDto,
   type RoleDefinition,
-  runtimeRoleProblem,
-  splitBackendModel,
 } from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import {
   useAgents,
   useFire,
-  useHire,
-  useNameSuggestions,
   usePauseAgent,
   useRerollFace,
   useRoles,
@@ -41,9 +34,7 @@ import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import {
-  type Access,
   AllowedProjectsDialog,
-  ProjectAccessEditor,
   WorksOn,
 } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
@@ -54,16 +45,13 @@ import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
-import { unionExtras } from '../components/ModelSelect.tsx';
 import { SandboxWarning } from '../components/SandboxWarning.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import { PlaybookGrants } from '../components/slash/PlaybookGrants.tsx';
 import {
-  Avatar,
   Badge,
   Button,
   ButtonLink,
-  Callout,
   Dialog,
   Disclosure,
   EmptyState,
@@ -75,9 +63,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
-import { getLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
 
@@ -137,9 +123,7 @@ export function Agents() {
     !!myId && (orgRole(a) === 'owner' || orgRole(a) === 'admin' || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
-  // The built-in DevOps engineer is plumbing in a Business mode organization: not listed.
-  const business = useBusinessMode();
-  const active = (board.data?.agents ?? []).filter((h) => !(business && h.agent.isDevops));
+  const active = board.data?.agents ?? [];
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
 
   return (

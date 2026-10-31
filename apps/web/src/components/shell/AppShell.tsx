@@ -1,4 +1,4 @@
-import { isBusinessOrg, ORG_ROLE_LABEL } from '@aom/shared';
+import { isBusinessView, ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 'lucide-react';
@@ -17,7 +17,6 @@ import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useOrgTerms } from '../../lib/terms.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
-import { getSocket, useSocketState } from '../../ws/socket.ts';
 import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
@@ -133,7 +132,7 @@ function Shell({ name, live }: { name: string; live: string }) {
       ((project.publishedNotes ?? 0) > 0 || (project.startedAs ?? project.workflowKey) === 'research'),
     canManage,
     features: org?.features ?? {},
-    business: isBusinessOrg(org),
+    business: isBusinessView(org),
     terms,
   });
   const intakeOn = canUseIntake(org);
@@ -277,19 +276,19 @@ function Shell({ name, live }: { name: string; live: string }) {
                       </kbd>
                     </button>
                     <PageHelpButton onClick={() => setPageHelp(true)} />
-                    {!isBusinessOrg(org) && (
+                    {
                       <button
                         type="button"
                         onClick={() => askDevOps()}
-                        aria-label="Ask DevOps"
+                        aria-label={terms.askDevOps}
                         data-testid="ask-devops-button"
                         data-tour="ask-devops"
                         className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
                       >
                         <Wrench aria-hidden="true" className="size-4" />
-                        <span className="hidden xl:inline">Ask DevOps</span>
+                        <span className="hidden xl:inline">{terms.askDevOps}</span>
                       </button>
-                    )}
+                    }
                     <AskCeoButton />
                     <button
                       type="button"
@@ -406,7 +405,8 @@ function Shell({ name, live }: { name: string; live: string }) {
               projects,
               projectKey: project?.key ?? null,
               onChat: () => setChat(true),
-              ...(isBusinessOrg(org) ? {} : { onAskDevOps: () => askDevOps() }),
+              onAskDevOps: () => askDevOps(),
+              askDevOpsLabel: terms.askDevOps,
               onHelp: () => setHelp(true),
               ...(contact.available ? { onContact: () => contact.open() } : {}),
               onPageHelp: () => setPageHelp(true),

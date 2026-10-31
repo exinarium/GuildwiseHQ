@@ -23,6 +23,7 @@ import {
   ConfirmDialog,
   ConnectionDot,
   Dialog,
+  Disclosure,
   EmptyState,
   ErrorBox,
   ListSkeleton,
@@ -41,7 +42,7 @@ import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx'
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { copyText } from '../lib/secure.ts';
@@ -212,7 +213,7 @@ export function WorkstationCard({
 }) {
   const unpair = useUnlinkWorkstation();
   const toast = useToast();
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const [confirm, setConfirm] = useState(false);
   const [own, setOwn] = useState(false);
   const expanded = expandedProp ?? own;
@@ -389,6 +390,14 @@ export function WorkstationCard({
             {!admin && !business && <GitConnectionsPanel w={w} />}
             {!admin && <JiraStatusLine w={w} />}
             {!admin && !business && <DevOpsPanel w={w} />}
+            {!admin && business && (
+              <Disclosure summary="Software connections and DevOps" data-testid="software-fold">
+                <div className="flex flex-col gap-4">
+                  <GitConnectionsPanel w={w} />
+                  <DevOpsPanel w={w} />
+                </div>
+              </Disclosure>
+            )}
             {!admin && <WorkstationRuns workstationId={w.id} />}
             <ErrorBox error={unpair.error} />
           </div>

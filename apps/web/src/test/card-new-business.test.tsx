@@ -41,12 +41,23 @@ function renderForm(business: boolean) {
 }
 
 describe('new card in a business organization', () => {
-  it('offers the six business types, by label, and no developer type', () => {
+  it('leads with the six business types, by label, and keeps the developer types under More types', () => {
     renderForm(true);
     const options = within(screen.getByLabelText('Card type'))
       .getAllByRole('option')
       .map((o) => o.textContent);
-    expect(options).toEqual(['Enquiry', 'Follow-up', 'Document request', 'Reminder', 'Report', 'Quote']);
+    expect(options).toEqual([
+      'Enquiry',
+      'Follow-up',
+      'Document request',
+      'Reminder',
+      'Report',
+      'Quote',
+      'feature',
+      'bug',
+    ]);
+    const more = screen.getByLabelText('Card type').querySelector('optgroup[label="More types"]');
+    expect(more?.textContent).toBe('featurebug');
     expect(screen.getByLabelText('Card type')).toHaveValue('enquiry');
   });
 
@@ -62,12 +73,14 @@ describe('new card in a business organization', () => {
 });
 
 describe('new card in a developer organization', () => {
-  it('offers the developer types only', () => {
+  it('leads with the developer types and keeps the business types under More types', () => {
     renderForm(false);
     const options = within(screen.getByLabelText('Card type'))
       .getAllByRole('option')
       .map((o) => o.textContent);
-    expect(options).toEqual(['feature', 'bug']);
+    expect(options.slice(0, 2)).toEqual(['feature', 'bug']);
+    expect(options).toContain('Quote');
+    expect(screen.getByLabelText('Card type').querySelector('optgroup[label="More types"]')).not.toBeNull();
     expect(screen.getByLabelText('Card type')).toHaveValue('feature');
   });
 });

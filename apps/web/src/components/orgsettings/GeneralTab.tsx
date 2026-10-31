@@ -2,26 +2,16 @@ import {
   DIAGNOSTICS_CONSENT_TEXT,
   DIAGNOSTICS_CONSENT_TITLE,
   DIAGNOSTICS_CONSENT_VERSION,
+  ORG_MODE_LABEL,
   type OrgDetailResponse,
   type OrgMode,
 } from '@aom/shared';
 import { ArrowRightLeft, LogOut, Share2, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
-import { ApiError } from '../../api/client.ts';
 import { useLeaveOrg, useOrgMembers, usePatchOrg, useTransferOwnership } from '../../api/queries/orgs.ts';
 import { PasswordInput } from '../auth/PasswordInput.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
-import {
-  Button,
-  Callout,
-  ConfirmDialog,
-  Dialog,
-  ErrorBox,
-  Panel,
-  Select,
-  TextInput,
-  useToast,
-} from '../ui.tsx';
+import { Button, ConfirmDialog, Dialog, ErrorBox, Panel, Select, TextInput, useToast } from '../ui.tsx';
 import { FollowUpPanel } from './FollowUpPanel.tsx';
 import { OrgModePicker } from './OrgModePicker.tsx';
 
@@ -305,28 +295,15 @@ export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: st
   );
 }
 
-interface ModeBlockers {
-  repositories?: { project: string; name: string }[];
-  agents?: { name: string; role: string }[];
-}
-
-/** Developer or Business mode. Owners and Admins change it; everyone else reads it. */
+/** The organization's DEFAULT view (Software or Business). Owners and Admins change it; everyone else reads it. */
 function ModePanel({ org, manager }: { org: OrgDetailResponse; manager: boolean }) {
   const patch = usePatchOrg();
   const toast = useToast();
   const [confirming, setConfirming] = useState<OrgMode | null>(null);
-  const [blocked, setBlocked] = useState<{ message: string; blockers: ModeBlockers } | null>(null);
   const change = (mode: OrgMode) => {
-    setBlocked(null);
     patch.mutate(
       { mode },
-      {
-        onSuccess: () => toast.success(mode === 'business' ? 'Business mode is on' : 'Developer mode is on'),
-        onError: (e) => {
-          if (e instanceof ApiError && e.code === 'business_mode_blocked')
-            setBlocked({ message: e.message, blockers: (e.details ?? {}) as ModeBlockers });
-        },
-      },
+      { onSuccess: () => toast.success(`The default view is now the ${ORG_MODE_LABEL[mode]}`) },
     );
   };
   const pick = (mode: OrgMode) => {
@@ -337,35 +314,17 @@ function ModePanel({ org, manager }: { org: OrgDetailResponse; manager: boolean 
   return (
     <Panel data-testid="org-mode-panel">
       <OrgModePicker value={org.mode} onChange={pick} disabled={!manager || patch.isPending} />
-      {!manager && <p className="mt-2 text-xs text-subtle">Only the Owner and Admins change this.</p>}
-      {blocked && (
-        <Callout tone="warning" title="Business mode is not possible yet" data-testid="org-mode-blocked">
-          <p>{blocked.message}</p>
-          <ul className="mt-1 list-disc pl-5">
-            {(blocked.blockers.repositories ?? []).map((r) => (
-              <li key={`${r.project}-${r.name}`}>
-                Repository {r.name} (project {r.project})
-              </li>
-            ))}
-            {(blocked.blockers.agents ?? []).map((a) => (
-              <li key={a.name}>
-                {a.name} ({a.role})
-              </li>
-            ))}
-          </ul>
-        </Callout>
-      )}
-      {!blocked &&
-        patch.error &&
-        !(patch.error instanceof ApiError && patch.error.code === 'business_mode_blocked') && (
-          <ErrorBox error={patch.error} />
-        )}
+      <p className="mt-2 text-xs text-subtle">
+        Each person can pick their own view from their user menu; this is what people see until they do.
+      </p>
+      {!manager && <p className="mt-2 text-xs text-subtle">Only the Owner and Admins change the default.</p>}
+      {patch.error && <ErrorBox error={patch.error} />}
       <ConfirmDialog
         open={confirming !== null}
         onOpenChange={(o) => !o && setConfirming(null)}
-        title="Switch to Business mode?"
-        description="Repository, branch, DevOps and code-role screens will be hidden. Nothing is deleted; switching back shows them again."
-        confirmLabel="Switch to Business mode"
+        title="Make the Business view the default?"
+        description="This only changes the default view, for people who have not picked their own. It changes nothing else: no data, projects, repositories, agents, workflows or deploys are touched, and test environments and releases stay available in the Software view. You can change it back at any time."
+        confirmLabel="Make Business view the default"
         tone="primary"
         onConfirm={() => {
           const m = confirming;

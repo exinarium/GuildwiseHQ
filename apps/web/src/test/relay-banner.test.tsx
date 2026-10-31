@@ -130,9 +130,8 @@ describe('the live notice', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId('relay-offline-banner')).toBeNull();
   });
-  it('makes no relay request in a developer organization', async () => {
+  it('asks for the relay status in a software-default organization too', async () => {
     wrap(<Shell mode="dev" />);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(calls.filter((c) => c.startsWith('/api/relay'))).toEqual([]);
+    await waitFor(() => expect(calls).toContain('/api/relay/integrations/status'));
   });
 });
