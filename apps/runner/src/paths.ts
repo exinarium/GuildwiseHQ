@@ -37,6 +37,8 @@ export interface RunnerPaths {
   graphCache: string;
   /** Cloned capability packs (`packs/<packId>/repo`) and their state (docs/ARCHITECTURE.md section 38.4). */
   packs: string;
+  /** Inbound relay: events handed to the `generic` handler (`relay/inbox/<integrationId>/`). Denied to agent sandboxes like the rest of the data dir. */
+  relay: string;
   agentDir(agentId: string): string;
   /**
    * Default worktree location. Project keys are only unique per organization, so the project id (first 8 hex
@@ -67,6 +69,7 @@ export function runnerPaths(root: string): RunnerPaths {
     toolchains: join(root, 'toolchains.json'),
     graphCache: join(root, 'graph-cache'),
     packs: join(root, 'packs'),
+    relay: join(root, 'relay'),
     agentDir: (agentId) => join(root, 'agents', agentId),
     worktreePath: (projectKey, cardRef, projectId) =>
       join(root, 'worktrees', projectId ? `${projectKey}-${projectId.slice(0, 8)}` : projectKey, cardRef),

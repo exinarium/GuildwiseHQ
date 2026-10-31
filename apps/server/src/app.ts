@@ -109,6 +109,7 @@ import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
+import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -134,6 +135,8 @@ import { createVideoDestinationClient, type VideoDestinationClient } from './vid
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
+import { RelayHub } from './webhook-relay/hub.ts';
+import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
@@ -152,6 +155,8 @@ export interface BuildOptions {
   clock?: Clock;
   /** Fastify logger: `false` silences it. Defaults to config.logLevel. */
   logger?: boolean;
+  /** Where the logger writes (tests capture it to check that no relayed content is logged). Default: stdout. */
+  logStream?: { write(line: string): void };
 }
 
 export interface AomApp extends FastifyInstance {
@@ -200,6 +205,7 @@ const DESK_LINK_TOKEN =
  */
 export function redactUrl(url: string): string {
   return url
+    .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
     .replace(DESK_LINK_TOKEN, '$1[redacted]')
     .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
     .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
@@ -279,6 +285,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
             serializers: { req: requestLogSerializer },
             // Second line of defence: sealed envelopes of the Integrations page must never reach a log line.
             redact: LOG_REDACT,
+            ...(opts.logStream ? { stream: opts.logStream } : {}),
           },
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
@@ -450,6 +457,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(scheduleRoutes(ctx));
   await app.register(inboundRoutes(ctx));
   await app.register(hookRoutes(ctx));
+  await app.register(relayIntegrationRoutes(ctx));
+  await app.register(relayPublicRoutes(ctx));
   await app.register(approvalRoutes(ctx));
   await app.register(interestRoutes(ctx));
   await app.register(digestRoutes(ctx));
@@ -511,6 +520,11 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, signals });
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
+  ctx.services.webhookRelay = new RelayHub(ctx);
+  // After a restart nothing is served until the runners announce again (right after their welcome).
+  await ctx.services.webhookRelay
+    .markAllOffline()
+    .catch((err) => app.log.warn({ err }, 'relay presence reset failed'));
   ctx.services.sessions = new SessionTurns(ctx);
   ctx.services.discovery = new DiscoveryService(ctx);
   ctx.services.board = new BoardService(ctx);

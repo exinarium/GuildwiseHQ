@@ -80,4 +80,12 @@ describe('access logs do not carry secrets (review low)', () => {
     expect(redactUrl('/login?next=/m/desk/tok_en-1')).toBe('/login?next=/m/desk/[redacted]');
     expect(requestLogSerializer({ method: 'GET', url: '/invite/tok123' }).url).toBe('/invite/[redacted]');
   });
+
+  it('redacts the relay token and the whole query of an inbound relay call', async () => {
+    const { redactUrl } = await import('../src/app.ts');
+    expect(redactUrl('/relay/in/rly_abc-DEF_123')).toBe('/relay/in/[redacted]');
+    expect(redactUrl('/relay/in/rly_abc?hub.mode=subscribe&hub.verify_token=SECRET&hub.challenge=1')).toBe(
+      '/relay/in/[redacted]',
+    );
+  });
 });

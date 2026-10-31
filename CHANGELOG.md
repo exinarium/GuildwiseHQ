@@ -4,7 +4,11 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Runner 0.1.63.
+Runner 0.1.64. Migration 2751. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.
+
+### Added
+
+- Inbound webhook relay for Business mode organizations. An Owner or Admin creates an integration (WhatsApp Cloud API, form webhook, incoming webhook, calendar push or generic) and gets a public URL `/relay/in/<token>` once. The server forwards each request, raw and with its headers, over the runner's connection to a workstation that serves the integration, and gives the provider the status the runner answers. The server keeps no content: only a hash of the token and metadata per request (time, integration, size, status, latency, outcome). With no runner connected the provider gets 503 with `Retry-After` and retries; nothing is queued. The runner has a `relay` command (`list`, `add`, `remove`) and a `generic` handler that stores events in its data folder.
 
 ### Fixed
 

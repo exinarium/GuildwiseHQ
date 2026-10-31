@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { ClaudeAccountKeySchema, ProviderAccountKeySchema } from '@aom/shared';
+import { ClaudeAccountKeySchema, ProviderAccountKeySchema, RelayKindSchema } from '@aom/shared';
 import { z } from 'zod';
 
 /** An additional Claude account of this workstation (docs/design/claude-accounts.md section 2.1). */
@@ -206,6 +206,18 @@ export const ScratchConfigSchema = z.object({
   sweepIntervalHours: z.number().positive().default(4),
 });
 
+/** An inbound relay integration this workstation serves (`guildwise-runner relay add`). */
+export const RelayIntegrationConfigSchema = z.object({
+  id: z.uuid(),
+  kind: RelayKindSchema,
+  label: z.string().max(80).optional(),
+});
+export const RelayConfigSchema = z.object({
+  integrations: z.array(RelayIntegrationConfigSchema).default([]),
+  /** Where the `generic` handler writes events; default `<data dir>/relay/inbox`. */
+  sinkDir: z.string().optional(),
+});
+
 export const RunnerConfigSchema = z.object({
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
@@ -251,6 +263,8 @@ export const RunnerConfigSchema = z.object({
     .refine((r) => r.from <= r.to, { message: 'runPortRange.from must not exceed to' })
     .default({ from: 20000, to: 29999 }),
   vaultSyncIntervalSec: z.number().int().positive().default(300),
+  /** Inbound webhook relay: the integrations this workstation serves (business mode). */
+  relay: RelayConfigSchema.default(RelayConfigSchema.parse({})),
   /** Disk retention of the agents' scratch folders (see `ScratchConfigSchema`). */
   scratch: ScratchConfigSchema.default(ScratchConfigSchema.parse({})),
 });

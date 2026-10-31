@@ -375,6 +375,24 @@ Files are cleaned up daily (replaced revisions after a day, rejected ones after 
 
 Organizations can receive mail at their own addresses. This needs an inbound mail provider, a receiving domain and a secret. Set `AOM_INBOUND_PROVIDER` (`postmark` or `sendgrid`), `AOM_INBOUND_DOMAIN` and `AOM_INBOUND_SECRET` together (generate the secret with `openssl rand -hex 24`). Point the provider's inbound webhook at `https://inbound:<secret>@<your domain>/api/inbound/mail/<provider>`. Both adapters are included; use the one your mail provider offers.
 
+### Inbound webhook relay (Business mode)
+
+A Business mode organization can give an outside provider (the WhatsApp Cloud API, a form, a calendar) a public address, `https://<your domain>/relay/in/<token>`. The server only passes each request, raw, to the runner of a workstation that serves the integration, and hands the provider the runner's answer. It stores no message content, headers, query string, token or provider secret; the provider's secrets and the signature checks stay on the workstation. When no runner is connected the provider gets `503` with `Retry-After` and retries on its own (Meta retries for up to 7 days); nothing is queued on the server. All settings are optional:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. |
+| `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST` | `60`, `20` | Requests per minute and burst, per integration. More is `429`. |
+| `AOM_RELAY_TIMEOUT_MS` | `5000` | How long the server waits for the runner's answer (`504` after that); 1000 to 15000. Keep it below the provider's own timeout. |
+| `AOM_RELAY_TIMEOUTS` | unset | Per kind overrides, for example `whatsapp_cloud=5000,calendar_push=8000`. |
+| `AOM_RELAY_RETRY_AFTER_SEC` | `60` | The `Retry-After` of the `503` when no runner serves the integration. |
+| `AOM_RELAY_MAX_IN_FLIGHT` | `200` | Requests waiting for a runner at once; more get `503`. |
+| `AOM_RELAY_RETENTION_DAYS` | `30` | How long the per-request metadata (time, integration, size, status, latency, outcome) is kept. |
+
+A reverse proxy in front of the server must not write an access log for `/relay/in/*`: the address and query string carry the integration's secret path and the provider's verify token. The bundled Caddy configuration writes no access log.
+
+On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` tells the runner to serve an integration (restart the runner to apply); `relay list` and `relay remove` manage the list.
+
 ## 11. Operations
 
 ```bash

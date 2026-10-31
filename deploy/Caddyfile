@@ -3,6 +3,8 @@
 # `localhost` (the default) or an IP address uses Caddy's internal CA instead: a locally trusted test certificate.
 {$AOM_DOMAIN:localhost} {
 	encode zstd gzip
+	# No `log` directive on purpose: the inbound relay (/relay/in/*) carries a secret path and the provider's verify token in
+	# the URL. If you add an access log, exclude /relay/in/* from it.
 	# HSTS only for a real domain: a locally trusted `localhost` certificate must not pin browsers to https for
 	# every other service on localhost. (The app sends HSTS itself when AOM_PUBLIC_ORIGIN is https.)
 	@public not host localhost 127.0.0.1 ::1

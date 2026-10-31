@@ -41,6 +41,7 @@ import { providerKeyEvents } from './provider-keys.ts';
 import { qaEvents } from './qa.ts';
 import { questionFlowEvents } from './question-flow.ts';
 import { releaseEvents } from './release.ts';
+import { relayEvents } from './relay.ts';
 import { repoEvents } from './repo.ts';
 import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
@@ -115,6 +116,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...playbookEvents,
   ...governanceEvents,
   ...agentUxEvents,
+  ...relayEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -158,6 +160,7 @@ export * from './project.ts';
 export * from './project-workflows.ts';
 export * from './qa.ts';
 export * from './question-flow.ts';
+export * from './relay.ts';
 export * from './repo.ts';
 export * from './reporter.ts';
 export * from './research.ts';

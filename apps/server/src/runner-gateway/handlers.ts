@@ -9,6 +9,7 @@ import {
   normalizeRemoteUrl,
   PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
+  RELAY_FEATURE,
   RUN_USAGE_FEATURE,
   type RunnerToServer,
   type RunnerToServerOf,
@@ -446,6 +447,14 @@ export class RunnerHandlers {
         return;
       case 'capabilities.project.report':
         await applyProjectCapabilitiesReport(this.ctx, ws, msg);
+        return;
+      case 'relay.serve': {
+        const r = await this.ctx.services.webhookRelay.serve(conn, msg.integrations);
+        this.send(conn, 'relay.serve.result', r);
+        return;
+      }
+      case 'relay.response':
+        this.ctx.services.webhookRelay.onResponse(conn, msg);
         return;
       case 'token.rotate':
         this.send(conn, 'token.rotated', { token: await issueRotatedToken(this.ctx, conn.workstationId) });
@@ -985,6 +994,7 @@ export class RunnerHandlers {
         DELEGATE_GRANTS_FEATURE,
         CAPABILITY_REGISTRY_FEATURE,
         PACKS_CAPABILITY,
+        RELAY_FEATURE,
       ],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.

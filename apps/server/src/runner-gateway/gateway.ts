@@ -85,6 +85,10 @@ export class RunnerGateway {
     let ping: NodeJS.Timeout | undefined;
 
     socket.on('message', (data) => {
+      // A relayed request waits for its answer with a deadline of seconds: `relay.response` must not sit behind slower
+      // frames of the in-order chain, so it is handled at once.
+      const live = conn as RunnerConn | null;
+      if (live && this.relayAnswer(live, data.toString())) return;
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
         if (!c) return;
@@ -96,7 +100,14 @@ export class RunnerGateway {
         }
         const parsed = RunnerToServerSchema.safeParse(json);
         if (!parsed.success) {
-          ctx.log.warn({ issues: parsed.error.issues.slice(0, 3) }, 'invalid runner message');
+          // A relay frame holds a provider's content: never log what an issue echoes, only where it is.
+          const t = (json as { type?: unknown } | null)?.type;
+          if (typeof t === 'string' && t.startsWith('relay.'))
+            ctx.log.warn(
+              { type: t, paths: parsed.error.issues.slice(0, 3).map((i) => i.path.join('.')) },
+              'invalid runner message',
+            );
+          else ctx.log.warn({ issues: parsed.error.issues.slice(0, 3) }, 'invalid runner message');
           return;
         }
         try {
@@ -112,6 +123,9 @@ export class RunnerGateway {
         clearInterval(ping);
         this.pings.delete(ping);
       }
+      // Requests waiting on this runner end as "offline" now, not after their timeout.
+      const gone = conn as RunnerConn | null;
+      if (gone) void ctx.services.webhookRelay.disconnected(gone);
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
         if (!c || this.closing) return;
@@ -141,6 +155,28 @@ export class RunnerGateway {
     }, PING_MS);
     ping.unref();
     this.pings.add(ping);
+  }
+
+  /** The fast path of `relay.response`. True when the frame was one (valid or not) and needs no further handling. */
+  private relayAnswer(conn: RunnerConn, text: string): boolean {
+    if (!text.slice(0, 160).includes('"relay.response"')) return false;
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return false;
+    }
+    if ((json as { type?: unknown } | null)?.type !== 'relay.response') return false;
+    const parsed = RunnerToServerSchema.safeParse(json);
+    if (!parsed.success) {
+      this.ctx.log.warn(
+        { type: 'relay.response', paths: parsed.error.issues.slice(0, 3).map((i) => i.path.join('.')) },
+        'invalid runner message',
+      );
+      return true;
+    }
+    if (parsed.data.type === 'relay.response') this.ctx.services.webhookRelay.onResponse(conn, parsed.data);
+    return true;
   }
 
   private async authenticate(
