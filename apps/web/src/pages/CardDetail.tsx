@@ -566,7 +566,7 @@ export function CardDetailView({
               {data.publication && <PublicationPanel publication={data.publication} />}
               <InvestigationPanel card={card} />
               {keys.length > 0 && (
-                <Panel title="What to build" data-testid="card-spec">
+                <Panel title={business ? 'Details' : 'What to build'} data-testid="card-spec">
                   <dl className="flex flex-col gap-4 text-base">
                     {keys.map((k) => (
                       <div key={k}>

@@ -1,6 +1,7 @@
-import { BUSINESS_CARD_TYPES, BUSINESS_WORKFLOW_KEY } from '@aom/shared';
+import { BUSINESS_CARD_TYPES, BUSINESS_PREPARE_ROLE, BUSINESS_WORKFLOW_KEY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { pipeline } from './helpers/pipeline.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 /**
@@ -92,5 +93,67 @@ describe('a business organization', () => {
       await q(`SELECT count(*)::int AS n FROM workflow_versions WHERE org_id=$1`, [orgId()])
     )[0] as any;
     expect(after.n).toBe(before.n);
+  });
+});
+
+describe('the whole life of a card in a business organization without a repository', () => {
+  const ROLES = [...new Set(Object.values(BUSINESS_PREPARE_ROLE))];
+  let runner: Awaited<ReturnType<World['connectRunner']>>;
+  let p: ReturnType<typeof pipeline>;
+  const names: Record<string, string> = {};
+  const tick = async (n = 4) => {
+    for (let i = 0; i < n; i++) await w.t.app.ctx.services.scheduler.run();
+  };
+  const row = async (id: string) => (await q('SELECT * FROM cards WHERE id=$1', [id]))[0] as any;
+  const act = (id: string, path: string, body: unknown = {}) =>
+    w.t.req('POST', `/api/cards/${id}/${path}`, { cookie: w.owner.cookie, body });
+  const prepare = (agent: string, note: string) =>
+    p.run(agent, { kind: 'outcome', outcomeId: 'done', note, data: {} });
+
+  beforeAll(async () => {
+    runner = await w.connectRunner();
+    p = pipeline(w, runner);
+    for (const role of ROLES) {
+      names[role] = `Biz ${role}`;
+      await w.hire(names[role]!, role, 'senior');
+    }
+  });
+  afterAll(() => runner?.close());
+
+  for (const t of BUSINESS_CARD_TYPES) {
+    it(`${t}: created, prepared by ${BUSINESS_PREPARE_ROLE[t]}, approved by the starter, done`, async () => {
+      const res = await ok<any>(
+        newCard({ title: `Life ${t}`, cardType: t, fields: SAMPLE[t], specify: true }),
+        201,
+      );
+      const id = res.card.id as string;
+      expect((await row(id)).repo_id).toBeNull();
+      const { start } = await prepare(names[BUSINESS_PREPARE_ROLE[t]]!, `Draft for ${t}`);
+      expect((start as any).worktree ?? null).toBeNull();
+      expect((start as any).brief.role.key).toBe(BUSINESS_PREPARE_ROLE[t]);
+      await tick();
+      expect(await row(id)).toMatchObject({ stage: 'approve', status: 'waiting' });
+      const done = await act(id, 'approval/approve', { note: 'Send it' });
+      expect(done.status).toBe(200);
+      expect(await row(id)).toMatchObject({ stage: 'done', status: 'done', repo_id: null });
+    });
+  }
+
+  it('a send back returns the card to prepare with the comment, then it can be approved', async () => {
+    const res = await ok<any>(
+      newCard({ title: 'Life send back', cardType: 'enquiry', fields: SAMPLE.enquiry, specify: true }),
+      201,
+    );
+    const id = res.card.id as string;
+    await prepare(names.front_desk!, 'First draft');
+    await tick();
+    expect((await row(id)).stage).toBe('approve');
+    expect((await act(id, 'approval/send-back', { comment: 'Too long' })).status).toBe(200);
+    expect(await row(id)).toMatchObject({ stage: 'prepare', status: 'queued' });
+    await prepare(names.front_desk!, 'Shorter draft');
+    await tick();
+    expect(await row(id)).toMatchObject({ stage: 'approve', status: 'waiting' });
+    expect((await act(id, 'approval/approve')).status).toBe(200);
+    expect(await row(id)).toMatchObject({ stage: 'done', status: 'done' });
   });
 });
