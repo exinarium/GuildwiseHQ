@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { countVaultNotes } from '../src/vaults/notes.ts';
+import { countVaultNotes, noteCountField } from '../src/vaults/notes.ts';
 
 let root: string;
 beforeEach(() => {
@@ -50,9 +50,19 @@ describe('countVaultNotes', () => {
     }
   });
 
-  it('stops at the cap and returns 0 for a missing folder', () => {
+  it('stops at the cap', () => {
     for (let i = 0; i < 5; i++) put(`n${i}.md`);
     expect(countVaultNotes(root, 3)).toBe(3);
-    expect(countVaultNotes(join(root, 'nope'))).toBe(0);
+  });
+
+  it('returns undefined for an unreadable folder, and the report then leaves the count out', () => {
+    const missing = join(root, 'nope');
+    expect(countVaultNotes(missing)).toBeUndefined();
+    expect(noteCountField(missing)).toEqual({});
+    put('a.md');
+    expect(noteCountField(root)).toEqual({ noteCount: 1 });
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root);
+    expect(noteCountField(root)).toEqual({ noteCount: 0 });
   });
 });

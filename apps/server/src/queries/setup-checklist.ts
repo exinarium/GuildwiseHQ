@@ -127,7 +127,7 @@ export async function getSetupChecklist(
       ctx.pool,
       `SELECT 1 WHERE EXISTS (SELECT 1 FROM projects p WHERE p.org_id = $1 AND p.status = 'active'
                                AND cardinality(p.mcp_servers) > 0)
-         OR EXISTS (SELECT 1 FROM schedules s WHERE s.org_id = $1
+         OR EXISTS (SELECT 1 FROM schedules s WHERE s.org_id = $1 AND s.enabled
                       AND ((s.action->>'kind' = 'integration' AND s.action->>'integration' IN ('webhook','email'))
                            OR jsonb_array_length(COALESCE(s.action->'deliverOutput'->'destinations', '[]'::jsonb)) > 0))`,
       [orgId],
