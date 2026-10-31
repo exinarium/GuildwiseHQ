@@ -53,8 +53,7 @@ export function CardFormFields({
   // Repository and completion action belong to code work; research and feed cards live in the vault.
   // Business card types never use a repository, a completion action or documentation.
   const business = isBusinessCardType(v.cardType);
-  const codeCard =
-    !template && !business && workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
+  const codeCard = !template && !business && workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
   const dateKeys = new Set(
     (workflow.customFields ?? []).filter((c) => c.format === 'date').map((c) => c.key),
   );

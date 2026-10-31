@@ -259,7 +259,9 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
       const body = typeof v === 'string' ? v.trim() : v === undefined || v === null ? '' : JSON.stringify(v);
       if (!body) continue;
       lines.push(
-        outside.has(key) ? `- ${label}:\n${renderUntrusted(`${what}${from}: ${label}`, body)}` : `- ${label}: ${body}`,
+        outside.has(key)
+          ? `- ${label}:\n${renderUntrusted(`${what}${from}: ${label}`, body)}`
+          : `- ${label}: ${body}`,
       );
     }
     if (lines.length > 0) parts.push(section('Details', lines.join('\n')));

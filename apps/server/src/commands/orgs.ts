@@ -23,6 +23,7 @@ import {
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
+import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
@@ -42,7 +43,6 @@ import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
-import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { blockersMessage, modeSwitchBlockers } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';

@@ -1,8 +1,4 @@
-import {
-  BUSINESS_CARD_TYPE_LABELS,
-  BUSINESS_CARD_TYPES,
-  type BusinessCardType,
-} from '../cards/types.ts';
+import { BUSINESS_CARD_TYPE_LABELS, BUSINESS_CARD_TYPES, type BusinessCardType } from '../cards/types.ts';
 import { type CustomField, type WorkflowDefinition, WorkflowDefinitionSchema } from './schema.ts';
 
 /** Workflow key of the shipped default workflow of each business card type. */

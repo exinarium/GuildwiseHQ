@@ -8,11 +8,11 @@ import {
   streamId,
   validateCustomWorkflow,
 } from '@aom/shared';
+import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 
 const BUILTIN_KEYS = BUILTIN_WORKFLOWS.map((w) => w.key);
 
@@ -34,7 +34,10 @@ export async function businessWorkflowEvents(ctx: Ctx, tx: Tx, orgId: string): P
       departments: [],
     }).filter((i) => i.severity === 'error');
     if (errors.length) {
-      ctx.log.warn({ key: def.key, codes: errors.map((e) => e.code) }, 'business workflow is invalid: skipped');
+      ctx.log.warn(
+        { key: def.key, codes: errors.map((e) => e.code) },
+        'business workflow is invalid: skipped',
+      );
       continue;
     }
     events.push({
@@ -106,7 +109,10 @@ export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): 
       [
         {
           streamId: streamId.project(p.id),
-          event: { type: 'ProjectWorkflowsSet', payload: { projectId: p.id, enabled: entries, by: p.created_by } },
+          event: {
+            type: 'ProjectWorkflowsSet',
+            payload: { projectId: p.id, enabled: entries, by: p.created_by },
+          },
           actor: SYSTEM_ACTOR,
           scope: projectScope(orgId, p.id),
         },
