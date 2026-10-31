@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
@@ -1807,6 +1808,43 @@ export const CommandSchema = msg('command', {
 export const RepoSyncStatusMsgSchema = msg('repo.sync_status', { status: RepoSyncStatusSchema });
 export const AckSchema = msg('ack', { ackOf: z.string().min(1) });
 
+// ---------------------------------------------------------------- inbound webhook relay
+// None of these is acked: a relayed request that is not answered in time is worthless, and the provider retries.
+
+/** Runner to server: the full set of relay integrations this runner serves (replaces the previous set). */
+export const RelayServeSchema = msg('relay.serve', {
+  integrations: z.array(z.object({ integrationId: z.uuid(), kind: RelayKindSchema })).max(100),
+});
+/** Server to runner: which of the announced integrations were accepted. */
+export const RelayServeResultSchema = msg('relay.serve.result', {
+  accepted: z.array(z.uuid()),
+  refused: z.array(
+    z.object({
+      integrationId: z.uuid(),
+      reason: z.enum(['unknown', 'revoked', 'kind_mismatch', 'not_allowed', 'not_business']),
+    }),
+  ),
+});
+/** Server to runner: one provider request, raw. `body` is the exact bytes as base64; `query` is never parsed. */
+export const RelayRequestSchema = msg('relay.request', {
+  requestId: z.uuid(),
+  integrationId: z.uuid(),
+  kind: RelayKindSchema,
+  method: z.enum(['GET', 'POST']),
+  query: z.string().max(8192),
+  headers: z.array(z.tuple([z.string().max(200), z.string().max(8192)])).max(200),
+  body: z.base64().max(Math.ceil(RELAY_BODY_HARD_MAX_BYTES / 3) * 4),
+  /** Milliseconds the runner has left before the server answers 504. */
+  deadlineMs: z.number().int().positive(),
+});
+/** Runner to server: what to answer the provider. */
+export const RelayResponseSchema = msg('relay.response', {
+  requestId: z.uuid(),
+  status: z.number().int().min(200).max(599),
+  headers: z.record(z.string().max(40), z.string().max(1000)).optional(),
+  body: z.base64().max(Math.ceil(RELAY_RESPONSE_MAX_BYTES / 3) * 4).optional(),
+});
+
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HelloSchema,
   OutboxFlushedSchema,
@@ -1851,6 +1889,8 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   VaultConflictSchema,
   DeployProgressSchema,
   TokenRotateSchema,
+  RelayServeSchema,
+  RelayResponseSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -1868,6 +1908,8 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   CommandSchema,
   TokenRotatedSchema,
   RunFollowSchema,
+  RelayServeResultSchema,
+  RelayRequestSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

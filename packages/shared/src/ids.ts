@@ -32,6 +32,7 @@ export const streamId = {
   repo: (id: string) => `repo-${id}`,
   release: (id: string) => `release-${id}`,
   schedule: (id: string) => `schedule-${id}`,
+  relayIntegration: (id: string) => `relay-${id}`,
   interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,
   baTask: (id: string) => `ba-task-${id}`,
