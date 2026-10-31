@@ -1094,8 +1094,9 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
               Acknowledge
             </Button>
           </>
-        ) : item.subkind === 'repo_create_failed' ? (
-          // Also for alerts the server stored without options: Retry queues the same request again.
+        ) : item.subkind === 'repo_create_failed' || item.subkind === 'release_failed' ? (
+          // Also for alerts the server stored without options: Retry queues the same request again (a stopped release
+          // continues from the step that failed).
           <Button
             variant="primary"
             onClick={() =>

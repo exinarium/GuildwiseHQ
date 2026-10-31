@@ -258,6 +258,7 @@ export const PROJECTION_TABLES = [
   'outbound_drafts',
   'repo_requests',
   'release_proposals',
+  'release_ships',
   'deploy_targets',
   'phases',
   'phase_followups',

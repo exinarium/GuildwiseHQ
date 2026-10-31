@@ -34,6 +34,7 @@ import { resolveGateItemIn } from '../governance/gates.ts';
 import { resolvePlatformApprovalIn } from '../platform-team/approvals.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { resolveShipReleaseIn } from '../release/approve.ts';
+import { dismissReleaseShipIn, retryReleaseShipIn, startReleaseShipIn } from '../release/ship.ts';
 import {
   afterPlaybookRunDecision,
   PLAYBOOK_WORKSTATION_SUBKIND,
@@ -333,7 +334,7 @@ async function closeItem(
     const retryClosedAlert =
       item.status !== 'open' &&
       item.kind === 'alert' &&
-      item.subkind === 'repo_create_failed' &&
+      (item.subkind === 'repo_create_failed' || item.subkind === 'release_failed') &&
       resolution === 'approved';
     if (item.status !== 'open' && !retryClosedAlert)
       throw conflict('already_resolved', `this item is already ${item.status}`);
@@ -411,9 +412,15 @@ async function closeItem(
     } else if (item.kind === 'approval' && item.subkind === 'ship_release') {
       // Ship release: only the project owner decides; approving records the version, components and notes (nothing is pushed).
       await resolveShipReleaseIn(ctx, tx, user, item, resolution, release);
+      // Approved: the release commit goes to a workstation in the same transaction (none available: the approval rolls back).
+      if (resolution === 'approved') workstationToDeliver = await startReleaseShipIn(ctx, tx, user, item);
     } else if (item.kind === 'approval' && item.subkind === 'repo_create') {
       // Approved repository setup: only the project owner decides; their own workstation creates it with their gh login.
       workstationToDeliver = (await resolveRepoCreateIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'alert' && item.subkind === 'release_failed') {
+      // A stopped release: Retry sends the stored command again; Dismiss abandons the release.
+      if (resolution === 'approved') workstationToDeliver = await retryReleaseShipIn(ctx, tx, user, item);
+      else if (resolution === 'dismissed') await dismissReleaseShipIn(ctx, tx, user, item);
     } else if (item.kind === 'alert' && item.subkind === 'repo_create_failed' && resolution === 'approved') {
       // Retry of a failed repository creation (works for alerts stored without options, too): owner only, and the
       // request must still be failed; the same request goes to the owner's workstation again.

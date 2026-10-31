@@ -114,7 +114,7 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
               kind: 'approval',
               subkind: 'ship_release',
               title: `Ship release: ${repo.name}`,
-              body: `${built.recommended.reason}. Approving records the version, component versions and notes. Nothing is pushed, tagged or published yet.`,
+              body: `${built.recommended.reason}. Approving prepares the release commit (changelog and component versions) and pushes it to the working branch. Nothing is tagged or published yet.`,
               options: [],
               blocking: false,
               pinned: false,

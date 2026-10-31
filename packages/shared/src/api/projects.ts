@@ -72,7 +72,24 @@ export const ProjectRepoDtoSchema = z.object({
     .optional(),
   /** A "Ship release" proposal waiting on the desk for this repository (state and the item to open); null: none. */
   releaseProposal: z
-    .object({ state: z.enum(['proposed', 'approved']), deskItemId: z.uuid(), version: z.string().nullable() })
+    .object({
+      state: z.enum(['proposed', 'approved']),
+      deskItemId: z.uuid(),
+      version: z.string().nullable(),
+      /** The release commit of an approved proposal: preparing, pushed, or stopped at a step. */
+      ship: z
+        .object({
+          version: z.string(),
+          status: z.enum(['committing', 'committed', 'failed']),
+          step: z.string().nullable(),
+          commit: z.string().nullable(),
+          error: z.string().nullable(),
+          branch: z.string().nullable(),
+          updatedAt: IsoTime,
+        })
+        .nullable()
+        .optional(),
+    })
     .nullable()
     .optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */

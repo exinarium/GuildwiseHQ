@@ -2,8 +2,17 @@ import type { EventOf } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 
-const ev = <T extends 'ReleaseProposed' | 'ReleaseApproved' | 'ReleaseProposalClosed'>(e: StoredEvent) =>
-  e.event as EventOf<T>;
+const ev = <
+  T extends
+    | 'ReleaseProposed'
+    | 'ReleaseApproved'
+    | 'ReleaseProposalClosed'
+    | 'ReleaseShipStarted'
+    | 'ReleaseCommitted'
+    | 'ReleaseFailed',
+>(
+  e: StoredEvent,
+) => e.event as EventOf<T>;
 
 export const releaseProjectors: Record<string, Projector> = {
   ReleaseProposed: async (tx, e) => {
@@ -57,5 +66,48 @@ export const releaseProjectors: Record<string, Projector> = {
       p.reason,
       e.createdAt,
     ]);
+  },
+  ReleaseShipStarted: async (tx, e) => {
+    const p = ev<'ReleaseShipStarted'>(e).payload;
+    // A version of an abandoned release proposed again: the earlier row (another proposal) goes.
+    await exec(tx, 'DELETE FROM release_ships WHERE repo_id=$1 AND version=$2 AND id<>$3', [
+      p.repoId,
+      p.version,
+      p.shipId,
+    ]);
+    await exec(
+      tx,
+      `INSERT INTO release_ships (id, org_id, project_id, repo_id, version, tag, release_date, payload, status, workstation_id, created_at, updated_at)
+       SELECT $1, pr.org_id, pr.id, $3, $4, $5, $6::date, $7::jsonb, 'committing', $8, $9, $9
+         FROM projects pr WHERE pr.id = (SELECT project_id FROM release_proposals WHERE id = $2)
+       ON CONFLICT (id) DO UPDATE SET status='committing', workstation_id=$8, step=NULL, error=NULL, payload=$7::jsonb, updated_at=$9`,
+      [
+        p.shipId,
+        p.proposalId,
+        p.repoId,
+        p.version,
+        p.tag,
+        p.date,
+        JSON.stringify(p.payload),
+        p.workstationId,
+        e.createdAt,
+      ],
+    );
+  },
+  ReleaseCommitted: async (tx, e) => {
+    const p = ev<'ReleaseCommitted'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET status='committed', commit_sha=$2, step='push', error=NULL, updated_at=$3 WHERE id=$1`,
+      [p.shipId, p.commit, e.createdAt],
+    );
+  },
+  ReleaseFailed: async (tx, e) => {
+    const p = ev<'ReleaseFailed'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET status='failed', step=$2, error=$3, alert_desk_item_id=$4, updated_at=$5 WHERE id=$1`,
+      [p.shipId, p.step, p.error, p.alertDeskItemId ?? null, e.createdAt],
+    );
   },
 };

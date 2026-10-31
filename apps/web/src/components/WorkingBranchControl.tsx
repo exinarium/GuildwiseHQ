@@ -271,6 +271,18 @@ function ReleasePr({ projectId, repo }: { projectId: string; repo: ProjectRepoDt
   );
 }
 
+/** The one-line state of a live release: waiting for approval, preparing the commit, pushed, or stopped. */
+export function releaseStatusLine(live: NonNullable<ProjectRepoDto['releaseProposal']>): string {
+  if (live.state !== 'approved') return 'Ship release waiting on the desk';
+  const v = live.ship?.version ?? live.version ?? '';
+  const ship = live.ship;
+  if (!ship || ship.status === 'committing') return `Release ${v}: preparing the release commit…`;
+  if (ship.status === 'committed')
+    return `Release commit ${(ship.commit ?? '').slice(0, 7)} pushed${ship.branch ? ` to ${ship.branch}` : ''}, in the release PR`;
+  const why = (ship.error ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
+  return `Release ${v} stopped at ${ship.step ?? 'a step'}${why ? `: ${why}` : ''} (Retry on the desk)`;
+}
+
 /** "Prepare release": a workstation reads the repository and the "Ship release" item appears on the desk. */
 function PrepareRelease({ projectId, repo }: { projectId: string; repo: ProjectRepoDto }) {
   const prepare = usePrepareRelease(projectId);
@@ -278,10 +290,8 @@ function PrepareRelease({ projectId, repo }: { projectId: string; repo: ProjectR
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm" data-testid={`prepare-release-${repo.name}`}>
       {live ? (
-        <Link to="/desk" className="text-xs underline">
-          {live.state === 'approved'
-            ? `Release ${live.version ?? ''} approved`
-            : 'Ship release waiting on the desk'}
+        <Link to="/desk" className="text-xs underline" data-testid="release-status">
+          {releaseStatusLine(live)}
         </Link>
       ) : (
         <Button

@@ -103,7 +103,7 @@ describe('Ship release desk item', () => {
     expect(screen.getByTestId('ship-components')).toHaveTextContent(
       'runner 0.1.62 -> 0.1.63 (17 files changed under apps/runner/)',
     );
-    expect(screen.getByText(/Nothing is pushed, tagged or published yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing is tagged or published yet/)).toBeInTheDocument();
   });
 
   it('refuses a version that is equal, lower or not semver inline and disables Approve', async () => {

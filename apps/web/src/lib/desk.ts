@@ -67,6 +67,8 @@ const SUBKIND_LABEL: Record<string, string> = {
   large_merge: 'Merge approval',
   repo_create: 'Create repository',
   repo_create_failed: 'Repository not created',
+  release_failed: 'Release stopped',
+  release_committed: 'Release prepared',
   budget_warning: 'Budget warning',
   budget_paused: 'Budget paused',
   provider_cap_warning: 'Provider cap warning',

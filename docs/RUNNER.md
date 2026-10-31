@@ -262,7 +262,7 @@ After a rollback the failed version is not tried again on this machine (`update-
 
 **Check for updates now.** The Workstations page has a **Check for updates** button next to the runner version. It sends the `runner.update.check` command (capability `update-check:1`, runner 0.1.34+) through any pairing; the `start` process calls `Updater.checkNow()`, which runs the same check as the timer and so the same pipeline (download, verify, wait for idle, switch). It only skips the timer: it never restarts a busy runner, the pause switch and `AOM_RUNNER_AUTO_UPDATE=0` still apply, and a check or download already in progress is joined, not repeated. The command's result is `{ outcome, version, detail }` with `outcome` one of `up_to_date`, `update_found` (downloaded or downloading, installs when idle), `paused`, `disabled` (switched off or not an installer-managed install) or `failed`; the runner logs one INFO line (`update check on request: ...`). The server accepts one request a minute per workstation, only while the runner is connected, and stores the answer on the workstation (`runner_update_check`).
 
-**Releasing.** The version is `RUNNER_VERSION` in `apps/runner/src/version.ts`, and nothing is "newer" until it is raised: bump it, run `pnpm package:runner`, publish `release/aom-runner-<version>.tgz` to the server's release directory (`AOM_RUNNER_RELEASE_DIR`). Runners pick it up within a day. Pause updates first if you are unsure about a release.
+**Releasing.** The version is `RUNNER_VERSION` in `apps/runner/src/version.ts`, and nothing is "newer" until it is raised: the Ship release item raises it in the release commit when files under `apps/runner/` changed since the last tag (`release.ship`); otherwise bump it by hand. Then run `pnpm package:runner`, publish `release/aom-runner-<version>.tgz` to the server's release directory (`AOM_RUNNER_RELEASE_DIR`). Runners pick it up within a day. Pause updates first if you are unsure about a release.
 
 ## CEO full power
 
@@ -1439,6 +1439,29 @@ each component rule's version file at the head and at the tag. It counts the fil
 sends the raw file text; the server reads the version. It never pushes, tags, creates a branch or checks anything out, and
 a missing clone, a missing branch or an unsafe ref come back as an answer (`ok: false` with the reason), not a failure.
 Runners announce the capability `release-facts:1`; the server asks only a runner that has it.
+
+### `release.ship`
+
+The release commit of an approved "Ship release". It runs under the per-clone lock, in a throwaway integration
+worktree cut from `origin/<working branch>` (never in the user's checkout, never on the main branch):
+
+1. **prepare**: fetch the working branch and the tags; refuse when tag `v<version>` already exists.
+2. If `origin/<working branch>` already has `## [<version>]` in CHANGELOG.md, the answer is `alreadyDone` with that commit
+   and nothing is made. A commit made by an earlier attempt but not pushed (kept under `refs/guildwise/release/<version>`)
+   is pushed as it is when its parent is still the branch tip; if the branch moved, it is made again and a notice says so.
+3. **components**: the shared `componentBumps` reads each rule's version file at the tag and at the head; only a rule whose
+   files changed since the tag and whose version is not already raised is written (`replaceComponentVersion` with the
+   approved version). A missing file or a pattern that does not match stops the step.
+4. **changelog**: `## [Unreleased]` moves under `## [<version>] - <date>`, an empty `## [Unreleased]` stays above it, and the
+   intro line gets one sentence per rule (`Runner 0.1.64.` or `Runner 0.1.63 (unchanged).`). Without a CHANGELOG.md the
+   approved notes become a new one.
+5. **commit**: `chore(release): <version>` as the project's commit identity (the same resolution as a merge). `--signoff` is added
+   when the repository asks for a DCO (`.github/dco.yml`, a workflow or `.gitlab-ci.yml` that checks `Signed-off-by`, or a
+   CONTRIBUTING.md naming the Developer Certificate of Origin).
+6. **push**: the commit goes to `refs/heads/<working branch>` as a fast-forward. A push is never forced, and a protected
+   branch is reported with the host's own message.
+
+A failure comes back as an answer (`ok: false`, the `step` and git's message), never a crash. Runners announce `release-ship:1`.
 
 ### Git worktrees
 

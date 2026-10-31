@@ -48,4 +48,49 @@ export const releaseEvents = [
       tag: z.string().optional(),
     }),
   ),
+  /** The release commit was queued on a workstation (on approval, or on Retry). */
+  defineEvent(
+    'ReleaseShipStarted',
+    z.object({
+      shipId: Id,
+      proposalId: Id,
+      repoId: Id,
+      version: z.string(),
+      tag: z.string(),
+      date: z.string(),
+      workstationId: Id,
+      retry: z.boolean(),
+      /** The command payload without the commit identity. */
+      payload: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  /** The release commit is on the working branch (made now, resumed, or already there). */
+  defineEvent(
+    'ReleaseCommitted',
+    z.object({
+      shipId: Id,
+      commit: z.string(),
+      alreadyDone: z.boolean(),
+      resumed: z.boolean(),
+      signedOff: z.boolean(),
+      components: z.array(
+        z.object({
+          name: z.string(),
+          state: z.string(),
+          from: z.string().nullable(),
+          to: z.string().nullable(),
+        }),
+      ),
+    }),
+  ),
+  /** A step of the release stopped; `step` is free text so later steps (tag, publish) can use the event too. */
+  defineEvent(
+    'ReleaseFailed',
+    z.object({
+      shipId: Id,
+      step: z.string(),
+      error: z.string(),
+      alertDeskItemId: Id.optional(),
+    }),
+  ),
 ] as const;

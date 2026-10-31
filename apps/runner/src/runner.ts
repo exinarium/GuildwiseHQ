@@ -41,6 +41,7 @@ import {
   READONLY_DESIGN_CAPABILITY,
   RELAY_FEATURE,
   RELEASE_FACTS_CAPABILITY,
+  RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -112,6 +113,7 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
+import { shipReleaseCommit } from './git/release-ship.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -1373,6 +1375,7 @@ export class Runner {
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
+        RELEASE_SHIP_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
@@ -2047,6 +2050,25 @@ export class Runner {
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
+      } else if (command === 'release.ship') {
+        // "No clone here" and every git refusal are answers (ok:true, result.ok:false): the server puts them on the desk.
+        const p = CommandPayloadSchemas['release.ship'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        const result = repo
+          ? await shipReleaseCommit({
+              payload: p,
+              repoPath: repo.localPath,
+              integrationDir: this.paths.integration,
+              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+            })
+          : { ok: false, step: 'prepare', error: `no local clone for ${p.remoteUrlNormalized}`, components: [], notices: [] };
+        done(true, result);
+        if (result.ok)
+          void this.sync.sync({
+            repoId: p.repoId,
+            remoteUrlNormalized: p.remoteUrlNormalized,
+            workingBranch: p.workingBranch,
+          });
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
         done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));
