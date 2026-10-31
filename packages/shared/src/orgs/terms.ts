@@ -77,6 +77,7 @@ const REWRITES: Array<[string, (t: OrgTerms, upper: boolean) => string]> = [
   ['the ledger', (t) => t.theLedger],
   ['standing orders', (t, u) => (u ? t.StandingOrders : t.standingOrders)],
   ['standing order', (t, u) => (u ? t.StandingOrder : t.standingOrder)],
+  ['ledgers', (t) => t.ledger],
   ['ledger', (t) => t.ledger],
   ['vaults', (t, u) => (u ? t.Vaults : t.vaults)],
   ['vault', (t, u) => (u ? t.Vault : t.vault)],

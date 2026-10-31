@@ -95,6 +95,11 @@ describe('rewordForOrg', () => {
     ];
     for (const k of keep) expect(rewordForOrg(k, 'business'), k).toBe(k);
   });
+  it('handles plurals and possessives', () => {
+    expect(rewordForOrg("the vault's files", 'business')).toBe("the knowledge folder's files");
+    expect(rewordForOrg('Ledgers differ', 'business')).toBe('Rules & decisions differ');
+    expect(rewordForOrg('ledgers', 'dev')).toBe('ledgers');
+  });
   it('rewrites a sentence around a guarded token only where it is prose', () => {
     expect(rewordForOrg('Use vault:<path> to write into the vault.', 'business')).toBe(
       'Use vault:<path> to write into the knowledge folder.',

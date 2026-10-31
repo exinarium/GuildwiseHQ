@@ -12,6 +12,7 @@ import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
 import { PAGE_HELP } from '../help/page-help-content.ts';
+import { DeskItem } from '../pages/Desk.tsx';
 import { DocumentsList } from '../pages/Documents.tsx';
 import { Help } from '../pages/Help.tsx';
 import { Ledger } from '../pages/Ledger.tsx';
@@ -153,6 +154,37 @@ const expectClean = () => {
   }
 };
 
+const deskItem = (over: Record<string, unknown> = {}) =>
+  ({
+    id: ID(90),
+    kind: 'question',
+    subkind: null,
+    status: 'open',
+    routedTo: 'manager',
+    title: 'Which branch?',
+    body: 'Pick one.',
+    doing: null,
+    options: [],
+    recommendation: null,
+    blocking: false,
+    pinned: false,
+    urgent: false,
+    affectedCardIds: [],
+    affectedCount: 0,
+    askedBy: { kind: 'system' },
+    card: null,
+    projectId: null,
+    dedupEntries: [],
+    answer: null,
+    answerOption: null,
+    answeredAt: null,
+    answeredByName: null,
+    decisionPolicy: 'owner_only',
+    canAnswer: true,
+    createdAt: '2026-10-03T10:00:00.000Z',
+    ...over,
+  }) as never;
+
 describe('a business org: the main pages never say Vault, Ledger or standing order', () => {
   it('the sidebar, the breadcrumbs and the command entries', () => {
     const t = ORG_TERMS.business;
@@ -175,6 +207,18 @@ describe('a business org: the main pages never say Vault, Ledger or standing ord
     const dlg = await screen.findByRole('dialog');
     expect(within(dlg).getAllByText('Add to Rules & decisions').length).toBeGreaterThan(0);
     expect(within(dlg).getByRole('option', { name: /^Rule \(every agent loads it\)/ })).toBeInTheDocument();
+    expectClean();
+  });
+
+  it('Desk: a vault conflict item and the answer form with its Add choices', async () => {
+    wrap(
+      <>
+        <DeskItem bare item={deskItem({ id: ID(91), kind: 'escalation', subkind: 'vault_conflict', title: 'Knowledge folder sync conflict: Organization knowledge', body: 'Local and remote edits to the knowledge folder cannot be merged automatically.' })} />
+        <DeskItem bare item={deskItem()} />
+      </>,
+    );
+    await screen.findByText('Add to Rules & decisions as');
+    expect(screen.getAllByRole('option', { name: /^Rule \(/ })[0]).toBeInTheDocument();
     expectClean();
   });
 
@@ -290,6 +334,11 @@ describe('a dev org: the old words are unchanged', () => {
     expect(
       within(dlg).getByRole('option', { name: 'Standing order (every agent loads it)' }),
     ).toBeInTheDocument();
+  });
+  it('Desk: the answer form keeps the ledger words', async () => {
+    wrap(<DeskItem bare item={deskItem()} />);
+    expect(await screen.findByText('Add to ledger as')).toBeInTheDocument();
+    expect(screen.getAllByRole('option', { name: /^Standing order \(/ })[0]).toBeInTheDocument();
   });
   it('Vaults page', async () => {
     wrap(<Vaults />);

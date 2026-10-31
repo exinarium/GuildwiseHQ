@@ -631,7 +631,7 @@ export async function applyVaultConflict(
     kind: 'escalation',
     subkind: 'vault_conflict',
     title: `${orgTerms(orgMode?.mode).Vault} sync conflict: ${defaultVaultName(v.name, orgMode?.mode)}`,
-    body: `Local and remote edits to ${msg.files.length ? msg.files.join(', ') : 'the vault'} cannot be merged automatically. Syncing of this vault is paused on this workstation until you resolve it.`,
+    body: `Local and remote edits to ${msg.files.length ? msg.files.join(', ') : `the ${orgTerms(orgMode?.mode).vault}`} cannot be merged automatically. Syncing of this ${orgTerms(orgMode?.mode).vault} is paused on this workstation until you resolve it.`,
     pinned: true,
     blocking: false,
     orgId: v.org_id,
