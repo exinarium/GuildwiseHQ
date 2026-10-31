@@ -138,9 +138,10 @@ export class RelayHub {
     for (const id of ids) {
       if (this.liveServers(id).length > 0) continue;
       if (this.serving.get(id)?.size === 0) this.serving.delete(id);
+      // `last_served_at <= now`: a runner that announced it again meanwhile keeps its integration online.
       await exec(
         this.ctx.pool,
-        'UPDATE relay_presence SET offline_since=$2 WHERE integration_id=$1 AND offline_since IS NULL',
+        'UPDATE relay_presence SET offline_since=$2 WHERE integration_id=$1 AND offline_since IS NULL AND last_served_at <= $2',
         [id, now],
       ).catch((err) => this.ctx.log.error({ err: err?.name }, 'relay presence update failed'));
     }
