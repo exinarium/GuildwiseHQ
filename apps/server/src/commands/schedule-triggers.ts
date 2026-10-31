@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  BRIEF_DONE_STAGE_ID,
   eventTypesOf,
   type IntegrationRunPayload,
   IntegrationRunResultSchema,
+  isBriefWorkflowKey,
   isOrgOperational,
   type PolledIssue,
   SCHEDULE_EVENT_TRIGGERS,
@@ -327,6 +329,15 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
     if (!ec) continue;
     // A card an automation made is done: send its output where the automation says (once per card and destination).
     if (name === 'card_done' && ec.card?.scheduleId && ec.sourceId) n += await sendCardOutput(ctx, ec);
+    // A Brief card ends through StageCompleted into its terminal stage, which never fires `card_done`: deliver it here.
+    if (
+      name === 'card_stage_reached' &&
+      ec.card?.scheduleId &&
+      ec.sourceId &&
+      isBriefWorkflowKey(ec.card.workflowKey) &&
+      ec.card.toStage === BRIEF_DONE_STAGE_ID
+    )
+      n += await sendCardOutput(ctx, ec);
     const list = await rows(
       ctx.pool,
       `SELECT s.* FROM schedules s

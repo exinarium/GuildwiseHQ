@@ -289,7 +289,7 @@ export async function checkTemplate(tx: Queryable, project: Row, kind: string, t
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
 }
 
-interface Normalized {
+export interface Normalized {
   name: string;
   enabled: boolean;
   trigger: ScheduleTrigger;
@@ -688,7 +688,18 @@ export async function createSchedule(
   req: CreateScheduleRequest,
 ): Promise<{ id: string; webhookSecret?: string }> {
   const n = normalizeCreate(req);
-  return withAppendTx(ctx.pool, async (tx) => {
+  return withAppendTx(ctx.pool, (tx) => createScheduleIn(ctx, tx, user, org, n));
+}
+
+/** `createSchedule` inside the caller's transaction (a playbook install registers its workflow in the same one). */
+export async function createScheduleIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  org: OrgCtx | null,
+  n: Normalized,
+): Promise<{ id: string; webhookSecret?: string }> {
+  {
     const { orgId, project } = await authorize(ctx, tx, user, org, n);
     const isManager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) });
     await validate(ctx, tx, user, orgId, project, n, isManager);
@@ -726,7 +737,7 @@ export async function createSchedule(
       { tx },
     );
     return { id, ...(webhookSecret ? { webhookSecret } : {}) };
-  });
+  }
 }
 
 /**
@@ -760,8 +771,20 @@ export async function patchSchedule(
   id: string,
   patch: PatchScheduleRequest,
 ): Promise<{ webhookSecret?: string }> {
+  return withAppendTx(ctx.pool, (tx) => patchScheduleIn(ctx, tx, user, org, id, patch));
+}
+
+/** `patchSchedule` inside the caller's transaction. */
+export async function patchScheduleIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  org: OrgCtx | null,
+  id: string,
+  patch: PatchScheduleRequest,
+): Promise<{ webhookSecret?: string }> {
   let newOutputSecret: string | undefined;
-  await withAppendTx(ctx.pool, async (tx) => {
+  {
     const { s, project, orgId } = await lockManaged(tx, user, org, id);
     const cur = s.action as ScheduleAction;
     let action = patch.action ?? cur;
@@ -851,7 +874,7 @@ export async function patchSchedule(
       ],
       { tx },
     );
-  });
+  }
   return newOutputSecret ? { webhookSecret: newOutputSecret } : {};
 }
 

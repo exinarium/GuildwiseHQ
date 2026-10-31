@@ -113,6 +113,7 @@ import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
+import { briefPlaybookRoutes } from './routes/brief-playbooks.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
@@ -455,6 +456,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));
+  await app.register(briefPlaybookRoutes(ctx));
   await app.register(inboundRoutes(ctx));
   await app.register(hookRoutes(ctx));
   await app.register(relayIntegrationRoutes(ctx));

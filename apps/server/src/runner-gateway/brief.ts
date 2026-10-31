@@ -11,6 +11,7 @@ import {
   getStage,
   highRiskSummary,
   type InvestigationLocation,
+  isBriefWorkflowKey,
   isBusinessCardType,
   type LocalTestService,
   LocalTestServicesSchema,
@@ -283,7 +284,14 @@ export async function buildBrief(
       reworkRound: card.rework_round,
       completionAction: await effectiveCompletionAction(ctx.pool, card),
       ...(businessCard
-        ? { fieldLabels: Object.fromEntries(wf.definition.customFields.map((c) => [c.key, c.label])) }
+        ? {
+            // A Brief card prints `context` and `requirements` in their own sections: Details holds the rest.
+            fieldLabels: Object.fromEntries(
+              wf.definition.customFields
+                .filter((c) => !isBriefWorkflowKey(wf.definition.key) || !['context', 'requirements'].includes(c.key))
+                .map((c) => [c.key, c.label]),
+            ),
+          }
         : {}),
       docsNeeded: card.docs_needed,
       designNeeded: card.design_needed ?? false,

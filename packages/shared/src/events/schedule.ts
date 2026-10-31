@@ -193,6 +193,8 @@ export const ScheduleActionSchema = z.union([
     dedupe: z.enum(['thread', 'subject_from', 'none']).optional(),
     /** Send what the agent produced when the card is done. Absent: nothing is sent. */
     deliverOutput: DeliverOutputSchema.optional(),
+    /** Installed from a brief playbook: the Automations page shows its own editor, and the run adds the Context snapshot. */
+    playbook: z.object({ key: z.string().min(1).max(60), version: z.number().int().min(1) }).optional(),
   }),
   z.object({ kind: z.literal('regression_run'), projectId: Id, template: CardTemplateSchema }),
   z.object({

@@ -202,3 +202,12 @@ export function businessWorkflow(type: BusinessCardType): WorkflowDefinition {
 
 /** The six shipped business workflows, installed per business organization. */
 export const BUSINESS_WORKFLOWS: readonly WorkflowDefinition[] = BUSINESS_CARD_TYPES.map(businessWorkflow);
+
+/** The field that holds the due date of each business card type (the brief lists what is due or overdue). */
+export const BUSINESS_DUE_FIELDS: Partial<Record<BusinessCardType, string>> = {
+  follow_up: 'dueDate',
+  reminder: 'remindOn',
+  enquiry: 'dueBy',
+  document_request: 'deadline',
+  quote: 'validUntil',
+};
