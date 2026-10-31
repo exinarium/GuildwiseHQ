@@ -25,6 +25,7 @@ import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
+import { RepoComponentRulesControl } from '../components/RepoComponentRulesControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
@@ -333,6 +334,13 @@ export function ProjectSettings() {
                   )}
                   {traits.usesRepos && (
                     <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                  )}
+                  {traits.usesRepos && expert && (
+                    <RepoComponentRulesControl
+                      projectId={id}
+                      repo={r}
+                      isOwner={project?.myRole === 'owner'}
+                    />
                   )}
                   {traits.usesRepos &&
                     (r.syncs ?? []).map((sy) => (

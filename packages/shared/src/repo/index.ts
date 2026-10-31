@@ -134,3 +134,4 @@ export const RepoCreateResultSchema = z.object({
   error: z.string().optional(),
 });
 export type RepoCreateResult = z.infer<typeof RepoCreateResultSchema>;
+export * from './component-rules.ts';

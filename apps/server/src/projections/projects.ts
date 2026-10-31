@@ -445,6 +445,13 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoMainBranchSet'>).payload;
     await exec(tx, 'UPDATE project_repos SET main_branch=$2 WHERE id=$1', [p.repoId, p.mainBranch]);
   },
+  ProjectRepoComponentRulesSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoComponentRulesSet'>).payload;
+    await exec(tx, 'UPDATE project_repos SET component_rules=$2::jsonb WHERE id=$1', [
+      p.repoId,
+      JSON.stringify(p.rules),
+    ]);
+  },
   ProjectRepoWorkingBranchCreated: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoWorkingBranchCreated'>).payload;
     await exec(

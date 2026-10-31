@@ -9,6 +9,7 @@ import { migrateDelegationExplicit } from './delegation-explicit.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
+import { migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
@@ -51,6 +52,7 @@ export {
   type GraphBackfillReport,
   migrateGraphBackfill,
 } from './graph-backfill.ts';
+export { GUILDWISEHQ_RUNNER_RULE_MIGRATION, migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -124,6 +126,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'suspicious-roles-2026-10', run: (env) => migrateSuspiciousRoles(env) },
   { name: 'pack-skill-keys-2026-10', run: (env) => migratePackSkillKeys(env) },
   { name: 'video-schedule-2026-10', run: (env) => migrateVideoSchedule(env) },
+  { name: 'guildwisehq-runner-rule-2026-10', run: (env) => migrateGuildwiseRunnerRule(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

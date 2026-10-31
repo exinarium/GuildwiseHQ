@@ -5,6 +5,7 @@ import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { ComponentRulesSchema } from '../repo/component-rules.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -130,6 +131,11 @@ export const projectEvents = [
   defineEvent(
     'ProjectRepoMainBranchSet',
     z.object({ projectId: Id, repoId: Id, mainBranch: GitRefSchema.nullable(), setBy: Id.optional() }),
+  ),
+  /** The owner replaced the component version rules of a repository (empty: none); a release bumps those whose files changed. */
+  defineEvent(
+    'ProjectRepoComponentRulesSet',
+    z.object({ projectId: Id, repoId: Id, rules: ComponentRulesSchema, setBy: Id.optional() }),
   ),
   /**
    * The owner set (or cleared, `commitAs: null`) the name and e-mail every commit of the project carries (backlog #65).
