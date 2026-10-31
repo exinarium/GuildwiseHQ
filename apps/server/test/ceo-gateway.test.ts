@@ -44,6 +44,8 @@ describe('the gateway accepts only the CEO', () => {
   it('the CEO shift carries the brief, the sandbox kind and a placeholder card', async () => {
     const start = r.of('shift.start').find((f: any) => f.kind === 'ceo') as any;
     expect(start.worktree).toBeNull();
+    // CEO shifts keep the single-vault shape: no `vaults` list
+    expect(start.vaults).toBeUndefined();
     expect(start.ceo.purpose).toBe('wake');
     expect(start.ceo.brief).toContain('aom ceo snapshot');
     expect(start.ceo.brief).toContain('What you may do');

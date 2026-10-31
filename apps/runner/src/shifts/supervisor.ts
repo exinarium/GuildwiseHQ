@@ -405,6 +405,21 @@ const QA_STEPS_STAGE = 'qa_steps';
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
 
+/**
+ * The vaults a shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
+ * sends only `vault`); question, BA task and CEO shifts read their one `vault`; any other shift reads none.
+ */
+export function shiftVaultsOf(msg: {
+  kind?: string;
+  vault?: ShiftVault | null;
+  vaults?: ShiftVault[];
+}): ShiftVault[] {
+  if (msg.kind === 'card') return msg.vaults?.length ? msg.vaults : msg.vault ? [msg.vault] : [];
+  return (msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
+    ? [msg.vault]
+    : [];
+}
+
 export class ShiftSupervisor {
   private readonly active = new Map<string, ActiveShift>();
   private readonly log: Logger;
@@ -1066,16 +1081,7 @@ export class ShiftSupervisor {
 
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
-    const shiftVaults: ShiftVault[] =
-      msg.kind === 'card'
-        ? msg.vaults?.length
-          ? msg.vaults
-          : msg.vault
-            ? [msg.vault]
-            : []
-        : (msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
-          ? [msg.vault]
-          : [];
+    const shiftVaults = shiftVaultsOf(msg);
     const vaultCtxs = await readVaultContexts(paths.vaults, shiftVaults);
     // Every vault opens as a read-only folder (secret files blocked, like a reference repository).
     const vaultReadFolder: ReadableFolder[] = vaultCtxs.map((c) => ({

@@ -10,6 +10,7 @@ import {
   withVaultContext,
   withVaultContexts,
 } from '../src/vaults/context.ts';
+import { shiftVaultsOf } from '../src/shifts/supervisor.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
@@ -168,5 +169,18 @@ describe('policy: both vaults of a builder are read-only folders', () => {
       expect(fs?.allowRead).toContain(join(d, 'standing-orders.md'));
     }
     expect(fs?.allowRead.some((p) => p.endsWith('.env') || p.endsWith('.pem'))).toBe(false);
+  });
+});
+
+describe('shiftVaultsOf: which vaults a shift reads', () => {
+  it('card: every named vault; an older message falls back to its single vault', () => {
+    expect(shiftVaultsOf({ kind: 'card', vault: PRJ, vaults: [PRJ, ORG] })).toEqual([PRJ, ORG]);
+    expect(shiftVaultsOf({ kind: 'card', vault: ORG })).toEqual([ORG]);
+    expect(shiftVaultsOf({ kind: 'card', vault: null })).toEqual([]);
+  });
+  it('question, BA task and CEO keep their single vault, even if a list is present; devops reads none', () => {
+    for (const kind of ['question', 'ba_task', 'ceo'])
+      expect(shiftVaultsOf({ kind, vault: PRJ, vaults: [PRJ, ORG] })).toEqual([PRJ]);
+    expect(shiftVaultsOf({ kind: 'devops', vault: PRJ })).toEqual([]);
   });
 });
