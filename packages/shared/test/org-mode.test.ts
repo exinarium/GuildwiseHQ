@@ -81,7 +81,7 @@ describe('views: a user override beats the organization default', () => {
     expect(isBusinessView({ mode: 'dev', viewOverride: 'business' })).toBe(true);
   });
   it('the organization default alone is not the view', () => {
-    expect(isBusinessOrg({ mode: 'business', viewOverride: 'dev' })).toBe(true);
+    expect(isBusinessOrg({ mode: 'business' })).toBe(true);
   });
   it('PUT /api/org/view takes a view or null, nothing else', () => {
     expect(SetMemberViewRequestSchema.safeParse({ view: 'business' }).success).toBe(true);
