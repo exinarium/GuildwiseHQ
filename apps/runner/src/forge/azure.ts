@@ -50,7 +50,7 @@ interface AzRepo {
  */
 export class AzureDevOpsForge implements Forge {
   readonly kind = 'azure-devops' as const;
-  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true };
+  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true, releases: false };
 
   constructor(
     private readonly env: ForgeEnv,

@@ -80,18 +80,42 @@ export const ProjectRepoDtoSchema = z.object({
       ship: z
         .object({
           version: z.string(),
-          status: z.enum(['committing', 'committed', 'failed']),
+          status: z.enum(['committing', 'committed', 'tagged', 'published', 'failed']),
           step: z.string().nullable(),
           commit: z.string().nullable(),
           error: z.string().nullable(),
           branch: z.string().nullable(),
           updatedAt: IsoTime,
+          landMode: z.enum(['pr', 'merge']).nullable().optional(),
+          prUrl: z.string().nullable().optional(),
+          /** Why the release is waiting (for example for the release pull request to be merged). */
+          message: z.string().nullable().optional(),
+          tag: z.string().nullable().optional(),
+          tagUrl: z.string().nullable().optional(),
+          /** The failure alert on the desk (for Retry). */
+          alertDeskItemId: z.uuid().nullable().optional(),
         })
         .nullable()
         .optional(),
     })
     .nullable()
     .optional(),
+  /** The newest release of this repository: published through Guildwise, else the newest release tag. */
+  lastRelease: z
+    .object({
+      version: z.string(),
+      tag: z.string(),
+      tagUrl: z.string().nullable(),
+      releaseUrl: z.string().nullable(),
+      /** False: the forge has no release pages; null: not known (tagged outside Guildwise). */
+      releasePage: z.boolean().nullable(),
+      at: IsoTime,
+      source: z.enum(['guildwise', 'tag']),
+    })
+    .nullable()
+    .optional(),
+  /** The name used in the release tag message and title; empty: the project name. */
+  releaseName: z.string().nullable().optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */
   forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */
@@ -560,6 +584,8 @@ export const PatchRepoRequestSchema = z
     mainBranch: GitRefSchema.nullable().optional(),
     /** The full list of component version rules (`[]` clears them). */
     componentRules: ComponentRulesSchema.optional(),
+    /** The name in the release tag message and title (null or empty: the project name). */
+    releaseName: z.string().trim().max(100).nullable().optional(),
   })
   .refine(
     (b) =>
@@ -567,8 +593,9 @@ export const PatchRepoRequestSchema = z
       b.projectPath !== undefined ||
       b.accessMethod !== undefined ||
       b.mainBranch !== undefined ||
-      b.componentRules !== undefined,
-    { message: 'send forge, projectPath, accessMethod, mainBranch or componentRules' },
+      b.componentRules !== undefined ||
+      b.releaseName !== undefined,
+    { message: 'send forge, projectPath, accessMethod, mainBranch, componentRules or releaseName' },
   );
 
 /** `POST /api/projects/:id/repos/:repoId/release-pr` answer: the request was queued for the repository's workstation. */

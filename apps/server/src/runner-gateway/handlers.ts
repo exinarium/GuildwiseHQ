@@ -128,6 +128,7 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
+import { applyReleasePublishResult } from '../release/publish.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
 import { applyReleaseFactsResult } from '../release/facts.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
@@ -568,6 +569,10 @@ export class RunnerHandlers {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseShipResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'release.publish') {
+      // Terminal: the tag and release are recorded, or the failure is on the desk with Retry (no blind redelivery).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleasePublishResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'claude.account.ensure') {
       // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

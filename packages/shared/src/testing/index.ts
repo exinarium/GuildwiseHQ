@@ -37,6 +37,7 @@ export const DESK_SUBKIND = {
   releaseFailed: 'release_failed',
   /** The release commit of a Ship release is on the working branch (a notice). */
   releaseCommitted: 'release_committed',
+  releasePublished: 'release_published',
   loopBackoff: 'loop_backoff',
   /** A card failed `LOOP_PARK_FAILURES` shifts in one loop-breaker episode: it is parked on one blocking item (S4 hook). */
   loopParked: 'loop_parked',

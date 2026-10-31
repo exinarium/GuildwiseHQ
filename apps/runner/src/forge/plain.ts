@@ -8,7 +8,7 @@ import type { Forge, ForgeEnv, GitAuth, RemoteRepo } from './types.ts';
  * (local merge + push); a refused push to a protected branch is the only signal.
  */
 export class PlainGitForge implements Forge {
-  readonly caps = { listRepos: false, createRepo: false, openChange: false, branchRules: false };
+  readonly caps = { listRepos: false, createRepo: false, openChange: false, branchRules: false, releases: false };
 
   constructor(
     private readonly env: ForgeEnv,

@@ -5,3 +5,4 @@ export * from './dto.ts';
 export * from './recommend.ts';
 export * from './tags.ts';
 export * from './validate.ts';
+export * from './publish.ts';

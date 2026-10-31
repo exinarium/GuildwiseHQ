@@ -49,6 +49,20 @@ export interface OpenChangeInput {
   body: string;
 }
 
+export interface ForgeRelease {
+  url: string;
+  draft?: boolean;
+}
+
+export interface CreateReleaseInput {
+  tag: string;
+  title: string;
+  notes: string;
+  /** Marked as the latest release. */
+  latest: boolean;
+  prerelease: boolean;
+}
+
 export type ChangeState = 'open' | 'merged' | 'closed';
 
 export interface CreateRepoInput {
@@ -70,6 +84,8 @@ export interface Forge {
     createRepo: boolean;
     openChange: boolean;
     branchRules: boolean;
+    /** Release pages (GitHub, GitLab). Without them the tag is the release. */
+    releases: boolean;
   };
   /** Connected or not, from this workstation's login. Never returns a secret. */
   status?(): Promise<GitConnection>;
@@ -83,4 +99,10 @@ export interface Forge {
   changeState?(repo: RemoteRepo, id: string): Promise<ChangeState>;
   /** Null when the rules cannot be read (not connected, no permission): callers then assume a direct push may work. */
   branchRules?(repo: RemoteRepo, branch: string): Promise<BranchRules | null>;
+  /** The release page of a tag; null when there is none. Never creates anything. */
+  findRelease?(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null>;
+  /** Creates the release page for an existing, pushed tag. An existing release is returned, never edited. */
+  createRelease?(repo: RemoteRepo, r: CreateReleaseInput): Promise<ForgeRelease>;
+  /** The commit a merged change landed as on its base branch (squash and rebase merges); null when unknown. */
+  changeMergeCommit?(repo: RemoteRepo, id: string): Promise<string | null>;
 }

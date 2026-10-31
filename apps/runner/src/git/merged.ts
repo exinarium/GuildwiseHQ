@@ -2,6 +2,11 @@ import { type BranchCheckMergedPayload, type BranchCheckMergedResult, isSafeGitR
 import { git, hasRemote, revParse } from './git.ts';
 import { baseTarget } from './rebase.ts';
 
+/** Is `a` an ancestor of (or the same commit as) `b`? Pure git; deletes nothing. */
+export async function isAncestor(repoPath: string, a: string, b: string): Promise<boolean> {
+  return (await git(repoPath, ['merge-base', '--is-ancestor', a, b])).exitCode === 0;
+}
+
 /**
  * `branch.check_merged` (docs/design/phases.md A2 and the worktree/branch cleanup addendum): is the card branch's head
  * an ancestor of the working branch? Pure git, no GitHub. A branch that is merged is deleted, locally and (for
@@ -44,8 +49,7 @@ export async function checkBranchMerged(input: {
   if (!head)
     return result(false, { reason: `the branch ${p.branchName} was not found, locally or on the remote` });
 
-  const anc = await git(repoPath, ['merge-base', '--is-ancestor', head, target]);
-  if (anc.exitCode !== 0)
+  if (!(await isAncestor(repoPath, head, target)))
     return result(false, { reason: `${p.branchName} is not merged into ${p.workingBranch} yet` });
 
   let branchDeleted = false;

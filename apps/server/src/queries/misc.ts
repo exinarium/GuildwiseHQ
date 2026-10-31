@@ -16,6 +16,8 @@ import {
   SHIFT_LIMIT_CAPABILITY,
   StopLossSettingsSchema,
   UNLIMITED_SHIFTS,
+  repoTagUrl,
+  tagVersion,
   type WorkstationDto,
 } from '@aom/shared';
 import type { z } from 'zod';
@@ -196,6 +198,39 @@ export async function budgetsFor(ctx: Ctx, userId: string, projects: Row[]): Pro
 }
 
 /** The last "pull request from the working branch to the main branch" asked for a repository, as the settings show it. */
+/** The newest release: published through Guildwise, else the newest release tag the last read saw. */
+function lastReleaseOf(
+  r: Record<string, any>,
+  ships: Record<string, any>[],
+  facts: Record<string, any> | undefined,
+) {
+  const sh = ships
+    .filter((s) => s.repo_id === r.id && s.status === 'published')
+    .sort((a, b) => (b.published_at?.getTime?.() ?? 0) - (a.published_at?.getTime?.() ?? 0))[0];
+  if (sh)
+    return {
+      version: sh.version as string,
+      tag: (sh.tag_name ?? `v${sh.version}`) as string,
+      tagUrl: (sh.tag_url ?? null) as string | null,
+      releaseUrl: (sh.release_url ?? null) as string | null,
+      releasePage: sh.release_state ? sh.release_state !== 'none' : null,
+      at: iso(sh.published_at) as string,
+      source: 'guildwise' as const,
+    };
+  const tag = facts?.last_tag as string | undefined;
+  const version = tag ? tagVersion(tag) : null;
+  if (!tag || !version) return null;
+  return {
+    version,
+    tag,
+    tagUrl: repoTagUrl(r.remote_url, tag, r.forge_kind ?? null),
+    releaseUrl: null,
+    releasePage: null,
+    at: iso(facts?.updated_at) as string,
+    source: 'tag' as const,
+  };
+}
+
 function releasePrOf(r: Record<string, any> | undefined) {
   if (!r) return null;
   return {
@@ -248,7 +283,15 @@ export async function getProjectDetail(
   );
   const ships = await rows(
     ctx.pool,
-    `SELECT id, version, status, step, commit_sha, error, payload, updated_at FROM release_ships WHERE project_id=$1`,
+    `SELECT id, repo_id, version, status, step, commit_sha, error, payload, updated_at, land_mode, pr_url, step_message,
+            tag_name, tag_url, release_url, release_state, published_at, alert_desk_item_id
+       FROM release_ships WHERE project_id=$1`,
+    [projectId],
+  );
+  const releaseFacts = await rows(
+    ctx.pool,
+    `SELECT f.project_repo_id, f.facts->'lastTag'->>'name' AS last_tag, f.updated_at
+       FROM repo_release_facts f JOIN project_repos pr ON pr.id = f.project_repo_id WHERE pr.project_id=$1 AND f.state='ready'`,
     [projectId],
   );
   const clones = await rows(
@@ -329,10 +372,18 @@ export async function getProjectDetail(
                 error: sh.error ?? null,
                 branch: (sh.payload as { workingBranch?: string } | null)?.workingBranch ?? null,
                 updatedAt: iso(sh.updated_at) as string,
+                landMode: sh.land_mode ?? null,
+                prUrl: sh.pr_url ?? null,
+                message: sh.step_message ?? null,
+                tag: sh.tag_name ?? null,
+                tagUrl: sh.tag_url ?? null,
+                alertDeskItemId: sh.status === 'failed' ? (sh.alert_desk_item_id ?? null) : null,
               }
             : null,
         };
       })(),
+      lastRelease: lastReleaseOf(r, ships, releaseFacts.find((f) => f.project_repo_id === r.id)),
+      releaseName: r.release_name ?? null,
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],

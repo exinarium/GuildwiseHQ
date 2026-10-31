@@ -297,6 +297,7 @@ export function reservedKeyOfDesk(kind: string, subkind: string | null | undefin
     case 'working_branch':
       return 'working_branch';
     case 'ship_release':
+    case 'release_failed':
       return 'release_publish';
     case 'devops':
       return kind === 'approval' ? 'devops_destructive' : null;

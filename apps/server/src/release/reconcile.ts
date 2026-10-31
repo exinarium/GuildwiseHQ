@@ -38,6 +38,13 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
       [repoId],
     );
     if (live?.state === 'approved') {
+      // While the release is being published, the publish flow closes the proposal itself.
+      const unpublished = await one(
+        tx,
+        `SELECT 1 FROM release_ships WHERE id=$1 AND status <> 'published'`,
+        [live.id],
+      );
+      if (unpublished) return;
       const tags = facts.existingTags ?? [];
       const tag = live.version && tags.includes(`v${live.version}`) ? `v${live.version}` : null;
       if (tag)

@@ -100,6 +100,38 @@ export function repoFileUrl(
   }
 }
 
+/** The web page of a tag, for the hosts whose URL shape is known. Null for plain git or an unusable remote. */
+export function repoTagUrl(remoteUrl: string, tag: string, override?: ForgeKind | null): string | null {
+  const r = parseRemote(remoteUrl, override);
+  if (!r) return null;
+  const ns = r.namespace.map(encodeURIComponent).join('/');
+  const name = encodeURIComponent(r.name);
+  const t = tag.split('/').map(encodeURIComponent).join('/');
+  switch (r.kind) {
+    case 'github':
+      return `https://${r.host}/${ns}/${name}/tree/${t}`;
+    case 'gitlab':
+      return `https://${r.host}/${ns}/${name}/-/tags/${t}`;
+    case 'bitbucket-cloud':
+      return `https://${r.host}/${ns}/${name}/src/${t}`;
+    case 'azure-devops':
+      return `https://${r.host}/${ns}/_git/${name}?version=GT${encodeURIComponent(tag)}`;
+    default:
+      return null;
+  }
+}
+
+/** Forges that have release pages Guildwise can create. */
+export function forgeHasReleasePages(kind: ForgeKind): boolean {
+  return kind === 'github' || kind === 'gitlab';
+}
+
+/** What the desk says when the forge has no release pages. */
+export function noReleasePageText(kind: ForgeKind, tag: string): string {
+  const where = kind === 'git' ? 'plain git' : (FORGE_LABELS[kind] ?? kind);
+  return `Tag ${tag} was pushed. No release page was created: ${where} has no release pages.`;
+}
+
 // ------------------------------------------------------------------ connections (status only, never a secret)
 
 /**

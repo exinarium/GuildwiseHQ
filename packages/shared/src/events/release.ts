@@ -93,4 +93,47 @@ export const releaseEvents = [
       alertDeskItemId: Id.optional(),
     }),
   ),
+  /** How the release reaches main was decided (release PR, or Guildwise merges). */
+  defineEvent(
+    'ReleasePublishPlanned',
+    z.object({ shipId: Id, landMode: z.enum(['pr', 'merge']), prUrl: z.string().optional() }),
+  ),
+  /** The release commit is on the main branch. */
+  defineEvent(
+    'ReleaseLanded',
+    z.object({
+      shipId: Id,
+      mergeSha: z.string(),
+      mode: z.enum(['pr', 'merge']),
+      by: z.enum(['forge', 'guildwise', 'found']),
+      prUrl: z.string().optional(),
+    }),
+  ),
+  /** The annotated tag is on the remote (made now, or it was there already on the right commit). */
+  defineEvent(
+    'ReleaseTagged',
+    z.object({
+      shipId: Id,
+      tag: z.string(),
+      targetSha: z.string(),
+      state: z.enum(['created', 'existed']),
+      tagUrl: z.string().nullable(),
+    }),
+  ),
+  /** The forge release exists, or the forge has no release pages (`none`). */
+  defineEvent(
+    'ReleasePublished',
+    z.object({
+      shipId: Id,
+      state: z.enum(['created', 'existed', 'none']),
+      releaseUrl: z.string().nullable(),
+      latest: z.boolean().optional(),
+      deskItemId: Id.optional(),
+    }),
+  ),
+  /** Retry of a failed land, tag or publish step. */
+  defineEvent(
+    'ReleasePublishRetried',
+    z.object({ shipId: Id, step: z.string(), workstationId: Id }),
+  ),
 ] as const;
