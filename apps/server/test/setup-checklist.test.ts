@@ -61,7 +61,15 @@ describe('setup checklist', () => {
     await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [orgId]);
     try {
       let c = await get();
-      expect(c.steps.map((s: any) => s.id)).toEqual(['project', 'workstation', 'team', 'ba']);
+      expect(c.steps.map((s: any) => s.id)).toEqual([
+        'project',
+        'workstation',
+        'team',
+        'knowledge',
+        'rules',
+        'ba',
+        'connections',
+      ]);
       expect(step(c, 'team')).toMatchObject({
         done: false,
         link: '/agents?hire=ba',

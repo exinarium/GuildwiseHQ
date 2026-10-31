@@ -17,6 +17,7 @@ import type { RunnerPaths } from '../paths.ts';
 import { type DeliveryFile, type DeliverySaveResult, saveDeliveryDir } from './delivery.ts';
 import { ensureLocalVault, isLocalVaultDir, localVaultWarning, setAsideLocalVault } from './local.ts';
 import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
+import { countVaultNotes } from './notes.ts';
 import {
   ensureClone,
   isClean,
@@ -259,6 +260,7 @@ export class VaultManager {
         lastPullAt: null,
         lastPushAt: null,
         localPath: dir,
+        noteCount: countVaultNotes(dir),
       });
       return { status: 'ok', cloned: false, committed: false, pulled: false, pushed: false };
     } catch (err) {
@@ -301,6 +303,7 @@ export class VaultManager {
         lastPullAt: this.lastPull.get(vaultId) ?? null,
         lastPushAt: this.lastPush.get(vaultId) ?? null,
         ...this.pathField(vaultId),
+        noteCount: countVaultNotes(this.dir(vaultId)),
       });
       return;
     }

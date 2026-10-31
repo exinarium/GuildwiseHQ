@@ -66,8 +66,36 @@ export function SetupChecklistProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Every step is required (the optional "appoint a CEO" step is gone: the CEO is built in). */
-export const requiredSteps = (c: SetupChecklist): SetupStep[] => c.steps;
+/** The steps that count: recommended (optional) steps are shown but never counted. */
+export const requiredSteps = (c: SetupChecklist): SetupStep[] => c.steps.filter((s) => !s.optional);
+
+const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const numberWord = (n: number): string => NUMBER_WORDS[n] ?? String(n);
+const capitalize = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
+
+const SHORT_NAME: Record<string, string> = {
+  project: 'project',
+  repository: 'repository',
+  workstation: 'workstation',
+  team: 'team',
+  ba: 'the business analyst',
+  knowledge: 'Knowledge',
+  rules: 'Rules & decisions',
+  connections: 'connections',
+};
+
+/** "a, b and c". */
+const listJoin = (items: string[]): string =>
+  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+const GO_LABEL: Record<string, string> = {
+  workstation: 'Add',
+  team: 'Hire',
+  ba: 'Talk',
+  knowledge: 'Add',
+  rules: 'Add',
+  connections: 'Connect',
+};
 
 /** Whether the sidebar button shows: there are steps, the user did not hide it, and the setup is not finished. */
 export const checklistVisible = (c: SetupChecklist | undefined): c is SetupChecklist =>
@@ -127,6 +155,14 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
       <div className="min-w-0 flex-1">
         <p className={cx('text-sm font-medium', step.done ? 'text-muted line-through' : 'text-fg')}>
           {step.title}
+          {step.optional && (
+            <span
+              className="ml-2 rounded-full bg-sunken px-2 py-0.5 align-middle text-xs font-normal text-muted no-underline"
+              data-testid={`setup-optional-${step.id}`}
+            >
+              Recommended
+            </span>
+          )}
         </p>
         <p className="text-sm text-muted">{step.hint}</p>
         {!step.done && missing && <p className="text-sm text-muted">{missing}</p>}
@@ -143,13 +179,7 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
           data-testid={`setup-go-${step.id}`}
           className="inline-flex h-8 shrink-0 items-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
         >
-          {step.id === 'workstation'
-            ? 'Add'
-            : step.id === 'team'
-              ? 'Hire'
-              : step.id === 'ba'
-                ? 'Talk'
-                : 'Start'}
+          {GO_LABEL[step.id] ?? 'Start'}
         </Link>
       )}
     </li>
@@ -170,7 +200,7 @@ export function SetupChecklistDialog() {
       description={
         data.complete
           ? 'Everything is set up. Your team can take cards now.'
-          : 'Five steps from an empty organization to a team that works. Each one ticks itself off.'
+          : `${capitalize(numberWord(total))} steps from an empty organization to a team that works. Each one ticks itself off.`
       }
       footer={
         <>
@@ -220,8 +250,8 @@ export function SetupHelpCard() {
         <h2 className="text-base font-semibold text-fg">The Get started checklist</h2>
         <p className="text-sm text-muted">
           {data.complete
-            ? 'All five steps are done.'
-            : `${data.doneCount} of ${requiredSteps(data).length} steps done: project, repository, workstation, team and the business analyst.`}
+            ? `All ${numberWord(requiredSteps(data).length)} steps are done.`
+            : `${data.doneCount} of ${requiredSteps(data).length} steps done: ${listJoin(requiredSteps(data).map((x) => SHORT_NAME[x.id] ?? x.id))}.`}
         </p>
       </div>
       <Button

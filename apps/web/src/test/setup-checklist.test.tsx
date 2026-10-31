@@ -120,4 +120,35 @@ describe('setup checklist', () => {
     expect(await screen.findByTestId('help-setup')).toHaveTextContent('All five steps are done.');
     expect(screen.queryByTestId('setup-widget')).toBeNull();
   });
+
+  it('a business checklist has no repository step, shows the new steps and counts only the required ones', async () => {
+    checklist = {
+      steps: [
+        step('project', 'Create your first project', { done: true, link: null }),
+        step('workstation', 'Add a workstation', { done: true, link: null }),
+        step('team', 'Hire your team', { done: true, link: null }),
+        step('knowledge', 'Add something to Knowledge', { link: '/documents' }),
+        step('rules', 'Set your first rule', { link: '/ledger' }),
+        step('ba', 'Talk to the business analyst'),
+        step('connections', 'Connect a tool or a destination', { link: '/automations', optional: true }),
+      ] as SetupChecklist['steps'],
+      doneCount: 3,
+      complete: false,
+      dismissed: false,
+    };
+    mount();
+    expect(await screen.findByTestId('setup-widget-count')).toHaveTextContent('3/6');
+    expect(screen.getByTestId('help-setup')).toHaveTextContent(
+      '3 of 6 steps done: project, workstation, team, Knowledge, Rules & decisions and the business analyst.',
+    );
+    await userEvent.click(screen.getByTestId('setup-widget'));
+    expect(screen.getByText(/^Six steps from an empty organization/)).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-step-repository')).toBeNull();
+    expect(screen.getByTestId('setup-go-knowledge')).toHaveAttribute('href', '/documents');
+    expect(screen.getByTestId('setup-go-rules')).toHaveAttribute('href', '/ledger');
+    expect(screen.getByTestId('setup-go-connections')).toHaveAttribute('href', '/automations');
+    expect(screen.getByTestId('setup-go-connections')).toHaveTextContent('Connect');
+    expect(screen.getByTestId('setup-optional-connections')).toHaveTextContent('Recommended');
+    expect(screen.queryByTestId('setup-optional-rules')).toBeNull();
+  });
 });
