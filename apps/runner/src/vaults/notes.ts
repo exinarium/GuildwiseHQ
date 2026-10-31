@@ -9,8 +9,8 @@ export function noteCountField(root: string): { noteCount?: number } {
 }
 
 /** Files and folders the system writes into a vault itself: they are not the user's notes. */
-const GENERATED_FILES = new Set(['standing-orders.md', TASTE_FILE]);
-const GENERATED_DIRS = new Set(['graph', 'delivery']);
+const GENERATED_FILES = new Set(['standing-orders.md', 'PROJECT.md', TASTE_FILE]);
+const GENERATED_DIRS = new Set(['graph', 'delivery', 'decisions', 'docs']);
 
 /**
  * How many notes (Markdown files the user wrote) a vault folder holds, counted up to `cap`. Skips symlinks, dot

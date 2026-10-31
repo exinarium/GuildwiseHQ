@@ -25,6 +25,10 @@ describe('countVaultNotes', () => {
       'p/graph/a.md',
       'delivery/r.md',
       'p/taste.md',
+      'p/decisions/x.md',
+      'p/docs/x.md',
+      'org/docs/x.md',
+      'p/PROJECT.md',
       'readme.txt',
     ])
       put(f);
