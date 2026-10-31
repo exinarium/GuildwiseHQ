@@ -198,11 +198,11 @@ describe('refusals never reach the runner', () => {
     r.ws.close();
   });
 
-  it('answers 404 when the organization is no longer in Business mode', async () => {
+  it('does not care about the default view of the organization', async () => {
     const m = await createIntegration(w);
     await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [w.owner.id]);
     try {
-      expect((await post(m.path, 'x')).statusCode).toBe(404);
+      expect((await post(m.path, 'x')).statusCode).not.toBe(404);
     } finally {
       await makeBusiness(w);
     }

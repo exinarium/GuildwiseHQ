@@ -11,6 +11,7 @@ import {
 } from '@aom/shared';
 import type { OrgRow } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { diagnosticsConsentAvailable } from './diagnostics.ts';
 import { limitState, orgLimits, orgUsage } from './limits.ts';
 
@@ -50,7 +51,12 @@ export function orgBanners(
 }
 
 /** The `activeOrg` block of `me` and `GET /api/org` for a member in `role`. */
-export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promise<ActiveOrg> {
+export async function activeOrgDto(
+  ctx: Ctx,
+  org: OrgRow,
+  role: OrgRole,
+  userId?: string,
+): Promise<ActiveOrg> {
   const manager = isOrgManager({ orgRole: role });
   const limits = await orgLimits(ctx, ctx.pool, org.id);
   const usage = await orgUsage(ctx.pool, org.id);
@@ -70,6 +76,7 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     features: effectiveFeatures(org.plan, org.features),
     ...(manager ? { limits, usage } : {}),
     mode: org.mode === 'business' ? 'business' : 'dev',
+    viewOverride: userId ? await memberViewOverride(ctx, org.id, userId) : null,
     requireTwoFactor: Boolean(org.require_two_factor),
     diagnosticsSharing: Boolean(org.diagnostics_sharing),
     diagnosticsSharingAvailable: await diagnosticsConsentAvailable(ctx, org.id),
@@ -82,4 +89,18 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
   // Members see "suspended" and "cancelled" only.
   dto.banners = dto.banners.filter((b) => manager || b.audience === 'all');
   return dto;
+}
+
+/** The member's own view for the organization, or null (follow the organization default). */
+async function memberViewOverride(
+  ctx: Ctx,
+  orgId: string,
+  userId: string,
+): Promise<'dev' | 'business' | null> {
+  const m = await one<{ view: string | null }>(
+    ctx.pool,
+    `SELECT view FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
+    [orgId, userId],
+  );
+  return m?.view === 'business' ? 'business' : m?.view === 'dev' ? 'dev' : null;
 }

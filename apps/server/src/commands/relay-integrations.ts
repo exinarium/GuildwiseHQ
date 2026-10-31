@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  isBusinessOrg,
   RELAY_PATH_PREFIX,
   RELAY_TOKEN_PREFIX,
   type RelayIntegrationCreate,
@@ -11,7 +10,7 @@ import {
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { conflict, HttpError, notFound } from '../errors.ts';
+import { conflict, notFound } from '../errors.ts';
 import { orgScope, userActor } from './common.ts';
 
 /** `rly_` plus 192 random bits. Shown once; only its sha256 is stored. */
@@ -35,17 +34,6 @@ export function toDto(r: Row): RelayIntegrationDto {
   };
 }
 
-/** 403 `business_mode_required` unless the organization works in Business mode. `FOR SHARE` serialises with a switch. */
-async function assertBusiness(db: Queryable, orgId: string): Promise<void> {
-  const o = await one(db, 'SELECT mode FROM organizations WHERE id=$1 FOR SHARE', [orgId]);
-  if (!isBusinessOrg(o))
-    throw new HttpError(
-      403,
-      'business_mode_required',
-      'Inbound relay integrations are available in Business mode organizations.',
-    );
-}
-
 async function lockOwn(tx: Queryable, orgId: string, id: string): Promise<Row> {
   const r = await one(tx, 'SELECT * FROM relay_integrations WHERE id=$1 AND org_id=$2 FOR UPDATE', [
     id,
@@ -64,7 +52,6 @@ export async function createRelayIntegration(
   const token = newRelayToken();
   const id = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
-    await assertBusiness(tx, orgId);
     await ctx.store.append(
       [
         {
@@ -92,7 +79,6 @@ export async function createRelayIntegration(
 }
 
 export async function listRelayIntegrations(ctx: Ctx, orgId: string): Promise<RelayIntegrationDto[]> {
-  await assertBusiness(ctx.pool, orgId);
   const r = await rows(ctx.pool, 'SELECT * FROM relay_integrations WHERE org_id=$1 ORDER BY created_at, id', [
     orgId,
   ]);
@@ -107,7 +93,6 @@ export async function rotateRelayIntegration(
 ): Promise<{ integration: RelayIntegrationDto; url: string }> {
   const token = newRelayToken();
   await withAppendTx(ctx.pool, async (tx) => {
-    await assertBusiness(tx, orgId);
     const cur = await lockOwn(tx, orgId, id);
     if (cur.status === 'revoked') throw conflict('revoked', 'this integration is revoked');
     await ctx.store.append(
@@ -136,7 +121,6 @@ export async function revokeRelayIntegration(
   id: string,
 ): Promise<RelayIntegrationDto> {
   await withAppendTx(ctx.pool, async (tx) => {
-    await assertBusiness(tx, orgId);
     const cur = await lockOwn(tx, orgId, id);
     if (cur.status === 'revoked') throw conflict('revoked', 'this integration is already revoked');
     await ctx.store.append(
@@ -158,7 +142,6 @@ export async function revokeRelayIntegration(
 
 /** Per integration: is a serving runner connected, since when not, and how many events were refused since then. */
 export async function relayStatuses(ctx: Ctx, orgId: string): Promise<RelayIntegrationStatus[]> {
-  await assertBusiness(ctx.pool, orgId);
   const list = await rows(
     ctx.pool,
     `SELECT i.id, i.created_at, p.last_served_at, p.offline_since,

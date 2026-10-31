@@ -854,7 +854,7 @@ describe('GET /api/subworkflow-targets', () => {
     expect(ids).toEqual(expect.arrayContaining([w.projectId, ansProjectId]));
     expect(res.projects.find((x: any) => x.id === ansProjectId)).toMatchObject({
       key: 'ANS',
-      enabledWorkflows: ['answering'],
+      enabledWorkflows: expect.arrayContaining(['answering']),
     });
     expect(res.projects.find((x: any) => x.id === w.projectId).enabledWorkflows).toContain('answering');
   });

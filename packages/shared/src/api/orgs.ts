@@ -48,8 +48,10 @@ export const ActiveOrgSchema = z.object({
   trialEndsAt: IsoTime.nullable().optional(),
   licenseExpiresAt: IsoTime.nullable().optional(),
   graceDays: z.number().int().optional(),
-  /** How the organization works: Developer (default) or Business (no repositories or code roles). */
+  /** The organization's DEFAULT VIEW: Software (`dev`, the default) or Business. Presentation only; it blocks nothing. */
   mode: OrgModeSchema.default('dev'),
+  /** The signed-in member's own view for this organization (`null`: follow `mode`). See `effectiveView`. */
+  viewOverride: OrgModeSchema.nullable().default(null),
   /** The Owner requires two-factor login of every member. */
   requireTwoFactor: z.boolean().default(false),
   /** The Owner's consent "Share diagnostic data with Guildwise" (off by default). */
@@ -105,7 +107,7 @@ export const PatchOrgRequestSchema = z
     /** Owner only. Switching it on needs `consentVersion`: the version of the consent text the Owner saw. */
     diagnosticsSharing: z.boolean(),
     consentVersion: z.string().min(1).max(40),
-    /** Owner and Admins. Switching to business is refused while repositories or code agents exist. */
+    /** Owner and Admins: the default view. It is never refused and changes nothing but the preference. */
     mode: OrgModeSchema,
   })
   .partial()
@@ -118,6 +120,10 @@ export const PatchOrgRequestSchema = z
     'name, requireTwoFactor, diagnosticsSharing or mode is required',
   );
 export type PatchOrgRequest = z.infer<typeof PatchOrgRequestSchema>;
+
+/** `PUT /api/org/view`: the member's own view for the active organization; `null` follows the organization default. */
+export const SetMemberViewRequestSchema = z.object({ view: OrgModeSchema.nullable() });
+export type SetMemberViewRequest = z.infer<typeof SetMemberViewRequestSchema>;
 
 export const OrgMemberDtoSchema = z.object({
   userId: z.uuid(),

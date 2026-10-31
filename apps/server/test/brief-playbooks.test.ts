@@ -20,20 +20,11 @@ const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 const schedule = async (id: string) => (await q('SELECT * FROM schedules WHERE id=$1', [id]))[0] as any;
 
-describe('a developer organization', () => {
-  it('refuses the playbooks and creates nothing', async () => {
-    const res = await owner('POST', '/api/brief-playbooks/morning_plan/install', { destinations: [mail] });
-    expect(res.status).toBe(409);
-    expect(res.body.error?.code ?? res.body.code).toBe('business_only');
-    expect(await q(`SELECT 1 FROM workflow_versions WHERE key LIKE 'business-brief-%'`)).toEqual([]);
-  });
-});
-
-describe('a business organization', () => {
+// Playbooks are available to every organization: this one keeps its default Software view, repository and all.
+describe('a software-default organization', () => {
   let scheduleId = '';
   it('a manager installs Morning plan in one action', async () => {
-    await ok(w.t.req('DELETE', `/api/projects/${w.projectId}/repos/${w.repoId}`, { cookie: w.owner.cookie }));
-    await ok(owner('PATCH', '/api/org', { mode: 'business' }));
+    expect((await q('SELECT mode FROM organizations WHERE id=$1', [w.owner.id]))[0]?.mode).toBe('dev');
     const r = await ok<any>(
       owner('POST', '/api/brief-playbooks/morning_plan/install', {
         destinations: [mail, hook],

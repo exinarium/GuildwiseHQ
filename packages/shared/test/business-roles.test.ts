@@ -11,8 +11,7 @@ import {
   isBusinessRoleKey,
   PACK_SEAT_KEYS,
   RoleDefinitionSchema,
-  roleListedInMode,
-  roleOfferedInMode,
+  roleGroupInView,
   suggestSeat,
   validateCustomWorkflow,
   type WorkflowDefinitionInput,
@@ -64,25 +63,18 @@ describe('business roles (AC 1)', () => {
   });
 });
 
-describe('roleOfferedInMode / roleListedInMode (AC 5)', () => {
-  it('a dev organization (or no mode) is offered no business role and every other role', () => {
-    for (const mode of ['dev', null, undefined]) {
-      for (const k of BUSINESS_ROLE_KEYS) expect(roleOfferedInMode(k, mode)).toBe(false);
-      for (const r of BUILTIN_ROLES.filter((x) => !isBusinessRoleKey(x.key)))
-        expect(roleOfferedInMode(r.key, mode)).toBe(true);
+describe('roleGroupInView', () => {
+  it('leads with the roles of the view and tucks the others under More; nothing is excluded', () => {
+    for (const k of BUSINESS_ROLE_KEYS) {
+      expect(roleGroupInView(k, 'business')).toBe('main');
+      expect(roleGroupInView(k, 'dev')).toBe('more');
     }
-  });
-
-  it('a business organization is offered the business roles and no dev-only role', () => {
-    for (const k of BUSINESS_ROLE_KEYS) expect(roleOfferedInMode(k, 'business')).toBe(true);
-    for (const k of DEV_ONLY_ROLE_KEYS) expect(roleOfferedInMode(k, 'business')).toBe(false);
-  });
-
-  it('lists hide only the business roles, and only from a dev organization', () => {
-    expect(roleListedInMode('front_desk', 'dev')).toBe(false);
-    expect(roleListedInMode('front_desk', 'business')).toBe(true);
-    expect(roleListedInMode('devops', 'business')).toBe(true);
-    expect(roleListedInMode('builder', 'dev')).toBe(true);
+    for (const k of DEV_ONLY_ROLE_KEYS) {
+      expect(roleGroupInView(k, 'business')).toBe('more');
+      expect(roleGroupInView(k, 'dev')).toBe('main');
+    }
+    expect(roleGroupInView('architect', 'business')).toBe('main');
+    expect(roleGroupInView('front_desk', null)).toBe('more');
   });
 });
 

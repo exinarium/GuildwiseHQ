@@ -1,6 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
 import {
-  isBusinessOrg,
   isOrgOperational,
   RELAY_STRIPPED_HEADERS,
   type RelayKind,
@@ -146,7 +145,6 @@ export function relayPublicRoutes(ctx: Ctx) {
           r.status === 'active' &&
           r.token_hash &&
           sameHash(hash, r.token_hash) &&
-          isBusinessOrg(r) &&
           isOrgOperational(r.org_status)
         )
           found = { id: r.id, org_id: r.org_id, kind: r.kind };

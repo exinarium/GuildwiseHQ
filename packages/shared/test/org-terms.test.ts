@@ -23,6 +23,8 @@ describe('ORG_TERMS', () => {
       Decision: 'Decision',
       decisions: 'decisions',
       Decisions: 'Decisions',
+      askDevOps: 'Ask DevOps',
+      askDevOpsAbout: 'Ask DevOps about this',
     });
   });
   it('names the same things for a business org', () => {
@@ -38,6 +40,7 @@ describe('ORG_TERMS', () => {
       standingOrders: 'rules',
       StandingOrders: 'Rules',
       decisions: 'decisions',
+      askDevOps: 'Ask for technical help',
     });
     for (const [key, word] of Object.entries(ORG_TERMS.business)) expect(word, key).not.toMatch(WORDS);
   });

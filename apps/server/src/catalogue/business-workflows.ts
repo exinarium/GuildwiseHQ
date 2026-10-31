@@ -63,7 +63,7 @@ export async function businessWorkflowEvents(ctx: Ctx, tx: Tx, orgId: string): P
 
 /**
  * Registers the business workflows an organization is missing and enables each on its projects (the primary stays the
- * primary; every enabled entry is kept). Idempotent. Only for business organizations.
+ * primary; every enabled entry is kept). Idempotent. Runs for every organization.
  */
 export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): Promise<void> {
   const events = await businessWorkflowEvents(ctx, tx, orgId);
@@ -122,9 +122,12 @@ export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): 
   }
 }
 
-/** Boot: every business organization gets its workflows (catches organizations switched before they shipped). */
+/**
+ * Boot: EVERY organization gets the shipped business workflows, whatever its default view. A workflow added in a later
+ * release reaches every existing organization (and its projects) at the next start.
+ */
 export async function ensureBusinessWorkflowsAtBoot(ctx: Ctx): Promise<number> {
-  const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations WHERE mode='business'`, []);
+  const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations ORDER BY id`, []);
   let n = 0;
   for (const o of orgs) {
     try {

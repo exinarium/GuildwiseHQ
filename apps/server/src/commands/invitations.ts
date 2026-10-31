@@ -441,9 +441,11 @@ async function acceptEvents(
     events.push(
       ...(await ceoProvisionEvents(tx, ctx, orgId, userId, { simulation: terms.simulation === true })),
     );
-    // A business organization starts with its business card types (it has no project yet to enable them on).
-    if (a.mode === 'business') events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
+    // Every organization starts with the business card types (it has no project yet to enable them on).
+    events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
   }
+  // Joining an existing organization also fills in any shipped business workflow it is still missing (idempotent).
+  if (inv.kind === 'org_member') events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
   if (inv.kind !== 'legacy')
     events.push({
       streamId: streamId.invitation(inv.id),

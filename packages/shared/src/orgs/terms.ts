@@ -2,7 +2,7 @@ import type { OrgMode } from './mode.ts';
 
 /**
  * The words the web app uses for the ledger and the vaults. Display text only: routes, API paths, event names,
- * `aom` commands, DB columns and vault paths keep their names. Add every word a mode changes here, not in a component.
+ * `aom` commands, DB columns and vault paths keep their names. Add every word a VIEW changes here, not in a component.
  */
 export interface OrgTerms {
   /** Nav entry, page title, breadcrumb of /ledger. */
@@ -25,6 +25,10 @@ export interface OrgTerms {
   Decision: string;
   decisions: string;
   Decisions: string;
+  /** The "Ask DevOps" button, dialog title and palette entry. The feature is the same in every view. */
+  askDevOps: string;
+  /** The same, for one item: "Ask DevOps about this". */
+  askDevOpsAbout: string;
 }
 
 export const ORG_TERMS = {
@@ -46,6 +50,8 @@ export const ORG_TERMS = {
     Decision: 'Decision',
     decisions: 'decisions',
     Decisions: 'Decisions',
+    askDevOps: 'Ask DevOps',
+    askDevOpsAbout: 'Ask DevOps about this',
   },
   business: {
     ledger: 'Rules & decisions',
@@ -65,10 +71,12 @@ export const ORG_TERMS = {
     Decision: 'Decision',
     decisions: 'decisions',
     Decisions: 'Decisions',
+    askDevOps: 'Ask for technical help',
+    askDevOpsAbout: 'Ask for technical help with this',
   },
 } as const satisfies Record<OrgMode, OrgTerms>;
 
-/** Anything but 'business' (missing, null, an older server) is dev: dev orgs never change. */
+/** Anything but 'business' (missing, null, an older server) is the Software view. Pass the effective VIEW (see `effectiveView`). */
 export const orgTerms = (mode: OrgMode | string | null | undefined): OrgTerms =>
   mode === 'business' ? ORG_TERMS.business : ORG_TERMS.dev;
 
@@ -88,7 +96,7 @@ const REWRITE_RE = new RegExp(
 );
 
 /**
- * Rewrites product copy for the org's mode. Dev returns the same string. Business replaces whole words and keeps
+ * Rewrites product copy for a view. Dev returns the same string. Business replaces whole words and keeps
  * routes, anchors, `vault:` paths, ids and `aom ledger ...` commands. Never pass user or agent content through it.
  */
 export function rewordForOrg(text: string, mode: OrgMode | string | null | undefined): string {

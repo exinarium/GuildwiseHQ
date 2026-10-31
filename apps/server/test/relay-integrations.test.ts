@@ -3,13 +3,13 @@ import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createIntegration, makeBusiness, serve } from './helpers/relay.ts';
+import { createIntegration, serve } from './helpers/relay.ts';
 import { createWorld, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
 let w: World;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-  await makeBusiness(w);
+  // the organization keeps its default (Software) view: relay integrations are available to every organization
 });
 afterAll(async () => {
   await w.t.close();
@@ -99,18 +99,13 @@ describe('relay integrations API', () => {
       ).toBe(403);
   });
 
-  it('refuses an organization that is not in Business mode', async () => {
-    const email = uniqueEmail('dev');
-    await w.t.createUser(email, 'member');
-    const cookie = await w.t.login(email);
-    const r = await w.t.req('POST', '/api/relay/integrations', {
-      cookie,
-      body: { kind: 'generic', label: 'x' },
-    });
-    expect(r.status).toBe(403);
-    expect(r.body.error.code).toBe('business_mode_required');
+  it('is available in an organization whose default view is Software', async () => {
+    const [row] = await q('SELECT mode FROM organizations WHERE id=$1', [w.owner.id]);
+    expect(row?.mode).toBe('dev');
+    const m = await createIntegration(w, 'generic', 'Software org hook');
+    expect(m.integration.status).toBe('active');
     for (const path of ['/api/relay/integrations', '/api/relay/integrations/status'])
-      expect((await w.t.req('GET', path, { cookie })).body.error.code).toBe('business_mode_required');
+      expect((await w.t.req('GET', path, { cookie: w.owner.cookie })).status).toBe(200);
   });
 
   it('answers 404 for another organization or an unknown integration id', async () => {
@@ -173,7 +168,6 @@ describe('relay integrations API', () => {
     const r = await w.connectRunner();
     await serve(r, [{ integrationId: m.integration.id, kind: 'generic' }]);
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
-    await makeBusiness(w); // the mode was set straight in the table, so a replay gives the default back
     const [row] = await q('SELECT status, kind FROM relay_integrations WHERE id=$1', [m.integration.id]);
     expect(row).toMatchObject({ status: 'active', kind: 'generic' });
     expect(await q('SELECT 1 FROM relay_presence WHERE integration_id=$1', [m.integration.id])).toHaveLength(

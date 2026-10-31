@@ -70,7 +70,7 @@ export async function buildMe(
   if (activeId) {
     const org = (await loadOrg(ctx.pool, activeId)) as OrgRow | null;
     const role = org ? await orgRoleOf(ctx.pool, userId, activeId) : null;
-    if (org && role) activeOrg = await activeOrgDto(ctx, org, role);
+    if (org && role) activeOrg = await activeOrgDto(ctx, org, role, userId);
   }
   const visible = await rows<{ project_id: string }>(ctx.pool, VISIBLE_PROJECTS_FOR_ME_SQL, [userId]);
   const guestIn = session.user.kind === 'super_admin' ? [] : await guestOrgs(ctx, userId);

@@ -5,9 +5,9 @@ import { pipeline } from './helpers/pipeline.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 /**
- * Business card types: nothing is installed in a developer organization; switching to Business installs the six shipped
- * workflows and enables them on its projects; a card of each type is created with its fields and no repository; a
- * workflow that uses repositories is refused there.
+ * Business card types: every organization has the six shipped workflows from the start, enabled on its projects, and
+ * switching the view installs nothing; a card of each type is created with its fields and no repository; a code card is
+ * never refused because of the view.
  */
 let w: World;
 beforeAll(async () => {
@@ -43,17 +43,9 @@ const SAMPLE: Record<string, Record<string, string>> = {
   quote: { customer: 'Acme', scope: '10 chairs', amount: '1200', validUntil: '2026-12-15' },
 };
 
-describe('a developer organization', () => {
-  it('has no business workflow', async () => {
-    expect(await installed()).toEqual([]);
-    expect((await enabled()).map((e) => e.workflow_key)).not.toContain('business-quote');
-  });
-});
-
-describe('a business organization', () => {
-  it('installs the six workflows and enables them on its project when it switches', async () => {
-    await ok(w.t.req('DELETE', `/api/projects/${w.projectId}/repos/${w.repoId}`, { cookie: w.owner.cookie }));
-    await ok(w.t.req('PATCH', '/api/org', { cookie: w.owner.cookie, body: { mode: 'business' } }));
+describe('a software-default organization', () => {
+  it('has the six business workflows from the start, enabled on its project, without any switch', async () => {
+    expect((await q('SELECT mode FROM organizations WHERE id=$1', [orgId()]))[0]?.mode).toBe('dev');
     expect((await installed()).sort()).toEqual([...keys()].sort());
     const on = await enabled();
     for (const t of BUSINESS_CARD_TYPES) {
@@ -61,6 +53,24 @@ describe('a business organization', () => {
       expect(row?.default_card_types).toEqual([t]);
     }
     expect(on.some((e) => e.workflow_key === 'code')).toBe(true);
+  });
+
+  it('creates a code card as before, and a business card, whatever its view', async () => {
+    const code = await newCard({ title: 'Fix it', cardType: 'feature', specify: false });
+    expect(code.status).toBe(201);
+    await ok(w.t.req('PUT', '/api/org/view', { cookie: w.owner.cookie, body: { view: 'business' } }));
+    const code2 = await newCard({ title: 'Fix it again', cardType: 'feature', specify: false });
+    expect(code2.status).toBe(201);
+    await ok(w.t.req('PUT', '/api/org/view', { cookie: w.owner.cookie, body: { view: null } }));
+  });
+});
+
+describe('a business organization', () => {
+  it('switching the default view installs and removes nothing', async () => {
+    await ok(w.t.req('DELETE', `/api/projects/${w.projectId}/repos/${w.repoId}`, { cookie: w.owner.cookie }));
+    const before = (await installed()).sort();
+    await ok(w.t.req('PATCH', '/api/org', { cookie: w.owner.cookie, body: { mode: 'business' } }));
+    expect((await installed()).sort()).toEqual(before);
   });
 
   it('creating a card of each type keeps its fields, with no repository', async () => {
@@ -75,12 +85,6 @@ describe('a business organization', () => {
       expect(res.card.effectiveCompletionAction).toBeNull();
       for (const [k, v] of Object.entries(SAMPLE[t] ?? {})) expect(String(res.card.fields[k])).toBe(v);
     }
-  });
-
-  it('refuses a card whose workflow uses repositories', async () => {
-    const r = await newCard({ title: 'Fix it', cardType: 'feature', specify: false });
-    expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe('business_mode_code_workflow');
   });
 
   it('does not overwrite a workflow the organization already changed, and installing twice adds nothing', async () => {

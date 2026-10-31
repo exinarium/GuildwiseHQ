@@ -3,9 +3,12 @@ import {
   ActiveOrgSchema,
   canSetOrgMode,
   DEV_ONLY_ROLE_KEYS,
+  effectiveView,
   isBusinessOrg,
-  isDevOnlyRoleKey,
+  isBusinessView,
   OrgModeSchema,
+  SetMemberViewRequestSchema,
+  isDevOnlyRoleKey,
   PatchOrgRequestSchema,
 } from '../src/index.ts';
 
@@ -62,5 +65,40 @@ describe('the mode on the wire', () => {
     expect(canSetOrgMode({ orgRole: 'owner' })).toBe(true);
     expect(canSetOrgMode({ orgRole: 'admin' })).toBe(true);
     expect(canSetOrgMode({ orgRole: 'member' })).toBe(false);
+  });
+});
+
+describe('views: a user override beats the organization default', () => {
+  it('falls back to the organization default when the member has no override', () => {
+    expect(effectiveView({ mode: 'business' })).toBe('business');
+    expect(effectiveView({ mode: 'dev', viewOverride: null })).toBe('dev');
+    expect(effectiveView(null)).toBe('dev');
+  });
+  it('the override wins in both directions', () => {
+    expect(effectiveView({ mode: 'dev', viewOverride: 'business' })).toBe('business');
+    expect(effectiveView({ mode: 'business', viewOverride: 'dev' })).toBe('dev');
+    expect(isBusinessView({ mode: 'business', viewOverride: 'dev' })).toBe(false);
+    expect(isBusinessView({ mode: 'dev', viewOverride: 'business' })).toBe(true);
+  });
+  it('the organization default alone is not the view', () => {
+    expect(isBusinessOrg({ mode: 'business', viewOverride: 'dev' })).toBe(true);
+  });
+  it('PUT /api/org/view takes a view or null, nothing else', () => {
+    expect(SetMemberViewRequestSchema.safeParse({ view: 'business' }).success).toBe(true);
+    expect(SetMemberViewRequestSchema.safeParse({ view: null }).success).toBe(true);
+    expect(SetMemberViewRequestSchema.safeParse({ view: 'x' }).success).toBe(false);
+  });
+  it('an active org without an override parses as null', () => {
+    const org = ActiveOrgSchema.parse({
+      id: '8f1d2c3a-0000-4000-8000-000000000001',
+      name: 'Acme',
+      role: 'owner',
+      status: 'active',
+      plan: 'founding',
+      planName: 'Founding',
+      features: {},
+      banners: [],
+    });
+    expect(org.viewOverride).toBeNull();
   });
 });

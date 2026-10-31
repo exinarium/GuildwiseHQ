@@ -4,6 +4,7 @@ import {
   type CapabilityMeta,
   indexPack,
   isBusinessRoleKey,
+  BUSINESS_SEAT_KEYS,
   PACK_SEAT_KEYS,
   PACKS_CAPABILITY,
   type PackSnapshot,
@@ -692,23 +693,23 @@ describe('business roles as seats (mode)', () => {
   const seatKeys = async () =>
     (await owner('GET', `/api/packs/${packId}/team`)).seats.map((s: { key: string }) => s.key);
 
-  it('a dev organization is offered exactly the seats it had, and refuses a business seat', async () => {
+  it('a software-default organization is offered every seat and seats a pack agent on a business one', async () => {
     await setMode('dev');
     const keys = await seatKeys();
     for (const k of PACK_SEAT_KEYS) expect(keys).toContain(k);
-    expect(keys.filter((k: string) => isBusinessRoleKey(k))).toEqual([]);
+    for (const k of BUSINESS_SEAT_KEYS) expect(keys).toContain(k);
     const roles = (await owner('GET', '/api/roles')).roles.map(
       (r: { definition: { key: string } }) => r.definition.key,
     );
-    expect(roles.filter((k: string) => isBusinessRoleKey(k))).toEqual([]);
+    for (const k of BUSINESS_SEAT_KEYS) expect(roles).toContain(k);
     const before = (await agents()).length;
     await owner(
       'POST',
       `/api/packs/${packId}/agents/hire`,
       hireBody([{ key: 'crew-agent-ux', seat: 'front_desk' }]),
-      409,
+      201,
     );
-    expect((await agents()).length).toBe(before);
+    expect((await agents()).length).toBe(before + 1);
   });
 
   it('a business organization is offered the business seats and seats a pack agent on one, with no new role', async () => {

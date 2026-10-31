@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BUILTIN_ROLES, BUSINESS_ROLE_KEYS, isBusinessRoleKey, type PackSnapshot } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hireChecks } from '../src/ceo/actions2.ts';
 import { ensureRole } from '../src/commands/pack-hire.ts';
 import { withAppendTx } from '../src/db/tx.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -48,40 +47,46 @@ describe('business roles in the catalogue (AC 1)', () => {
   });
 });
 
-describe('a dev organization (AC 5)', () => {
-  it('lists exactly the built-in roles it had before, and none of the business roles', async () => {
+describe('a software-default organization', () => {
+  it('lists every built-in role, the business roles too', async () => {
     await setMode('dev');
     const keys = await roleKeys();
-    for (const k of BUSINESS_ROLE_KEYS) expect(keys).not.toContain(k);
-    for (const r of BUILTIN_ROLES.filter((x) => !isBusinessRoleKey(x.key))) expect(keys).toContain(r.key);
+    for (const r of BUILTIN_ROLES) expect(keys).toContain(r.key);
   });
 
-  it('refuses to hire a business role (role_not_in_mode)', async () => {
-    const r = await hireReq('Dora', 'front_desk');
-    expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe('role_not_in_mode');
+  it('hires a business role', async () => {
+    await ok(hireReq('Dora', 'front_desk'), 201);
   });
 
-  it('does not list the business department', async () => {
+  it('lists the business department', async () => {
     const d = await ok<{ departments: { name: string }[] }>(
       w.t.req('GET', '/api/departments', { cookie: w.owner.cookie }),
     );
-    expect(d.departments.map((x) => x.name)).not.toContain('business');
+    expect(d.departments.map((x) => x.name)).toContain('business');
+  });
+
+  it('shows the business roles in the organization catalogue', async () => {
+    const cat = await ok(w.t.req('GET', '/api/org/catalogue', { cookie: w.owner.cookie }));
+    for (const k of BUSINESS_ROLE_KEYS) expect(JSON.stringify(cat)).toContain(`"${k}"`);
   });
 });
 
-describe('a business organization (AC 1, AC 3)', () => {
-  it('lists the seven roles and hires each one', async () => {
+describe('a business-default organization (AC 1, AC 3)', () => {
+  it('lists the seven roles and hires each one, and the software roles too', async () => {
     await setMode('business');
     const keys = await roleKeys();
     for (const k of BUSINESS_ROLE_KEYS) expect(keys).toContain(k);
+    for (const r of BUILTIN_ROLES) expect(keys).toContain(r.key);
     let n = 0;
     for (const k of BUSINESS_ROLE_KEYS) await ok(hireReq(`Biz ${++n}`, k), 201);
+    await ok(hireReq('Ken', 'builder'), 201);
+    await ok(hireReq('Rex', 'reviewer'), 201);
     const hired = await q(`SELECT role_key FROM agents WHERE org_id=$1 AND role_key = ANY($2)`, [
       w.owner.id,
       [...BUSINESS_ROLE_KEYS],
     ]);
-    expect(hired).toHaveLength(7);
+    // the seven, plus Dora hired above
+    expect(hired).toHaveLength(8);
   });
 
   it('hiring a business role creates no organization role row', async () => {
@@ -90,21 +95,6 @@ describe('a business organization (AC 1, AC 3)', () => {
       [...BUSINESS_ROLE_KEYS],
     ]);
     expect(own).toHaveLength(0);
-  });
-});
-
-describe('a dev organization: more lists (AC 5)', () => {
-  it('shows no business role or department in the catalogue, departments and CEO hire checks', async () => {
-    await setMode('dev');
-    const cat = await ok(w.t.req('GET', '/api/org/catalogue', { cookie: w.owner.cookie }));
-    for (const k of BUSINESS_ROLE_KEYS) expect(JSON.stringify(cat)).not.toContain(`"${k}"`);
-    const d = await ok<{ departments: { name: string }[] }>(
-      w.t.req('GET', '/api/departments', { cookie: w.owner.cookie }),
-    );
-    expect(d.departments.map((x) => x.name)).not.toContain('business');
-    const env = { ctx: w.t.app.ctx, orgId: w.owner.id } as never;
-    const c = await hireChecks(env, 'front_desk', [], 1);
-    expect(c.refuse).toBeTruthy();
   });
 });
 
