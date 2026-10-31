@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { RelayEvent, RelayHandler } from '../dispatch.ts';
-import { relayEventFile, type RelaySink } from '../generic.ts';
+import { type RelaySink, relayEventFile } from '../generic.ts';
 import type { WhatsAppSecretStore } from './store.ts';
 import { verifyHandshake, verifySignature } from './verify.ts';
 
@@ -72,15 +72,18 @@ export function whatsAppHandler(deps: {
     }
     if (e.method !== 'POST') return { status: 405 };
     const sigs = headerValues(e, 'x-hub-signature-256');
-    const verdict =
-      sigs.length > 1 ? 'malformed' : verifySignature(e.body, sigs[0], s.appSecret);
+    const verdict = sigs.length > 1 ? 'malformed' : verifySignature(e.body, sigs[0], s.appSecret);
     if (verdict !== 'ok') {
       const status = verdict === 'missing' ? 401 : 403;
       note(verdict === 'missing' ? 'sig_missing' : 'sig_invalid', status);
       return { status };
     }
     const summary = summarize(e.body);
-    if (s.phoneNumberId && summary.phoneNumberIds.length > 0 && !summary.phoneNumberIds.includes(s.phoneNumberId)) {
+    if (
+      s.phoneNumberId &&
+      summary.phoneNumberIds.length > 0 &&
+      !summary.phoneNumberIds.includes(s.phoneNumberId)
+    ) {
       note('ignored:other_number', 200);
       return { status: 200 };
     }
@@ -96,7 +99,9 @@ export function whatsAppHandler(deps: {
     };
     note('delivered', 200, ` messages=${summary.messages} statuses=${summary.statuses}`);
     setImmediate(() => {
-      void deps.intake.accept(event).catch(() => ctx.log.warn(`relay whatsapp_cloud ${e.integrationId} intake failed`));
+      void deps.intake
+        .accept(event)
+        .catch(() => ctx.log.warn(`relay whatsapp_cloud ${e.integrationId} intake failed`));
     });
     return { status: 200 };
   };

@@ -15,7 +15,12 @@ export function verifyHandshake(
   const given = one('hub.verify_token');
   if (given === null || !tokenEquals(given, verifyToken)) return { status: 403 };
   const challenge = one('hub.challenge');
-  if (challenge === null || challenge.length === 0 || challenge.length > 512 || !/^[\x21-\x7e]+$/.test(challenge))
+  if (
+    challenge === null ||
+    challenge.length === 0 ||
+    challenge.length > 512 ||
+    !/^[\x21-\x7e]+$/.test(challenge)
+  )
     return { status: 400 };
   return { status: 200, body: challenge };
 }

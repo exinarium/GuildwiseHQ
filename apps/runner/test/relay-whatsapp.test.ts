@@ -4,16 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeEnvelope, type ServerToRunnerOf } from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { RunnerConfigSchema } from '../src/config.ts';
+import type { Logger } from '../src/log.ts';
 import { addRelayIntegration } from '../src/relay/config.ts';
 import { RelayDispatcher, type RelayEvent } from '../src/relay/dispatch.ts';
 import { FileRelaySink, relayEventFile } from '../src/relay/generic.ts';
 import { type InboundEvent, whatsAppHandler } from '../src/relay/whatsapp/handler.ts';
 import { WhatsAppSecretStore } from '../src/relay/whatsapp/store.ts';
 import { verifyHandshake, verifySignature } from '../src/relay/whatsapp/verify.ts';
-import { RunnerConfigSchema } from '../src/config.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact } from '../src/secrets/redact.ts';
-import type { Logger } from '../src/log.ts';
 
 const ID = '0198f2a0-0000-7000-8000-000000000001';
 const SECRET = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
@@ -34,17 +34,37 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('verifyHandshake', () => {
   const q = (o: Record<string, string>) => new URLSearchParams(o).toString();
   it('answers the challenge for the right token', () => {
-    expect(verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '1158201444' }), TOKEN)).toEqual({ status: 200, body: '1158201444' });
+    expect(
+      verifyHandshake(
+        q({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '1158201444' }),
+        TOKEN,
+      ),
+    ).toEqual({ status: 200, body: '1158201444' });
   });
   it('refuses a wrong or missing token or mode', () => {
-    expect(verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.verify_token': 'nope', 'hub.challenge': '1' }), TOKEN).status).toBe(403);
+    expect(
+      verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.verify_token': 'nope', 'hub.challenge': '1' }), TOKEN)
+        .status,
+    ).toBe(403);
     expect(verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.challenge': '1' }), TOKEN).status).toBe(403);
     expect(verifyHandshake(q({ 'hub.verify_token': TOKEN, 'hub.challenge': '1' }), TOKEN).status).toBe(403);
-    expect(verifyHandshake(q({ 'hub.mode': 'unsubscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '1' }), TOKEN).status).toBe(403);
-    expect(verifyHandshake(`hub.mode=subscribe&hub.verify_token=${TOKEN}&hub.verify_token=${TOKEN}&hub.challenge=1`, TOKEN).status).toBe(403);
+    expect(
+      verifyHandshake(
+        q({ 'hub.mode': 'unsubscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '1' }),
+        TOKEN,
+      ).status,
+    ).toBe(403);
+    expect(
+      verifyHandshake(
+        `hub.mode=subscribe&hub.verify_token=${TOKEN}&hub.verify_token=${TOKEN}&hub.challenge=1`,
+        TOKEN,
+      ).status,
+    ).toBe(403);
   });
   it('is 400 without a challenge', () => {
-    expect(verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN }), TOKEN).status).toBe(400);
+    expect(verifyHandshake(q({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN }), TOKEN).status).toBe(
+      400,
+    );
   });
 });
 
@@ -60,7 +80,9 @@ describe('verifySignature', () => {
   });
   it('fails for re-serialised or altered bytes', () => {
     const sig = sign(body);
-    expect(verifySignature(Buffer.from(JSON.stringify(JSON.parse(body.toString()))), sig, SECRET)).toBe('mismatch');
+    expect(verifySignature(Buffer.from(JSON.stringify(JSON.parse(body.toString()))), sig, SECRET)).toBe(
+      'mismatch',
+    );
     expect(verifySignature(Buffer.from(`${body.toString()} `), sig, SECRET)).toBe('mismatch');
     const decomposed = Buffer.from('{"a":1, "b":"é"}');
     expect(verifySignature(decomposed, sig, SECRET)).toBe('mismatch');
@@ -153,7 +175,21 @@ describe('whatsAppHandler', () => {
   });
   const ctx = { integration: { id: ID, kind: 'whatsapp_cloud' as const }, log };
   const payload = (phone = '555000111') =>
-    Buffer.from(JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: phone }, messages: [{ id: 'm1' }] } }] }] }));
+    Buffer.from(
+      JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                field: 'messages',
+                value: { metadata: { phone_number_id: phone }, messages: [{ id: 'm1' }] },
+              },
+            ],
+          },
+        ],
+      }),
+    );
 
   it('delivers a correctly signed POST and calls the intake once', async () => {
     const seen: InboundEvent[] = [];
@@ -172,7 +208,12 @@ describe('whatsAppHandler', () => {
   });
   it('answers 200 before the intake runs, and a never-finishing intake does not hold it up', async () => {
     let called = false;
-    const { handler } = await setup({ accept: () => { called = true; return new Promise<void>(() => {}); } });
+    const { handler } = await setup({
+      accept: () => {
+        called = true;
+        return new Promise<void>(() => {});
+      },
+    });
     const body = payload();
     const r = await handler(event({ body, headers: [['x-hub-signature-256', sign(body)]] }), ctx);
     expect(r.status).toBe(200);
@@ -185,11 +226,35 @@ describe('whatsAppHandler', () => {
     const { handler, sinkDir } = await setup({ accept: async () => void calls++ });
     const body = payload();
     expect((await handler(event({ body }), ctx)).status).toBe(401);
-    expect((await handler(event({ body, headers: [['x-hub-signature-256', 'sha256=zz']] }), ctx)).status).toBe(403);
-    expect((await handler(event({ body, headers: [['x-hub-signature-256', sign(body, 'wrong-secret-wrong-secret')]] }), ctx)).status).toBe(403);
-    expect((await handler(event({ body, headers: [['x-hub-signature-256', sign(body)], ['x-hub-signature-256', sign(body)]] }), ctx)).status).toBe(403);
+    expect(
+      (await handler(event({ body, headers: [['x-hub-signature-256', 'sha256=zz']] }), ctx)).status,
+    ).toBe(403);
+    expect(
+      (
+        await handler(
+          event({ body, headers: [['x-hub-signature-256', sign(body, 'wrong-secret-wrong-secret')]] }),
+          ctx,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await handler(
+          event({
+            body,
+            headers: [
+              ['x-hub-signature-256', sign(body)],
+              ['x-hub-signature-256', sign(body)],
+            ],
+          }),
+          ctx,
+        )
+      ).status,
+    ).toBe(403);
     const altered = Buffer.from(`${body.toString()} `);
-    expect((await handler(event({ body: altered, headers: [['x-hub-signature-256', sign(body)]] }), ctx)).status).toBe(403);
+    expect(
+      (await handler(event({ body: altered, headers: [['x-hub-signature-256', sign(body)]] }), ctx)).status,
+    ).toBe(403);
     await new Promise((res) => setImmediate(res));
     expect(calls).toBe(0);
     expect(existsSync(sinkDir)).toBe(false);
@@ -197,7 +262,9 @@ describe('whatsAppHandler', () => {
   it('ignores events for another phone number with 200 and no delivery', async () => {
     const { handler, sinkDir } = await setup({ accept: async () => {} }, '999999');
     const body = payload('555000111');
-    expect((await handler(event({ body, headers: [['x-hub-signature-256', sign(body)]] }), ctx)).status).toBe(200);
+    expect((await handler(event({ body, headers: [['x-hub-signature-256', sign(body)]] }), ctx)).status).toBe(
+      200,
+    );
     expect(existsSync(sinkDir) && readdirSync(sinkDir).length > 0).toBe(false);
   });
   it('handshake through the dispatcher returns exactly the challenge; unbound id is 503', async () => {
@@ -213,11 +280,15 @@ describe('whatsAppHandler', () => {
         body: '',
         deadlineMs: 5000,
       }) as ServerToRunnerOf<'relay.request'>;
-    const ok = await dispatcher.dispatch(req(`hub.mode=subscribe&hub.verify_token=${TOKEN}&hub.challenge=424242`));
+    const ok = await dispatcher.dispatch(
+      req(`hub.mode=subscribe&hub.verify_token=${TOKEN}&hub.challenge=424242`),
+    );
     expect(ok?.status).toBe(200);
     expect(Buffer.from(ok?.body ?? '', 'base64').toString()).toBe('424242');
     expect(ok?.headers?.['content-type']).toContain('text/plain');
-    expect((await dispatcher.dispatch(req('hub.mode=subscribe&hub.verify_token=bad&hub.challenge=1')))?.status).toBe(403);
+    expect(
+      (await dispatcher.dispatch(req('hub.mode=subscribe&hub.verify_token=bad&hub.challenge=1')))?.status,
+    ).toBe(403);
     store.remove(ID);
     expect((await dispatcher.dispatch(req('hub.mode=subscribe')))?.status).toBe(503);
     expect(logs.join('\n')).not.toContain(TOKEN);
@@ -227,7 +298,19 @@ describe('whatsAppHandler', () => {
     const store = new WhatsAppSecretStore({ file: join(dir, 'k', 'wa.json'), keys });
     await store.set(ID, { appSecret: SECRET, verifyToken: TOKEN });
     const d = new RelayDispatcher({ integrations: () => [{ id: ID, kind: 'whatsapp_cloud' }], log });
-    d.register('whatsapp_cloud', whatsAppHandler({ store, sink: { put: async () => { throw new Error('disk'); } }, sinkDir: dir, intake: { accept: async () => {} } }));
+    d.register(
+      'whatsapp_cloud',
+      whatsAppHandler({
+        store,
+        sink: {
+          put: async () => {
+            throw new Error('disk');
+          },
+        },
+        sinkDir: dir,
+        intake: { accept: async () => {} },
+      }),
+    );
     const body = payload();
     const r = await d.dispatch(
       makeEnvelope('relay.request', {
@@ -247,7 +330,11 @@ describe('whatsAppHandler', () => {
 
 describe('relay config', () => {
   it('refuses to add whatsapp_cloud by hand', () => {
-    const r = addRelayIntegration(RunnerConfigSchema.parse({ serverUrl: 'http://x', workstationId: 'w', runnerToken: 't' } as never), ID, 'whatsapp_cloud');
+    const r = addRelayIntegration(
+      RunnerConfigSchema.parse({ serverUrl: 'http://x', workstationId: 'w', runnerToken: 't' } as never),
+      ID,
+      'whatsapp_cloud',
+    );
     expect(r.ok).toBe(false);
   });
 });

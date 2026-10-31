@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
-import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import {
   ClaudeAccountKeySchema,
@@ -673,7 +673,8 @@ async function whatsappConnect(idArg: string | undefined, opts: WhatsAppConnectO
   const generated = verifyToken === '';
   if (generated) verifyToken = randomBytes(24).toString('base64url');
   registerSecret(verifyToken);
-  const phoneNumberId = opts.phoneNumberId ?? ((await promptLine('Phone number id (optional): ')) || undefined);
+  const phoneNumberId =
+    opts.phoneNumberId ?? ((await promptLine('Phone number id (optional): ')) || undefined);
   await store.set(id, { appSecret, verifyToken, phoneNumberId });
   touchRecheck(paths.secrets);
   console.log(`Saved for ${id}. A running runner picks it up within about 10 seconds; no restart is needed.`);

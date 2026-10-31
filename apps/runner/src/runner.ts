@@ -39,8 +39,8 @@ import {
   type ProviderAccountPromoteResult,
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
-  RELEASE_FACTS_CAPABILITY,
   RELAY_FEATURE,
+  RELEASE_FACTS_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -414,7 +414,10 @@ export class Runner {
     };
     this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
-    this.whatsapp = new WhatsAppSecretStore({ file: join(this.paths.secrets, 'relay-whatsapp.json'), keys: this.keys });
+    this.whatsapp = new WhatsAppSecretStore({
+      file: join(this.paths.secrets, 'relay-whatsapp.json'),
+      keys: this.keys,
+    });
     this.relay.register(
       'whatsapp_cloud',
       whatsAppHandler({ store: this.whatsapp, sink: relaySink, sinkDir, intake: noopIntake }),
@@ -1132,7 +1135,8 @@ export class Runner {
   /** Tells the server which relay integrations this workstation serves (ids and kind only); replaces the previous set. */
   private announceRelay(): void {
     // Also with nothing to serve: the server then drops whatever an earlier announcement named.
-    if (this.serverFeatures.has(RELAY_FEATURE)) this.client.send('relay.serve', { integrations: this.relay.served() });
+    if (this.serverFeatures.has(RELAY_FEATURE))
+      this.client.send('relay.serve', { integrations: this.relay.served() });
   }
 
   async stop(): Promise<void> {

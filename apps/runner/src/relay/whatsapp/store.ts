@@ -68,7 +68,8 @@ export class WhatsAppSecretStore {
 
   async set(id: string, s: WhatsAppSecrets): Promise<void> {
     const key = WhatsAppSecretStore.normalizeId(id);
-    if (!/^\S{16,256}$/.test(s.appSecret)) throw new Error('the app secret must be 16-256 characters without spaces');
+    if (!/^\S{16,256}$/.test(s.appSecret))
+      throw new Error('the app secret must be 16-256 characters without spaces');
     if (!/^[\x21-\x7e]{8,256}$/.test(s.verifyToken))
       throw new Error('the verify token must be 8-256 printable characters without spaces');
     if (s.phoneNumberId !== undefined && !/^\d{5,30}$/.test(s.phoneNumberId))
