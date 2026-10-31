@@ -1,6 +1,6 @@
 import {
-  InstallBriefPlaybookRequestSchema,
   IdParamsSchema,
+  InstallBriefPlaybookRequestSchema,
   PatchBriefPlaybookRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -8,11 +8,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { orgRoleOf, requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
-import {
-  installBriefPlaybook,
-  listBriefPlaybooks,
-  patchBriefPlaybook,
-} from '../commands/brief-playbooks.ts';
+import { installBriefPlaybook, listBriefPlaybooks, patchBriefPlaybook } from '../commands/brief-playbooks.ts';
 import type { OrgCtx } from '../commands/schedules.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';

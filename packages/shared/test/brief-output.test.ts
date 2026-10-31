@@ -22,7 +22,9 @@ describe('brief output links', () => {
     );
     const body = outputWebhookBody('generic', withLinks, ctx) as { data: { links: unknown[] } };
     expect(body.data.links).toHaveLength(1);
-    expect(JSON.stringify(outputWebhookBody('slack', withLinks, ctx))).toContain('https://hq.test/cards/WEB-2');
+    expect(JSON.stringify(outputWebhookBody('slack', withLinks, ctx))).toContain(
+      'https://hq.test/cards/WEB-2',
+    );
     expect(sheetRow(ctx.at, 'x', withLinks)[4]).toContain('https://hq.test/cards/WEB-2');
   });
 
@@ -31,7 +33,9 @@ describe('brief output links', () => {
   });
 
   it('without links every output is as before', () => {
-    expect(outputEmail(base, 'Morning plan', email).text).toBe('Do WEB-2 first.\n\nhttps://hq.test/cards/WEB-1');
+    expect(outputEmail(base, 'Morning plan', email).text).toBe(
+      'Do WEB-2 first.\n\nhttps://hq.test/cards/WEB-1',
+    );
     expect(JSON.stringify(outputWebhookBody('generic', base, ctx))).not.toContain('links');
     expect(sheetRow(ctx.at, 'x', base)[4]).toBe('Do WEB-2 first.\n\nhttps://hq.test/cards/WEB-1');
   });

@@ -37,13 +37,13 @@ import type { Tx } from '../db/tx.ts';
 import { badRequest, conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { buildBriefContext } from './brief-context.ts';
 import { singleRepoDefault } from './card-repo.ts';
 import { resolveCardWorkflow, specifyTarget } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { requestHygiene } from './hygiene.ts';
 import { regressionRunEvents } from './regression.ts';
-import { buildBriefContext } from './brief-context.ts';
 import { buildDigest } from './schedule-digest.ts';
 
 /** `YYYY-MM-DD` of `at` in `timezone`: scheduled cards carry the day in their title. */

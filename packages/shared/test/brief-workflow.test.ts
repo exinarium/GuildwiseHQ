@@ -69,7 +69,10 @@ describe('Brief playbooks', () => {
   });
 
   it('defaults follow the design', () => {
-    expect(BRIEF_PLAYBOOKS.morning_plan).toMatchObject({ defaultOwnerRole: 'personal_assistant', maxWords: 150 });
+    expect(BRIEF_PLAYBOOKS.morning_plan).toMatchObject({
+      defaultOwnerRole: 'personal_assistant',
+      maxWords: 150,
+    });
     expect(BRIEF_PLAYBOOKS.weekly_owner_brief).toMatchObject({
       defaultOwnerRole: 'operations_analyst',
       maxWords: 300,
@@ -81,13 +84,19 @@ describe('Brief playbooks', () => {
     const dest = [{ kind: 'webhook', url: 'https://example.com/h', format: 'generic' }];
     expect(InstallBriefPlaybookRequestSchema.safeParse({ destinations: dest }).success).toBe(true);
     expect(InstallBriefPlaybookRequestSchema.safeParse({ destinations: [] }).success).toBe(false);
-    expect(InstallBriefPlaybookRequestSchema.safeParse({ destinations: dest, ownerRole: 'front_desk' }).success).toBe(
+    expect(
+      InstallBriefPlaybookRequestSchema.safeParse({ destinations: dest, ownerRole: 'front_desk' }).success,
+    ).toBe(false);
+    expect(InstallBriefPlaybookRequestSchema.safeParse({ destinations: dest, time: '25:00' }).success).toBe(
       false,
     );
-    expect(InstallBriefPlaybookRequestSchema.safeParse({ destinations: dest, time: '25:00' }).success).toBe(false);
   });
 
   it('lists the due field of each business type', () => {
-    expect(BUSINESS_DUE_FIELDS).toMatchObject({ follow_up: 'dueDate', reminder: 'remindOn', quote: 'validUntil' });
+    expect(BUSINESS_DUE_FIELDS).toMatchObject({
+      follow_up: 'dueDate',
+      reminder: 'remindOn',
+      quote: 'validUntil',
+    });
   });
 });

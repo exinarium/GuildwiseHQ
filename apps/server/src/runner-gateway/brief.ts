@@ -288,7 +288,10 @@ export async function buildBrief(
             // A Brief card prints `context` and `requirements` in their own sections: Details holds the rest.
             fieldLabels: Object.fromEntries(
               wf.definition.customFields
-                .filter((c) => !isBriefWorkflowKey(wf.definition.key) || !['context', 'requirements'].includes(c.key))
+                .filter(
+                  (c) =>
+                    !isBriefWorkflowKey(wf.definition.key) || !['context', 'requirements'].includes(c.key),
+                )
                 .map((c) => [c.key, c.label]),
             ),
           }

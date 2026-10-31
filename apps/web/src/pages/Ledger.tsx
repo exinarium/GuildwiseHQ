@@ -1,6 +1,6 @@
 import { BookOpen, Search } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
-import { Link } from 'react-router';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import {
   useEditLedgerEntry,
@@ -252,12 +252,21 @@ function Entry({ e }: { e: LedgerEntry }) {
   const [reviewing, setReviewing] = useState<'set' | 'confirm' | null>(null);
   const retired = !!e.retiredAt;
   const long = e.body.length > 260 || e.body.split('\n').length > 4;
+  // A link from a brief (`/ledger?entry=<id>`) scrolls to the rule and highlights it.
+  const linked = useSearchParams()[0].get('entry') === e.id;
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (linked) ref.current?.scrollIntoView?.({ block: 'center' });
+  }, [linked]);
   return (
     <li
+      ref={ref}
+      id={`entry-${e.id}`}
+      data-linked={linked ? 'true' : undefined}
       data-testid="ledger-entry"
       data-scope={e.scope}
       data-retired={retired ? 'true' : undefined}
-      className={`px-4 py-4 ${retired ? 'opacity-60' : ''}`}
+      className={`px-4 py-4 ${retired ? 'opacity-60' : ''} ${linked ? 'bg-brand-soft ring-2 ring-brand' : ''}`}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <Badge tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}>

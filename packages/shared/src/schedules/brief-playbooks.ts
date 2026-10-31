@@ -30,7 +30,8 @@ export const BRIEF_PLAYBOOKS: Record<BriefPlaybookKey, BriefPlaybook> = {
     key: 'morning_plan',
     version: 1,
     name: 'Morning plan',
-    description: "Every working day: today's priorities, follow-ups and reminders that are due, and overdue items.",
+    description:
+      "Every working day: today's priorities, follow-ups and reminders that are due, and overdue items.",
     cadence: 'workdays',
     defaultTime: '07:00',
     defaultOwnerRole: 'personal_assistant',

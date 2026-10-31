@@ -57,15 +57,16 @@ async function briefLinks(ctx: Ctx, db: Queryable, cardId: string, o: CardOutput
         links.push({ label: `${ref} ${title}`, url: `${origin}/cards/${encodeURIComponent(ref)}` });
     }
   }
-  const ids = [...new Set([...o.text.matchAll(/\brule ([0-9a-f]{8})\b/gi)].map((m) => (m[1] as string).toLowerCase()))];
+  const ids = [
+    ...new Set([...o.text.matchAll(/\brule ([0-9a-f]{8})\b/gi)].map((m) => (m[1] as string).toLowerCase())),
+  ];
   if (ids.length) {
     const found = await rows(
       db,
       `SELECT id, title FROM ledger_entries WHERE org_id=$1 AND left(id::text, 8) = ANY($2::text[])`,
       [c.org_id, ids],
     );
-    for (const r of found)
-      links.push({ label: `Rule: ${r.title}`, url: `${origin}/ledger?entry=${r.id}` });
+    for (const r of found) links.push({ label: `Rule: ${r.title}`, url: `${origin}/ledger?entry=${r.id}` });
   }
   return links.length ? { ...o, links } : o;
 }

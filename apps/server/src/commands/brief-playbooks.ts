@@ -2,19 +2,19 @@ import { randomUUID } from 'node:crypto';
 import {
   BRIEF_PLAYBOOK_KEYS,
   BRIEF_PLAYBOOKS,
-  BUILTIN_WORKFLOWS,
-  BUSINESS_ROLES,
   type BriefPlaybook,
   type BriefPlaybookDto,
+  BUILTIN_WORKFLOWS,
+  BUSINESS_ROLES,
+  briefPlaybookCron,
+  briefPlaybookTemplate,
+  briefWorkflow,
+  briefWorkflowKey,
   type CreateScheduleRequest,
   type InstallBriefPlaybookRequest,
   isBriefPlaybookKey,
   isOrgManager,
   type PatchBriefPlaybookRequest,
-  briefPlaybookCron,
-  briefPlaybookTemplate,
-  briefWorkflow,
-  briefWorkflowKey,
   streamId,
   validateCustomWorkflow,
 } from '@aom/shared';
@@ -84,7 +84,10 @@ async function ensureBriefWorkflow(
   roleKey: string,
 ): Promise<string> {
   const key = briefWorkflowKey(roleKey);
-  const have = await one(tx, 'SELECT 1 FROM workflow_versions WHERE org_id=$1 AND key=$2 LIMIT 1', [orgId, key]);
+  const have = await one(tx, 'SELECT 1 FROM workflow_versions WHERE org_id=$1 AND key=$2 LIMIT 1', [
+    orgId,
+    key,
+  ]);
   if (!have) {
     const def = briefWorkflow(roleKey);
     const errors = validateCustomWorkflow(def, BUSINESS_ROLES, {
@@ -165,19 +168,24 @@ export async function installBriefPlaybook(
     await assertBusinessOrg(tx, o.orgId, 'Playbooks are available in business mode.');
     const installed = (await installedMap(tx, o.orgId)).get(playbook.key);
     if (installed)
-      throw conflict('playbook_installed', `${playbook.name} is already installed`, { scheduleId: installed });
+      throw conflict('playbook_installed', `${playbook.name} is already installed`, {
+        scheduleId: installed,
+      });
     const projects = await rows(
       tx,
       `SELECT id, created_by FROM projects WHERE org_id=$1 AND kind='project' AND status='active' ORDER BY created_at`,
       [o.orgId],
     );
     let project = req.projectId ? projects.find((p) => p.id === req.projectId) : undefined;
-    if (req.projectId && !project) throw badRequest('project_not_found', 'that project is not in this organization');
+    if (req.projectId && !project)
+      throw badRequest('project_not_found', 'that project is not in this organization');
     if (!project) {
-      if (projects.length > 1) throw badRequest('project_required', 'choose the project the cards are made in');
+      if (projects.length > 1)
+        throw badRequest('project_required', 'choose the project the cards are made in');
       project = projects[0];
     }
-    if (!project) throw badRequest('project_required', 'the organization has no project to make the cards in');
+    if (!project)
+      throw badRequest('project_required', 'the organization has no project to make the cards in');
     const role = req.ownerRole ?? playbook.defaultOwnerRole;
     const workflowKey = await ensureBriefWorkflow(ctx, tx, o.orgId, project as never, role);
     const timezone = req.timezone ?? (await reportingOf(tx, o.orgId)).timezone ?? 'UTC';
@@ -248,7 +256,8 @@ export async function patchBriefPlaybook(
     if (!proj) throw conflict('project_gone', 'the project of this playbook is gone');
     const workflowKey = await ensureBriefWorkflow(ctx, tx, o.orgId, proj as never, role);
     const cur = s.action as Record<string, unknown> & { deliverOutput?: { destinations: unknown[] } };
-    const maxWords = req.maxWords ?? (typeof curFields.maxWords === 'number' ? curFields.maxWords : undefined);
+    const maxWords =
+      req.maxWords ?? (typeof curFields.maxWords === 'number' ? curFields.maxWords : undefined);
     patch.action = {
       ...cur,
       template: {

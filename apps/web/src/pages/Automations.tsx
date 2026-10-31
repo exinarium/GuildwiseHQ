@@ -1,5 +1,8 @@
 import {
+  BRIEF_PLAYBOOKS,
+  type BriefPlaybookDto,
   type CreateScheduleResponse,
+  isBriefPlaybookKey,
   isWebhookAction,
   type ScheduleDto,
   type SystemScheduleDto,
@@ -29,6 +32,8 @@ import {
   useScheduleList,
   useTestSchedule,
 } from '../api/queries/schedules.ts';
+import { BriefPlaybookDialog } from '../components/schedules/BriefPlaybookDialog.tsx';
+import { BriefPlaybooks } from '../components/schedules/BriefPlaybooks.tsx';
 import { RunHistory } from '../components/schedules/RunHistory.tsx';
 import { ScheduleWizard } from '../components/schedules/ScheduleWizard.tsx';
 import {
@@ -57,6 +62,7 @@ export function Automations() {
   const [secret, setSecret] = useState<{ name: string; value: string; url?: string | undefined } | null>(
     null,
   );
+  const [playbookEdit, setPlaybookEdit] = useState<ScheduleDto | null>(null);
   const schedules = list.data?.schedules ?? [];
   const system = list.data?.system ?? [];
 
@@ -92,6 +98,7 @@ export function Automations() {
           onClose={() => setSecret(null)}
         />
       )}
+      <BriefPlaybooks schedules={schedules} onSecret={(v) => setSecret({ name: v.name, value: v.value })} />
       {list.isPending && <ListSkeleton label="Loading automations" rows={2} />}
       <ErrorBox error={list.error} onRetry={() => list.refetch()} />
       {ordered.map(([group, items]) => (
@@ -102,7 +109,11 @@ export function Automations() {
               <li key={s.id} data-testid={`schedule-${s.name}`}>
                 <ScheduleRow
                   schedule={s}
-                  onEdit={() => setWizard({ open: true, editing: s })}
+                  onEdit={() =>
+                    s.action.kind === 'create_card' && s.action.playbook
+                      ? setPlaybookEdit(s)
+                      : setWizard({ open: true, editing: s })
+                  }
                   onSecret={setSecret}
                 />
               </li>
@@ -135,6 +146,14 @@ export function Automations() {
           </ul>
         </section>
       )}
+      {playbookEdit && playbookEdit.action.kind === 'create_card' && playbookEdit.action.playbook && (
+        <BriefPlaybookDialog
+          playbook={playbookDto(playbookEdit)}
+          schedule={playbookEdit}
+          onClose={() => setPlaybookEdit(null)}
+          onSecret={(v) => setSecret({ name: v.name, value: v.value })}
+        />
+      )}
       <ScheduleWizard
         open={wizard.open}
         onOpenChange={(open) => setWizard((cur) => ({ ...cur, open }))}
@@ -143,6 +162,23 @@ export function Automations() {
       />
     </div>
   );
+}
+
+/** The playbook of an installed schedule, for its edit dialog. */
+function playbookDto(s: ScheduleDto): BriefPlaybookDto {
+  const key = s.action.kind === 'create_card' && s.action.playbook ? s.action.playbook.key : '';
+  const p = isBriefPlaybookKey(key) ? BRIEF_PLAYBOOKS[key] : BRIEF_PLAYBOOKS.morning_plan;
+  return {
+    key: p.key,
+    name: p.name,
+    description: p.description,
+    cadence: p.cadence,
+    defaultTime: p.defaultTime,
+    defaultWeekday: p.defaultWeekday ?? null,
+    defaultOwnerRole: p.defaultOwnerRole,
+    maxWords: p.maxWords,
+    scheduleId: s.id,
+  };
 }
 
 function SecretNotice({
@@ -265,6 +301,7 @@ function ScheduleRow({
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-lg font-semibold text-fg [overflow-wrap:anywhere]">{s.name}</h3>
         <Badge tone="brand">{actionLabel(s.action)}</Badge>
+        {s.action.kind === 'create_card' && s.action.playbook && <Badge>Playbook</Badge>}
         <Badge tone={s.enabled ? 'green' : 'amber'}>{s.enabled ? 'Enabled' : 'Paused'}</Badge>
         {s.orgLevel && (
           <Badge title="Acts for the whole organization: only Owners and Admins change it">
