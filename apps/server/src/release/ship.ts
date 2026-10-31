@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   DESK_SUBKIND,
+  RELEASE_PUBLISH_CAPABILITY,
+  RELEASE_PUBLISH_STEPS,
   RELEASE_SHIP_CAPABILITY,
   type ReleaseShipPayload,
   ReleaseShipPayloadSchema,
@@ -16,6 +18,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { enqueueReleasePublish, planReleasePublish } from './publish.ts';
 import { loadComponentRules } from './rules.ts';
 
 type ShipPayload = Omit<ReleaseShipPayload, 'commitAs'>;
@@ -189,10 +192,53 @@ export async function retryReleaseShipIn(
   const ship = await failedShipOf(tx, user, alert);
   if (ship.status !== 'failed')
     throw conflict('not_failed', `this release is ${ship.status}, only a stopped release can be retried`);
+  if ((RELEASE_PUBLISH_STEPS as readonly string[]).includes(ship.step ?? '')) {
+    // land, tag or publish: the release commit exists. Never resend release.ship (it would start over).
+    const target = await enqueueReleasePublishFor(ctx, tx, user, ship);
+    return target;
+  }
   const workstationId = await shipWorkstation(tx, ship.repo_id, user.id);
   const stored = ship.payload as ShipPayload;
   await queue(ctx, tx, userActor(user.id), ship as never, stored, stored.date, workstationId, true);
   return workstationId;
+}
+
+async function enqueueReleasePublishFor(ctx: Ctx, tx: Tx, user: { id: string }, ship: Row): Promise<string> {
+  const ws = await enqueueReleasePublishWorkstation(tx, ship);
+  if (!ws)
+    throw conflict(
+      'runner_too_old',
+      'The workstation that has this repository is offline or needs a newer runner. Start or update the runner and retry.',
+    );
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.release(ship.id),
+        event: {
+          type: 'ReleasePublishRetried',
+          payload: { shipId: ship.id, step: ship.step ?? 'land', workstationId: ws },
+        },
+        actor: userActor(user.id),
+        scope: projectScope(ship.org_id, ship.project_id),
+      },
+    ],
+    { tx },
+  );
+  const fresh = await one(tx, 'SELECT * FROM release_ships WHERE id=$1', [ship.id]);
+  const delivered = fresh ? await enqueueReleasePublish(tx, fresh, ctx.clock.now()) : null;
+  return delivered ?? ws;
+}
+
+async function enqueueReleasePublishWorkstation(tx: Tx, ship: Row): Promise<string | null> {
+  const ws = await one(
+    tx,
+    `SELECT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
+       JOIN workstation_capabilities wc ON wc.workstation_id = w.id
+      WHERE wr.project_repo_id=$1 AND w.status='active' AND w.connected AND $2 = ANY (wc.capabilities)
+      LIMIT 1`,
+    [ship.repo_id, RELEASE_PUBLISH_CAPABILITY],
+  );
+  return ws?.id ?? null;
 }
 
 /** Dismissing a stopped release abandons it: the proposal is closed so the repository can be proposed again. */
@@ -245,6 +291,7 @@ export async function applyReleaseShipResult(
   const shipId = String(payload.shipId ?? '');
   const parsed = ReleaseShipResultSchema.safeParse(result);
   const r = parsed.success ? parsed.data : undefined;
+  const deliver: { to: string | null } = { to: null };
   await withAppendTx(ctx.pool, async (tx) => {
     const ship = await one(tx, 'SELECT * FROM release_ships WHERE id=$1 FOR UPDATE', [shipId]);
     if (!ship || ship.status !== 'committing' || ship.workstation_id !== workstationId) return;
@@ -273,7 +320,7 @@ export async function applyReleaseShipResult(
         ...(comps.length ? [`Components: ${comps.join(', ')}.`] : []),
         ...(r.signedOff ? [`Signed off${r.signOffReason ? ` (${r.signOffReason})` : ''}.`] : []),
         ...r.notices,
-        'Nothing is tagged or published yet.',
+        'Nothing is tagged or published yet. Once the release PR is merged, Guildwise tags it and creates the release page.',
       ];
       const deskItemId = randomUUID();
       await ctx.store.append(
@@ -318,6 +365,8 @@ export async function applyReleaseShipResult(
         ],
         { tx },
       );
+      // how the release reaches main, and the first look at whether it did
+      deliver.to = await planReleasePublish(ctx, tx, ship.id);
       return;
     }
     const step = r?.step ?? 'prepare';
@@ -325,45 +374,60 @@ export async function applyReleaseShipResult(
       0,
       4000,
     );
-    const alertId = randomUUID();
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.desk(alertId),
-          event: {
-            type: 'DeskItemCreated',
-            payload: {
-              deskItemId: alertId,
-              kind: 'alert',
-              subkind: DESK_SUBKIND.releaseFailed,
-              title: `Release ${ship.version} stopped at ${step}`,
-              body: `${failure}\n\nNothing was force-pushed and no tag was made. Fix the cause, then Retry: it continues from this step. Dismiss abandons this release.`,
-              options: [
-                { id: 'retry', label: 'Retry' },
-                { id: 'dismiss', label: 'Dismiss' },
-              ],
-              blocking: false,
-              pinned: false,
-              projectId: ship.project_id,
-              affectedCardIds: [],
-              askedBy: { kind: 'system' },
-              data: { repoId: ship.repo_id, shipId: ship.id, step, summary: firstLine(failure) },
-            },
-          },
-          actor: SYSTEM_ACTOR,
-          scope,
-        },
-        {
-          streamId: streamId.release(ship.id),
-          event: {
-            type: 'ReleaseFailed',
-            payload: { shipId: ship.id, step, error: failure, alertDeskItemId: alertId },
-          },
-          actor: SYSTEM_ACTOR,
-          scope,
-        },
-      ],
-      { tx },
-    );
+    await appendReleaseFailure(ctx, tx, ship, step, failure, false);
   });
+  if (deliver.to)
+    void Promise.resolve(ctx.services.gateway.deliverPending(deliver.to)).catch(() => undefined);
+}
+
+/** The "Release stopped" alert and `ReleaseFailed` for any step; Retry continues from `step`. */
+export async function appendReleaseFailure(
+  ctx: Ctx,
+  tx: Tx,
+  ship: Row,
+  step: string,
+  failure: string,
+  tagged: boolean,
+): Promise<void> {
+  const scope = projectScope(ship.org_id, ship.project_id);
+  const alertId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.desk(alertId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId: alertId,
+            kind: 'alert',
+            subkind: DESK_SUBKIND.releaseFailed,
+            title: `Release ${ship.version} stopped at ${step}`,
+            body: `${failure}\n\nNothing was force-pushed${tagged ? '' : ' and no tag was made'}; steps that already ran are not repeated. Fix the cause, then Retry: it continues from this step. Dismiss abandons this release.`,
+            options: [
+              { id: 'retry', label: 'Retry' },
+              { id: 'dismiss', label: 'Dismiss' },
+            ],
+            blocking: false,
+            pinned: false,
+            projectId: ship.project_id,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+            data: { repoId: ship.repo_id, shipId: ship.id, step, summary: firstLine(failure) },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+      {
+        streamId: streamId.release(ship.id),
+        event: {
+          type: 'ReleaseFailed',
+          payload: { shipId: ship.id, step, error: failure, alertDeskItemId: alertId },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+    ],
+    { tx },
+  );
 }

@@ -1,6 +1,7 @@
 import type { ProjectRepoDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
+import { useResolveDeskItem } from '../api/queries/desk.ts';
 import { usePrepareRelease, useRequestReleasePr, useSetRepoMainBranch } from '../api/queries/forges.ts';
 import { useSetWorkingBranch } from '../api/queries/projects.ts';
 import { formatDate } from '../lib/time.ts';
@@ -63,6 +64,7 @@ export function WorkingBranchControl({
       )}
       {isOwner && repo.workingBranch && !sameBranch && <ReleasePr projectId={projectId} repo={repo} />}
       {isOwner && repo.workingBranch && !sameBranch && <PrepareRelease projectId={projectId} repo={repo} />}
+      <ReleaseStatus repo={repo} />
     </div>
   );
 }
@@ -278,9 +280,85 @@ export function releaseStatusLine(live: NonNullable<ProjectRepoDto['releasePropo
   const ship = live.ship;
   if (!ship || ship.status === 'committing') return `Release ${v}: preparing the release commit…`;
   if (ship.status === 'committed')
-    return `Release commit ${(ship.commit ?? '').slice(0, 7)} pushed${ship.branch ? ` to ${ship.branch}` : ''}, in the release PR`;
+    return ship.message
+      ? `Release ${v}: ${ship.message}`
+      : `Release commit ${(ship.commit ?? '').slice(0, 7)} pushed${ship.branch ? ` to ${ship.branch}` : ''}, in the release PR`;
+  if (ship.status === 'tagged')
+    return `Release ${v}: tagged ${ship.tag ?? `v${v}`}, creating the release page`;
+  if (ship.status === 'published') return `Release ${v} is published`;
   const why = (ship.error ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
   return `Release ${v} stopped at ${ship.step ?? 'a step'}${why ? `: ${why}` : ''} (Retry on the desk)`;
+}
+
+/**
+ * The last release of a repository (version, tag and release page links) and, while a release is being published, where
+ * it stands. A stopped publish step shows git's or the forge's message with Retry (the owner's "Retry" on the desk alert).
+ */
+export function ReleaseStatus({ repo }: { repo: ProjectRepoDto }) {
+  const resolve = useResolveDeskItem();
+  const last = repo.lastRelease ?? null;
+  const ship = repo.releaseProposal?.ship ?? null;
+  const publishStep = ship?.step === 'land' || ship?.step === 'tag' || ship?.step === 'publish';
+  const failed = ship?.status === 'failed' && publishStep;
+  const link = 'inline-flex min-h-11 items-center text-xs underline sm:min-h-0';
+  return (
+    <div className="flex flex-col gap-1 text-xs" data-testid={`release-status-${repo.name}`}>
+      {last && (
+        <p className="flex flex-wrap items-center gap-x-2 text-subtle" data-testid="last-release">
+          <span>
+            Last release <strong>{last.version}</strong>
+          </span>
+          {last.tagUrl ? (
+            <a href={last.tagUrl} target="_blank" rel="noreferrer" className={link}>
+              Tag {last.tag}
+            </a>
+          ) : (
+            <span>{last.tag}</span>
+          )}
+          {last.releaseUrl && (
+            <a href={last.releaseUrl} target="_blank" rel="noreferrer" className={link}>
+              Release page
+            </a>
+          )}
+          {last.releasePage === false && <span>no release page (this git host has none)</span>}
+        </p>
+      )}
+      {ship && ship.status !== 'published' && publishStep && !failed && (
+        <p className="text-subtle" data-testid="release-progress">
+          {releaseStatusLine({ ...repo.releaseProposal, state: 'approved' } as never)}
+          {ship.status === 'committed' && ship.prUrl && (
+            <>
+              {' '}
+              <a href={ship.prUrl} target="_blank" rel="noreferrer" className={link}>
+                View the pull request
+              </a>
+            </>
+          )}
+        </p>
+      )}
+      {failed && ship && (
+        <div className="flex flex-col gap-1" data-testid="release-failed">
+          <p className="break-words text-danger-soft-fg">
+            Release {ship.version} stopped at {ship.step}:{' '}
+            {(ship.error ?? '').split('\n').find((l) => l.trim()) ?? ''}
+          </p>
+          {ship.alertDeskItemId && (
+            <Button
+              size="sm"
+              className="min-h-11 self-start sm:min-h-0"
+              loading={resolve.isPending}
+              onClick={() =>
+                resolve.mutate({ id: ship.alertDeskItemId as string, body: { resolution: 'approved' } })
+              }
+            >
+              Retry
+            </Button>
+          )}
+          <ErrorBox error={resolve.error} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** "Prepare release": a workstation reads the repository and the "Ship release" item appears on the desk. */

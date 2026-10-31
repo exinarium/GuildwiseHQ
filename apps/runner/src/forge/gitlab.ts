@@ -11,8 +11,10 @@ import {
 import type {
   BranchRules,
   ChangeState,
+  CreateReleaseInput,
   CreateRepoInput,
   Forge,
+  ForgeRelease,
   ForgeEnv,
   GitAuth,
   OpenChangeInput,
@@ -34,7 +36,7 @@ interface GlProject {
  */
 export class GitLabForge implements Forge {
   readonly kind = 'gitlab' as const;
-  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true };
+  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true, releases: true };
 
   constructor(
     private readonly env: ForgeEnv,
@@ -169,6 +171,45 @@ export class GitLabForge implements Forge {
       `/projects/${encodeURIComponent(repo.fullName)}/merge_requests/${encodeURIComponent(id)}`,
     );
     return mr.state === 'merged' ? 'merged' : mr.state === 'closed' ? 'closed' : 'open';
+  }
+
+  private releaseUrl(repo: RemoteRepo, tag: string, links?: { self?: string }): string {
+    return links?.self ?? `https://${this.host}/${repo.fullName}/-/releases/${encodeURIComponent(tag)}`;
+  }
+
+  async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {
+    try {
+      const r = await this.authed<{ _links?: { self?: string } }>(
+        `/projects/${encodeURIComponent(repo.fullName)}/releases/${encodeURIComponent(tag)}`,
+      );
+      return { url: this.releaseUrl(repo, tag, r._links) };
+    } catch (err) {
+      if (err instanceof ForgeHttpError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async createRelease(repo: RemoteRepo, c: CreateReleaseInput): Promise<ForgeRelease> {
+    try {
+      const r = await this.authed<{ _links?: { self?: string } }>(
+        `/projects/${encodeURIComponent(repo.fullName)}/releases`,
+        { method: 'POST', body: { tag_name: c.tag, name: c.title, description: c.notes } },
+      );
+      return { url: this.releaseUrl(repo, c.tag, r._links) };
+    } catch (err) {
+      if (err instanceof ForgeHttpError && err.status === 409) {
+        const again = await this.findRelease(repo, c.tag);
+        if (again) return again;
+      }
+      throw err;
+    }
+  }
+
+  async changeMergeCommit(repo: RemoteRepo, id: string): Promise<string | null> {
+    const mr = await this.authed<{ merge_commit_sha?: string | null; squash_commit_sha?: string | null }>(
+      `/projects/${encodeURIComponent(repo.fullName)}/merge_requests/${encodeURIComponent(id)}`,
+    );
+    return mr.merge_commit_sha ?? mr.squash_commit_sha ?? null;
   }
 
   async branchRules(repo: RemoteRepo, branch: string): Promise<BranchRules | null> {

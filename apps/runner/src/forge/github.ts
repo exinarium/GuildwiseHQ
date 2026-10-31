@@ -3,8 +3,10 @@ import { errText, ForgeUnavailableError, isHttps } from './http.ts';
 import type {
   BranchRules,
   ChangeState,
+  CreateReleaseInput,
   CreateRepoInput,
   Forge,
+  ForgeRelease,
   ForgeEnv,
   GitAuth,
   OpenChangeInput,
@@ -27,7 +29,7 @@ const FIELDS = 'nameWithOwner,url,sshUrl,isPrivate,defaultBranchRef';
  */
 export class GitHubForge implements Forge {
   readonly kind = 'github' as const;
-  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true };
+  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true, releases: true };
 
   constructor(
     private readonly env: ForgeEnv,
@@ -38,9 +40,10 @@ export class GitHubForge implements Forge {
     return this.env.ghBin ?? 'gh';
   }
 
-  private gh(args: string[]) {
+  private gh(args: string[], input?: string) {
     return this.env.exec.run(this.bin, args, {
       timeoutMs: 120_000,
+      ...(input === undefined ? {} : { input }),
       env: {
         GH_PROMPT_DISABLED: '1',
         NO_COLOR: '1',
@@ -190,6 +193,72 @@ export class GitHubForge implements Forge {
       throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
     const s = r.stdout.trim().toUpperCase();
     return s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
+  }
+
+  async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {
+    const r = await this.gh(['release', 'view', tag, '--repo', repo.fullName, '--json', 'url,isDraft']);
+    if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
+    if (r.exitCode !== 0) {
+      const why = (r.stderr || r.stdout).trim();
+      if (/release not found|not found/i.test(why)) return null;
+      throw new Error(`gh release view failed: ${why.slice(0, 300)}`);
+    }
+    const j = JSON.parse(r.stdout || '{}') as { url?: string; isDraft?: boolean };
+    if (!j.url) throw new Error('gh release view printed no release URL');
+    return { url: j.url, ...(j.isDraft ? { draft: true } : {}) };
+  }
+
+  async createRelease(repo: RemoteRepo, c: CreateReleaseInput): Promise<ForgeRelease> {
+    const r = await this.gh(
+      [
+        'release',
+        'create',
+        c.tag,
+        '--repo',
+        repo.fullName,
+        '--verify-tag',
+        '--title',
+        c.title,
+        '--notes-file',
+        '-',
+        c.latest ? '--latest' : '--latest=false',
+        ...(c.prerelease ? ['--prerelease'] : []),
+      ],
+      c.notes,
+    );
+    if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
+    if (r.exitCode !== 0) {
+      const why = (r.stderr || r.stdout).trim();
+      if (/already exists/i.test(why)) {
+        const again = await this.findRelease(repo, c.tag);
+        if (again) return again;
+      }
+      throw new Error(`gh release create failed: ${why.slice(0, 500)}`);
+    }
+    const url = r.stdout
+      .split('\n')
+      .reverse()
+      .map((l) => l.trim())
+      .find((l) => /^https?:\/\//.test(l));
+    if (!url) throw new Error('gh release create printed no release URL');
+    return { url };
+  }
+
+  async changeMergeCommit(repo: RemoteRepo, id: string): Promise<string | null> {
+    const r = await this.gh([
+      'pr',
+      'view',
+      id,
+      '--repo',
+      repo.fullName,
+      '--json',
+      'mergeCommit',
+      '--jq',
+      '.mergeCommit.oid',
+    ]);
+    if (r.exitCode !== 0) return null;
+    const sha = r.stdout.trim();
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   }
 
   async branchRules(repo: RemoteRepo, branch: string): Promise<BranchRules | null> {

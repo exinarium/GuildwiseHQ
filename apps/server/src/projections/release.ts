@@ -9,7 +9,12 @@ const ev = <
     | 'ReleaseProposalClosed'
     | 'ReleaseShipStarted'
     | 'ReleaseCommitted'
-    | 'ReleaseFailed',
+    | 'ReleaseFailed'
+    | 'ReleasePublishPlanned'
+    | 'ReleaseLanded'
+    | 'ReleaseTagged'
+    | 'ReleasePublished'
+    | 'ReleasePublishRetried',
 >(
   e: StoredEvent,
 ) => e.event as EventOf<T>;
@@ -108,6 +113,48 @@ export const releaseProjectors: Record<string, Projector> = {
       tx,
       `UPDATE release_ships SET status='failed', step=$2, error=$3, alert_desk_item_id=$4, updated_at=$5 WHERE id=$1`,
       [p.shipId, p.step, p.error, p.alertDeskItemId ?? null, e.createdAt],
+    );
+  },
+  ReleasePublishPlanned: async (tx, e) => {
+    const p = ev<'ReleasePublishPlanned'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET land_mode=$2, pr_url=COALESCE($3, pr_url), step='land', error=NULL, updated_at=$4 WHERE id=$1`,
+      [p.shipId, p.landMode, p.prUrl ?? null, e.createdAt],
+    );
+  },
+  ReleaseLanded: async (tx, e) => {
+    const p = ev<'ReleaseLanded'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET merge_sha=$2, landed_at=$3, land_mode=$4, pr_url=COALESCE($5, pr_url), step='tag', step_message=NULL, updated_at=$3 WHERE id=$1`,
+      [p.shipId, p.mergeSha, e.createdAt, p.mode, p.prUrl ?? null],
+    );
+  },
+  ReleaseTagged: async (tx, e) => {
+    const p = ev<'ReleaseTagged'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET status='tagged', tag_name=$2, tag_sha=$3, tag_state=$4, tag_url=$5, tagged_at=$6, step='publish', step_message=NULL, error=NULL, updated_at=$6 WHERE id=$1`,
+      [p.shipId, p.tag, p.targetSha, p.state, p.tagUrl, e.createdAt],
+    );
+  },
+  ReleasePublished: async (tx, e) => {
+    const p = ev<'ReleasePublished'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET status='published', release_state=$2, release_url=$3, release_latest=$4, published_desk_item_id=$5,
+              published_at=$6, step=NULL, step_message=NULL, error=NULL, updated_at=$6 WHERE id=$1`,
+      [p.shipId, p.state, p.releaseUrl, p.latest ?? null, p.deskItemId ?? null, e.createdAt],
+    );
+  },
+  ReleasePublishRetried: async (tx, e) => {
+    const p = ev<'ReleasePublishRetried'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_ships SET status = CASE WHEN tag_name IS NULL THEN 'committed' ELSE 'tagged' END, error=NULL,
+              workstation_id=$2, publish_checked_at=NULL, updated_at=$3 WHERE id=$1`,
+      [p.shipId, p.workstationId, e.createdAt],
     );
   },
 };

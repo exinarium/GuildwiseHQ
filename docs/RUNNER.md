@@ -1463,6 +1463,33 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
 
 A failure comes back as an answer (`ok: false`, the `step` and git's message), never a crash. Runners announce `release-ship:1`.
 
+### `release.publish`
+
+After the release commit: bring it to the main branch, tag it, create the forge release. It runs under the per-clone lock
+and works every step out again from git and the forge on each run, so a repeat or a Retry continues where it stopped.
+It never forces a push, never uses `--tags`, never moves a tag and never edits a release. It fetches the main branch and the
+working branch (never tags with force, never checks out in the clone).
+
+1. **land**: the release commit `R` (from `release.ship`) must be on `origin/<main>`. If `R` is an ancestor, the commit to tag is
+   the first-parent commit of main that brought it in (the merge commit; `R` itself after a fast-forward). Otherwise, in
+   `pr` mode with the release PR's address, the forge is asked (`changeState`): open or unknown means `waiting`, closed fails
+   `land`, merged reads the merge commit (squash and rebase merges) and waits until main shows it. In `merge` mode (the
+   project lands work without pull requests) `R` is merged `--no-ff` into main in a throwaway worktree as the project identity
+   (signed off when the payload says so or the repository asks for a DCO) and pushed to `refs/heads/<main>` without force; a
+   conflict fails `land` and aborts the merge; a protected main falls back to opening the release PR.
+2. **tag**: `git tag -a v<version> -m "<release name> <version>"` on that commit (the tagger is the commit identity) and
+   `git push origin refs/tags/<tag>`. A tag already on the remote at the commit is reported (`existed`); on another commit it
+   fails `tag` and is never moved; a local tag the remote lacks is pushed. CHANGELOG.md at the tag target must hold
+   `## [<version>]` (else `tag` fails and nothing is tagged).
+3. **publish**: GitHub through `gh release create <tag> --verify-tag --title ... --notes-file - --latest|--latest=false`
+   (notes on stdin), GitLab through `POST /projects/:id/releases`. The release exists already: reported, not touched.
+   Azure DevOps, Bitbucket and plain git have no release pages: the answer is `release.state: none` with the text that no
+   release page was created. `--latest` only for the highest non-pre-release version among the remote release tags.
+
+The release name is the repository's **Release name** setting (default: the project name) and is what the card calls
+"<Project name>". A failure comes back as an answer (`ok: false`, `failedStep` land, tag or publish, and git's or the
+forge's message). Runners announce `release-publish:1`.
+
 ### Git worktrees
 
 Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per

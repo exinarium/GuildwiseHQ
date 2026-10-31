@@ -873,6 +873,83 @@ export const ReleaseShipResultSchema = z.object({
 export type ReleaseShipResult = z.infer<typeof ReleaseShipResultSchema>;
 
 /**
+ * `release.publish`: after the release commit, bring it to the main branch (found when the release PR was merged, or
+ * merged by Guildwise), tag the merge commit `vX.Y.Z` (annotated, never moved) and create the forge release. The runner
+ * works every step out again from git and the forge, so a repeat or a Retry never duplicates anything.
+ */
+export const RELEASE_PUBLISH_CAPABILITY = 'release-publish:1';
+export const ReleasePublishStepSchema = z.enum(['land', 'tag', 'publish']);
+export const ReleasePublishPayloadSchema = z.object({
+  shipId: z.uuid(),
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(500),
+  forge: ForgeKindSchema.optional(),
+  version: z
+    .string()
+    .min(1)
+    .max(60)
+    .refine((v) => RELEASE_TAG_RE.test(`v${v}`), 'not a release version'),
+  tag: z.string().min(1).max(100),
+  /** Tag message and release title: "<release name> <version>". */
+  title: z.string().min(1).max(200),
+  workingBranch: z.string().min(1).max(200),
+  /** Absent: the repository's default branch. */
+  mainBranch: z.string().min(1).max(200).optional(),
+  /** The release commit on the working branch (`release.ship`). */
+  releaseCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
+  land: z.discriminatedUnion('mode', [
+    z.object({ mode: z.literal('pr'), prUrl: z.string().max(500).optional() }),
+    z.object({ mode: z.literal('merge'), signoff: z.boolean().optional() }),
+  ]),
+  notesSource: z.enum(['changelog', 'commits']),
+  /** Only for `commits`: the approved notes. */
+  notes: z.string().max(50_000).optional(),
+  commitAs: CommitAsSchema.nullable().optional(),
+});
+export type ReleasePublishPayload = z.infer<typeof ReleasePublishPayloadSchema>;
+
+export const ReleasePublishResultSchema = z.object({
+  ok: z.boolean(),
+  stage: z.enum(['waiting', 'done', 'failed']),
+  failedStep: ReleasePublishStepSchema.optional(),
+  /** Git's or the forge's message. */
+  error: z.string().max(4000).optional(),
+  waiting: z
+    .object({
+      reason: z.string().max(300),
+      prState: z.enum(['open', 'closed', 'merged']).nullable(),
+    })
+    .optional(),
+  land: z
+    .object({
+      mode: z.enum(['pr', 'merge']),
+      mergeSha: z.string(),
+      by: z.enum(['forge', 'guildwise', 'found']),
+      prUrl: z.string().optional(),
+      signedOff: z.boolean().optional(),
+    })
+    .optional(),
+  tag: z
+    .object({
+      name: z.string(),
+      target: z.string(),
+      state: z.enum(['created', 'existed']),
+      url: z.string().nullable(),
+    })
+    .optional(),
+  release: z
+    .object({
+      state: z.enum(['created', 'existed', 'none']),
+      url: z.string().nullable(),
+      latest: z.boolean().optional(),
+      message: z.string().max(500).optional(),
+    })
+    .optional(),
+});
+export type ReleasePublishResult = z.infer<typeof ReleasePublishResultSchema>;
+
+/**
  * Organisation source folder (docs/RUNNER.md): the folder inside a repo root whose repositories the architect of one
  * organisation may read. `org.folder` sets (`path`) or clears (`path: null`) it; the runner validates exactly like
  * `aom-runner org-folder set` and answers `{ ok, error? }`. The state is reported in `org.folders`.
@@ -989,6 +1066,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'release.ship',
+  'release.publish',
   'org.folder',
   'toolchain.remove',
   'repo.sync',
@@ -1090,6 +1168,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
+  'release.publish': ReleasePublishPayloadSchema,
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,

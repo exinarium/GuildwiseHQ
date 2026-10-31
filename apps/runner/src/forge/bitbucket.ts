@@ -30,7 +30,7 @@ interface BbRepo {
 export class BitbucketCloudForge implements Forge {
   readonly kind = 'bitbucket-cloud' as const;
   readonly host = 'bitbucket.org';
-  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true };
+  readonly caps = { listRepos: true, createRepo: true, openChange: true, branchRules: true, releases: false };
 
   constructor(private readonly env: ForgeEnv) {}
 

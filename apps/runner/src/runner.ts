@@ -41,6 +41,7 @@ import {
   READONLY_DESIGN_CAPABILITY,
   RELAY_FEATURE,
   RELEASE_FACTS_CAPABILITY,
+  RELEASE_PUBLISH_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -113,6 +114,7 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
+import { publishRelease } from './git/release-publish.ts';
 import { shipReleaseCommit } from './git/release-ship.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
@@ -1376,6 +1378,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
+        RELEASE_PUBLISH_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
@@ -2061,9 +2064,41 @@ export class Runner {
               integrationDir: this.paths.integration,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
             })
-          : { ok: false, step: 'prepare', error: `no local clone for ${p.remoteUrlNormalized}`, components: [], notices: [] };
+          : {
+              ok: false,
+              step: 'prepare',
+              error: `no local clone for ${p.remoteUrlNormalized}`,
+              components: [],
+              notices: [],
+            };
         done(true, result);
         if (result.ok)
+          void this.sync.sync({
+            repoId: p.repoId,
+            remoteUrlNormalized: p.remoteUrlNormalized,
+            workingBranch: p.workingBranch,
+          });
+      } else if (command === 'release.publish') {
+        // "No clone here", "not merged yet" and every git or forge refusal are answers (ok:true): the server decides.
+        const p = CommandPayloadSchemas['release.publish'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        const result = repo
+          ? await publishRelease({
+              payload: p,
+              repoPath: repo.localPath,
+              integrationDir: this.paths.integration,
+              forgeEnv: this.forgeEnv,
+              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+            })
+          : {
+              ok: false,
+              stage: 'failed' as const,
+              failedStep: 'land' as const,
+              error: `no local clone for ${p.remoteUrlNormalized}`,
+            };
+        done(true, result);
+        if (result.land?.by === 'guildwise')
           void this.sync.sync({
             repoId: p.repoId,
             remoteUrlNormalized: p.remoteUrlNormalized,
