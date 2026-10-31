@@ -111,7 +111,7 @@ export function RecommendationList({
                       });
                     }}
                   >
-                    {APPLY_LABEL[r.action.type]}
+                    <Reword>{APPLY_LABEL[r.action.type]}</Reword>
                   </Button>
                 ) : (
                   <Badge title="Only the owner or the manager who hired the agent can apply this">

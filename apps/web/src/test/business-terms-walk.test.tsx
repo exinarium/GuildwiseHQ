@@ -12,6 +12,7 @@ import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
 import { PAGE_HELP } from '../help/page-help-content.ts';
+import { RecommendationList } from '../components/hr/Recommendations.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
 import { DocumentsList } from '../pages/Documents.tsx';
 import { Help } from '../pages/Help.tsx';
@@ -185,6 +186,20 @@ const deskItem = (over: Record<string, unknown> = {}) =>
     ...over,
   }) as never;
 
+const standingOrderRec = () =>
+  ({
+    id: 'rework_reason:a:weak_tests',
+    kind: 'rework_reason',
+    title: 'Bea gets bounced for weak tests',
+    summary: 'Two cards came back.',
+    agentId: ID(1),
+    agentName: 'Bea',
+    roleKey: 'builder',
+    evidence: { metrics: [], items: [] },
+    action: { type: 'standing_order', text: 'Always ship tests.', topic: 'No or weak tests' },
+    canApply: true,
+  }) as never;
+
 describe('a business org: the main pages never say Vault, Ledger or standing order', () => {
   it('the sidebar, the breadcrumbs and the command entries', () => {
     const t = ORG_TERMS.business;
@@ -219,6 +234,12 @@ describe('a business org: the main pages never say Vault, Ledger or standing ord
     );
     await screen.findByText('Add to Rules & decisions as');
     expect(screen.getAllByRole('option', { name: /^Rule \(/ })[0]).toBeInTheDocument();
+    expectClean();
+  });
+
+  it('Agents: the recommendation apply button says Propose rule', async () => {
+    wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
+    expect(screen.getByTestId('apply-rework_reason')).toHaveTextContent('Propose rule');
     expectClean();
   });
 
@@ -339,6 +360,10 @@ describe('a dev org: the old words are unchanged', () => {
     wrap(<DeskItem bare item={deskItem()} />);
     expect(await screen.findByText('Add to ledger as')).toBeInTheDocument();
     expect(screen.getAllByRole('option', { name: /^Standing order \(/ })[0]).toBeInTheDocument();
+  });
+  it('Agents: the recommendation apply button keeps Propose standing order', async () => {
+    wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
+    expect(screen.getByTestId('apply-rework_reason')).toHaveTextContent('Propose standing order');
   });
   it('Vaults page', async () => {
     wrap(<Vaults />);

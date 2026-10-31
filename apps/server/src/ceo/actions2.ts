@@ -7,6 +7,7 @@ import {
   isBusinessRoleKey,
   modelTier,
   streamId,
+  rewordForOrg,
 } from '@aom/shared';
 import { z } from 'zod';
 import { loadRole } from '../catalogue/loader.ts';
@@ -793,6 +794,7 @@ const proposeOrder: ActionDef<z.infer<typeof OrderP>> = {
   async execute(env, p, pr) {
     const deskItemId = randomUUID();
     const projectId = (pr.data as { projectId: string | null }).projectId;
+    const orgMode = await one(env.ctx.pool, 'SELECT mode FROM organizations WHERE id=$1', [env.orgId]);
     await appendLocked(env, [
       {
         streamId: streamId.desk(deskItemId),
@@ -802,7 +804,7 @@ const proposeOrder: ActionDef<z.infer<typeof OrderP>> = {
             deskItemId,
             kind: 'approval',
             subkind: 'standing_order',
-            title: `Add a standing order: ${p.title ?? truncate(p.text, 80)}`,
+            title: `${rewordForOrg('Add a standing order:', orgMode?.mode)} ${p.title ?? truncate(p.text, 80)}`,
             body: p.text,
             options: [],
             blocking: false,

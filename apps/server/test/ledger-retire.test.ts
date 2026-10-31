@@ -167,6 +167,37 @@ describe('contradiction check on save', () => {
   });
 });
 
+describe('contradiction desk item wording by org mode', () => {
+  it('reads standing order and ledger in a dev org, rule and Rules & decisions in a business org, and keeps entry titles', async () => {
+    const item = async () =>
+      (await q(`SELECT title, body FROM desk_items WHERE subkind='ledger_conflict' ORDER BY created_at DESC LIMIT 1`))[0]!;
+    try {
+      await order('Wording env', 'Ask DevOps for a wording environment and wait for it before the tester starts.', {
+        projectId: w.projectId,
+      });
+      await order('Wording mode', 'Do not wait for a wording environment; the tester starts without one.', {
+        projectId: w.projectId,
+      });
+      const dev = await item();
+      expect(dev.title).toContain('A new standing order may contradict');
+      expect(dev.body).toContain('Open the ledger');
+      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w.owner.id]);
+      await order('Wording env b', 'Ask DevOps for a b-wording environment and wait for it before the tester starts.', {
+        projectId: w.projectId,
+      });
+      await order('Wording mode b', 'Do not wait for a b-wording environment; the tester starts without one.', {
+        projectId: w.projectId,
+      });
+      const biz = await item();
+      expect(biz.title).toContain('A new rule may contradict an existing one: Wording mode b');
+      expect(biz.body).toContain('Open Rules & decisions');
+      expect(`${biz.title} ${biz.body}`).not.toMatch(/ledger|standing order/i);
+    } finally {
+      await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [w.owner.id]);
+    }
+  });
+});
+
 describe('retiring an entry', () => {
   it('the owner retires an entry with a reason: gone from briefs, search and the default list, kept when asked', async () => {
     const e = await order('Build P5-25 now', 'Build P5-25 now, before anything else.', {

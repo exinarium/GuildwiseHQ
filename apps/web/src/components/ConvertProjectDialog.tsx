@@ -476,8 +476,8 @@ export function ConvertProjectDialog({
           </h3>
           {(preview.data?.publishedNotes ?? 0) > 0 && (
             <p className="text-sm text-muted" data-testid="convert-handover">
-              {plural(preview.data?.publishedNotes ?? 0, 'research note')} will be listed in PROJECT.md of the
-              project vault, so every agent reads them.
+              {plural(preview.data?.publishedNotes ?? 0, 'research note')}{' '}
+              {t.reword('will be listed in PROJECT.md of the project vault, so every agent reads them.')}
             </p>
           )}
           <TextInput

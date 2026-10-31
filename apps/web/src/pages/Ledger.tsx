@@ -134,9 +134,8 @@ function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   return (
     <form onSubmit={submit} aria-label="Retire entry" className="flex flex-col gap-4" noValidate>
       <p className="text-sm text-muted">
-        {t.reword(
-          `"${e.title}" stays in the ledger for the record, but agents no longer see it and a search no longer finds it.`,
-        )}
+        {`"${e.title}" `}
+        {t.reword('stays in the ledger for the record, but agents no longer see it and a search no longer finds it.')}
       </p>
       <TextArea label="Reason" value={reason} onChange={(ev) => setReason(ev.target.value)} error={err} />
       <ErrorBox error={retire.error} />
