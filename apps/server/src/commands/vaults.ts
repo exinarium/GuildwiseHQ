@@ -456,6 +456,47 @@ export async function vaultForProject(
   };
 }
 
+export interface CardVault {
+  id: string;
+  kind: 'org' | 'project';
+  folder: string;
+}
+
+/**
+ * Every vault a card shift of `projectId` may read on a workstation of `workstationUserId`: the organization vault
+ * (only for the organization's Owner and Admins, who are the only ones that receive it) and the project's own vault
+ * (git or local). `primary` is `vaultForProject`, the one vault writes go to; `all` lists it first, de-duplicated.
+ */
+export async function vaultsForCard(
+  db: Queryable,
+  projectId: string,
+  workstationUserId: string,
+): Promise<{ primary: CardVault | null; all: CardVault[] }> {
+  const p = await one(db, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
+    projectId,
+  ]);
+  if (!p) return { primary: null, all: [] };
+  const folder = projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir });
+  const primary = await vaultForProject(db, projectId, workstationUserId);
+  const org = isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
+    ? await one(db, `SELECT id, kind FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
+        p.org_id,
+      ])
+    : undefined;
+  const own = await one(
+    db,
+    `SELECT id, kind FROM vaults WHERE project_id=$1 ORDER BY (storage='git') DESC, created_at, id LIMIT 1`,
+    [projectId],
+  );
+  const found = [
+    primary,
+    org && { id: org.id, kind: org.kind, folder },
+    own && { id: own.id, kind: own.kind, folder },
+  ].filter((v): v is CardVault => !!v);
+  const all = [...new Map(found.map((v) => [v.id, v])).values()];
+  return { primary, all };
+}
+
 /**
  * The vault a conversation (chat, question shift, BA task) of `orgId` may read, read-only, on `workstationId`: the
  * project's vault (or the organization vault) for a project, else the organization vault, which only the workstations

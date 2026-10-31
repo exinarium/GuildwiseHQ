@@ -80,6 +80,8 @@ async function questionShift(name: string) {
           !usedQuestionShifts.has(f.shiftId),
       ) as any;
     if (found) {
+      // question shifts keep the single-vault shape: no `vaults` list
+      expect(found.vaults).toBeUndefined();
       usedQuestionShifts.add(found.shiftId);
       await p.startShift(r, found);
       return found;

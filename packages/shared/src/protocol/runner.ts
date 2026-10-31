@@ -1628,6 +1628,12 @@ export const ShiftStartSchema = msg('shift.start', {
   orgGraph: OrgGraphScopeSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
+  /**
+   * Card shifts: every vault the card may read, read-only (the organization vault and the project vault, each only when it
+   * exists and this workstation's user receives it). `vault` stays the one vault writes go to. Absent (an older server):
+   * the runner reads `[vault]`.
+   */
+  vaults: z.array(ShiftVaultSchema).max(4).optional(),
   /** The project's code graph (`arm: 'off'`: the measurement holdout, nothing is offered). Absent: none yet. */
   graph: GraphScopeSchema.optional(),
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */

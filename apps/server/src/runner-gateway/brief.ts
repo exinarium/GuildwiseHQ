@@ -40,7 +40,7 @@ import { riskOf } from '../commands/review-risk.ts';
 import { runBriefFor } from '../commands/runs.ts';
 import { scanBriefFor } from '../commands/setup-proposals.ts';
 import { shiftEnvironmentFor } from '../commands/test-environments.ts';
-import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
+import { projectHasVault, vaultForProject, vaultsForCard } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
@@ -661,7 +661,10 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     : null;
   // The one vault this card may read: its project vault (or the organization vault), only if this workstation's user can access it.
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [claim.workstationId]);
-  const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
+  const vaults = ws
+    ? await vaultsForCard(ctx.pool, brief.project.id, ws.user_id)
+    : { primary: null, all: [] };
+  const vault = vaults.primary;
   // This workstation's user cannot reach a vault the project-level check found (an organization vault): the runner would refuse a vault report.
   if (!vault && brief.investigation?.location === 'vault')
     brief =
@@ -684,6 +687,9 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     maxShiftMinutes: claim.maxShiftMinutes,
     ...accountOf(shift),
     vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
+    ...(vaults.all.length > 0
+      ? { vaults: vaults.all.map((v) => ({ vaultId: v.id, kind: v.kind, folder: v.folder })) }
+      : {}),
     ...(graph ? { graph } : {}),
     // The card's own repository is its worktree; the project's reference repositories are opened besides, and every
     // repository of the organization for a role with `readOrgRepos` (the architect).

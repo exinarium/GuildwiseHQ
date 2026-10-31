@@ -13,6 +13,8 @@ import { confine } from '../fs-safe.ts';
 import { isLocalVaultDir } from './local.ts';
 
 export interface VaultShiftContext {
+  /** Which vault this is (set by readVaultContexts). */
+  kind?: ShiftVault['kind'];
   /** The one directory passed to the runtime as `--add-dir`. */
   addDir: string;
   standingOrders: Array<{ title: string; body: string }>;
@@ -79,4 +81,56 @@ export function withVaultContext(brief: ShiftBrief, ctx: VaultShiftContext | nul
     standingOrders: [...ctx.standingOrders, ...brief.standingOrders],
     ...(brief.feed && ctx.taste ? { feed: { ...brief.feed, taste: ctx.taste } } : {}),
   };
+}
+
+const relabel = (title: string, kind: ShiftVault['kind'] | undefined): string => {
+  const which = kind === 'org' ? 'organization' : 'project';
+  if (title === 'Vault standing orders')
+    return `${kind === 'org' ? 'Organization' : 'Project'} vault standing orders`;
+  if (title === 'Project standing orders (vault)') return `Project standing orders (${which} vault)`;
+  return title;
+};
+
+/**
+ * The vaults of a shift, in order (the write target first), each read as `readVaultContext`. Vaults with no clone on
+ * this workstation are skipped; duplicates (same vault id or same directory) are dropped. With two or more vaults the
+ * standing-order titles say which vault they come from; with one the output is exactly that of `readVaultContext`.
+ */
+export async function readVaultContexts(
+  vaultsDir: string,
+  vaults: ShiftVault[],
+): Promise<VaultShiftContext[]> {
+  const seen = new Set<string>();
+  const out: VaultShiftContext[] = [];
+  for (const v of vaults) {
+    if (seen.has(v.vaultId)) continue;
+    seen.add(v.vaultId);
+    const ctx = await readVaultContext(vaultsDir, v);
+    if (!ctx || out.some((c) => c.addDir === ctx.addDir)) continue;
+    out.push({ ...ctx, kind: v.kind });
+  }
+  if (out.length < 2) return out;
+  return out.map((c) => ({
+    ...c,
+    standingOrders: c.standingOrders.map((o) => ({ ...o, title: relabel(o.title, c.kind) })),
+  }));
+}
+
+/**
+ * Merges several vaults into the brief: standing orders of all (first vault first, identical bodies once), PROJECT.md
+ * and taste.md from the first vault that has them. One vault gives the same result as `withVaultContext`.
+ */
+export function withVaultContexts(brief: ShiftBrief, ctxs: VaultShiftContext[]): ShiftBrief {
+  if (ctxs.length === 0) return brief;
+  if (ctxs.length === 1) return withVaultContext(brief, ctxs[0]!);
+  const bodies = new Set<string>();
+  const standingOrders = ctxs.flatMap((c) =>
+    c.standingOrders.filter((o) => (bodies.has(o.body) ? false : (bodies.add(o.body), true))),
+  );
+  return withVaultContext(brief, {
+    addDir: ctxs[0]!.addDir,
+    standingOrders,
+    ...(ctxs.find((c) => c.projectDoc) ? { projectDoc: ctxs.find((c) => c.projectDoc)!.projectDoc } : {}),
+    ...(ctxs.find((c) => c.taste) ? { taste: ctxs.find((c) => c.taste)!.taste } : {}),
+  });
 }
