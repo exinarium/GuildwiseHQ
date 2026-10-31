@@ -173,7 +173,13 @@ export function RecommendationList({
               </details>
               {done[r.id] && (
                 <p className="text-sm text-success" data-testid="rec-applied">
-                  {done[r.id]?.effect}.{' '}
+                  {/* only the proposal's effect is fixed server text; the others carry agent names */}
+                  {r.action.type === 'standing_order' ? (
+                    <Reword>{done[r.id]?.effect ?? ''}</Reword>
+                  ) : (
+                    done[r.id]?.effect
+                  )}
+                  .{' '}
                   {done[r.id]?.deskItemId && (
                     <Link to="/desk" className="underline">
                       Approve it on the desk

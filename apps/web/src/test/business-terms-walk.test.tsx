@@ -6,13 +6,13 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { meKey } from '../api/queries/auth.ts';
 import { PageHelpPanel } from '../components/help/PageHelpPanel.tsx';
+import { RecommendationList } from '../components/hr/Recommendations.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { crumbsFor } from '../components/shell/Breadcrumbs.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
 import { PAGE_HELP } from '../help/page-help-content.ts';
-import { RecommendationList } from '../components/hr/Recommendations.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
 import { DocumentsList } from '../pages/Documents.tsx';
 import { Help } from '../pages/Help.tsx';
@@ -118,6 +118,8 @@ beforeEach(() => {
       if (path === '/api/ledger') return json({ entries });
       if (path === '/api/vaults') return json({ vaults });
       if (path === '/api/documents') return json({ documents: [] });
+      if (path.startsWith('/api/hr/recommendations/') && path.endsWith('/apply'))
+        return json({ applied: true, effect: 'Proposed a standing order on the desk', deskItemId: ID(95) });
       return json({});
     }),
   );
@@ -228,7 +230,16 @@ describe('a business org: the main pages never say Vault, Ledger or standing ord
   it('Desk: a vault conflict item and the answer form with its Add choices', async () => {
     wrap(
       <>
-        <DeskItem bare item={deskItem({ id: ID(91), kind: 'escalation', subkind: 'vault_conflict', title: 'Knowledge folder sync conflict: Organization knowledge', body: 'Local and remote edits to the knowledge folder cannot be merged automatically.' })} />
+        <DeskItem
+          bare
+          item={deskItem({
+            id: ID(91),
+            kind: 'escalation',
+            subkind: 'vault_conflict',
+            title: 'Knowledge folder sync conflict: Organization knowledge',
+            body: 'Local and remote edits to the knowledge folder cannot be merged automatically.',
+          })}
+        />
         <DeskItem bare item={deskItem()} />
       </>,
     );
@@ -240,6 +251,13 @@ describe('a business org: the main pages never say Vault, Ledger or standing ord
   it('Agents: the recommendation apply button says Propose rule', async () => {
     wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
     expect(screen.getByTestId('apply-rework_reason')).toHaveTextContent('Propose rule');
+    expectClean();
+  });
+
+  it('Agents: the applied line of a proposed order says rule', async () => {
+    wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
+    await userEvent.click(screen.getByTestId('apply-rework_reason'));
+    expect(await screen.findByTestId('rec-applied')).toHaveTextContent('Proposed a rule on the desk.');
     expectClean();
   });
 
@@ -364,6 +382,13 @@ describe('a dev org: the old words are unchanged', () => {
   it('Agents: the recommendation apply button keeps Propose standing order', async () => {
     wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
     expect(screen.getByTestId('apply-rework_reason')).toHaveTextContent('Propose standing order');
+  });
+  it('Agents: the applied line of a proposed order keeps standing order', async () => {
+    wrap(<RecommendationList recommendations={[standingOrderRec()]} />);
+    await userEvent.click(screen.getByTestId('apply-rework_reason'));
+    expect(await screen.findByTestId('rec-applied')).toHaveTextContent(
+      'Proposed a standing order on the desk.',
+    );
   });
   it('Vaults page', async () => {
     wrap(<Vaults />);

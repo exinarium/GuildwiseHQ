@@ -170,30 +170,54 @@ describe('contradiction check on save', () => {
 describe('contradiction desk item wording by org mode', () => {
   it('reads standing order and ledger in a dev org, rule and Rules & decisions in a business org, and keeps entry titles', async () => {
     const item = async () =>
-      (await q(`SELECT title, body FROM desk_items WHERE subkind='ledger_conflict' ORDER BY created_at DESC LIMIT 1`))[0]!;
+      (
+        await q(
+          `SELECT title, body FROM desk_items WHERE subkind='ledger_conflict' ORDER BY created_at DESC LIMIT 1`,
+        )
+      )[0]!;
+    // Two pairs on subjects no other live order in this file shares, so neither save is refused as a near-duplicate,
+    // and each second order of a pair contradicts the first.
+    const devAsk = {
+      title: 'Changelog first',
+      body: 'Always write a changelog entry for each release before tagging it.',
+    };
+    const devSkip = {
+      title: 'Changelog skip',
+      body: 'Never write a changelog entry for a release; tagging it is enough.',
+    };
+    const bizAsk = {
+      title: 'Database backup',
+      body: 'Always take a database backup before running migrations.',
+    };
+    const bizSkip = {
+      title: 'Backup skip',
+      body: 'Do not take a database backup before migrations; snapshots cover it.',
+    };
+    const seeds = [devAsk, devSkip, bizAsk, bizSkip];
+    for (const [i, a] of seeds.entries())
+      for (const b of seeds.slice(i + 1)) expect(isNearDuplicate(a, b)).toBe(false);
+    expect(findContradictions(devSkip, [{ id: 'a', ...devAsk }])).toHaveLength(1);
+    expect(findContradictions(bizSkip, [{ id: 'a', ...bizAsk }])).toHaveLength(1);
+    const orgId = await orgOf();
     try {
-      await order('Wording env', 'Ask DevOps for a wording environment and wait for it before the tester starts.', {
-        projectId: w.projectId,
-      });
-      await order('Wording mode', 'Do not wait for a wording environment; the tester starts without one.', {
-        projectId: w.projectId,
-      });
+      await order(devAsk.title, devAsk.body, { projectId: w.projectId });
+      const devSaved = await order(devSkip.title, devSkip.body, { projectId: w.projectId });
+      expect(devSaved.conflictsWith).toHaveLength(1);
       const dev = await item();
-      expect(dev.title).toContain('A new standing order may contradict');
+      expect(dev.title).toBe('A new standing order may contradict an existing one: Changelog skip');
       expect(dev.body).toContain('Open the ledger');
-      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w.owner.id]);
-      await order('Wording env b', 'Ask DevOps for a b-wording environment and wait for it before the tester starts.', {
-        projectId: w.projectId,
-      });
-      await order('Wording mode b', 'Do not wait for a b-wording environment; the tester starts without one.', {
-        projectId: w.projectId,
-      });
+      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [orgId]);
+      await order(bizAsk.title, bizAsk.body, { projectId: w.projectId });
+      const bizSaved = await order(bizSkip.title, bizSkip.body, { projectId: w.projectId });
+      expect(bizSaved.conflictsWith).toHaveLength(1);
       const biz = await item();
-      expect(biz.title).toContain('A new rule may contradict an existing one: Wording mode b');
+      expect(biz.title).toBe('A new rule may contradict an existing one: Backup skip');
+      expect(biz.body).toContain('"Backup skip"');
+      expect(biz.body).toContain('"Database backup"');
       expect(biz.body).toContain('Open Rules & decisions');
       expect(`${biz.title} ${biz.body}`).not.toMatch(/ledger|standing order/i);
     } finally {
-      await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [w.owner.id]);
+      await q(`UPDATE organizations SET mode='dev' WHERE id=$1`, [orgId]);
     }
   });
 });
