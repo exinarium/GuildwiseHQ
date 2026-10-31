@@ -4,8 +4,9 @@ import { q, transitionsFor, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, BIZCARDS, paths } from '../support/env.ts';
 import { pairRunner, startRunner } from '../support/runner.ts';
 
-// Business card types: a developer organization's New card picker offers only the developer types; once the
-// organization (with no repository) switches to Business mode the picker offers the six business types, an enquiry and
+// Business card types: in the Software view the New card picker leads with the developer types and keeps the six
+// business types under "More types"; in the Business view it leads with the business types. Nothing is refused in
+// either view. An enquiry and
 // a quote are created from the form with their own fields, prepared by the Front Desk (mock runner, no worktree),
 // approved by the person who started them (one is sent back first) and reach Done with no repository, branch or merge.
 test.describe.configure({ mode: 'serial' });
@@ -96,32 +97,32 @@ test('setup: a developer organization with project BIZC (no repository) and a pa
   startRunner({ AOM_MOCK_STEP_MS: '200' }, HOME);
 });
 
-test('a developer organization offers only the developer card types', async () => {
+test('the Software view leads with the developer card types and has the business workflows installed already', async () => {
   const options = await pickerOptions();
-  expect(options).toContain('feature');
-  for (const label of BUSINESS_LABELS) expect(options).not.toContain(label);
-  // the server has not installed any business workflow either
+  expect(options[0]).toBe('feature');
+  for (const label of BUSINESS_LABELS) expect(options).toContain(label);
+  // every organization has the business workflows, installed at creation
   const installed = await q(`SELECT key FROM workflow_versions WHERE key LIKE 'business-%'`);
-  expect(installed).toHaveLength(0);
+  expect(installed.length).toBeGreaterThan(0);
 });
 
-test('switching to Business mode offers the six business types and hides the developer types', async () => {
+test('the Business view leads with the six business types and keeps the developer types under More types', async () => {
   const sw = await api.patch('/api/org', { data: { mode: 'business' } });
   expect(sw.ok(), await sw.text()).toBeTruthy();
   const options = await pickerOptions();
-  expect(options).toEqual(BUSINESS_LABELS);
+  expect(options.slice(0, BUSINESS_LABELS.length)).toEqual(BUSINESS_LABELS);
+  expect(options).toContain('feature');
   // a Front Desk agent prepares enquiries and quotes on the paired workstation
   const workstationId = ((await (await api.get('/api/workstations')).json()).workstations as any[])[0].id;
   const hire = await api.post('/api/agents', {
     data: { name: 'Fiona', roleKey: 'front_desk', seniority: 'senior', workstationId, runtime: 'mock' },
   });
   expect(hire.status(), await hire.text()).toBe(201);
-  // a developer card is refused in this organization
+  // a developer card is not refused in the Business view
   const dev = await api.post('/api/cards', {
     data: { projectId, title: 'Fix it', cardType: 'feature', specify: false },
   });
-  expect(dev.status(), await dev.text()).toBe(409);
-  expect((await dev.json()).error.code).toBe('business_mode_code_workflow');
+  expect(dev.status(), await dev.text()).toBe(201);
 });
 
 test('an enquiry is created with its fields, sent back once, approved and done without a repository', async () => {

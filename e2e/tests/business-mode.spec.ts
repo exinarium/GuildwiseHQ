@@ -4,9 +4,10 @@ import { q } from '../support/db.ts';
 import { ADMIN, BASE_URL, MODESW, paths } from '../support/env.ts';
 import { pairRunner } from '../support/runner.ts';
 
-// Business mode (organization mode flag): a dev organization with a repository and a builder cannot switch; once both
-// are gone it switches, the delivery surfaces leave the app (direct URLs show "not available"), the server refuses the
-// dev-only actions, and switching back to Developer mode shows everything again. Standalone: one user, a paired mock
+// Views: Software and Business are presentation only. The organization holds a default view; each member can override
+// it from the user menu. Switching is instant and never refused (even with a repository and a builder), changes no
+// data, hides only test environments and releases (direct URLs show a gentle "switch to Software view" note), keeps
+// workstations and Ask DevOps, and the server refuses nothing in either view. Standalone: one user, a paired mock
 // workstation (no runner process), project BIZ on the toy repo.
 test.describe.configure({ mode: 'serial' });
 
@@ -27,6 +28,18 @@ const modeEvents = () =>
 async function openGeneral(): Promise<void> {
   await page.goto('/settings/org');
   await expect(page.getByTestId('org-mode-panel')).toBeVisible();
+}
+
+const viewEvents = () =>
+  q<{ type: string }>(`SELECT type FROM events WHERE type='OrgMemberViewSet' AND payload->>'orgId'=$1`, [
+    orgId,
+  ]);
+
+/** Picks a view from the user menu (the toggle is one click away from anywhere). */
+async function pickView(id: 'dev' | 'business' | 'default'): Promise<void> {
+  await page.getByTestId('user-menu').first().click();
+  await page.getByTestId(`view-${id}`).click();
+  await page.keyboard.press('Escape');
 }
 
 async function hireRoleOptions(): Promise<string[]> {
@@ -53,9 +66,10 @@ test.beforeAll(async ({ browser }) => {
   orgId = (await (await api.get('/api/org')).json()).id;
 });
 
-test('setup: a new organization is in Developer mode; project BIZ with a repository and a builder', async () => {
+test('setup: a new organization defaults to the Software view; project BIZ with a repository and a builder', async () => {
   const org = await (await api.get('/api/org')).json();
   expect(org.mode).toBe('dev');
+  expect(org.viewOverride).toBeNull();
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
   pairRunner(BASE_URL, code, 'Mode PC', HOME);
@@ -70,96 +84,94 @@ test('setup: a new organization is in Developer mode; project BIZ with a reposit
   repoId = (await add.json()).repos[0].id;
   const h = await hire('Kenji', 'builder');
   expect(h.status(), await h.text()).toBe(201);
-  // Developer mode shows the delivery surfaces as before
   await page.goto('/projects');
   await expect(page.getByTestId('nav-releases')).toBeVisible();
 });
 
-test('switching to Business mode is refused and lists the repository and the builder', async () => {
+test('the default view switches to Business at once although a repository and a builder exist, and only the preference is recorded', async () => {
+  const before = (await (await api.get('/api/agents')).json()).agents.length;
   await openGeneral();
   await page.getByTestId('org-mode-business').check();
-  await page.getByRole('dialog').getByRole('button', { name: 'Switch to Business mode' }).click();
-  const blocked = page.getByTestId('org-mode-blocked');
-  await expect(blocked).toBeVisible();
-  await expect(blocked).toContainText('Repository toy (project BIZ)');
-  await expect(blocked).toContainText('Kenji (builder)');
-  expect((await (await api.get('/api/org')).json()).mode).toBe('dev');
-  expect(await modeEvents()).toHaveLength(0);
-});
-
-test('with the repository and the builder gone it switches, and the event is recorded', async () => {
-  const agents = (await (await api.get('/api/agents')).json()).agents as any[];
-  const kenji = agents.find((a) => a.name === 'Kenji');
-  expect((await api.post(`/api/agents/${kenji.id}/fire`, { data: {} })).ok()).toBeTruthy();
-  const del = await api.delete(`/api/projects/${projectId}/repos/${repoId}`);
-  expect(del.ok(), await del.text()).toBeTruthy();
-
-  await openGeneral();
-  await page.getByTestId('org-mode-business').check();
-  await page.getByRole('dialog').getByRole('button', { name: 'Switch to Business mode' }).click();
-  await expect(page.getByText('Business mode is on')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Make Business view the default' }).click();
+  await expect(page.getByText('The default view is now the Business view')).toBeVisible();
   await expect(page.getByTestId('org-mode-business')).toBeChecked();
   expect((await (await api.get('/api/org')).json()).mode).toBe('business');
-  const events = await modeEvents();
-  expect(events.map((e) => e.payload)).toEqual([
-    expect.objectContaining({ mode: 'business', previous: 'dev' }),
+  expect(await modeEvents()).toEqual([
+    expect.objectContaining({ payload: expect.objectContaining({ mode: 'business', previous: 'dev' }) }),
   ]);
+  // nothing else changed
+  expect((await (await api.get('/api/agents')).json()).agents.length).toBe(before);
+  const repos = (await (await api.get(`/api/projects/${projectId}`)).json()).repos as any[];
+  expect(repos.filter((r) => !r.removedAt)).toHaveLength(1);
 });
 
-test('in Business mode the delivery surfaces are gone and direct URLs show "not available"', async () => {
+test('in the Business view test environments and releases are tucked away with a gentle note; workstations and Ask for technical help stay', async () => {
   await page.goto('/projects');
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
   await expect(page.getByTestId('nav-releases')).toHaveCount(0);
-  await expect(page.getByTestId('ask-devops-button')).toHaveCount(0);
+  await expect(page.getByTestId('nav-organization')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Workstations' }).first()).toBeVisible();
+  await expect(page.getByTestId('ask-devops-button')).toBeVisible();
+  await expect(page.getByTestId('ask-devops-button')).toHaveAttribute('aria-label', 'Ask for technical help');
   for (const url of ['/releases', '/p/BIZ/environments']) {
     await page.goto(url);
-    await expect(page.getByTestId('not-available-business')).toBeVisible();
+    await expect(page.getByTestId('not-available-business')).toContainText(
+      'Switch to Software view to see this',
+    );
   }
+  await page.goto('/workstations');
+  await expect(page.getByText('Mode PC').first()).toBeVisible();
 
+  // developer roles are under More, not removed
   const roles = await hireRoleOptions();
-  expect(roles.length).toBeGreaterThan(0);
-  for (const dev of ['Builder', 'Reviewer', 'Tester', 'DevOps engineer']) expect(roles).not.toContain(dev);
+  for (const dev of ['Builder', 'Reviewer', 'Tester']) expect(roles).toContain(dev);
 
   await page.goto('/settings/capabilities?tab=packs');
-  await expect(page.getByRole('tabpanel')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add a pack by git URL' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add a pack by git URL' })).toBeVisible();
 
   await page.goto('/automations');
   await page.getByRole('button', { name: 'New automation' }).first().click();
   const wizard = page.getByTestId('schedule-wizard');
   await wizard.getByTestId('wizard-next').click();
   await expect(wizard.getByTestId('tile-create_card')).toBeVisible();
-  await expect(wizard.getByTestId('tile-devops_request')).toHaveCount(0);
-  await expect(wizard.getByTestId('tile-regression_run')).toHaveCount(0);
+  await wizard.getByTestId('more-actions').locator('summary').click();
+  await expect(wizard.getByTestId('tile-devops_request')).toBeVisible();
+  await expect(wizard.getByTestId('tile-regression_run')).toBeVisible();
   await page.keyboard.press('Escape');
 });
 
-test('in Business mode the server refuses a repository, dev hires and a pack by git URL with a readable 409', async () => {
+test('a Business-view user can still do every software action on the server', async () => {
   const repo = await api.post(`/api/projects/${projectId}/repos`, {
-    data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
+    data: { name: 'toy2', remoteUrl: paths.origin, workingBranch: 'main' },
   });
-  expect(repo.status(), await repo.text()).toBe(409);
-  expect((await repo.json()).error).toMatchObject({ code: 'business_mode' });
-  expect((await repo.json()).error.message).toMatch(/Business mode/);
-  for (const roleKey of ['builder', 'reviewer', 'tester', 'devops']) {
+  expect(repo.status(), await repo.text()).toBe(201);
+  for (const roleKey of ['reviewer', 'tester']) {
     const r = await hire(`Dev ${roleKey}`, roleKey);
-    expect(r.status(), `${roleKey}: ${await r.text()}`).toBe(409);
-    expect((await r.json()).error.code).toBe('business_mode');
+    expect(r.status(), `${roleKey}: ${await r.text()}`).toBe(201);
   }
-  const pack = await api.post('/api/packs', {
-    data: { url: 'https://github.com/acme/skills.git', ref: 'v1' },
-  });
-  expect(pack.status(), await pack.text()).toBe(409);
-  expect((await pack.json()).error.message).toMatch(/git URL/);
-  // a business role is still hired
-  const ok = await hire('Anna', 'architect');
-  expect(ok.status(), await ok.text()).toBe(201);
+  expect((await hire('Anna', 'architect')).status()).toBe(201);
 });
 
-test('switching back to Developer mode always works and shows every surface again', async () => {
+test('a member override beats the organization default, from the user menu, and the event is only the preference', async () => {
+  const seq = Number((await q<{ s: number }>('SELECT max(seq) AS s FROM events'))[0]?.s);
+  await page.goto('/projects');
+  await pickView('dev');
+  await expect(page.getByTestId('nav-releases')).toBeVisible();
+  await page.goto('/releases');
+  await expect(page.getByTestId('not-available-business')).toHaveCount(0);
+  expect((await (await api.get('/api/org')).json()).viewOverride).toBe('dev');
+  expect((await (await api.get('/api/org')).json()).mode).toBe('business');
+  const types = await q<{ type: string }>('SELECT type FROM events WHERE seq > $1', [seq]);
+  expect(types.map((t) => t.type)).toEqual(['OrgMemberViewSet']);
+  await pickView('default');
+  await expect(page.getByTestId('nav-releases')).toHaveCount(0);
+  expect((await viewEvents()).length).toBe(2);
+});
+
+test('switching the default back to the Software view always works and shows every surface again', async () => {
   await openGeneral();
   await page.getByTestId('org-mode-dev').check();
-  await expect(page.getByText('Developer mode is on')).toBeVisible();
+  await expect(page.getByText('The default view is now the Software view')).toBeVisible();
   expect((await (await api.get('/api/org')).json()).mode).toBe('dev');
   expect((await modeEvents()).at(-1)?.payload).toMatchObject({ mode: 'dev', previous: 'business' });
 
@@ -170,11 +182,6 @@ test('switching back to Developer mode always works and shows every surface agai
   await page.goto('/p/BIZ/environments');
   await expect(page.getByTestId('not-available-business')).toHaveCount(0);
   expect(await hireRoleOptions()).toContain('Builder');
-  // nothing was lost: Anna is still there, and a repository can be added again
   const agents = (await (await api.get('/api/agents')).json()).agents as any[];
   expect(agents.map((a) => a.name)).toContain('Anna');
-  const repo = await api.post(`/api/projects/${projectId}/repos`, {
-    data: { name: 'toy2', remoteUrl: paths.origin, workingBranch: 'main' },
-  });
-  expect(repo.status(), await repo.text()).toBe(201);
 });
