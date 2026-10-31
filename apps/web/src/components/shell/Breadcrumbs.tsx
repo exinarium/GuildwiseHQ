@@ -1,7 +1,8 @@
-import { type ProjectDto, parseCardRef } from '@aom/shared';
+import { ORG_TERMS, type OrgTerms, type ProjectDto, parseCardRef } from '@aom/shared';
 import { ChevronRight } from 'lucide-react';
 import { Fragment } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
+import { useOrgTerms } from '../../lib/terms.ts';
 
 interface Crumb {
   label: string;
@@ -14,6 +15,7 @@ export function crumbsFor(
   search: string,
   projects: ProjectDto[],
   card?: { ref: string; projectId: string },
+  terms: OrgTerms = ORG_TERMS.dev,
 ): Crumb[] {
   const name = (k?: string) => projects.find((p) => p.key === k)?.name ?? k ?? '';
   const table: Array<[string, (p: Record<string, string | undefined>) => Crumb[]]> = [
@@ -84,9 +86,9 @@ export function crumbsFor(
     ['/workstations', () => [{ label: 'Organization' }, { label: 'Workstations' }]],
     ['/releases', () => [{ label: 'Organization' }, { label: 'Releases' }]],
     ['/metrics', () => [{ label: 'Organization' }, { label: 'Metrics' }]],
-    ['/ledger', () => [{ label: 'Knowledge' }, { label: 'Ledger' }]],
+    ['/ledger', () => [{ label: 'Knowledge' }, { label: terms.ledger }]],
     ['/interests', () => [{ label: 'Knowledge' }, { label: 'Interests' }]],
-    ['/settings/vaults', () => [{ label: 'Knowledge' }, { label: 'Vaults' }]],
+    ['/settings/vaults', () => [{ label: 'Knowledge' }, { label: terms.vaultsPage }]],
     ['/settings', () => [{ label: 'Settings' }]],
     ['/help/contact', () => [{ label: 'Help', to: '/help' }, { label: 'Contact us' }]],
     [
@@ -123,7 +125,8 @@ export function Breadcrumbs({
   card?: { ref: string; projectId: string };
 }) {
   const { pathname, search } = useLocation();
-  const crumbs = crumbsFor(pathname, search, projects, card);
+  const t = useOrgTerms();
+  const crumbs = crumbsFor(pathname, search, projects, card, t);
   if (crumbs.length === 0) return <div />;
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">

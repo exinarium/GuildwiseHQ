@@ -2,6 +2,7 @@ import type { ProjectDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useDeleteProject } from '../api/queries/projects.ts';
 import { Button, Dialog, ErrorBox, TextInput } from './ui.tsx';
+import { Reword } from './Reword.tsx';
 
 /** Permanent delete of an archived project: the owner has to type the project key to enable the button. */
 export function DeleteProjectDialog({
@@ -36,7 +37,7 @@ export function DeleteProjectDialog({
         <p className="text-sm">
           All cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts
           and research notes of <strong>{project.name}</strong> are removed from the database. The event log
-          keeps a record that the project was deleted. The vault folder is never touched.
+          keeps a record that the project was deleted. <Reword>{'The vault folder is never touched.'}</Reword>
         </p>
         <TextInput
           label={`Type ${project.key} to confirm`}

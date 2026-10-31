@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { useInterest, useResyncInterestTaste, useSaveInterestTaste } from '../../api/queries/interests.ts';
 import { Button, ErrorBox, Panel, Spinner, useToast } from '../ui.tsx';
 import { TasteRulesEditor } from './TasteRulesEditor.tsx';
+import { useOrgTerms } from '../../lib/terms.ts';
 
 /**
  * Taste rules built into the interest: the explicit rules (they come first and win on a conflict, mirrored to the
  * managed section of `taste.md`) and, read-only, what your ratings taught it.
  */
 export function TasteTab({ interestId, canManage }: { interestId: string; canManage: boolean }) {
+  const t2 = useOrgTerms();
   const detail = useInterest(interestId);
   const save = useSaveInterestTaste();
   const resync = useResyncInterestTaste();
@@ -27,7 +29,7 @@ export function TasteTab({ interestId, canManage }: { interestId: string; canMan
           <span className="text-xs text-subtle" data-testid="taste-mirror-status">
             {t.hasVault
               ? `Mirrored to taste.md, version ${t.version}`
-              : 'No vault yet: the rules reach the curators through their brief only'}
+              : t2.reword('No vault yet: the rules reach the curators through their brief only')}
           </span>
         }
       >
@@ -54,7 +56,7 @@ export function TasteTab({ interestId, canManage }: { interestId: string; canMan
             </Button>
             <Button
               loading={resync.isPending}
-              title="Write the saved rules to taste.md in the vault again"
+              title={t2.reword('Write the saved rules to taste.md in the vault again')}
               data-testid="taste-resync"
               onClick={() =>
                 resync.mutate(interestId, { onSuccess: () => toast.success('Rules sent to taste.md again') })

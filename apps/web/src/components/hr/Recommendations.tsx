@@ -9,6 +9,7 @@ import {
 } from '../../api/queries/hr.ts';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Dialog, ErrorBox, Panel, TextArea } from '../ui.tsx';
+import { Reword } from '../../components/Reword.tsx';
 
 const KIND_LABEL: Record<Recommendation['kind'], string> = {
   blocked_ledger: 'Blocked',
@@ -145,7 +146,7 @@ export function RecommendationList({
                   className="rounded-control bg-sunken px-3 py-2 text-sm text-muted italic"
                   data-testid="rec-proposal"
                 >
-                  Proposed standing order: {r.action.text}
+                  <Reword>{'Proposed standing order:'}</Reword> {r.action.text}
                 </p>
               )}
               <details>
@@ -273,7 +274,9 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
                   <li key={`skill-${s}`}>Skill: {s}</li>
                 ))}
                 {ext.standingOrders.map((s) => (
-                  <li key={`order-${s}`}>Standing order: {s}</li>
+                  <li key={`order-${s}`}>
+                    <Reword>{'Standing order:'}</Reword> {s}
+                  </li>
                 ))}
                 {!ext.instructions.trim() && ext.skills.length === 0 && ext.standingOrders.length === 0 && (
                   <li>Nothing: you have no extensions on this role.</li>

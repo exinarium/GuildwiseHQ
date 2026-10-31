@@ -31,6 +31,7 @@ import { cx } from '../ui/cx.ts';
 import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
 import { MobileTabBar, UnreadBadge } from './MobileTabBar.tsx';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { buildNav } from './nav-config.ts';
 import { OrgBanner } from './OrgBanner.tsx';
 import { OrgSwitcher } from './OrgSwitcher.tsx';
@@ -121,6 +122,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
   const org = me.data?.activeOrg ?? null;
   const canManage = org?.role === 'owner' || org?.role === 'admin';
+  const terms = useOrgTerms();
   const { sections, footer } = buildNav({
     projectKey: project?.key ?? null,
     hasEnvironments: !!project && project.workflowKey !== 'research',
@@ -130,6 +132,7 @@ function Shell({ name, live }: { name: string; live: string }) {
     canManage,
     features: org?.features ?? {},
     business: isBusinessOrg(org),
+    terms,
   });
   const intakeOn = canUseIntake(org);
   const intake = intakeOn
@@ -208,7 +211,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const cardParam = matchPath('/cards/:ref', pathname)?.params.ref;
   const shownCard = useCard(cardParam && cardParam !== 'new' ? cardParam : undefined);
   const shownCardRef = shownCard.data?.card;
-  const crumbs = crumbsFor(pathname, search, projects, shownCardRef);
+  const crumbs = crumbsFor(pathname, search, projects, shownCardRef, terms);
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
   const backTo = backTargetFor(pathname, crumbs);
 

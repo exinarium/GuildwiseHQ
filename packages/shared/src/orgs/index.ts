@@ -3,6 +3,7 @@ import { z } from 'zod';
 export * from './diagnostics-consent.ts';
 export * from './mode.ts';
 export * from './plans.ts';
+export * from './terms.ts';
 
 /** Org roles (`org_members.role`). A guest is not a member: it is derived from project access (D8). */
 export const ORG_ROLES = ['owner', 'admin', 'member'] as const;

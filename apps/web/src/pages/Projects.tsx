@@ -36,6 +36,7 @@ import {
 } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
 import { useBusinessMode } from '../lib/orgMode.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 
 const TYPE_ICON = { code: Code2, research: FlaskConical, feed: Rss } as const;
 
@@ -310,6 +311,7 @@ const WORKFLOW_BLURB: Record<string, { title: string; text: string; icon: typeof
 const NOT_A_PROJECT_WORKFLOW: readonly string[] = ['code-bugfix'];
 
 function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useOrgTerms();
   const create = useCreateProject();
   const toast = useToast();
   const workflows = useWorkflows();
@@ -419,7 +421,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 <span className="min-w-0 flex-1">
                   <span className="block text-base font-medium text-fg">{b?.title ?? nameOf(k)}</span>
                   <span className="block text-sm text-muted">
-                    {b?.text ?? 'A custom workflow of your organization.'}
+                    {t.reword(b?.text ?? 'A custom workflow of your organization.')}
                   </span>
                 </span>
               </label>
@@ -428,7 +430,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         </fieldset>
         <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
           {noRepo || business
-            ? "No repository needed; results go to the project's vault folder."
+            ? t.reword("No repository needed; results go to the project's vault folder.")
             : 'Add repositories in project settings.'}
         </p>
         <ErrorBox error={create.error} />

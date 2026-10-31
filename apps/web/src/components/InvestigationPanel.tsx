@@ -1,6 +1,7 @@
 import type { CardDto } from '@aom/shared';
 import { safeHref } from '../lib/links.ts';
 import { Badge, Callout, Panel } from './ui.tsx';
+import { useOrgTerms } from '../lib/terms.ts';
 
 /** What the runner did with the latest main branch before work on the card started, in plain words. */
 const SYNC_TEXT: Record<string, string> = {
@@ -15,6 +16,7 @@ const SYNC_TEXT: Record<string, string> = {
 
 /** The architect's report on a card: its summary, where it lives, and a link to the file when the forge is known. */
 export function InvestigationPanel({ card }: { card: CardDto }) {
+  const t = useOrgTerms();
   const inv = card.investigation;
   if (!inv) return null;
   const href = safeHref(inv.url);
@@ -24,7 +26,7 @@ export function InvestigationPanel({ card }: { card: CardDto }) {
         <h2 className="mb-2 flex flex-wrap items-center gap-2 text-lg font-semibold text-fg">
           {card.investigationOnly ? 'Investigation report' : 'Design report'}
           <Badge tone={inv.location === 'vault' ? 'violet' : 'green'}>
-            {inv.location === 'vault' ? 'in the vault' : 'in the repository'}
+            {inv.location === 'vault' ? t.reword('in the vault') : 'in the repository'}
           </Badge>
         </h2>
         <p className="text-sm whitespace-pre-wrap text-muted" data-testid="investigation-summary">

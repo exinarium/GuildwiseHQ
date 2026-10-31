@@ -13,6 +13,7 @@ import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts
 import { useBusinessMode } from '../lib/orgMode.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
+import { useOrgTerms } from '../lib/terms.ts';
 
 type RepoEntry =
   | { id: number; kind: 'url'; name: string; remoteUrl: string; workingBranch: string }
@@ -52,6 +53,7 @@ export function ConvertProjectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useOrgTerms();
   const workflows = useWorkflows(project.id);
   const business = useBusinessMode();
   const options = useMemo(
@@ -240,7 +242,7 @@ export function ConvertProjectDialog({
                     <span className="block text-sm text-muted">
                       {workflowUsesRepos(o)
                         ? 'Works in repositories: builders, reviewers and testers.'
-                        : 'Works in the project vault: no repository needed.'}
+                        : t.reword('Works in the project vault: no repository needed.')}
                     </span>
                   </span>
                 </label>

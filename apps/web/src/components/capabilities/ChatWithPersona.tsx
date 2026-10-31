@@ -6,12 +6,14 @@ import { useStartPersonaChat } from '../../api/queries/my-capabilities.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { ModelSelect, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Button, Dialog, ErrorBox, TextInput } from '../ui.tsx';
+import { useOrgTerms } from '../../lib/terms.ts';
 
 /**
  * "Chat with persona": a one-to-one session with a persona that is not hired, on your own workstation. It talks on the persona's
  * model unless you choose another here.
  */
 export function ChatWithPersona({ personaKey, name }: { personaKey: string; name: string }) {
+  const t = useOrgTerms();
   const start = useStartPersonaChat();
   const nav = useNavigate();
   const me = useMe();
@@ -54,7 +56,7 @@ export function ChatWithPersona({ personaKey, name }: { personaKey: string; name
           open
           onOpenChange={(o) => !o && setOpen(false)}
           title={`Chat with ${name}`}
-          description="A one-to-one chat on your own workstation. The persona can read skills and search the ledger and does nothing else; what it costs is tracked."
+          description={t.reword('A one-to-one chat on your own workstation. The persona can read skills and search the ledger and does nothing else; what it costs is tracked.')}
           footer={
             <>
               <Button variant="ghost" onClick={() => setOpen(false)}>

@@ -27,6 +27,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { formatCalendarDate, formatDateTime } from '../lib/time.ts';
 
 const SCOPES = [
@@ -36,13 +37,17 @@ const SCOPES = [
   { value: 'feature', label: 'Requirements' },
 ] as const;
 
-const scopeLabel = (s: string) => SCOPES.find((x) => x.value === s)?.label.replace(/s$/, '') ?? s;
+const scopeLabel = (s: string, reword: (v: string) => string = (v) => v) => {
+  const label = SCOPES.find((x) => x.value === s)?.label.replace(/s$/, '');
+  return label ? reword(label) : s;
+};
 
 type LedgerEntry = NonNullable<ReturnType<typeof useLedger>['data']>[number];
 
 /** Edit form of a standing order: the earlier wording stays in the history. */
 function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   const toast = useToast();
+  const t = useOrgTerms();
   const edit = useEditLedgerEntry(e.id);
   const [title, setTitle] = useState(e.title);
   const [body, setBody] = useState(e.body);
@@ -63,14 +68,14 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
       },
       {
         onSuccess: () => {
-          toast.success('Standing order updated');
+          toast.success(t.reword('Standing order updated'));
           onDone();
         },
       },
     );
   };
   return (
-    <form onSubmit={submit} aria-label="Edit standing order" className="flex flex-col gap-4" noValidate>
+    <form onSubmit={submit} aria-label={t.reword('Edit standing order')} className="flex flex-col gap-4" noValidate>
       <TextInput label="Title" value={title} onChange={(ev) => setTitle(ev.target.value)} />
       <TextArea label="Text" value={body} onChange={(ev) => setBody(ev.target.value)} error={err} />
       {hasPower && (
@@ -103,6 +108,7 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
 /** Retire form: a reason is required; the entry stays in the ledger greyed out and agents stop seeing it. */
 function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   const toast = useToast();
+  const t = useOrgTerms();
   const retire = useRetireLedgerEntry(e.id);
   const [reason, setReason] = useState('');
   const [err, setErr] = useState('');
@@ -123,8 +129,9 @@ function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   return (
     <form onSubmit={submit} aria-label="Retire entry" className="flex flex-col gap-4" noValidate>
       <p className="text-sm text-muted">
-        "{e.title}" stays in the ledger for the record, but agents no longer see it and a search no longer
-        finds it.
+        {t.reword(
+          `"${e.title}" stays in the ledger for the record, but agents no longer see it and a search no longer finds it.`,
+        )}
       </p>
       <TextArea label="Reason" value={reason} onChange={(ev) => setReason(ev.target.value)} error={err} />
       <ErrorBox error={retire.error} />
@@ -227,6 +234,7 @@ function History({ id }: { id: string }) {
 }
 
 function Entry({ e }: { e: LedgerEntry }) {
+  const t = useOrgTerms();
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState(false);
   const [history, setHistory] = useState(false);
@@ -243,7 +251,7 @@ function Entry({ e }: { e: LedgerEntry }) {
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <Badge tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}>
-          {scopeLabel(e.scope)}
+          {scopeLabel(e.scope, t.reword)}
         </Badge>
         {e.projectKey ? <span className="font-mono">{e.projectKey}</span> : <span>every project</span>}
         {e.cardRef && (
@@ -373,7 +381,7 @@ function Entry({ e }: { e: LedgerEntry }) {
       <Dialog
         open={editing}
         onOpenChange={setEditing}
-        title="Edit standing order"
+        title={t.reword('Edit standing order')}
         description="Agents get the new wording from their next shift or chat. The earlier wording stays in the history."
       >
         <EditForm e={e} onDone={() => setEditing(false)} />
@@ -383,6 +391,7 @@ function Entry({ e }: { e: LedgerEntry }) {
 }
 
 export function Ledger() {
+  const t = useOrgTerms();
   const projects = useProjects();
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<(typeof SCOPES)[number]['value']>('all');
@@ -402,15 +411,15 @@ export function Ledger() {
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader
-        title="Ledger"
-        sub="Requirements, decisions and standing orders agents rely on"
+        title={t.ledger}
+        sub={t.reword('Requirements, decisions and standing orders agents rely on')}
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
             Add entry
           </Button>
         }
       />
-      <search aria-label="Search the ledger" className="mb-4 flex flex-col gap-3">
+      <search aria-label={t.reword('Search the ledger')} className="mb-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="relative min-w-0 flex-1 basis-60">
             <Search
@@ -441,7 +450,7 @@ export function Ledger() {
         <div className="flex flex-wrap gap-2" role="group" aria-label="Scope">
           {SCOPES.map((s) => (
             <FilterChip key={s.value} pressed={scope === s.value} onClick={() => setScope(s.value)}>
-              {s.label}
+              {t.reword(s.label)}
             </FilterChip>
           ))}
           <FilterChip pressed={showRetired} onClick={() => setShowRetired((v) => !v)}>
@@ -452,7 +461,7 @@ export function Ledger() {
           </FilterChip>
         </div>
       </search>
-      {entries.isPending && <ListSkeleton label="Loading the ledger" />}
+      {entries.isPending && <ListSkeleton label={t.reword('Loading the ledger')} />}
       <ErrorBox error={entries.error} onRetry={() => entries.refetch()} />
       {entries.data?.length === 0 &&
         (filtered ? (
@@ -478,7 +487,7 @@ export function Ledger() {
           <EmptyState
             data-testid="ledger-empty"
             icon={BookOpen}
-            title="The ledger is empty"
+            title={t.reword('The ledger is empty')}
             description="Answers you give on the desk are recorded here so agents do not ask twice."
             action={
               <Button variant="primary" onClick={() => setAdding(true)}>
@@ -500,8 +509,10 @@ export function Ledger() {
       <Dialog
         open={adding}
         onOpenChange={setAdding}
-        title="Add to the ledger"
-        description="A standing order is loaded by every agent. Requirements and decisions belong to a project."
+        title={t.reword('Add to the ledger')}
+        description={t.reword(
+          'A standing order is loaded by every agent. Requirements and decisions belong to a project.',
+        )}
       >
         <LedgerForm onDone={() => setAdding(false)} />
       </Dialog>

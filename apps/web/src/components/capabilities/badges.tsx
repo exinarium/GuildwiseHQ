@@ -1,4 +1,5 @@
 import { Badge } from '../ui.tsx';
+import { useOrgTerms } from '../../lib/terms.ts';
 
 export const SOURCE_LABEL = {
   builtin: 'built-in',
@@ -17,9 +18,10 @@ const SOURCE_TONE = {
 
 /** Where a registry entry comes from; a pack's name is added (`pack: acme`). */
 export function SourceBadge({ source, pack }: { source: Source; pack?: string | undefined }) {
+  const t = useOrgTerms();
   return (
     <Badge tone={SOURCE_TONE[source]} data-testid={`source-${source}`}>
-      {SOURCE_LABEL[source]}
+      {t.reword(SOURCE_LABEL[source])}
       {source === 'pack' && pack ? `: ${pack}` : ''}
     </Badge>
   );

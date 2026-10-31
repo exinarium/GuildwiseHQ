@@ -4,6 +4,7 @@ import { type ComponentProps, type ReactNode, useId } from 'react';
 import { Link } from 'react-router';
 import { hueFor, initials } from '../lib/avatar.ts';
 import { useDelayedFlag } from '../lib/useDelayedFlag.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { cx } from './ui/cx.ts';
 
@@ -348,7 +349,8 @@ export function Spinner({ label = 'Loading', inline = false }: { label?: string;
 
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (!error) return null;
-  const msg = error instanceof Error ? error.message : String(error);
+  const { reword } = useOrgTerms();
+  const msg = reword(error instanceof Error ? error.message : String(error));
   return (
     <div
       role="alert"

@@ -45,6 +45,8 @@ import {
 } from '../components/ui.tsx';
 import { blankRole, errorCount, roleToInput } from '../lib/designer.ts';
 import { claimableWorkflows } from '../lib/role-builder.ts';
+import { Reword } from '../components/Reword.tsx';
+import { useOrgTerms } from '../lib/terms.ts';
 
 type Tab = 'roles' | 'workflows' | 'departments' | 'design';
 const TABS: Array<[Tab, string]> = [
@@ -114,8 +116,7 @@ export function OrgDesigner() {
       <LargerScreenNote />
       {cat.data && !cat.data.canEdit && (
         <Callout tone="info" role="note" data-testid="read-only-note" className="mb-4">
-          You are an additional manager here: this is the owner's catalogue. Their roles, workflows and
-          standing orders apply to the shared project's cards, and only the owner can change them.
+          <Reword>{"You are an additional manager here: this is the owner's catalogue. Their roles, workflows and standing orders apply to the shared project's cards, and only the owner can change them."}</Reword>
         </Callout>
       )}
       <Tabs
@@ -160,6 +161,7 @@ function VersionRow({
   extra?: string;
   actions?: React.ReactNode;
 }) {
+  const { reword } = useOrgTerms();
   return (
     <li
       className="flex flex-wrap items-center gap-2 text-sm"
@@ -178,7 +180,7 @@ function VersionRow({
         </Link>
       )}
       {vaultPath && (
-        <span className="text-xs text-subtle" title="Stored in your vault">
+        <span className="text-xs text-subtle" title={reword('Stored in your vault')}>
           {vaultPath}
         </span>
       )}
@@ -306,8 +308,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
       <section aria-label="Built-in roles">
         <h2 className="mb-3 text-lg font-semibold text-fg">Built-in roles</h2>
         <p className="mb-2 text-xs text-subtle">
-          They ship with the app and can never be removed. The owner can extend them with extra instructions,
-          skills and standing orders; their core rules (test ownership, review gates) cannot be changed.
+          <Reword>{'They ship with the app and can never be removed. The owner can extend them with extra instructions, skills and standing orders; their core rules (test ownership, review gates) cannot be changed.'}</Reword>
         </p>
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="builtin-roles">
           {builtIn.map((r) => {
@@ -432,6 +433,7 @@ function ExtendDialog({
   projectId?: string;
   onClose: () => void;
 }) {
+  const { reword } = useOrgTerms();
   const extend = useExtendRole();
   const def = (role.versions.find((v) => v.status === 'active') ?? role.versions[0])?.definition;
   const [instructions, setInstructions] = useState(role.extensions?.instructions ?? '');
@@ -482,7 +484,7 @@ function ExtendDialog({
           <SkillPicker value={skills} onChange={setSkills} projectId={projectId} />
         </div>
         <TextArea
-          label="Standing orders (one per line)"
+          label={reword('Standing orders (one per line)')}
           rows={3}
           value={orders}
           onChange={(e) => setOrders(e.target.value)}

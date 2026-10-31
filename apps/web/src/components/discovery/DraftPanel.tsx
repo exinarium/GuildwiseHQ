@@ -10,6 +10,7 @@ import { ageLabel } from '../../lib/time.ts';
 import { Markdown } from '../chat/Markdown.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, Spinner } from '../ui.tsx';
 import { HireBa } from './HireBa.tsx';
+import { Reword } from '../../components/Reword.tsx';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -186,7 +187,7 @@ function DocBlock({
       </div>
       {doc.status === 'approved' && full && full.publishState !== 'queued' && (
         <p className="text-xs text-subtle">
-          It will be copied to your vault as soon as a workstation is available.
+          <Reword>{'It will be copied to your vault as soon as a workstation is available.'}</Reword>
         </p>
       )}
       <ErrorBox error={err} />

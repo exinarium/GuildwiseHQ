@@ -51,6 +51,7 @@ import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
 import { useBusinessMode } from '../lib/orgMode.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
+import { Reword } from '../components/Reword.tsx';
 
 const lines = (s: string) =>
   s
@@ -200,8 +201,7 @@ export function ProjectSettings() {
       )}
       {!traits.usesRepos && !business && (
         <Callout tone="info">
-          This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
-          folder. Convert it to a delivery project to add repositories.
+          <Reword>{`This is a ${project?.workflowKey} project: it needs no repository, and results go to its vault folder. Convert it to a delivery project to add repositories.`}</Reword>
         </Callout>
       )}
       <div id="general" className="scroll-mt-20">

@@ -78,6 +78,7 @@ import { useExpertMode } from '../lib/expert-mode.ts';
 import { canUseIntake } from '../lib/intake.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 
 type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices' | 'ceo' | 'ceoDecisions';
 const FILTERS: Array<{ key: FilterKey; label: string; test: (i: DeskItemDto) => boolean }> = [
@@ -120,6 +121,7 @@ function DeskSkeleton() {
 }
 
 export function Desk() {
+  const t = useOrgTerms();
   const me = useMe();
   const business = isBusinessOrg(me.data?.activeOrg);
   const open = useDesk({ status: 'open' });
@@ -204,7 +206,7 @@ export function Desk() {
         }
         actions={
           <>
-            <Button onClick={() => setShowLedger(true)}>Add to ledger</Button>
+            <Button onClick={() => setShowLedger(true)}>{t.reword('Add to ledger')}</Button>
             {canUseIntake(me.data?.activeOrg) && (
               <Button data-testid="intake-button" onClick={() => nav('/intake')}>
                 Intake
@@ -221,8 +223,8 @@ export function Desk() {
       <Dialog
         open={showLedger}
         onOpenChange={setShowLedger}
-        title="Add a requirement or standing order"
-        description="Agents read the ledger before they ask. Add something they should always know."
+        title={t.reword('Add a requirement or standing order')}
+        description={t.reword('Agents read the ledger before they ask. Add something they should always know.')}
       >
         <LedgerForm onDone={() => setShowLedger(false)} />
       </Dialog>
@@ -370,7 +372,7 @@ export function Desk() {
           open={!!openItem}
           onOpenChange={(o) => !o && setOpenId(null)}
           size="full"
-          title={openItem ? deskKindLabel(openItem) : 'Item'}
+          title={openItem ? deskKindLabel(openItem, t.reword) : 'Item'}
           testId="desk-sheet"
         >
           {openItem &&
@@ -387,6 +389,7 @@ export function Desk() {
 
 /** Phone list row: priority, title, who and what it is about, and how long it waits. Tap opens the item full screen. */
 export function DeskCard({ item, now, onOpen }: { item: DeskItemDto; now?: number; onOpen: () => void }) {
+  const t = useOrgTerms();
   const Icon = KIND_ICON[item.kind] ?? CircleHelp;
   const project = item.card?.ref ? item.card.ref.slice(0, Math.max(0, item.card.ref.lastIndexOf('-'))) : null;
   return (
@@ -408,7 +411,7 @@ export function DeskCard({ item, now, onOpen }: { item: DeskItemDto; now?: numbe
           {item.urgent && <Badge tone="red">Urgent</Badge>}
           {item.blocking && <Badge tone="amber">Blocking</Badge>}
           <Badge tone="violet" icon={<Icon aria-hidden="true" />}>
-            {deskKindLabel(item)}
+            {deskKindLabel(item, t.reword)}
           </Badge>
         </span>
         <span className="mt-1.5 line-clamp-2 block text-base font-semibold [overflow-wrap:anywhere] text-fg">
@@ -453,6 +456,7 @@ export function DeskItem({
   bare?: boolean;
   business?: boolean;
 }) {
+  const t = useOrgTerms();
   const Icon = KIND_ICON[item.kind] ?? CircleHelp;
   return (
     <article
@@ -476,7 +480,7 @@ export function DeskItem({
           </Badge>
         )}
         <Badge tone="violet" icon={<Icon aria-hidden="true" />}>
-          <span data-testid="desk-kind">{deskKindLabel(item)}</span>
+          <span data-testid="desk-kind">{deskKindLabel(item, t.reword)}</span>
         </Badge>
         {item.blocking && <Badge tone="amber">Blocking</Badge>}
         {(item.repeatCount ?? 1) > 1 && (
@@ -583,7 +587,7 @@ export function DeskItem({
           tone="warning"
           className="mt-3"
           data-testid="dedup-entries"
-          title="The ledger already has similar entries:"
+          title={t.reword('The ledger already has similar entries:')}
         >
           <ul className="mt-1 list-disc pl-4">
             {item.dedupEntries.map((e) => (
@@ -728,6 +732,7 @@ function DismissButton({ item }: { item: DeskItemDto }) {
 }
 
 function AnswerForm({ item }: { item: DeskItemDto }) {
+  const t = useOrgTerms();
   const answer = useAnswerDeskItem();
   const toast = useToast();
   const rec = item.ceo?.recommendation ?? null;
@@ -820,13 +825,13 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="sm:w-72">
           <Select
-            label="Add to ledger as"
+            label={t.reword('Add to ledger as')}
             value={choice}
             onChange={(e) => setChoice(e.target.value as LedgerChoiceKey)}
           >
             {LEDGER_CHOICES.map((c) => (
               <option key={c.key} value={c.key}>
-                {c.label}
+                {t.reword(c.label)}
               </option>
             ))}
           </Select>
@@ -936,6 +941,7 @@ function PlaybookWorkstationActions({ item }: { item: DeskItemDto }) {
 }
 
 function ResolveButtons({ item }: { item: DeskItemDto }) {
+  const t = useOrgTerms();
   const expert = useExpertMode();
   const nav = useNavigate();
   const resolve = useResolveDeskItem();
@@ -972,7 +978,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         onSuccess: () => {
           setConfirmApprove(false);
           toast.success(
-            item.subkind === 'ceo_recommendation' ? 'Done' : merge ? 'Merged into the ledger' : 'Approved',
+            item.subkind === 'ceo_recommendation' ? 'Done' : merge ? t.reword('Merged into the ledger') : 'Approved',
           );
         },
         onError: (err) => {
@@ -1000,13 +1006,13 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
       />
       {editable && (
         <TextArea
-          label={item.subkind === 'standing_order' ? 'Standing order (editable)' : 'Rule (editable)'}
+          label={item.subkind === 'standing_order' ? t.reword('Standing order (editable)') : 'Rule (editable)'}
           value={rule}
           onChange={(e) => setRule(e.target.value)}
         />
       )}
       {duplicate ? (
-        <Callout tone="warning" role="alert" data-testid="desk-duplicate" title="Already in the ledger">
+        <Callout tone="warning" role="alert" data-testid="desk-duplicate" title={t.reword('Already in the ledger')}>
           <p>{duplicate.message}</p>
           <Button
             className="mt-2"
@@ -1104,7 +1110,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                 resolve.mutate({ id: item.id, body: { resolution: 'acknowledged' } }, done('Acknowledged'))
               }
             >
-              {item.subkind === 'vault_conflict' ? 'Conflict resolved, resume sync' : 'Acknowledge'}
+              {item.subkind === 'vault_conflict' ? t.reword('Conflict resolved, resume sync') : 'Acknowledge'}
             </Button>
           </>
         )}
