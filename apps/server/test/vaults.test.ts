@@ -283,6 +283,29 @@ describe('sync conflicts resolved on the desk', () => {
   });
 });
 
+describe('note count in vault status', () => {
+  it('a report without noteCount keeps the last count; a report with one replaces it', async () => {
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
+    const count = async () =>
+      (
+        await q(`SELECT note_count FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2`, [
+          w.workstationId,
+          work.id,
+        ])
+      )[0]?.note_count;
+    const report = async (extra: Record<string, unknown>) => {
+      const id = r.send('vault.status', { vaultId: work.id, lastPullAt: null, lastPushAt: null, ...extra });
+      await r.waitFor('ack', (f) => f.ackOf === id);
+    };
+    await report({ noteCount: 7 });
+    expect(await count()).toBe(7);
+    await report({});
+    expect(await count()).toBe(7);
+    await report({ noteCount: 0 });
+    expect(await count()).toBe(0);
+  });
+});
+
 describe('project vaults and shared projects', () => {
   let m: Member;
   let mr: FakeRunner;

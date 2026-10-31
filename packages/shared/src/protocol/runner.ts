@@ -1609,6 +1609,7 @@ export const CommandResultSchema = msg('command.result', {
 });
 /** Asks the server for a new runner token (`aom-runner rotate-token`); the old one stays valid until the new one connects. */
 export const TokenRotateSchema = msg('token.rotate', {});
+export const MAX_VAULT_NOTE_COUNT = 1000;
 export const VaultStatusSchema = msg('vault.status', {
   vaultId: z.string(),
   lastPullAt: z.iso.datetime().nullable(),
@@ -1616,6 +1617,8 @@ export const VaultStatusSchema = msg('vault.status', {
   error: z.string().optional(),
   /** Additive: where the clone lives on the workstation (also reported by `hello.vaults`). */
   localPath: z.string().optional(),
+  /** Additive: how many notes the vault holds (Markdown files the user wrote; generated files left out), counted up to MAX_VAULT_NOTE_COUNT. Absent from older runners. */
+  noteCount: z.number().int().nonnegative().optional(),
 });
 /**
  * A deploy run reached a stage on the workstation (docs/design/ceo-front-door.md 9.5). Best effort and not acked: the

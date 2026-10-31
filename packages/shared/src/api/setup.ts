@@ -1,6 +1,15 @@
 import { z } from 'zod';
 
-export const SETUP_STEP_IDS = ['project', 'repository', 'workstation', 'team', 'ba'] as const;
+export const SETUP_STEP_IDS = [
+  'project',
+  'repository',
+  'workstation',
+  'team',
+  'ba',
+  'knowledge',
+  'rules',
+  'connections',
+] as const;
 export const SetupStepId = z.enum(SETUP_STEP_IDS);
 export type SetupStepId = z.infer<typeof SetupStepId>;
 
@@ -18,7 +27,7 @@ export const SetupStepSchema = z.object({
   link: z.string().nullable(),
   /** For the team step: the roles still missing. */
   missing: z.array(z.string()).optional(),
-  /** Not needed to finish the checklist (the CEO step): shown for Owners and Admins, never counted. */
+  /** Recommended, not needed to finish the checklist (a business org's Connections step). Shown, never counted. */
   optional: z.boolean().optional(),
 });
 export type SetupStep = z.infer<typeof SetupStepSchema>;
