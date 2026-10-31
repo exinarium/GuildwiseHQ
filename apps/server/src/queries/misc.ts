@@ -382,7 +382,11 @@ export async function getProjectDetail(
             : null,
         };
       })(),
-      lastRelease: lastReleaseOf(r, ships, releaseFacts.find((f) => f.project_repo_id === r.id)),
+      lastRelease: lastReleaseOf(
+        r,
+        ships,
+        releaseFacts.find((f) => f.project_repo_id === r.id),
+      ),
       releaseName: r.release_name ?? null,
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,

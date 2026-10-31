@@ -84,11 +84,11 @@ export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<Releas
 export async function enqueueReleasePublish(tx: Tx, ship: Row, now: Date): Promise<string | null> {
   const workstationId = await publishWorkstation(tx, ship);
   if (!workstationId) {
-    await exec(
-      tx,
-      `UPDATE release_ships SET step_message=$2, publish_checked_at=$3 WHERE id=$1`,
-      [ship.id, 'Waiting for a workstation with an up-to-date runner and this repository', now],
-    );
+    await exec(tx, `UPDATE release_ships SET step_message=$2, publish_checked_at=$3 WHERE id=$1`, [
+      ship.id,
+      'Waiting for a workstation with an up-to-date runner and this repository',
+      now,
+    ]);
     return null;
   }
   const payload = await publishPayloadOf(tx, ship);
@@ -189,9 +189,11 @@ export async function releaseChecks(ctx: Ctx): Promise<void> {
   const touched = new Set<string>();
   for (const s of due) {
     const ws = await withAppendTx(ctx.pool, async (tx) => {
-      const live = await one(tx, `SELECT * FROM release_ships WHERE id=$1 AND status IN ('committed','tagged') FOR UPDATE`, [
-        s.id,
-      ]);
+      const live = await one(
+        tx,
+        `SELECT * FROM release_ships WHERE id=$1 AND status IN ('committed','tagged') FOR UPDATE`,
+        [s.id],
+      );
       return live ? enqueueReleasePublish(tx, live, ctx.clock.now()) : null;
     });
     if (ws) touched.add(ws);
@@ -221,7 +223,15 @@ export async function applyReleasePublishResult(
     const now = ctx.clock.now();
     const append = (type: string, p: Record<string, unknown>, extra: Record<string, unknown>[] = []) =>
       ctx.store.append(
-        [{ streamId: streamId.release(ship.id), event: { type, payload: p } as never, actor: SYSTEM_ACTOR, scope }, ...(extra as never[])],
+        [
+          {
+            streamId: streamId.release(ship.id),
+            event: { type, payload: p } as never,
+            actor: SYSTEM_ACTOR,
+            scope,
+          },
+          ...(extra as never[]),
+        ],
         { tx },
       );
 
@@ -230,18 +240,41 @@ export async function applyReleasePublishResult(
       const message = (r?.error ?? error ?? 'the workstation could not publish the release').slice(0, 4000);
       // what finished before the failure still counts
       if (r?.land && !ship.merge_sha && r.land.mergeSha)
-        await append('ReleaseLanded', { shipId, mergeSha: r.land.mergeSha, mode: r.land.mode, by: r.land.by, ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}) });
+        await append('ReleaseLanded', {
+          shipId,
+          mergeSha: r.land.mergeSha,
+          mode: r.land.mode,
+          by: r.land.by,
+          ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}),
+        });
       if (r?.tag && !ship.tag_name)
-        await append('ReleaseTagged', { shipId, tag: r.tag.name, targetSha: r.tag.target, state: r.tag.state, tagUrl: r.tag.url });
+        await append('ReleaseTagged', {
+          shipId,
+          tag: r.tag.name,
+          targetSha: r.tag.target,
+          state: r.tag.state,
+          tagUrl: r.tag.url,
+        });
       const tagged = !!(ship.tag_name || r?.tag);
-      await appendReleaseFailure(ctx, tx, { ...ship, tag_name: ship.tag_name ?? r?.tag?.name }, step, message, tagged);
+      await appendReleaseFailure(
+        ctx,
+        tx,
+        { ...ship, tag_name: ship.tag_name ?? r?.tag?.name },
+        step,
+        message,
+        tagged,
+      );
       return;
     }
 
     if (r.stage === 'waiting') {
       const w = r.waiting;
       if (r.land?.mode === 'pr' && ship.land_mode !== 'pr')
-        await append('ReleasePublishPlanned', { shipId, landMode: 'pr', ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}) });
+        await append('ReleasePublishPlanned', {
+          shipId,
+          landMode: 'pr',
+          ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}),
+        });
       await exec(
         tx,
         `UPDATE release_ships SET step_message=$2, publish_checked_at=$3, publish_checks=publish_checks+1 WHERE id=$1`,
@@ -252,11 +285,25 @@ export async function applyReleasePublishResult(
 
     // done
     if (r.land && !ship.merge_sha)
-      await append('ReleaseLanded', { shipId, mergeSha: r.land.mergeSha, mode: r.land.mode, by: r.land.by, ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}) });
+      await append('ReleaseLanded', {
+        shipId,
+        mergeSha: r.land.mergeSha,
+        mode: r.land.mode,
+        by: r.land.by,
+        ...(r.land.prUrl ? { prUrl: r.land.prUrl } : {}),
+      });
     if (r.tag && !ship.tag_name)
-      await append('ReleaseTagged', { shipId, tag: r.tag.name, targetSha: r.tag.target, state: r.tag.state, tagUrl: r.tag.url });
+      await append('ReleaseTagged', {
+        shipId,
+        tag: r.tag.name,
+        targetSha: r.tag.target,
+        state: r.tag.state,
+        tagUrl: r.tag.url,
+      });
     const rel = r.release ?? { state: 'none' as const, url: null };
-    const repo = await one(tx, 'SELECT forge_kind, remote_url, name FROM project_repos WHERE id=$1', [ship.repo_id]);
+    const repo = await one(tx, 'SELECT forge_kind, remote_url, name FROM project_repos WHERE id=$1', [
+      ship.repo_id,
+    ]);
     const kind = repo?.forge_kind ?? 'git';
     const tagUrl = r.tag?.url ?? ship.tag_url ?? null;
     const tag = r.tag?.name ?? ship.tag_name ?? `v${ship.version}`;

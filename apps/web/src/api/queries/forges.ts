@@ -127,6 +127,16 @@ export function useSetRepoComponentRules(projectId: string) {
   });
 }
 
+/** The owner names the release (tag message and title); null or empty: the project name. */
+export function useSetRepoReleaseName(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; releaseName: string | null }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { releaseName: v.releaseName }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
 /** "Prepare release" and "Refresh" on a Ship release item: a workstation reads the repository again (read-only). */
 export function usePrepareRelease(projectId: string) {
   const qc = useQueryClient();

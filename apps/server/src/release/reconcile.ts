@@ -26,9 +26,11 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
       [repoId],
     );
     if (!repo) return;
-    const f = await one(tx, `SELECT facts FROM repo_release_facts WHERE project_repo_id=$1 AND state='ready'`, [
-      repoId,
-    ]);
+    const f = await one(
+      tx,
+      `SELECT facts FROM repo_release_facts WHERE project_repo_id=$1 AND state='ready'`,
+      [repoId],
+    );
     if (!f?.facts) return;
     const facts = f.facts as ReleaseFacts;
     const scope = projectScope(repo.org_id, repo.project_id);
@@ -39,11 +41,9 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
     );
     if (live?.state === 'approved') {
       // While the release is being published, the publish flow closes the proposal itself.
-      const unpublished = await one(
-        tx,
-        `SELECT 1 FROM release_ships WHERE id=$1 AND status <> 'published'`,
-        [live.id],
-      );
+      const unpublished = await one(tx, `SELECT 1 FROM release_ships WHERE id=$1 AND status <> 'published'`, [
+        live.id,
+      ]);
       if (unpublished) return;
       const tags = facts.existingTags ?? [];
       const tag = live.version && tags.includes(`v${live.version}`) ? `v${live.version}` : null;

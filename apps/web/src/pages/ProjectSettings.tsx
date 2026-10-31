@@ -26,6 +26,7 @@ import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoComponentRulesControl } from '../components/RepoComponentRulesControl.tsx';
+import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
@@ -340,6 +341,14 @@ export function ProjectSettings() {
                       projectId={id}
                       repo={r}
                       isOwner={project?.myRole === 'owner'}
+                    />
+                  )}
+                  {traits.usesRepos && expert && (
+                    <RepoReleaseNameControl
+                      projectId={id}
+                      repo={r}
+                      isOwner={project?.myRole === 'owner'}
+                      projectName={project?.name ?? ''}
                     />
                   )}
                   {traits.usesRepos &&

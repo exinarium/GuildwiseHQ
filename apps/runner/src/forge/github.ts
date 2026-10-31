@@ -196,15 +196,7 @@ export class GitHubForge implements Forge {
   }
 
   async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {
-    const r = await this.gh([
-      'release',
-      'view',
-      tag,
-      '--repo',
-      repo.fullName,
-      '--json',
-      'url,isDraft',
-    ]);
+    const r = await this.gh(['release', 'view', tag, '--repo', repo.fullName, '--json', 'url,isDraft']);
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0) {
       const why = (r.stderr || r.stdout).trim();

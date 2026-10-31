@@ -376,7 +376,8 @@ export async function applyReleaseShipResult(
     );
     await appendReleaseFailure(ctx, tx, ship, step, failure, false);
   });
-  if (deliver.to) void Promise.resolve(ctx.services.gateway.deliverPending(deliver.to)).catch(() => undefined);
+  if (deliver.to)
+    void Promise.resolve(ctx.services.gateway.deliverPending(deliver.to)).catch(() => undefined);
 }
 
 /** The "Release stopped" alert and `ReleaseFailed` for any step; Retry continues from `step`. */

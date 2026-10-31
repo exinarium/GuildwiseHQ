@@ -53,7 +53,8 @@ function commit(clone: string, path: string, text: string, message: string) {
 function setup(opts: { dco?: boolean } = {}) {
   const repo = makeRepo();
   commit(repo.clone, 'CHANGELOG.md', CHANGELOG.replace('## [1.4.0]', '## [1.3.0-x]'), 'docs: changelog');
-  if (opts.dco) commit(repo.clone, 'CONTRIBUTING.md', '## DCO\n\nSign off: Signed-off-by: you\n', 'docs: dco');
+  if (opts.dco)
+    commit(repo.clone, 'CONTRIBUTING.md', '## DCO\n\nSign off: Signed-off-by: you\n', 'docs: dco');
   sh(repo.clone, 'git', ['tag', '-a', 'v1.3.0', '-m', 'Guildwise HQ 1.3.0']);
   sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
   sh(repo.clone, 'git', ['checkout', '-b', 'develop']);
@@ -65,7 +66,10 @@ function setup(opts: { dco?: boolean } = {}) {
   return { repo, R, integrationDir: tmp('aom-integration-') };
 }
 
-const payload = (s: ReturnType<typeof setup>, over: Partial<ReleasePublishPayload> = {}): ReleasePublishPayload => ({
+const payload = (
+  s: ReturnType<typeof setup>,
+  over: Partial<ReleasePublishPayload> = {},
+): ReleasePublishPayload => ({
   shipId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d1',
   projectId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d2',
   repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -124,7 +128,9 @@ describe('release.publish', () => {
     expect(r.release?.message).toContain('No release page was created');
     expect(sh(s.repo.origin, 'git', ['cat-file', '-t', 'v1.4.0'])).toBe('tag');
     expect(originRef(s, 'v1.4.0^{commit}')).toBe(M);
-    expect(sh(s.repo.origin, 'git', ['tag', '-l', '--format=%(contents:subject)', 'v1.4.0'])).toBe('Guildwise HQ 1.4.0');
+    expect(sh(s.repo.origin, 'git', ['tag', '-l', '--format=%(contents:subject)', 'v1.4.0'])).toBe(
+      'Guildwise HQ 1.4.0',
+    );
     expect(sh(s.repo.origin, 'git', ['tag', '-l', '--format=%(taggername) %(taggeremail)', 'v1.4.0'])).toBe(
       'Release Owner <owner@example.test>',
     );
@@ -162,11 +168,14 @@ describe('release.publish', () => {
     expect(originRef(s, 'v1.4.0')).toBe(before);
   });
 
-  it('fails the tag step with git\'s message when the push is rejected, and Retry pushes the local tag', async () => {
+  it("fails the tag step with git's message when the push is rejected, and Retry pushes the local tag", async () => {
     const s = setup();
     mergeOnOrigin(s);
     const hook = join(s.repo.origin, 'hooks', 'pre-receive');
-    writeFileSync(hook, '#!/bin/sh\nwhile read old new ref; do case "$ref" in refs/tags/*) echo "tags are locked" >&2; exit 1;; esac; done\n');
+    writeFileSync(
+      hook,
+      '#!/bin/sh\nwhile read old new ref; do case "$ref" in refs/tags/*) echo "tags are locked" >&2; exit 1;; esac; done\n',
+    );
     chmodSync(hook, 0o755);
     const r = await run(s);
     expect(r.ok).toBe(false);
@@ -197,7 +206,9 @@ describe('release.publish', () => {
     const M = originRef(s, 'main');
     expect(r.tag?.target).toBe(M);
     expect(originRef(s, 'v1.4.0^{commit}')).toBe(M);
-    expect(sh(s.repo.origin, 'git', ['log', '-1', '--format=%B', 'main'])).toContain('Signed-off-by: Release Owner');
+    expect(sh(s.repo.origin, 'git', ['log', '-1', '--format=%B', 'main'])).toContain(
+      'Signed-off-by: Release Owner',
+    );
     expect(sh(s.repo.origin, 'git', ['rev-list', '--parents', '-n', '1', 'main']).split(' ')).toHaveLength(3);
     // a second run finds R on main and creates nothing new
     const again = await run(s, { land: { mode: 'merge' } });
@@ -208,7 +219,12 @@ describe('release.publish', () => {
   it('merge mode: a conflict fails the land step and leaves main alone', async () => {
     const s = setup();
     const main = originRef(s, 'main');
-    commit(s.repo.clone, 'CHANGELOG.md', '# Changelog\n\n## [Unreleased]\n\nchanged on main\n', 'docs: main edit');
+    commit(
+      s.repo.clone,
+      'CHANGELOG.md',
+      '# Changelog\n\n## [Unreleased]\n\nchanged on main\n',
+      'docs: main edit',
+    );
     sh(s.repo.clone, 'git', ['push', 'origin', 'main']);
     const r = await run(s, { land: { mode: 'merge' } });
     expect(r.ok).toBe(false);

@@ -572,7 +572,14 @@ export class RunnerHandlers {
     } else if (cmd?.type === 'release.publish') {
       // Terminal: the tag and release are recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-      await applyReleasePublishResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+      await applyReleasePublishResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
     } else if (cmd?.type === 'claude.account.ensure') {
       // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

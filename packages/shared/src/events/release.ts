@@ -132,8 +132,5 @@ export const releaseEvents = [
     }),
   ),
   /** Retry of a failed land, tag or publish step. */
-  defineEvent(
-    'ReleasePublishRetried',
-    z.object({ shipId: Id, step: z.string(), workstationId: Id }),
-  ),
+  defineEvent('ReleasePublishRetried', z.object({ shipId: Id, step: z.string(), workstationId: Id })),
 ] as const;

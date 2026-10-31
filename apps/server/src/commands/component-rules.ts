@@ -61,10 +61,11 @@ export async function setRepoReleaseName(
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
-    const r = await one(tx, 'SELECT id FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL', [
-      repoId,
-      projectId,
-    ]);
+    const r = await one(
+      tx,
+      'SELECT id FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
+      [repoId, projectId],
+    );
     if (!r) throw notFound('repository not found');
     await exec(tx, 'UPDATE project_repos SET release_name=$2 WHERE id=$1', [repoId, value]);
   });

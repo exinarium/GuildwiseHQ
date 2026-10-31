@@ -70,7 +70,12 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
   const authEnv = { env: a.env };
 
-  const resolved = await resolveReleaseBase(repoPath, { base: p.mainBranch, forge: p.forge }, input.auth, 'cannot publish');
+  const resolved = await resolveReleaseBase(
+    repoPath,
+    { base: p.mainBranch, forge: p.forge },
+    input.auth,
+    'cannot publish',
+  );
   if (!resolved.ok) return failed('land', resolved.error);
   const base = resolved.base;
   const baseRef = `refs/remotes/origin/${base}`;
@@ -91,7 +96,12 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   let target: string | null = null;
   if (await isAncestor(repoPath, R, baseRef)) {
     target = await firstParentTarget(repoPath, R, baseRef);
-    landed = { mode: p.land.mode, mergeSha: target, by: 'found', ...(p.land.mode === 'pr' && p.land.prUrl ? { prUrl: p.land.prUrl } : {}) };
+    landed = {
+      mode: p.land.mode,
+      mergeSha: target,
+      by: 'found',
+      ...(p.land.mode === 'pr' && p.land.prUrl ? { prUrl: p.land.prUrl } : {}),
+    };
   } else if (p.land.mode === 'pr') {
     const out = await landByPr(input, base, baseRef, fetchBase);
     if ('result' in out) return out.result;
@@ -112,7 +122,11 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
     authEnv,
   );
   if (remoteTag.exitCode !== 0)
-    return failed('tag', `could not list the tags of origin: ${(remoteTag.stderr || remoteTag.stdout).trim()}`, carry);
+    return failed(
+      'tag',
+      `could not list the tags of origin: ${(remoteTag.stderr || remoteTag.stdout).trim()}`,
+      carry,
+    );
   const remoteSha = peeledTag(remoteTag.stdout, p.tag);
   const localRaw = await git(repoPath, ['rev-parse', '-q', '--verify', `refs/tags/${p.tag}^{commit}`]);
   const localSha = localRaw.exitCode === 0 ? localRaw.stdout.trim() : null;
@@ -142,8 +156,11 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
     } catch (err) {
       return failed('tag', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errText(err), carry);
     }
-    const made = await git(repoPath, ['tag', '-a', p.tag, '-m', p.title, target], { env: commitEnv(identity) });
-    if (made.exitCode !== 0) return failed('tag', `git tag failed: ${(made.stderr || made.stdout).trim()}`, carry);
+    const made = await git(repoPath, ['tag', '-a', p.tag, '-m', p.title, target], {
+      env: commitEnv(identity),
+    });
+    if (made.exitCode !== 0)
+      return failed('tag', `git tag failed: ${(made.stderr || made.stdout).trim()}`, carry);
   }
   if (decision.action === 'create' || decision.action === 'push') {
     const push = await git(repoPath, [...a.args, 'push', 'origin', `refs/tags/${p.tag}`], authEnv);
@@ -161,7 +178,13 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   // 3. the forge release
   const hit = forgeForUrl(input.forgeEnv, url, p.forge);
   const kind: ForgeKind = hit?.forge.kind ?? p.forge ?? 'git';
-  if (!hit || !hit.forge.caps.releases || !hit.forge.createRelease || !hit.forge.findRelease || !forgeHasReleasePages(kind)) {
+  if (
+    !hit ||
+    !hit.forge.caps.releases ||
+    !hit.forge.createRelease ||
+    !hit.forge.findRelease ||
+    !forgeHasReleasePages(kind)
+  ) {
     return {
       ok: true,
       stage: 'done',
@@ -179,7 +202,9 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
         release: {
           state: 'existed',
           url: found.url,
-          ...(found.draft ? { message: 'A draft release exists for this tag: publish it on the forge.' } : {}),
+          ...(found.draft
+            ? { message: 'A draft release exists for this tag: publish it on the forge.' }
+            : {}),
         },
       };
     }
@@ -211,7 +236,10 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
 /** The commit of `base` to tag: the first-parent commit that brought `R` in, or `R` itself when it was fast-forwarded. */
 async function firstParentTarget(repoPath: string, R: string, baseRef: string): Promise<string> {
   const list = await git(repoPath, ['rev-list', '--first-parent', '--ancestry-path', `${R}..${baseRef}`]);
-  const shas = list.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  const shas = list.stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const oldest = shas[shas.length - 1];
   if (!oldest) return R;
   const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${oldest}^1`])).stdout.trim();
@@ -257,8 +285,11 @@ async function landByPr(
   if (state === 'closed')
     return { result: failed('land', `The release pull request ${prUrl} was closed without merging.`) };
   if (state === 'open') return waiting('the release pull request is not merged yet', 'open');
-  const sha = hit.forge.changeMergeCommit ? await hit.forge.changeMergeCommit(hit.repo, id).catch(() => null) : null;
-  if (!sha) return waiting('the release pull request is merged; waiting for its merge commit on ' + base, 'merged');
+  const sha = hit.forge.changeMergeCommit
+    ? await hit.forge.changeMergeCommit(hit.repo, id).catch(() => null)
+    : null;
+  if (!sha)
+    return waiting('the release pull request is merged; waiting for its merge commit on ' + base, 'merged');
   await refetch();
   if (!(await isAncestor(repoPath, sha, baseRef)))
     return waiting(`the release pull request is merged; waiting for ${base} to show it`, 'merged');
@@ -292,7 +323,9 @@ async function landByMerge(
     },
     async (wt): Promise<{ sha: string; signedOff: boolean } | { result: ReleasePublishResult }> => {
       const signedOff =
-        p.land.mode === 'merge' && p.land.signoff !== undefined ? p.land.signoff : (await detectSignOff(wt)).required;
+        p.land.mode === 'merge' && p.land.signoff !== undefined
+          ? p.land.signoff
+          : (await detectSignOff(wt)).required;
       const merge = await git(
         wt,
         [
@@ -338,7 +371,10 @@ async function landByMerge(
               result: {
                 ok: true,
                 stage: 'waiting',
-                waiting: { reason: `${base} is protected: the release pull request ${r.url} must be merged`, prState: 'open' },
+                waiting: {
+                  reason: `${base} is protected: the release pull request ${r.url} must be merged`,
+                  prState: 'open',
+                },
                 land: { mode: 'pr', mergeSha: '', by: 'forge', prUrl: r.url },
               },
             };

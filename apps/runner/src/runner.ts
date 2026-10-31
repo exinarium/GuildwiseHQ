@@ -2064,7 +2064,13 @@ export class Runner {
               integrationDir: this.paths.integration,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
             })
-          : { ok: false, step: 'prepare', error: `no local clone for ${p.remoteUrlNormalized}`, components: [], notices: [] };
+          : {
+              ok: false,
+              step: 'prepare',
+              error: `no local clone for ${p.remoteUrlNormalized}`,
+              components: [],
+              notices: [],
+            };
         done(true, result);
         if (result.ok)
           void this.sync.sync({
