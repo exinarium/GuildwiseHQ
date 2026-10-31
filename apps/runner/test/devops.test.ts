@@ -245,6 +245,8 @@ describe('a card shift sees only the vault of its domain', () => {
     const personalDir = await clone(personalId, personal);
     return { adapter, workId, personalId, workDir, personalDir };
   }
+  const vaultReadDirs = (input: { readDirs?: string[] } | undefined) =>
+    (input?.readDirs ?? []).filter((d) => d.startsWith(join(h!.dataDir, 'vaults')));
   const withVault = (vault: unknown, over: Record<string, unknown> = {}) => ({
     ...makeShiftStart({ stage: 'build', remoteNormalized: h!.repo.remoteNormalized, ...over }),
     vault,
@@ -256,7 +258,9 @@ describe('a card shift sees only the vault of its domain', () => {
     await run(
       withVault({ vaultId: v.workId, kind: 'org', folder: 'projects/toy' }, { agentId, ref: 'TOY-1' }),
     );
-    expect(v.adapter.inputs[0]?.addDirs).toEqual([v.workDir]);
+    // vaults are mounted read-only (readDirs), never as writable --add-dir (cb1627eb)
+    expect(vaultReadDirs(v.adapter.inputs[0])).toEqual([v.workDir]);
+    expect(v.adapter.inputs[0]?.addDirs).not.toContain(v.workDir);
     const md = v.adapter.inputs[0]?.instructionsMarkdown ?? '';
     expect(md).toContain('WORK-PROJECT-DOC use pnpm');
     expect(md).toContain('WORK-GLOBAL-ORDER keep it short');
@@ -276,7 +280,8 @@ describe('a card shift sees only the vault of its domain', () => {
         { agentId, ref: 'TOY-2', shiftId: uuidv7() },
       ),
     );
-    expect(v.adapter.inputs[0]?.addDirs).toEqual([v.personalDir]);
+    expect(vaultReadDirs(v.adapter.inputs[0])).toEqual([v.personalDir]);
+    expect(v.adapter.inputs[0]?.addDirs).not.toContain(v.personalDir);
     const md = v.adapter.inputs[0]?.instructionsMarkdown ?? '';
     expect(md).toContain('PERSONAL-PROJECT-DOC secret hobby');
     expect(md).toContain('PERSONAL-GLOBAL-ORDER be playful');
