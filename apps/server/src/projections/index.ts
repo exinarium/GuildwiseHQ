@@ -41,6 +41,7 @@ import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
 import { questionFlowProjectors } from './question-flow.ts';
 import { releaseProjectors } from './release.ts';
+import { relayProjectors } from './relay.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
@@ -123,6 +124,7 @@ const domains: Array<Record<string, Projector>> = [
   playbookProjectors,
   governanceProjectors,
   agentUxProjectors,
+  relayProjectors,
 ];
 
 /**
@@ -247,6 +249,7 @@ export const PROJECTION_TABLES = [
   'intake_batches',
   'intake_batch_items',
   'backlog_items',
+  'relay_integrations',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',

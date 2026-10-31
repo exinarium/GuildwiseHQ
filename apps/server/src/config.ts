@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { RELAY_BODY_HARD_MAX_BYTES, RELAY_KINDS, type RelayKind } from '@aom/shared';
 import { z } from 'zod';
 
 /**
@@ -182,6 +183,15 @@ const EnvSchema = z.object({
   /** Persona chats (R3c) are removed from the lists after this many days without a message (0: keep for ever). */
   AOM_PERSONA_CHAT_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(90),
   AOM_PROJECT_GRAPHS: bool(true),
+  /** Inbound webhook relay (business mode). */
+  AOM_RELAY_MAX_BODY_BYTES: z.coerce.number().int().min(1).max(RELAY_BODY_HARD_MAX_BYTES).default(1_048_576),
+  AOM_RELAY_RATE_PER_MINUTE: z.coerce.number().int().min(1).max(100000).default(60),
+  AOM_RELAY_RATE_BURST: z.coerce.number().int().min(1).max(10000).default(20),
+  AOM_RELAY_TIMEOUT_MS: z.coerce.number().int().default(5000),
+  AOM_RELAY_TIMEOUTS: z.string().default(''),
+  AOM_RELAY_RETRY_AFTER_SEC: z.coerce.number().int().min(1).max(3600).default(60),
+  AOM_RELAY_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(100000).default(200),
+  AOM_RELAY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -278,6 +288,18 @@ export interface Config {
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
+  /** Inbound webhook relay (business mode). */
+  relay: {
+    /** Largest request body forwarded (`AOM_RELAY_MAX_BODY_BYTES`); bigger is a 413. */
+    maxBodyBytes: number;
+    perMinute: number;
+    burst: number;
+    /** How long the server waits for the runner's answer, per kind (`AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`). */
+    timeoutMs: Record<RelayKind, number>;
+    retryAfterSec: number;
+    maxInFlight: number;
+    retentionDays: number;
+  };
   /** Host the simulated workstations of simulation organizations (see src/simulation). */
   simulationHost: boolean;
   simulationDir: string;
@@ -293,6 +315,20 @@ export interface Config {
     subject: string | undefined;
     offlineGraceSeconds: number;
   };
+}
+
+const clampMs = (n: number) => Math.min(15_000, Math.max(1000, n));
+
+/** The forward timeout of each relay kind: the default, then `kind=ms,kind=ms` overrides, each clamped to 1..15 s. */
+export function relayTimeouts(fallback: number, overrides: string): Record<RelayKind, number> {
+  const out = Object.fromEntries(RELAY_KINDS.map((k) => [k, clampMs(fallback)])) as Record<RelayKind, number>;
+  for (const part of overrides.split(',')) {
+    const [k, v] = part.split('=').map((x) => x.trim());
+    const n = Number(v);
+    if (k && (RELAY_KINDS as readonly string[]).includes(k) && Number.isFinite(n))
+      out[k as RelayKind] = clampMs(Math.trunc(n));
+  }
+  return out;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -370,6 +406,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     videoPushUrl: e.AOM_VIDEO_PUSH_URL,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
+    relay: {
+      maxBodyBytes: e.AOM_RELAY_MAX_BODY_BYTES,
+      perMinute: e.AOM_RELAY_RATE_PER_MINUTE,
+      burst: e.AOM_RELAY_RATE_BURST,
+      timeoutMs: relayTimeouts(e.AOM_RELAY_TIMEOUT_MS, e.AOM_RELAY_TIMEOUTS),
+      retryAfterSec: e.AOM_RELAY_RETRY_AFTER_SEC,
+      maxInFlight: e.AOM_RELAY_MAX_IN_FLIGHT,
+      retentionDays: e.AOM_RELAY_RETENTION_DAYS,
+    },
     simulationHost: e.AOM_SIMULATION_HOST,
     simulationDir: e.AOM_SIMULATION_DIR?.trim() || join(tmpdir(), 'aom-simulation'),
     simulationRunnerBin: e.AOM_SIMULATION_RUNNER_BIN?.trim() || undefined,

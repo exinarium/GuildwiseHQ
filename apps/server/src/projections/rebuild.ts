@@ -29,6 +29,8 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
       'repo_id IN (SELECT id FROM project_repos) AND workstation_id IN (SELECT id FROM workstations)',
   },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
+  // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
+  { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
   { table: 'user_totp', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'login_challenges', restoreWhere: 'user_id IN (SELECT id FROM users)' },

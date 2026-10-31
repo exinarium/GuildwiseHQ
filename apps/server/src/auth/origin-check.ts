@@ -1,3 +1,4 @@
+import { RELAY_PATH_PREFIX } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Config } from '../config.ts';
 import { HttpError } from '../errors.ts';
@@ -45,6 +46,8 @@ const isUnsubscribePost = (url: string): boolean => /^\/blog\/unsubscribe\//.tes
 export function checkContentType(req: FastifyRequest, formPostPaths: ReadonlySet<string> = new Set()): void {
   if (SAFE.has(req.method)) return;
   if (isUnsubscribePost(req.url)) return;
+  // The inbound relay carries any provider's body untouched (forms, JSON, bytes); the runner checks the signature.
+  if (req.url.startsWith(RELAY_PATH_PREFIX)) return;
   // SendGrid Inbound Parse posts multipart/form-data; the shared secret (checked before the body is read) is the credential.
   if ((req.url.split('?')[0] ?? '') === '/api/inbound/mail/sendgrid') return;
   // An extension's webhook may be a form post (its own signature is the credential).

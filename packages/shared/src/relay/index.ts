@@ -23,6 +23,8 @@ export const RELAY_OUTCOMES = [
   'rejected_size',
   'rejected_rate',
   'unknown_path',
+  /** The server failed before it could forward (a malformed body, a database error). */
+  'error',
 ] as const;
 export type RelayOutcome = (typeof RELAY_OUTCOMES)[number];
 /** Response headers the runner may set; anything else is dropped. */

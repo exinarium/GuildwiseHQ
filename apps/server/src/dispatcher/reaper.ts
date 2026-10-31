@@ -10,6 +10,7 @@ import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { pruneRelayRequests } from '../webhook-relay/hub.ts';
 import { pruneRunnerInbox } from '../runner-gateway/inbox-prune.ts';
 
 const ACCEPT_TIMEOUT_MS = 30_000;
@@ -49,6 +50,9 @@ export class Reaper {
         this.lastInboxPrune = t;
         await pruneRunnerInbox(this.ctx).catch((err) =>
           this.ctx.log.error({ err }, 'runner inbox prune failed'),
+        );
+        await pruneRelayRequests(this.ctx).catch((err) =>
+          this.ctx.log.error({ err }, 'relay requests prune failed'),
         );
       }
     });

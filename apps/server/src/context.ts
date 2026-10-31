@@ -21,6 +21,7 @@ import type { BoardService } from './sessions/board.ts';
 import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
 import type { VideoDestinationClient } from './video/destinations.ts';
+import type { RelayHub } from './webhook-relay/hub.ts';
 import type { YouTubeClient } from './video/youtube.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
@@ -75,6 +76,8 @@ export interface Services {
   /** The Boardroom orchestrator: rounds, speaker choice, decision points, whiteboard and minutes. */
   board: BoardService;
   cloud: CloudServices;
+  /** The inbound webhook relay: which runner serves which integration, and the requests waiting for an answer. */
+  webhookRelay: RelayHub;
   /** Web Push notifier (only when VAPID is configured). */
   push?: PushService;
 }
