@@ -65,6 +65,7 @@ import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
 import { boardRoutes } from './routes/board.ts';
+import { briefPlaybookRoutes } from './routes/brief-playbooks.ts';
 import { capabilityRoutes } from './routes/capabilities.ts';
 import { cardAttachmentRoutes } from './routes/card-attachments.ts';
 import { cardRoutes } from './routes/cards.ts';
@@ -455,6 +456,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));
+  await app.register(briefPlaybookRoutes(ctx));
   await app.register(inboundRoutes(ctx));
   await app.register(hookRoutes(ctx));
   await app.register(relayIntegrationRoutes(ctx));

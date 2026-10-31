@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CardOutput,
+  isBriefWorkflowKey,
   isOrgOperational,
   type OutputDestination,
   outputEmail,
@@ -11,7 +12,7 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { one, type Queryable, type Row } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { SYSTEM_ACTOR } from './common.ts';
@@ -28,6 +29,49 @@ export const deliverOutputOf = (a: ScheduleAction | null | undefined) =>
 
 /** The card's result: the last agent handoff note, or the investigation summary for an investigation-only card. */
 export async function cardOutput(ctx: Ctx, db: Queryable, cardId: string): Promise<CardOutput | null> {
+  const o = await baseCardOutput(ctx, db, cardId);
+  return o ? briefLinks(ctx, db, cardId, o) : o;
+}
+
+/** Brief cards only: the cards and rules the brief cites, as links. Any other card is returned as it is. */
+async function briefLinks(ctx: Ctx, db: Queryable, cardId: string, o: CardOutput): Promise<CardOutput> {
+  const c = await one(
+    db,
+    `SELECT c.org_id, v.key FROM cards c LEFT JOIN workflow_versions v ON v.id = c.workflow_version_id WHERE c.id=$1`,
+    [cardId],
+  );
+  if (!c || !isBriefWorkflowKey(c.key as string | null)) return o;
+  const origin = ctx.config.publicOrigin;
+  const links: Array<{ label: string; url: string }> = [];
+  const refs = [...new Set(o.text.match(/\b[A-Z][A-Z0-9]{1,9}-\d+\b/g) ?? [])];
+  if (refs.length) {
+    const found = await rows(
+      db,
+      'SELECT ref, title FROM cards WHERE org_id=$1 AND ref = ANY($2::text[]) AND id <> $3',
+      [c.org_id, refs, cardId],
+    );
+    const byRef = new Map(found.map((r) => [r.ref as string, r.title as string]));
+    for (const ref of refs) {
+      const title = byRef.get(ref);
+      if (title !== undefined)
+        links.push({ label: `${ref} ${title}`, url: `${origin}/cards/${encodeURIComponent(ref)}` });
+    }
+  }
+  const ids = [
+    ...new Set([...o.text.matchAll(/\brule ([0-9a-f]{8})\b/gi)].map((m) => (m[1] as string).toLowerCase())),
+  ];
+  if (ids.length) {
+    const found = await rows(
+      db,
+      `SELECT id, title FROM ledger_entries WHERE org_id=$1 AND left(id::text, 8) = ANY($2::text[])`,
+      [c.org_id, ids],
+    );
+    for (const r of found) links.push({ label: `Rule: ${r.title}`, url: `${origin}/ledger?entry=${r.id}` });
+  }
+  return links.length ? { ...o, links } : o;
+}
+
+async function baseCardOutput(ctx: Ctx, db: Queryable, cardId: string): Promise<CardOutput | null> {
   const c = await one(db, 'SELECT id, ref, title, investigation, investigation_only FROM cards WHERE id=$1', [
     cardId,
   ]);

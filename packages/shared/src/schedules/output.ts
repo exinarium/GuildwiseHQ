@@ -10,7 +10,12 @@ export interface CardOutput {
   source: 'handoff' | 'report';
   /** Absolute link to the card. */
   link: string;
+  /** Links to the cards and rules a brief cites (Brief cards only; absent: outputs are unchanged). */
+  links?: Array<{ label: string; url: string }>;
 }
+
+const linkLines = (o: CardOutput): string =>
+  o.links?.length ? o.links.map((l) => `- ${l.label}: ${l.url}`).join('\n') : '';
 
 export const OUTPUT_EMPTY_TEXT = '(no text: see the card)';
 /** Meta's template variable limit differs between sources: keep it low and in one place. */
@@ -40,7 +45,7 @@ export function outputEmail(
   return {
     to: dest.to,
     subject: outputEmailSubject(o, scheduleName, dest.subject),
-    text: `${cut(outputText(o), EMAIL_TEXT_MAX)}\n\n${o.link}`,
+    text: `${cut(outputText(o), EMAIL_TEXT_MAX)}${o.links?.length ? `\n\nLinks:\n${linkLines(o)}` : ''}\n\n${o.link}`,
   };
 }
 
@@ -64,14 +69,18 @@ export function outputWebhookBody(
       trigger: c.test ? 'test' : 'event',
       at: c.at,
       text: outputText(o),
-      data: { card: { ref: o.ref, title: o.title, url: o.link }, output: { source: o.source } },
+      data: {
+        card: { ref: o.ref, title: o.title, url: o.link },
+        output: { source: o.source },
+        ...(o.links?.length ? { links: o.links } : {}),
+      },
     };
   const d: WebhookData = {
     scheduleId: c.scheduleId,
     scheduleName: c.scheduleName,
     trigger: c.test ? 'test' : 'event',
     at: c.at,
-    text: `${o.ref} ${o.title}\n${cut(outputText(o), CHAT_EXCERPT_MAX)}\n${o.link}`,
+    text: `${o.ref} ${o.title}\n${cut(outputText(o), CHAT_EXCERPT_MAX)}${o.links?.length ? `\n${linkLines(o)}` : ''}\n${o.link}`,
   };
   return webhookBody(format, d);
 }
@@ -90,7 +99,13 @@ export function whatsappText(o: CardOutput): string {
 
 /** The five agreed columns: timestamp (UTC), automation, card ref, title, output text and link. */
 export function sheetRow(at: string, scheduleName: string, o: CardOutput): string[] {
-  return [at, scheduleName, o.ref, o.title, `${cut(outputText(o), SHEET_TEXT_MAX)}\n\n${o.link}`];
+  return [
+    at,
+    scheduleName,
+    o.ref,
+    o.title,
+    `${cut(outputText(o), SHEET_TEXT_MAX)}${o.links?.length ? `\n\nLinks:\n${linkLines(o)}` : ''}\n\n${o.link}`,
+  ];
 }
 
 /** A short, secret-free label for the history: where an output goes. */

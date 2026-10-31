@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BRIEF_PLAYBOOKS,
   type CardTemplate,
   cardRef,
   DEFAULT_CARD_PRIORITY,
@@ -10,6 +11,7 @@ import {
   expandTitle,
   FEED_FIELD_DEFAULTS,
   HR_DESK_SUBKIND,
+  isBriefPlaybookKey,
   isEmailAction,
   isoWeek,
   isPollAction,
@@ -35,6 +37,7 @@ import type { Tx } from '../db/tx.ts';
 import { badRequest, conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { buildBriefContext } from './brief-context.ts';
 import { singleRepoDefault } from './card-repo.ts';
 import { resolveCardWorkflow, specifyTarget } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -304,6 +307,20 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
           ? 'queued'
           : 'draft'
         : t.start;
+    // A brief playbook: the snapshot of what changed is written into the card's fields at run time.
+    if (action.playbook) {
+      const snap = await buildBriefContext(tx, {
+        orgId: s.org_id,
+        projectId: project.id,
+        scheduleId: s.id,
+        playbook: isBriefPlaybookKey(action.playbook.key) ? BRIEF_PLAYBOOKS[action.playbook.key] : undefined,
+        now: spec.firedFor,
+        timezone: tz,
+        origin: ctx.config.publicOrigin,
+      });
+      mapped.context = snap.context;
+      mapped.period = snap.period;
+    }
     const card = await scheduledCard(tx, project, t, s.id, title, s.interest_id, {
       ...(mail ? { origin: 'email' as const } : fromEvent ? { origin: 'trigger' as const } : {}),
       ...(start ? { start } : {}),

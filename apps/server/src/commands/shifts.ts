@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   allowedOutcomes,
+  BRIEF_STAGE_ID,
   BuildEvidenceInputSchema,
   buildEvidenceProblem,
   type ClaimReleaseReason,
@@ -14,6 +15,7 @@ import {
   highRiskPaths,
   highRiskSummary,
   type InvestigationData,
+  isBriefWorkflowKey,
   isSuiteOrigin,
   isValidReportPath,
   type LedgerMatch,
@@ -43,6 +45,7 @@ import { dependencyStates } from '../dispatcher/dependencies.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
+import { checkBriefNote } from './brief-check.ts';
 import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
@@ -510,6 +513,11 @@ export async function applyShiftReport(
       break;
     }
     case 'StageCompleted':
+      if (isBriefWorkflowKey(wf.definition.key) && card.stage === BRIEF_STAGE_ID) {
+        // A brief is checked before it is accepted: the cap, and only cards and rules of this organization.
+        const problem = await checkBriefNote(tx, card, report.note);
+        if (problem) return { accepted: false, error: problem };
+      }
       if (card.stage === QA_STEPS_STAGE) {
         // Manual QA: the note is the agent's test steps; they are posted on the card for the person who tests it.
         if (!report.note.trim())
