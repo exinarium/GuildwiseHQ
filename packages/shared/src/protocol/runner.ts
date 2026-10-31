@@ -97,7 +97,12 @@ import {
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
-import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
+import {
+  CommitAsSchema,
+  ComponentRulesSchema,
+  RepoCreatePayloadSchema,
+  RepoIdentityFactSchema,
+} from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   EnvSecretClearPayloadSchema,
@@ -757,6 +762,54 @@ export const RepoOpenPrResultSchema = z.object({
 export type RepoOpenPrResult = z.infer<typeof RepoOpenPrResultSchema>;
 
 /**
+ * `repo.release_facts`: read-only. The last release tag, the commits and changed files since it, CHANGELOG.md and the
+ * component version files at the head of the working branch. Only fetches; never pushes, tags or checks out.
+ */
+export const RepoReleaseFactsPayloadSchema = z.object({
+  requestId: z.uuid(),
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  head: z.string().min(1),
+  base: z.string().min(1).optional(),
+  forge: ForgeKindSchema.optional(),
+  components: ComponentRulesSchema.default([]),
+});
+export type RepoReleaseFactsPayload = z.infer<typeof RepoReleaseFactsPayloadSchema>;
+
+export const RepoReleaseFactsResultSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().max(600).optional(),
+  base: z.string().optional(),
+  headSha: z.string().optional(),
+  baseSha: z.string().optional(),
+  ahead: z.number().int().nonnegative().optional(),
+  lastTag: z.object({ name: z.string(), sha: z.string() }).nullable().optional(),
+  existingTags: z.array(z.string()).max(500).default([]),
+  commits: z
+    .array(z.object({ sha: z.string().max(40), subject: z.string().max(300), breakingFooter: z.boolean() }))
+    .max(1000)
+    .default([]),
+  commitsTruncated: z.boolean().default(false),
+  changedTotal: z.number().int().nonnegative().default(0),
+  components: z
+    .array(
+      z.object({
+        name: z.string(),
+        changedCount: z.number().int().nonnegative(),
+        contentAtHead: z.string().max(262_144).nullable(),
+        contentAtTag: z.string().max(262_144).nullable(),
+      }),
+    )
+    .default([]),
+  changelog: z.string().max(1_048_576).nullable().optional(),
+});
+export type RepoReleaseFactsResult = z.infer<typeof RepoReleaseFactsResultSchema>;
+
+/** Announced by a runner that understands `repo.release_facts`. */
+export const RELEASE_FACTS_CAPABILITY = 'release-facts:1';
+
+/**
  * Organisation source folder (docs/RUNNER.md): the folder inside a repo root whose repositories the architect of one
  * organisation may read. `org.folder` sets (`path`) or clears (`path: null`) it; the runner validates exactly like
  * `aom-runner org-folder set` and answers `{ ok, error? }`. The state is reported in `org.folders`.
@@ -871,6 +924,7 @@ export const RunnerCommandNameSchema = z.enum([
   'git.ssh',
   'repo.access',
   'repo.open_pr',
+  'repo.release_facts',
   'org.folder',
   'toolchain.remove',
   'repo.sync',
@@ -970,6 +1024,7 @@ export const CommandPayloadSchemas = {
   'git.ssh': GitSshPayloadSchema,
   'repo.access': RepoAccessPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
+  'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,

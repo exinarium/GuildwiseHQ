@@ -49,6 +49,7 @@ export * from './prompt/index.ts';
 export * from './protocol/index.ts';
 export * from './questions/index.ts';
 export * from './repo/index.ts';
+export * from './release/index.ts';
 export * from './reporter/index.ts';
 export * from './research/index.ts';
 export * from './roles/index.ts';

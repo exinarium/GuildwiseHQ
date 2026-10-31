@@ -14,6 +14,40 @@ export interface ReleasePrInput {
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+export interface ResolvedReleaseBase {
+  ok: true;
+  base: string;
+  /** Git auth arguments and environment for the forge of origin. */
+  a: { args: string[]; env: Record<string, string> };
+}
+
+/**
+ * The main branch of a repository, resolved as the release PR does: the configured one, else the repository's default
+ * branch. Shared by the release PR and the release facts read.
+ */
+export async function resolveReleaseBase(
+  repoPath: string,
+  p: { base?: string | undefined; forge?: RepoOpenPrPayload['forge'] },
+  auth: GitAuth | undefined,
+  what: string,
+): Promise<ResolvedReleaseBase | { ok: false; error: string }> {
+  const remote = await hasRemote(repoPath);
+  if (!remote) return { ok: false, error: `${what}: the repository has no origin remote` };
+  const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+  const a = auth && url ? await auth(url, p.forge) : { args: [], env: {} };
+  const found = p.base ? null : await resolveDefaultBranch(repoPath, auth ? { auth } : {});
+  if (found && !found.branch && found.ambiguous.length > 1)
+    return { ok: false, error: ambiguousMainMessage(basename(repoPath), found.ambiguous) };
+  const base = p.base ?? found?.branch;
+  if (!base)
+    return {
+      ok: false,
+      error:
+        'the main branch cannot be told (the repository has several branches and no default). Set the main branch in the project settings.',
+    };
+  return { ok: true, base, a };
+}
+
 /**
  * `repo.open_pr`: a pull request from the repository's working branch (the head) to its main branch (the base; absent:
  * the repository's default branch). Pushes the working branch first when origin does not have it. Answers
@@ -26,21 +60,9 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
   if (!isSafeGitRef(head)) return { ok: false, error: `refusing unsafe branch name ${JSON.stringify(head)}` };
   if (p.base !== undefined && !isSafeGitRef(p.base))
     return { ok: false, error: `refusing unsafe branch name ${JSON.stringify(p.base)}` };
-  const remote = await hasRemote(repoPath);
-  if (!remote) return { ok: false, error: 'cannot open a pull request: the repository has no origin remote' };
-
-  const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
-  const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-  const found = p.base ? null : await resolveDefaultBranch(repoPath, input.auth ? { auth: input.auth } : {});
-  if (found && !found.branch && found.ambiguous.length > 1)
-    return { ok: false, error: ambiguousMainMessage(basename(repoPath), found.ambiguous) };
-  const base = p.base ?? found?.branch;
-  if (!base)
-    return {
-      ok: false,
-      error:
-        'the main branch cannot be told (the repository has several branches and no default). Set the main branch in the project settings.',
-    };
+  const resolved = await resolveReleaseBase(repoPath, p, input.auth, 'cannot open a pull request');
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { base, a } = resolved;
   if (base === head)
     return {
       ok: true,

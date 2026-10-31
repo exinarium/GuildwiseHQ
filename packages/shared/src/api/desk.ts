@@ -7,6 +7,7 @@ import { EscalationStepSchema } from '../intake/index.ts';
 import { FloorDigestSchema } from '../reporter/index.ts';
 import { IsoTime } from './common.ts';
 import { DigestItemDtoSchema } from './digest.ts';
+import { ReleaseProposalViewSchema, ShipReleaseApprovalSchema } from '../release/dto.ts';
 import { PhaseDeskBlockSchema } from './phases.ts';
 
 export const DeskLedgerChoiceSchema = z.object({
@@ -84,6 +85,8 @@ export const DeskItemDtoSchema = z.object({
   interest: z.object({ id: z.uuid(), name: z.string() }).nullable().optional(),
   /** Phases: the phase a `phase_proposal`, `phase_done` or `phase_results` item is about (live data). */
   phase: PhaseDeskBlockSchema.nullable().optional(),
+  /** A `ship_release` item: the live release proposal (recommendation, preview, component bumps). */
+  release: ReleaseProposalViewSchema.nullable().optional(),
   /** Part B: the BA's note on this item (context, how often it was asked, a recommendation). */
   baNote: z.string().nullable().optional(),
   baNoteAt: IsoTime.nullable().optional(),
@@ -317,6 +320,8 @@ export const ResolveDeskItemRequestSchema = z.object({
   onDuplicate: z.literal('merge').optional(),
   /** Q69: approving "where should this playbook run?" names one of the person's own workstations (the item's options). */
   workstationId: z.uuid().optional(),
+  /** Approving a Ship release item: the version, component levels and notes the owner chose. */
+  release: ShipReleaseApprovalSchema.optional(),
 });
 export type ResolveDeskItemRequest = z.infer<typeof ResolveDeskItemRequestSchema>;
 

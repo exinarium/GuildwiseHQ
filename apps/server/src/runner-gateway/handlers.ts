@@ -65,6 +65,7 @@ import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
+import { applyReleaseFactsResult } from '../release/facts.ts';
 import { riskTierRpc } from '../commands/risk.ts';
 import { applyDevopsAudit, applyRoleSmoke, applyRunnerError } from '../commands/runner-telemetry.ts';
 import {
@@ -549,6 +550,10 @@ export class RunnerHandlers {
       // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.release_facts') {
+      // Terminal: the facts (or why not) are stored; the proposal is reconciled with them.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleaseFactsResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'claude.account.ensure') {
       // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

@@ -63,6 +63,7 @@ import {
   updateProject,
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
+import { requestReleaseProposal } from '../release/manual.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
 import { gone } from '../errors.ts';
@@ -449,6 +450,21 @@ export function projectRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireUser(ctx, req);
         const out = await requestReleasePr(ctx, s.user, req.params.id, req.params.repoId);
+        reply.code(202);
+        return out;
+      },
+    );
+
+    /**
+     * "Prepare release" (and "Refresh" on the Ship release item): a workstation reads the repository (read-only) and the
+     * proposal is prepared or refreshed. Owner only. 202 with the request, or 409 with the reason nothing was asked.
+     */
+    app.post(
+      '/api/projects/:id/repos/:repoId/release-proposal',
+      { schema: { params: RepoParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const out = await requestReleaseProposal(ctx, s.user, req.params.id, req.params.repoId);
         reply.code(202);
         return out;
       },

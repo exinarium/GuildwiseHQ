@@ -70,6 +70,11 @@ export const ProjectRepoDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** A "Ship release" proposal waiting on the desk for this repository (state and the item to open); null: none. */
+  releaseProposal: z
+    .object({ state: z.enum(['proposed', 'approved']), deskItemId: z.uuid(), version: z.string().nullable() })
+    .nullable()
+    .optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */
   forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */

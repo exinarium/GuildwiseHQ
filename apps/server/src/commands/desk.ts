@@ -15,6 +15,7 @@ import {
   TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
   WORKING_BRANCH_SUBKIND,
+  type ShipReleaseApproval,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -32,6 +33,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { resolveGateItemIn } from '../governance/gates.ts';
 import { resolvePlatformApprovalIn } from '../platform-team/approvals.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
+import { resolveShipReleaseIn } from '../release/approve.ts';
 import {
   afterPlaybookRunDecision,
   PLAYBOOK_WORKSTATION_SUBKIND,
@@ -289,6 +291,7 @@ export async function resolveDeskItem(
     req.editedBody,
     req.onDuplicate,
     req.workstationId,
+    req.release,
   );
 }
 
@@ -310,6 +313,7 @@ async function closeItem(
   editedBody?: string,
   onDuplicate?: 'merge',
   workstationId?: string,
+  release?: ShipReleaseApproval,
 ) {
   let mergeInto: { id: string; body: string } | undefined;
   let workstationToDeliver: string | undefined;
@@ -404,6 +408,9 @@ async function closeItem(
       // M8: only the card's owner decides; an approved draft is posted by their own workstation, exactly as approved.
       workstationToDeliver =
         (await resolveOutboundIn(ctx, tx, user, item, resolution, note, editedBody)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === 'ship_release') {
+      // Ship release: only the project owner decides; approving records the version, components and notes (nothing is pushed).
+      await resolveShipReleaseIn(ctx, tx, user, item, resolution, release);
     } else if (item.kind === 'approval' && item.subkind === 'repo_create') {
       // Approved repository setup: only the project owner decides; their own workstation creates it with their gh login.
       workstationToDeliver = (await resolveRepoCreateIn(ctx, tx, user, item, resolution, note)) ?? undefined;

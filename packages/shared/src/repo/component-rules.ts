@@ -227,11 +227,13 @@ export function bumpVersion(current: string, bump: VersionBump): BumpResult {
   }
   let { major, minor, patch } = cur;
   if (bump === 'major') {
-    major += 1;
+    // npm semantics: X.0.0-pre becomes X.0.0, every other base goes to the next major.
+    if (!(cur.pre !== null && minor === 0 && patch === 0)) major += 1;
     minor = 0;
     patch = 0;
   } else if (bump === 'minor') {
-    minor += 1;
+    // npm semantics: X.Y.0-pre becomes X.Y.0, every other base goes to the next minor.
+    if (!(cur.pre !== null && patch === 0)) minor += 1;
     patch = 0;
   } else if (cur.pre === null) patch += 1;
   return { ok: true, version: `${cur.v}${major}.${minor}.${patch}` };

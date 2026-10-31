@@ -14,6 +14,7 @@ import {
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
 import { userAvatarOf } from '../dto.ts';
 import { digestItemsForDesk } from './digests.ts';
+import { releaseViewFor } from '../release/approve.ts';
 import { phaseDeskBlock } from './phases.ts';
 
 const SELECT = `
@@ -279,6 +280,11 @@ async function withPhase(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskI
   return isPhaseDeskSubkind(r.subkind) ? { ...dto, phase: await phaseDeskBlock(db, r) } : dto;
 }
 
+/** A Ship release item carries the live proposal (facts and rules read now). */
+async function withRelease(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskItemDto> {
+  return r.subkind === 'ship_release' ? { ...dto, release: await releaseViewFor({ pool: db as never }, r) } : dto;
+}
+
 async function orgRolesOf(db: Queryable, userId: string): Promise<Map<string, OrgRole>> {
   const list = await rows<{ org_id: string; role: OrgRole }>(
     db,
@@ -340,7 +346,13 @@ export async function listDesk(
   );
   const items: DeskItemDto[] = [];
   for (const r of all)
-    items.push(await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup, orgRoles), digests), r));
+    items.push(
+      await withRelease(
+        db,
+        await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup, orgRoles), digests), r),
+        r,
+      ),
+    );
   const openItems = items.filter((i) => i.status === 'open');
   // CEO decisions are for review, not decisions waiting on the user: they are not part of the open count.
   const decisions = items.filter((i) => i.ceoDecision && !i.ceoDecision.reviewed).length;
@@ -365,9 +377,13 @@ export async function getDeskDto(
   if (!r) return undefined;
   const dedup = await dedupEntriesFor(db, r.dedup_ledger_ids);
   const digests = await digestItemsForDesk(db, r.kind === 'rating' ? [r.id] : []);
-  return withPhase(
+  return withRelease(
     db,
-    withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup, await orgRolesOf(db, userId)), digests),
+    await withPhase(
+      db,
+      withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup, await orgRolesOf(db, userId)), digests),
+      r,
+    ),
     r,
   );
 }

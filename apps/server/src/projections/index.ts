@@ -40,6 +40,7 @@ import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
 import { questionFlowProjectors } from './question-flow.ts';
+import { releaseProjectors } from './release.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
@@ -100,6 +101,7 @@ const domains: Array<Record<string, Projector>> = [
   trackRecordProjectors,
   outboundProjectors,
   repoProjectors,
+  releaseProjectors,
   phaseProjectors,
   reporterProjectors,
   interestProjectors,
@@ -251,6 +253,7 @@ export const PROJECTION_TABLES = [
   'hr_applied',
   'outbound_drafts',
   'repo_requests',
+  'release_proposals',
   'deploy_targets',
   'phases',
   'phase_followups',

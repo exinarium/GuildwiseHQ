@@ -119,6 +119,7 @@ export const OWNER_RESERVED_KEYS = [
   'repo_create',
   'mass_cancel',
   'working_branch',
+  'release_publish',
 ] as const;
 export const OwnerReservedKey = z.enum(OWNER_RESERVED_KEYS);
 export type OwnerReservedKey = z.infer<typeof OwnerReservedKey>;
@@ -137,6 +138,7 @@ export const OWNER_RESERVED_LABEL: Record<OwnerReservedKey, string> = {
   repo_create: 'Creating repositories',
   mass_cancel: 'Cancelling more than 3 cards at once',
   working_branch: 'Choosing which branch a repository works on (answering working-branch questions)',
+  release_publish: 'Approving a release (version, changelog, tag and release page)',
 };
 
 /** Never delegable, whatever the policy says. The CEO has no action for them; a request for one is refused. */
@@ -229,6 +231,7 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'question:*': 'decide',
     'alert:*': 'decide',
     'approval:*': 'recommend',
+    'approval:ship_release': 'recommend',
     'escalation:*': 'recommend',
     // Loops and parks: the CEO already has the context, so it releases them without asking (owner decision 22 Oct).
     'escalation:loop_parked': 'decide',
@@ -293,6 +296,8 @@ export function reservedKeyOfDesk(kind: string, subkind: string | null | undefin
       return 'repo_create';
     case 'working_branch':
       return 'working_branch';
+    case 'ship_release':
+      return 'release_publish';
     case 'devops':
       return kind === 'approval' ? 'devops_destructive' : null;
     default:
