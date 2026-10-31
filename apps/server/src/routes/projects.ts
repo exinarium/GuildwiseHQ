@@ -25,6 +25,7 @@ import {
   SetProviderAccountRequestSchema,
   SetReferenceReposRequestSchema,
   SetStopLossRequestSchema,
+  SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -57,6 +58,7 @@ import {
   setProviderAccount,
   setReferenceRepos,
   setStopLoss,
+  setTestServices,
   updateProject,
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
@@ -327,6 +329,23 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Local test services (loopback host and port) that build, review and test shifts may reach. */
+    app.put(
+      '/api/projects/:id/test-services',
+      { schema: { params: IdParamsSchema, body: SetTestServicesRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setTestServices(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.services,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },

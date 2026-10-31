@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
-import type { AgentPermissions } from '@aom/shared';
+import { type AgentPermissions, testServiceDomain } from '@aom/shared';
 import { protectedGitPaths } from '../git/harden.ts';
+import { TEST_SERVICE_ROLES, type TestServicesSeen } from '../sandbox/test-services.ts';
 import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**
@@ -52,6 +53,11 @@ export interface ClaudePolicyContext {
   realHome: string;
   mode: SandboxMode;
   extraAllowedDomains?: string[];
+  /**
+   * The project's local test services this shift may reach, already decided (sandbox/test-services.ts): exact loopback
+   * `host:port` allowlist entries. Only `buildShiftSettings` reads it, and only for builder, reviewer and tester.
+   */
+  testServiceDomains?: string[];
   /** Other agents' private temp dirs (under /tmp, outside the data dir): never readable by this agent. */
   otherAgentTmps?: string[];
   /** Toolchain dirs (the Node install, configured toolchainPaths) sandboxed commands may read despite the read block. */
@@ -297,6 +303,8 @@ function sandboxBlock(
   scratch: string,
   tmp: string,
   profile: SandboxProfile = { browser: false, readOnlyWorktree: false },
+  /** Exact `host:port` entries of the project's local test services (empty: the settings are exactly as before). */
+  testDomains: string[] = [],
 ): ClaudeSettings['sandbox'] {
   if (ctx.mode === 'off') return undefined;
   const runnerPrivate = RUNNER_PRIVATE.map((p) => join(ctx.runnerRoot, p));
@@ -370,7 +378,7 @@ function sandboxBlock(
     excludedCommands: aomExcluded(ctx.aomReadPaths),
     network: {
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
-      allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? [])] : [],
+      allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains] : [],
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
@@ -682,10 +690,17 @@ export function buildShiftSettings(
     includeCoAuthoredBy: false,
     attribution: { commit: '', pr: '' },
   };
-  const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch, paths.tmp, {
-    browser: runsBrowsers(p, roleKey),
-    readOnlyWorktree: !tools.has('edit') && !p.mayCommit,
-  });
+  // A second role gate (the supervisor decides first): a mention, CEO, DevOps, chat or scan context never carries a test service.
+  const testDomains = TEST_SERVICE_ROLES.has(roleKey ?? '') ? (ctx.testServiceDomains ?? []) : [];
+  const sb = sandboxBlock(
+    tools,
+    ctx,
+    paths.home,
+    paths.scratch,
+    paths.tmp,
+    { browser: runsBrowsers(p, roleKey), readOnlyWorktree: !tools.has('edit') && !p.mayCommit },
+    testDomains,
+  );
   if (sb) out.sandbox = sb;
   return out;
 }
@@ -925,6 +940,7 @@ export function sandboxState(
 export function sandboxDoctorLines(
   sb: SandboxState,
   os: NodeJS.Platform,
+  testServices?: Record<string, TestServicesSeen>,
 ): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
   const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [
     {
@@ -944,6 +960,42 @@ export function sandboxDoctorLines(
       'Opt-in without sandbox (not recommended): runtimes["claude-code"] { "sandbox": "best_effort", "allowUnsandboxed": true } in config.json',
     ].entries())
       out.push({ ok: 'warn', name: i === 0 ? 'windows' : '       ', detail: step });
+  // Only when the runner reported its services (an old or stopped runner reports none): the lines above stay as they were.
+  if (testServices !== undefined) out.push(...testServiceDoctorLines(testServices));
+  return out;
+}
+
+/**
+ * The local test services the runner has allowed (or refused) per project, from `status.json`: one line per service, so an
+ * operator sees the opening. Nothing recorded: one line saying so.
+ */
+export function testServiceDoctorLines(
+  seen: Record<string, TestServicesSeen> | undefined,
+): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
+  const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [];
+  for (const [project, { at, decisions }] of Object.entries(seen ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  ))
+    for (const d of decisions)
+      out.push(
+        d.state === 'allowed'
+          ? {
+              ok: true,
+              name: 'test service',
+              detail: `${project} ${d.name} ${testServiceDomain(d)} (build, review and test shifts; as of ${at})`,
+            }
+          : {
+              ok: 'warn',
+              name: 'test service',
+              detail: `${project} ${d.name} ${testServiceDomain(d)} not opened: ${d.reason}`,
+            },
+      );
+  if (out.length === 0)
+    out.push({
+      ok: true,
+      name: 'test services',
+      detail: 'none declared by the projects this runner has worked on',
+    });
   return out;
 }
 

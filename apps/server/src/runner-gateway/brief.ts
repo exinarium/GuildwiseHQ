@@ -11,6 +11,8 @@ import {
   getStage,
   highRiskSummary,
   type InvestigationLocation,
+  type LocalTestService,
+  LocalTestServicesSchema,
   type PackAgentBrief,
   type PackPersonaRef,
   packAgentBriefOf,
@@ -623,6 +625,23 @@ export async function shiftVault(
 export const accountOf = (shift: { account_key?: string | null }): { account?: { key: string } } =>
   shift.account_key ? { account: { key: shift.account_key } } : {};
 
+/** Roles whose card shifts may reach the project's local test services (GWP-41). */
+const TEST_SERVICE_ROLES: ReadonlySet<string> = new Set(['builder', 'reviewer', 'tester']);
+
+/**
+ * The project's declared local test services for this agent's shift, read at claim time (so a change applies from the
+ * next shift). Empty unless the agent is a builder, reviewer or tester and not the DevOps engineer.
+ */
+export async function testServicesFor(
+  ctx: Ctx,
+  agent: { role_key?: string | null; is_devops?: boolean | null },
+  projectId: string,
+): Promise<LocalTestService[]> {
+  if (agent.is_devops || !TEST_SERVICE_ROLES.has(agent.role_key ?? '')) return [];
+  const row = await one(ctx.pool, 'SELECT test_services FROM projects WHERE id=$1', [projectId]);
+  return LocalTestServicesSchema.safeParse(row?.test_services).data ?? [];
+}
+
 export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<ShiftStartPayload | null> {
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [claim.agentId]);
@@ -652,6 +671,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
   const graph = await graphScopeFor(ctx, brief.project.id, brief.card.id);
   const resume = await affinityResume(ctx, claim, brief);
+  const testServices = await testServicesFor(ctx, agent, brief.project.id);
   return {
     shiftId: claim.shiftId,
     claimId: claim.claimId,
@@ -670,6 +690,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     readRepos: await shiftReadRepos(ctx, agent, brief.project.id, ws?.user_id, claim.worktree?.repoId),
     localReadRepos: await localReadRepos(ctx.pool, brief.project.id, claim.workstationId),
     ...(mcp.length > 0 ? { mcpServers: mcp } : {}),
+    ...(testServices.length > 0 ? { testServices } : {}),
     ...resume,
   };
 }

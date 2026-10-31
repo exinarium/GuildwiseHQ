@@ -127,6 +127,16 @@ import {
   sandboxEnv,
 } from '../sandbox/sandbox.ts';
 import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
+import {
+  decideTestServices,
+  refusedProgress,
+  TEST_SERVICE_ROLES,
+  type TestServiceDecision,
+  type TestServicesSeen,
+  testServiceDomains,
+  testServicesNote,
+  testServicesSpec,
+} from '../sandbox/test-services.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import { e2eAreasSection } from '../testing/e2e-areas.ts';
@@ -252,6 +262,8 @@ export interface SupervisorDeps {
   toolchains?: ToolchainRegistry;
   /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
   runs?: RunManager;
+  /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
+  onTestServices?: () => void;
   /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
   targetSecrets?: TargetSecrets;
   /** Test hook: how a remote target is probed before a tester shift starts (default: an HTTP request). */
@@ -399,6 +411,9 @@ export class ShiftSupervisor {
   private readonly sessions: SessionRegistry;
   /** `aom delegate`: read-only persona sub-tasks of a running shift (costs booked under the shift). */
   private readonly delegates: DelegateRunner;
+
+  /** The local test services each project declared at its latest shift start (doctor display only; never feeds settings). */
+  private readonly testServicesSeen = new Map<string, TestServicesSeen>();
 
   constructor(private readonly deps: SupervisorDeps) {
     this.log = deps.log ?? nullLogger;
@@ -721,6 +736,60 @@ export class ShiftSupervisor {
       ...(limitedUntil ? { limitedUntil } : {}),
       ...(accountKey ? { accountKey } : {}),
     });
+  }
+
+  /**
+   * Which of the project's declared local test services this shift's sandbox may reach (sandbox/test-services.ts). Empty,
+   * without asking the adapter anything, when the server sent none or the shift is not a builder, reviewer or tester card shift.
+   */
+  private async decideTestServices(
+    msg: ShiftStartMsg,
+    adapter: RuntimeAdapter | undefined,
+    testEnv: ShiftStartMsg['brief']['environment'],
+  ): Promise<TestServiceDecision[]> {
+    if (!msg.testServices?.length) return [];
+    const caps = adapter ? await adapter.capabilities().catch(() => undefined) : undefined;
+    let ipcPort: number | undefined;
+    try {
+      ipcPort = Number(new URL(this.deps.ipc.url).port) || undefined;
+    } catch {
+      ipcPort = undefined;
+    }
+    const runnerPorts = new Set<number>(this.deps.runs?.ownedPorts() ?? []);
+    if (ipcPort) runnerPorts.add(ipcPort);
+    const envForwardPorts =
+      testEnv?.mode === 'local' && testEnv.envId && this.deps.runs
+        ? this.deps.runs.testPorts(testEnv.envId)
+        : new Set<number>();
+    return decideTestServices({
+      services: msg.testServices,
+      kind: msg.kind,
+      roleKey: msg.agent.roleKey,
+      isDevops: !!msg.agent.isDevops,
+      runtime: msg.agent.runtime,
+      hasShell: msg.agent.permissions.allowedTools.includes('shell'),
+      platform: process.platform,
+      sandbox: caps?.sandbox,
+      claudeVersion: caps?.version,
+      runnerPorts,
+      envForwardPorts,
+    });
+  }
+
+  /** Remember what was decided for the project (replaced at every shift start, so a removed entry disappears). */
+  private recordTestServices(msg: ShiftStartMsg, decisions: TestServiceDecision[]): void {
+    // Only a shift whose role the server tells (builder, reviewer, tester): any other role says nothing about the list.
+    if (msg.kind !== 'card' || msg.agent.isDevops || !TEST_SERVICE_ROLES.has(msg.agent.roleKey)) return;
+    const key = msg.brief.project.key;
+    if (decisions.length === 0) {
+      if (!this.testServicesSeen.delete(key)) return;
+    } else this.testServicesSeen.set(key, { at: new Date().toISOString(), decisions });
+    this.deps.onTestServices?.();
+  }
+
+  /** The latest declaration per project, for the status file and the doctor. */
+  testServices(): Record<string, TestServicesSeen> {
+    return Object.fromEntries(this.testServicesSeen);
   }
 
   private async run(s: ActiveShift): Promise<void> {
@@ -1144,6 +1213,13 @@ export class ShiftSupervisor {
     // The tester's environment: where the app is, which suites to run, how to reach it from the sandbox.
     if (hasEnv && testEnv)
       texts.instructions += `\n${environmentNote(testEnv, testEnv.envId ? this.deps.runs?.testEnvironment(testEnv.envId) : null)}\n`;
+    // The project's local test services (GWP-41): the loopback ports this shift's sandbox may reach, decided here.
+    const testDecisions = await this.decideTestServices(msg, adapter, hasEnv ? testEnv : undefined);
+    const testNote = testServicesNote(testDecisions);
+    if (testNote) texts.instructions += `\n${testNote}\n`;
+    for (const d of testDecisions)
+      if (d.state === 'refused') this.addProgress(s, 'status', refusedProgress(d));
+    this.recordTestServices(msg, testDecisions);
     // Delegation (R3b): only an agent that was granted targets is told about `aom delegate`, and only a Claude Code agent gets
     // native subagents (the same targets, in its own process). The work a child shares with this shift is its working directory.
     s.delegateWork = {
@@ -1216,6 +1292,10 @@ export class ShiftSupervisor {
       }
     }
 
+    // The sandbox opens each allowed test service; `aom-env` bridges a local listener to it (never a bare host).
+    const testSpec = testServicesSpec(testDecisions);
+    if (testSpec) s.env.AOM_TEST_SERVICES = testSpec;
+
     // Resume the agent's own earlier session when it may (same agent, under 120K context tokens and 4 hours old).
     let resumeSessionId: string | undefined;
     if (msg.resumeSessionId && !s.resumed) {
@@ -1287,6 +1367,9 @@ export class ShiftSupervisor {
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
         ...(hasEnv && testEnv?.mode === 'remote' && testEnv.target
           ? { extraAllowedDomains: targetHosts(testEnv.target) }
+          : {}),
+        ...(testServiceDomains(testDecisions).length
+          ? { testServiceDomains: testServiceDomains(testDecisions) }
           : {}),
         ...(subagents.length ? { subagents } : {}),
         maxShiftMinutes: msg.maxShiftMinutes,

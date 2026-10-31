@@ -29,6 +29,7 @@ import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
   Badge,
@@ -413,6 +414,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="manual-qa" className="scroll-mt-20">
           <ManualQaPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="test-services" className="scroll-mt-20">
+          <TestServicesPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}

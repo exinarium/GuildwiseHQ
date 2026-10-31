@@ -54,6 +54,7 @@ import {
   saveIndex,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
@@ -364,6 +365,18 @@ function unpair(selector: string, opts: { dataDir?: string; purge?: boolean }): 
   );
 }
 
+/** The local test services the running runner recorded in its status file (none: an old or stopped runner). */
+function recordedTestServices(statusFile: string): Record<string, TestServicesSeen> | undefined {
+  try {
+    const s = JSON.parse(readFileSync(statusFile, 'utf8')) as {
+      testServices?: Record<string, TestServicesSeen>;
+    };
+    return s.testServices && typeof s.testServices === 'object' ? s.testServices : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<void> {
   const root = resolveDataDir(opts.dataDir);
   let paths = runnerPaths(root);
@@ -408,7 +421,8 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
       : `\`${claudeBin}\` not found (only needed for the claude-code runtime)`,
   );
   const sbCfg = config?.runtimes['claude-code'] ?? RunnerConfigSchema.shape.runtimes.parse({})['claude-code'];
-  for (const l of sandboxDoctorLines(sandboxState(sbCfg), platform())) line(l.ok, l.name, l.detail);
+  for (const l of sandboxDoctorLines(sandboxState(sbCfg), platform(), recordedTestServices(paths.status)))
+    line(l.ok, l.name, l.detail);
   const d = await execa('docker', ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
     () => undefined,
   );

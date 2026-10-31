@@ -29,6 +29,12 @@ const q = (s: string) => `"${s.replace(/(["\\$`])/g, '\\$1')}"`;
  * port inside it (`AOM_ENV_FORWARDS` = `<port>=<unix socket>,...`; the runner listens on the sockets) and runs the command,
  * which then finds `localhost:<port>` where it is on the workstation. `--timeout <minutes>` kills the command's whole
  * process group when it hangs (exit status 124).
+ *
+ * Local test services (GWP-41): when `AOM_TEST_SERVICES` lists `host:port` pairs (`127.0.0.1:5433,[::1]:6379`), the wrapper
+ * also starts a `socat` listener on each port inside the command's network. It tunnels through the Claude Code sandbox's
+ * proxy (`HTTPS_PROXY`, with its per-session credential) the way git-over-SSH does, and the proxy lets through only the
+ * exact `host:port` entries of the sandbox settings. The proxy URL is never printed. Without a usable proxy nothing is
+ * listened on and the services stay closed.
  */
 export const AOM_ENV_SCRIPT = `#!/usr/bin/env bash
 # aom-env [--timeout <minutes>] -- <command> [args...]
@@ -64,6 +70,34 @@ if [ -n "\${AOM_ENV_FORWARDS:-}" ]; then
       sleep 0.1
     done
   done
+fi
+if [ -n "\${AOM_TEST_SERVICES:-}" ]; then
+  proxy="\${HTTPS_PROXY:-\${https_proxy:-}}"
+  re='^https?://(([^:@/]+):([^@/]+)@)?([^:/@]+):([0-9]+)/?$'
+  if ! command -v socat >/dev/null 2>&1; then
+    echo "aom-env: socat is not installed on this machine, test services not reachable" >&2
+  elif [[ ! "$proxy" =~ $re ]]; then
+    echo "aom-env: no sandbox proxy, test services not reachable" >&2
+  else
+    pauth=""; [ -n "\${BASH_REMATCH[2]}" ] && pauth=",proxyauth=\${BASH_REMATCH[2]}:\${BASH_REMATCH[3]}"
+    phost="\${BASH_REMATCH[4]}"; pport="\${BASH_REMATCH[5]}"
+    IFS=',' read -r -a svcs <<<"$AOM_TEST_SERVICES"
+    for sv in "\${svcs[@]}"; do
+      sport="\${sv##*:}"; shost="\${sv%:*}"
+      case "$sport" in ''|*[!0-9]*) echo "aom-env: ignoring test service '$sv'" >&2; continue ;; esac
+      case "$shost" in
+        '[::1]') listen="TCP6-LISTEN:$sport,bind=[::1],fork,reuseaddr"; hex="00000000000000000000000001000000:$(printf '%04X' "$sport")"; tbl=/proc/net/tcp6 ;;
+        127.0.0.1|localhost) listen="TCP-LISTEN:$sport,bind=127.0.0.1,fork,reuseaddr"; hex="0100007F:$(printf '%04X' "$sport")"; tbl=/proc/net/tcp ;;
+        *) echo "aom-env: ignoring test service '$sv'" >&2; continue ;;
+      esac
+      socat "$listen" "PROXY:$phost:$shost:$sport,proxyport=$pport$pauth" >/dev/null 2>&1 &
+      pids+=($!)
+      for _ in $(seq 1 50); do
+        grep -qi "$hex 0*:0000 0A" "$tbl" 2>/dev/null && break
+        sleep 0.1
+      done
+    done
+  fi
 fi
 # Node's fetch ignores HTTP(S)_PROXY unless asked (spike (b), 2026-10-14): remote targets are reached through the sandbox proxy.
 export NODE_USE_ENV_PROXY=1

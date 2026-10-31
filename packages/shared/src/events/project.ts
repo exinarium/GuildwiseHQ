@@ -3,6 +3,7 @@ import { AccountKeySchema, ClaudeAccountKeySchema } from '../claude/accounts.ts'
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import {
   BranchPrefixSchema,
@@ -320,6 +321,11 @@ export const projectEvents = [
    * Manual QA after Finalize (docs/design/manual-qa.md) turned off or on for the project. On by default. Only cards
    * that have not yet passed Finalize are affected.
    */
+  /** The project's local test services (the whole list) that build, review and test shifts may reach. */
+  defineEvent(
+    'ProjectTestServicesSet',
+    z.object({ projectId: Id, services: LocalTestServicesSchema, by: Id }),
+  ),
   defineEvent('ProjectManualQaSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
    * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &

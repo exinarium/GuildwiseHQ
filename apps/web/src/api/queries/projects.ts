@@ -5,6 +5,7 @@ import {
   type ConvertProjectRequest,
   type ConvertResult,
   type CreateProjectRequest,
+  type LocalTestService,
   type PatchProjectRequest,
   ProjectClaudeAccountsViewSchema,
   type ProjectDetailResponse,
@@ -260,6 +261,17 @@ export function useSetManualQa(id: string) {
       qc.invalidateQueries({ queryKey: ['project', id] });
       qc.invalidateQueries({ queryKey: ['projects'] });
       qc.invalidateQueries({ queryKey: ['board'] });
+    },
+  });
+}
+
+export function useSetTestServices(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (services: LocalTestService[]) => put(`/projects/${id}/test-services`, { services }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
     },
   });
 }

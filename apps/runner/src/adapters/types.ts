@@ -122,9 +122,15 @@ export interface ShiftStartInput {
   mcpServers?: string[];
   /**
    * Hosts the shell may reach besides the package registries for this shift only: the deployed target a tester tests
-   * (docs/design/run-and-integration-tests.md D7). Hostnames, no ports (the sandbox cannot filter ports).
+   * (docs/design/run-and-integration-tests.md D7). Hostnames; an entry may carry a port (`127.0.0.1:5433`), which the
+   * sandbox's proxy then limits to that port.
    */
   extraAllowedDomains?: string[];
+  /**
+   * The project's local test services this shift may reach: exact loopback `host:port` entries, decided by the supervisor
+   * (sandbox/test-services.ts). Only a shift start sets it; a chat never does.
+   */
+  testServiceDomains?: string[];
   maxShiftMinutes: number;
   /** Continue this session (`claude --resume`): a chat's earlier turns, or a card shift that resumes its agent's session. */
   resumeSessionId?: string;

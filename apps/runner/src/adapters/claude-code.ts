@@ -501,6 +501,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       readDirs?: string[];
       toolchainReadDirs?: string[];
       extraAllowedDomains?: string[];
+      testServiceDomains?: string[];
     },
     cwd: string,
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
@@ -524,6 +525,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       accountDirs: this.registry.list().flatMap((a) => (a.configDir ? [a.configDir] : [])),
       mode: this.cfg.sandbox,
       extraAllowedDomains: [...this.cfg.extraAllowedDomains, ...(input.extraAllowedDomains ?? [])],
+      ...(input.testServiceDomains?.length ? { testServiceDomains: input.testServiceDomains } : {}),
       toolchainReadPaths: toolchainReadPaths([
         ...(this.cfg.toolchainPaths ?? []),
         ...(input.toolchainReadDirs ?? []),
