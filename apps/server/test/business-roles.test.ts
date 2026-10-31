@@ -124,7 +124,12 @@ describe('a persona that matches a business role (AC 2)', () => {
       hash,
       tools: ['read'],
     }) as never;
-  const read = (hash: string) => ({ text: 'You greet people.', hash, sha: 'a'.repeat(40) });
+  // a persona file starts with a frontmatter block (name, description, stance, voice, icon are required)
+  const PERSONA_TEXT =
+    '---\nname: Greeter\ndescription: Greets people.\nstance: Warm.\nvoice: Plain.\nicon: hand\ntools: [read]\n---\nYou greet people.\n';
+  // a content hash is 64 hex characters
+  const H = (c: string) => c.repeat(64);
+  const read = (hash: string) => ({ text: PERSONA_TEXT, hash, sha: 'a'.repeat(40) });
   const run = (it: never, hash: string, seat: boolean) =>
     withAppendTx(w.t.app.ctx.pool, (tx) =>
       ensureRole(w.t.app.ctx, tx, w.owner.id, w.owner.id, pack as never, it, read(hash), true, {
@@ -137,7 +142,7 @@ describe('a persona that matches a business role (AC 2)', () => {
   it('in a business organization takes the built-in role and registers no role', async () => {
     await setMode('business');
     const before = await ownRoles();
-    const def = await run(item('Front Desk', 'h1'), 'h1', true);
+    const def = await run(item('Front Desk', H('1')), H('1'), true);
     expect(def.key).toBe('front_desk');
     expect(def.builtIn).toBe(true);
     expect(await ownRoles()).toBe(before);
@@ -146,7 +151,7 @@ describe('a persona that matches a business role (AC 2)', () => {
   it('in a dev organization still makes the pack role', async () => {
     await setMode('dev');
     const before = await ownRoles();
-    const def = await run(item('Front Desk', 'h1'), 'h1', true);
+    const def = await run(item('Front Desk', H('1')), H('1'), true);
     expect(def.key).toBe('crew-front-desk');
     expect(def.builtIn).toBeFalsy();
     expect(await ownRoles()).toBe(before + 1);
@@ -154,19 +159,19 @@ describe('a persona that matches a business role (AC 2)', () => {
 
   it('a persona role made earlier keeps its role in a business organization, and still gets versions', async () => {
     await setMode('dev');
-    await run(item('Front Desk', 'h1'), 'h1', true); // the dev-era role (made here, so the test stands alone)
+    await run(item('Front Desk', H('1')), H('1'), true); // the dev-era role (made here, so the test stands alone)
     await setMode('business');
     const before = await ownRoles();
-    expect((await run(item('Front Desk', 'h1'), 'h1', true)).key).toBe('crew-front-desk');
+    expect((await run(item('Front Desk', H('1')), H('1'), true)).key).toBe('crew-front-desk');
     expect(await ownRoles()).toBe(before);
-    const v2 = await run(item('Front Desk', 'h2'), 'h2', true);
+    const v2 = await run(item('Front Desk', H('2')), H('2'), true);
     expect(v2.key).toBe('crew-front-desk');
     expect(v2.version).toBe(2);
   });
 
   it('without the seat option (the role-update path) a matching persona still makes its own role', async () => {
     await setMode('business');
-    const def = await run(item('Billing Clerk', 'b1'), 'b1', false);
+    const def = await run(item('Billing Clerk', H('b')), H('b'), false);
     expect(def.key).toBe('crew-billing-clerk');
     await setMode('dev');
   });
@@ -189,8 +194,16 @@ describe('a business role in an organization with no repository (AC 3)', () => {
     wf.stages = [wf.stages[0], stage('triage', 'done'), wf.stages[3]];
     wf.stages[0].outcomes[0].to = 'triage';
     await d.publish('workflows', wf);
+    // a card may name only a workflow that is enabled on its project
+    await q(
+      `INSERT INTO project_workflows (project_id, workflow_key, enabled_at) VALUES ($1, 'enquiries', now())
+       ON CONFLICT DO NOTHING`,
+      [w.projectId],
+    );
     const runner = await w.connectRunner();
     const p = pipeline(w, runner);
+    // the 'hires each one' test left a front desk agent ('Biz 1'); retire it so that Fiona is the one who takes the card
+    await q(`UPDATE agents SET status='retired' WHERE org_id=$1 AND role_key='front_desk'`, [w.owner.id]);
     await w.hire('Fiona', 'front_desk', 'senior');
     const res = await w.t.req('POST', '/api/cards', {
       cookie: w.owner.cookie,
