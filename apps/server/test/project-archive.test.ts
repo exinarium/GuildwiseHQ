@@ -25,6 +25,7 @@ let allCardIds: string[] = [];
 let phaseId: string;
 let allPhaseIds: string[] = [];
 let baTaskId: string;
+let chatThreadId: string;
 
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
@@ -245,6 +246,29 @@ const snapshot = async (): Promise<Record<string, string[]>> => {
 };
 
 describe('deleting a project permanently', () => {
+  it('setup: a project chat that is closed and has a read marker', async () => {
+    const una = (await q(`SELECT id FROM agents WHERE name='Una'`))[0]?.id;
+    const chat = await ok<any>(
+      owner('POST', '/api/chats', { agentId: una, projectId: w.projectId }),
+      201,
+    );
+    chatThreadId = chat.chat.threadId;
+    await ok(owner('POST', `/api/chats/${chatThreadId}/close`));
+    await w.t.app.ctx.store.append([
+      {
+        streamId: streamId.thread(chatThreadId),
+        event: {
+          type: 'ChatRead',
+          payload: { threadId: chatThreadId, userId: w.owner.id, readUpTo: new Date().toISOString() },
+        },
+        actor: { kind: 'user', id: w.owner.id },
+        scope: { orgId: null, projectId: null, audience: 'user', userId: w.owner.id },
+      },
+    ]);
+    expect((await q('SELECT 1 FROM chat_archives WHERE thread_id=$1', [chatThreadId])).length).toBe(1);
+    expect((await q('SELECT 1 FROM chat_reads WHERE thread_id=$1', [chatThreadId])).length).toBe(1);
+  });
+
   it('only an archived project, only the owner, and only with the project key', async () => {
     // keep a second project alongside, with a card, to prove a delete is scoped
     keepProjectId = (await ok<any>(owner('POST', '/api/projects', { key: 'KEEP', name: 'Keep me' }), 201))
@@ -305,6 +329,9 @@ describe('deleting a project permanently', () => {
     expect((await q('SELECT 1 FROM ba_tasks WHERE id=$1', [baTaskId])).length).toBe(0);
     expect((await q('SELECT 1 FROM threads WHERE id = ANY($1::uuid[])', [allPhaseIds])).length).toBe(0);
     expect((await q('SELECT 1 FROM projects WHERE id=$1', [w.projectId])).length).toBe(0);
+    expect((await q('SELECT 1 FROM threads WHERE id=$1', [chatThreadId])).length).toBe(0);
+    expect((await q('SELECT 1 FROM chat_archives WHERE thread_id=$1', [chatThreadId])).length).toBe(0);
+    expect((await q('SELECT 1 FROM chat_reads WHERE thread_id=$1', [chatThreadId])).length).toBe(0);
     expect(
       (await q('SELECT 1 FROM thread_messages WHERE thread_id = ANY($1::uuid[])', [allCardIds])).length,
     ).toBe(0);
