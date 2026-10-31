@@ -27,7 +27,10 @@ export interface ForwardRequest {
 
 export interface ServeResult {
   accepted: string[];
-  refused: { integrationId: string; reason: 'unknown' | 'revoked' | 'kind_mismatch' | 'not_allowed' | 'not_business' }[];
+  refused: {
+    integrationId: string;
+    reason: 'unknown' | 'revoked' | 'kind_mismatch' | 'not_allowed' | 'not_business';
+  }[];
 }
 
 interface Pending {
@@ -68,7 +71,8 @@ export class RelayHub {
     if (!m) return [];
     const out: RunnerConn[] = [];
     for (const [ws, conn] of m) {
-      if (this.ctx.services.runners.get(ws) === conn && this.ctx.services.runners.isOnline(ws)) out.push(conn);
+      if (this.ctx.services.runners.get(ws) === conn && this.ctx.services.runners.isOnline(ws))
+        out.push(conn);
     }
     return out;
   }
@@ -113,8 +117,8 @@ export class RelayHub {
       }
     }
     for (const id of accepted) {
-      let m = this.serving.get(id);
-      if (!m) this.serving.set(id, (m = new Map()));
+      const m = this.serving.get(id) ?? new Map<string, RunnerConn>();
+      this.serving.set(id, m);
       m.set(conn.workstationId, conn);
     }
     for (const id of accepted)
@@ -311,4 +315,3 @@ export async function pruneRelayRequests(ctx: Ctx): Promise<number> {
   const r = await ctx.pool.query('DELETE FROM relay_requests WHERE at < $1', [cutoff]);
   return r.rowCount ?? 0;
 }
-

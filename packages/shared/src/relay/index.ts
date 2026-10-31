@@ -5,7 +5,13 @@ import { z } from 'zod';
  * runner: it forwards each request raw over the runner socket and stores nothing of its content. The name `relay`
  * is deliberate: `integration` is already taken (workstation sign-ins, test environments).
  */
-export const RELAY_KINDS = ['whatsapp_cloud', 'form_webhook', 'webhook_in', 'calendar_push', 'generic'] as const;
+export const RELAY_KINDS = [
+  'whatsapp_cloud',
+  'form_webhook',
+  'webhook_in',
+  'calendar_push',
+  'generic',
+] as const;
 export const RelayKindSchema = z.enum(RELAY_KINDS);
 export type RelayKind = z.infer<typeof RelayKindSchema>;
 

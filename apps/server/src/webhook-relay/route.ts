@@ -101,14 +101,19 @@ export function relayPublicRoutes(ctx: Ctx) {
     };
 
     // Empty bodies everywhere: an error never explains itself to a stranger, and never echoes the input.
-    fastify.setErrorHandler(async (err: { statusCode?: number; name?: string }, req, reply) => {
-      const tooBig = err.statusCode === 413;
-      const status =
-        typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
-      ctx.log.warn({ relay: { integrationId: req.relay?.integrationId ?? null, status, errName: err.name } }, 'relay error');
-      await record(req, status, tooBig ? 'rejected_size' : 'error', sizeOf(req));
-      return reply.code(status).send();
-    });
+    fastify.setErrorHandler(
+      async (err: { statusCode?: number; status?: number; name?: string }, req, reply) => {
+        const given = err.statusCode ?? err.status;
+        const tooBig = given === 413;
+        const status = typeof given === 'number' && given >= 400 && given < 500 ? given : 500;
+        ctx.log.warn(
+          { relay: { integrationId: req.relay?.integrationId ?? null, status, errName: err.name } },
+          'relay error',
+        );
+        await record(req, status, tooBig ? 'rejected_size' : 'error', sizeOf(req));
+        return reply.code(status).send();
+      },
+    );
 
     const empty404 = async (req: FastifyRequest, reply: FastifyReply) => {
       await record(req, 404, 'unknown_path', 0);
@@ -155,7 +160,8 @@ export function relayPublicRoutes(ctx: Ctx) {
 
     const forward = async (req: FastifyRequest, reply: FastifyReply) => {
       const call = req.relay as RelayCall;
-      const body = req.method === 'GET' ? Buffer.alloc(0) : Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const body =
+        req.method === 'GET' ? Buffer.alloc(0) : Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       const raw = req.raw.url ?? '';
       const q = raw.indexOf('?');
       const r = await hub().forward(

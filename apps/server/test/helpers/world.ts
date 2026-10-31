@@ -113,6 +113,8 @@ export async function createWorld(
     integrationTests?: 'plain' | 'off' | 'local';
     /** Server extensions to register (the hosted build's tests pass the cloud extension). */
     extensions?: ServerExtension[];
+    /** Capture the server's log lines. */
+    logStream?: { write(line: string): void };
   } = {},
 ): Promise<World> {
   const t = await createTestApp({
@@ -120,6 +122,7 @@ export async function createWorld(
     listen: opts.listen ?? true,
     lean: opts.lean,
     ...(opts.extensions ? { extensions: opts.extensions } : {}),
+    ...(opts.logStream ? { logStream: opts.logStream } : {}),
   });
   const owner = await t.userSession(uniqueEmail('owner'));
   const proj = await ok<any>(

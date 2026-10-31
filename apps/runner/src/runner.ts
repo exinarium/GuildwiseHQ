@@ -60,8 +60,6 @@ import {
   type WorktreeSweepResult,
 } from '@aom/shared';
 import { ensureClaudeAccount } from './adapters/claude-account-provision.ts';
-import { RelayDispatcher } from './relay/dispatch.ts';
-import { FileRelaySink, genericHandler } from './relay/generic.ts';
 import { ClaudeAccountRegistry } from './adapters/claude-accounts.ts';
 import { probeClaudeLogin } from './adapters/claude-auth.ts';
 import { sweepVertexKeys } from './adapters/claude-backend.ts';
@@ -139,6 +137,8 @@ import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-fol
 import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
+import { RelayDispatcher } from './relay/dispatch.ts';
+import { FileRelaySink, genericHandler } from './relay/generic.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
@@ -775,7 +775,8 @@ export class Runner {
     this.client.on('welcome', (w) => {
       this.serverFeatures = new Set(w.features ?? []);
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
-      if (this.serverFeatures.has(RELAY_FEATURE)) this.client.send('relay.serve', { integrations: this.relay.served() });
+      if (this.serverFeatures.has(RELAY_FEATURE))
+        this.client.send('relay.serve', { integrations: this.relay.served() });
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);

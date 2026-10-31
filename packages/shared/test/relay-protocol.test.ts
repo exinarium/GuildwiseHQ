@@ -93,11 +93,14 @@ describe('relay frames', () => {
 
 describe('RelayIntegrationCreateSchema', () => {
   it('accepts kind and label', () => {
-    expect(RelayIntegrationCreateSchema.safeParse({ kind: 'whatsapp_cloud', label: 'Shop' }).success).toBe(true);
+    expect(RelayIntegrationCreateSchema.safeParse({ kind: 'whatsapp_cloud', label: 'Shop' }).success).toBe(
+      true,
+    );
   });
   it('rejects a provider secret in the body', () => {
     expect(
-      RelayIntegrationCreateSchema.safeParse({ kind: 'whatsapp_cloud', label: 'Shop', appSecret: 'x' }).success,
+      RelayIntegrationCreateSchema.safeParse({ kind: 'whatsapp_cloud', label: 'Shop', appSecret: 'x' })
+        .success,
     ).toBe(false);
   });
   it('rejects an unknown kind', () => {

@@ -29,7 +29,10 @@ export function removeRelayIntegration(config: RunnerConfig, id: string): RelayC
     ok: true,
     config: {
       ...config,
-      relay: { ...config.relay, integrations: config.relay.integrations.filter((i) => i.id.toLowerCase() !== key) },
+      relay: {
+        ...config.relay,
+        integrations: config.relay.integrations.filter((i) => i.id.toLowerCase() !== key),
+      },
     },
   };
 }

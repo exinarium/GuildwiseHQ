@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
@@ -98,6 +97,7 @@ import {
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
+import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import {
   CommitAsSchema,
   ComponentRulesSchema,
@@ -1842,7 +1842,10 @@ export const RelayResponseSchema = msg('relay.response', {
   requestId: z.uuid(),
   status: z.number().int().min(200).max(599),
   headers: z.record(z.string().max(40), z.string().max(1000)).optional(),
-  body: z.base64().max(Math.ceil(RELAY_RESPONSE_MAX_BYTES / 3) * 4).optional(),
+  body: z
+    .base64()
+    .max(Math.ceil(RELAY_RESPONSE_MAX_BYTES / 3) * 4)
+    .optional(),
 });
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [

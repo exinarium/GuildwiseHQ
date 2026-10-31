@@ -47,7 +47,10 @@ async function assertBusiness(db: Queryable, orgId: string): Promise<void> {
 }
 
 async function lockOwn(tx: Queryable, orgId: string, id: string): Promise<Row> {
-  const r = await one(tx, 'SELECT * FROM relay_integrations WHERE id=$1 AND org_id=$2 FOR UPDATE', [id, orgId]);
+  const r = await one(tx, 'SELECT * FROM relay_integrations WHERE id=$1 AND org_id=$2 FOR UPDATE', [
+    id,
+    orgId,
+  ]);
   if (!r) throw notFound('integration not found');
   return r;
 }

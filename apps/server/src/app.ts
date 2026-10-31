@@ -85,7 +85,6 @@ import { documentRoutes } from './routes/documents.ts';
 import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
-import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
 import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
 import { installerRoutes } from './routes/installer.ts';
@@ -110,6 +109,7 @@ import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
+import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -130,13 +130,13 @@ import { Scheduler } from './scheduler/scheduler.ts';
 import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
-import { RelayHub } from './webhook-relay/hub.ts';
-import { relayPublicRoutes } from './webhook-relay/route.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
+import { RelayHub } from './webhook-relay/hub.ts';
+import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
@@ -522,7 +522,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
   // After a restart nothing is served until the runners announce again (right after their welcome).
-  await ctx.services.webhookRelay.markAllOffline().catch((err) => app.log.warn({ err }, 'relay presence reset failed'));
+  await ctx.services.webhookRelay
+    .markAllOffline()
+    .catch((err) => app.log.warn({ err }, 'relay presence reset failed'));
   ctx.services.sessions = new SessionTurns(ctx);
   ctx.services.discovery = new DiscoveryService(ctx);
   ctx.services.board = new BoardService(ctx);

@@ -72,6 +72,8 @@ export async function createTestApp(
     assistantClient?: AnthropicLike | null;
     /** Server extensions to register (the hosted build's tests pass the cloud extension). */
     extensions?: ServerExtension[];
+    /** Capture the server's log lines (a Fastify logger writing to this stream). */
+    logStream?: { write(line: string): void };
   } = {},
 ): Promise<TestApp> {
   if (opts.reset !== false) await resetDb();
@@ -79,7 +81,8 @@ export async function createTestApp(
   const clock = createClock();
   const app = await createApp(config, {
     clock,
-    logger: process.env.TEST_LOG ? true : false,
+    logger: process.env.TEST_LOG || opts.logStream ? true : false,
+    ...(opts.logStream ? { logStream: opts.logStream } : {}),
     background: false,
     assistantClient: opts.assistantClient ?? null,
     extensions: opts.extensions ?? [],

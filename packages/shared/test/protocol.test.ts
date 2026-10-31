@@ -287,6 +287,16 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'vault.conflict': { ...env('vault.conflict'), vaultId: 'v1', files: ['standing-orders.md'] },
   'deploy.progress': { ...env('deploy.progress'), runId: U.d, phase: 'started' },
   'token.rotate': { ...env('token.rotate') },
+  'relay.serve': {
+    ...env('relay.serve'),
+    integrations: [{ integrationId: '11111111-1111-4111-8111-111111111111', kind: 'generic' }],
+  },
+  'relay.response': {
+    ...env('relay.response'),
+    requestId: '11111111-1111-4111-8111-111111111111',
+    status: 200,
+    body: 'MTIz',
+  },
   ack: { ...env('ack'), ackOf: U.d },
 };
 
@@ -336,6 +346,22 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
   },
   'chat.cancel': { ...env('chat.cancel'), chatId: 'c1' },
   'token.rotated': { ...env('token.rotated'), token: 'aomr_newtoken' },
+  'relay.serve.result': {
+    ...env('relay.serve.result'),
+    accepted: ['11111111-1111-4111-8111-111111111111'],
+    refused: [],
+  },
+  'relay.request': {
+    ...env('relay.request'),
+    requestId: '11111111-1111-4111-8111-111111111111',
+    integrationId: '11111111-1111-4111-8111-111111111111',
+    kind: 'generic',
+    method: 'POST',
+    query: 'a=1',
+    headers: [['content-type', 'text/plain']],
+    body: 'MTIz',
+    deadlineMs: 4750,
+  },
   command: {
     ...env('command'),
     commandId: 'k1',

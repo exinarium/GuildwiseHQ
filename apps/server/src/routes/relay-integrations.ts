@@ -22,12 +22,16 @@ export function relayIntegrationRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
 
-    app.post('/api/relay/integrations', { schema: { body: RelayIntegrationCreateSchema } }, async (req, reply) => {
-      const a = await requireOrg(ctx, req, { min: 'admin' });
-      const out = await createRelayIntegration(ctx, a.session.user.id, a.orgId, req.body);
-      reply.code(201);
-      return out;
-    });
+    app.post(
+      '/api/relay/integrations',
+      { schema: { body: RelayIntegrationCreateSchema } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const out = await createRelayIntegration(ctx, a.session.user.id, a.orgId, req.body);
+        reply.code(201);
+        return out;
+      },
+    );
 
     app.get('/api/relay/integrations', async (req) => {
       const a = await requireOrg(ctx, req);

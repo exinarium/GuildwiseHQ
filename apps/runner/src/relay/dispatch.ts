@@ -127,7 +127,11 @@ export class RelayDispatcher {
     const bad: RelayResponsePayload = { requestId, status: 500 };
     if (!Number.isInteger(reply.status) || reply.status < 200 || reply.status > 599) return bad;
     const body =
-      reply.body === undefined ? undefined : Buffer.isBuffer(reply.body) ? reply.body : Buffer.from(reply.body);
+      reply.body === undefined
+        ? undefined
+        : Buffer.isBuffer(reply.body)
+          ? reply.body
+          : Buffer.from(reply.body);
     if (body && body.length > RELAY_RESPONSE_MAX_BYTES) return bad;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(reply.headers ?? {})) {

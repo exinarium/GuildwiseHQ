@@ -42,7 +42,6 @@ import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';
 import { changeOrgFolder, ORG_ID_RE } from './org-folder.ts';
-import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import {
   addPairing,
   entryConfigPath,
@@ -55,6 +54,7 @@ import {
   saveIndex,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
@@ -614,7 +614,9 @@ function relayRemove(id: string, opts: { dataDir?: string; pairing?: string }): 
 function relayList(opts: { dataDir?: string; pairing?: string }): void {
   const config = loadConfig(pairingPaths(opts).config);
   if (config.relay.integrations.length === 0)
-    console.log('No relay integration is served. Use `guildwise-runner relay add <integration-id> --kind <kind>`.');
+    console.log(
+      'No relay integration is served. Use `guildwise-runner relay add <integration-id> --kind <kind>`.',
+    );
   for (const i of config.relay.integrations) console.log(`${i.id}\t${i.kind}\t${i.label ?? ''}`);
 }
 

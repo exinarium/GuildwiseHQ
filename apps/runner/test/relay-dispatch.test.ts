@@ -125,7 +125,13 @@ describe('generic handler and file sink', () => {
     expect(statSync(join(folder, files[0] as string)).mode & 0o777).toBe(0o600);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     const rec = JSON.parse(readFileSync(join(folder, files[0] as string), 'utf8'));
-    expect(rec).toMatchObject({ requestId: REQ, integrationId: ID, kind: 'generic', method: 'POST', query: 'a=1&b=%20' });
+    expect(rec).toMatchObject({
+      requestId: REQ,
+      integrationId: ID,
+      kind: 'generic',
+      method: 'POST',
+      query: 'a=1&b=%20',
+    });
     expect(Buffer.from(rec.bodyBase64, 'base64').equals(Buffer.from([0xff, 0xfe, 0x00, 0x7b]))).toBe(true);
   });
 

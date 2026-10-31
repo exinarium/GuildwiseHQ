@@ -10,8 +10,8 @@ import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { pruneRelayRequests } from '../webhook-relay/hub.ts';
 import { pruneRunnerInbox } from '../runner-gateway/inbox-prune.ts';
+import { pruneRelayRequests } from '../webhook-relay/hub.ts';
 
 const ACCEPT_TIMEOUT_MS = 30_000;
 const STALE_HEARTBEAT_MS = 45_000;
