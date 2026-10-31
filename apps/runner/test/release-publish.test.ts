@@ -109,6 +109,28 @@ const originRef = (s: ReturnType<typeof setup>, ref: string) => sh(s.repo.origin
 const tags = (s: ReturnType<typeof setup>) => sh(s.repo.origin, 'git', ['tag', '--list']);
 
 describe('release.publish', () => {
+  it('fails the land step when the merged pull request does not contain the release commit (an earlier release PR)', async () => {
+    const s = setup();
+    const oldMerge = originRef(s, 'main');
+    const gh: Executor = {
+      async run(_cmd: string, args: string[]): Promise<ExecResult> {
+        const line = args.join(' ');
+        if (/pr view 3 .*--json state/.test(line)) return { exitCode: 0, stdout: 'MERGED\n', stderr: '' };
+        if (/pr view 3 .*mergeCommit/.test(line)) return { exitCode: 0, stdout: `${oldMerge}\n`, stderr: '' };
+        return { exitCode: 127, stdout: '', stderr: 'not found' };
+      },
+    };
+    const r = await publishRelease({
+      payload: payload(s, { forge: 'github', land: { mode: 'pr', prUrl: 'https://github.com/acme/web/pull/3' } }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+      forgeEnv: { ...forgeEnv, exec: gh },
+    });
+    expect(r.stage).toBe('failed');
+    expect(r.ok).toBe(false);
+    expect(tags(s)).toBe('v1.3.0');
+  });
+
   it('waits while the release PR is not merged and tags nothing', async () => {
     const s = setup();
     const r = await run(s);

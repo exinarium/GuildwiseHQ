@@ -118,6 +118,24 @@ describe('release.publish on the server', () => {
     expect((await ship()).status).toBe('committed');
   });
 
+  it('ignores a release PR request that an earlier landed release already used', async () => {
+    await q(
+      `INSERT INTO release_ships (id, org_id, project_id, repo_id, version, tag, release_date, payload, status, merge_sha, pr_url, created_at, updated_at)
+       SELECT gen_random_uuid(), org_id, id, $2, '1.3.0', 'v1.3.0', current_date, '{}'::jsonb, 'published', $3, 'https://github.com/o/r/pull/3', now(), now()
+         FROM projects WHERE id=$1`,
+      [w.projectId, w.repoId, M],
+    );
+    await q(
+      `INSERT INTO repo_pr_requests (request_id, project_id, repo_id, workstation_id, head, base, state, url, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, 'develop', 'main', 'opened', 'https://github.com/o/r/pull/3', now(), now())`,
+      [w.projectId, w.repoId, w.workstationId],
+    );
+    await committed();
+    const cmds = await publishCmds();
+    expect(cmds).toHaveLength(1);
+    expect(JSON.stringify(cmds[0].payload.land)).not.toContain('/pull/3');
+  });
+
   it('uses the release name setting for the title when it is set', async () => {
     await q(`UPDATE project_repos SET release_name='Guildwise HQ' WHERE id=$1`, [w.repoId]);
     await committed();

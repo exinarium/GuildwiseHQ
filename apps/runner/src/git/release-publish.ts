@@ -260,6 +260,17 @@ function peeledTag(out: string, tag: string): string | null {
 
 type Landing = { sha: string } | { result: ReleasePublishResult };
 
+/** A merge of the release commit `R` reaches `sha`: R is an ancestor (merge, rebase), or (squash) every file R changed reads the same at `sha`. */
+async function carriesRelease(repoPath: string, R: string, sha: string): Promise<boolean> {
+  if (await isAncestor(repoPath, R, sha)) return true;
+  const files = (await git(repoPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', R])).stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (files.length === 0) return false;
+  return (await git(repoPath, ['diff', '--quiet', R, sha, '--', ...files])).exitCode === 0;
+}
+
 async function landByPr(
   input: ReleasePublishInput,
   base: string,
@@ -289,10 +300,17 @@ async function landByPr(
     ? await hit.forge.changeMergeCommit(hit.repo, id).catch(() => null)
     : null;
   if (!sha)
-    return waiting('the release pull request is merged; waiting for its merge commit on ' + base, 'merged');
+    return waiting(`the release pull request is merged; waiting for its merge commit on ${base}`, 'merged');
   await refetch();
   if (!(await isAncestor(repoPath, sha, baseRef)))
     return waiting(`the release pull request is merged; waiting for ${base} to show it`, 'merged');
+  if (!(await carriesRelease(repoPath, p.releaseCommitSha, sha)))
+    return {
+      result: failed(
+        'land',
+        `The pull request ${prUrl} is merged but does not contain the release commit ${p.releaseCommitSha.slice(0, 7)}. Open the release pull request for ${p.workingBranch} and Retry.`,
+      ),
+    };
   return { sha };
 }
 

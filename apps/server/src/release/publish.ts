@@ -50,8 +50,11 @@ export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<Releas
   if (!repo || !ship.commit_sha) return null;
   const pr = await one(
     tx,
-    `SELECT url FROM repo_pr_requests WHERE repo_id=$1 AND state='opened' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
-    [ship.repo_id],
+    `SELECT q.url FROM repo_pr_requests q WHERE q.repo_id=$1 AND q.state='opened' AND q.url IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM release_ships o WHERE o.repo_id = q.repo_id AND o.id <> $2::uuid
+                          AND o.merge_sha IS NOT NULL AND o.pr_url = q.url)
+      ORDER BY q.created_at DESC LIMIT 1`,
+    [ship.repo_id, ship.id],
   );
   const stored = ship.payload as { workingBranch?: string };
   const name = String(repo.release_name ?? '').trim() || repo.project_name || 'Release';
@@ -108,8 +111,11 @@ export async function planReleasePublish(ctx: Ctx, tx: Tx, shipId: string): Prom
   const project = await one(tx, 'SELECT default_completion FROM projects WHERE id=$1', [ship.project_id]);
   const req = await one(
     tx,
-    `SELECT url, state FROM repo_pr_requests WHERE repo_id=$1 AND state IN ('pending','opened') ORDER BY created_at DESC LIMIT 1`,
-    [ship.repo_id],
+    `SELECT q.url, q.state FROM repo_pr_requests q WHERE q.repo_id=$1 AND q.state IN ('pending','opened')
+         AND NOT EXISTS (SELECT 1 FROM release_ships o WHERE o.repo_id = q.repo_id AND o.id <> $2::uuid
+                          AND o.merge_sha IS NOT NULL AND o.pr_url = q.url)
+      ORDER BY q.created_at DESC LIMIT 1`,
+    [ship.repo_id, ship.id],
   );
   let mode: 'pr' | 'merge' = 'merge';
   let prUrl: string | undefined;
