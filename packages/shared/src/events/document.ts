@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
+import {
+  DOCUMENT_MAX_TAGS,
+  DOCUMENT_TAG_MAX,
+  DocumentKindSchema,
+  DocumentStatusSchema,
+} from '../documents/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 /** Documents (stream `document-<docId>`; project scope when the document has a project, else org scope). */
@@ -15,6 +20,25 @@ export const documentEvents = [
       slug: z.string().min(1).max(60),
       createdBy: Id.nullable(),
       sourceThreadIds: z.array(Id).max(20).default([]),
+      tags: z.array(z.string().max(DOCUMENT_TAG_MAX)).max(DOCUMENT_MAX_TAGS).optional(),
+      /** An uploaded file (its bytes are operational, not in the event). */
+      file: z
+        .object({
+          name: z.string().min(1).max(200),
+          contentType: z.string().min(1).max(200),
+          size: z.number().int().min(1),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        })
+        .optional(),
+    }),
+  ),
+  /** The whole set of tags (not a diff). */
+  defineEvent(
+    'DocumentTagsChanged',
+    z.object({
+      docId: Id,
+      tags: z.array(z.string().max(DOCUMENT_TAG_MAX)).max(DOCUMENT_MAX_TAGS),
+      by: Id.nullable(),
     }),
   ),
   /** A new version. `version` is assigned by the server (current + 1); the content is the whole document. */

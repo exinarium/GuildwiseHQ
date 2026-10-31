@@ -122,6 +122,7 @@ import {
   VaultMergeCommandSchema,
   VaultMoveCommandSchema,
   VaultWriteCommandSchema,
+  VaultWriteFileCommandSchema,
 } from '../vaults/index.ts';
 import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
@@ -828,6 +829,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repos.rescan',
   'vault.configure',
   'vault.write',
+  'vault.write_file',
   'vault.move',
   'vault.merge',
   'finalize.execute',
@@ -918,6 +920,7 @@ export const CommandPayloadSchemas = {
   'provider.account.promote': ProviderAccountPromotePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
+  'vault.write_file': VaultWriteFileCommandSchema,
   'vault.move': VaultMoveCommandSchema,
   'vault.merge': VaultMergeCommandSchema,
   'agent.wipe': z.object({ agentId: z.uuid() }),

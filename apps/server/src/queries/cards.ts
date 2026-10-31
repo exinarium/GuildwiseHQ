@@ -42,7 +42,7 @@ import {
   seesAmounts,
   spendBriefs,
 } from '../costs/index.ts';
-import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { escapeLike, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { dependencyStates, landedSql } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
 import { delegationSteps } from '../sessions/delegate-grants.ts';
@@ -467,8 +467,6 @@ export async function boardNotices(
 /** Cards finished before this moment are archived: they are off the board and listed in the project's archive. */
 export const archiveCutoff = (now: Date): Date =>
   new Date(now.getTime() - CARD_ARCHIVE_AFTER_HOURS * 3_600_000);
-
-const escapeLike = (q: string) => q.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** The archive of a project: done and cancelled cards finished more than a day ago, newest first, searchable and filterable. */
 export async function getArchive(ctx: Ctx, userId: string, query: ArchiveQuery): Promise<ArchiveResponse> {

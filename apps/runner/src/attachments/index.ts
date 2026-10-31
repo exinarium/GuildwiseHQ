@@ -61,6 +61,19 @@ export class ServerHttp {
     if (res.status < 200 || res.status >= 300) throw new Error(await httpError(res, 'the download'));
     return Buffer.from(await res.arrayBuffer());
   }
+
+  /** The bytes of an uploaded document that a queued `vault.write_file` command names. */
+  async documentFile(documentId: string): Promise<Buffer> {
+    const res = await this.f()(
+      new URL(`/api/runner/document-files/${documentId}`, this.opts.base()).toString(),
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${this.opts.token()}` },
+      },
+    );
+    if (res.status < 200 || res.status >= 300) throw new Error(await httpError(res, 'the file download'));
+    return Buffer.from(await res.arrayBuffer());
+  }
 }
 
 async function httpError(res: Response, what: string): Promise<string> {

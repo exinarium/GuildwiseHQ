@@ -36,3 +36,6 @@ export async function exec(db: Queryable, text: string, params: unknown[] = []):
 
 export const iso = (d: Date | string | null | undefined): string | null =>
   d === null || d === undefined ? null : new Date(d).toISOString();
+
+/** Escapes `\`, `%` and `_` so user text matches literally inside a `LIKE`/`ILIKE` pattern. */
+export const escapeLike = (q: string): string => q.replace(/[\\%_]/g, (c) => `\\${c}`);

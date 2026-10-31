@@ -3,7 +3,12 @@ import { exec } from '../db/sql.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 
 const ev = <
-  T extends 'DocumentCreated' | 'DocumentVersionSaved' | 'DocumentStatusChanged' | 'DocumentPublishQueued',
+  T extends
+    | 'DocumentCreated'
+    | 'DocumentVersionSaved'
+    | 'DocumentStatusChanged'
+    | 'DocumentPublishQueued'
+    | 'DocumentTagsChanged',
 >(
   e: StoredEvent,
 ) => e.event as EventOf<T>;
@@ -14,8 +19,9 @@ export const documentProjectors: Record<string, Projector> = {
     const p = ev<'DocumentCreated'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO documents (id, org_id, project_id, kind, title, slug, status, current_version, source_thread_ids, created_by, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'draft',0,$7,$8,$9,$9)
+      `INSERT INTO documents (id, org_id, project_id, kind, title, slug, status, current_version, source_thread_ids, created_by, created_at, updated_at,
+                              tags, file_name, file_content_type, file_size, file_sha256)
+       VALUES ($1,$2,$3,$4,$5,$6,'draft',0,$7,$8,$9,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.docId,
@@ -27,7 +33,24 @@ export const documentProjectors: Record<string, Projector> = {
         p.sourceThreadIds,
         p.createdBy,
         e.createdAt,
+        p.tags ?? [],
+        p.file?.name ?? null,
+        p.file?.contentType ?? null,
+        p.file?.size ?? null,
+        p.file?.sha256 ?? null,
       ],
+    );
+  },
+  DocumentTagsChanged: async (tx, e) => {
+    const p = ev<'DocumentTagsChanged'>(e).payload;
+    // The vault copy carries the tags, so an approved document owes the vault a new copy.
+    await exec(
+      tx,
+      `UPDATE documents SET tags = $2::text[], updated_at = $3,
+              publish_state = CASE WHEN status IN ('approved','handed_off') AND publish_version IS NOT NULL
+                                   THEN 'pending' ELSE publish_state END
+        WHERE id = $1`,
+      [p.docId, p.tags, e.createdAt],
     );
   },
   DocumentVersionSaved: async (tx, e) => {

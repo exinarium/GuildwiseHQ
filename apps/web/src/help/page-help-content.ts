@@ -1560,9 +1560,17 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/documents': {
     title: 'Documents',
-    intro: 'Briefs, PRDs, minutes and session logs of your organization.',
+    intro: 'Briefs, PRDs, minutes, session logs and uploaded files of your organization.',
     controls: [
-      { name: 'Filters', text: 'Narrow the list by kind (brief, PRD, minutes) or by status.' },
+      { name: 'Search', text: 'Find documents by words in the title, the file name or the text.' },
+      {
+        name: 'Filters',
+        text: 'Narrow the list by kind, status or tags. Several tags show only documents that carry all of them.',
+      },
+      {
+        name: 'Upload',
+        text: 'Owners and Admins add a file (a document, image, spreadsheet or text file) with a title and tags; it is copied to the vault.',
+      },
       { name: 'A document', text: 'Click one to read it, see its versions and change its status.' },
     ],
     article: 'discovery#documents',
@@ -1572,6 +1580,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     intro: 'One document as formatted text, with its version history and status.',
     controls: [
       { name: 'Version', text: 'Pick an earlier version to read it. The current version is the default.' },
+      {
+        name: 'Tags',
+        text: 'Owners and Admins edit the tags at any time; they stay with the document across versions and status changes.',
+      },
       {
         name: 'Approve and Reopen',
         text: 'Owners and Admins approve a document (it is then copied to the vault) or reopen it to edit again.',

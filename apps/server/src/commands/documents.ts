@@ -1,31 +1,43 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
+  attachmentExtension,
   type ChangeDocumentStatusRequest,
   type CreateDocumentRequest,
   canTransitionDocument,
+  checkAttachment,
+  DOCUMENT_MAX_CHARS,
+  DOCUMENT_MAX_TAGS,
+  DOCUMENT_TEXT_UPLOAD_EXTENSIONS,
   type DocumentDto,
+  type DocumentKind,
   type DocumentStatus,
+  type DocumentTagCountDto,
   type DocumentVersionDto,
   type DocumentWithContentDto,
+  documentFileVaultPath,
   documentIsEditable,
   documentSlug,
   documentVaultPath,
   isOrgManager,
   type ListDocumentsQuery,
+  normalizeDocumentTags,
+  parseDocumentTagList,
   projectVaultFolder,
   renderDocumentFile,
   type SaveDocumentVersionRequest,
+  type SetDocumentTagsRequest,
+  safeAttachmentName,
   streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import { loadVisibleProject, visibleProjectIds } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { escapeLike, exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
-import { enqueueVaultWrite } from './vaults.ts';
+import { enqueueVaultFileWrite, enqueueVaultWrite, vaultWriteTarget } from './vaults.ts';
 
 export function documentDto(r: Row): DocumentDto {
   return {
@@ -45,6 +57,19 @@ export function documentDto(r: Row): DocumentDto {
     createdBy: r.created_by ?? null,
     createdAt: iso(r.created_at) as string,
     updatedAt: iso(r.updated_at) as string,
+    // Left out when empty: the response of an untagged, authored document is what it always was.
+    ...(r.tags?.length ? { tags: r.tags as string[] } : {}),
+    ...(r.file_name
+      ? {
+          file: {
+            name: r.file_name,
+            contentType: r.file_content_type,
+            size: Number(r.file_size),
+            sha256: r.file_sha256,
+            image: /^image\//.test(r.file_content_type),
+          },
+        }
+      : {}),
   };
 }
 
@@ -133,6 +158,14 @@ async function dtoWithContent(db: Queryable, d: Row): Promise<DocumentWithConten
   };
 }
 
+/** Normalized tags; more than the limit is refused (after merging duplicates). */
+function tagsOf(raw: readonly string[] | undefined): string[] {
+  const tags = normalizeDocumentTags(raw ?? []);
+  if (tags.length > DOCUMENT_MAX_TAGS)
+    throw badRequest('too_many_tags', `a document holds at most ${DOCUMENT_MAX_TAGS} tags`);
+  return tags;
+}
+
 export async function createDocument(
   ctx: Ctx,
   who: Who,
@@ -146,6 +179,7 @@ export async function createDocument(
     }
     await assertThreads(tx, who, req.sourceThreadIds);
     const docId = randomUUID();
+    const tags = tagsOf(req.tags);
     const slug = await uniqueSlug(tx, who.orgId, req.projectId ?? null, req.title);
     const scope = req.projectId ? projectScope(who.orgId, req.projectId) : orgScope(who.orgId);
     await ctx.store.append(
@@ -163,6 +197,7 @@ export async function createDocument(
               slug,
               createdBy: who.userId,
               sourceThreadIds: req.sourceThreadIds,
+              ...(tags.length ? { tags } : {}),
             },
           },
           actor: userActor(who.userId),
@@ -209,8 +244,15 @@ export function versionEvent(
   };
 }
 
+/** The words of a search as `ILIKE` patterns (at most 8, each must match). */
+const searchPatterns = (q: string | undefined): string[] | null => {
+  const words = (q ?? '').split(/\s+/).filter(Boolean).slice(0, 8);
+  return words.length ? words.map((w) => `%${escapeLike(w)}%`) : null;
+};
+
 export async function listDocuments(ctx: Ctx, who: Who, q: ListDocumentsQuery): Promise<DocumentDto[]> {
   const visible = await visibleProjectIds(ctx.pool, who.userId);
+  const tags = parseDocumentTagList(q.tags);
   const list = await rows(
     ctx.pool,
     `SELECT * FROM documents d
@@ -218,6 +260,12 @@ export async function listDocuments(ctx: Ctx, who: Who, q: ListDocumentsQuery): 
         AND ($3::uuid IS NULL OR d.project_id=$3) AND ($4::text IS NULL OR d.kind=$4) AND ($5::text IS NULL OR d.status=$5)
         AND ($6::boolean IS NOT TRUE OR d.project_id IS NULL)
         AND ($7::uuid IS NULL OR $7 = ANY(d.source_thread_ids))
+        AND ($8::text[] IS NULL OR d.tags @> $8::text[])
+        AND ($9::text[] IS NULL OR NOT EXISTS (
+              SELECT 1 FROM unnest($9::text[]) AS t(p)
+               WHERE NOT (d.title ILIKE t.p OR COALESCE(d.file_name,'') ILIKE t.p
+                          OR EXISTS (SELECT 1 FROM document_versions v WHERE v.document_id = d.id
+                                      AND v.version = d.current_version AND v.content ILIKE t.p))))
       ORDER BY d.updated_at DESC, d.id`,
     [
       who.orgId,
@@ -227,9 +275,197 @@ export async function listDocuments(ctx: Ctx, who: Who, q: ListDocumentsQuery): 
       q.status ?? null,
       q.orgOnly === 'true' ? true : null,
       q.threadId ?? null,
+      tags.length ? tags : null,
+      searchPatterns(q.q),
     ],
   );
   return list.map(documentDto);
+}
+
+/** The tags in use in the documents this user may see, most used first. */
+export async function listDocumentTags(ctx: Ctx, who: Who): Promise<DocumentTagCountDto[]> {
+  const visible = await visibleProjectIds(ctx.pool, who.userId);
+  const r = await rows(
+    ctx.pool,
+    `SELECT t.tag, count(*)::int AS n FROM documents d, unnest(d.tags) AS t(tag)
+      WHERE d.org_id=$1 AND (d.project_id IS NULL OR d.project_id = ANY($2::uuid[]))
+      GROUP BY t.tag ORDER BY n DESC, t.tag LIMIT 200`,
+    [who.orgId, visible],
+  );
+  return r.map((x) => ({ tag: x.tag, count: x.n }));
+}
+
+/** Replaces the document's tags (any status: tags are metadata, not content). An unchanged set appends nothing. */
+export async function setDocumentTags(
+  ctx: Ctx,
+  who: Who,
+  docId: string,
+  req: SetDocumentTagsRequest,
+): Promise<DocumentWithContentDto> {
+  assertManager(who);
+  const tags = tagsOf(req.tags);
+  const changed = await withAppendTx(ctx.pool, async (tx) => {
+    const d = await loadDocument(tx, who, docId, true);
+    const cur = (d.tags ?? []) as string[];
+    if (cur.length === tags.length && cur.every((t, i) => t === tags[i])) return false;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.document(docId),
+          event: { type: 'DocumentTagsChanged', payload: { docId, tags, by: who.userId } },
+          actor: userActor(who.userId),
+          scope: scopeOf(d as never),
+        },
+      ],
+      { tx },
+    );
+    return true;
+  });
+  if (changed)
+    await publishDocument(ctx, docId).catch((err) => ctx.log.warn({ err, docId }, 'document publish failed'));
+  return getDocument(ctx, who, docId);
+}
+
+export interface UploadDocumentInput {
+  name: string;
+  bytes: Buffer;
+  projectId?: string | undefined;
+  kind: DocumentKind;
+  title?: string | undefined;
+  tags?: readonly string[] | undefined;
+}
+
+/**
+ * An uploaded file becomes a finished document: created, reviewed and approved in one step by the Owner or Admin who
+ * uploads it, then published to the vault. Text files (md, markdown, txt) become the text of version 1; every other
+ * allowed type is kept as a file (bytes in `document_file_data`). Every refusal happens before anything is stored, and
+ * the vault commands are queued only after the transaction commits.
+ */
+export async function uploadDocument(
+  ctx: Ctx,
+  who: Who,
+  input: UploadDocumentInput,
+): Promise<DocumentWithContentDto> {
+  assertManager(who);
+  const docId = await withAppendTx(ctx.pool, async (tx) => {
+    if (input.projectId) {
+      const p = await loadVisibleProject(tx, who.userId, input.projectId);
+      if (p.org_id !== who.orgId) throw notFound('project not found');
+    }
+    const name = safeAttachmentName(input.name);
+    const check = checkAttachment(name, input.bytes);
+    if (!check.ok) throw unprocessable('document_rejected', `${name}: ${check.reason}`);
+    const tags = tagsOf(input.tags);
+    let content = '';
+    let file: { name: string; contentType: string; size: number; sha256: string } | undefined;
+    if (DOCUMENT_TEXT_UPLOAD_EXTENSIONS.includes(check.ext)) {
+      try {
+        content = new TextDecoder('utf-8', { fatal: true }).decode(input.bytes).replace(/^\uFEFF/, '');
+      } catch {
+        throw unprocessable('document_rejected', `${name}: the text is not valid UTF-8`);
+      }
+      if (content.length > DOCUMENT_MAX_CHARS)
+        throw unprocessable(
+          'document_too_long',
+          `${name}: a text document holds at most ${DOCUMENT_MAX_CHARS} characters`,
+        );
+    } else {
+      file = {
+        name,
+        contentType: check.kind.contentType,
+        size: input.bytes.byteLength,
+        sha256: createHash('sha256').update(input.bytes).digest('hex'),
+      };
+    }
+    const dot = name.lastIndexOf('.');
+    const title = (input.title ?? (dot > 0 ? name.slice(0, dot) : name)).trim().slice(0, 200) || 'Document';
+    const id = randomUUID();
+    const slug = await uniqueSlug(tx, who.orgId, input.projectId ?? null, title);
+    const scope = input.projectId ? projectScope(who.orgId, input.projectId) : orgScope(who.orgId);
+    const actor = userActor(who.userId);
+    if (file)
+      await exec(tx, 'INSERT INTO document_file_data (document_id, data) VALUES ($1,$2)', [id, input.bytes]);
+    const status = (from: DocumentStatus, to: DocumentStatus): AppendInput => ({
+      streamId: streamId.document(id),
+      event: {
+        type: 'DocumentStatusChanged',
+        payload: { docId: id, from, to, version: 1, by: who.userId, note: 'uploaded' },
+      },
+      actor,
+      scope,
+    });
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.document(id),
+          event: {
+            type: 'DocumentCreated',
+            payload: {
+              docId: id,
+              orgId: who.orgId,
+              ...(input.projectId ? { projectId: input.projectId } : {}),
+              kind: input.kind,
+              title,
+              slug,
+              createdBy: who.userId,
+              sourceThreadIds: [],
+              ...(tags.length ? { tags } : {}),
+              ...(file ? { file } : {}),
+            },
+          },
+          actor,
+          scope,
+        },
+        versionEvent(id, 1, content, { kind: 'user', id: who.userId }, scope, actor),
+        status('draft', 'in_review'),
+        status('in_review', 'approved'),
+      ],
+      { tx },
+    );
+    return id;
+  });
+  await publishDocument(ctx, docId).catch((err) => ctx.log.warn({ err, docId }, 'document publish failed'));
+  return getDocument(ctx, who, docId);
+}
+
+/** The original file of an uploaded document, for a member who can see the document. */
+export async function readDocumentFile(
+  ctx: Ctx,
+  who: Who,
+  docId: string,
+): Promise<{ name: string; contentType: string; data: Buffer }> {
+  const d = await loadDocument(ctx.pool, who, docId);
+  return fileOf(ctx.pool, d);
+}
+
+async function fileOf(db: Queryable, d: Row): Promise<{ name: string; contentType: string; data: Buffer }> {
+  const f = d.file_name
+    ? await one(db, 'SELECT data FROM document_file_data WHERE document_id=$1', [d.id])
+    : null;
+  if (!f) throw notFound('this document has no file');
+  return { name: d.file_name, contentType: d.file_content_type, data: f.data };
+}
+
+/**
+ * The bytes for a runner that was told to write them to a vault: only while a `vault.write_file` command for this
+ * document is waiting on this workstation.
+ */
+export async function readDocumentFileForRunner(
+  ctx: Ctx,
+  workstationId: string,
+  docId: string,
+): Promise<Buffer> {
+  const queued = await one(
+    ctx.pool,
+    `SELECT 1 FROM runner_commands
+      WHERE workstation_id=$1 AND type='vault.write_file' AND payload->>'documentId'=$2
+        AND status IN ('pending','sent')`,
+    [workstationId, docId],
+  );
+  if (!queued) throw notFound('file not found');
+  const d = await one(ctx.pool, 'SELECT * FROM documents WHERE id=$1', [docId]);
+  if (!d) throw notFound('file not found');
+  return (await fileOf(ctx.pool, d)).data;
 }
 
 export async function getDocument(ctx: Ctx, who: Who, docId: string): Promise<DocumentWithContentDto> {
@@ -331,7 +567,8 @@ export async function changeDocumentStatus(
         docId,
         d.current_version,
       ]);
-      if (!cur?.content?.trim()) throw conflict('document_empty', 'an empty document cannot be approved');
+      if (!d.file_name && !cur?.content?.trim())
+        throw conflict('document_empty', 'an empty document cannot be approved');
     }
     await ctx.store.append(
       [
@@ -403,21 +640,49 @@ export async function publishDocument(ctx: Ctx, docId: string): Promise<PublishR
   ]);
   if (!v) return { queued: false, reason: 'not_pending' };
   const path = documentVaultPath(d.slug, folder);
-  const r = await enqueueVaultWrite(ctx, ctx.pool, vaultId, {
-    path,
-    mode: 'replace',
-    content: renderDocumentFile({
-      id: d.id,
-      title: d.title,
-      kind: d.kind,
-      version: d.publish_version,
-      status: 'approved',
-      content: v.content,
-      approvedAt: iso(d.updated_at) as string,
-      sourceThreadIds: d.source_thread_ids ?? [],
-    }),
-    commitMessage: `docs: ${d.kind} ${d.title.replace(/\s+/g, ' ').slice(0, 60)} v${d.publish_version}`,
-  });
+  // An uploaded file goes first (same workstation, FIFO), then the sidecar that points at it.
+  const target = await vaultWriteTarget(ctx.pool, vaultId);
+  if ('reason' in target) return { queued: false, reason: 'no_workstation' };
+  let file: { path: string; name: string } | undefined;
+  if (d.file_name) {
+    const ext = attachmentExtension(d.file_name);
+    file = { path: `files/${d.slug}.${ext}`, name: d.file_name };
+    await enqueueVaultFileWrite(
+      ctx.pool,
+      vaultId,
+      {
+        path: documentFileVaultPath(d.slug, ext, folder),
+        documentId: d.id,
+        sha256: d.file_sha256,
+        size: Number(d.file_size),
+        commitMessage: `docs: file ${d.title.replace(/\s+/g, ' ').slice(0, 60)}`,
+      },
+      target,
+    );
+  }
+  const r = await enqueueVaultWrite(
+    ctx,
+    ctx.pool,
+    vaultId,
+    {
+      path,
+      mode: 'replace',
+      content: renderDocumentFile({
+        id: d.id,
+        title: d.title,
+        kind: d.kind,
+        version: d.publish_version,
+        status: 'approved',
+        content: v.content,
+        approvedAt: iso(d.updated_at) as string,
+        sourceThreadIds: d.source_thread_ids ?? [],
+        tags: d.tags ?? [],
+        file,
+      }),
+      commitMessage: `docs: ${d.kind} ${d.title.replace(/\s+/g, ' ').slice(0, 60)} v${d.publish_version}`,
+    },
+    target,
+  );
   if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
   await ctx.store.append([
     {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -8,6 +9,7 @@ import {
   type VaultMergeCommand,
   type VaultMoveCommand,
   type VaultWriteCommand,
+  type VaultWriteFileCommand,
 } from '@aom/shared';
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
@@ -26,7 +28,14 @@ import {
   syncVault,
   type VaultSyncResult,
 } from './sync.ts';
-import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
+import {
+  moveVaultFolder,
+  type VaultMoveResult,
+  VaultWriteError,
+  vaultFileHasHash,
+  writeVaultBinary,
+  writeVaultFile,
+} from './write.ts';
 
 export interface VaultTransport {
   /** Acked types (`vault.conflict`) are persisted in the outbox; `vault.status` is best effort. */
@@ -342,6 +351,48 @@ export class VaultManager {
       this.adoptRepository(cmd.vaultId);
       await ensureClone(dir, v.remoteUrl, {});
       const w = await writeVaultFile(dir, cmd, cfg.identity);
+      if (this.paused.has(cmd.vaultId))
+        return { ...w, pushed: false, paused: true, conflict: this.paused.get(cmd.vaultId) };
+      if (!cmd.push) return { ...w, pushed: false, paused: false };
+      const r = await syncVault({
+        dir,
+        remoteUrl: v.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      this.afterSync(cmd.vaultId, r);
+      if (r.status === 'conflict') return { ...w, pushed: false, paused: true, conflict: r.files };
+      if (r.status === 'error') throw new VaultWriteError(r.error);
+      return { ...w, pushed: r.pushed, paused: false };
+    });
+  }
+
+  /**
+   * `vault.write_file`: the bytes of an uploaded document are fetched from the server (unless the vault already holds
+   * them), checked against the size and hash in the command, written and committed like `write`, then pushed.
+   */
+  writeFile(
+    cmd: VaultWriteFileCommand,
+    fetchBytes: (documentId: string) => Promise<Buffer>,
+  ): Promise<VaultWriteOutcome> {
+    return this.serialize(cmd.vaultId, async () => {
+      const cfg = this.config;
+      const v = this.vault(cmd.vaultId);
+      if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      const local = v.storage === 'local';
+      const dir = local ? this.localDir(cmd.vaultId) : this.dir(cmd.vaultId);
+      if (!local) {
+        this.adoptRepository(cmd.vaultId);
+        await ensureClone(dir, v.remoteUrl, {});
+      }
+      let w: { written: boolean; committed: boolean } = { written: false, committed: false };
+      if (!(await vaultFileHasHash(dir, cmd.path, cmd.sha256))) {
+        const bytes = await fetchBytes(cmd.documentId);
+        if (bytes.byteLength !== cmd.size || createHash('sha256').update(bytes).digest('hex') !== cmd.sha256)
+          throw new VaultWriteError('the file does not match what the server announced');
+        w = await writeVaultBinary(dir, cmd, bytes, { commit: !local });
+      }
+      if (local) return { ...w, pushed: false, paused: false };
       if (this.paused.has(cmd.vaultId))
         return { ...w, pushed: false, paused: true, conflict: this.paused.get(cmd.vaultId) };
       if (!cmd.push) return { ...w, pushed: false, paused: false };
