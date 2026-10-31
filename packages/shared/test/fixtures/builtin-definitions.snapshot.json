@@ -21,7 +21,7 @@
     "kind": "role",
     "key": "billing_clerk",
     "version": 1,
-    "sha256": "d96bb36ac62c378a4e85c416c07153613fa3e3f44f8fefc1bb0526682ff32b6b"
+    "sha256": "9eae0bde7d4fadb4161f7a77a7296a07f6fa9ebfd186d893e97d851288a26285"
   },
   {
     "kind": "role",
@@ -45,7 +45,7 @@
     "kind": "role",
     "key": "compliance_officer",
     "version": 1,
-    "sha256": "da8f163336ec96fff844d87b0ed1f26f89a804f27fe74d1d9c6973c27c854f97"
+    "sha256": "2be7738d93367cd56fc40cd4707090da615a47b03cda5c55e744ae8e319ea1be"
   },
   {
     "kind": "role",
@@ -63,31 +63,31 @@
     "kind": "role",
     "key": "follow_up_assistant",
     "version": 1,
-    "sha256": "fbc8e6597deb3b9fc667b5fda6de6c5404790fb3d2e4d49800b36871cacfef3a"
+    "sha256": "9f7035ece041a22e7cd6f1b1448ac9998a964e01c866a14f81746bcf0ab659da"
   },
   {
     "kind": "role",
     "key": "front_desk",
     "version": 1,
-    "sha256": "1b6be18766599cd9bd941f6e21a46f1bfc62c3d230b0d23790e46fc6db3e19fe"
+    "sha256": "09d904c64d07e4903a06c00e630618f26659dc57c6aab259bb1165e9d07e9314"
   },
   {
     "kind": "role",
     "key": "marketing_reputation",
     "version": 1,
-    "sha256": "c798f25b12ab75fd87d3eddd6147e03d66fa17eff9a7a9007ba209459a6d85d5"
+    "sha256": "dea3a858f53150bf9a4e1ac7ce2070bb0315b1be016e4457aaadd64c554fce91"
   },
   {
     "kind": "role",
     "key": "operations_analyst",
     "version": 1,
-    "sha256": "d98849b77e7851edab2f32a33f72526068ba00ae620e3927af491c57caa1c15a"
+    "sha256": "510fbee5d108d556c74605f344b27c44868cf46eaf0c2da02193b352288e6ca0"
   },
   {
     "kind": "role",
     "key": "personal_assistant",
     "version": 1,
-    "sha256": "c96b460f11f3ceaf2eb3595d3158d52c7f947630316e020995ee3c8945228d3b"
+    "sha256": "9f220e8197306b71207cdbcb3abf9e983b6d85a5b75fe5678b9f7c22bf0a751e"
   },
   {
     "kind": "role",

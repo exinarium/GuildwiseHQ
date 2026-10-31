@@ -46,7 +46,6 @@ const businessRole = (r: BusinessRoleRow): RoleDefinition =>
     instructions: [
       `You are the ${r.name} of a business. You work the patterns ${r.patterns}, with these tools: ${r.tools}.`,
       `You never ${r.never}.`,
-      'Whatever needs approval goes to the Desk; the owner decides.',
     ].join('\n\n'),
     coreRules: [...BUSINESS_CORE_RULES, `Never ${r.never}.`],
     seniorityLevels: ['junior', 'senior'],

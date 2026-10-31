@@ -470,7 +470,7 @@ async function roleCountOn(env: ActionEnv, roleKey: string, projectId: string): 
   return Number(r?.n ?? 0);
 }
 
-async function hireChecks(
+export async function hireChecks(
   env: ActionEnv,
   roleKey: string,
   projectIds: string[],
