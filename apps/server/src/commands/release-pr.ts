@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
+import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 
 /**
@@ -92,4 +93,16 @@ export async function applyReleasePrResult(
     `UPDATE repo_pr_requests SET state=$2, url=$3, message=$4, base=COALESCE($5, base), updated_at=$6 WHERE request_id=$1`,
     [String(payload.requestId ?? ''), state, r?.url ?? null, message, r?.base ?? null, ctx.clock.now()],
   );
+  // A release PR is open: prepare the "Ship release" proposal (a read-only look at the repository).
+  if (state === 'opened') {
+    const req = await one(
+      ctx.pool,
+      'SELECT repo_id, requested_by FROM repo_pr_requests WHERE request_id=$1',
+      [String(payload.requestId ?? '')],
+    );
+    if (req)
+      await requestReleaseFacts(ctx, req.repo_id, 'release_pr', { userId: req.requested_by }).catch((err) =>
+        ctx.log.error({ err }, 'release facts request failed'),
+      );
+  }
 }

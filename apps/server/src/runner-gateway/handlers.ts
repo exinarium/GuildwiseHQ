@@ -127,6 +127,7 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
+import { applyReleaseFactsResult } from '../release/facts.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
@@ -549,6 +550,10 @@ export class RunnerHandlers {
       // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.release_facts') {
+      // Terminal: the facts (or why not) are stored; the proposal is reconciled with them.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleaseFactsResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'claude.account.ensure') {
       // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

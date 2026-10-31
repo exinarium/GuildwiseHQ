@@ -3,6 +3,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
+import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 
 /**
@@ -42,6 +43,10 @@ export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: 
       s.detail ?? null,
       s.checkedAt,
     ],
+  );
+  // The heartbeat doubles as the "working branch ahead of main" trigger (throttled to 30 minutes per repository).
+  await requestReleaseFacts(ctx, s.repoId, 'sync', { workstationId }).catch((err) =>
+    ctx.log.error({ err }, 'release facts request failed'),
   );
 }
 

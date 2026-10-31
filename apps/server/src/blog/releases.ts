@@ -38,20 +38,28 @@ const SECTION_OF: Record<string, keyof ReleaseSections> = {
   security: 'fixed',
 };
 
-/** The releases of a Keep a Changelog file, newest first (file order). `[Unreleased]` and undated sections are left out. */
-export function parseChangelog(md: string): ChangelogRelease[] {
-  const out: ChangelogRelease[] = [];
-  let cur: ChangelogRelease | null = null;
+interface ScannedBlock {
+  release: ChangelogRelease;
+  unreleased: boolean;
+  /** The raw lines of the block after its `## [..]` heading. */
+  lines: string[];
+}
+
+/** The one scanner behind `parseChangelog` and `parseUnreleased`: every `## [..]` block with its parsed sections and raw lines. */
+function scanChangelog(md: string): ScannedBlock[] {
+  const out: ScannedBlock[] = [];
+  let cur: ScannedBlock | null = null;
   let section: keyof ReleaseSections | null = null;
   let intro: string[] = [];
   let item: string[] | null = null;
   const flushItem = () => {
-    if (cur && section && item) cur.sections[section].push(item.join(' ').replace(/\s+/g, ' ').trim());
+    if (cur && section && item)
+      cur.release.sections[section].push(item.join(' ').replace(/\s+/g, ' ').trim());
     item = null;
   };
   const finish = () => {
     flushItem();
-    if (cur) cur.intro = intro.join(' ').replace(/\s+/g, ' ').trim();
+    if (cur) cur.release.intro = intro.join(' ').replace(/\s+/g, ' ').trim();
   };
   for (const line of md.split(/\r?\n/)) {
     const h = /^##\s+\[([^\]]+)\](?:\s*-\s*(\d{4}-\d{2}-\d{2}))?/.exec(line);
@@ -60,13 +68,26 @@ export function parseChangelog(md: string): ChangelogRelease[] {
       cur = null;
       section = null;
       intro = [];
+      const empty = { added: [], changed: [], fixed: [] };
       if (h[1] && /^\d+\.\d+\.\d+$/.test(h[1]) && h[2]) {
-        cur = { version: h[1], date: h[2], intro: '', sections: { added: [], changed: [], fixed: [] } };
+        cur = {
+          release: { version: h[1], date: h[2], intro: '', sections: empty },
+          unreleased: false,
+          lines: [],
+        };
+        out.push(cur);
+      } else if (h[1]?.toLowerCase() === 'unreleased') {
+        cur = {
+          release: { version: 'Unreleased', date: '', intro: '', sections: empty },
+          unreleased: true,
+          lines: [],
+        };
         out.push(cur);
       }
       continue;
     }
     if (!cur) continue;
+    cur.lines.push(line);
     const s = /^###\s+(\w+)/.exec(line);
     if (s) {
       flushItem();
@@ -87,6 +108,69 @@ export function parseChangelog(md: string): ChangelogRelease[] {
   }
   finish();
   return out;
+}
+
+/** The releases of a Keep a Changelog file, newest first (file order). `[Unreleased]` and undated sections are left out. */
+export function parseChangelog(md: string): ChangelogRelease[] {
+  return scanChangelog(md)
+    .filter((b) => !b.unreleased)
+    .map((b) => b.release);
+}
+
+export interface UnreleasedSection {
+  /** Same normalisation as `ChangelogRelease.intro`. */
+  intro: string;
+  sections: ReleaseSections;
+  /** The raw markdown from the first `###` line of the block to its end, trimmed. */
+  body: string;
+  /** Items with the word BREAKING, and bullets under a heading that names breaking changes. */
+  breaking: number;
+  /** Bullets of every section, known or not. */
+  entries: number;
+  /** No bullets at all. */
+  empty: boolean;
+}
+
+/** The `[Unreleased]` block of a Keep a Changelog file (read by the same scanner as `parseChangelog`); null when absent. */
+export function parseUnreleased(md: string): UnreleasedSection | null {
+  const block = scanChangelog(md).find((b) => b.unreleased);
+  if (!block) return null;
+  const first = block.lines.findIndex((l) => /^###\s/.test(l));
+  const body = (first < 0 ? '' : block.lines.slice(first).join('\n')).trim();
+  let breaking = 0;
+  let entries = 0;
+  let heading = '';
+  let current: string[] | null = null;
+  const flush = () => {
+    if (current) {
+      entries += 1;
+      if (/\bBREAKING\b/.test(current.join(' ')) || /breaking/i.test(heading)) breaking += 1;
+    }
+    current = null;
+  };
+  for (const line of block.lines.slice(first < 0 ? block.lines.length : first)) {
+    const h = /^###\s+(.*)$/.exec(line);
+    if (h) {
+      flush();
+      heading = h[1] as string;
+      continue;
+    }
+    const b = /^[-*]\s+(.*)$/.exec(line);
+    if (b) {
+      flush();
+      current = [b[1] as string];
+    } else if (current && line.trim() && /^\s/.test(line)) current.push(line.trim());
+    else if (!line.trim()) flush();
+  }
+  flush();
+  return {
+    intro: block.release.intro,
+    sections: block.release.sections,
+    body,
+    breaking,
+    entries,
+    empty: entries === 0,
+  };
 }
 
 /**

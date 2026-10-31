@@ -1411,6 +1411,16 @@ The runner reports the identity each clone would use (`identity: {name, email, s
 web app shows it in Project settings. Tests set `GIT_CONFIG_GLOBAL` to a temporary file (`test/setup-git.ts`); nothing reads
 the real `~/.gitconfig`.
 
+### `repo.release_facts` (read-only)
+
+Read for the "Ship release" proposal. For a repository the runner fetches the main branch, the working branch and the
+release tags (a tag fetch that fails is not fatal), then reads the last `vX.Y.Z` tag reachable from the working branch
+(pre-release tags count), the commits since it (at most 1000), the files changed since it, `CHANGELOG.md` at the head and
+each component rule's version file at the head and at the tag. It counts the files each rule's globs match itself and
+sends the raw file text; the server reads the version. It never pushes, tags, creates a branch or checks anything out, and
+a missing clone, a missing branch or an unsafe ref come back as an answer (`ok: false` with the reason), not a failure.
+Runners announce the capability `release-facts:1`; the server asks only a runner that has it.
+
 ### Git worktrees
 
 Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per

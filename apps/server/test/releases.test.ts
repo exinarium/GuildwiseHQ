@@ -9,6 +9,7 @@ import {
   loadReleases,
   locateReleaseSource,
   parseChangelog,
+  parseUnreleased,
   parseWhatsNew,
   publicText,
   resetReleaseWarnings,
@@ -284,5 +285,39 @@ describe('draftFromRelease', () => {
       whatsNew: [],
     });
     expect(SocialPostContentSchema.safeParse(c).success).toBe(true);
+  });
+});
+
+describe('parseUnreleased', () => {
+  it('keeps parseChangelog output unchanged for an unknown heading (regression guard)', () => {
+    const md = `## [Unreleased]\n\n### Added\n\n- New.\n\n## [1.0.0] - 2026-01-01\n\nIntro.\n\n### Notes for self-hosters\n\n- Set X.\n\n### Added\n\n- A.\n`;
+    const [r] = parseChangelog(md);
+    expect(parseChangelog(md)).toHaveLength(1);
+    expect(r?.intro).toBe('Intro. - Set X.');
+    expect(r?.sections.added).toEqual(['A.']);
+  });
+  it('reads Added and Fixed entries', () => {
+    const u = parseUnreleased(
+      `# Changelog\n\n## [Unreleased]\n\nRunner 0.1.63.\n\n### Added\n\n- One.\n- Two\n  continued.\n\n### Fixed\n\n- Three.\n\n## [1.0.0] - 2026-01-01\n\n### Added\n\n- Old.\n`,
+    );
+    expect(u?.intro).toBe('Runner 0.1.63.');
+    expect(u?.sections.added).toEqual(['One.', 'Two continued.']);
+    expect(u?.sections.fixed).toEqual(['Three.']);
+    expect(u?.entries).toBe(3);
+    expect(u?.breaking).toBe(0);
+    expect(u?.empty).toBe(false);
+    expect(u?.body).toBe('### Added\n\n- One.\n- Two\n  continued.\n\n### Fixed\n\n- Three.');
+  });
+  it('counts BREAKING entries and bullets under a breaking heading', () => {
+    const u = parseUnreleased(
+      `## [Unreleased]\n\n### Changed\n\n- BREAKING: API gone.\n- Other.\n\n### Breaking changes\n\n- Config renamed.\n`,
+    );
+    expect(u?.breaking).toBe(2);
+    expect(u?.entries).toBe(3);
+  });
+  it('reports empty and absent sections', () => {
+    expect(parseUnreleased('## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n')?.empty).toBe(true);
+    expect(parseUnreleased('## [Unreleased]\n')?.body).toBe('');
+    expect(parseUnreleased('## [1.0.0] - 2026-01-01\n')).toBeNull();
   });
 });

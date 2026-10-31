@@ -1,0 +1,61 @@
+import type { EventOf } from '@aom/shared';
+import { exec } from '../db/sql.ts';
+import type { Projector, StoredEvent } from '../eventstore/types.ts';
+
+const ev = <T extends 'ReleaseProposed' | 'ReleaseApproved' | 'ReleaseProposalClosed'>(e: StoredEvent) =>
+  e.event as EventOf<T>;
+
+export const releaseProjectors: Record<string, Projector> = {
+  ReleaseProposed: async (tx, e) => {
+    const p = ev<'ReleaseProposed'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO release_proposals (id, org_id, project_id, repo_id, desk_item_id, state, trigger, recommended_version,
+                                      recommended_level, reason, last_tag, head_sha, created_at, updated_at)
+       SELECT $1, pr.org_id, pr.id, $3, $4, 'proposed', $5, $6, $7, $8, $9, $10, $11, $11
+         FROM projects pr WHERE pr.id = $2`,
+      [
+        p.proposalId,
+        p.projectId,
+        p.repoId,
+        p.deskItemId,
+        p.trigger,
+        p.recommendedVersion,
+        p.level,
+        p.reason,
+        p.lastTag,
+        p.headSha,
+        e.createdAt,
+      ],
+    );
+  },
+  ReleaseApproved: async (tx, e) => {
+    const p = ev<'ReleaseApproved'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_proposals SET state='approved', version=$2, components=$3::jsonb, notes=$4, notes_source=$5,
+              approved_by=$6, approved_at=$7, head_sha=$8, updated_at=$7 WHERE id=$1`,
+      [
+        p.proposalId,
+        p.version,
+        JSON.stringify(p.components),
+        p.notes,
+        p.notesSource,
+        p.approvedBy,
+        e.createdAt,
+        p.headSha,
+      ],
+    );
+  },
+  ReleaseProposalClosed: async (tx, e) => {
+    const p = ev<'ReleaseProposalClosed'>(e).payload;
+    const state =
+      p.reason === 'released' ? 'released' : p.reason === 'nothing_to_release' ? 'closed' : 'dismissed';
+    await exec(tx, `UPDATE release_proposals SET state=$2, closed_reason=$3, updated_at=$4 WHERE id=$1`, [
+      p.proposalId,
+      state,
+      p.reason,
+      e.createdAt,
+    ]);
+  },
+};

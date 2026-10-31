@@ -241,6 +241,11 @@ export async function getProjectDetail(
     `SELECT DISTINCT ON (repo_id) * FROM repo_pr_requests WHERE project_id=$1 ORDER BY repo_id, created_at DESC`,
     [projectId],
   );
+  const liveProposals = await rows(
+    ctx.pool,
+    `SELECT repo_id, state, desk_item_id, version FROM release_proposals WHERE project_id=$1 AND state IN ('proposed','approved')`,
+    [projectId],
+  );
   const clones = await rows(
     ctx.pool,
     `SELECT rc.*, w.name AS workstation_name FROM repo_clones rc JOIN workstations w ON w.id = rc.workstation_id
@@ -302,6 +307,10 @@ export async function getProjectDetail(
           }
         : null,
       releasePr: releasePrOf(prRequests.find((q) => q.repo_id === r.id)),
+      releaseProposal: (() => {
+        const lp = liveProposals.find((q) => q.repo_id === r.id);
+        return lp ? { state: lp.state, deskItemId: lp.desk_item_id, version: lp.version ?? null } : null;
+      })(),
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],

@@ -39,6 +39,7 @@ import {
   type ProviderAccountPromoteResult,
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
+  RELEASE_FACTS_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -109,6 +110,7 @@ import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
+import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -1329,6 +1331,7 @@ export class Runner {
         SHIFT_LIMIT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
+        RELEASE_FACTS_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
@@ -1973,6 +1976,20 @@ export class Runner {
                 payload: p,
                 repoPath: repo.localPath,
                 pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              })
+            : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
+        );
+      } else if (command === 'repo.release_facts') {
+        // Read-only. "No clone here" and a missing branch are answers (ok:true, result.ok:false).
+        const p = CommandPayloadSchemas['repo.release_facts'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo
+            ? await readReleaseFacts({
+                payload: p,
+                repoPath: repo.localPath,
                 auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
