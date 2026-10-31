@@ -40,6 +40,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
   ShiftReportSchema,
+  type ShiftVault,
   scanReportForSecrets,
   splitBackendModel,
   type TranscriptRef,
@@ -161,7 +162,7 @@ import {
   renderTranscriptMessage,
   transcriptPath,
 } from '../transcript/service.ts';
-import { readVaultContext, withVaultContext } from '../vaults/context.ts';
+import { readVaultContexts, withVaultContexts } from '../vaults/context.ts';
 import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
 import {
   type BranchSnapshot,
@@ -1063,24 +1064,26 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
-    // A card, question or BA task shift reads only the vault the server named for it; a DevOps shift reads none.
-    const vaultCtx =
-      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') &&
-      msg.vault
-        ? await readVaultContext(paths.vaults, msg.vault)
-        : null;
-    // Question and BA task shifts open the vault as a read-only folder (secret files blocked, like a reference repository).
-    const vaultReadFolder: ReadableFolder[] =
-      vaultCtx && msg.kind !== 'card'
-        ? [
-            {
-              name: msg.vault?.kind === 'org' ? 'organization' : 'project',
-              path: vaultCtx.addDir,
-              kind: 'vault',
-            },
-          ]
-        : [];
-    s.brief = withVaultContext(msg.brief, vaultCtx);
+    // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
+    // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
+    const shiftVaults: ShiftVault[] =
+      msg.kind === 'card'
+        ? msg.vaults?.length
+          ? msg.vaults
+          : msg.vault
+            ? [msg.vault]
+            : []
+        : (msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
+          ? [msg.vault]
+          : [];
+    const vaultCtxs = await readVaultContexts(paths.vaults, shiftVaults);
+    // Every vault opens as a read-only folder (secret files blocked, like a reference repository).
+    const vaultReadFolder: ReadableFolder[] = vaultCtxs.map((c) => ({
+      name: c.kind === 'org' ? 'organization' : 'project',
+      path: c.addDir,
+      kind: 'vault',
+    }));
+    s.brief = withVaultContexts(msg.brief, vaultCtxs);
     // A "run this branch" request: the runner finds BUILD.md and the commits itself (the server never reads repositories).
     if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
       const run = msg.devops.run;
@@ -1167,7 +1170,7 @@ export class ShiftSupervisor {
       folderRepos,
     );
     if (msg.kind === 'card')
-      texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
+      texts.instructions += `\n${renderReadableFolders(mergeReadFolders(readFolders, vaultReadFolder), { workingDir: cwd })}\n`;
     else if (msg.kind === 'ba_task' && registeredFolders.length + vaultReadFolder.length > 0)
       texts.instructions += `\n${renderReadableFolders(mergeReadFolders(registeredFolders, vaultReadFolder), { workingDir: cwd })}\n`;
     else if (vaultReadFolder.length > 0)
@@ -1229,7 +1232,7 @@ export class ShiftSupervisor {
         ...(msg.kind === 'ba_task' ? registeredFolders : []),
         ...vaultReadFolder,
       ].map((f) => f.path),
-      addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
+      addDirs: scanDirs,
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
     };
     const subagents = this.mayDelegate(msg)
@@ -1356,7 +1359,7 @@ export class ShiftSupervisor {
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
         grantedSkills,
-        addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
+        addDirs: scanDirs,
         readDirs: [
           ...readFolders,
           ...(msg.kind === 'ba_task' ? registeredFolders : []),

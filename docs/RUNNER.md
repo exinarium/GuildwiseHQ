@@ -1559,7 +1559,7 @@ clone under `vaults/`; with none, the instructions say the vault is not cloned h
 
 | Work | Server sends | Runner opens | How |
 |---|---|---|---|
-| Card shift | `shift.start.vault` (project vault, else org vault on an Owner/Admin workstation) | the vault clone | `--add-dir`, Edit denied, sandbox `denyWrite`; PROJECT.md, standing orders (and taste) added to the brief |
+| Card shift | `shift.start.vaults` (the organization vault on an Owner/Admin workstation, and the project vault); an older server sends only `shift.start.vault` | every vault clone that exists here | read-only folders (`readDirs`, listed under "Folders you can read": Edit denied, sandbox `denyWrite`, secret-file deny list); PROJECT.md, standing orders (and taste) of all of them added to the brief; `vault` stays the write target |
 | Question shift, BA task shift | `shift.start.vault`, same rule, for the shift's project | the vault clone | read-only folder (as reference repositories: secret files denied); PROJECT.md and standing orders in the brief |
 | Chat about a project or card | `chat.start` `context.vault` `{ vaultId, kind, folder }`, same rule | the vault clone | read-only folder (`readDirs`: `--add-dir`, Edit denied, sandbox `denyWrite`, secret-file deny list); PROJECT.md and standing orders (clipped to 3,000 characters each) in the chat instructions |
 | Chat with no project | `context.vault` `{ vaultId, kind: 'org' }` (no `folder`), only on an Owner/Admin workstation | the vault clone | as above; only the root standing orders |
