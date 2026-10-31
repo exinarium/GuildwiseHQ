@@ -165,6 +165,6 @@ describe('deleting a project with chats', () => {
     expect(res.status).toBe(204);
     expect(await archivesOf([t])).toBe(0);
     expect(await readsOf([t])).toBe(0);
-    expect(await threadsOf([t])).toBe(0);
+    expect((await q('SELECT deleted_at FROM threads WHERE id=$1', [t]))[0]?.deleted_at).toBeTruthy(); // tombstone stays
   });
 });
