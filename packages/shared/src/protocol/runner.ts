@@ -954,7 +954,7 @@ export type ReleasePublishResult = z.infer<typeof ReleasePublishResultSchema>;
  * git submodule. The runner moves D's pin of X to `commit` on D's working branch (a commit and a push, never a force push)
  * and answers D's new head, which the server then deploys. The runner finds the submodule by URL in D's `.gitmodules`
  * (`submoduleRemoteUrlNormalized` against each submodule url, normalized the same way), so the owner sets nothing up.
- * Needs runner 0.1.63.
+ * Needs runner 0.1.64.
  */
 export const RepoBumpSubmodulePayloadSchema = z.object({
   projectId: z.uuid(),

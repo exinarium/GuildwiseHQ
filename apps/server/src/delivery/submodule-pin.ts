@@ -22,7 +22,7 @@ import { type EnvRepo, requestDeployRun } from './runs.ts';
  */
 
 /** The first runner that has `repo.bump_submodule`. */
-export const MIN_RUNNER_FOR_SUBMODULE_PIN = '0.1.63';
+export const MIN_RUNNER_FOR_SUBMODULE_PIN = '0.1.64';
 const PIN_COMMAND_TTL_MS = 3_600_000;
 
 export const pinSubject = (projectId: string, repoId: string) => `submodule_pin:${projectId}:${repoId}`;

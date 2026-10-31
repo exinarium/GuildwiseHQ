@@ -1866,7 +1866,7 @@ Runner-attached data: for build outcomes the runner computes `diffStats` with `g
 
 Before `test` and `finalize` shifts (`stage.rebaseBefore`), the runner (not the agent) runs in the worktree: `git fetch origin <base>`; `git rebase origin/<base>`; on non-zero exit `git rebase --abort`, collect `git diff --name-only --diff-filter=U` beforehand, and reject the shift with `rebase_conflict`. The conflict becomes Rework for the builder with the conflicted files in the event, but first (when the workstation has a DevOps engineer) `cardConflictAttemptEvents` (server `commands/conflict-attempts.ts`) raises a DevOps request with `origin: 'conflict'` for the card and appends `ConflictAttemptStarted`, which parks the card (`status waiting`, `park_problem 'conflict'`) on that request; the dispatcher's unpark pass posts the result on the card thread and releases it to Rework. A card thread note and a desk notice (`conflict_attempt`) make the attempt visible. The attempts are counted per card from `devops_requests`; the third conflict raises a desk escalation (`conflict_unresolved`) instead. Repository hygiene conflicts (`HygieneProblemKind 'conflict'`) follow the same rule per repository (two attempts in 24 hours).
 
-The completion action (`finalize.execute`, `git/completion.ts`) follows the same rule and two more: a card head that is already part of `origin/<base>` (merged by hand, or an earlier finalize whose answer was lost) is reported merged at once, before any rebase, with the base tip as `mergeCommit`; and only a merge or rebase that leaves conflicted files is a `conflict`. A git failure without a conflicted file (a lock, a missing ref, a refused signature) is a plain finalize failure carrying git's own message, so it reaches the desk instead of looping the card through Rework (runner 0.1.63).
+The completion action (`finalize.execute`, `git/completion.ts`) follows the same rule and two more: a card head that is already part of `origin/<base>` (merged by hand, or an earlier finalize whose answer was lost) is reported merged at once, before any rebase, with the base tip as `mergeCommit`; and only a merge or rebase that leaves conflicted files is a `conflict`. A git failure without a conflicted file (a lock, a missing ref, a refused signature) is a plain finalize failure carrying git's own message, so it reaches the desk instead of looping the card through Rework (runner 0.1.64).
 
 ### 13.7 Post-shift guard and auto-commit (`shifts/guard.ts`, `shifts/autocommit.ts`)
 
@@ -2480,6 +2480,22 @@ runs the script outside any model session.
   `deploy_trigger_queue`, `deliveryPass` in the dispatcher). A recipe project's phase `deploy` follow-up starts without a DevOps
   request; the dispatcher's `deployStep` asks for the run of the environment whose target the follow-up names (outside the phase
   transaction) and `followupVerdict` finishes the follow-up with the run.
+- **A commit belongs to one repository.** A card merges into its own repository (`cards.repo_id`), but an environment deploys one
+  repository (the recipe's `repo`, else the first by name). A merge commit is therefore only ever used for the deploy of the
+  repository it was merged into: `latestMerge(db, projectId, repoId)` and the allow-list of automated commits
+  (`automatedCommitAllowed`) are scoped to the environment's repository, and with no merge there the runner deploys the head of that
+  repository's working branch (`commit: null`). `deploy_trigger_queue` remembers the repository of the newest merge (`repo_id`) and
+  every repository merged in the window (`repo_ids`, migration 2751); rows from before have neither and behave as before.
+- **Submodule pin bump (`repo.bump_submodule`, runner 0.1.64).** When the merged repository X is not the deploy repository D,
+  `deliveryPass` asks a workstation that holds D (an active one with a runner of at least 0.1.64; `delivery/submodule-pin.ts`) to
+  point D's submodule pin of X at X's newest merge, in one command per (D, X) however many merges came in the window. The runner
+  finds the pin itself: D's `.gitmodules` on D's working branch, matched by normalized url to X's `remote_url_normalized`
+  (relative urls are resolved against D's origin), so nothing is configured. It commits `chore: pin <path> to <sha>` with the
+  project's commit identity and a `Signed-off-by` line, pushes D's working branch (never forced; once more from the new tip if origin
+  moved) and answers D's new head. The server then requests the deploy of D's `after_merge` environments with that head
+  (`pinnedCommit`: a commit of D's own that is not a card merge). D not holding X (`notSubmodule`), or a runner that is too old (a
+  desk notice says the pin was not moved), deploys D as it is. Any other failure (a protected working branch, a refused push, no
+  clone) is a desk notice with the runner's words and no deploy: a deploy would run code that does not match the merge.
 - **Conversation (section 10).** `aom ceo devops --project KEY --kind recipe` (owner turns only) files a DevOps request whose context
   is `{requestKind: 'recipe', ownerTurn: true, projectKey}` and whose text carries the script contract. DevOps may then
   `aom recipe save --dir <scratch> --project KEY` (the runner writes `delivery/` into the vault, one commit, pushed:
