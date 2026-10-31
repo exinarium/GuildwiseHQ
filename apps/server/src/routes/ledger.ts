@@ -16,8 +16,9 @@ import { authorizeOrder, escalateOrder, revokeOrder } from '../ceo/orders.ts';
 import { addLedgerEntryChecked, editLedgerEntry } from '../commands/ledger.ts';
 import { retireLedgerEntry } from '../commands/ledger-retire.ts';
 import { setLedgerReviewDate } from '../commands/ledger-review.ts';
+import { installRulePack, listRulePacks, previewRulePack, removeRulePack } from '../commands/rule-packs.ts';
 import type { Ctx } from '../context.ts';
-import { notFound } from '../errors.ts';
+import { forbidden, notFound } from '../errors.ts';
 import { getLedgerDto, getVisibleLedgerDto, ledgerVersions, listLedger } from '../queries/ledger.ts';
 import { typed } from './util.ts';
 
@@ -48,6 +49,37 @@ export function ledgerRoutes(ctx: Ctx) {
         ...(r.merged ? { merged: true } : {}),
         ...(r.conflictsWith.length > 0 ? { conflictsWith: r.conflictsWith } : {}),
       };
+    });
+
+    // Rule packs (business mode). Registered before the `:id` routes.
+    const packOrg = async (
+      s: Awaited<ReturnType<typeof requireUser>>,
+      req: Parameters<typeof requestedOrgId>[0],
+    ) => {
+      const id = await resolveOrgId(ctx, s, requestedOrgId(req));
+      if (!id) throw forbidden('you do not belong to an organization');
+      return id;
+    };
+    const PackParams = z.object({ packId: z.string().min(1).max(80) });
+    app.get('/api/ledger/rule-packs', async (req) => {
+      const s = await requireUser(ctx, req);
+      const orgId = await packOrg(s, req);
+      return { packs: await listRulePacks(ctx, s.user, orgId) };
+    });
+    app.get('/api/ledger/rule-packs/:packId', { schema: { params: PackParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const orgId = await packOrg(s, req);
+      return previewRulePack(ctx, s.user, orgId, req.params.packId);
+    });
+    app.post('/api/ledger/rule-packs/:packId/install', { schema: { params: PackParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const orgId = await packOrg(s, req);
+      return installRulePack(ctx, s.user, orgId, req.params.packId);
+    });
+    app.post('/api/ledger/rule-packs/:packId/remove', { schema: { params: PackParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const orgId = await packOrg(s, req);
+      return removeRulePack(ctx, s.user, orgId, req.params.packId);
     });
 
     const IdParams = z.object({ id: z.uuid() });

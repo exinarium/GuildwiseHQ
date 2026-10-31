@@ -5,7 +5,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import { voidAuthorityEvents } from '../ceo/orders.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
@@ -26,42 +26,48 @@ export async function retireLedgerEntryAs(
   input: RetireInput,
   by: { actor: AppendInput['actor']; label: 'owner' | 'ba' | 'ceo' | 'system'; orgId?: string },
 ): Promise<boolean> {
-  return withAppendTx(ctx.pool, async (tx) => {
-    const e = await one(tx, 'SELECT * FROM ledger_entries WHERE id=$1 FOR UPDATE', [entryId]);
-    if (!e || (by.orgId && e.org_id !== by.orgId)) throw notFound('ledger entry not found');
-    if (e.retired_at) return false;
-    if (input.supersededBy) {
-      const repl = await one(tx, 'SELECT org_id FROM ledger_entries WHERE id=$1', [input.supersededBy]);
-      if (!repl || repl.org_id !== e.org_id || input.supersededBy === entryId)
-        throw conflict(
-          'bad_replacement',
-          'the replacing entry must be another entry of the same organization',
-        );
-    }
-    const scope = e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id);
-    await ctx.store.append(
-      [
-        // A retired order carries no full power (docs/design/ceo-front-door.md section 3.4).
-        ...(await voidAuthorityEvents(tx, entryId, 'retired', scope)),
-        {
-          streamId: streamId.ledger(entryId),
-          event: {
-            type: 'LedgerEntryRetired',
-            payload: {
-              entryId,
-              reason: input.reason.trim(),
-              ...(input.supersededBy ? { supersededBy: input.supersededBy } : {}),
-              by: by.label,
-            },
+  return withAppendTx(ctx.pool, (tx) => retireLedgerEntryTx(ctx, tx, entryId, input, by));
+}
+
+/** The body of `retireLedgerEntryAs`, run inside the caller's append transaction. */
+export async function retireLedgerEntryTx(
+  ctx: Ctx,
+  tx: Tx,
+  entryId: string,
+  input: RetireInput,
+  by: { actor: AppendInput['actor']; label: 'owner' | 'ba' | 'ceo' | 'system'; orgId?: string },
+): Promise<boolean> {
+  const e = await one(tx, 'SELECT * FROM ledger_entries WHERE id=$1 FOR UPDATE', [entryId]);
+  if (!e || (by.orgId && e.org_id !== by.orgId)) throw notFound('ledger entry not found');
+  if (e.retired_at) return false;
+  if (input.supersededBy) {
+    const repl = await one(tx, 'SELECT org_id FROM ledger_entries WHERE id=$1', [input.supersededBy]);
+    if (!repl || repl.org_id !== e.org_id || input.supersededBy === entryId)
+      throw conflict('bad_replacement', 'the replacing entry must be another entry of the same organization');
+  }
+  const scope = e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id);
+  await ctx.store.append(
+    [
+      // A retired order carries no full power (docs/design/ceo-front-door.md section 3.4).
+      ...(await voidAuthorityEvents(tx, entryId, 'retired', scope)),
+      {
+        streamId: streamId.ledger(entryId),
+        event: {
+          type: 'LedgerEntryRetired',
+          payload: {
+            entryId,
+            reason: input.reason.trim(),
+            ...(input.supersededBy ? { supersededBy: input.supersededBy } : {}),
+            by: by.label,
           },
-          actor: by.actor,
-          scope,
         },
-      ],
-      { tx },
-    );
-    return true;
-  });
+        actor: by.actor,
+        scope,
+      },
+    ],
+    { tx },
+  );
+  return true;
 }
 
 /**

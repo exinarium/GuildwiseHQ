@@ -8,6 +8,14 @@ import {
   LedgerListResponseSchema,
   type RetireLedgerEntryRequest,
   type ReviewLedgerEntryRequest,
+  type RulePackInstallResult,
+  RulePackInstallResultSchema,
+  type RulePackListResponse,
+  RulePackListResponseSchema,
+  type RulePackPreview,
+  RulePackPreviewSchema,
+  type RulePackRemoveResult,
+  RulePackRemoveResultSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post, qs } from '../client.ts';
@@ -110,5 +118,47 @@ export function useEscalateOrder(id: string) {
   return useMutation({
     mutationFn: (note: string) => post(`/ledger/${id}/escalate`, { note }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
+  });
+}
+
+/** Rule packs (business mode): the list, a preview, install and remove. */
+export function useRulePacks(enabled = true) {
+  return useQuery({
+    queryKey: ['rule-packs'],
+    enabled,
+    queryFn: async () =>
+      (await get<RulePackListResponse>('/ledger/rule-packs', RulePackListResponseSchema)).packs,
+  });
+}
+
+export function useRulePackPreview(packId: string | null) {
+  return useQuery({
+    queryKey: ['rule-packs', packId],
+    enabled: !!packId,
+    queryFn: () => get<RulePackPreview>(`/ledger/rule-packs/${packId}`, RulePackPreviewSchema),
+  });
+}
+
+export function useInstallRulePack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (packId: string) =>
+      post<RulePackInstallResult>(`/ledger/rule-packs/${packId}/install`, {}, RulePackInstallResultSchema),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      qc.invalidateQueries({ queryKey: ['rule-packs'] });
+    },
+  });
+}
+
+export function useRemoveRulePack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (packId: string) =>
+      post<RulePackRemoveResult>(`/ledger/rule-packs/${packId}/remove`, {}, RulePackRemoveResultSchema),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      qc.invalidateQueries({ queryKey: ['rule-packs'] });
+    },
   });
 }

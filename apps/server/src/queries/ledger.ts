@@ -1,4 +1,11 @@
-import { isReviewDue, type LedgerEntryDto, type LedgerMatch, type LedgerVersionDto } from '@aom/shared';
+import {
+  enforcedByFor,
+  isReviewDue,
+  type LedgerEntryDto,
+  type LedgerMatch,
+  type LedgerVersionDto,
+  rulePackById,
+} from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
 import { fullPowerDto } from '../ceo/orders.ts';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -205,6 +212,22 @@ export const toLedgerDto = (r: Row, today: string, rank?: number): LedgerEntryDt
   ),
   canEdit: false,
   canRetire: false,
+  rulePack: r.rule_pack_id
+    ? {
+        id: r.rule_pack_id,
+        name: rulePackById(r.rule_pack_id)?.name ?? r.rule_pack_id,
+        ruleId: r.rule_pack_rule_id ?? '',
+      }
+    : null,
+  ...(r.scope === 'standing_order'
+    ? {
+        enforcedBy: enforcedByFor({
+          rulePackId: r.rule_pack_id ?? null,
+          rulePackRuleId: r.rule_pack_rule_id ?? null,
+          version: r.version ?? 1,
+        }),
+      }
+    : {}),
   ...(rank !== undefined ? { rank } : {}),
 });
 

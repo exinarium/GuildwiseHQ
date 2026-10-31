@@ -8,6 +8,12 @@ export async function assertDevMode(db: Queryable, orgId: string, message: strin
   if (isBusinessOrg(o)) throw conflict('business_mode', message);
 }
 
+/** 409 `business_only` when the organization does not work in Business mode. `FOR SHARE` serialises with a switch. */
+export async function assertBusinessOrg(db: Queryable, orgId: string, message: string): Promise<void> {
+  const o = await one<{ mode: string }>(db, 'SELECT mode FROM organizations WHERE id=$1 FOR SHARE', [orgId]);
+  if (!isBusinessOrg(o)) throw conflict('business_only', message);
+}
+
 /** The organization's mode (`dev` for an unknown organization). */
 export async function orgModeOf(db: Queryable, orgId: string): Promise<'dev' | 'business'> {
   const o = await one<{ mode: string }>(db, 'SELECT mode FROM organizations WHERE id=$1', [orgId]);

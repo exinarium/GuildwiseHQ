@@ -8,8 +8,8 @@ export const ledgerProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ledger_entries (id, org_id, project_id, card_id, scope, title, body, tags, source_desk_item_id, vault_path,
-         created_by_kind, created_by_id, created_at, review_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::date)`,
+         created_by_kind, created_by_id, created_at, review_date, rule_pack_id, rule_pack_rule_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::date,$15,$16)`,
       [
         p.entryId,
         e.scope.orgId,
@@ -25,8 +25,32 @@ export const ledgerProjectors: Record<string, Projector> = {
         e.actor.kind === 'user' || e.actor.kind === 'agent' ? e.actor.id : null,
         e.createdAt,
         p.reviewDate ?? null,
+        p.rulePack?.packId ?? null,
+        p.rulePack?.ruleId ?? null,
       ],
     );
+  },
+  RulePackInstalled: async (tx, e) => {
+    const p = (e.event as EventOf<'RulePackInstalled'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO org_rule_packs (org_id, pack_id, pack_version, installed_at, installed_by)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (org_id, pack_id) DO UPDATE
+         SET pack_version=EXCLUDED.pack_version, removed_at=NULL, removed_by=NULL,
+             installed_at = CASE WHEN org_rule_packs.removed_at IS NULL THEN org_rule_packs.installed_at ELSE EXCLUDED.installed_at END,
+             installed_by = CASE WHEN org_rule_packs.removed_at IS NULL THEN org_rule_packs.installed_by ELSE EXCLUDED.installed_by END`,
+      [e.scope.orgId, p.packId, p.packVersion, e.createdAt, e.actor.kind === 'user' ? e.actor.id : null],
+    );
+  },
+  RulePackRemoved: async (tx, e) => {
+    const p = (e.event as EventOf<'RulePackRemoved'>).payload;
+    await exec(tx, 'UPDATE org_rule_packs SET removed_at=$3, removed_by=$4 WHERE org_id=$1 AND pack_id=$2', [
+      e.scope.orgId,
+      p.packId,
+      e.createdAt,
+      e.actor.kind === 'user' ? e.actor.id : null,
+    ]);
   },
   LedgerEntryEdited: async (tx, e) => {
     const p = (e.event as EventOf<'LedgerEntryEdited'>).payload;
