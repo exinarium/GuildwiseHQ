@@ -1,3 +1,4 @@
+import { BUSINESS_ROLE_KEYS } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool } from './helpers/db.ts';
@@ -153,23 +154,27 @@ describe('two-user isolation', () => {
   it('catalogue endpoints list the built-in roles and workflows to any signed-in user', async () => {
     const u = await w.t.userSession(uniqueEmail('cat'));
     const roles = await ok<any>(w.t.req('GET', '/api/roles', { cookie: u.cookie }));
-    expect(roles.roles.map((r: any) => r.definition.key).sort()).toEqual([
-      'analyst',
-      'architect',
-      'ba',
-      'builder',
-      'ceo',
-      'checker',
-      'curator',
-      'devops',
-      'planner',
-      'pre_reviewer',
-      'researcher',
-      'reviewer',
-      'scout',
-      'tester',
-      'writer',
-    ]);
+    // every role is listed to every organization, the business roles too
+    expect(roles.roles.map((r: any) => r.definition.key).sort()).toEqual(
+      [
+        'analyst',
+        'architect',
+        'ba',
+        'builder',
+        'ceo',
+        'checker',
+        'curator',
+        'devops',
+        'planner',
+        'pre_reviewer',
+        'researcher',
+        'reviewer',
+        'scout',
+        'tester',
+        'writer',
+        ...BUSINESS_ROLE_KEYS,
+      ].sort(),
+    );
     const wfs = await ok<any>(w.t.req('GET', '/api/workflows', { cookie: u.cookie }));
     expect(wfs.workflows.map((x: any) => x.definition.key).sort()).toEqual([
       'code',

@@ -95,7 +95,10 @@ describe('migration and projection', () => {
     );
     expect(bad).toEqual([]);
     expect(
-      await q('SELECT workflow_key, is_primary FROM project_workflows WHERE project_id=$1', [w.projectId]),
+      await q(
+        `SELECT workflow_key, is_primary FROM project_workflows WHERE project_id=$1 AND workflow_key NOT LIKE 'business-%'`,
+        [w.projectId],
+      ),
     ).toEqual([{ workflow_key: 'code', is_primary: true }]);
   });
 });
@@ -104,7 +107,13 @@ describe('enabling workflows', () => {
   it('lists the primary as enabled and the approved workflows as available (not the internal ones)', async () => {
     const v = await getView();
     expect(v.canEdit).toBe(true);
-    expect(v.enabled.map((x: any) => [x.workflowKey, x.isPrimary])).toEqual([['code', true]]);
+    // the shipped business workflows are enabled next to the primary in every project
+    expect(
+      v.enabled
+        .map((x: any) => [x.workflowKey, x.isPrimary])
+        .filter(([k]: any) => !k.startsWith('business-')),
+    ).toEqual([['code', true]]);
+    expect(v.enabled.some((x: any) => x.workflowKey === 'business-enquiry')).toBe(true);
     const keys = v.available.map((x: any) => x.workflowKey);
     expect(keys).toContain('support');
     for (const hidden of ['code-bugfix', 'feed', 'research']) expect(keys).not.toContain(hidden);
@@ -118,7 +127,11 @@ describe('enabling workflows', () => {
     expect(res.status).toBe(403);
     const draft = await w.t.req('POST', variantUrl(), { cookie: member.cookie, body: variantSpec() });
     expect(draft.status).toBe(403);
-    expect((await getView()).enabled.map((x: any) => x.workflowKey)).toEqual(['code']);
+    expect(
+      (await getView()).enabled
+        .map((x: any) => x.workflowKey)
+        .filter((k: string) => !k.startsWith('business-')),
+    ).toEqual(['code']);
   });
 
   it('a card type that the primary runs resolves to it until another workflow is made the default', async () => {
@@ -143,7 +156,11 @@ describe('enabling workflows', () => {
     ]);
     expect(dup.status).toBe(400);
     expect(dup.body.error.code).toBe('duplicate_default');
-    expect((await getView()).enabled.map((x: any) => x.workflowKey)).toEqual(['code']);
+    expect(
+      (await getView()).enabled
+        .map((x: any) => x.workflowKey)
+        .filter((k: string) => !k.startsWith('business-')),
+    ).toEqual(['code']);
   });
 
   it('enabling support as the default for support cards routes them there; others stay on code', async () => {

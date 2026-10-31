@@ -106,7 +106,11 @@ describe('browser websocket', () => {
     expect(mine.every((e) => e.projectId === null || e.projectId === w.projectId)).toBe(true);
     expect(mine.some((e) => e.projectId === otherProject.project.id)).toBe(false);
     expect(otherBrowser.events().some((e) => e.type === 'CardCreated')).toBe(false);
-    expect(otherBrowser.events().every((e) => e.projectId === otherProject.project.id)).toBe(true);
+    // its own organization's events only: the project's, and organization-level ones (such as the business workflows
+    // every organization gets with its first project)
+    expect(
+      otherBrowser.events().every((e) => e.projectId === null || e.projectId === otherProject.project.id),
+    ).toBe(true);
     expect(mine[0]).toMatchObject({
       type: expect.any(String),
       streamId: expect.any(String),
