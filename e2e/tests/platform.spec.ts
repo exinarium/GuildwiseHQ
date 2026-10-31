@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { NEWORG, SUPER } from '../support/env.ts';
+import { q } from '../support/db.ts';
+import { BASE_URL, BIZORG, NEWORG, SUPER } from '../support/env.ts';
 import { deleteMailFor, waitForMail } from '../support/mail.ts';
 import { freshTotp } from '../support/totp.ts';
 
@@ -110,4 +111,68 @@ test('invites a new organization, the invitee starts it, and the platform suspen
   await page.getByTestId('platform-nav-audit').click();
   await expect(page.getByTestId('platform-audit')).toContainText('Unpaid invoice');
   await ownerCtx.close();
+});
+
+test('an invitee starts a Business mode organization: no delivery surfaces, direct URLs blocked, the server refuses dev actions', async ({
+  page,
+  browser,
+}) => {
+  await deleteMailFor(BIZORG.email);
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(SUPER.email);
+  await page.getByLabel('Password').fill(SUPER.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByTestId('login-code').fill(await freshTotp(secret));
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL(/\/platform/);
+  await page.getByTestId('platform-nav-invitations').click();
+  await page.getByLabel('Owner email').fill(BIZORG.email);
+  await page.getByLabel('Organization name').fill(BIZORG.org);
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByTestId('platform-invitations').getByText(BIZORG.email)).toBeVisible();
+
+  const mail = await waitForMail(BIZORG.email);
+  const link = /https?:\/\/\S+\/invite\/[A-Za-z0-9_-]+/.exec(mail.text)?.[0];
+  expect(link, mail.text).toBeTruthy();
+
+  const ctx = await browser.newContext();
+  const op = await ctx.newPage();
+  await op.goto(link as string);
+  await expect(op.getByRole('heading', { name: /Start your organization/ })).toBeVisible();
+  // Developer is the default; the invitee picks Business
+  await expect(op.getByTestId('org-mode-dev')).toBeChecked();
+  await op.getByTestId('org-mode-business').check();
+  await op.getByLabel('Your name').fill(BIZORG.name);
+  await op.getByLabel('Password', { exact: true }).fill(BIZORG.password);
+  await op.getByLabel('Confirm password').fill(BIZORG.password);
+  await op.getByRole('button', { name: /start|create|continue|accept/i }).click();
+  await expect(op.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  await expect(op.getByTestId('org-label')).toContainText(BIZORG.org);
+
+  const org = await (await op.request.get('/api/org')).json();
+  expect(org.mode).toBe('business');
+  const [created] = await q<{ payload: { mode?: string } }>(
+    `SELECT payload FROM events WHERE type='OrganizationCreated' AND payload->>'orgId'=$1`,
+    [org.id],
+  );
+  expect(created?.payload.mode).toBe('business');
+
+  // no Releases nav entry, no Ask DevOps button; direct URLs show "not available"
+  await expect(op.getByTestId('nav-releases')).toHaveCount(0);
+  await expect(op.getByTestId('ask-devops-button')).toHaveCount(0);
+  for (const url of ['/releases', '/deploys']) {
+    await op.goto(url);
+    await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
+  }
+
+  // the server refuses a pack by git URL with a readable 409 (hires and repositories: business-mode spec)
+  const pack = await op.request.post('/api/packs', {
+    headers: { origin: BASE_URL },
+    data: { url: 'https://github.com/acme/skills.git', ref: 'v1' },
+  });
+  expect(pack.status(), await pack.text()).toBe(409);
+  const body = await pack.json();
+  expect(body.error.code).toBe('business_mode');
+  expect(body.error.message).toMatch(/git URL/);
+  await ctx.close();
 });
