@@ -160,6 +160,7 @@ export function usePatchDeployTarget(projectId: string) {
       void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
       void qc.invalidateQueries({ queryKey: ['places', projectId] });
       void qc.invalidateQueries({ queryKey: ['deploy-setup', projectId] });
+      void qc.invalidateQueries({ queryKey: ['env-status', projectId] });
     },
   });
 }

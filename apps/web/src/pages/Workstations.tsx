@@ -5,7 +5,12 @@ import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useRuns } from '../api/queries/runs.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
-import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
+import {
+  usePairingCode,
+  useUnlinkImpact,
+  useUnlinkWorkstation,
+  useWorkstations,
+} from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
@@ -425,9 +430,34 @@ export function WorkstationCard({
           <li>DevOps requests waiting for it fail with that reason.</li>
           <li>Its agents wait until you re-home them. To use the machine again, pair it with a new code.</li>
         </ul>
+        <UnpairImpact workstationId={w.id} />
         <ErrorBox error={unpair.error} />
       </ConfirmDialog>
     </li>
+  );
+}
+
+/** The places and environments that ran on this computer: they stay, and need another computer after it is unpaired. */
+function UnpairImpact({ workstationId }: { workstationId: string }) {
+  const impact = useUnlinkImpact(workstationId);
+  const places = impact.data?.places ?? [];
+  if (places.length === 0) return null;
+  return (
+    <div className="mt-3 text-sm" data-testid="unpair-impact">
+      <p className="font-medium text-fg">These will need another computer:</p>
+      <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
+        {places.map((p) => (
+          <li key={p.placeId} data-testid={`unpair-impact-${p.placeName}`}>
+            <span className="text-fg">{p.placeName}</span> ({p.kind === 'server' ? 'server' : 'computer'}
+            {p.production ? ', live' : ''}) in {p.projectName}
+            {p.environments.length > 0 ? `: ${p.environments.map((e) => e.label).join(', ')}` : ''}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-subtle">
+        They are kept. After you unpair, open the project's Environments and choose a computer for each.
+      </p>
+    </div>
   );
 }
 

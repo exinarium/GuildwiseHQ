@@ -130,7 +130,8 @@ export function ChangePlaceDialog({
   const current = placeOfEnv(places, env);
   const kind = env.hosting === 'ssh' ? 'server' : 'computer';
   const options = places.filter(
-    (p) => p.role === 'active' && !p.duplicateOf && p.kind === kind && p.id !== current?.id,
+    (p) =>
+      p.role === 'active' && !p.duplicateOf && p.kind === kind && p.id !== current?.id && !p.computerRemoved,
   );
   const [pick, setPick] = useState('');
   const setPlace = useSetEnvironmentPlace(projectId);

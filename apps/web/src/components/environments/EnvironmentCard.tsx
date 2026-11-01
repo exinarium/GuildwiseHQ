@@ -33,6 +33,7 @@ import {
   runningFileFor,
   withEnv,
 } from './answers.ts';
+import { ChooseComputerDialog } from './ChooseComputerDialog.tsx';
 import { EnvironmentDialog } from './EnvironmentDialog.tsx';
 import {
   agoText,
@@ -107,6 +108,7 @@ export function EnvironmentCard({
   const [rollingBack, setRollingBack] = useState(false);
   const [approving, setApproving] = useState(false);
   const [reconnect, setReconnect] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [tried, setTried] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -205,7 +207,14 @@ export function EnvironmentCard({
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="font-medium">{place.name}</span>
                 <span className="text-muted">({place.what})</span>
-                {place.kind === 'server' && <ReachabilityChip reachability={reach} />}
+                {place.kind === 'server' && !place.computerRemoved && (
+                  <ReachabilityChip reachability={reach} />
+                )}
+                {place.computerRemoved && (
+                  <Badge tone="red" data-testid={`env-computer-removed-${env.name}`}>
+                    Computer removed
+                  </Badge>
+                )}
               </span>
             ) : (
               <span className="text-muted">Not connected yet</span>
@@ -289,7 +298,7 @@ export function EnvironmentCard({
             </Button>
           </div>
         )}
-        {info.state === 'failed' && place?.workstationId && (
+        {info.state === 'failed' && place?.workstationId && !place.computerRemoved && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <FixWithDevOps
               workstationId={place.workstationId}
@@ -373,6 +382,16 @@ export function EnvironmentCard({
                 {waiting ? `Release ${waiting.version ?? 'the new version'}` : 'Release the newest version'}
               </Button>
             )}
+            {info.action === 'change_computer' && place && (
+              <Button
+                variant="primary"
+                onClick={() => setChoosing(true)}
+                data-testid={`env-choose-computer-${env.name}`}
+              >
+                <Monitor aria-hidden="true" className="size-4" />
+                Choose a computer
+              </Button>
+            )}
             {info.action === 'check' && place && (
               <Button
                 variant="primary"
@@ -398,7 +417,7 @@ export function EnvironmentCard({
                   onClick={() => setReconnect(true)}
                   data-testid={`env-reconnect-${env.name}`}
                 >
-                  Reconnect
+                  {place?.computerRemoved ? 'Choose a computer' : 'Reconnect'}
                 </Button>
               )}
             {info.action === 'back_to_guided' && (
@@ -598,6 +617,9 @@ export function EnvironmentCard({
             onDone={() => setReconnect(false)}
           />
         </Dialog>
+      )}
+      {choosing && place && (
+        <ChooseComputerDialog projectId={projectId} s={s} place={place} onClose={() => setChoosing(false)} />
       )}
       {editing && (
         <EnvironmentDialog

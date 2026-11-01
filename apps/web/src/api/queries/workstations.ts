@@ -9,6 +9,7 @@ import {
   PairingCodeResponseSchema,
   type PatchUserRequest,
   type SetShiftLimitRequest,
+  UnlinkImpactResponseSchema,
   type UpdateCheckResponse,
   UpdateCheckResponseSchema,
   WorkstationsResponseSchema,
@@ -59,6 +60,15 @@ export function usePairingCode() {
   });
 }
 
+/** The places (and the environments that use them) that will need another computer when this one is unpaired. */
+export function useUnlinkImpact(id: string, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['workstations', id, 'unlink-impact'],
+    queryFn: () => get(`/workstations/${id}/unlink-impact`, UnlinkImpactResponseSchema),
+  });
+}
+
 export function useUnlinkWorkstation() {
   const qc = useQueryClient();
   return useMutation({
@@ -66,6 +76,9 @@ export function useUnlinkWorkstation() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workstations'] });
       qc.invalidateQueries({ queryKey: ['agents'] });
+      // the places that ran on it now say their computer was removed
+      for (const key of ['places', 'deploy-setup', 'env-status', 'deploy-targets'])
+        qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }

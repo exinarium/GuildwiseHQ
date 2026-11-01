@@ -49,6 +49,29 @@ beforeEach(() => {
           features: { mockUi: false },
         });
       if (url === '/api/workstations') return json({ workstations: [ws(10, 'Desk'), ws(11, 'Laptop')] });
+      if (url === `/api/workstations/${ID(10)}/unlink-impact`)
+        return json({
+          places: [
+            {
+              placeId: ID(60),
+              placeName: 'Live site',
+              kind: 'server',
+              production: true,
+              projectId: ID(61),
+              projectName: 'Shop',
+              environments: [{ env: 'production', label: 'Live site' }],
+            },
+            {
+              placeId: ID(62),
+              placeName: 'Test box',
+              kind: 'computer',
+              production: false,
+              projectId: ID(61),
+              projectName: 'Shop',
+              environments: [],
+            },
+          ],
+        });
       if (method === 'POST' && url.endsWith('/unlink')) return json({ ok: true });
       return json({});
     }),
@@ -111,5 +134,33 @@ describe('Workstations page', () => {
     expect(calls.some((c) => c.endsWith('/unlink'))).toBe(false);
     await user.click(within(dialog).getByRole('button', { name: 'Unpair' }));
     await waitFor(() => expect(calls).toContain(`POST /api/workstations/${ID(10)}/unlink`));
+  });
+
+  it('Unpair lists the places and environments that will need another computer, and still unpairs', async () => {
+    const user = userEvent.setup();
+    wrap();
+    const desk = await screen.findByTestId('workstation-Desk');
+    await user.click(within(desk).getByRole('button', { name: 'Unpair Desk' }));
+    const dialog = await screen.findByRole('dialog');
+    const impact = await within(dialog).findByTestId('unpair-impact');
+    expect(impact).toHaveTextContent('These will need another computer:');
+    expect(within(impact).getByTestId('unpair-impact-Live site')).toHaveTextContent(
+      'Live site (server, live) in Shop: Live site',
+    );
+    expect(within(impact).getByTestId('unpair-impact-Test box')).toHaveTextContent(
+      'Test box (computer) in Shop',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Unpair' }));
+    await waitFor(() => expect(calls).toContain(`POST /api/workstations/${ID(10)}/unlink`));
+  });
+
+  it('Unpair shows no list when nothing deploys from the computer', async () => {
+    const user = userEvent.setup();
+    wrap();
+    const laptop = await screen.findByTestId('workstation-Laptop');
+    await user.click(within(laptop).getByRole('button', { name: 'Unpair Laptop' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Unpair Laptop?');
+    expect(within(dialog).queryByTestId('unpair-impact')).toBeNull();
   });
 });

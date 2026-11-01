@@ -210,7 +210,8 @@ export function EnvironmentDialog({
   // choosing a place starts the look at it
   const askedFor = useRef('');
   const lookAt = (dir?: string) => {
-    if (!wsId || (!place && !vplace)) return;
+    // a place whose computer was removed has nothing to look at: no probe is sent to it
+    if (!wsId || (!place && !vplace) || place?.computerRemoved) return;
     const hints = dir
       ? { dirs: [dir], composeFiles: [`${dir}/docker-compose.yml`, `${dir}/compose.yaml`] }
       : editing
@@ -222,10 +223,10 @@ export function EnvironmentDialog({
   };
   useEffect(() => {
     const key = `${placeId}|${wsId}|${place?.host ?? ''}`;
-    if (!placeId || !wsId || askedFor.current === key) return;
+    if (!placeId || !wsId || askedFor.current === key || place?.computerRemoved) return;
     askedFor.current = key;
     lookAt();
-  }, [placeId, wsId, place?.host]);
+  }, [placeId, wsId, place?.host, place?.computerRemoved]);
 
   // a server just looked at: the sites it answers on are asked about, once, so the health check can be offered
   const followUp = useRef('');
@@ -587,7 +588,8 @@ export function EnvironmentDialog({
                       <span className="font-normal text-muted">
                         ({p.kind === 'server' ? 'server' : 'this computer'})
                       </span>
-                      {p.kind === 'server' && (
+                      {p.computerRemoved && <span className="font-normal text-danger">computer removed</span>}
+                      {p.kind === 'server' && !p.computerRemoved && (
                         <ReachabilityChip
                           reachability={
                             p.reach
@@ -637,7 +639,13 @@ export function EnvironmentDialog({
               )}
             </fieldset>
 
-            {placeId && (
+            {placeId && place?.computerRemoved && (
+              <Callout tone="warning" data-testid="place-computer-removed">
+                The computer for {place.key} was removed, so nothing can be looked at there. Close this,
+                choose another computer for it (the button on the environment), then edit it.
+              </Callout>
+            )}
+            {placeId && !place?.computerRemoved && (
               <FoundApps
                 group="env-start"
                 server={server}

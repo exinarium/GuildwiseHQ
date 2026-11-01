@@ -71,6 +71,8 @@ export interface PlaceVm {
   workstationName: string | null;
   /** Computer: is the Guildwise computer online. */
   online: boolean | null;
+  /** The computer that deploys this place was removed (unpaired): the Owner has to choose another one. */
+  computerRemoved: boolean;
   /** Server: can the deploying computer sign in. */
   reach: { state: ConnectionState; at: string; detail: string | null } | null;
   production: boolean;
@@ -130,6 +132,9 @@ export function placesOf(
       workstationId: t.workstationId,
       workstationName: t.workstationName,
       online: t.workstationOnline,
+      computerRemoved:
+        t.computerRemoved === true ||
+        (!!t.workstationId && !s.workstations.some((w) => w.id === t.workstationId)),
       reach: t.connection
         ? { state: t.connection.state, at: t.connection.at, detail: t.connection.detail }
         : null,
@@ -162,6 +167,9 @@ export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
     workstationId: p.workstationId,
     workstationName: p.workstationName,
     online: p.workstationOnline,
+    computerRemoved:
+      p.computerRemoved === true ||
+      (!!p.workstationId && !s.workstations.some((w) => w.id === p.workstationId)),
     reach: p.reachability
       ? { state: p.reachability.state, at: p.reachability.at, detail: p.reachability.detail }
       : null,
@@ -182,11 +190,19 @@ export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
 export const placeOfEnv = (places: PlaceVm[], env: Pick<SetupEnv, 'target'>): PlaceVm | undefined =>
   places.find((p) => p.key.toLowerCase() === env.target.toLowerCase());
 
+export const COMPUTER_REMOVED_SENTENCE = "This environment's computer was removed. Choose another.";
+
 /** Why nothing can be done with a place right now, in a sentence; null when it is fine. */
 export function placeProblem(
   p: PlaceVm | undefined,
-): { text: string; fix: 'check' | 'reconnect' | null } | null {
+): { text: string; fix: 'check' | 'reconnect' | 'change' | null } | null {
   if (!p) return null;
+  // the computer was unpaired: nothing can be checked until the Owner chooses another one (a server is reconnected from it)
+  if (p.computerRemoved)
+    return {
+      text: `The computer for ${p.kind === 'computer' ? p.name : p.key} was removed`,
+      fix: p.kind === 'server' ? 'reconnect' : 'change',
+    };
   if (p.kind === 'computer')
     return p.online === false ? { text: `${p.name} is offline`, fix: 'check' } : null;
   const s = p.reach?.state;
@@ -221,6 +237,7 @@ export type CardAction =
   | 'release'
   | 'check'
   | 'reconnect'
+  | 'change_computer'
   | 'fix'
   | 'retry'
   | 'back_to_guided'
@@ -283,6 +300,8 @@ const SERVER_CHIP: Record<string, { label: string; tone: Tone }> = {
 function withServerState(info: CardInfo, status: EnvStatusDto, place: PlaceVm | undefined): CardInfo {
   const st = status.serverState;
   if (!st || !status.stateText) return info;
+  // the removed computer is the whole story: the page already worked it out (its sentence and button), whatever the server says
+  if (place?.computerRemoved && info.state === 'cannot_reach') return info;
   const problem = placeProblem(place);
   const action: CardAction =
     st === 'draft' || st === 'not_set_up'
@@ -294,7 +313,9 @@ function withServerState(info: CardInfo, status: EnvStatusDto, place: PlaceVm | 
           : st === 'cannot_reach'
             ? problem?.fix === 'reconnect'
               ? 'reconnect'
-              : 'check'
+              : problem?.fix === 'change'
+                ? 'change_computer'
+                : 'check'
             : st === 'needs_answer'
               ? 'answer'
               : st === 'failed' || st === 'unhealthy'
@@ -376,6 +397,15 @@ function cardInfoLocal(args: {
       sentence: status?.updatingStep ? `Updating: ${status.updatingStep}.` : 'Updating now.',
       action: null,
     };
+  // the computer that deploys it was removed: that is the whole story (a refused run says the same), and nothing else works
+  if (problem && place?.computerRemoved)
+    return {
+      ...base,
+      state: 'cannot_reach',
+      chip: { label: 'Computer removed', tone: 'red' },
+      sentence: COMPUTER_REMOVED_SENTENCE,
+      action: problem.fix === 'reconnect' ? 'reconnect' : 'change_computer',
+    };
   if (last && (last.status === 'failed' || last.status === 'refused') && strip.approved)
     return {
       ...base,
@@ -390,7 +420,8 @@ function cardInfoLocal(args: {
       state: 'cannot_reach',
       chip: { label: 'Cannot reach', tone: 'red' },
       sentence: `${problem.text}. Updates are blocked until it is back.`,
-      action: problem.fix === 'reconnect' ? 'reconnect' : 'check',
+      action:
+        problem.fix === 'reconnect' ? 'reconnect' : problem.fix === 'change' ? 'change_computer' : 'check',
     };
   if (!strip.tried)
     return {

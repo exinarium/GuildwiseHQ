@@ -20,6 +20,7 @@ import {
   MenuItem,
   useToast,
 } from '../ui.tsx';
+import { ChooseComputerDialog } from './ChooseComputerDialog.tsx';
 import { type PlaceVm, placesOf } from './model.ts';
 
 /**
@@ -49,6 +50,7 @@ export function PlacesPanel({
   const [removing, setRemoving] = useState<PlaceVm | null>(null);
   const [merging, setMerging] = useState<PlaceVm | null>(null);
   const [reconnect, setReconnect] = useState<PlaceVm | null>(null);
+  const [choosing, setChoosing] = useState<PlaceVm | null>(null);
   const [alsoKey, setAlsoKey] = useState(false);
   const [cleanup, setCleanup] = useState<{ id: string; name: string } | null>(null);
 
@@ -74,10 +76,15 @@ export function PlacesPanel({
                 )}
                 <span className="font-medium text-fg">{p.name}</span>
                 <span className="text-sm text-muted">{p.what}</span>
-                {p.kind === 'computer' && p.online !== null && (
+                {p.computerRemoved && (
+                  <Badge tone="red" data-testid={`place-computer-removed-${p.key}`}>
+                    Computer removed
+                  </Badge>
+                )}
+                {p.kind === 'computer' && !p.computerRemoved && p.online !== null && (
                   <Badge tone={p.online ? 'green' : 'neutral'}>{p.online ? 'Online' : 'Offline'}</Badge>
                 )}
-                {p.kind === 'server' && <ReachabilityChip reachability={reach} />}
+                {p.kind === 'server' && !p.computerRemoved && <ReachabilityChip reachability={reach} />}
               </div>
               <p className="text-sm text-muted" data-testid={`place-used-${p.key}`}>
                 {p.usedBy.length > 0
@@ -101,33 +108,55 @@ export function PlacesPanel({
                   )}
                 </Callout>
               )}
+              {p.computerRemoved && (
+                <Callout tone="warning" data-testid={`place-removed-${p.key}`}>
+                  The computer for {p.key} was removed. Choose another computer for it.
+                  {!s.canEdit && ' Ask the project owner.'}
+                </Callout>
+              )}
               {s.canEdit && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    loading={(check.isPending && check.variables === p.id) || probe.isPending}
-                    onClick={() =>
-                      p.kind === 'server'
-                        ? check.mutate(p.id, { onSuccess: () => toast.success('Checking the connection') })
-                        : probe.mutate({
-                            scope: 'local',
-                            ...(p.workstationId ? { workstationId: p.workstationId } : {}),
-                          })
-                    }
-                    data-testid={`place-check-${p.key}`}
-                  >
-                    <RefreshCw aria-hidden="true" className="size-4" />
-                    Check
-                  </Button>
+                  {!p.computerRemoved && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={(check.isPending && check.variables === p.id) || probe.isPending}
+                      onClick={() =>
+                        p.kind === 'server'
+                          ? check.mutate(p.id, { onSuccess: () => toast.success('Checking the connection') })
+                          : probe.mutate({
+                              scope: 'local',
+                              ...(p.workstationId ? { workstationId: p.workstationId } : {}),
+                            })
+                      }
+                      data-testid={`place-check-${p.key}`}
+                    >
+                      <RefreshCw aria-hidden="true" className="size-4" />
+                      Check
+                    </Button>
+                  )}
                   {p.kind === 'server' && target && (
                     <Button
                       size="sm"
-                      variant={needsReconnect(reach) ? 'primary' : 'ghost'}
+                      variant={p.computerRemoved || needsReconnect(reach) ? 'primary' : 'ghost'}
                       onClick={() => setReconnect(p)}
                       data-testid={`place-reconnect-${p.key}`}
                     >
-                      {needsReconnect(reach) ? 'Reconnect' : 'Use another computer'}
+                      {p.computerRemoved
+                        ? 'Choose a computer'
+                        : needsReconnect(reach)
+                          ? 'Reconnect'
+                          : 'Use another computer'}
+                    </Button>
+                  )}
+                  {p.kind === 'computer' && p.computerRemoved && (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => setChoosing(p)}
+                      data-testid={`place-choose-computer-${p.key}`}
+                    >
+                      Choose a computer
                     </Button>
                   )}
                   <span className="ml-auto" />
@@ -293,6 +322,14 @@ export function PlacesPanel({
             are written for a place, they are made again and need trying and approving again.
           </p>
         </ConfirmDialog>
+      )}
+      {choosing && (
+        <ChooseComputerDialog
+          projectId={projectId}
+          s={s}
+          place={choosing}
+          onClose={() => setChoosing(null)}
+        />
       )}
       {reconnect && (
         <Dialog
