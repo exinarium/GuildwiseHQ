@@ -429,35 +429,20 @@ test('AC6: rejecting the follow-ups asks DevOps for nothing', async () => {
   expect(row.report_desk_item_id).toBeTruthy();
 });
 
-// Parked: this spec makes a card with completion action `push_branch`, which the API no longer accepts (retired in
-// 93879629, "no card or agent branch is pushed unless the goal is a pull request"; only old cards still carry it). The
-// merged-branch cleanup it covers is exercised by the runner and server tests; there is no API path to a push_branch card.
-test.fixme('AC7: a pushed branch counts once it is merged into the working branch; the runner then deletes it, locally and on the remote', async () => {
-  const p = await newPhase('Phase 4: pushed branch', []);
-  const c = await createCard('Pushed branch card', { completionAction: 'push_branch' });
+// The card lands with the `merge` completion action (`push_branch` was retired, 93879629): the runner merges the card branch
+// into the working branch itself, the server verifies that, the phase counts the card, and the runner deletes the merged branch.
+test('AC7: a merged card branch counts for its phase; the runner then deletes the branch, locally and on the remote', async () => {
+  const p = await newPhase('Phase 4: merged branch', []);
+  const c = await createCard('Merged branch card', { completionAction: 'merge' });
   await put(c.id, p.id);
   const done = await waitFor(
-    'the card pushed its branch',
+    'the card finished',
     () => card(c.ref),
     (x) => x?.status === 'done' && !!x.finalize_result,
     240_000,
   );
   const branch = done.branch_name as string;
-  expect(git(paths.origin, 'branch', '--list', branch).trim()).toContain(branch);
-
-  // finalized, but not merged: the phase waits, and says so
-  await new Promise((r) => setTimeout(r, 15_000));
-  expect((await phase(p.ref))!.status).toBe('open');
-  await page.goto('/p/PHS/phases/4');
-  await expect(page.getByTestId(`member-${c.ref}`)).toContainText(/waiting (to be merged|for you to merge)/);
-
-  // somebody merges it into main (as a reviewed pull request would)
-  const clone = join(paths.vaults, 'phase-merge-clone');
-  rmSync(clone, { recursive: true, force: true });
-  mkdirSync(paths.vaults, { recursive: true });
-  git(paths.vaults, 'clone', paths.origin, clone);
-  git(clone, 'merge', '--no-ff', '-m', 'Merge the pushed branch', `origin/${branch}`);
-  git(clone, 'push', 'origin', 'main');
+  expect(branch).toBeTruthy();
 
   await phaseWhen(
     p.ref,
