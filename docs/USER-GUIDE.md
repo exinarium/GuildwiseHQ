@@ -1371,7 +1371,7 @@ An approved setup turns "how we deploy" into something you approve once and that
 
 ### 4.28 Releases
 
-The **Releases** page (sidebar, Organization group; the old address `/deploys` leads here) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
+The **Releases** page (sidebar, Organization group; its address is `/delivery/releases`, and the old `/deploys` and in-app `/releases` links lead here; the plain `/releases` address on the web is the public release blog) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
 
 ![The Releases page](guide/assets/releases.jpg)
 

@@ -11,6 +11,10 @@ The **CEO** is built into every organization: you do not hire or appoint it, and
 
 When **you** talk to the CEO it is a real Claude Code session on your workstation: your own settings, skills and tools, your home directory and no Guildwise sandbox. This is enabled only after you run `guildwise-runner ceo full-power on` on that machine (the Overview says "Full power is off on <workstation>" until then). Events, other agents and your team can never start such a turn; the CEO's background work stays restricted. Where the runtime needs a permission it does not have, you or an Admin get a desk question, **Authorize this execution**: authorize once, for this turn, or deny; no answer in 10 minutes is a deny. A phone notification only points to that desk item.
 
+## Looking at what is running {#diagnostics}
+
+In your own chat the CEO can read this workstation's runner status and logs (`aom runner status`, `aom runner logs`) and, with `aom ceo diag`, the status and logs of your other workstations and of the server. Tokens and passwords are hidden. So you can ask it "why is the runner not picking up work?" and it looks. It needs runner 0.1.65 or newer.
+
 ## Pick the model per message {#model}
 
 The chip in the chat composer shows the model ("Default (Sonnet)"). Choose another for **this message** or for **this conversation**. Switching the model inside the same runtime keeps the session; another runtime starts a new session with a short handover. If your workstation is offline, your message is **queued** and sent when it is back (a message older than 3 days asks first).
