@@ -322,9 +322,10 @@ test.beforeAll(() => {
   });
 });
 const workClone = () =>
-  q<{ id: string }>(`SELECT id FROM vaults WHERE kind='org'`).then((r) =>
-    join(HOME, 'vaults', r[0]?.id ?? 'none'),
-  );
+  q<{ id: string }>(
+    `SELECT id FROM vaults WHERE kind='org' AND org_id = (SELECT org_id FROM projects WHERE id=$1)`,
+    [projectId],
+  ).then((r) => join(HOME, 'vaults', r[0]?.id ?? 'none'));
 
 test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
   await page.goto('/settings/vaults');
@@ -339,7 +340,13 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   await expect(work).toBeVisible();
   await expect(work.getByTestId('vault-ws-Dev Box')).toContainText('synced', { timeout: 30_000 });
   const dir = await workClone();
-  expect(existsSync(join(dir, 'standing-orders.md'))).toBe(true);
+  // the converted vault shows "synced" as soon as its folder is known; the clone of the repository follows
+  await waitFor(
+    'the repository is cloned into the vault folder',
+    async () => existsSync(join(dir, 'standing-orders.md')),
+    (b) => b,
+    30_000,
+  );
 
   // a local edit is committed and pushed within the interval
   writeVaultFile(dir, 'projects/dvo/notes/local.md', 'edited on the workstation\n');
@@ -377,7 +384,8 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   await expect(work.getByTestId('vault-ws-Dev Box')).toContainText('Sync paused: conflict');
   await expect(work.getByTestId('vault-ws-Dev Box')).toContainText('conflict.md');
   const ev = await q<{ payload: { files: string[]; deskItemId: string } }>(
-    `SELECT payload FROM events WHERE type='VaultSyncConflict'`,
+    `SELECT payload FROM events WHERE type='VaultSyncConflict' AND payload->>'vaultId' IN (SELECT id::text FROM vaults WHERE kind='org' AND org_id = (SELECT org_id FROM projects WHERE id=$1))`,
+    [projectId],
   );
   expect(ev).toHaveLength(1);
   expect(ev[0]?.payload.files).toEqual(['conflict.md']);
@@ -432,7 +440,8 @@ test('AC3: answering a question on the desk writes projects/<name>/decisions/<da
     'ledger entry with a vault path',
     () =>
       q<{ id: string; vault_path: string | null }>(
-        `SELECT id, vault_path FROM ledger_entries WHERE source_desk_item_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+        `SELECT id, vault_path FROM ledger_entries WHERE source_desk_item_id IS NOT NULL AND org_id = (SELECT org_id FROM projects WHERE id=$1) ORDER BY created_at DESC LIMIT 1`,
+        [projectId],
       ),
     (r) => !!r[0]?.vault_path,
     30_000,
@@ -494,7 +503,8 @@ test('AC3b: standing orders added to the ledger are appended to the vault standi
     30_000,
   );
   const paths = await q<{ vault_path: string | null }>(
-    `SELECT vault_path FROM ledger_entries WHERE scope='standing_order' AND vault_path IS NOT NULL ORDER BY created_at`,
+    `SELECT vault_path FROM ledger_entries WHERE scope='standing_order' AND vault_path IS NOT NULL AND org_id = (SELECT org_id FROM projects WHERE id=$1) ORDER BY created_at`,
+    [projectId],
   );
   expect(paths.map((p) => p.vault_path)).toEqual(['projects/dvo/standing-orders.md', 'standing-orders.md']);
 });

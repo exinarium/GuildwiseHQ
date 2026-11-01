@@ -142,11 +142,11 @@ test('in the Business view test environments and releases are tucked away with a
 
 test('a Business-view user can still do every software action on the server', async () => {
   const repo = await api.post(`/api/projects/${projectId}/repos`, {
-    data: { name: 'toy2', remoteUrl: paths.origin, workingBranch: 'main' },
+    data: { name: 'toy2', remoteUrl: 'https://github.com/acme/toy2.git', workingBranch: 'main' }, // the first one is already added
   });
   expect(repo.status(), await repo.text()).toBe(201);
   for (const roleKey of ['reviewer', 'tester']) {
-    const r = await hire(`Dev ${roleKey}`, roleKey);
+    const r = await hire(`Dev ${roleKey}`, roleKey, 'senior'); // the Reviewer and Tester are only available as senior
     expect(r.status(), `${roleKey}: ${await r.text()}`).toBe(201);
   }
   expect((await hire('Anna', 'architect', 'senior')).status()).toBe(201);
