@@ -4,7 +4,9 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Runner 0.1.65. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.
+## [1.4.0] - 2026-11-01
+
+Runner 0.1.65. Software and Business views, the six business workflows built in, any workflow as a variant base, releases from start to finish, and a clear way back when a computer is removed. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.
 
 ### Added
 
