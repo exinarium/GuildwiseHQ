@@ -35,6 +35,17 @@ describe('AOM_SERVE_WEB', () => {
     });
   });
 
+  it('serves the app at /delivery/releases (load and reload), while /releases stays the public release blog', async () => {
+    for (const url of ['/delivery/releases', '/delivery/releases?tab=waiting']) {
+      const r = await t.app.inject({ method: 'GET', url });
+      expect(r.statusCode, url).toBe(200);
+      expect(r.body).toContain('<div id=root>');
+    }
+    // the blog's page is the server's own, never the app shell
+    const blog = await t.app.inject({ method: 'GET', url: '/releases' });
+    expect(blog.body).not.toContain('<div id=root>');
+  });
+
   it('sends a CSP and no HSTS on a plain-http origin (review M8)', async () => {
     const root = await t.app.inject({ method: 'GET', url: '/' });
     const csp = String(root.headers['content-security-policy']);

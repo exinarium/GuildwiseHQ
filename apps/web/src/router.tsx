@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, useParams } from 'react-router';
+import { createBrowserRouter, Navigate, useLocation, useParams } from 'react-router';
 import { useInterests } from './api/queries/interests.ts';
 import { useProjects } from './api/queries/projects.ts';
 import { DevOnly } from './components/DevOnly.tsx';
@@ -8,6 +8,7 @@ import { RouteError } from './components/RouteError.tsx';
 import { PageSkeleton } from './components/ui.tsx';
 import { ext } from './extension/index.ts';
 import { getLastProjectKey } from './lib/lastProject.ts';
+import { RELEASES_PATH } from './lib/paths.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
@@ -79,6 +80,12 @@ function Home() {
  * The old per-project pages of a feed project (`/p/KEY/feed`, and the board of its hidden project) now live on the
  * interest behind the key; any other key goes to the projects page.
  */
+/** An old in-app address of the Releases page (`/releases`, `/deploys`): same query and hash at the new path. */
+function ToDeliveryReleases() {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: RELEASES_PATH, search, hash }} replace />;
+}
+
 function InterestRedirect({ tab }: { tab?: string }) {
   const { projectKey = '' } = useParams();
   const list = useInterests();
@@ -147,14 +154,16 @@ export const routes = [
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
       {
-        path: '/releases',
+        path: RELEASES_PATH,
         element: (
           <DevOnly>
             <Releases />
           </DevOnly>
         ),
       },
-      { path: '/deploys', element: <Navigate to="/releases" replace /> },
+      // The old in-app addresses lead to the new one (the query and hash are kept: `?tab=waiting`).
+      { path: '/releases', element: <ToDeliveryReleases /> },
+      { path: '/deploys', element: <ToDeliveryReleases /> },
       { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },
       { path: '/help/glossary', element: <Help /> },

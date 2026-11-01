@@ -307,9 +307,9 @@ test.describe('Environments: user journeys (mocked world)', () => {
     await tid(page, 'env-release-production').click();
     await expect(page.getByRole('dialog')).toContainText('Release to Live site');
     await page.keyboard.press('Escape');
-    await page.goto('/releases?tab=waiting');
+    await page.goto('/delivery/releases?tab=waiting');
     await expect(page.getByTestId('release-queue')).toContainText('P5');
-    await page.goto('/releases?tab=live');
+    await page.goto('/delivery/releases?tab=live');
     await expect(page.getByRole('main')).toContainText('Live site');
   });
 
@@ -325,9 +325,9 @@ test.describe('Environments: user journeys (mocked world)', () => {
     await expect(page.getByTestId('rollback-candidate')).toHaveCount(2);
     await page.getByTestId('rollback-candidate').first().getByRole('radio').check();
     await tid(page, 'rollback-confirm').click();
-    await page.goto('/releases?tab=live');
+    await page.goto('/delivery/releases?tab=live');
     await expect(page.getByRole('main')).toContainText('0.9.1');
-    await page.goto('/releases?tab=history');
+    await page.goto('/delivery/releases?tab=history');
     await expect(page.getByRole('main')).toContainText(/rollback/i);
   });
 
@@ -335,7 +335,7 @@ test.describe('Environments: user journeys (mocked world)', () => {
     browser,
   }) => {
     const member = await openAs(browser, { scenario: 'member' });
-    await member.goto('/releases?tab=live');
+    await member.goto('/delivery/releases?tab=live');
     await expect(member.getByRole('main')).toContainText('Live site');
     await expect(member.getByRole('button', { name: /^Release/ })).toHaveCount(0);
     const phone = await openAs(browser, { scenario: 'approved', width: 360, height: 780 });
@@ -357,10 +357,10 @@ test.describe('Environments: user journeys (mocked world)', () => {
       });
   });
 
-  test('12. redirects: /deploys lands on /releases, settings #run lands on Your app', async ({ browser }) => {
+  test('12. redirects: /deploys lands on /delivery/releases, settings #run lands on Your app', async ({ browser }) => {
     const page = await openAs(browser, { scenario: 'approved' });
     await page.goto('/deploys');
-    await expect(page).toHaveURL(/\/releases/);
+    await expect(page).toHaveURL(/\/delivery\/releases/);
     const id = await page.evaluate(async () => {
       const r = await fetch('/api/projects');
       return ((await r.json()) as { projects: Array<{ id: string; key: string }> }).projects.find(
@@ -496,8 +496,8 @@ test.describe('Environments: the page against the real server', () => {
     await expect(tid(page, 'environments')).toBeVisible();
     await expect(tid(page, 'places')).toBeVisible();
     await page.goto('/deploys');
-    await expect(page).toHaveURL(/\/releases/);
-    await page.goto('/releases?tab=live');
+    await expect(page).toHaveURL(/\/delivery\/releases/);
+    await page.goto('/delivery/releases?tab=live');
     await expect(page.getByRole('main')).toBeVisible();
   });
 

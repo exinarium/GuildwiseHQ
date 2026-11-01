@@ -12,6 +12,7 @@ import {
 import { useRelease, useReleaseQueue } from '../../api/queries/delivery.ts';
 import { Reword } from '../../components/Reword.tsx';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 import { Button, Callout, ErrorBox, TextInput } from '../ui.tsx';
 import { UndoButton } from './UndoButton.tsx';
 
@@ -343,7 +344,7 @@ export function ReleaseCards() {
               </Button>
             ) : (
               <Link
-                to="/releases"
+                to={RELEASES_PATH}
                 className="inline-flex h-8 items-center rounded-control bg-brand px-3 text-sm font-medium text-brand-fg"
               >
                 Choose servers

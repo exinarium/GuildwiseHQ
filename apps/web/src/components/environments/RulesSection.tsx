@@ -1,6 +1,7 @@
 import type { SetupStateDto } from '@aom/shared';
 import { Link } from 'react-router';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 import { FollowupDefaultsPanel } from '../PhasesPanel.tsx';
 import { allEnvironments, displayLabel, roleOf, rulesOf } from './model.ts';
 import { Section } from './Section.tsx';
@@ -25,7 +26,7 @@ export function RulesSection({ projectId, s }: { projectId: string; s: SetupStat
       actions={
         canManage && (
           <Link
-            to="/releases?tab=rules"
+            to={`${RELEASES_PATH}?tab=rules`}
             className="inline-flex min-h-9 items-center text-sm font-medium text-brand hover:underline"
             data-testid="rules-edit"
           >

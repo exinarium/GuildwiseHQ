@@ -2494,7 +2494,7 @@ cap('backlog, environments, metrics, releases, project links', async () => {
     ['backlog', '/p/WEB/backlog', 900],
     ['environments', '/p/WEB/environments', 1200],
     ['metrics', '/metrics', 1200],
-    ['releases', '/releases', 1200],
+    ['releases', '/delivery/releases', 1200],
     ['org-project-links', '/settings/org?tab=links', 900],
   ] as const) {
     await open(pPage, path);

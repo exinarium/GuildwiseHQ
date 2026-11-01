@@ -2,7 +2,7 @@ import { isOlderGenerator } from '@aom/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { Cloud, Plus, ScanSearch } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { useDelivery, useInspectRecipe, useSetDeliveryMode } from '../api/queries/delivery.ts';
 import { useSetupState, useStartDeployScan } from '../api/queries/deploy-setup.ts';
 import {
@@ -47,6 +47,7 @@ import {
   Spinner,
   useToast,
 } from '../components/ui.tsx';
+import { RELEASES_PATH } from '../lib/paths.ts';
 
 /**
  * Project > Environments (docs/design/environments-ux.md section 3): one place to say where the app runs. Your app (how to
@@ -406,9 +407,9 @@ function EnvironmentsBody({
       {approvedWaiting.length > 0 && (
         <Callout tone="info" data-testid="release-waiting-note">
           Waiting for you: {approvedWaiting.length} {approvedWaiting.length === 1 ? 'release' : 'releases'}.{' '}
-          <a className="font-medium underline" href="/releases?tab=waiting">
+          <Link className="font-medium underline" to={`${RELEASES_PATH}?tab=waiting`}>
             Open Releases
-          </a>
+          </Link>
         </Callout>
       )}
 

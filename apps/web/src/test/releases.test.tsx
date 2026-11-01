@@ -260,17 +260,28 @@ describe('Releases page', () => {
     expect(await screen.findByTestId('history-empty')).toBeInTheDocument();
   });
 
-  it('/deploys lands on /releases', async () => {
+  // `/releases` belongs to the server (the public release blog): the app page lives at /delivery/releases and the
+  // old in-app addresses lead there, keeping the query.
+  it.each([
+    ['/deploys', '/delivery/releases'],
+    ['/releases', '/delivery/releases'],
+    ['/releases?tab=waiting', '/delivery/releases?tab=waiting'],
+    ['/deploys?tab=history#x', '/delivery/releases?tab=history#x'],
+  ])('%s lands on %s', async (from, to) => {
     const app = (routes as RouteObject[]).flatMap((r) => r.children ?? []);
-    const pick = app.filter((r) => r.path === '/deploys' || r.path === '/releases');
-    expect(pick.map((r) => r.path)).toEqual(['/releases', '/deploys']);
+    const pick = app.filter((r) => ['/deploys', '/releases', '/delivery/releases'].includes(r.path ?? ''));
+    expect(pick.map((r) => r.path).sort()).toEqual(['/delivery/releases', '/deploys', '/releases']);
     const router = createMemoryRouter(
-      pick.map((r) => (r.path === '/releases' ? { path: r.path, element: <p>Releases here</p> } : r)),
-      { initialEntries: ['/deploys'] },
+      pick.map((r) =>
+        r.path === '/delivery/releases' ? { path: r.path, element: <p>Releases here</p> } : r,
+      ),
+      { initialEntries: [from] },
     );
     render(<RouterProvider router={router} />);
     expect(await screen.findByText('Releases here')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/releases');
+    expect(router.state.location.pathname + router.state.location.search + router.state.location.hash).toBe(
+      to,
+    );
   });
 });
 

@@ -160,7 +160,7 @@ test('an invitee starts an organization with the Business view as default: deliv
   // no Releases nav entry; Ask for technical help stays; direct URLs show a gentle note, not "not available"
   await expect(op.getByTestId('nav-releases')).toHaveCount(0);
   await expect(op.getByTestId('ask-devops-button')).toBeVisible();
-  for (const url of ['/releases', '/deploys']) {
+  for (const url of ['/delivery/releases', '/deploys']) {
     await op.goto(url);
     await expect(op.getByTestId('not-available-business')).toContainText(
       'Switch to Software view to see this',

@@ -2,6 +2,7 @@ import { ORG_TERMS, type OrgTerms, type ProjectDto, parseCardRef } from '@aom/sh
 import { ChevronRight } from 'lucide-react';
 import { Fragment } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 import { useOrgTerms } from '../../lib/terms.ts';
 
 interface Crumb {
@@ -84,7 +85,7 @@ export function crumbsFor(
     ],
     ['/integrations', () => [{ label: 'Organization' }, { label: 'Integrations' }]],
     ['/workstations', () => [{ label: 'Organization' }, { label: 'Workstations' }]],
-    ['/releases', () => [{ label: 'Organization' }, { label: 'Releases' }]],
+    [RELEASES_PATH, () => [{ label: 'Organization' }, { label: 'Releases' }]],
     ['/metrics', () => [{ label: 'Organization' }, { label: 'Metrics' }]],
     ['/ledger', () => [{ label: 'Knowledge' }, { label: terms.ledger }]],
     ['/interests', () => [{ label: 'Knowledge' }, { label: 'Interests' }]],

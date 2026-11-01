@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { useDeployRuns } from '../../api/queries/delivery.ts';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 import { Badge } from '../ui.tsx';
 import { agoText } from './model.ts';
 import { Section } from './Section.tsx';
@@ -41,7 +42,7 @@ export function HistorySection({
       collapsible
       actions={
         <Link
-          to="/releases?tab=history"
+          to={`${RELEASES_PATH}?tab=history`}
           className="inline-flex min-h-9 items-center text-sm font-medium text-brand hover:underline"
         >
           See all in Releases

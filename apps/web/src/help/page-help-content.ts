@@ -920,7 +920,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'budgets-and-costs#monthly-budgets',
   },
-  '/releases': {
+  '/delivery/releases': {
     title: 'Releases',
     intro:
       'Everything about putting a new version of your app on a live site. Waiting for you lists versions that are ready; What is live shows the version on every site; History shows what was released and why it was allowed; Rules says what must be true first.',

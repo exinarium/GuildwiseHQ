@@ -11,6 +11,7 @@ export const NO_PAGE_HELP = [
   '/p/:projectKey/feed',
   '/schedules',
   '/deploys',
+  '/releases',
   '/login',
   '/invite/:token',
   '/m/desk/:token',

@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { type LiveHealth, type LiveRow, useOrgLive } from '../../api/queries/releases.ts';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { Badge, ErrorBox, ListSkeleton, Panel } from '../ui.tsx';
 
@@ -54,7 +55,7 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
     r.waitingRelease > 0 ? (
       canRelease ? (
         <Link
-          to="/releases?tab=waiting"
+          to={`${RELEASES_PATH}?tab=waiting`}
           className="text-sm text-brand-text underline-offset-2 hover:underline"
           data-testid={`${id}-${r.projectKey}-${r.env}`}
         >

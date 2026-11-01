@@ -28,6 +28,7 @@ import {
   Vault,
   Workflow,
 } from 'lucide-react';
+import { RELEASES_PATH } from '../../lib/paths.ts';
 
 export interface NavEntry {
   /** Stable key (also the test-id suffix). */
@@ -202,7 +203,7 @@ export function buildNav(opts: {
         },
         ...(business
           ? []
-          : [{ id: 'releases', label: 'Releases', to: '/releases', icon: Rocket, testId: 'nav-releases' }]),
+          : [{ id: 'releases', label: 'Releases', to: RELEASES_PATH, icon: Rocket, testId: 'nav-releases' }]),
         {
           id: 'integrations',
           label: 'Integrations',

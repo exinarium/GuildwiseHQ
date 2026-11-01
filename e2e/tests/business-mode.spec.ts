@@ -113,7 +113,7 @@ test('in the Business view test environments and releases are tucked away with a
   await expect(page.getByRole('link', { name: 'Workstations' }).first()).toBeVisible();
   await expect(page.getByTestId('ask-devops-button')).toBeVisible();
   await expect(page.getByTestId('ask-devops-button')).toHaveAttribute('aria-label', 'Ask for technical help');
-  for (const url of ['/releases', '/p/BIZ/environments']) {
+  for (const url of ['/delivery/releases', '/p/BIZ/environments']) {
     await page.goto(url);
     await expect(page.getByTestId('not-available-business')).toContainText(
       'Switch to Software view to see this',
@@ -157,7 +157,7 @@ test('a member override beats the organization default, from the user menu, and 
   await page.goto('/projects');
   await pickView('dev');
   await expect(page.getByTestId('nav-releases')).toBeVisible();
-  await page.goto('/releases');
+  await page.goto('/delivery/releases');
   await expect(page.getByTestId('not-available-business')).toHaveCount(0);
   expect((await (await api.get('/api/org')).json()).viewOverride).toBe('dev');
   expect((await (await api.get('/api/org')).json()).mode).toBe('business');
@@ -177,7 +177,7 @@ test('switching the default back to the Software view always works and shows eve
 
   await page.goto('/projects');
   await expect(page.getByTestId('nav-releases')).toBeVisible();
-  await page.goto('/releases');
+  await page.goto('/delivery/releases');
   await expect(page.getByTestId('not-available-business')).toHaveCount(0);
   await page.goto('/p/BIZ/environments');
   await expect(page.getByTestId('not-available-business')).toHaveCount(0);
