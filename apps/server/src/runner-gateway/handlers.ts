@@ -129,9 +129,9 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
+import { applyReleaseFactsResult } from '../release/facts.ts';
 import { applyReleasePublishResult } from '../release/publish.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
-import { applyReleaseFactsResult } from '../release/facts.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
@@ -601,6 +601,21 @@ export class RunnerHandlers {
       // Terminal: the outcome (up to date, found, paused, disabled, failed) is stored for the Workstations page.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyUpdateCheckResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'runner.diagnostics') {
+      // Terminal: the CEO's call is waiting on the row. The answer is kept on it until read (operational data, never an event).
+      if (msg.ok && msg.result !== undefined)
+        await exec(this.ctx.pool, `UPDATE runner_commands SET result=$2::jsonb WHERE id=$1`, [
+          msg.commandId,
+          JSON.stringify(msg.result),
+        ]);
+      if (msg.ok) await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      else
+        await failCommandFinal(
+          this.ctx.pool,
+          msg.commandId,
+          msg.error ?? 'the runner refused',
+          this.ctx.clock.now(),
+        );
     } else if (cmd?.type === 'rights.verify') {
       // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
       const problem = await applyRightsResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);

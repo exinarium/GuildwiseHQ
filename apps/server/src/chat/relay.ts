@@ -666,7 +666,13 @@ export class ChatRelay {
     turn: Row,
     status: 'done' | 'failed' | 'dropped',
     error?: string,
-    extra: { degraded?: string; toolCounts?: ToolCounts; model?: ModelChoice } = {},
+    extra: {
+      degraded?: string;
+      toolCounts?: ToolCounts;
+      model?: ModelChoice;
+      permissionMode?: 'bypass' | 'auto';
+      commands?: string[];
+    } = {},
   ): AppendInput {
     return {
       streamId: streamId.ceo(turn.org_id),
@@ -681,6 +687,8 @@ export class ChatRelay {
           ...(extra.degraded ? { degraded: extra.degraded } : {}),
           ...(extra.toolCounts ? { toolCounts: extra.toolCounts } : {}),
           ...(extra.model ? { model: extra.model } : {}),
+          ...(extra.permissionMode ? { permissionMode: extra.permissionMode } : {}),
+          ...(extra.commands?.length ? { commands: extra.commands } : {}),
         },
       },
       actor: SYSTEM_ACTOR,
@@ -759,6 +767,10 @@ export class ChatRelay {
       this.turnFinished(turn, 'done', undefined, {
         ...(msg.degraded ? { degraded: msg.degraded } : {}),
         ...(msg.toolCounts ? { toolCounts: msg.toolCounts } : {}),
+        ...(msg.permissionMode ? { permissionMode: msg.permissionMode } : {}),
+        ...(turn.mode === 'owner' && msg.commands?.length
+          ? { commands: summarizeCommandTexts(msg.commands) }
+          : {}),
         model: info.model,
       }),
       ...(await backstopJobEvents(this.ctx, turn, {

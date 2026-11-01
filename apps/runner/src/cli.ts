@@ -1190,20 +1190,40 @@ function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?:
 }
 
 /** `aom-runner ceo full-power on|off|status`: the local switch for the CEO's full-power turns (the Owner's own Claude Code). */
-function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string }): void {
+function ceoFullPower(
+  value: string,
+  opts: { dataDir?: string; pairing?: string; strict?: boolean; bypass?: boolean },
+): void {
   if (value !== 'on' && value !== 'off' && value !== 'status')
     throw new Error('use: guildwise-runner ceo full-power on|off|status');
+  if (opts.strict && opts.bypass) throw new Error('use --strict or --bypass, not both');
   const { root, entries } = selectPairings(opts);
   for (const e of entries) {
     const file = entryConfigPath(root, e);
     const config = loadConfig(file);
     if (value !== 'status')
-      saveConfig(file, { ...config, ceo: { ...config.ceo, fullPower: value === 'on' } });
-    const now = value === 'status' ? config.ceo.fullPower : value === 'on';
+      saveConfig(file, {
+        ...config,
+        ceo: {
+          ...config.ceo,
+          fullPower: value === 'on',
+          // `on` keeps the permission style (default `auto`: classifier + desk questions); `--bypass` is the explicit opt-in to
+          // no prompts, `--strict` sets `auto` back
+          ...(value === 'on' && (opts.bypass || opts.strict)
+            ? { ownerPermissions: opts.bypass ? ('bypass' as const) : ('auto' as const) }
+            : {}),
+        },
+      });
+    const after = value === 'status' ? config : loadConfig(file);
+    const now = after.ceo.fullPower;
     console.log(
       `${entries.length > 1 ? `${e.id}: ` : ''}CEO full power is ${now ? 'ON' : 'off'}${
         now
-          ? ': the CEO chat with the Owner runs as your own Claude Code (your ~/.claude, your home directory, no sandbox).'
+          ? `: the CEO chat with the Owner runs as your own Claude Code (your ~/.claude, your home directory, no sandbox), ${
+              after.ceo.ownerPermissions === 'bypass'
+                ? 'with no permission prompts, because you chose --bypass (the safety floor, the audit and the masking of secrets still apply; `on --strict` goes back to the classifier and the desk questions)'
+                : 'in Claude Code auto mode with desk questions for what it lacks (`on --bypass` runs it without prompts, like your terminal)'
+            }.`
           : '.'
       }`,
     );
@@ -1411,6 +1431,11 @@ export function buildProgram(): Command {
     .description(
       "let the CEO's chat with the Owner run as your own Claude Code on this machine (on), refuse it (off), or show the state",
     )
+    .option(
+      '--bypass',
+      'with `on`: run the Owner chat without permission prompts, like your own terminal (explicit opt-in)',
+    )
+    .option('--strict', 'with `on`: use Claude Code auto mode and desk questions (the default)')
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(ceoFullPower);

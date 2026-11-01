@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import {
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
+  CEO_DIAGNOSTICS_CAPABILITY,
   CEO_FULL_POWER_CAPABILITY,
   CHAT_ACCOUNTS_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
@@ -48,6 +49,7 @@ import {
   RUNNER_PIN_CAPABILITY,
   RUNNER_UPDATE_CHECK_CAPABILITY,
   type RunnerCommandName,
+  type RunnerDiagnosticsResult,
   type RunnerUpdateCheckResult,
   type RunnerUpdateState,
   type RuntimeInfo,
@@ -82,6 +84,7 @@ import { ServerHttp } from './attachments/index.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
 import { CapabilityRegistry } from './capabilities/registry.ts';
+import { runnerDiagnostics } from './ceo/diagnostics.ts';
 import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
@@ -114,11 +117,11 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
+import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
 import { shipReleaseCommit } from './git/release-ship.ts';
-import { openReleasePr } from './git/release-pr.ts';
-import { bumpSubmodule } from './git/submodule-pin.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
+import { bumpSubmodule } from './git/submodule-pin.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { SyncService } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
@@ -706,6 +709,8 @@ export class Runner {
       capabilities: this.capabilities,
       restart: this.restartAfterReply,
       ceoFullPower: () => this.freshConfig().ceo.fullPower,
+      ceoOwnerPermissions: () => this.freshConfig().ceo.ownerPermissions,
+      diagnostics: (request) => this.diagnostics(request),
       guardClones: () =>
         this.repos.map((r) => ({ path: r.localPath, name: basename(r.remoteUrl || r.localPath) })),
       paths: this.paths,
@@ -1158,6 +1163,27 @@ export class Runner {
     this.writeStatus(false);
   }
 
+  /** `aom runner status|logs` and the `runner.diagnostics` command: this workstation's status and logs, secrets masked. */
+  private diagnostics(request: unknown): Promise<RunnerDiagnosticsResult> {
+    return runnerDiagnostics(request, {
+      paths: this.paths,
+      version: RUNNER_VERSION,
+      status: () => ({
+        connected: this.connected,
+        pid: process.pid,
+        platform: process.platform,
+        node: process.version,
+        uptimeSeconds: Math.round(process.uptime()),
+        activeShifts: this.supervisor.size,
+        idle: this.isIdle(),
+        repos: this.repos.length,
+        outboxPending: this.outbox.count(),
+        ceoFullPower: this.freshConfig().ceo.fullPower,
+        ceoOwnerPermissions: this.freshConfig().ceo.ownerPermissions,
+      }),
+    });
+  }
+
   private writeStatus(connected: boolean): void {
     this.connected = connected;
     try {
@@ -1430,6 +1456,8 @@ export class Runner {
         PACK_CREDENTIALS_BOUND_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
+        // Logs and status of this workstation for the CEO (`runner.diagnostics`, `aom runner logs|status`).
+        CEO_DIAGNOSTICS_CAPABILITY,
       ],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
@@ -1847,6 +1875,10 @@ export class Runner {
         const p = CommandPayloadSchemas['runner.pin'].parse(payload);
         this.opts.onRunnerPin?.(p.version);
         done(true, { version: p.version });
+      } else if (command === 'runner.diagnostics') {
+        // The CEO's full-power owner turn reads this runner's logs and status through the server: read-only, secrets masked.
+        const p = CommandPayloadSchemas['runner.diagnostics'].parse(payload);
+        done(true, await this.diagnostics(p));
       } else if (command === 'runner.update.check') {
         // "Check for updates": the answer is ok:true whatever the outcome (up to date, found, paused, disabled, failed).
         CommandPayloadSchemas['runner.update.check'].parse(payload);

@@ -39,6 +39,7 @@ import type { Ctx } from './context.ts';
 import { createCostStampInterceptor } from './costs/stamp.ts';
 import { createPool } from './db/pool.ts';
 import { rows } from './db/sql.ts';
+import { LogRing } from './diagnostics/log-ring.ts';
 import { Dispatcher } from './dispatcher/dispatcher.ts';
 import { Reaper } from './dispatcher/reaper.ts';
 import { HttpError } from './errors.ts';
@@ -277,6 +278,7 @@ export const LOG_REDACT = {
 };
 
 export async function createApp(config: Config, opts: BuildOptions = {}): Promise<AomApp> {
+  const logRing = new LogRing();
   const app = Fastify({
     logger:
       opts.logger === false
@@ -286,7 +288,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
             serializers: { req: requestLogSerializer },
             // Second line of defence: sealed envelopes of the Integrations page must never reach a log line.
             redact: LOG_REDACT,
-            ...(opts.logStream ? { stream: opts.logStream } : {}),
+            stream: logRing.tee(opts.logStream ?? process.stdout),
           },
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
@@ -311,6 +313,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     videoDestinations: opts.videoDestinations ?? createVideoDestinationClient(),
     ext: createExtensionHost(opts.extensions),
     log: app.log,
+    logRing,
     services: {} as Ctx['services'],
   };
   store.extraSaved = ctx.ext.list.flatMap((e) => e.preservedTables ?? []);

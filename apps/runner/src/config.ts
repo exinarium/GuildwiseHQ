@@ -184,6 +184,13 @@ export const IntegrationsPolicyConfigSchema = z.object({
  */
 export const CeoConfigSchema = z.object({
   fullPower: z.boolean().default(false),
+  /**
+   * How the Owner's own CEO chat is permitted (docs/RUNNER.md "CEO full power"). `bypass` (explicit opt-in, `full-power on --bypass`): Claude Code's
+   * `bypassPermissions` mode, so nothing is judged or prompted, like the Owner's own terminal; the deny floor, the hook, the
+   * credential scrub and the audit still apply. `auto`: the earlier behaviour, Claude Code's auto-mode classifier plus the
+   * desk relay `auto` (default, also `on --strict`) is the earlier behaviour. Standing-order turns always use `auto`.
+   */
+  ownerPermissions: z.enum(['bypass', 'auto']).default('auto'),
 });
 
 /**

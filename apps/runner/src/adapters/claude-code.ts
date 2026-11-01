@@ -291,8 +291,10 @@ export const PERMISSION_TOOL = 'mcp__aom_permission__ask';
  * The CEO's full-power turn (docs/design/ceo-front-door.md section 3.3, permissions per section 14.1): the Owner's own Claude
  * Code. His real `~/.claude` loads (user, project and local settings, skills, plugins and his MCP servers), HOME is the real
  * one, there is no sandbox, no `--strict-mcp-config`, no `--disable-slash-commands` and no `CLAUDE_CONFIG_DIR` override.
- * The turn runs in auto mode; a permission it lacks goes to the permission relay (a desk question). `Bash(aom:*)` is always
- * allowed; the deny floor (`floor.json`) protects the runner and its secrets. Pure; unit tested.
+ * The Owner's own chat runs in `auto` (the classifier plus the desk relay) unless he opted in with `full-power on --bypass`
+ * (`ceo.ownerPermissions = 'bypass'`: `bypassPermissions`, nothing judged or prompted, like his terminal); a standing-order turn always runs `auto`, and a permission it lacks
+ * goes to the permission relay (a desk question). The deny floor (`floor.json`) still wins in both modes: deny rules are
+ * evaluated before the mode. `Bash(aom:*)` is always allowed. Pure; unit tested.
  */
 export function buildClaudeOwnerTurnCommand(
   input: OwnerTurnInput,
@@ -317,7 +319,7 @@ export function buildClaudeOwnerTurnCommand(
     '--append-system-prompt-file',
     join(input.turnDir, OWNER_BRIEF_FILE),
     '--permission-mode',
-    'auto',
+    ownerPermissionFlag(input),
     '--permission-prompt-tool',
     PERMISSION_TOOL,
     '--mcp-config',
@@ -337,8 +339,18 @@ export function buildClaudeOwnerTurnCommand(
   for (const [k, v] of Object.entries(parent)) if (v !== undefined) env[k] = v;
   const home = homedir();
   Object.assign(env, { HOME: home, USERPROFILE: home }, input.env, provider);
+  // Without the classifier or the relay in front of the shell, the runner's provider credential must not be readable by it
+  // (`env`, `printenv`): Claude Code strips Anthropic and cloud-provider credentials from the subprocesses it starts.
+  if (ownerBypasses(input)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
 }
+
+/** Only the Owner's own chat can run without prompts; a standing-order turn (nobody watching) keeps the classifier and the relay. */
+export const ownerBypasses = (input: Pick<OwnerTurnInput, 'mode' | 'permissionMode'>): boolean =>
+  input.mode === 'owner' && input.permissionMode === 'bypass';
+
+const ownerPermissionFlag = (input: Pick<OwnerTurnInput, 'mode' | 'permissionMode'>): string =>
+  ownerBypasses(input) ? 'bypassPermissions' : 'auto';
 
 /**
  * Tests and CI must never start a real Claude session (it spends tokens and can touch the machine). In mock mode

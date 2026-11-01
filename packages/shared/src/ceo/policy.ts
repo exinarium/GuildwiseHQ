@@ -337,12 +337,18 @@ export interface PolicyVerdict {
   inline?: boolean;
 }
 
-/** Causes that an owner turn turns into an inline confirmation (the owner is in the conversation). */
+/**
+ * Causes that an owner turn turns into an inline confirmation (the owner is in the conversation). `evidence` and `limit` are
+ * guards for a CEO acting alone (cite a ledger entry, no more than N actions an hour); with the Owner present they ask him
+ * instead of refusing (docs/investigations/ceo-full-power.md). `untrusted` is a wake's: an owner turn is never untrusted.
+ */
 const INLINE_CAUSES: ReadonlyArray<NonNullable<PolicyVerdict['cause']>> = [
   'mode',
   'reserved',
   'confidence',
   'desk',
+  'evidence',
+  'limit',
 ];
 
 const UNTRUSTED_RECOMMEND: readonly string[] = [
@@ -373,14 +379,32 @@ export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInpu
 
 function evaluateBase(policy: CeoPolicy, cls: string, input: PolicyInput): PolicyVerdict {
   if (isHardNever(cls))
-    return { verdict: 'deny', reason: `${cls} is never delegated to the CEO`, cause: 'never' };
+    return {
+      verdict: 'deny',
+      reason: `${cls} is never delegated to the CEO: it stays an owner-only action in the Guildwise UI (it changes who can act, what is spent or what is secret). Tell the owner where to do it; this is not a permission problem on this machine.`,
+      cause: 'never',
+    };
   if (!(ACTION_CLASSES as readonly string[]).includes(cls))
-    return { verdict: 'deny', reason: `unknown action class ${cls}`, cause: 'never' };
+    return {
+      verdict: 'deny',
+      reason: `unknown action class ${cls}: the CEO has no action for it. Tell the owner to do it in the UI.`,
+      cause: 'never',
+    };
   const mode = policy.classes[cls]?.mode ?? 'recommend';
   if (mode === 'never')
-    return { verdict: 'deny', reason: 'the owner set this action to never', cause: 'never' };
+    return {
+      verdict: 'deny',
+      reason:
+        'the owner set this action to never in the CEO policy (Settings, CEO, Policy). Only he can change that: say what you wanted and why, or let him do it in the UI',
+      cause: 'never',
+    };
   if (input.deskMode === 'never')
-    return { verdict: 'deny', reason: 'the owner set this kind of item to never', cause: 'never' };
+    return {
+      verdict: 'deny',
+      reason:
+        'the owner set this kind of item to never in the CEO policy (Settings, CEO, Policy). Only he can change that: say what you wanted and why, or let him do it in the UI',
+      cause: 'never',
+    };
   if (mode === 'recommend')
     return {
       verdict: 'recommend',

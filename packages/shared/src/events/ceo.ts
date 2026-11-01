@@ -445,6 +445,10 @@ export const ceoEvents = [
       degraded: z.string().max(40).optional(),
       toolCounts: ToolCountsSchema.optional(),
       model: ModelChoiceSchema.optional(),
+      /** The permission mode of an owner turn (`bypass`: no prompts, the deny floor still applies; `auto`: classifier plus desk relay). */
+      permissionMode: z.enum(['bypass', 'auto']).optional(),
+      /** The commands the session ran, as first words and counts (`aom*3`, `journalctl*1`); the arguments stay in the runner's audit file. */
+      commands: z.array(z.string().max(500)).max(200).optional(),
     }),
   ),
   /** The owner's model choice for the whole conversation (null: back to the default). */

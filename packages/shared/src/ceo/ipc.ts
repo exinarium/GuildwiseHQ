@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BacklogPriority, BacklogSort, BacklogStatus } from '../backlog/index.ts';
 import { TOPIC_AREAS, TOPIC_AUDIENCES } from '../blog/topic.ts';
+import { DIAGNOSTICS_DEFAULT_LINES, DIAGNOSTICS_MAX_LINES } from './diagnostics.ts';
 
 /**
  * `aom ceo ...` over the runner IPC (docs/design/ceo-agent-v2.md section 4): one rpc method `ceo` with an `op`. The runner
@@ -83,6 +84,27 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     q: z.string().min(1).max(300),
   }),
   z.object({ op: z.literal('costs'), days: z.number().int().min(1).max(90).default(30) }),
+  /**
+   * `aom ceo diag server|workstation ...`: diagnostics for the owner's full-power turn (docs/investigations/ceo-full-power.md).
+   * Read-only and masked. `server` is this Guildwise server (status, or its recent log lines); `workstation` asks one of the
+   * Owner's runners (0.1.65+) for its logs or status over its connection.
+   */
+  z.object({
+    op: z.literal('diag'),
+    target: z.enum(['server', 'workstation']),
+    /** server: `status` or `logs`; workstation: a `RunnerLogKind` (the server checks it against the target). */
+    kind: z.string().trim().max(20).default(''),
+    lines: z.number().int().min(1).max(DIAGNOSTICS_MAX_LINES).default(DIAGNOSTICS_DEFAULT_LINES),
+    grep: z.string().trim().min(1).max(200).optional(),
+    /** server `logs`: the lowest level to show (`warn` shows warn, error and fatal). */
+    level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    /** workstation: its name or id. */
+    ref: z.string().trim().min(1).max(200).optional(),
+    name: z.string().trim().max(200).optional(),
+    since: z.string().trim().max(40).optional(),
+    /** workstation: the request started by an earlier call; the answer is collected with it (the runner's answer takes seconds). */
+    requestId: z.uuid().optional(),
+  }),
   /**
    * Which projects, repositories and areas a request belongs to (`aom ceo route "<request>"`, docs/design/project-graphs.md
    * section 8). Read-only. The workstation answers it from the organization graph in the organization vault; the server

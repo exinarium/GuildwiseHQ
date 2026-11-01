@@ -229,6 +229,94 @@ describe('aom ceo (front door verbs)', () => {
   });
 });
 
+describe('aom runner status|logs and aom ceo diag', () => {
+  it('`runner logs` sends the filters to the runner and prints the masked text', async () => {
+    const t = await cli({}, () => ({
+      kind: 'runner',
+      text: 'boot ok',
+      truncated: false,
+      runnerVersion: '0.1.65',
+    }));
+    expect(
+      await t.run(
+        'runner',
+        'logs',
+        '--kind',
+        'service',
+        '--lines',
+        '30',
+        '--grep',
+        'fail',
+        '--since',
+        '-3 hours',
+      ),
+    ).toBe(0);
+    expect(t.calls[0]).toEqual({
+      method: 'runner.logs',
+      params: { kind: 'service', grep: 'fail', since: '-3 hours', lines: 30 },
+    });
+    expect(t.out.join('')).toContain('# runner 0.1.65, runner');
+    expect(t.out.join('')).toContain('boot ok');
+    expect(await t.run('runner', 'status')).toBe(0);
+    expect(t.calls[1]).toEqual({ method: 'runner.status', params: {} });
+    expect(await t.run('runner', 'bogus')).toBe(1);
+  });
+
+  it('`ceo diag workstation` asks, then collects the answer by its request id', async () => {
+    let polls = 0;
+    let clock = 0;
+    const t = await cli(
+      {},
+      (req) => {
+        const p = req.params as { requestId?: string };
+        if (!p.requestId) return { status: 'pending', requestId: 'req-1', message: 'asked' };
+        return ++polls < 3
+          ? { status: 'pending', requestId: 'req-1' }
+          : { text: '# Laptop, runner 0.1.65, runner\nok' };
+      },
+      {
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      },
+    );
+    expect(await t.run('ceo', 'diag', 'workstation', 'Laptop', '--kind', 'runner', '--lines', '40')).toBe(0);
+    expect(t.calls[0]?.params).toMatchObject({
+      op: 'diag',
+      target: 'workstation',
+      ref: 'Laptop',
+      kind: 'runner',
+      lines: 40,
+    });
+    expect(t.calls[1]?.params).toEqual({ op: 'diag', target: 'workstation', requestId: 'req-1' });
+    expect(t.out.join('')).toContain('# Laptop, runner 0.1.65');
+  });
+
+  it('gives up after 40 seconds and says so; `diag server` needs no polling; a bad target is a usage error', async () => {
+    let clock = 0;
+    const t = await cli({}, () => ({ status: 'pending', requestId: 'req-2' }), {
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+    });
+    expect(await t.run('ceo', 'diag', 'workstation', 'Laptop')).toBe(0);
+    expect(t.out.join('')).toContain('has not answered in 40 seconds');
+    const s = await cli({}, () => ({ text: '{"database":"ok"}' }));
+    expect(await s.run('ceo', 'diag', 'server', '--kind', 'logs', '--level', 'warn', '--grep', 'x')).toBe(0);
+    expect(s.calls).toHaveLength(1);
+    expect(s.calls[0]?.params).toMatchObject({
+      op: 'diag',
+      target: 'server',
+      kind: 'logs',
+      level: 'warn',
+      grep: 'x',
+    });
+    expect(await s.run('ceo', 'diag', 'moon')).toBe(1);
+  });
+});
+
 describe('the owner turn handler', () => {
   async function turn(script: (env: Record<string, string>) => Promise<void>) {
     h = await startHarness();

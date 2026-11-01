@@ -81,4 +81,29 @@ describe('guildwise-runner ceo full-power', () => {
       await server.close();
     }
   });
+
+  it('stays on auto unless --bypass is given; --strict goes back; plain on keeps the choice; both flags fail', async () => {
+    const server = await FakeServer.start();
+    const dir = tmp();
+    const mode = () => loadConfig(join(dir, 'config.json')).ceo.ownerPermissions;
+    try {
+      await run(['pair', '--server', server.url, '--code', 'ABCD-EFGH', '--data-dir', dir, '--mock']);
+      expect(mode()).toBe('auto');
+      const on = await run(['ceo', 'full-power', 'on', '--data-dir', dir]);
+      expect(mode()).toBe('auto');
+      expect(on.stdout).toContain('auto mode');
+      const bp = await run(['ceo', 'full-power', 'on', '--bypass', '--data-dir', dir]);
+      expect(mode()).toBe('bypass');
+      expect(bp.stdout).toContain('no permission prompts');
+      await run(['ceo', 'full-power', 'on', '--data-dir', dir]);
+      expect(mode()).toBe('bypass');
+      await run(['ceo', 'full-power', 'on', '--strict', '--data-dir', dir]);
+      expect(mode()).toBe('auto');
+      expect(
+        (await run(['ceo', 'full-power', 'on', '--strict', '--bypass', '--data-dir', dir])).exitCode,
+      ).not.toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
 });

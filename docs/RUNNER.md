@@ -277,12 +277,34 @@ sections 3 and 5). It is a cap the machine owner holds against any server:
   (wakes) never get this profile, whatever their payload says.
 - **The profile:** `claude -p ... --setting-sources user,project,local --permission-mode auto --permission-prompt-tool
   mcp__aom_permission__ask --allowedTools "Bash(aom:*)" --append-system-prompt-file <turn>/ceo-brief.md --settings <turn>/floor.json`.
-  Your real `~/.claude` (settings, skills, plugins, MCP), your home directory and no Guildwise sandbox. The working directory is
-  fixed per conversation (`ceo.settings.ownerTurn.cwd`, default your home) so `--resume` works. The turn directory
-  `<data dir>/ceo-turns/<chat id>/` is removed afterwards.
-- **Deny floor** (deny wins over your own rules): `systemctl ... aom-runner`, `pkill *aom*`, `kill <runner pid>`, and reading or
-  editing the runner's `secrets/` and `config.json`. A restart goes through `aom runner restart`.
-- **Permission relay:** when the session needs a permission it lacks, a small MCP server (`aom ceo-permission-mcp`) raises the desk
+  Your real `~/.claude`, your home directory and no Guildwise sandbox. The working directory is fixed per conversation
+  (`ceo.settings.ownerTurn.cwd`, default your home) so `--resume` works. The turn directory `<data dir>/ceo-turns/<chat id>/` is
+  removed afterwards.
+- **Permission mode (runner 0.1.65):** `ceo.ownerPermissions` in `config.json` is `auto` (default, for every install, also an
+  existing opt-in: the Claude Code classifier plus the desk relay) or `bypass`. `guildwise-runner ceo full-power on --bypass` is the
+  explicit opt-in to `--permission-mode bypassPermissions` for the Owner's own chat: nothing is judged or asked, like his terminal,
+  and the runner sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so his shell cannot print the runner's provider credential.
+  `on --strict` sets `auto` again; plain `on` keeps the current choice. **A standing-order turn always runs `auto` with the desk
+  relay**, whatever this says. The classifier's refusals are final and never reach the desk, so in `auto` an ordinary step can still be
+  refused; that is the price of not choosing `--bypass`.
+- **Deny floor** (deny rules are evaluated before the permission mode, so they hold in `bypass` too; `auto` and `bypass` both): `systemctl stop|restart|kill|disable|
+  mask|start|edit ... aom-runner*`, `pkill *aom*`, `kill <runner pid>`, reading or editing the runner's `secrets/` and `config.json`, and
+  shell commands that name the runner's keys, config, queued payloads or raw `logs/` (the data folder under its root, `~/` and
+  `$HOME` spellings). Looking at the service (`systemctl status`, `journalctl`) is allowed. A `PreToolUse` hook on `Bash` says WHY a
+  command was refused and names the alternative (`aom runner logs`, `aom runner restart`); the rule alone only says "denied". A restart
+  goes through `aom runner restart`.
+- **Logs and status** (runner 0.1.65, capability `ceo-diagnostics:1`): `aom runner status` and `aom runner logs [--kind
+  runner|service|shifts|env|audit] [--name <file>] [--lines N] [--grep text] [--since "-3 hours"]` in the Owner's turn only
+  (`runner.status`/`runner.logs` over the turn's IPC; refused in order turns, wakes and every other agent). `runner` is the runner's own
+  log, `service` the systemd user journal of `aom-runner*` (falling back to `logs/service.log`), `shifts`/`env`/`audit` list the files
+  of `logs/shifts`, `logs/env` and the CEO command audit, `--name` reads one (a bare name, no folders). Everything goes through
+  `redactSecrets`, lines are cut to 2000 characters and an answer to 60000. `aom ceo diag workstation <name>` asks another workstation
+  of the Owner the same thing through the `runner.diagnostics` command (server side `MIN_RUNNER_FOR_CEO_DIAGNOSTICS = 0.1.65`; the
+  answer is kept on `runner_commands.result` until the CEO's command collects it, at most five minutes), and `aom ceo diag server`
+  shows the server's status and recent log lines.
+- **Audit:** each turn writes `logs/ceo-turns/<chat id>.commands.log` (the permission mode, then every Bash command, redacted); the
+  server gets the first word of each command and the permission mode (`CeoTurnFinished.commands`, `.permissionMode`).
+- **Permission relay** (standing-order turns, and owner turns unless `--bypass`): when the session needs a permission it lacks, a small MCP server (`aom ceo-permission-mcp`) raises the desk
   question "authorize this execution"; an Owner or Admin answers it on the desk (once, for the turn, or deny; ten minutes without
   an answer is a deny). In order turns the question is raised and the step is denied at once (reported as waiting).
 - **Use the system first:** a PreToolUse hook (`aom ceo guard`) blocks the first edit inside a repository clone of this workstation
