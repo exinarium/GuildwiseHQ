@@ -9,7 +9,7 @@ afterAll(async () => {
 });
 
 describe('admin:create', () => {
-  it('installs the business workflows in the new organization at once, not at the next start', async () => {
+  it('a new organization has the business workflows at once: they are built-ins, not organization copies', async () => {
     const email = uniqueEmail('cli-owner');
     const r = spawnSync(
       'npx',
@@ -38,7 +38,10 @@ describe('admin:create', () => {
     )[0];
     expect(org).toBeTruthy();
     const keys = (
-      await q(`SELECT DISTINCT key FROM workflow_versions WHERE org_id=$1 AND status='active'`, [org?.id])
+      await q(
+        `SELECT DISTINCT key FROM workflow_versions WHERE (org_id IS NULL OR org_id=$1) AND status='active'`,
+        [org?.id],
+      )
     ).map((x: any) => x.key as string);
     for (const k of Object.values(BUSINESS_WORKFLOW_KEY)) expect(keys).toContain(k);
   });

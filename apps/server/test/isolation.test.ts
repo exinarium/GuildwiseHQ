@@ -1,4 +1,4 @@
-import { BUSINESS_ROLE_KEYS } from '@aom/shared';
+import { BUSINESS_ROLE_KEYS, BUSINESS_WORKFLOW_KEY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool } from './helpers/db.ts';
@@ -176,12 +176,9 @@ describe('two-user isolation', () => {
       ].sort(),
     );
     const wfs = await ok<any>(w.t.req('GET', '/api/workflows', { cookie: u.cookie }));
-    expect(wfs.workflows.map((x: any) => x.definition.key).sort()).toEqual([
-      'code',
-      'code-bugfix',
-      'feed',
-      'research',
-    ]);
+    expect(wfs.workflows.map((x: any) => x.definition.key).sort()).toEqual(
+      [...Object.values(BUSINESS_WORKFLOW_KEY), 'code', 'code-bugfix', 'feed', 'research'].sort(),
+    );
     expect((await w.t.req('GET', '/api/roles')).status).toBe(401);
   });
 });
