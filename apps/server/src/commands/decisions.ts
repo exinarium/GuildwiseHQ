@@ -7,7 +7,7 @@ import {
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
-import { enqueueVaultWrite } from './vaults.ts';
+import { enqueueVaultWrite, vaultForProject } from './vaults.ts';
 
 export interface DecisionRecord {
   /** Overrides the computed path (the path recorded on the ledger entry when the question was answered). */
@@ -24,20 +24,16 @@ export interface DecisionRecord {
   answeredBy?: string;
 }
 
-/** The vault a project's files go to: the project vault if it has one, else the organization vault. */
+/**
+ * The vault a project's files go to: the same resolution as `vaultForProject` (docs/design/project-graphs.md section 3):
+ * the project's own git vault, else the organization vault, else the project's automatic local vault.
+ */
 export async function projectVault(db: Queryable, projectId: string) {
-  const p = await one(db, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
-    projectId,
-  ]);
+  const p = await one(db, 'SELECT key, vault_folder, vault_dir FROM projects WHERE id=$1', [projectId]);
   if (!p) return null;
-  const vault =
-    (await one(db, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
-    (await one(db, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
-      p.org_id,
-      'org',
-    ]));
+  const v = await vaultForProject(db, projectId, null);
   return {
-    vaultId: vault?.id as string | undefined,
+    vaultId: v?.id as string | undefined,
     folder: projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir }),
   };
 }
@@ -83,18 +79,11 @@ export type DecisionWriteResult =
  * organization vault. No registered vault: nothing is written (the ledger entry still exists).
  */
 export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<DecisionWriteResult> {
-  const p = await one(ctx.pool, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
-    rec.projectId,
-  ]);
-  if (!p) return { queued: false, reason: 'project_not_found' };
-  const vault =
-    (await one(ctx.pool, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
-    (await one(ctx.pool, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
-      p.org_id,
-      'org',
-    ]));
+  const target = await projectVault(ctx.pool, rec.projectId);
+  if (!target) return { queued: false, reason: 'project_not_found' };
+  const vault = target.vaultId ? { id: target.vaultId } : undefined;
   if (!vault) return { queued: false, reason: 'no_vault' };
-  const folder = projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir });
+  const folder = target.folder;
   const path = rec.path ?? decisionFilePath(folder, rec);
   const r = await enqueueVaultWrite(ctx, ctx.pool, vault.id, {
     path,
@@ -115,20 +104,10 @@ async function appendTarget(
   let vaultId: string | undefined;
   let path = 'standing-orders.md';
   if (input.projectId) {
-    const p = await one(
-      ctx.pool,
-      'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1',
-      [input.projectId],
-    );
-    if (!p) return { queued: false, reason: 'project_not_found' };
-    vaultId = (
-      (await one(ctx.pool, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
-      (await one(ctx.pool, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
-        p.org_id,
-        'org',
-      ]))
-    )?.id;
-    path = `${projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir })}/standing-orders.md`;
+    const target = await projectVault(ctx.pool, input.projectId);
+    if (!target) return { queued: false, reason: 'project_not_found' };
+    vaultId = target.vaultId;
+    path = `${target.folder}/standing-orders.md`;
   } else {
     vaultId = (
       await one(ctx.pool, `SELECT id FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [

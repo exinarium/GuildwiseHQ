@@ -254,13 +254,9 @@ test('a card made on the form takes the design step: spec -> investigate -> buil
   await page.screenshot({ path: `${paths.vaults}/architect-report.png` });
 });
 
-// OPEN QUESTION (reported, not guessed): the PROJECT.md section is written by `projectVault` in
-// `apps/server/src/commands/decisions.ts`, which prefers ANY vault of the project over the organization vault. Since
-// project-graphs (1f61d3f0) every project has an automatic local vault, so the section goes to that folder (push: false)
-// and never reaches the organization vault's origin this spec registers, while `vaultForProject`
-// (`commands/vaults.ts`, docs/design/project-graphs.md section 3) reads from the git project vault, else the organization
-// vault, else the local one. Which one decisions and investigations should follow is a product decision.
-test.fixme('an investigation-only card ends in Finalize with a ledger entry and the PROJECT.md section', async () => {
+// The PROJECT.md section is written to the vault `vaultForProject` names (docs/design/project-graphs.md section 3): the project's
+// git vault, else the organization vault this spec registers, else the project's automatic local folder.
+test('an investigation-only card ends in Finalize with a ledger entry and the PROJECT.md section', async () => {
   const ref = await createCard('Which queue should we use', {
     fields: SHORT,
     extra: { investigationOnly: true },
