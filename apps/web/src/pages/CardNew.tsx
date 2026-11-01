@@ -1,5 +1,6 @@
 import {
   BUSINESS_CARD_TYPE_LABELS,
+  BUSINESS_CARD_TYPES,
   type BusinessCardType,
   type CompletionAction,
   isBusinessCardType,
@@ -129,6 +130,11 @@ export function CardNew() {
 
 type Workflow = NonNullable<ReturnType<typeof useWorkflows>['data']>[number]['definition'];
 
+const businessTypeRank = (t: string): number => {
+  const i = (BUSINESS_CARD_TYPES as readonly string[]).indexOf(t);
+  return i < 0 ? 0 : i; // developer types are all equal: the sort is stable and keeps their order
+};
+
 export function CardNewForm({
   projectId,
   projectKey,
@@ -171,7 +177,11 @@ export function CardNewForm({
   // A business organization offers the business card types only; a developer one never offers them.
   const cardTypes = [
     ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
-  ].filter((t) => isBusinessCardType(t) === business);
+  ]
+    .filter((t) => isBusinessCardType(t) === business)
+    // The business types keep their own order (Enquiry first): the workflows arrive in the order they were enabled,
+    // which for the six enabled together is alphabetical by workflow key.
+    .sort((x, y) => businessTypeRank(x) - businessTypeRank(y));
   const [v, setV] = useState<CardFormValues>(() =>
     emptyForm(
       initialType && cardTypes.includes(initialType)

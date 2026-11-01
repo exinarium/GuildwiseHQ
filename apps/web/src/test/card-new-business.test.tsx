@@ -20,7 +20,7 @@ const CODE = {
   stages: [],
 } as unknown as WorkflowDefinition;
 
-function renderForm(business: boolean) {
+function renderForm(business: boolean, extra: WorkflowDefinition[] = [...BUSINESS_WORKFLOWS]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
@@ -31,7 +31,7 @@ function renderForm(business: boolean) {
           projectKeys={['OFFICE']}
           onProject={() => {}}
           workflow={CODE}
-          extraWorkflows={[...BUSINESS_WORKFLOWS]}
+          extraWorkflows={extra}
           repos={[]}
           business={business}
         />
@@ -43,6 +43,19 @@ function renderForm(business: boolean) {
 describe('new card in a business organization', () => {
   it('offers the six business types, by label, and no developer type', () => {
     renderForm(true);
+    const options = within(screen.getByLabelText('Card type'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(options).toEqual(['Enquiry', 'Follow-up', 'Document request', 'Reminder', 'Report', 'Quote']);
+    expect(screen.getByLabelText('Card type')).toHaveValue('enquiry');
+  });
+
+  it('keeps the business order and Enquiry as the default when the workflows arrive in another order', () => {
+    // workflows enabled together come back alphabetical by key: document request first
+    renderForm(
+      true,
+      [...BUSINESS_WORKFLOWS].sort((a, b) => a.key.localeCompare(b.key)),
+    );
     const options = within(screen.getByLabelText('Card type'))
       .getAllByRole('option')
       .map((o) => o.textContent);
