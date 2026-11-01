@@ -44,6 +44,25 @@ export const catalogueEvents = [
   defineEvent('WorkflowVersionSubmitted', z.object({ workflowVersionId: Id, deskItemId: Id })),
   defineEvent('WorkflowVersionApproved', z.object({ workflowVersionId: Id })),
   defineEvent('WorkflowVersionRejected', z.object({ workflowVersionId: Id })),
+  /**
+   * An active version was taken out of key lookups (status `superseded`) without a newer version replacing it. Cards
+   * pinned to it keep running on it. Used when a shipped workflow moved from an organization copy to a true built-in.
+   */
+  defineEvent('WorkflowVersionDeactivated', z.object({ workflowVersionId: Id, reason: z.string().min(1) })),
+  /**
+   * Every version of an organization's workflow `fromKey` now has the key `toKey` (and `name`); the versions keep their
+   * ids, so pinned cards, enabled projects' variants and history follow. Used to free a reserved built-in key.
+   */
+  defineEvent(
+    'WorkflowKeyChanged',
+    z.object({
+      orgId: Id,
+      fromKey: z.string().min(1),
+      toKey: z.string().min(1),
+      name: z.string().min(1),
+      reason: z.string().min(1),
+    }),
+  ),
   defineEvent(
     'RoleVersionRegistered',
     z.object({

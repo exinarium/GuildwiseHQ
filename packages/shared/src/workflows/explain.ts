@@ -178,7 +178,8 @@ const SPEC: Record<IssueCode, Spec> = {
   },
   variant_base_not_allowed: {
     field: 'details',
-    text: () => 'This built-in workflow cannot be extended for a project.',
+    text: () =>
+      'A project workflow that is already a variant cannot be extended again. Extend the workflow it was made from, or change the variant itself.',
   },
   variant_base_mismatch: {
     field: 'details',

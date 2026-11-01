@@ -48,8 +48,14 @@ describe('built-in workflows', () => {
     },
   );
 
-  it('exposes the built-in definitions (code v1 to v6, the others v1)', () => {
+  it('exposes the built-in definitions (code v1 to v6, the others v1, the six business workflows)', () => {
     expect(BUILTIN_WORKFLOWS.map((w) => `${w.key}@${w.version}`).sort()).toEqual([
+      'business-document-request@1',
+      'business-enquiry@1',
+      'business-follow-up@1',
+      'business-quote@1',
+      'business-reminder@1',
+      'business-report@1',
       'code-bugfix@1',
       'code@1',
       'code@2',

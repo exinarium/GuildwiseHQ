@@ -18,9 +18,6 @@ import { type ValidationIssue, validateWorkflow } from './validate.ts';
  * it like any other workflow version and the dispatcher needs nothing new.
  */
 
-/** Workflows a variant cannot be based on (internal or special machinery). */
-export const NON_VARIANT_BASES: readonly string[] = ['code-bugfix', 'feed', 'research'];
-
 /** The stage an inserted step is, as the author writes it. Everything else is fixed (agent stage, StageCompleted). */
 export const InsertedStageSchema = StageSchema.pick({
   id: true,
@@ -320,10 +317,13 @@ export function validateVariant(
   const err = (code: ValidationIssue['code'], message: string, stageId?: string) =>
     issues.push({ severity: 'error', rule: 0, code, message, stageId });
 
-  if (NON_VARIANT_BASES.includes(base.key) || base.extends || (base.builtIn && base.key !== 'code'))
+  // Any workflow can be a base (built-in or custom): a variant is stored materialised and its stages keep the base's
+  // outcome events and effects, so the special machinery of research, feed and code-bugfix works unchanged. Only a
+  // variant of a variant is refused: `extends` names ONE base, and the inherited-stage role rule and Rebase follow it.
+  if (base.extends)
     err(
       'variant_base_not_allowed',
-      `'${base.key}' cannot be the base of a variant (use code or a custom workflow)`,
+      `'${base.key}' is itself a variant and cannot be the base of another (base it on '${base.extends.key}' or change the variant)`,
     );
   if (spec.base.key !== base.key || spec.base.version !== base.version)
     err(

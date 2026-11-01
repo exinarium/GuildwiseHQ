@@ -11,6 +11,19 @@ export const BUSINESS_WORKFLOW_KEY: Record<BusinessCardType, string> = {
   quote: 'business-quote',
 };
 
+/**
+ * One plain-language line per shipped business workflow (New project, help). The person always approves the output
+ * before anything leaves the building.
+ */
+export const BUSINESS_WORKFLOW_DESCRIPTION: Record<BusinessCardType, string> = {
+  enquiry: 'Answer a customer question. An agent drafts the reply for you to check and send.',
+  follow_up: 'Chase someone up. An agent drafts the message and you approve it before it goes.',
+  document_request: 'Ask a person for a document. An agent writes the request and you approve it.',
+  reminder: 'Remind someone of something on a date. An agent writes the reminder and you approve it.',
+  report: 'Produce a report for a period and an audience. An agent writes it and you approve it.',
+  quote: 'Prepare a quote for a customer. An agent drafts it from the scope and you approve it.',
+};
+
 /** The business role that prepares the output of each type (the `prepare` step's `claimRole`). */
 export const BUSINESS_PREPARE_ROLE: Record<BusinessCardType, string> = {
   enquiry: 'front_desk',
@@ -118,7 +131,7 @@ export function businessWorkflow(type: BusinessCardType): WorkflowDefinition {
     key: BUSINESS_WORKFLOW_KEY[type],
     version: 1,
     name: BUSINESS_CARD_TYPE_LABELS[type],
-    builtIn: false,
+    builtIn: true,
     fieldSet: 'custom',
     customFields: fields,
     cardTypes: [type],
@@ -200,7 +213,11 @@ export function businessWorkflow(type: BusinessCardType): WorkflowDefinition {
   });
 }
 
-/** The six shipped business workflows, installed per business organization. */
+/**
+ * The six shipped business workflows. True built-ins (`builtIn: true`, org_id NULL): registered at boot with the other
+ * built-ins, so a later version reaches every organization. They are not checked by `validateCustomWorkflow` (which
+ * refuses built-ins); `validateWorkflow` plus the shared tests cover them.
+ */
 export const BUSINESS_WORKFLOWS: readonly WorkflowDefinition[] = BUSINESS_CARD_TYPES.map(businessWorkflow);
 
 /** The field that holds the due date of each business card type (the brief lists what is due or overdue). */

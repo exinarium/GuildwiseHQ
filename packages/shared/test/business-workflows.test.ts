@@ -4,6 +4,7 @@ import {
   BUSINESS_PREPARE_ROLE,
   BUSINESS_ROLE_KEYS,
   BUSINESS_ROLES,
+  BUSINESS_WORKFLOW_DESCRIPTION,
   BUSINESS_WORKFLOW_KEY,
   BUSINESS_WORKFLOWS,
   CardType,
@@ -14,6 +15,9 @@ import {
 import { BUILTIN_WORKFLOWS } from '../src/workflows/builtin/index.ts';
 
 const ctx = { builtinWorkflowKeys: BUILTIN_WORKFLOWS.map((w) => w.key), departments: [] };
+// The shipped definitions are true built-ins; the custom-workflow rules (generic events, custom field set, no repository
+// machinery) still hold for them, so they are checked on a copy an organization could have made itself.
+const asCustom = (d: (typeof BUSINESS_WORKFLOWS)[number]) => ({ ...d, builtIn: false, key: `${d.key}-copy` });
 
 describe('business card types', () => {
   it('are part of CardType, additively', () => {
@@ -31,6 +35,14 @@ describe('business card types', () => {
     for (const t of BUSINESS_CARD_TYPES) expect(BUSINESS_ROLE_KEYS).toContain(BUSINESS_PREPARE_ROLE[t]);
   });
 
+  it('every type has a one-line plain description', () => {
+    for (const t of BUSINESS_CARD_TYPES) {
+      const text = BUSINESS_WORKFLOW_DESCRIPTION[t];
+      expect(text.length).toBeGreaterThan(20);
+      expect(text).not.toContain('\n');
+    }
+  });
+
   it('maps each type to the role fixed by the design', () => {
     expect(BUSINESS_PREPARE_ROLE).toEqual({
       enquiry: 'front_desk',
@@ -44,9 +56,21 @@ describe('business card types', () => {
 });
 
 describe.each(BUSINESS_WORKFLOWS.map((d) => [d.key, d] as const))('default workflow %s', (_k, def) => {
-  it('passes validateCustomWorkflow', () => {
-    const errors = validateCustomWorkflow(def, BUSINESS_ROLES, ctx).filter((i) => i.severity === 'error');
+  it('is a true built-in', () => {
+    expect(def.builtIn).toBe(true);
+    expect(BUILTIN_WORKFLOWS).toContain(def);
+  });
+
+  it('passes the custom-workflow rules as a copy, and is refused as an organization workflow', () => {
+    const errors = validateCustomWorkflow(asCustom(def), BUSINESS_ROLES, ctx).filter(
+      (i) => i.severity === 'error',
+    );
     expect(errors).toEqual([]);
+    const own = validateCustomWorkflow({ ...def, builtIn: false }, BUSINESS_ROLES, ctx).map((i) => i.code);
+    expect(own).toContain('builtin_key');
+    expect(
+      validateCustomWorkflow({ ...asCustom(def), builtIn: true }, BUSINESS_ROLES, ctx).map((i) => i.code),
+    ).toContain('not_custom');
   });
 
   it('has no repository, branch, build, review or merge stage', () => {

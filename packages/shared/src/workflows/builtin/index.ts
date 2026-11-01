@@ -1,3 +1,4 @@
+import { BUSINESS_WORKFLOWS } from '../business.ts';
 import { canonicalWorkflowKey } from '../legacy.ts';
 import type { WorkflowDefinition } from '../schema.ts';
 import { codeWorkflowV1, codeWorkflowV2 } from './code.ts';
@@ -32,6 +33,7 @@ export const BUILTIN_WORKFLOWS: readonly WorkflowDefinition[] = [
   codeBugfixWorkflowV1,
   researchWorkflowV1,
   feedWorkflowV1,
+  ...BUSINESS_WORKFLOWS,
 ];
 
 export function getBuiltinWorkflow(key: string, version?: number): WorkflowDefinition | undefined {

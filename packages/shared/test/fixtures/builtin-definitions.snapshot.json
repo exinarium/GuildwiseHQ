@@ -133,6 +133,42 @@
   },
   {
     "kind": "workflow",
+    "key": "business-document-request",
+    "version": 1,
+    "sha256": "cdbe26045587124d590c8ca78487e669a6745465bb340f39637e4406f384b6d0"
+  },
+  {
+    "kind": "workflow",
+    "key": "business-enquiry",
+    "version": 1,
+    "sha256": "03a666d31abff5afc0daedc6a6beba31898faf64cb7658f9d791aac4e964f235"
+  },
+  {
+    "kind": "workflow",
+    "key": "business-follow-up",
+    "version": 1,
+    "sha256": "a7802b0c9a4c54ccce187ad792a538f281f81289446c6baab300c9855aba7a24"
+  },
+  {
+    "kind": "workflow",
+    "key": "business-quote",
+    "version": 1,
+    "sha256": "7ac5b32d957106a0f3f9bece9e8fb09df55b61e445dd822b63db16548b2f2f5a"
+  },
+  {
+    "kind": "workflow",
+    "key": "business-reminder",
+    "version": 1,
+    "sha256": "d92705421e6ffc00677d842c2b940dff14383f48bb6d6928a37cb7b290b04adb"
+  },
+  {
+    "kind": "workflow",
+    "key": "business-report",
+    "version": 1,
+    "sha256": "a5a522f1dcd266a51fee721881186179777ad994a5925232f5032cb7eed1e231"
+  },
+  {
+    "kind": "workflow",
     "key": "code-bugfix",
     "version": 1,
     "sha256": "dcd3ceca333c451c3e545458be81a744cd563f9250dfeec9b4634e5bc56d649e"

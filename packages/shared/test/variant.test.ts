@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_ROLES,
+  BUILTIN_WORKFLOWS,
+  BUSINESS_ROLES,
   boardColumnsWith,
   codeBugfixWorkflowV1,
   codeWorkflowV1,
@@ -278,14 +280,10 @@ describe('validateVariant', () => {
     expect(codes(wide.issues)).toContain('invalid_card_type');
   });
 
-  it('only code and approved custom workflows can be bases', () => {
-    const v = check(
-      spec([investigateInsertion('test')], { base: { key: 'code-bugfix', version: 1 } }),
-      codeBugfixWorkflowV1,
-    );
-    expect(codes(v.issues)).toContain('variant_base_not_allowed');
+  it('only a variant cannot be a base: its own base is the one to extend', () => {
     const variant = materialiseVariant(codeWorkflowV1, spec([investigateInsertion('test')]));
-    expect(codes(check(spec([{ after: 'build', stage: customStage('q') }]), variant).issues)).toEqual(
+    const v = check(spec([{ after: 'build', stage: customStage('q') }]), variant);
+    expect(codes(v.issues)).toEqual(
       expect.arrayContaining(['variant_base_not_allowed', 'variant_base_mismatch']),
     );
   });
@@ -345,3 +343,45 @@ describe('board columns of a variant', () => {
 import { validateWorkflow } from '../src/index.ts';
 
 const validateVariantIssues = (def: unknown) => validateWorkflow(def, ROLES);
+
+// Any workflow can be a base: built-in (code, code-bugfix, research, feed, the six business workflows) or custom. A
+// variant is stored materialised and keeps the base's outcome events and effects, so nothing special has to be rebuilt.
+describe('every built-in workflow is a variant base', () => {
+  const anyRole: RoleDefinition = {
+    ...(BUILTIN_ROLES.find((r) => r.key === 'reviewer') as RoleDefinition),
+    key: 'step-writer',
+    claimableStages: [{ workflowKey: '*', stageId: '*' }],
+  };
+  /** The first stage a step can be inserted after: not terminal, one successor. */
+  const afterOf = (def: WorkflowDefinition): string => {
+    const st = def.stages.find((s) => {
+      if (s.kind === 'terminal') return false;
+      const to = new Set(s.outcomes.filter((o) => o.kind === 'success' && o.to !== s.id).map((o) => o.to));
+      return to.size === 1;
+    });
+    return (st as { id: string }).id;
+  };
+  const cases = BUILTIN_WORKFLOWS.filter((w) => w.key !== 'code' || w.version === 6).map(
+    (w) => [`${w.key}@${w.version}`, w] as const,
+  );
+
+  it.each(cases)('%s: a variant with an inserted agent step materialises and validates', (_n, base) => {
+    const after = afterOf(base);
+    const s = spec([{ after, stage: customStage('extra_check', { claimRole: 'step-writer' }) }], {
+      key: `${base.key}-toy`,
+      base: { key: base.key, version: base.version },
+    });
+    const v = validateVariant(s, base, [...ROLES, anyRole, ...BUSINESS_ROLES], CTX);
+    expect(codes(v.issues)).toEqual([]);
+    const def = v.definition as WorkflowDefinition;
+    expect(def.extends).toEqual({ key: base.key, version: base.version });
+    expect(def.builtIn).toBe(false);
+    expect(def.stages.map((x) => x.id)).toContain('extra_check');
+    // the base's events and effects are kept as they were
+    for (const st of base.stages)
+      for (const o of st.outcomes) {
+        const got = def.stages.find((x) => x.id === st.id)?.outcomes.find((x) => x.id === o.id);
+        expect([got?.event, got?.effect]).toEqual([o.event, o.effect]);
+      }
+  });
+});
