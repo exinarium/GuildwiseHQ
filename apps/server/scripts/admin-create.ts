@@ -3,8 +3,10 @@ import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 import { DEFAULT_PLAN, isPlanKey, NO_LIMITS, planDefinition, streamId } from '@aom/shared';
 import { hashPassword } from '../src/auth/password.ts';
+import { businessWorkflowEvents } from '../src/catalogue/business-workflows.ts';
 import { createClock } from '../src/clock.ts';
 import { loadConfig } from '../src/config.ts';
+import type { Ctx } from '../src/context.ts';
 import { migrate } from '../src/db/migrate.ts';
 import { createPool } from '../src/db/pool.ts';
 import { one } from '../src/db/sql.ts';
@@ -15,7 +17,7 @@ import { buildProjectors } from '../src/projections/index.ts';
 /**
  * `pnpm --filter @aom/server admin:create --email a@b.c --name "Ada" [--password ...] [--org "Name"] [--plan founding]`:
  * creates a user and a new organization they own (`UserRegistered` + `OrganizationCreated{createdVia:'cli'}` +
- * `OrgMemberAdded(owner)`). Default organization name "<name>'s organization", plan `founding`, status `active`. It
+ * `OrgMemberAdded(owner)` + the shipped business workflows). Default organization name "<name>'s organization", plan `founding`, status `active`. It
  * keeps fresh installs and the e2e setup working; the platform account is `superadmin:create`.
  */
 const { values } = parseArgs({
@@ -95,6 +97,8 @@ try {
           actor: system,
           scope: orgScope,
         },
+        // The business workflows are installed right away, not at the next start (the organization has no project yet).
+        ...(await businessWorkflowEvents({ log: console } as unknown as Ctx, tx, orgId)),
       ],
       { tx },
     );
