@@ -15,9 +15,9 @@ import {
   RoleExtensionsSchema,
   type RoleUpdate,
   randomAvatarSeed,
+  rewordForOrg,
   streamId,
   type WorkQuality,
-  rewordForOrg,
 } from '@aom/shared';
 import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';

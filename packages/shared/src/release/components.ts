@@ -1,4 +1,9 @@
-import { bumpVersion, type ComponentRule, compareSemver, readComponentVersion } from '../repo/component-rules.ts';
+import {
+  bumpVersion,
+  type ComponentRule,
+  compareSemver,
+  readComponentVersion,
+} from '../repo/component-rules.ts';
 import type { BumpLevel, ReleaseCommit } from './recommend.ts';
 
 export interface ComponentFacts {
@@ -51,7 +56,13 @@ export function componentBumps(
     };
     const level: BumpLevel = levels[rule.name] ?? 'patch';
     const under = underOf(rule);
-    const common = { name: rule.name, level, changedCount: f.changedCount, under, versionFile: rule.versionFile };
+    const common = {
+      name: rule.name,
+      level,
+      changedCount: f.changedCount,
+      under,
+      versionFile: rule.versionFile,
+    };
     const head = f.contentAtHead === null ? null : readComponentVersion(rule, f.contentAtHead);
     if (!head || !head.ok || compareSemver(head.version, head.version) === null)
       return {
@@ -69,7 +80,8 @@ export function componentBumps(
     const current = head.version;
     if (f.changedCount === 0) return { ...common, state: 'unchanged' as const, from: current, to: current };
     const tagged = f.contentAtTag === null ? null : readComponentVersion(rule, f.contentAtTag);
-    const base = tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : current;
+    const base =
+      tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : current;
     const target = bumpVersion(base, level);
     const targetVersion = target.ok ? target.version : base;
     const higher = (compareSemver(current, targetVersion) ?? 0) > 0;
@@ -83,7 +95,8 @@ export function componentLine(b: ComponentBump): string {
   if (b.state === 'missing') return `${b.name}: ${b.message ?? 'no version found'}`;
   if (b.state === 'unchanged') return `${b.name} ${b.to} (unchanged)`;
   const files = `${b.changedCount} ${b.changedCount === 1 ? 'file' : 'files'} changed${b.under ? ` under ${b.under}` : ''}`;
-  if (b.state === 'already_set') return `${b.name} ${b.from} -> ${b.to} (${files}; already set in ${b.versionFile})`;
+  if (b.state === 'already_set')
+    return `${b.name} ${b.from} -> ${b.to} (${files}; already set in ${b.versionFile})`;
   return `${b.name} ${b.from} -> ${b.to} (${files})`;
 }
 
@@ -95,12 +108,17 @@ export function releaseIntro(unreleasedIntro: string, bumps: readonly ComponentB
   if (bumps.length === 0) return unreleasedIntro.trim();
   let rest = unreleasedIntro.trim();
   for (const b of bumps) {
-    const re = new RegExp(`^${escapeRe(cap(b.name))}\\s+\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]*[0-9A-Za-z])?(?:\\s+\\(unchanged\\))?\\.\\s*`, 'i');
+    const re = new RegExp(
+      `^${escapeRe(cap(b.name))}\\s+\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]*[0-9A-Za-z])?(?:\\s+\\(unchanged\\))?\\.\\s*`,
+      'i',
+    );
     rest = rest.replace(re, '');
   }
   const sentences = bumps
     .filter((b) => b.state !== 'missing')
-    .map((b) => (b.state === 'unchanged' ? `${cap(b.name)} ${b.to} (unchanged).` : `${cap(b.name)} ${b.to}.`));
+    .map((b) =>
+      b.state === 'unchanged' ? `${cap(b.name)} ${b.to} (unchanged).` : `${cap(b.name)} ${b.to}.`,
+    );
   return [...sentences, rest].filter((s) => s !== '').join(' ');
 }
 

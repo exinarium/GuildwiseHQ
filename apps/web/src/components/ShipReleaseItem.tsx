@@ -209,7 +209,8 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
       </div>
 
       <p className="text-xs text-subtle">
-        Approving prepares the release commit (changelog and component versions) and pushes it to the working branch. Nothing is tagged or published yet.
+        Approving prepares the release commit (changelog and component versions) and pushes it to the working
+        branch. Nothing is tagged or published yet.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full">
         <Button

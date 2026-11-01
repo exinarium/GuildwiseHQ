@@ -1,21 +1,15 @@
-import {
-  type AgentDraftDto,
-  type AgentDto,
-  type HrAgent,
-  type McpServerCandidateDto,
-  type ProjectDto,
-  type RoleDefinition,
+import type {
+  AgentDraftDto,
+  AgentDto,
+  HrAgent,
+  McpServerCandidateDto,
+  ProjectDto,
+  RoleDefinition,
 } from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
-import {
-  useAgents,
-  useFire,
-  usePauseAgent,
-  useRerollFace,
-  useRoles,
-} from '../api/queries/agents.ts';
+import { useAgents, useFire, usePauseAgent, useRerollFace, useRoles } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
@@ -33,10 +27,7 @@ import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
-import {
-  AllowedProjectsDialog,
-  WorksOn,
-} from '../components/agents/ProjectAccess.tsx';
+import { AllowedProjectsDialog, WorksOn } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
 import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
 import { FirstRunGallery } from '../components/capabilities/StarterGallery.tsx';

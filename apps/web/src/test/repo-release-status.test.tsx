@@ -97,14 +97,12 @@ describe('ReleaseStatus', () => {
   });
 
   it("shows the failure message and Retry posts 'approved' to the alert; a refusal appears inline", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'only the project owner can decide' } }), {
-          status: 403,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'only the project owner can decide' } }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
     wrap(
       <ReleaseStatus
         repo={repo({

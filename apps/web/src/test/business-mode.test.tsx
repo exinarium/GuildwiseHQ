@@ -10,22 +10,22 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useMe } from '../api/queries/auth.ts';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
+import { SeatOptions } from '../components/agents/SeatOptions.tsx';
 import { BuildSomething } from '../components/BuildSomething.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
 import { DevOnly } from '../components/DevOnly.tsx';
 import { ScheduleWizard } from '../components/schedules/ScheduleWizard.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
+import { UserMenu } from '../components/shell/UserMenu.tsx';
 import { ToastProvider } from '../components/ui.tsx';
 import { ARTICLES, DEV_ONLY_HELP_SLUGS, helpArticlesFor } from '../help/articles.ts';
-import { SeatOptions } from '../components/agents/SeatOptions.tsx';
 import { ACTION_TILES, actionTilesFor } from '../lib/schedules.ts';
+import { useOrgTerms } from '../lib/terms.ts';
 import { CardDetailView } from '../pages/CardDetail.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
-import { useMe } from '../api/queries/auth.ts';
-import { useOrgTerms } from '../lib/terms.ts';
-import { UserMenu } from '../components/shell/UserMenu.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const USER = ID(1);
@@ -122,7 +122,11 @@ beforeEach(() => {
     if (path === '/api/workstations') return json({ workstations: [] });
     if (path === '/api/agents') return json({ agents: [] });
     if (path === `/api/projects/${ID(70)}`)
-      return json({ project: { id: ID(70), key: 'APP', name: 'App', workflowKey: 'enquiry' }, repos: [], environments: [] });
+      return json({
+        project: { id: ID(70), key: 'APP', name: 'App', workflowKey: 'enquiry' },
+        repos: [],
+        environments: [],
+      });
     if (path === '/api/agents/name-suggestions') return json({ names: [] });
     return json({});
   });
@@ -528,9 +532,7 @@ describe('automation wizard actions', () => {
 
 describe('the view toggle in the user menu', () => {
   const menu = () =>
-    wrap(
-      <UserMenu name="Olga" email="o@x.test" roleLabel="Owner" avatar={null} onSignOut={() => {}} />,
-    );
+    wrap(<UserMenu name="Olga" email="o@x.test" roleLabel="Owner" avatar={null} onSignOut={() => {}} />);
   it('is easy to reach and picks the view for this member only', async () => {
     mode = 'business';
     menu();
@@ -549,7 +551,9 @@ describe('the view toggle in the user menu', () => {
     mode = 'business';
     menu();
     await userEvent.click(await screen.findByTestId('user-menu'));
-    expect(await screen.findByTestId('view-default')).toHaveTextContent('Organization default (Business view)');
+    expect(await screen.findByTestId('view-default')).toHaveTextContent(
+      'Organization default (Business view)',
+    );
     await userEvent.click(screen.getByTestId('view-default'));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -561,7 +565,13 @@ describe('the view toggle in the user menu', () => {
 });
 
 describe('Build something', () => {
-  const project = { id: ID(70), key: 'APP', name: 'App', workflowKey: 'enquiry', myRole: 'owner' } as ProjectDto;
+  const project = {
+    id: ID(70),
+    key: 'APP',
+    name: 'App',
+    workflowKey: 'enquiry',
+    myRole: 'owner',
+  } as ProjectDto;
   it('walks a business project through workstation, repository and builder using the existing flows', async () => {
     mode = 'business';
     wrap(<BuildSomething project={project} />);

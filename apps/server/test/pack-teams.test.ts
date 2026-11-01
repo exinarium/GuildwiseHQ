@@ -1,10 +1,10 @@
 import {
   BUILTIN_ROLES,
   BUSINESS_ROLE_KEYS,
+  BUSINESS_SEAT_KEYS,
   type CapabilityMeta,
   indexPack,
   isBusinessRoleKey,
-  BUSINESS_SEAT_KEYS,
   PACK_SEAT_KEYS,
   PACKS_CAPABILITY,
   type PackSnapshot,

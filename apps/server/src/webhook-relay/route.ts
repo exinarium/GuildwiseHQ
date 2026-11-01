@@ -1,10 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import {
-  isOrgOperational,
-  RELAY_STRIPPED_HEADERS,
-  type RelayKind,
-  type RelayOutcome,
-} from '@aom/shared';
+import { isOrgOperational, RELAY_STRIPPED_HEADERS, type RelayKind, type RelayOutcome } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { hashRelayToken, RELAY_TOKEN_RE } from '../commands/relay-integrations.ts';
 import type { Ctx } from '../context.ts';

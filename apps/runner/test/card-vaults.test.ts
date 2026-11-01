@@ -4,13 +4,13 @@ import type { ShiftBrief } from '@aom/shared';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
+import { shiftVaultsOf } from '../src/shifts/supervisor.ts';
 import {
   readVaultContext,
   readVaultContexts,
   withVaultContext,
   withVaultContexts,
 } from '../src/vaults/context.ts';
-import { shiftVaultsOf } from '../src/shifts/supervisor.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';

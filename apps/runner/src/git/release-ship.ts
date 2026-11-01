@@ -150,7 +150,7 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
   }
 
   // 4. the commit, in a throwaway worktree
-  let identity;
+  let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs);
   } catch (err) {

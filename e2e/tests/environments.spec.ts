@@ -357,7 +357,9 @@ test.describe('Environments: user journeys (mocked world)', () => {
       });
   });
 
-  test('12. redirects: /deploys lands on /delivery/releases, settings #run lands on Your app', async ({ browser }) => {
+  test('12. redirects: /deploys lands on /delivery/releases, settings #run lands on Your app', async ({
+    browser,
+  }) => {
     const page = await openAs(browser, { scenario: 'approved' });
     await page.goto('/deploys');
     await expect(page).toHaveURL(/\/delivery\/releases/);

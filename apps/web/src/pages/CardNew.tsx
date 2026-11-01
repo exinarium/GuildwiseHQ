@@ -176,9 +176,7 @@ export function CardNewForm({
   const toast = useToast();
   // Every card type is offered in every view. The view decides which lead: the Business view leads with the business
   // types and puts the code types under "More types"; the Software view does the reverse.
-  const allTypes = [
-    ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
-  ]
+  const allTypes = [...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)])]
     // The business types keep their own order (Enquiry first): the workflows arrive in the order they were enabled,
     // which for the six enabled together is alphabetical by workflow key.
     .sort((x, y) => businessTypeRank(x) - businessTypeRank(y));

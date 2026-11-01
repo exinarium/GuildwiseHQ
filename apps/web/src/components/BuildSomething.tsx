@@ -1,3 +1,4 @@
+import type { ProjectDto } from '@aom/shared';
 import { CheckCircle2, Circle, Hammer } from 'lucide-react';
 import { useState } from 'react';
 import { useAgents } from '../api/queries/agents.ts';
@@ -6,7 +7,6 @@ import { useWorkstations } from '../api/queries/workstations.ts';
 import { useCanConvert } from '../lib/projectWorkflow.ts';
 import { ConvertProjectDialog } from './ConvertProjectDialog.tsx';
 import { Button, ButtonLink, Dialog } from './ui.tsx';
-import type { ProjectDto } from '@aom/shared';
 
 /**
  * "Build something", for a project in the Business view: a friendly way into software work without switching view.

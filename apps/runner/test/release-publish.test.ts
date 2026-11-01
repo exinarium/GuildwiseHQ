@@ -121,7 +121,10 @@ describe('release.publish', () => {
       },
     };
     const r = await publishRelease({
-      payload: payload(s, { forge: 'github', land: { mode: 'pr', prUrl: 'https://github.com/acme/web/pull/3' } }),
+      payload: payload(s, {
+        forge: 'github',
+        land: { mode: 'pr', prUrl: 'https://github.com/acme/web/pull/3' },
+      }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
       forgeEnv: { ...forgeEnv, exec: gh },

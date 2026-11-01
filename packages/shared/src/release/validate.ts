@@ -17,7 +17,8 @@ export function validateReleaseVersion(
     };
   if (lastTag) {
     const c = compareSemver(raw, lastTag.replace(/^v/, ''));
-    if (c !== null && c <= 0) return { ok: false, message: `${raw} is not higher than the last release ${lastTag}` };
+    if (c !== null && c <= 0)
+      return { ok: false, message: `${raw} is not higher than the last release ${lastTag}` };
   }
   if (existingTags.includes(`v${raw}`)) return { ok: false, message: `v${raw} already exists as a tag` };
   return { ok: true, version: raw };

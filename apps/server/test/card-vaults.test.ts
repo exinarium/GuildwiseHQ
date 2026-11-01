@@ -88,10 +88,7 @@ describe('a card shift carries the organization vault and the project vault', ()
       const start = await p.next('Bo5');
       expect(start.vaults?.map((v: any) => v.vaultId)).toEqual([prjId]);
     } finally {
-      await q(`UPDATE org_members SET role='owner' WHERE user_id=$1 AND org_id=$2`, [
-        w.owner.id,
-        w.owner.id,
-      ]);
+      await q(`UPDATE org_members SET role='owner' WHERE user_id=$1 AND org_id=$2`, [w.owner.id, w.owner.id]);
     }
   });
 });

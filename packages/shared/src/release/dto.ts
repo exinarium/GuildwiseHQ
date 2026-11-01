@@ -60,7 +60,9 @@ export const ReleaseProposalViewSchema = z.object({
   ahead: z.number().int().nonnegative(),
   commitsTruncated: z.boolean(),
   today: z.string(),
-  changelog: z.object({ present: z.boolean(), empty: z.boolean(), intro: z.string(), body: z.string() }).nullable(),
+  changelog: z
+    .object({ present: z.boolean(), empty: z.boolean(), intro: z.string(), body: z.string() })
+    .nullable(),
   notes: z.string(),
   notesEditable: z.boolean(),
   components: z.array(ComponentBumpSchema),
@@ -78,7 +80,10 @@ export type ReleaseProposalView = z.infer<typeof ReleaseProposalViewSchema>;
 /** `release` on `POST /api/desk/:id/resolve` when approving a Ship release item. */
 export const ShipReleaseApprovalSchema = z.object({
   version: z.string().trim().min(1).max(60),
-  components: z.array(z.object({ name: z.string(), level: BumpLevelSchema })).max(20).default([]),
+  components: z
+    .array(z.object({ name: z.string(), level: BumpLevelSchema }))
+    .max(20)
+    .default([]),
   notes: z.string().max(20_000).optional(),
   factsHeadSha: z.string().max(40),
 });

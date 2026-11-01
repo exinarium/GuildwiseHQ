@@ -248,10 +248,7 @@ const snapshot = async (): Promise<Record<string, string[]>> => {
 describe('deleting a project permanently', () => {
   it('setup: a project chat that is closed and has a read marker', async () => {
     const una = (await q(`SELECT id FROM agents WHERE name='Una'`))[0]?.id;
-    const chat = await ok<any>(
-      owner('POST', '/api/chats', { agentId: una, projectId: w.projectId }),
-      201,
-    );
+    const chat = await ok<any>(owner('POST', '/api/chats', { agentId: una, projectId: w.projectId }), 201);
     chatThreadId = chat.chat.threadId;
     await ok(owner('POST', `/api/chats/${chatThreadId}/close`));
     await w.t.app.ctx.store.append([

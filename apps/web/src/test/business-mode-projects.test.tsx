@@ -99,7 +99,11 @@ describe('New project by organization mode', () => {
     const values = radios(form).map((r) => r.value);
     expect(values).toEqual(expect.arrayContaining(['research', 'feed', 'code']));
     const more = within(form).getByTestId('more-project-types');
-    expect(within(more).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toContain('code');
+    expect(
+      within(more)
+        .getAllByRole('radio')
+        .map((r) => (r as HTMLInputElement).value),
+    ).toContain('code');
     expect(radios(form).find((r) => r.checked)?.value).not.toBe('code');
     expect(within(form).getByTestId('workflow-hint')).not.toHaveTextContent('Add repositories');
     expect(screen.queryByText(/Code projects also own repositories/)).toBeNull();

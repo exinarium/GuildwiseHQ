@@ -2,7 +2,7 @@ export * from './changelog-rewrite.ts';
 export * from './commits.ts';
 export * from './components.ts';
 export * from './dto.ts';
+export * from './publish.ts';
 export * from './recommend.ts';
 export * from './tags.ts';
 export * from './validate.ts';
-export * from './publish.ts';
