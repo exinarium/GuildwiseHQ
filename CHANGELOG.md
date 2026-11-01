@@ -4,7 +4,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Runner 0.1.65. Migrations 2751, 2791 and 2800. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.
+Runner 0.1.65. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.
 
 ### Added
 
@@ -26,6 +26,8 @@ Runner 0.1.65. Migrations 2751, 2791 and 2800. New optional environment variable
 - Any workflow can be the base of a project variant (Customise): Code, Research, Feed, the bug-fix workflow, the business workflows and your own. Only a variant itself cannot be extended again; extend the workflow it was made from. A variant of research, feed or code-bugfix follows the rules of its base: it can only run in a project of that kind (a research project runs research and its own variants), never next to Code, and a bug-fix variant is not a project workflow.
 
 ### Fixed
+
+- Unpairing a computer no longer breaks the places and environments that deployed from it. Each place (server or computer) and live environment that ran on the removed computer is now marked "computer removed" (new event `DeployTargetComputerRemoved`, migration 2801 `deploy_targets.computer_removed_at`; the place keeps its old computer for the record). Before, Check, Check again, Fix with DevOps, secrets, moves and deploys answered "workstation not found", the card kept offering Check and hid Reconnect. Now they answer 409 `deploying_computer_removed` ("The computer that deploys <place> was removed. Choose another computer for it."), the card and the Places panel say so and offer **Choose a computer** (a server opens Reconnect, a computer place offers your active computers), nothing probes a removed computer, and the daily server check skips it. The project owner can recover a live place. The Unpair dialog lists the places and environments that will need another computer (`GET /api/workstations/:id/unlink-impact`); unpairing still goes ahead once confirmed. The boot data migration `deploy-removed-computers-2026-11` marks places whose computer was removed earlier (events only, idempotent, skipped with `AOM_DATA_MIGRATIONS=false`). When the project's vault lived on a removed computer, saving a setup now says the vault must be moved first.
 
 - The workflow builder kept no date format on a field: a workflow with a date field (the business workflows) lost the format when saved from the builder.
 - An organization vault can take a git remote after the automatic local one exists. Registering a git URL for the organization (or editing the local organization vault) converts that same vault and keeps its content, as a project's local vault already did, instead of 409 `vault_exists` / `vault_local`; Settings > Vaults offers it.

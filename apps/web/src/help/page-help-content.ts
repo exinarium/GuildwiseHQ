@@ -147,7 +147,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'More menu on an environment',
-        text: 'Edit, Change server (or Change computer), Go back to an earlier version on the live site, and Remove. Move to a new server is a button on the card where the place can move.',
+        text: 'Edit, Change server (or Change computer), Go back to an earlier version on the live site, and Remove. Move to a new server is a button on the card where the place can move. When a computer was removed, its places say so and offer Choose a computer.',
       },
     ],
     article: 'phases#delivery-recipes',
@@ -983,7 +983,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Unpair',
-        text: 'Disconnect a workstation for good. Its runner token is revoked, cards claimed there go back to the queue and its agents wait to be re-homed.',
+        text: 'Disconnect a workstation for good. Its runner token is revoked, cards claimed there go back to the queue and its agents wait to be re-homed. The dialog lists the places and environments that deployed from it: they are kept, marked "computer removed", and you choose another computer for each on the project\'s Environments page.',
       },
     ],
     article: 'workstations-and-installer#add-a-workstation',
