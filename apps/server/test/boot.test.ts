@@ -16,7 +16,7 @@ afterAll(async () => {
 describe('catalogue boot', () => {
   it('registers built-in workflow and role versions exactly once', async () => {
     const before = await q('SELECT count(*)::int AS n FROM workflow_versions WHERE org_id IS NULL');
-    expect(before[0]!.n).toBe(9); // code v1 to v6, code-bugfix, research, feed
+    expect(before[0]!.n).toBe(15); // code v1 to v6, code-bugfix, research, feed, the six business workflows
     expect((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id IS NULL'))[0]!.n).toBe(
       15 + BUSINESS_ROLE_KEYS.length,
     ); // 15 before the seven business roles (a95cb545)
@@ -31,7 +31,7 @@ describe('catalogue boot', () => {
     ]);
     expect(
       (await q(`SELECT count(*)::int AS n FROM events WHERE type='WorkflowVersionRegistered'`))[0]!.n,
-    ).toBe(9);
+    ).toBe(15);
   });
 });
 

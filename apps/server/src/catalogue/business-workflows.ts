@@ -1,80 +1,22 @@
-import { randomUUID } from 'node:crypto';
-import {
-  BUILTIN_WORKFLOWS,
-  BUSINESS_CARD_TYPES,
-  BUSINESS_ROLES,
-  BUSINESS_WORKFLOW_KEY,
-  BUSINESS_WORKFLOWS,
-  streamId,
-  validateCustomWorkflow,
-} from '@aom/shared';
-import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { BUSINESS_CARD_TYPES, BUSINESS_WORKFLOW_KEY, streamId } from '@aom/shared';
+import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import type { AppendInput } from '../eventstore/types.ts';
-
-const BUILTIN_KEYS = BUILTIN_WORKFLOWS.map((w) => w.key);
 
 /**
- * The events that register the shipped business workflows an organization does not have yet. A definition is validated
- * first and skipped (and logged) when invalid; an existing key (edited by the owner, or made by hand) is never overwritten.
- */
-export async function businessWorkflowEvents(ctx: Ctx, tx: Tx, orgId: string): Promise<AppendInput[]> {
-  const have = new Set(
-    (
-      await rows<{ key: string }>(tx, 'SELECT DISTINCT key FROM workflow_versions WHERE org_id=$1', [orgId])
-    ).map((r) => r.key),
-  );
-  const events: AppendInput[] = [];
-  for (const def of BUSINESS_WORKFLOWS) {
-    if (have.has(def.key)) continue;
-    const errors = validateCustomWorkflow(def, BUSINESS_ROLES, {
-      builtinWorkflowKeys: BUILTIN_KEYS,
-      departments: [],
-    }).filter((i) => i.severity === 'error');
-    if (errors.length) {
-      ctx.log.warn(
-        { key: def.key, codes: errors.map((e) => e.code) },
-        'business workflow is invalid: skipped',
-      );
-      continue;
-    }
-    events.push({
-      streamId: streamId.workflow(orgId, def.key),
-      event: {
-        type: 'WorkflowVersionRegistered',
-        payload: {
-          workflowVersionId: randomUUID(),
-          orgId,
-          key: def.key,
-          version: def.version,
-          name: def.name,
-          definition: def,
-          status: 'active',
-        },
-      },
-      actor: SYSTEM_ACTOR,
-      scope: orgScope(orgId),
-    });
-  }
-  return events;
-}
-
-/**
- * Registers the business workflows an organization is missing and enables each on its projects (the primary stays the
- * primary; every enabled entry is kept). Idempotent. Runs for every organization. A workflow the project once had and
+ * Enables the shipped business workflows on the organization's projects (the primary stays the primary; every enabled
+ * entry is kept). The workflows themselves are true built-ins, registered at boot with the other built-ins
+ * (`registerBuiltins`), so there is nothing to install per organization. Idempotent. A workflow the project once had and
  * an owner turned off is never enabled again; only workflows the project has never had are added.
  */
 export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): Promise<void> {
-  const events = await businessWorkflowEvents(ctx, tx, orgId);
-  if (events.length) await ctx.store.append(events, { tx });
-
   const installed = new Set(
     (
       await rows<{ key: string }>(
         tx,
-        `SELECT DISTINCT key FROM workflow_versions WHERE org_id=$1 AND status='active' AND project_id IS NULL`,
+        `SELECT DISTINCT key FROM workflow_versions
+          WHERE (org_id IS NULL OR org_id=$1) AND status='active' AND project_id IS NULL`,
         [orgId],
       )
     ).map((r) => r.key),
@@ -137,8 +79,8 @@ export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): 
 }
 
 /**
- * Boot: EVERY organization gets the shipped business workflows, whatever its default view. A workflow added in a later
- * release reaches every existing organization (and its projects) at the next start.
+ * Boot: EVERY organization's projects get the shipped business workflows enabled, whatever its default view. A workflow
+ * added in a later release is registered as a built-in first, then reaches every existing project at the next start.
  */
 export async function ensureBusinessWorkflowsAtBoot(ctx: Ctx): Promise<number> {
   const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations ORDER BY id`, []);
@@ -150,7 +92,7 @@ export async function ensureBusinessWorkflowsAtBoot(ctx: Ctx): Promise<number> {
       });
       n++;
     } catch (err) {
-      ctx.log.warn({ orgId: o.id, err }, 'business workflows could not be installed for this organization');
+      ctx.log.warn({ orgId: o.id, err }, 'business workflows could not be enabled for this organization');
     }
   }
   return n;

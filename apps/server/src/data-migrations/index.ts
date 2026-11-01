@@ -1,5 +1,6 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
+import { migrateBusinessBuiltin } from './business-builtin.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
 import { migrateCeoAuthority, migrateCeoDecisionDedupe } from './ceo-authority.ts';
 import { migrateCeoBuiltin } from './ceo-builtin.ts';
@@ -28,6 +29,11 @@ export {
   migrateBlogCiteCleanup,
 } from './blog-cite-cleanup.ts';
 export { BLOG_LAUNCH_MIGRATION, loadLaunchArticles, migrateBlogLaunch } from './blog-launch.ts';
+export {
+  BUSINESS_BUILTIN_MIGRATION,
+  type BusinessBuiltinReport,
+  migrateBusinessBuiltin,
+} from './business-builtin.ts';
 export {
   CARD_COMPLETION_INHERIT_MIGRATION,
   type CardCompletionInheritReport,
@@ -127,6 +133,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'pack-skill-keys-2026-10', run: (env) => migratePackSkillKeys(env) },
   { name: 'video-schedule-2026-10', run: (env) => migrateVideoSchedule(env) },
   { name: 'guildwisehq-runner-rule-2026-10', run: (env) => migrateGuildwiseRunnerRule(env) },
+  { name: 'business-builtin-2026-11', run: (env) => migrateBusinessBuiltin(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

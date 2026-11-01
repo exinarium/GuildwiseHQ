@@ -233,7 +233,10 @@ describe('(a) every capability is available in every view', () => {
 describe('(e) business workflows exist in every organization', () => {
   const have = async (orgIdValue: string) =>
     (
-      await q(`SELECT DISTINCT key FROM workflow_versions WHERE org_id=$1 AND status='active'`, [orgIdValue])
+      await q(
+        `SELECT DISTINCT key FROM workflow_versions WHERE (org_id IS NULL OR org_id=$1) AND status='active'`,
+        [orgIdValue],
+      )
     ).map((r: any) => r.key as string);
 
   it('the software-default world organization has them, enabled on its project', async () => {

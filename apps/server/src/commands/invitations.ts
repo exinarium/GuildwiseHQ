@@ -12,7 +12,6 @@ import {
 } from '@aom/shared';
 import { hashPassword } from '../auth/password.ts';
 import type { AuthSession } from '../auth/sessions.ts';
-import { businessWorkflowEvents } from '../catalogue/business-workflows.ts';
 import { ceoProvisionEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
@@ -441,11 +440,7 @@ async function acceptEvents(
     events.push(
       ...(await ceoProvisionEvents(tx, ctx, orgId, userId, { simulation: terms.simulation === true })),
     );
-    // Every organization starts with the business card types (it has no project yet to enable them on).
-    events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
   }
-  // Joining an existing organization also fills in any shipped business workflow it is still missing (idempotent).
-  if (inv.kind === 'org_member') events.push(...(await businessWorkflowEvents(ctx, tx, orgId)));
   if (inv.kind !== 'legacy')
     events.push({
       streamId: streamId.invitation(inv.id),

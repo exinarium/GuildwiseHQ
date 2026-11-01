@@ -104,6 +104,33 @@ export const catalogueProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'WorkflowVersionRejected'>).payload;
     await exec(tx, `UPDATE workflow_versions SET status='rejected' WHERE id=$1`, [p.workflowVersionId]);
   },
+  WorkflowVersionDeactivated: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkflowVersionDeactivated'>).payload;
+    await exec(tx, `UPDATE workflow_versions SET status='superseded' WHERE id=$1 AND status='active'`, [
+      p.workflowVersionId,
+    ]);
+  },
+  WorkflowKeyChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkflowKeyChanged'>).payload;
+    await exec(
+      tx,
+      `UPDATE workflow_versions
+          SET key=$3, name=$4,
+              definition = jsonb_set(jsonb_set(definition, '{key}', to_jsonb($3::text)), '{name}', to_jsonb($4::text))
+        WHERE org_id=$1 AND key=$2`,
+      [p.orgId, p.fromKey, p.toKey, p.name],
+    );
+    // Variants of the renamed workflow keep pointing at it.
+    await exec(
+      tx,
+      `UPDATE workflow_versions
+          SET base_key=$3, definition = jsonb_set(definition, '{extends,key}', to_jsonb($3::text)),
+              variant_spec = CASE WHEN variant_spec IS NULL THEN NULL
+                                  ELSE jsonb_set(variant_spec, '{base,key}', to_jsonb($3::text)) END
+        WHERE org_id=$1 AND base_key=$2 AND project_id IS NOT NULL`,
+      [p.orgId, p.fromKey, p.toKey],
+    );
+  },
   RoleVersionRegistered: async (tx, e) => {
     const p = (e.event as EventOf<'RoleVersionRegistered'>).payload;
     await exec(

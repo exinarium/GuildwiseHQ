@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BUILTIN_ROLES,
   BUILTIN_WORKFLOWS,
+  BUSINESS_WORKFLOW_KEY,
   type CreateDepartmentRequest,
   DEFINITION_FORMAT,
   DESK_SUBKIND_DEFINITION,
@@ -62,7 +63,6 @@ const BUILTIN_DEPARTMENTS = [
     ),
   ),
 ];
-
 
 const issueOfWorkflow = (i: ValidationIssue): DefinitionIssue => ({
   severity: i.severity,
@@ -686,8 +686,10 @@ export async function orgCatalogue(
     `SELECT w.*, (SELECT count(*)::int FROM cards c WHERE c.workflow_version_id = w.id
                    AND c.status NOT IN ('done','cancelled')) AS in_flight
        FROM workflow_versions w WHERE (w.org_id IS NULL OR w.org_id = $1) AND w.project_id IS NULL AND w.key <> '${LEGACY_CODE_V6_KEY}' AND ${visible.replaceAll('status', 'w.status')}
+        AND NOT (w.org_id IS NOT NULL AND w.status = 'superseded' AND w.key = ANY($2::text[]))
       ORDER BY (w.org_id IS NULL) DESC, w.key, w.version DESC`,
-    [orgId],
+    // A 1.4.0 organization copy of a shipped business workflow, retired for the built-in, is not listed next to it.
+    [orgId, Object.values(BUSINESS_WORKFLOW_KEY)],
   );
   const exts = await rows(ctx.pool, 'SELECT * FROM role_extensions WHERE org_id=$1', [orgId]);
   const roles = new Map<string, OrgCatalogueResponse['roles'][number]>();

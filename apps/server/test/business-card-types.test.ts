@@ -23,7 +23,7 @@ const keys = () => Object.values(BUSINESS_WORKFLOW_KEY);
 const installed = async () =>
   (
     await q(
-      `SELECT key FROM workflow_versions WHERE org_id=$1 AND key = ANY($2::text[]) AND status='active'`,
+      `SELECT key FROM workflow_versions WHERE (org_id IS NULL OR org_id=$1) AND key = ANY($2::text[]) AND status='active'`,
       [orgId(), keys()],
     )
   ).map((r: any) => r.key);
@@ -47,6 +47,10 @@ describe('a software-default organization', () => {
   it('has the six business workflows from the start, enabled on its project, without any switch', async () => {
     expect((await q('SELECT mode FROM organizations WHERE id=$1', [orgId()]))[0]?.mode).toBe('dev');
     expect((await installed()).sort()).toEqual([...keys()].sort());
+    // true built-ins: registered once for everybody, none owned by the organization
+    expect(
+      await q(`SELECT 1 FROM workflow_versions WHERE org_id=$1 AND key = ANY($2::text[])`, [orgId(), keys()]),
+    ).toEqual([]);
     const on = await enabled();
     for (const t of BUSINESS_CARD_TYPES) {
       const row = on.find((e) => e.workflow_key === BUSINESS_WORKFLOW_KEY[t]);
