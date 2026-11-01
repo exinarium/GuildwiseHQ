@@ -36,7 +36,8 @@ export function Vaults() {
   const [registering, setRegistering] = useState(false);
   const owned = (projects.data ?? []).filter((p) => p.myRole === 'owner');
   const vaults = q.data ?? [];
-  const hasOrgVault = vaults.some((v) => v.kind === 'org');
+  // The organization's automatic local vault may still be given a git repository (the same vault, now synced).
+  const hasOrgVault = vaults.some((v) => v.kind === 'org' && v.storage !== 'local');
   // A project with only a local folder vault may still be given a git repository (the same vault, now synced).
   const projectsWithoutVault = owned.filter(
     (p) => !vaults.some((v) => v.projectId === p.id && v.storage !== 'local'),
@@ -166,7 +167,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       {vault.storage === 'local' ? (
         <Callout tone="warning">
           {t.reword(
-            'This vault is a folder on one workstation. It is not synced and has no copy anywhere else: back it up yourself (it may sit in OneDrive or iCloud), or register a git repository for the project to keep it in sync. The map of your code that your agents use is kept here too, and can be rebuilt.',
+            'This vault is a folder on one workstation. It is not synced and has no copy anywhere else: back it up yourself (it may sit in OneDrive or iCloud), or register a git repository to keep it in sync (its content stays). The map of your code that your agents use is kept here too, and can be rebuilt.',
           )}
         </Callout>
       ) : (

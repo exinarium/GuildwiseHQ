@@ -109,38 +109,24 @@ export async function registerVault(
       if (existing?.storage === 'local') {
         // The project's automatic local vault is given a remote repository (docs/design/project-graphs.md section 3):
         // the same vault, now synced. The runner keeps the old folder aside and clones the repository.
-        assertRemoteUrl(ctx, req.remoteUrl.trim());
-        await ctx.store.append(
-          [
-            {
-              streamId: streamId.vault(existing.id),
-              event: {
-                type: 'VaultUpdated',
-                payload: {
-                  vaultId: existing.id,
-                  orgId: p.org_id,
-                  projectId: p.id,
-                  kind: 'project',
-                  name: req.name ?? existing.name,
-                  remoteUrl: req.remoteUrl.trim(),
-                  syncIntervalSec: req.syncIntervalSec,
-                  storage: 'git',
-                },
-              },
-              actor: userActor(user.id),
-              scope: projectScope(p.org_id, p.id),
-            },
-          ],
-          { tx },
-        );
-        convertedId = existing.id;
+        convertedId = await convertLocalVault(ctx, tx, user, existing, req, 'project', p.org_id, p.id);
         return;
       }
       if (existing) throw conflict('vault_exists', 'this project already has a vault');
-    } else if (
-      await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId])
-    ) {
-      throw conflict('vault_exists', 'the organization already has an organization vault; edit it instead');
+    } else {
+      const existing = await one(
+        tx,
+        `SELECT id, storage, name, sync_interval_sec FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`,
+        [orgId],
+      );
+      if (existing?.storage === 'local') {
+        // Every organization has an automatic local vault (docs/design/project-graphs.md section 3). Connecting a git
+        // repository converts that same vault, keeping its content (the runner sets the old folder aside, then clones).
+        convertedId = await convertLocalVault(ctx, tx, user, existing, req, 'org', orgId, null);
+        return;
+      }
+      if (existing)
+        throw conflict('vault_exists', 'the organization already has an organization vault; edit it instead');
     }
     assertRemoteUrl(ctx, req.remoteUrl.trim());
     const payload = {
@@ -165,6 +151,44 @@ export async function registerVault(
     );
   });
   return convertedId ?? vaultId;
+}
+
+/** The automatic local vault of a project or of the organization takes a git remote: the same vault, now synced. */
+async function convertLocalVault(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  existing: Row,
+  req: { remoteUrl: string; name?: string | undefined; syncIntervalSec: number },
+  kind: 'org' | 'project',
+  orgId: string,
+  projectId: string | null,
+): Promise<string> {
+  assertRemoteUrl(ctx, req.remoteUrl.trim());
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.vault(existing.id),
+        event: {
+          type: 'VaultUpdated',
+          payload: {
+            vaultId: existing.id,
+            orgId,
+            ...(projectId ? { projectId } : {}),
+            kind,
+            name: req.name ?? existing.name,
+            remoteUrl: req.remoteUrl.trim(),
+            syncIntervalSec: req.syncIntervalSec,
+            storage: 'git',
+          },
+        },
+        actor: userActor(user.id),
+        scope: projectId ? projectScope(orgId, projectId) : orgScope(orgId),
+      },
+    ],
+    { tx },
+  );
+  return existing.id as string;
 }
 
 async function editableVault(tx: Queryable, user: AuthSession['user'], vaultId: string): Promise<Row> {
@@ -199,6 +223,24 @@ export async function updateVault(
   await withAppendTx(ctx.pool, async (tx) => {
     const v = await editableVault(tx, user, vaultId);
     if (Object.keys(changes).length === 0) return;
+    if (v.storage === 'local' && changes.remoteUrl !== undefined && !v.project_id) {
+      // The organization's automatic local vault takes a git remote through an edit too (the same conversion).
+      await convertLocalVault(
+        ctx,
+        tx,
+        user,
+        v,
+        {
+          remoteUrl: changes.remoteUrl,
+          name: changes.name ?? v.name,
+          syncIntervalSec: changes.syncIntervalSec ?? v.sync_interval_sec,
+        },
+        'org',
+        v.org_id,
+        null,
+      );
+      return;
+    }
     if (v.storage === 'local' && changes.remoteUrl !== undefined)
       throw conflict(
         'vault_local',
@@ -434,7 +476,7 @@ export const NO_VAULT_MESSAGE =
 export async function vaultForProject(
   db: Queryable,
   projectId: string,
-  workstationUserId: string,
+  workstationUserId: string | null,
 ): Promise<{ id: string; kind: 'org' | 'project'; folder: string } | null> {
   const p = await one(db, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
     projectId,
@@ -444,7 +486,8 @@ export async function vaultForProject(
   // (docs/design/project-graphs.md section 3: an organization vault keeps the knowledge it already holds).
   const v =
     (await one(db, `SELECT id, kind FROM vaults WHERE project_id=$1 AND storage='git'`, [projectId])) ??
-    (isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
+    // `workstationUserId` null: no workstation in question (the server writes a file), so the organization vault counts.
+    (workstationUserId === null || isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
       ? await one(db, `SELECT id, kind FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
           p.org_id,
         ])

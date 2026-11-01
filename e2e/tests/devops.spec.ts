@@ -306,11 +306,9 @@ test('reset wipes the DevOps sandbox and keeps the engineer', async () => {
 });
 
 // ------------------------------------------------------------------------------------------- vaults
-// OPEN QUESTION (reported, not guessed): these four specs register the organization vault by git URL. Since project-graphs
-// (1f61d3f0, 24d95558) the organization gets a local folder vault of its own when the first project or graph needs one, and
-// `registerVault` then refuses a git URL for the organization (409 vault_exists) while `PATCH` refuses a remote on a local vault
-// (409 vault_local). Only a project's local vault can be given a git repository. Whether an organization vault may do the same
-// is a product decision, so the specs are parked with `test.fixme` until it is made.
+// Since project-graphs (1f61d3f0, 24d95558) the organization gets a local folder vault of its own when the first project or
+// graph needs one. Registering a git URL for the organization converts that same vault (as a project's local vault does),
+// so these specs connect the organization vault by URL whether or not the automatic local one exists yet.
 
 let WORK: VaultFixture; // the organization vault
 let PERSONAL: VaultFixture; // the vault of the HOB project
@@ -328,7 +326,7 @@ const workClone = () =>
     join(HOME, 'vaults', r[0]?.id ?? 'none'),
   );
 
-test.fixme('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
+test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
   await page.goto('/settings/vaults');
   await page.getByRole('button', { name: 'Register a vault' }).click();
   const form = page.getByRole('form', { name: 'Register vault' });
@@ -351,8 +349,8 @@ test.fixme('AC2: vault sync pushes local edits, pulls remote edits and pauses on
     (b) => b,
     30_000,
   );
-  expect(originLog(WORK)[0]).toMatch(/aom sync Dev Box/);
-  expect(originLog(WORK)[0]).toMatch(/^[A-Za-z]+ \(aom\)\|/);
+  // the runner commits a sync as "Update notes <time>" with the resolved git identity (backlog #65), not an agent's
+  expect(originLog(WORK)[0]).toMatch(/\|Update notes \d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/);
 
   // a remote edit is pulled
   pushFromOther(WORK, 'standing-orders.md', 'WORK-ORDER keep answers short\nWORK-ORDER2 from elsewhere\n');
@@ -421,7 +419,7 @@ test.fixme('AC2: vault sync pushes local edits, pulls remote edits and pauses on
   );
 });
 
-test.fixme('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the organization vault, committed and pushed', async () => {
+test('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the organization vault, committed and pushed', async () => {
   // The real M2 path: a builder asks, the manager answers on the desk, the QuestionAnswered hook writes the file.
   const ref = await createCard('Needs a decision for the vault', { build: ['question', 'ok'] });
   await page.goto('/desk');
@@ -456,9 +454,7 @@ test.fixme('AC3: answering a question on the desk writes projects/<name>/decisio
   expect(md).toContain('Status: accepted');
   expect(md).toContain('yes');
   expect(md).toContain(`on card ${ref}`);
-  expect(originLog(WORK).some((l) => l.includes(`aom: decision ${ref} Mock question for ${ref}?`))).toBe(
-    true,
-  );
+  expect(originLog(WORK).some((l) => l.includes(`decision ${ref} Mock question for ${ref}?`))).toBe(true);
   // the unblocked card carries on
   await waitFor(
     'unblocked card reaches review',
@@ -468,7 +464,7 @@ test.fixme('AC3: answering a question on the desk writes projects/<name>/decisio
   );
 });
 
-test.fixme('AC3b: standing orders added to the ledger are appended to the vault standing-orders.md (project and global)', async () => {
+test('AC3b: standing orders added to the ledger are appended to the vault standing-orders.md (project and global)', async () => {
   const project = await api.post('/api/ledger', {
     data: {
       scope: 'standing_order',
@@ -503,7 +499,7 @@ test.fixme('AC3b: standing orders added to the ledger are appended to the vault 
   expect(paths.map((p) => p.vault_path)).toEqual(['projects/dvo/standing-orders.md', 'standing-orders.md']);
 });
 
-test.fixme("AC4: a card shift sees only the vault of its project: the organization vault, or the project's own vault", async () => {
+test("AC4: a card shift reads the organization vault's standing orders and its project's own vault, never another project's documents", async () => {
   const hobby = await api.post('/api/projects', {
     data: { key: 'HOB', name: 'Hobby', vaultFolder: 'projects/hob' },
   });
@@ -517,14 +513,15 @@ test.fixme("AC4: a card shift sees only the vault of its project: the organizati
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
   });
   expect(add.status()).toBe(201);
-  // both vaults are cloned on the workstation by now
+  // both repository vaults are cloned on the workstation by now (the projects' automatic local folders are not clones)
   await waitFor(
     'both vaults cloned',
     async () =>
       existsSync(join(HOME, 'vaults')) &&
       (
         await q<{ n: number }>(
-          'SELECT count(*)::int AS n FROM workstation_vaults WHERE local_path IS NOT NULL',
+          `SELECT count(*)::int AS n FROM workstation_vaults wv JOIN vaults v ON v.id = wv.vault_id
+            WHERE wv.local_path IS NOT NULL AND v.storage = 'git'`,
         )
       )[0]?.n,
     (n) => n === 2,
@@ -591,6 +588,7 @@ test.fixme("AC4: a card shift sees only the vault of its project: the organizati
   const h = instructions(halId);
   expect(h).toContain('- Key: HOB');
   expect(h).toContain('PERSONAL-MARK secret hobby notes');
-  expect(h).not.toContain('WORK-MARK');
-  expect(h).not.toContain('WORK-ORDER');
+  expect(h).not.toContain('WORK-MARK'); // DVO's project document stays with DVO
+  // the organization's standing orders apply to every project (card shifts read the organization vault too: cb1627eb)
+  expect(h).toContain('WORK-ORDER');
 });

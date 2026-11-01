@@ -22,6 +22,12 @@ Runner 0.1.65. Migrations 2751, 2791 and 2800. New optional environment variable
 
 ### Fixed
 
+- An organization vault can take a git remote after the automatic local one exists. Registering a git URL for the organization (or editing the local organization vault) converts that same vault and keeps its content, as a project's local vault already did, instead of 409 `vault_exists` / `vault_local`; Settings > Vaults offers it.
+
+- Decisions, standing orders, investigation notes and conversion notes follow the same vault as the rest of the knowledge: the project's git vault, then the organization vault, then the project's automatic local vault. They no longer stay in the local folder when an organization vault exists.
+
+- The Releases page of the app moved to `/delivery/releases`, so a reload or a shared link reaches the app (the public release blog keeps `/releases` and `/releases/<version>`). `/releases` and `/deploys` still lead there inside the app.
+
 - A business workflow an owner turned off on a project stays off. The check at start and the install on a new project only add the workflows the project has never had (read from its event history); it no longer switches a disabled one back on.
 
 - A deploy of a repository that holds another as a git submodule (the cloud holds the core) builds again: the runner fills each submodule of the deploy checkout at its pinned commit, from this workstation's own clone of that repository when it has one (a missing commit is fetched into that clone first), and removes such a checkout afterwards without leaving a worktree entry. Before, the submodule folder stayed empty and the build failed.

@@ -1,6 +1,6 @@
 import type { MeResponse } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/ui.tsx';
@@ -132,6 +132,26 @@ describe('Vaults page: local vaults (project-graphs design section 3)', () => {
     renderVaults();
     expect(await screen.findByText('No vault yet')).toBeTruthy();
     expect(screen.getByTestId('vault-ask-admin').textContent).toBe('Ask an Owner or Admin to register one.');
+    expect(screen.queryByRole('button', { name: 'Register a vault' })).toBeNull();
+  });
+
+  it('offers to connect a git repository to the automatic local organization vault', async () => {
+    vaultList = [{ ...localVault, kind: 'org', projectId: null, name: 'Organization vault' }];
+    ownsProject = false;
+    renderVaults();
+    expect(await screen.findByText('local folder')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Register a vault' }));
+    const form = await screen.findByRole('form', { name: 'Register vault' });
+    expect(within(form).getByRole('option', { name: /Organization vault/ })).toBeTruthy();
+  });
+
+  it('does not offer a second organization vault once it is synced', async () => {
+    vaultList = [
+      { ...localVault, kind: 'org', projectId: null, storage: 'git', remoteUrl: 'git@x.test:a/b.git' },
+    ];
+    ownsProject = false;
+    renderVaults();
+    expect(await screen.findByText(/git@x.test:a\/b.git/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Register a vault' })).toBeNull();
   });
 });
