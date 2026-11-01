@@ -14,10 +14,10 @@ import { useOrg } from '../../api/queries/orgs.ts';
 import { packHireMessage, useHirePackTeam, usePackTeam } from '../../api/queries/pack-team.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
-import { seatAllowed, useBusinessMode } from '../../lib/orgMode.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { hireSkills, PackAgentSkills } from '../agents/PackAgentSkills.tsx';
 import { type Access, ProjectAccessEditor } from '../agents/ProjectAccess.tsx';
+import { SeatOptions } from '../agents/SeatOptions.tsx';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
 import {
@@ -72,8 +72,7 @@ export function HirePackTeamDialog({
   onClose: () => void;
 }) {
   const team = usePackTeam(packId);
-  const business = useBusinessMode();
-  const seatOf = (seat: PackSeat): PackSeat => (seatAllowed(seat, business) ? seat : OWN);
+  const seatOf = (seat: PackSeat): PackSeat => seat;
   const roles = useRoles();
   const stations = useWorkstations();
   const packs = usePacks();
@@ -424,13 +423,7 @@ export function HirePackTeamDialog({
                           value={r.seat}
                           onChange={(e) => patch(a.key, { seat: e.target.value as PackSeat, seniority: '' })}
                         >
-                          {(team.data?.seats ?? [])
-                            .filter((s) => seatAllowed(s.key, business))
-                            .map((s) => (
-                              <option key={s.key} value={s.key}>
-                                {s.name}
-                              </option>
-                            ))}
+                          <SeatOptions seats={team.data?.seats ?? []} />
                           <option value={OWN}>Own role</option>
                         </Select>
                       </div>

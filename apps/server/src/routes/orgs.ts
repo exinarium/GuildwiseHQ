@@ -7,6 +7,7 @@ import {
   PatchOrgMemberRequestSchema,
   PatchOrgRequestSchema,
   SetMemberProjectsRequestSchema,
+  SetMemberViewRequestSchema,
   SwitchOrgRequestSchema,
   TransferOwnershipRequestSchema,
 } from '@aom/shared';
@@ -29,6 +30,7 @@ import {
   revokeOrgInvitation,
   setDiagnosticsSharing,
   setMemberProjects,
+  setMemberView,
   setOrgMode,
   setRequireTwoFactor,
   transferOwnership,
@@ -74,7 +76,7 @@ export function orgRoutes(ctx: Ctx) {
         [a.org.owner_user_id],
       );
       return {
-        ...(await activeOrgDto(ctx, a.org, a.role)),
+        ...(await activeOrgDto(ctx, a.org, a.role, a.session.user.id)),
         owner: {
           id: owner?.id ?? a.org.owner_user_id,
           displayName: owner?.display_name ?? '',
@@ -100,7 +102,7 @@ export function orgRoutes(ctx: Ctx) {
         [fresh.org.owner_user_id],
       );
       return {
-        ...(await activeOrgDto(ctx, fresh.org, fresh.role)),
+        ...(await activeOrgDto(ctx, fresh.org, fresh.role, fresh.session.user.id)),
         owner: {
           id: owner?.id ?? fresh.org.owner_user_id,
           displayName: owner?.display_name ?? '',
@@ -108,6 +110,16 @@ export function orgRoutes(ctx: Ctx) {
         },
         createdAt: iso(fresh.org.created_at) as string,
       } satisfies OrgDetailResponse;
+    });
+
+    /**
+     * The member's own view (Software or Business) for this organization; `null` follows the organization default. Any
+     * member, any time, never refused. Presentation only: it appends the one preference event and changes nothing else.
+     */
+    app.put('/api/org/view', { schema: { body: SetMemberViewRequestSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req);
+      await setMemberView(ctx, a, req.body.view);
+      return buildMe(ctx, a.session, a.orgId);
     });
 
     app.get('/api/org/members', async (req) => {

@@ -25,6 +25,7 @@ import {
   Badge,
   Button,
   Dialog,
+  Disclosure,
   EmptyState,
   ErrorBox,
   ListSkeleton,
@@ -35,7 +36,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 
 const TYPE_ICON = { code: Code2, research: FlaskConical, feed: Rss } as const;
@@ -320,18 +321,24 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [keyTouched, setKeyTouched] = useState(false);
   const [picked, setWorkflowKey] = useState('code');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const business = useBusinessMode();
+  const business = useBusinessView();
   // `code-bugfix` runs only the bug cards a failed test files under a code card: never a project's workflow.
-  // A Business mode organization has no repositories, so it is never offered a repository workflow.
-  const keys = [
+  // Every workflow is offered in every view. The Business view leads with the ones that need no repository and puts the
+  // code workflows under "More project types".
+  const allKeys = [
     ...new Set(
-      workflows.data
-        ?.filter((w) => !(business && workflowUsesRepos(w.definition)))
-        .map((w) => w.definition.key)
-        .filter((k) => !NOT_A_PROJECT_WORKFLOW.includes(k)) ?? (business ? [] : ['code']),
+      workflows.data?.map((w) => w.definition.key).filter((k) => !NOT_A_PROJECT_WORKFLOW.includes(k)) ?? [
+        'code',
+      ],
     ),
   ];
-  const workflowKey = business && !keys.includes(picked) ? (keys[0] ?? '') : picked;
+  const usesRepo = (k: string) => {
+    const d = workflows.data?.find((w) => w.definition.key === k)?.definition;
+    return d ? workflowUsesRepos(d) : k === 'code';
+  };
+  const keys = business ? allKeys.filter((k) => !usesRepo(k)) : allKeys;
+  const moreKeys = business ? allKeys.filter((k) => usesRepo(k)) : [];
+  const workflowKey = business && picked === 'code' && keys.length ? (keys[0] ?? picked) : picked;
   const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
   const noRepo = selected ? !workflowUsesRepos(selected) : false;
   const nameOf = (k: string) => workflows.data?.find((w) => w.definition.key === k)?.definition.name ?? k;
@@ -372,6 +379,36 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     });
   };
 
+  const renderWf = (k: string) => {
+    const b = WORKFLOW_BLURB[k];
+    const Icon = b?.icon ?? FolderKanban;
+    return (
+      <label
+        key={k}
+        className={cx(
+          'flex cursor-pointer items-start gap-3 rounded-card border p-3 transition-colors',
+          workflowKey === k ? 'border-brand bg-brand-soft' : 'border-control hover:bg-sunken',
+        )}
+      >
+        <input
+          type="radio"
+          name="workflow"
+          value={k}
+          checked={workflowKey === k}
+          onChange={() => setWorkflowKey(k)}
+          className="mt-1 size-4"
+        />
+        <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-medium text-fg">{b?.title ?? nameOf(k)}</span>
+          <span className="block text-sm text-muted">
+            {t.reword(b?.text ?? 'A custom workflow of your organization.')}
+          </span>
+        </span>
+      </label>
+    );
+  };
+
   return (
     <Dialog
       open={open}
@@ -379,7 +416,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       title="New project"
       description={
         business
-          ? 'A project owns a board and agents.'
+          ? 'A project owns a board and agents. Software projects, with repositories, are under More project types.'
           : 'A project owns a board and agents. Code projects also own repositories.'
       }
     >
@@ -398,35 +435,16 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         />
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1.5 text-sm font-medium text-fg">Workflow</legend>
-          {keys.map((k) => {
-            const b = WORKFLOW_BLURB[k];
-            const Icon = b?.icon ?? FolderKanban;
-            return (
-              <label
-                key={k}
-                className={cx(
-                  'flex cursor-pointer items-start gap-3 rounded-card border p-3 transition-colors',
-                  workflowKey === k ? 'border-brand bg-brand-soft' : 'border-control hover:bg-sunken',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="workflow"
-                  value={k}
-                  checked={workflowKey === k}
-                  onChange={() => setWorkflowKey(k)}
-                  className="mt-1 size-4"
-                />
-                <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-base font-medium text-fg">{b?.title ?? nameOf(k)}</span>
-                  <span className="block text-sm text-muted">
-                    {t.reword(b?.text ?? 'A custom workflow of your organization.')}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
+          {keys.map(renderWf)}
+          {moreKeys.length > 0 && (
+            <Disclosure
+              summary="More project types"
+              data-testid="more-project-types"
+              defaultOpen={moreKeys.includes(workflowKey)}
+            >
+              <div className="flex flex-col gap-2">{moreKeys.map(renderWf)}</div>
+            </Disclosure>
+          )}
         </fieldset>
         <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
           {noRepo || business

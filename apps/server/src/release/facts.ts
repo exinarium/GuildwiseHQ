@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
-  isBusinessOrg,
   isResearchStage,
   RELEASE_FACTS_CAPABILITY,
-  RepoReleaseFactsResultSchema,
   type ReleaseFacts,
   ReleaseFactsSchema,
+  RepoReleaseFactsResultSchema,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
@@ -44,8 +43,9 @@ export async function requestReleaseFacts(
   const head: string | null = repo.working_branch ?? repo.project_branch ?? null;
   if (!head || (repo.main_branch && repo.main_branch === head) || isResearchStage(repo.workflow_key))
     return { queued: false, reason: 'skipped' };
-  const org = await one(ctx.pool, 'SELECT mode, simulation FROM organizations WHERE id=$1', [repo.org_id]);
-  if (isBusinessOrg(org) || org?.simulation) return { queued: false, reason: 'skipped' };
+  // Release facts follow the repository, never the view: a project with a repository gets them.
+  const org = await one(ctx.pool, 'SELECT simulation FROM organizations WHERE id=$1', [repo.org_id]);
+  if (org?.simulation) return { queued: false, reason: 'skipped' };
 
   const prior = await one(
     ctx.pool,
@@ -78,7 +78,9 @@ export async function requestReleaseFacts(
           [repoId, opts.userId ?? null, RELEASE_FACTS_CAPABILITY],
         );
   if (!ws) {
-    const anyClone = await one(ctx.pool, 'SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [repoId]);
+    const anyClone = await one(ctx.pool, 'SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [
+      repoId,
+    ]);
     return { queued: false, reason: anyClone ? 'old_runner' : 'no_clone' };
   }
 
@@ -157,7 +159,13 @@ export async function applyReleaseFactsResult(
 export async function loadFacts(
   db: Queryable,
   repoId: string,
-): Promise<{ facts: ReleaseFacts | null; state: 'pending' | 'ready' | 'failed'; message: string | null; at: Date | null; headSha: string | null } | null> {
+): Promise<{
+  facts: ReleaseFacts | null;
+  state: 'pending' | 'ready' | 'failed';
+  message: string | null;
+  at: Date | null;
+  headSha: string | null;
+} | null> {
   const r = await one(db, 'SELECT * FROM repo_release_facts WHERE project_repo_id=$1', [repoId]);
   if (!r) return null;
   const parsed = r.facts ? ReleaseFactsSchema.safeParse(r.facts) : null;

@@ -2,7 +2,6 @@ import {
   LEGACY_CODE_V6_KEY,
   OrgContextQuerySchema,
   RoleDefinitionSchema,
-  roleListedInMode,
   WorkflowDefinitionSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -13,7 +12,6 @@ import { subworkflowTargets } from '../catalogue/subworkflow-lookup.ts';
 import { catalogueOrg } from '../commands/designer.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
-import { orgModeOf } from '../orgs/mode.ts';
 import { typed } from './util.ts';
 
 export function catalogueRoutes(ctx: Ctx) {
@@ -40,12 +38,9 @@ export function catalogueRoutes(ctx: Ctx) {
           ORDER BY r.org_id NULLS FIRST, r.key, r.version DESC`,
         [orgId],
       );
-      const mode = await orgModeOf(ctx.pool, orgId);
+      // Every role is offered to every organization; the view only changes how the web groups them.
       return {
         roles: list
-          .filter(
-            (r) => r.org_id !== null || roleListedInMode(RoleDefinitionSchema.parse(r.definition).key, mode),
-          )
           .map((r) => ({
             definition: RoleDefinitionSchema.parse(r.definition),
             orgId: r.org_id,

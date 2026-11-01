@@ -15,13 +15,10 @@ import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { type Tx, withAppendTx, withTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
-import { assertBusinessOrg } from '../orgs/mode.ts';
 import { orgScope, userActor } from './common.ts';
 import { addLedgerEntryTx, liveOrdersFor } from './ledger.ts';
 import { findContradictions, findNearDuplicate } from './ledger-checks.ts';
 import { retireLedgerEntryTx } from './ledger-retire.ts';
-
-export const RULE_PACKS_BUSINESS_ONLY = 'Rule packs are available in business organizations.';
 
 const pack = (packId: string): RulePack => {
   const p = rulePackById(packId);
@@ -83,7 +80,6 @@ export async function listRulePacks(
   orgId: string,
 ): Promise<RulePackSummary[]> {
   return withTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, orgId, RULE_PACKS_BUSINESS_ONLY);
     await assertMember(tx, user, orgId);
     const installed = await installedPackIds(tx, orgId);
     return RULE_PACKS.map((p) => summary(p, installed.has(p.id)));
@@ -98,7 +94,6 @@ export async function previewRulePack(
   packId: string,
 ): Promise<RulePackPreview> {
   return withTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, orgId, RULE_PACKS_BUSINESS_ONLY);
     await assertMember(tx, user, orgId);
     const p = pack(packId);
     const linked = new Map((await linkedRows(tx, orgId, p.id)).map((l) => [l.rule_pack_rule_id, l]));
@@ -142,7 +137,6 @@ export async function installRulePack(
   packId: string,
 ): Promise<RulePackInstallResult> {
   return withAppendTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, orgId, RULE_PACKS_BUSINESS_ONLY);
     await assertManager(tx, user, orgId);
     const p = pack(packId);
     const existing = await linkedRows(tx, orgId, p.id);
@@ -202,7 +196,6 @@ export async function removeRulePack(
   packId: string,
 ): Promise<RulePackRemoveResult> {
   return withAppendTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, orgId, RULE_PACKS_BUSINESS_ONLY);
     await assertManager(tx, user, orgId);
     const p = pack(packId);
     const retired: string[] = [];

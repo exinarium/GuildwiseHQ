@@ -145,13 +145,18 @@ export const ACTION_TILES: Array<{
 export const DEV_ONLY_ACTION_TILES: readonly ActionTile[] = ['devops_request', 'regression_run'];
 
 /**
- * The action tiles the wizard offers. A Business mode organization does not get the developer actions,
- * except `keep`: the action of an existing automation being edited stays as it is.
+ * The action tiles the wizard offers. Every action is available in every view: the Business view tucks the developer
+ * actions under "More actions" (`more`), and never removes them.
  */
-export const actionTilesFor = (business: boolean, keep?: ActionTile): typeof ACTION_TILES =>
+export const actionTilesFor = (
+  business: boolean,
+): { main: typeof ACTION_TILES; more: typeof ACTION_TILES } =>
   business
-    ? ACTION_TILES.filter((t) => t.id === keep || !DEV_ONLY_ACTION_TILES.includes(t.id))
-    : ACTION_TILES;
+    ? {
+        main: ACTION_TILES.filter((t) => !DEV_ONLY_ACTION_TILES.includes(t.id)),
+        more: ACTION_TILES.filter((t) => DEV_ONLY_ACTION_TILES.includes(t.id)),
+      }
+    : { main: ACTION_TILES, more: [] };
 
 export const actionTileOf = (a: ScheduleAction): ActionTile => {
   if (a.kind !== 'integration') return a.kind;

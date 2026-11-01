@@ -1,5 +1,4 @@
 import {
-  isBusinessOrg,
   type MeResponse,
   type RelayIntegrationCreate,
   RelayIntegrationDtoSchema,
@@ -23,7 +22,7 @@ export const RELAY_OFFLINE_POLL_MS = 5000;
 
 /**
  * The org's inbound webhooks merged with their live status (metadata only: never a URL token, never content).
- * Both endpoints answer 403 outside Business mode, so keep it disabled there.
+ * Both endpoints work in every organization.
  */
 export function useRelayIntegrations(enabled = true) {
   return useQuery({
@@ -72,6 +71,6 @@ export function useRevokeRelayIntegration() {
 
 /** The "runner offline, messages waiting at the provider" notice for the shell, or null. */
 export function useRelayOfflineNotice(org: MeResponse['activeOrg'] | null | undefined) {
-  const q = useRelayIntegrations(!!org && isBusinessOrg(org));
+  const q = useRelayIntegrations(!!org);
   return useMemo(() => relayOfflineNotice(q.data), [q.data]);
 }

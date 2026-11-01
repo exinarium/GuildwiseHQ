@@ -15,7 +15,6 @@ import {
   type PackTeamResponse,
   RoleDefinitionSchema,
   roleForPackAgent,
-  roleOfferedInMode,
   runnerAtLeast,
   type Seniority,
   streamId,
@@ -225,9 +224,11 @@ export async function packTeam(ctx: Ctx, who: Who, packId: string): Promise<Pack
     packId,
     packName: p.name,
     trusted,
-    seats: [...PACK_SEAT_KEYS, ...BUSINESS_SEAT_KEYS]
-      .filter((key) => roleOfferedInMode(key, orgMode))
-      .map((key) => ({ key, name: SEAT_NAMES.get(key) ?? key })),
+    // Every seat is offered to every organization.
+    seats: [...PACK_SEAT_KEYS, ...BUSINESS_SEAT_KEYS].map((key) => ({
+      key,
+      name: SEAT_NAMES.get(key) ?? key,
+    })),
     agents,
     skills: show
       ? skillItems

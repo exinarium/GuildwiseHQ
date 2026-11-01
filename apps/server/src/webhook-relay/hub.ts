@@ -1,5 +1,4 @@
 import {
-  isBusinessOrg,
   isOrgOperational,
   RELAY_RESPONSE_HEADERS,
   type RelayKind,
@@ -95,7 +94,7 @@ export class RelayHub {
       if (!r) refused.push({ integrationId: it.integrationId, reason: 'unknown' });
       else if (r.status !== 'active') refused.push({ integrationId: it.integrationId, reason: 'revoked' });
       else if (r.kind !== it.kind) refused.push({ integrationId: it.integrationId, reason: 'kind_mismatch' });
-      else if (!isBusinessOrg(r) || !isOrgOperational(r.org_status))
+      else if (!isOrgOperational(r.org_status))
         refused.push({ integrationId: it.integrationId, reason: 'not_business' });
       else {
         const m = await one(

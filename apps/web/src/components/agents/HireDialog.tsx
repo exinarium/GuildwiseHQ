@@ -2,10 +2,10 @@ import {
   type AgentDraftDto,
   BUSINESS_ROLE_KEYS,
   backendDef,
-  isDevOnlyRoleKey,
   modelChoicesFor,
   NAME_THEMES,
   type RoleDefinition,
+  roleGroupInView,
   runtimeRoleProblem,
   splitBackendModel,
 } from '@aom/shared';
@@ -16,7 +16,7 @@ import { useMe } from '../../api/queries/auth.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { getLastProjectKey } from '../../lib/lastProject.ts';
-import { useBusinessMode } from '../../lib/orgMode.ts';
+import { useBusinessView } from '../../lib/orgMode.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../../lib/sandbox.ts';
 import { unionExtras } from '../ModelSelect.tsx';
 import { SandboxWarning } from '../SandboxWarning.tsx';
@@ -86,15 +86,12 @@ export function HireDialog({
     setSkills(draft.skills.join(', '));
   }, [draft]);
 
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const hireable = useMemo(
     // The CEO is appointed on the CEO page, never hired here.
     () => {
       const list = (roles.data ?? []).filter(
-        (r) =>
-          r.definition.key !== 'devops' &&
-          r.definition.key !== 'ceo' &&
-          !(business && isDevOnlyRoleKey(r.definition.key)),
+        (r) => r.definition.key !== 'devops' && r.definition.key !== 'ceo',
       );
       // a business organization lists the business roles first, in the research table's order
       if (!business) return list;
@@ -106,6 +103,10 @@ export function HireDialog({
     },
     [roles.data, business],
   );
+  // Every role is hireable in every view; the roles of the other view sit under "More".
+  const view = business ? 'business' : 'dev';
+  const mainRoles = hireable.filter((r) => roleGroupInView(r.definition.key, view) === 'main');
+  const moreRoles = hireable.filter((r) => roleGroupInView(r.definition.key, view) === 'more');
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');
   const effectiveRoleKey = hireable.some((r) => r.definition.key === roleKey)
     ? roleKey
@@ -257,11 +258,20 @@ export function HireDialog({
               error={errors.role}
               hint={role?.department ? `Department: ${role.department}` : undefined}
             >
-              {hireable.map((r) => (
+              {mainRoles.map((r) => (
                 <option key={r.definition.key} value={r.definition.key}>
                   {r.definition.name}
                 </option>
               ))}
+              {moreRoles.length > 0 && (
+                <optgroup label="More">
+                  {moreRoles.map((r) => (
+                    <option key={r.definition.key} value={r.definition.key}>
+                      {r.definition.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </Select>
           )}
           <div className="grid gap-3 sm:grid-cols-2">

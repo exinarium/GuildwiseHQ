@@ -5,7 +5,6 @@ import { useState } from 'react';
 import { useMe } from '../../api/queries/auth.ts';
 import { useBriefPlaybooks } from '../../api/queries/briefPlaybooks.ts';
 import { useDeleteSchedule, useRunSchedule, useTestSchedule } from '../../api/queries/schedules.ts';
-import { useBusinessMode } from '../../lib/orgMode.ts';
 import { describeTrigger } from '../../lib/schedules.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ConfirmDialog, Panel, useToast } from '../ui.tsx';
@@ -14,7 +13,7 @@ import { BriefPlaybookDialog } from './BriefPlaybookDialog.tsx';
 const roleName = (key: string) => BUSINESS_ROLES.find((r) => r.key === key)?.name ?? key;
 
 /**
- * Ready-made Brief playbooks (Morning plan, Weekly owner brief) at the top of Automations: a business organization's
+ * Ready-made Brief playbooks (Morning plan, Weekly owner brief) at the top of Automations: every organization's
  * Owner and Admins install one with their destinations, edit it, run it now, send a test or remove it.
  */
 export function BriefPlaybooks({
@@ -24,10 +23,9 @@ export function BriefPlaybooks({
   schedules: ScheduleDto[];
   onSecret: (v: { name: string; value: string }) => void;
 }) {
-  const business = useBusinessMode();
   const role = useMe().data?.activeOrg?.role;
   const manager = role === 'owner' || role === 'admin';
-  const show = business && manager;
+  const show = manager;
   const list = useBriefPlaybooks(show);
   const [open, setOpen] = useState<BriefPlaybookDto | null>(null);
   if (!show || !list.data) return null;

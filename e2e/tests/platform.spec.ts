@@ -113,7 +113,7 @@ test('invites a new organization, the invitee starts it, and the platform suspen
   await ownerCtx.close();
 });
 
-test('an invitee starts a Business mode organization: no delivery surfaces, direct URLs blocked, the server refuses dev actions', async ({
+test('an invitee starts an organization with the Business view as default: delivery surfaces tucked away, the server refuses nothing', async ({
   page,
   browser,
 }) => {
@@ -139,9 +139,9 @@ test('an invitee starts a Business mode organization: no delivery surfaces, dire
   const op = await ctx.newPage();
   await op.goto(link as string);
   await expect(op.getByRole('heading', { name: /Start your organization/ })).toBeVisible();
-  // Developer is the default; the invitee picks Business
+  // The Software view is the default; the invitee picks Business as the organization default
   await expect(op.getByTestId('org-mode-dev')).toBeChecked();
-  await op.getByTestId('org-mode-business').check();
+  await op.getByTestId('org-mode-business').click();
   await op.getByLabel('Your name').fill(BIZORG.name);
   await op.getByLabel('Password', { exact: true }).fill(BIZORG.password);
   await op.getByLabel('Confirm password').fill(BIZORG.password);
@@ -157,27 +157,22 @@ test('an invitee starts a Business mode organization: no delivery surfaces, dire
   );
   expect(created?.payload.mode).toBe('business');
 
-  // no Releases nav entry, no Ask DevOps button; direct URLs show "not available"
+  // no Releases nav entry; Ask for technical help stays; direct URLs show a gentle note, not "not available"
   await expect(op.getByTestId('nav-releases')).toHaveCount(0);
-  await expect(op.getByTestId('ask-devops-button')).toHaveCount(0);
-  // `/releases` is also a public page of the server (the blog's release pages, f40b15a9), so a full page load of it never
-  // reaches the app: open it as a link inside the app does (client-side route change). `/deploys` redirects there inside the app.
-  await op.evaluate(() => {
-    history.pushState({}, '', '/releases');
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  });
-  await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
-  await op.goto('/deploys');
-  await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
+  await expect(op.getByTestId('ask-devops-button')).toBeVisible();
+  for (const url of ['/releases', '/deploys']) {
+    await op.goto(url);
+    await expect(op.getByTestId('not-available-business')).toContainText(
+      'Switch to Software view to see this',
+    );
+  }
 
-  // the server refuses a pack by git URL with a readable 409 (hires and repositories: business-mode spec)
+  // the server refuses nothing because of the view: a pack by git URL gets past the view (it may fail on the URL
+  // itself, never with the retired `business_mode` code); hires and repositories: business-mode spec
   const pack = await op.request.post('/api/packs', {
     headers: { origin: BASE_URL },
     data: { url: 'https://github.com/acme/skills.git', ref: 'v1' },
   });
-  expect(pack.status(), await pack.text()).toBe(409);
-  const body = await pack.json();
-  expect(body.error.code).toBe('business_mode');
-  expect(body.error.message).toMatch(/git URL/);
+  expect((await pack.json().catch(() => ({})))?.error?.code).not.toBe('business_mode');
   await ctx.close();
 });

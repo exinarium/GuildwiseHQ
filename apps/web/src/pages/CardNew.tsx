@@ -31,7 +31,7 @@ import {
 } from '../components/ui.tsx';
 import { buildCardRequest, type CardFormValues, emptyForm, FIND_REPO, fieldLabel } from '../lib/cardForm.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 
 export function CardNew() {
   const [params] = useSearchParams();
@@ -45,7 +45,7 @@ export function CardNew() {
   const detail = useProject(project?.id);
   const enabledWorkflows = useProjectWorkflows(project?.id);
   const mockUi = useMe().data?.features?.mockUi ?? false;
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const workflow = useMemo(
     () =>
       workflows.data
@@ -162,7 +162,7 @@ export function CardNewForm({
   repos: Array<{ id: string; name: string }>;
   /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
   mockUi?: boolean;
-  /** The organization works in Business mode: only the business card types are offered. */
+  /** The Business view is in effect: the business card types lead, the code types sit under "More types". */
   business?: boolean;
   /** The project's "Investigate & design before build" setting. */
   designDefault?: boolean;
@@ -174,14 +174,18 @@ export function CardNewForm({
   const nav = useNavigate();
   const create = useCreateCard();
   const toast = useToast();
-  // A business organization offers the business card types only; a developer one never offers them.
-  const cardTypes = [
+  // Every card type is offered in every view. The view decides which lead: the Business view leads with the business
+  // types and puts the code types under "More types"; the Software view does the reverse.
+  const allTypes = [
     ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
   ]
-    .filter((t) => isBusinessCardType(t) === business)
     // The business types keep their own order (Enquiry first): the workflows arrive in the order they were enabled,
     // which for the six enabled together is alphabetical by workflow key.
     .sort((x, y) => businessTypeRank(x) - businessTypeRank(y));
+  const mainTypes = allTypes.filter((t) => isBusinessCardType(t) === business);
+  const moreTypes = allTypes.filter((t) => isBusinessCardType(t) !== business);
+  const cardTypes = [...mainTypes, ...moreTypes];
+  const [typePicked, setTypePicked] = useState(!!initialType);
   const [v, setV] = useState<CardFormValues>(() =>
     emptyForm(
       initialType && cardTypes.includes(initialType)
@@ -189,12 +193,14 @@ export function CardNewForm({
         : (cardTypes[0] ?? projectWorkflow.cardTypes[0] ?? ''),
     ),
   );
-  // Business mode: when the offered types change (workflows loaded late) and the chosen one is no longer offered, move to the first.
+  // When the offered types change (workflows loaded late) and the chosen one is no longer offered, move to the first.
   // biome-ignore lint/correctness/useExhaustiveDependencies: follows the offered types by value, not by array identity
   useEffect(() => {
-    if (business && cardTypes.length && !cardTypes.includes(v.cardType))
-      setV(emptyForm(cardTypes[0] as string));
-  }, [business, cardTypes.join('|'), v.cardType]);
+    if (cardTypes.length && !cardTypes.includes(v.cardType)) setV(emptyForm(cardTypes[0] as string));
+    // a type that was only the first guess follows the view's lead types as they load; a type the person picked stays
+    else if (!typePicked && mainTypes.length && !mainTypes.includes(v.cardType))
+      setV(emptyForm(mainTypes[0] as string));
+  }, [business, cardTypes.join('|'), mainTypes.join('|'), v.cardType, typePicked]);
   const [picked, setPicked] = useState<{ type: string; key: string } | null>(null);
   // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
   // When the project enabled more than one workflow for the type, the default (or the user's pick) decides.
@@ -294,14 +300,26 @@ export function CardNewForm({
               <Select
                 label="Card type"
                 value={v.cardType}
-                onChange={(e) => setV({ ...v, cardType: e.target.value })}
+                onChange={(e) => {
+                  setTypePicked(true);
+                  setV({ ...v, cardType: e.target.value });
+                }}
                 error={errors.cardType}
               >
-                {cardTypes.map((t) => (
+                {mainTypes.map((t) => (
                   <option key={t} value={t}>
                     {BUSINESS_CARD_TYPE_LABELS[t as BusinessCardType] ?? t}
                   </option>
                 ))}
+                {moreTypes.length > 0 && (
+                  <optgroup label="More types">
+                    {moreTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {BUSINESS_CARD_TYPE_LABELS[t as BusinessCardType] ?? t}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </Select>
             </div>
             {chooseWorkflow && (

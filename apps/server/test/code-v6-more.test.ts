@@ -87,9 +87,13 @@ describe('code v6 follows automatically, like v3 to v5: new cards take it, cards
     // the project's detail says new cards are lean team; nothing was enabled next to its own workflow
     const detail = await call('GET', `/api/projects/${w.projectId}`);
     expect(detail.project).toMatchObject({ workflowKey: 'code', leanTeam: true });
-    expect(await q(`SELECT workflow_key FROM project_workflows WHERE project_id=$1`, [w.projectId])).toEqual([
-      { workflow_key: 'code' },
-    ]);
+    // the shipped business workflows are enabled next to it in every project
+    expect(
+      await q(
+        `SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND workflow_key NOT LIKE 'business-%'`,
+        [w.projectId],
+      ),
+    ).toEqual([{ workflow_key: 'code' }]);
 
     const fresh = await w.card({ title: 'After the release' });
     expect(fresh).toMatchObject({

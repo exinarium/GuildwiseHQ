@@ -37,6 +37,8 @@ export interface PaletteContext {
   projects: Array<{ id: string; key: string; name: string }>;
   projectKey: string | null;
   onChat: () => void;
+  /** The words of the Ask DevOps entry in the current view. */
+  askDevOpsLabel?: string;
   /** Opens the Ask DevOps dialog with the current page attached. */
   onAskDevOps?: () => void;
   onHelp: () => void;
@@ -170,7 +172,7 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
               icon={Wrench}
               onSelect={run(() => ctx.onAskDevOps?.())}
             >
-              Ask DevOps...
+              {ctx.askDevOpsLabel ?? 'Ask DevOps'}...
             </Item>
           )}
           <Item

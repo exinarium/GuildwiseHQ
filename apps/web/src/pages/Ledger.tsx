@@ -28,7 +28,6 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
-import { useBusinessMode } from '../lib/orgMode.ts';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { formatCalendarDate, formatDateTime } from '../lib/time.ts';
@@ -244,7 +243,6 @@ function History({ id }: { id: string }) {
 
 function Entry({ e }: { e: LedgerEntry }) {
   const t = useOrgTerms();
-  const business = useBusinessMode();
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState(false);
   const [history, setHistory] = useState(false);
@@ -272,10 +270,8 @@ function Entry({ e }: { e: LedgerEntry }) {
         <Badge tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}>
           {scopeLabel(e.scope, t.reword)}
         </Badge>
-        {business && e.scope === 'standing_order' && (
-          <EnforcedByBadge value={e.enforcedBy ?? 'agent_instruction'} />
-        )}
-        {business && e.rulePack && <span data-testid="ledger-rule-pack">from {e.rulePack.name}</span>}
+        {e.scope === 'standing_order' && <EnforcedByBadge value={e.enforcedBy ?? 'agent_instruction'} />}
+        {e.rulePack && <span data-testid="ledger-rule-pack">from {e.rulePack.name}</span>}
         {e.projectKey ? <span className="font-mono">{e.projectKey}</span> : <span>every project</span>}
         {e.cardRef && (
           <Link to={`/cards/${e.cardRef}`} className="font-mono text-brand-text hover:underline">
@@ -420,7 +416,6 @@ export function Ledger() {
   const [scope, setScope] = useState<(typeof SCOPES)[number]['value']>('all');
   const [projectId, setProjectId] = useState('');
   const [adding, setAdding] = useState(false);
-  const business = useBusinessMode();
   const [packs, setPacks] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
   const [dueOnly, setDueOnly] = useState(false);
@@ -440,11 +435,11 @@ export function Ledger() {
         sub={t.reword('Requirements, decisions and standing orders agents rely on')}
         actions={
           <>
-            {business && (
+            {
               <Button variant="secondary" onClick={() => setPacks(true)}>
                 Rule packs
               </Button>
-            )}
+            }
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add entry
             </Button>
@@ -548,7 +543,7 @@ export function Ledger() {
       >
         <LedgerForm onDone={() => setAdding(false)} />
       </Dialog>
-      {business && <RulePacksDialog open={packs} onOpenChange={setPacks} />}
+      {<RulePacksDialog open={packs} onOpenChange={setPacks} />}
     </div>
   );
 }

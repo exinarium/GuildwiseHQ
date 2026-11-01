@@ -1,5 +1,5 @@
 import { COMPLETION_ACTION_LABELS, isSafePrBranchPrefix } from '@aom/shared';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { Navigate, useLocation, useParams } from 'react-router';
 import { usePatchProject, useProject, useProjects, useRemoveRepo } from '../api/queries/projects.ts';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
@@ -26,9 +26,9 @@ import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoComponentRulesControl } from '../components/RepoComponentRulesControl.tsx';
-import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
+import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { Reword } from '../components/Reword.tsx';
@@ -39,6 +39,7 @@ import {
   Button,
   Callout,
   ConfirmDialog,
+  Disclosure,
   ErrorBox,
   PageHeader,
   PageSkeleton,
@@ -51,7 +52,7 @@ import {
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
@@ -80,9 +81,9 @@ export function ProjectSettings() {
   const projectList = useProjects();
   const projectKey = projectList.data?.find((p) => p.id === id)?.key ?? project?.key;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
-  const business = useBusinessMode();
-  // The repository, branch, environment and merge sections: none of them in a Business mode organization.
-  const repoUi = traits.usesRepos && !business;
+  const business = useBusinessView();
+  // The repository, branch, environment and merge sections show whenever the project uses repositories, in every view.
+  const repoUi = traits.usesRepos;
   const canConvert = useCanConvert(project);
 
   useEffect(() => {
@@ -127,7 +128,7 @@ export function ProjectSettings() {
     patch.mutate(
       {
         name: name.trim(),
-        ...(expert && !business ? { workingBranch: branch.trim() } : {}),
+        ...(expert ? { workingBranch: branch.trim() } : {}),
         ...(repoUi
           ? {
               defaultCompletion: landing,
@@ -145,7 +146,7 @@ export function ProjectSettings() {
     { id: 'general', label: 'Basics' },
     { id: 'stage', label: 'Stage' },
     ...(project && traits.usesRepos ? [{ id: 'workflows', label: 'Workflows' }] : []),
-    ...(repoUi || (!business && activeRepos.length > 0) ? [{ id: 'repos', label: 'Repos' }] : []),
+    ...(repoUi || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
     ...(project && repoUi
       ? [
           { id: 'phase-list', label: 'Phases' },
@@ -200,7 +201,7 @@ export function ProjectSettings() {
           settingsTo={`/projects/${id}/settings#budget`}
         />
       )}
-      {!traits.usesRepos && !business && (
+      {!traits.usesRepos && (
         <Callout tone="info">
           <Reword>{`This is a ${project?.workflowKey} project: it needs no repository, and results go to its vault folder. Convert it to a delivery project to add repositories.`}</Reword>
         </Callout>
@@ -209,7 +210,7 @@ export function ProjectSettings() {
         <Panel title="General">
           <form onSubmit={save} className="flex flex-col gap-4" aria-label="Project settings">
             <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-            {expert && !business && (
+            {expert && (
               <TextInput
                 label="Working branch"
                 hint="The project's default working branch. Each repository can have its own below; a branch that does not exist is created from the main branch."
@@ -271,7 +272,7 @@ export function ProjectSettings() {
                 onChange={(e) => setArch(e.target.value)}
               />
             )}
-            {traits.hasTestStage && !business && (
+            {traits.hasTestStage && (
               <TextArea
                 label="E2E globs"
                 hint="One glob per line"
@@ -296,80 +297,82 @@ export function ProjectSettings() {
           <ProjectWorkflows projectId={id} projectKey={project.key} />
         </div>
       )}
-      {(repoUi || (!business && activeRepos.length > 0)) && (
+      {(repoUi || activeRepos.length > 0) && (
         <div id="repos" className="scroll-mt-20">
-          <Panel title="Repositories">
-            {!traits.usesRepos && (
-              <p className="mb-3 text-sm text-muted">
-                This workflow needs no repository. Existing ones are listed so you can remove them.
-              </p>
-            )}
-            <ul className="mb-4 flex flex-col divide-y divide-line" data-testid="repos">
-              {activeRepos.map((r) => (
-                <li key={r.id} className="flex flex-col py-3 text-sm first:pt-0">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="min-w-0">
-                      <span className="block text-base font-medium text-fg">{r.name}</span>
-                      <span className="block font-mono text-xs break-all text-subtle">{r.remoteUrl}</span>
-                    </span>
-                    <Button
-                      variant="danger-ghost"
-                      size="sm"
-                      aria-label={`Remove repository ${r.name}`}
-                      onClick={() => setRemoving({ id: r.id, name: r.name })}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  {traits.usesRepos && (
-                    <RepoProviderControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
-                  )}
-                  {traits.usesRepos && (
-                    <RepoAccessControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
-                  )}
-                  {traits.usesRepos && (
-                    <RepoProjectPathControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
-                  )}
-                  {traits.usesRepos && (
-                    <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
-                  )}
-                  {traits.usesRepos && (
-                    <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
-                  )}
-                  {traits.usesRepos && expert && (
-                    <RepoComponentRulesControl
-                      projectId={id}
-                      repo={r}
-                      isOwner={project?.myRole === 'owner'}
-                    />
-                  )}
-                  {traits.usesRepos && expert && (
-                    <RepoReleaseNameControl
-                      projectId={id}
-                      repo={r}
-                      isOwner={project?.myRole === 'owner'}
-                      projectName={project?.name ?? ''}
-                    />
-                  )}
-                  {traits.usesRepos &&
-                    (r.syncs ?? []).map((sy) => (
-                      <RepoSyncLine
-                        key={sy.workstationId}
-                        sync={sy}
-                        workstationId={sy.workstationId}
-                        repoId={r.id}
-                        canSync={sy.canSync}
-                        where={(r.syncs ?? []).length > 1 ? sy.workstationName : undefined}
-                      />
-                    ))}
-                </li>
-              ))}
-              {activeRepos.length === 0 && (
-                <li className="text-sm text-subtle">No repositories yet. Add the first one below.</li>
+          <RepoFold fold={business}>
+            <Panel title="Repositories">
+              {!traits.usesRepos && (
+                <p className="mb-3 text-sm text-muted">
+                  This workflow needs no repository. Existing ones are listed so you can remove them.
+                </p>
               )}
-            </ul>
-            {traits.usesRepos && <AddRepoForm projectId={id} />}
-          </Panel>
+              <ul className="mb-4 flex flex-col divide-y divide-line" data-testid="repos">
+                {activeRepos.map((r) => (
+                  <li key={r.id} className="flex flex-col py-3 text-sm first:pt-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block text-base font-medium text-fg">{r.name}</span>
+                        <span className="block font-mono text-xs break-all text-subtle">{r.remoteUrl}</span>
+                      </span>
+                      <Button
+                        variant="danger-ghost"
+                        size="sm"
+                        aria-label={`Remove repository ${r.name}`}
+                        onClick={() => setRemoving({ id: r.id, name: r.name })}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    {traits.usesRepos && (
+                      <RepoProviderControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && (
+                      <RepoAccessControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && (
+                      <RepoProjectPathControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && (
+                      <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && (
+                      <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && expert && (
+                      <RepoComponentRulesControl
+                        projectId={id}
+                        repo={r}
+                        isOwner={project?.myRole === 'owner'}
+                      />
+                    )}
+                    {traits.usesRepos && expert && (
+                      <RepoReleaseNameControl
+                        projectId={id}
+                        repo={r}
+                        isOwner={project?.myRole === 'owner'}
+                        projectName={project?.name ?? ''}
+                      />
+                    )}
+                    {traits.usesRepos &&
+                      (r.syncs ?? []).map((sy) => (
+                        <RepoSyncLine
+                          key={sy.workstationId}
+                          sync={sy}
+                          workstationId={sy.workstationId}
+                          repoId={r.id}
+                          canSync={sy.canSync}
+                          where={(r.syncs ?? []).length > 1 ? sy.workstationName : undefined}
+                        />
+                      ))}
+                  </li>
+                ))}
+                {activeRepos.length === 0 && (
+                  <li className="text-sm text-subtle">No repositories yet. Add the first one below.</li>
+                )}
+              </ul>
+              {traits.usesRepos && <AddRepoForm projectId={id} />}
+            </Panel>
+          </RepoFold>
         </div>
       )}
       {project && repoUi && (
@@ -536,5 +539,15 @@ export function ProjectSettings() {
         }
       />
     </div>
+  );
+}
+
+/** In the Business view the repositories of a project are tucked into a closed fold; nothing is hidden or removed. */
+function RepoFold({ fold, children }: { fold: boolean; children: ReactNode }) {
+  if (!fold) return <>{children}</>;
+  return (
+    <Disclosure summary="Repositories (software)" data-testid="repos-fold">
+      {children}
+    </Disclosure>
   );
 }

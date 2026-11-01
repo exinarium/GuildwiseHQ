@@ -18,6 +18,7 @@ import { useProject, useProjects } from '../api/queries/projects.ts';
 import { useRuns } from '../api/queries/runs.ts';
 import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
+import { BuildSomething } from '../components/BuildSomething.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { PauseProjectButton, ProjectPausedBanner } from '../components/ProjectPause.tsx';
@@ -43,7 +44,7 @@ import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { canUseIntake } from '../lib/intake.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { priorityLabel } from '../lib/priority.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 import { stageStyle } from '../lib/stages.ts';
@@ -103,7 +104,7 @@ function StageStrip({ columns }: { columns: { name: string; cards: unknown[] }[]
 
 export function Board() {
   const { projectKey = '' } = useParams();
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
   // The key of an interest's hidden project is not a project: its board is the interest.
@@ -173,6 +174,9 @@ export function Board() {
 
   const projectActions = (
     <>
+      {business && !traits.usesRepos && project.workflowKey !== 'research' && (
+        <BuildSomething project={project} />
+      )}
       {traits.usesRepos && <RunBranchDialog projectId={project.id} />}
       {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
       {project.workflowKey === 'research' && canConvert && detail.data && (
@@ -438,9 +442,7 @@ export function Board() {
           }
         />
       )}
-      {board.data && (cards.length > 0 || phaseId) && (
-        <BoardView board={board.data} filter={filter} business={business} />
-      )}
+      {board.data && (cards.length > 0 || phaseId) && <BoardView board={board.data} filter={filter} />}
       {isMobile && (
         <ButtonLink
           to={`/cards/new?project=${project.key}`}

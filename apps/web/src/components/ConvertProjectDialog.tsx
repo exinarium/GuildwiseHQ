@@ -10,7 +10,7 @@ import { GitBranch, Plus, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
@@ -26,14 +26,13 @@ function targets(all: WorkflowDefinition[], currentKey: string, business: boolea
   const latest = new Map<string, WorkflowDefinition>();
   for (const d of all) {
     if (d.fieldSet === 'feed' || d.key === 'code-bugfix' || d.key === currentKey) continue;
-    // A Business mode organization has no repositories, so it is never offered a repository workflow.
-    if (business && workflowUsesRepos(d)) continue;
     const had = latest.get(d.key);
     if (!had || d.version > had.version) latest.set(d.key, d);
   }
-  return [...latest.values()].sort(
-    (a, b) => Number(b.key === 'code') - Number(a.key === 'code') || a.name.localeCompare(b.name),
-  );
+  // Every workflow is offered in every view; the Business view leads with the ones that need no repository.
+  const lead = (d: WorkflowDefinition) =>
+    business ? Number(!workflowUsesRepos(d)) : Number(d.key === 'code');
+  return [...latest.values()].sort((a, b) => lead(b) - lead(a) || a.name.localeCompare(b.name));
 }
 
 /**
@@ -55,7 +54,7 @@ export function ConvertProjectDialog({
 }) {
   const t = useOrgTerms();
   const workflows = useWorkflows(project.id);
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const options = useMemo(
     () => targets(workflows.data?.map((w) => w.definition) ?? [], project.workflowKey, business),
     [workflows.data, project.workflowKey, business],

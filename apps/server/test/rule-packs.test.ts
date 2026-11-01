@@ -35,20 +35,12 @@ const ledger = async () => (await call('GET', '/api/ledger?scope=standing_order'
 const core = rulePackById('core');
 if (!core) throw new Error('core pack missing');
 
-describe('rule packs in a developer organization', () => {
-  it('are refused by every route with 409 business_only, and nothing changes', async () => {
-    for (const [m, u] of [
-      ['GET', '/api/ledger/rule-packs'],
-      ['GET', '/api/ledger/rule-packs/core'],
-      ['POST', '/api/ledger/rule-packs/core/install'],
-      ['POST', '/api/ledger/rule-packs/core/remove'],
-    ] as const) {
-      const r = await raw(m, u, m === 'POST' ? {} : undefined);
-      expect(r.status).toBe(409);
-      expect(r.body.error.code).toBe('business_only');
-      expect(r.body.error.message).toMatch(/business organizations/);
-    }
-    expect(await q('SELECT 1 FROM ledger_entries WHERE org_id=$1', [orgId()])).toHaveLength(0);
+describe('rule packs in a software-default organization', () => {
+  it('are listed and previewed like anywhere else: the default view blocks nothing', async () => {
+    expect((await q('SELECT mode FROM organizations WHERE id=$1', [orgId()]))[0]?.mode).toBe('dev');
+    const list = await raw('GET', '/api/ledger/rule-packs');
+    expect(list.status).toBe(200);
+    expect((await raw('GET', '/api/ledger/rule-packs/core')).status).toBe(200);
   });
 });
 

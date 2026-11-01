@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import {
   BUILTIN_ROLES,
   BUILTIN_WORKFLOWS,
-  BUSINESS_DEPARTMENT,
   type CreateDepartmentRequest,
   DEFINITION_FORMAT,
   DESK_SUBKIND_DEFINITION,
@@ -21,7 +20,6 @@ import {
   RoleDefinitionSchema,
   type RoleDraftInput,
   renderDefinitionFile,
-  roleListedInMode,
   type SubmitResponse,
   streamId,
   type ValidateResponse,
@@ -45,7 +43,6 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
 import { rebaseAgentsToCurrentRoles } from '../hr/follow-role.ts';
-import { orgModeOf } from '../orgs/mode.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { enqueueVaultWrite } from './vaults.ts';
 
@@ -65,9 +62,7 @@ const BUILTIN_DEPARTMENTS = [
     ),
   ),
 ];
-/** The built-in departments an organization of this mode sees: the business department only exists in a business org. */
-const builtinDepartmentsFor = (mode: string): string[] =>
-  BUILTIN_DEPARTMENTS.filter((d) => mode === 'business' || d !== BUSINESS_DEPARTMENT);
+
 
 const issueOfWorkflow = (i: ValidationIssue): DefinitionIssue => ({
   severity: i.severity,
@@ -117,7 +112,7 @@ export async function catalogueOrg(
 
 export async function departmentNames(db: Queryable, orgId: string): Promise<string[]> {
   const own = await rows<{ name: string }>(db, 'SELECT name FROM departments WHERE org_id=$1', [orgId]);
-  return [...builtinDepartmentsFor(await orgModeOf(db, orgId)), ...own.map((d) => d.name)];
+  return [...BUILTIN_DEPARTMENTS, ...own.map((d) => d.name)];
 }
 
 /**
@@ -137,10 +132,7 @@ export async function roleCatalogue(
       ORDER BY key, (org_id IS NULL), version DESC`,
     [orgId, statuses],
   );
-  const mode = await orgModeOf(db, orgId);
-  return list
-    .filter((r) => r.org_id !== null || roleListedInMode(r.key as string, mode))
-    .map((r) => RoleDefinitionSchema.parse(r.definition));
+  return list.map((r) => RoleDefinitionSchema.parse(r.definition));
 }
 
 async function validationContexts(db: Queryable, orgId: string, workflowDef?: unknown) {
@@ -699,9 +691,7 @@ export async function orgCatalogue(
   );
   const exts = await rows(ctx.pool, 'SELECT * FROM role_extensions WHERE org_id=$1', [orgId]);
   const roles = new Map<string, OrgCatalogueResponse['roles'][number]>();
-  const catalogueMode = await orgModeOf(ctx.pool, orgId);
   for (const r of roleRows) {
-    if (r.org_id === null && !roleListedInMode(r.key, catalogueMode)) continue;
     // a role made from someone's private pack is that person's alone
     if (
       isOthersPrivateRole(
@@ -796,7 +786,7 @@ export async function listDepartments(db: Queryable, orgId: string): Promise<Dep
     roleKeys: roleKeys.filter((r) => r.department === name).map((r) => r.key),
     workflowKeys: wfKeys.filter((w) => w.department === name).map((w) => w.key),
   });
-  const builtin = builtinDepartmentsFor(await orgModeOf(db, orgId));
+  const builtin: string[] = [...BUILTIN_DEPARTMENTS];
   return [...builtin.map((n) => mk(n, null, true)), ...own.map((d) => mk(d.name, d.id, false))];
 }
 

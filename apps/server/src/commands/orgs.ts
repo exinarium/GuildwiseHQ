@@ -23,7 +23,6 @@ import {
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
-import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
@@ -43,7 +42,6 @@ import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
-import { blockersMessage, modeSwitchBlockers } from '../orgs/mode.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
 import { invitationLink } from './invitations.ts';
@@ -132,24 +130,19 @@ export async function setDiagnosticsSharing(
 }
 
 /**
- * Owner and Admins choose how the organization works. Switching to Business is refused while it has a connected
- * repository or an active builder, reviewer, tester or DevOps agent; switching back to Developer always works and
- * deletes nothing.
+ * Owner and Admins set the organization's DEFAULT VIEW (Software or Business). A view is presentation only: it is never
+ * refused, installs and removes nothing, and touches no project, repository, agent, deploy or card. It appends the one
+ * preference event and nothing else.
  */
 export async function setOrgMode(ctx: Ctx, a: OrgAccess, mode: OrgMode): Promise<void> {
   if (!canSetOrgMode({ orgRole: a.role }))
-    throw forbidden('only the Owner and Admins can change how the organization works');
+    throw forbidden('only the Owner and Admins can change the default view of the organization');
   await withAppendTx(ctx.pool, async (tx) => {
     const cur = await one<{ mode: OrgMode }>(tx, 'SELECT mode FROM organizations WHERE id=$1 FOR UPDATE', [
       a.orgId,
     ]);
     const previous: OrgMode = cur?.mode === 'business' ? 'business' : 'dev';
     if (previous === mode) return;
-    if (mode === 'business') {
-      const b = await modeSwitchBlockers(tx, a.orgId);
-      if (b.repositories.length || b.agents.length)
-        throw conflict('business_mode_blocked', blockersMessage(b), b);
-    }
     await ctx.store.append(
       [
         {
@@ -161,7 +154,38 @@ export async function setOrgMode(ctx: Ctx, a: OrgAccess, mode: OrgMode): Promise
       ],
       { tx },
     );
-    if (mode === 'business') await ensureBusinessWorkflows(ctx, tx, a.orgId);
+  });
+}
+
+/**
+ * A member chooses the view they see in this organization (`null`: follow the organization default). Any member may do
+ * it for themselves, at any time. Stored on the membership (`org_members.view`), so a user in several organizations
+ * can use a different view in each. Appends the one preference event and nothing else.
+ */
+export async function setMemberView(ctx: Ctx, a: OrgAccess, view: OrgMode | null): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const cur = await one<{ view: OrgMode | null }>(
+      tx,
+      `SELECT view FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active' FOR UPDATE`,
+      [a.orgId, a.session.user.id],
+    );
+    if (!cur) throw forbidden('you are not a member of this organization');
+    const previous = cur.view ?? null;
+    if (previous === view) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.org(a.orgId),
+          event: {
+            type: 'OrgMemberViewSet',
+            payload: { orgId: a.orgId, userId: a.session.user.id, view, previous },
+          },
+          actor: userActor(a.session.user.id),
+          scope: orgScope(a.orgId),
+        },
+      ],
+      { tx },
+    );
   });
 }
 

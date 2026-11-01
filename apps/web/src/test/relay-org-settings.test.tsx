@@ -77,15 +77,11 @@ describe('the Inbound webhooks tab', () => {
     open('?tab=relay');
     expect(await screen.findByTestId('relay-new')).toBeInTheDocument();
   });
-  it('is not there in a developer organization, and ?tab=relay shows General without any relay request', async () => {
+  it('is there in a software-default organization too: relay integrations are for every organization', async () => {
     setup('dev', 'owner');
     open('?tab=relay');
-    await screen.findByRole('tab', { name: 'General' });
-    expect(screen.queryByRole('tab', { name: 'Inbound webhooks' })).toBeNull();
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'General', selected: true })).toBeInTheDocument(),
-    );
-    expect(screen.queryByTestId('relay-tab')).toBeNull();
-    expect(calls.filter((c) => c.startsWith('/api/relay'))).toEqual([]);
+    expect(await screen.findByRole('tab', { name: 'Inbound webhooks' })).toBeInTheDocument();
+    expect(await screen.findByTestId('relay-tab')).toBeInTheDocument();
+    expect(await screen.findByTestId('relay-new')).toBeInTheDocument();
   });
 });

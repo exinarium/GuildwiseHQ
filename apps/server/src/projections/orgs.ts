@@ -218,6 +218,14 @@ export const orgProjectors: Record<string, Projector> = {
     const p = ev<EventOf<'OrgModeSet'>>(e).payload;
     await exec(tx, 'UPDATE organizations SET mode=$2 WHERE id=$1', [p.orgId, p.mode]);
   },
+  OrgMemberViewSet: async (tx, e) => {
+    const p = ev<EventOf<'OrgMemberViewSet'>>(e).payload;
+    await exec(tx, 'UPDATE org_members SET view=$3 WHERE org_id=$1 AND user_id=$2', [
+      p.orgId,
+      p.userId,
+      p.view,
+    ]);
+  },
   OrgDiagnosticsSharingSet: async (tx, e) => {
     const p = ev<EventOf<'OrgDiagnosticsSharingSet'>>(e).payload;
     await exec(

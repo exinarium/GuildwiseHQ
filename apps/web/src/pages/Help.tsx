@@ -1,18 +1,17 @@
 import { ArrowLeft, BookOpen, GraduationCap, Play, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { BlogSearchHits, HelpBlog } from '../components/blog/HelpBlog.tsx';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
 import { SectionVideo } from '../components/help/SectionVideo.tsx';
 import { SetupHelpCard, useSetupChecklistUi } from '../components/setup/SetupChecklist.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
 import { panelId, Tabs, tabId } from '../components/ui/Tabs.tsx';
-import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader, Panel } from '../components/ui.tsx';
+import { Badge, Button, EmptyState, PageHeader, Panel } from '../components/ui.tsx';
 import { useAllWhatsNew, WhatsNewDialog } from '../components/whatsnew/WhatsNew.tsx';
 import { ext } from '../extension/index.ts';
 import {
   articleBySlug,
-  DEV_ONLY_HELP_SLUGS,
   glossaryId,
   helpArticlesFor,
   helpBase,
@@ -21,9 +20,8 @@ import {
 } from '../help/articles.ts';
 import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
-import { useBusinessMode } from '../lib/orgMode.ts';
+import { useBusinessView } from '../lib/orgMode.ts';
 import { useOrgTerms } from '../lib/terms.ts';
-import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { videosForArticle } from '../lib/videos.ts';
 
@@ -185,9 +183,7 @@ function HelpCentre() {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
   const glossary = pathname === `${base}/glossary`;
-  const business = useBusinessMode();
-  const article =
-    slug && !glossary && !(business && DEV_ONLY_HELP_SLUGS.includes(slug)) ? articleBySlug(slug) : undefined;
+  const article = slug && !glossary ? articleBySlug(slug) : undefined;
   const setQ = (v: string) =>
     setParams(
       (p) => {
@@ -231,7 +227,7 @@ function HelpCentre() {
 }
 
 function Results({ q, base }: { q: string; base: string }) {
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const t = useOrgTerms();
   const hits = useMemo(() => searchHelp(q, helpArticlesFor(business)), [q, business]);
   return (
@@ -280,7 +276,7 @@ function Results({ q, base }: { q: string; base: string }) {
 }
 
 function Home({ base }: { base: string }) {
-  const business = useBusinessMode();
+  const business = useBusinessView();
   const t = useOrgTerms();
   return (
     <>

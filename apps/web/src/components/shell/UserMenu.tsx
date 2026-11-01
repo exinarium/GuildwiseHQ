@@ -1,7 +1,9 @@
-import type { UserAvatar as UserAvatarValue } from '@aom/shared';
+import { effectiveView, ORG_MODE_LABEL, type OrgMode, type UserAvatar as UserAvatarValue } from '@aom/shared';
 import * as DM from '@radix-ui/react-dropdown-menu';
-import { Laptop, LifeBuoy, LogOut, MessageCircleQuestion, Moon, Sun } from 'lucide-react';
+import { Laptop, LifeBuoy, LogOut, Moon, Sun } from 'lucide-react';
 import { Link } from 'react-router';
+import { useMe } from '../../api/queries/auth.ts';
+import { useSetMyView } from '../../api/queries/orgs.ts';
 import { ext } from '../../extension/index.ts';
 import { type ThemeChoice, useTheme } from '../../lib/useTheme.ts';
 import { UserAvatar } from '../Face.tsx';
@@ -34,6 +36,9 @@ export function UserMenu({
   onNavigate?: () => void;
 }) {
   const [theme, setTheme] = useTheme();
+  const org = useMe().data?.activeOrg;
+  const setView = useSetMyView();
+  const viewChoice: 'default' | OrgMode = org?.viewOverride ?? 'default';
   return (
     <DM.Root>
       <DM.Trigger
@@ -83,6 +88,40 @@ export function UserMenu({
               </DM.RadioItem>
             ))}
           </DM.RadioGroup>
+          {org && (
+            <>
+              <DM.Separator className="my-1 h-px bg-line" />
+              <DM.Label className="px-3 pt-1 pb-0.5 text-xs font-medium text-subtle">View</DM.Label>
+              <DM.RadioGroup
+                value={viewChoice}
+                onValueChange={(v) => setView.mutate(v === 'default' ? null : (v as OrgMode))}
+                data-testid="view-menu"
+              >
+                {(
+                  [
+                    ['dev', ORG_MODE_LABEL.dev],
+                    ['business', ORG_MODE_LABEL.business],
+                    ['default', `Organization default (${ORG_MODE_LABEL[org.mode]})`],
+                  ] as const
+                ).map(([id, label]) => (
+                  <DM.RadioItem
+                    key={id}
+                    value={id}
+                    data-testid={`view-${id}`}
+                    className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-[6px] px-3 text-sm text-fg outline-none select-none data-[highlighted]:bg-sunken"
+                  >
+                    <span className="flex-1">{label}</span>
+                    <DM.ItemIndicator>
+                      <span className="block size-2 rounded-full bg-brand" />
+                    </DM.ItemIndicator>
+                  </DM.RadioItem>
+                ))}
+              </DM.RadioGroup>
+              <p className="px-3 pb-1 text-xs text-subtle" data-testid="view-current">
+                Showing the {ORG_MODE_LABEL[effectiveView(org)]}. Only what you see changes.
+              </p>
+            </>
+          )}
           <DM.Separator className="my-1 h-px bg-line" />
           <DM.Item asChild>
             <Link

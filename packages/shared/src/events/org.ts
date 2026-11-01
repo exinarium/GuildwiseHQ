@@ -143,7 +143,15 @@ export const orgEvents = [
   ),
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
-  /** An Owner or Admin changed how the organization works (Developer or Business mode). */
+  /**
+   * A member chose the view they see (`dev` = Software view, `business` = Business view) in one organization, or `null`
+   * to follow the organization default again. A view is presentation only: this event changes nothing else.
+   */
+  defineEvent(
+    'OrgMemberViewSet',
+    z.object({ orgId: Id, userId: Id, view: OrgModeSchema.nullable(), previous: OrgModeSchema.nullable() }),
+  ),
+  /** An Owner or Admin set the organization's DEFAULT VIEW (Software or Business). Presentation only: nothing else changes. */
   defineEvent('OrgModeSet', z.object({ orgId: Id, mode: OrgModeSchema, previous: OrgModeSchema, by: Id })),
   /**
    * The Owner switched the organization-level consent "Share diagnostic data with Guildwise" on or off

@@ -24,7 +24,6 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden } from '../errors.ts';
-import { assertBusinessOrg } from '../orgs/mode.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createScheduleIn, type OrgCtx, patchScheduleIn } from './schedules.ts';
 
@@ -54,7 +53,6 @@ async function installedMap(db: Tx | Ctx['pool'], orgId: string): Promise<Map<st
 
 export async function listBriefPlaybooks(ctx: Ctx, org: OrgCtx | null): Promise<BriefPlaybookDto[]> {
   const o = managerOrg(org);
-  await assertBusinessOrg(ctx.pool, o.orgId, 'Playbooks are available in business mode.');
   const installed = await installedMap(ctx.pool, o.orgId);
   return BRIEF_PLAYBOOK_KEYS.map((k) => {
     const p = BRIEF_PLAYBOOKS[k];
@@ -165,7 +163,6 @@ export async function installBriefPlaybook(
   const o = managerOrg(org);
   const playbook = playbookOf(key);
   return withAppendTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, o.orgId, 'Playbooks are available in business mode.');
     const installed = (await installedMap(tx, o.orgId)).get(playbook.key);
     if (installed)
       throw conflict('playbook_installed', `${playbook.name} is already installed`, {
@@ -224,7 +221,6 @@ export async function patchBriefPlaybook(
 ): Promise<{ webhookSecret?: string }> {
   const o = managerOrg(org);
   return withAppendTx(ctx.pool, async (tx) => {
-    await assertBusinessOrg(tx, o.orgId, 'Playbooks are available in business mode.');
     const s = await one(tx, 'SELECT * FROM schedules WHERE id=$1 AND org_id=$2', [scheduleId, o.orgId]);
     const action = s?.action as
       | { kind?: string; projectId?: string; template?: Record<string, unknown>; playbook?: { key: string } }

@@ -11,17 +11,21 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
+import { BuildSomething } from '../components/BuildSomething.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
 import { DevOnly } from '../components/DevOnly.tsx';
 import { ScheduleWizard } from '../components/schedules/ScheduleWizard.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
 import { ToastProvider } from '../components/ui.tsx';
-import { ARTICLES, helpArticlesFor } from '../help/articles.ts';
-import { seatAllowed } from '../lib/orgMode.ts';
-import { ACTION_TILES, type ActionTile, actionTilesFor } from '../lib/schedules.ts';
+import { ARTICLES, DEV_ONLY_HELP_SLUGS, helpArticlesFor } from '../help/articles.ts';
+import { SeatOptions } from '../components/agents/SeatOptions.tsx';
+import { ACTION_TILES, actionTilesFor } from '../lib/schedules.ts';
 import { CardDetailView } from '../pages/CardDetail.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
+import { useMe } from '../api/queries/auth.ts';
+import { useOrgTerms } from '../lib/terms.ts';
+import { UserMenu } from '../components/shell/UserMenu.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const USER = ID(1);
@@ -41,12 +45,14 @@ const role = (key: string, name: string) => ({
 });
 
 let mode: 'dev' | 'business' = 'dev';
+let override: 'dev' | 'business' | null = null;
 let orgRole = 'owner';
 let withBusinessRoles = false;
 const fetchMock = vi.fn();
 
 beforeEach(() => {
   mode = 'dev';
+  override = null;
   orgRole = 'owner';
   withBusinessRoles = false;
   fetchMock.mockReset().mockImplementation(async (url: string) => {
@@ -75,6 +81,7 @@ beforeEach(() => {
           planName: 'Founding',
           features: {},
           mode,
+          viewOverride: override,
           banners: [],
         },
         guestIn: [],
@@ -113,6 +120,9 @@ beforeEach(() => {
     if (path === '/api/projects')
       return json({ projects: [{ id: ID(70), key: 'APP', name: 'App', orgId: USER, orgName: null }] });
     if (path === '/api/workstations') return json({ workstations: [] });
+    if (path === '/api/agents') return json({ agents: [] });
+    if (path === `/api/projects/${ID(70)}`)
+      return json({ project: { id: ID(70), key: 'APP', name: 'App', workflowKey: 'enquiry' }, repos: [], environments: [] });
     if (path === '/api/agents/name-suggestions') return json({ names: [] });
     return json({});
   });
@@ -151,18 +161,26 @@ describe('the sidebar', () => {
 });
 
 describe('seats and help', () => {
-  it('offers no developer seat in business mode', () => {
-    expect(seatAllowed('builder', true)).toBe(false);
-    expect(seatAllowed('tester', true)).toBe(false);
-    expect(seatAllowed('analyst', true)).toBe(true);
-    expect(seatAllowed('own', true)).toBe(true);
-    expect(seatAllowed('builder', false)).toBe(true);
+  it('offers every seat in every view, the other view under More', () => {
+    const seats = [
+      { key: 'builder', name: 'Builder' },
+      { key: 'front_desk', name: 'Front Desk' },
+      { key: 'architect', name: 'Architect' },
+    ];
+    const { container } = wrap(
+      <select>
+        <SeatOptions seats={seats} />
+      </select>,
+    );
+    expect(container.querySelectorAll('option')).toHaveLength(3);
+    expect(container.querySelector('optgroup[label="More"]')?.textContent).toBe('Front Desk');
   });
-  it('drops the developer help articles in business mode only', () => {
+  it('keeps every help article in every view, the software ones last in business', () => {
     expect(helpArticlesFor(false)).toEqual(ARTICLES);
-    const slugs = helpArticlesFor(true).map((a) => a.slug);
-    for (const s of ['devops-and-hygiene', 'testing-and-finalization', 'project-conversion'])
-      expect(slugs).not.toContain(s);
+    const b = helpArticlesFor(true);
+    expect(b).toHaveLength(ARTICLES.length);
+    const dev = b.map((a) => a.slug).filter((s) => DEV_ONLY_HELP_SLUGS.includes(s));
+    expect(b.slice(-dev.length).map((a) => a.slug)).toEqual(dev);
   });
 });
 
@@ -175,7 +193,7 @@ describe('DevOnly', () => {
     );
     expect(await screen.findByText('Releases page')).toBeInTheDocument();
   });
-  it('shows "not available" instead of the page in a business organization, with a way to the settings for managers', async () => {
+  it('(d) shows a gentle note instead of the page in the Business view, with a way to the Software view', async () => {
     mode = 'business';
     wrap(
       <DevOnly>
@@ -183,12 +201,31 @@ describe('DevOnly', () => {
       </DevOnly>,
     );
     expect(await screen.findByTestId('not-available-business')).toHaveTextContent(
-      'Not available in Business mode',
+      'Switch to Software view to see this',
     );
     expect(screen.queryByText('Releases page')).toBeNull();
-    expect(screen.getByRole('link', { name: 'Organization settings' })).toBeInTheDocument();
+    expect(screen.queryByText(/not available/i)).toBeNull();
   });
-  it('does not send a member to the settings page', async () => {
+  it('(c) a member whose own view is Software sees the page although the organization default is Business', async () => {
+    mode = 'business';
+    override = 'dev';
+    wrap(
+      <DevOnly>
+        <p>Releases page</p>
+      </DevOnly>,
+    );
+    expect(await screen.findByText('Releases page')).toBeInTheDocument();
+  });
+  it('(c) a member whose own view is Business is gated although the organization default is Software', async () => {
+    override = 'business';
+    wrap(
+      <DevOnly>
+        <p>Releases page</p>
+      </DevOnly>,
+    );
+    await screen.findByTestId('not-available-business');
+  });
+  it('one click switches to the Software view, for a plain member too, and only stores the preference', async () => {
     mode = 'business';
     orgRole = 'member';
     wrap(
@@ -196,8 +233,15 @@ describe('DevOnly', () => {
         <p>x</p>
       </DevOnly>,
     );
-    await screen.findByTestId('not-available-business');
-    expect(screen.queryByRole('link', { name: 'Organization settings' })).toBeNull();
+    await userEvent.click(await screen.findByTestId('switch-to-software-view'));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/org/view',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ view: 'dev' }) }),
+      ),
+    );
+    const writes = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET');
+    expect(writes.map(([u]) => u)).toEqual(['/api/org/view']);
   });
 });
 
@@ -217,13 +261,16 @@ describe('hire dialog roles', () => {
     expect(options()).toMatch(/Builder/);
     expect(options()).toMatch(/Tester/);
   });
-  it('omits builder, reviewer and tester in business mode', async () => {
+  it('keeps builder, reviewer and tester in the Business view, under More', async () => {
     mode = 'business';
     const options = await renderForm();
-    await waitFor(() => expect(options()).not.toMatch(/Builder/));
-    expect(options()).toMatch(/Architect/);
-    expect(options()).not.toMatch(/Reviewer/);
-    expect(options()).not.toMatch(/Tester/);
+    await waitFor(() => expect(options()).toMatch(/Architect/));
+    expect(options()).toMatch(/Builder/);
+    expect(options()).toMatch(/Reviewer/);
+    expect(options()).toMatch(/Tester/);
+    const group = document.querySelector('optgroup[label="More"]');
+    expect(group?.textContent).toMatch(/Builder/);
+    expect(group?.textContent).not.toMatch(/Architect/);
   });
 });
 
@@ -247,20 +294,19 @@ describe('packs tab', () => {
     wrap(<PacksTab />);
     expect(await screen.findByRole('button', { name: 'Add a pack by git URL' })).toBeInTheDocument();
   });
-  it('has no add-by-URL control in business mode', async () => {
+  it('still offers adding a pack by git URL in the Business view', async () => {
     mode = 'business';
     wrap(<PacksTab />);
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add a pack by git URL' })).toBeNull());
-    expect(screen.queryByTestId('packs-format-note')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Add a pack by git URL' })).toBeInTheDocument();
   });
 });
 
 describe('hire dialog with a developer role prefilled', () => {
-  it('falls back to a hireable role in business mode', async () => {
+  it('keeps the prefilled developer role in the Business view', async () => {
     mode = 'business';
     wrap(<HireDialog open onOpenChange={() => {}} prefill={{ roleKey: 'builder', projectId: ID(70) }} />);
     const form = await screen.findByRole('form', { name: 'Hire agent' });
-    await waitFor(() => expect(within(form).getByLabelText('Role')).toHaveValue('architect'));
+    await waitFor(() => expect(within(form).getByLabelText('Role')).toHaveValue('builder'));
   });
 });
 
@@ -278,15 +324,19 @@ describe('convert dialog', () => {
     expect(await screen.findByTestId('convert-workflow-code')).toBeInTheDocument();
     expect(await screen.findByTestId('convert-repo-url')).toBeInTheDocument();
   });
-  it('offers no repository workflow and no repository form in business mode', async () => {
+  it('still offers the code workflow and the repository forms in the Business view', async () => {
     mode = 'business';
     open();
-    expect(await screen.findByText('There is no other workflow to convert to.')).toBeInTheDocument();
-    expect(screen.queryByTestId('convert-workflow-code')).toBeNull();
-    expect(screen.queryByTestId('convert-repo-url')).toBeNull();
-    expect(screen.queryByTestId('convert-new-name')).toBeNull();
+    expect(await screen.findByTestId('convert-workflow-code')).toBeInTheDocument();
+    expect(await screen.findByTestId('convert-repo-url')).toBeInTheDocument();
   });
 });
+
+/** The shell loads `me` in the app; a test that renders a piece alone does it here. */
+function LoadMe() {
+  useMe();
+  return null;
+}
 
 const meLoaded = () =>
   waitFor(() =>
@@ -360,11 +410,14 @@ describe('Ask DevOps on a card', () => {
     await meLoaded();
     expect(screen.getAllByRole('button', { name: 'Ask DevOps' }).length).toBeGreaterThan(0);
   });
-  it('is gone in business mode', async () => {
+  it('stays in the Business view, in business words', async () => {
     mode = 'business';
     open();
     await meLoaded();
-    await waitFor(() => expect(screen.queryAllByRole('button', { name: 'Ask DevOps' })).toHaveLength(0));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Ask for technical help' }).length).toBeGreaterThan(0),
+    );
+    expect(screen.queryAllByRole('button', { name: 'Ask DevOps' })).toHaveLength(0);
   });
   const openOnPhone = async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -382,10 +435,10 @@ describe('Ask DevOps on a card', () => {
     const sheet = await openOnPhone();
     expect(within(sheet).getByRole('button', { name: 'Ask DevOps' })).toBeInTheDocument();
   });
-  it('is not in the phone actions sheet in business mode', async () => {
+  it('is in the phone actions sheet in the Business view too', async () => {
     mode = 'business';
     const sheet = await openOnPhone();
-    await waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Ask DevOps' })).toBeNull());
+    expect(await within(sheet).findByRole('button', { name: 'Ask for technical help' })).toBeInTheDocument();
     expect(within(sheet).getByRole('button', { name: /Move/ })).toBeInTheDocument();
   });
 });
@@ -423,9 +476,18 @@ describe('Ask DevOps on a desk item', () => {
     wrap(<DeskItem item={item} />);
     expect(screen.getByRole('button', { name: 'Ask DevOps about this' })).toBeInTheDocument();
   });
-  it('is gone in business mode, and the item itself still shows', () => {
-    wrap(<DeskItem item={item} business />);
-    expect(screen.queryByRole('button', { name: 'Ask DevOps about this' })).toBeNull();
+  it('stays in the Business view, in business words, and the item still shows', async () => {
+    mode = 'business';
+    wrap(
+      <>
+        <LoadMe />
+        <DeskItem item={item} />
+      </>,
+    );
+    await meLoaded();
+    expect(
+      await screen.findByRole('button', { name: 'Ask for technical help with this' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('The runner is offline')).toBeInTheDocument();
   });
 });
@@ -445,21 +507,103 @@ describe('automation wizard actions', () => {
     expect(w.getByTestId('tile-devops_request')).toHaveTextContent('Ask DevOps');
     expect(w.getByTestId('tile-regression_run')).toBeInTheDocument();
   });
-  it('leaves out Ask DevOps and the regression run in business mode', async () => {
+  it('tucks Ask DevOps and the regression run under More actions in the Business view', async () => {
     mode = 'business';
     const w = await actionStep();
     expect(await w.findByTestId('tile-create_card')).toBeInTheDocument();
-    await waitFor(() => expect(w.queryByTestId('tile-devops_request')).toBeNull());
-    expect(w.queryByTestId('tile-regression_run')).toBeNull();
-    expect(w.queryByText('Ask DevOps')).toBeNull();
+    await waitFor(() => expect(w.getByTestId('more-actions')).toBeInTheDocument());
+    const more = within(w.getByTestId('more-actions'));
+    expect(more.getByTestId('tile-devops_request')).toBeInTheDocument();
+    expect(more.getByTestId('tile-regression_run')).toBeInTheDocument();
     expect(w.getByTestId('tile-ba_task')).toBeInTheDocument();
   });
-  it('keeps the action of an existing automation being edited, and dev mode lists every tile', () => {
-    const ids = (business: boolean, keep?: ActionTile) => actionTilesFor(business, keep).map((t) => t.id);
-    expect(ids(false)).toEqual(ACTION_TILES.map((t) => t.id));
-    expect(ids(true)).not.toContain('devops_request');
-    expect(ids(true)).not.toContain('regression_run');
-    expect(ids(true, 'devops_request')).toContain('devops_request');
-    expect(ids(true, 'devops_request')).not.toContain('regression_run');
+  it('lists every tile in every view; the Business view only moves two under More', () => {
+    const all = ACTION_TILES.map((t) => t.id);
+    expect(actionTilesFor(false)).toEqual({ main: ACTION_TILES, more: [] });
+    const b = actionTilesFor(true);
+    expect(b.more.map((t) => t.id).sort()).toEqual(['devops_request', 'regression_run']);
+    expect([...b.main, ...b.more].map((t) => t.id).sort()).toEqual([...all].sort());
+  });
+});
+
+describe('the view toggle in the user menu', () => {
+  const menu = () =>
+    wrap(
+      <UserMenu name="Olga" email="o@x.test" roleLabel="Owner" avatar={null} onSignOut={() => {}} />,
+    );
+  it('is easy to reach and picks the view for this member only', async () => {
+    mode = 'business';
+    menu();
+    await userEvent.click(await screen.findByTestId('user-menu'));
+    expect(await screen.findByTestId('view-current')).toHaveTextContent('Business view');
+    await userEvent.click(screen.getByTestId('view-dev'));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/org/view',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ view: 'dev' }) }),
+      ),
+    );
+  });
+  it('can go back to the organization default', async () => {
+    override = 'dev';
+    mode = 'business';
+    menu();
+    await userEvent.click(await screen.findByTestId('user-menu'));
+    expect(await screen.findByTestId('view-default')).toHaveTextContent('Organization default (Business view)');
+    await userEvent.click(screen.getByTestId('view-default'));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/org/view',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ view: null }) }),
+      ),
+    );
+  });
+});
+
+describe('Build something', () => {
+  const project = { id: ID(70), key: 'APP', name: 'App', workflowKey: 'enquiry', myRole: 'owner' } as ProjectDto;
+  it('walks a business project through workstation, repository and builder using the existing flows', async () => {
+    mode = 'business';
+    wrap(<BuildSomething project={project} />);
+    await userEvent.click(await screen.findByTestId('build-something-open'));
+    const steps = await screen.findByTestId('build-steps');
+    expect(within(steps).getByTestId('build-workstation')).toHaveAttribute('href', '/workstations?add=1');
+    expect(within(steps).getByTestId('build-builder')).toHaveAttribute(
+      'href',
+      `/agents?hire=builder&projectId=${ID(70)}`,
+    );
+    expect(within(steps).getByTestId('build-step-workstation')).toHaveAttribute('data-done', 'false');
+    // nothing was written: no view switch, no install
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toEqual([]);
+  });
+});
+
+describe('the words follow the view, not the organization default', () => {
+  function Words() {
+    const t = useOrgTerms();
+    return <p data-testid="words">{`${t.ledger} / ${t.askDevOps}`}</p>;
+  }
+  const show = async () => {
+    wrap(
+      <>
+        <LoadMe />
+        <Words />
+      </>,
+    );
+    await meLoaded();
+  };
+  it('uses the business words when the member picked the Business view in a Software organization', async () => {
+    override = 'business';
+    await show();
+    await waitFor(() =>
+      expect(screen.getByTestId('words')).toHaveTextContent('Rules & decisions / Ask for technical help'),
+    );
+  });
+  it('uses the software words when the member picked the Software view in a Business organization', async () => {
+    mode = 'business';
+    override = 'dev';
+    await show();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTestId('words')).toHaveTextContent('Ledger / Ask DevOps');
   });
 });

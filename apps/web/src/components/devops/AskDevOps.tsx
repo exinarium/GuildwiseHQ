@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useCallback, useContext, useMemo, useSta
 import { useLocation, useNavigate } from 'react-router';
 import { useCeoChat } from '../../api/queries/ceo.ts';
 import { openCeoChat } from '../../lib/openCeoChat.ts';
+import { useOrgTerms } from '../../lib/terms.ts';
 import { useCeoName } from '../ceo/useCeoName.ts';
 import { useCurrentProject } from '../shell/useCurrentProject.ts';
 import { Button, Dialog, ErrorBox, TextArea } from '../ui.tsx';
@@ -80,6 +81,7 @@ function chipsOf(r: AskDevOpsRequest): Chip[] {
 
 function AskDevOpsDialog({ request, onClose }: { request: AskDevOpsRequest; onClose: () => void }) {
   const ceoName = useCeoName();
+  const terms = useOrgTerms();
   const openChat = useCeoChat();
   const nav = useNavigate();
   const [text, setText] = useState(request.suggestion ?? '');
@@ -108,13 +110,13 @@ function AskDevOpsDialog({ request, onClose }: { request: AskDevOpsRequest; onCl
     <Dialog
       open
       onOpenChange={(o) => !o && onClose()}
-      title="Ask DevOps"
+      title={terms.askDevOps}
       description={`DevOps works through ${ceoName} now. Say what you need (install tools, fix the build, start the app, deploy): ${ceoName} delegates it to DevOps and tells you the result.`}
       size="lg"
     >
       <form
         className="flex flex-col gap-3"
-        aria-label="Ask DevOps"
+        aria-label={terms.askDevOps}
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
@@ -168,7 +170,7 @@ function AskDevOpsDialog({ request, onClose }: { request: AskDevOpsRequest; onCl
 /** The header / page button. */
 export function AskDevOpsButton({
   request,
-  label = 'Ask DevOps',
+  label,
   className,
   variant = 'default',
 }: {
@@ -178,6 +180,7 @@ export function AskDevOpsButton({
   variant?: 'default' | 'quiet';
 }) {
   const ask = useAskDevOps();
+  const terms = useOrgTerms();
   const props = useMemo(() => request, [request]);
   return (
     <Button
@@ -187,7 +190,7 @@ export function AskDevOpsButton({
       onClick={() => ask(props)}
     >
       <Wrench aria-hidden="true" className="size-4" />
-      {label}
+      {label ?? terms.askDevOps}
     </Button>
   );
 }

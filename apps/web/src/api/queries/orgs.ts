@@ -1,5 +1,7 @@
 import {
   type CreateOrgInvitationRequest,
+  type MeResponse,
+  MeResponseSchema,
   type OffboardingReport,
   type OrgDetailResponse,
   OrgDetailResponseSchema,
@@ -8,6 +10,7 @@ import {
   OrgInvitationsResponseSchema,
   type OrgMemberDto,
   OrgMembersResponseSchema,
+  type OrgMode,
   type OrgRemovalPreview,
   OrgRemovalPreviewSchema,
   type OrgsResponse,
@@ -43,6 +46,34 @@ export function usePatchOrg() {
   return useMutation({
     mutationFn: (b: PatchOrgRequest) => patch<OrgDetailResponse>('/org', b, OrgDetailResponseSchema),
     onSuccess: () => refresh(qc),
+  });
+}
+
+/**
+ * The member's own view (Software or Business) for the active organization; `null` follows the organization default.
+ * Instant and never refused: the cached `me` changes at once, and the server stores the preference only.
+ */
+export function useSetMyView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (view: OrgMode | null) => put<MeResponse>('/org/view', { view }, MeResponseSchema),
+    onMutate: async (view) => {
+      await qc.cancelQueries({ queryKey: meKey });
+      const before = qc.getQueryData<MeResponse | null>(meKey);
+      if (before?.activeOrg)
+        qc.setQueryData(meKey, {
+          ...before,
+          activeOrg: { ...before.activeOrg, viewOverride: view },
+        } as MeResponse);
+      return { before };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.before) qc.setQueryData(meKey, ctx.before);
+    },
+    onSuccess: (me) => {
+      qc.setQueryData(meKey, me);
+      void qc.invalidateQueries({ queryKey: orgKey });
+    },
   });
 }
 
