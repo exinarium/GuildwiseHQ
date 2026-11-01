@@ -132,9 +132,9 @@ export function placesOf(
       workstationId: t.workstationId,
       workstationName: t.workstationName,
       online: t.workstationOnline,
-      computerRemoved:
-        t.computerRemoved === true ||
-        (!!t.workstationId && !s.workstations.some((w) => w.id === t.workstationId)),
+      // The server decides (flagged, or its computer is no longer active). `s.workstations` lists only the active computers
+      // of current members, so a missing entry is not proof that the computer was removed.
+      computerRemoved: t.computerRemoved === true,
       reach: t.connection
         ? { state: t.connection.state, at: t.connection.at, detail: t.connection.detail }
         : null,
@@ -167,9 +167,7 @@ export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
     workstationId: p.workstationId,
     workstationName: p.workstationName,
     online: p.workstationOnline,
-    computerRemoved:
-      p.computerRemoved === true ||
-      (!!p.workstationId && !s.workstations.some((w) => w.id === p.workstationId)),
+    computerRemoved: p.computerRemoved === true,
     reach: p.reachability
       ? { state: p.reachability.state, at: p.reachability.at, detail: p.reachability.detail }
       : null,

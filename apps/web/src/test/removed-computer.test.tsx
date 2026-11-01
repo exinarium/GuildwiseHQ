@@ -91,6 +91,7 @@ const target = (id: string, name: string, kind: 'remote_ssh' | 'local_docker', o
       : null,
   keys: [],
   role: 'active' as const,
+  computerRemoved: true,
   ...over,
 });
 const state = (over: Partial<SetupStateDto> = {}): SetupStateDto =>
@@ -111,7 +112,7 @@ const state = (over: Partial<SetupStateDto> = {}): SetupStateDto =>
       custom: false,
     },
     publish: null,
-    // note: the stale "reachable" answer and no computerRemoved flag: an older server, or data from before the flag
+    // note: the stale "reachable" answer next to the server's computerRemoved flag
     targets: [target(SERVER, 'Live site', 'remote_ssh'), target(BOX, 'Test box', 'local_docker')],
     workstations: [
       {
@@ -166,7 +167,7 @@ const card = (s: SetupStateDto, envName: string) => {
 };
 
 describe('the model', () => {
-  it('a place whose computer is not among the active ones is a removed computer, flagged or not', () => {
+  it('a place the server says lost its computer is a removed computer, whatever the stale reachability says', () => {
     const places = placesOf(state());
     expect(places.every((p) => p.computerRemoved)).toBe(true);
     expect(placeProblem(places.find((p) => p.kind === 'server'))).toMatchObject({
@@ -176,10 +177,22 @@ describe('the model', () => {
     expect(placeProblem(places.find((p) => p.kind === 'computer'))).toMatchObject({ fix: 'change' });
     // a healthy place is not
     const ok = placesOf(
-      state({ targets: [target(SERVER, 'Live site', 'remote_ssh', { workstationId: NEWPC })] }),
+      state({
+        targets: [
+          target(SERVER, 'Live site', 'remote_ssh', { workstationId: NEWPC, computerRemoved: false }),
+        ],
+      }),
     );
     expect(ok[0]!.computerRemoved).toBe(false);
     expect(placeProblem(ok[0])).toBeNull();
+  });
+
+  it('a computer missing from the active list (a member who left) is not called removed: the server decides', () => {
+    // `workstations` lists only the active computers of current members; the place still deploys, so no false alarm
+    const places = placesOf(
+      state({ targets: [target(SERVER, 'Live site', 'remote_ssh', { computerRemoved: false })] }),
+    );
+    expect(places[0]!.computerRemoved).toBe(false);
   });
 
   it('the places the server lists carry the flag too', () => {
@@ -261,7 +274,13 @@ describe('an environment whose computer was removed', () => {
   it('a healthy environment keeps its normal card', () => {
     const s = state({
       workstations: state().workstations.concat([]),
-      targets: [target(SERVER, 'Live site', 'remote_ssh', { workstationId: NEWPC, workstationOnline: true })],
+      targets: [
+        target(SERVER, 'Live site', 'remote_ssh', {
+          workstationId: NEWPC,
+          workstationOnline: true,
+          computerRemoved: false,
+        }),
+      ],
     });
     card(s, 'production');
     expect(screen.queryByTestId('env-choose-computer-production')).toBeNull();
