@@ -50,7 +50,10 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
   }
 
   const app = await createApp(config, { background: true, extensions });
-  const reg = await registerBuiltins(app.ctx);
+  const reg = await registerBuiltins(
+    app.ctx,
+    config.noLeanTeam ? (d) => !(d.key === 'code' && d.version >= 6) : undefined,
+  );
   if (reg.workflows || reg.roles) app.log.info(reg, 'registered built-in catalogue');
   const biz = await ensureBusinessWorkflowsAtBoot(app.ctx);
   if (biz) app.log.info({ orgs: biz }, 'business workflows checked');

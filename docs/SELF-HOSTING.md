@@ -110,7 +110,7 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Platform ceiling on shifts per workstation (`0` means no ceiling). |
 | `AOM_DATA_MIGRATIONS` | on | Set to `false` to skip data migrations on boot. |
 
-Set these only for development or tests, never in production: `AOM_TEST_CLOCK`, `AOM_MOCK_UI`, `AOM_ALLOW_LOCAL_REMOTES`.
+Set these only for development or tests, never in production: `AOM_TEST_CLOCK`, `AOM_MOCK_UI`, `AOM_ALLOW_LOCAL_REMOTES`, `AOM_NO_LEAN_TEAM` (does not register the lean team workflow, code v6).
 
 ## 5. The platform account and organizations
 

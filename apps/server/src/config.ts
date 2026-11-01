@@ -90,6 +90,8 @@ const EnvSchema = z.object({
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
+  /** Dev and e2e only: do not register built-in `code` version 6 (the lean team flow), so new cards take the classic flow. */
+  AOM_NO_LEAN_TEAM: bool(false),
   /** The workflow new projects start on (`code`, version 6 is the lean team flow). Existing projects keep theirs. */
   AOM_DEFAULT_WORKFLOW: z.string().min(1).default('code'),
   AOM_TOUR_AUTOSTART: bool(true),
@@ -223,6 +225,8 @@ export interface Config {
   allowLocalRemotes: boolean;
   /** Mock-runtime card fields (Mock script, ...) are shown in the UI and accepted on the API (dev and e2e only). */
   mockUi: boolean;
+  /** Dev and e2e only: `code` version 6 (the lean team flow) is not registered at boot (`AOM_NO_LEAN_TEAM`). */
+  noLeanTeam: boolean;
   /** The workflow a new project starts on when the request names none (`code`). */
   defaultWorkflow: string;
   /** A user who has never seen the first-login tour gets it on their first visit (off in the e2e suite, which switches it on per user). */
@@ -365,6 +369,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
+    noLeanTeam: e.AOM_NO_LEAN_TEAM,
     defaultWorkflow: e.AOM_DEFAULT_WORKFLOW,
     tourAutostart: e.AOM_TOUR_AUTOSTART,
     reporterSeconds: e.AOM_REPORTER_SECONDS,
