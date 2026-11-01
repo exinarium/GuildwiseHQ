@@ -5,7 +5,6 @@ import {
   insertedStageIds,
   investigateInsertion,
   materialiseVariant,
-  NON_VARIANT_BASES,
   type OrgCatalogueResponse,
   type ProjectWorkflowDto,
   type RoleDefinition,
@@ -40,9 +39,9 @@ export function slugId(label: string): string {
   return /^[a-z]/.test(s) ? s : s ? `step_${s}` : '';
 }
 
-/** True when a variant can be based on this workflow (code and approved custom workflows; never on a variant). */
+/** True when a variant can be based on this workflow (any workflow, built-in or custom; never on a variant). */
 export const canCustomise = (wf: Pick<ProjectWorkflowDto, 'workflowKey' | 'variantOf'>): boolean =>
-  !wf.variantOf && !NON_VARIANT_BASES.includes(wf.workflowKey);
+  !wf.variantOf;
 
 /** The suggested key and name of a project's variant of a workflow. */
 export const suggestVariant = (wf: Pick<ProjectWorkflowDto, 'workflowKey' | 'name'>, projectKey: string) => ({

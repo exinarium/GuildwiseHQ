@@ -345,6 +345,27 @@ describe('the organization page', () => {
     ).toBeInTheDocument();
   });
 
+  it('workflows: a shipped business workflow is Built in (no edit links), a custom one is Custom', async () => {
+    const cat = catalogue(true);
+    cat.workflows.push({
+      key: 'business-quote',
+      builtIn: true,
+      versions: [
+        version(8, { ...wf(), key: 'business-quote', name: 'Quote', builtIn: true }, 'active', {
+          cardsInFlight: 0,
+        }) as never,
+      ],
+    });
+    mountPage(cat, '/org?tab=workflows');
+    const quote = await screen.findByTestId('workflow-business-quote');
+    expect(within(quote).getByText('Built in')).toBeInTheDocument();
+    expect(within(quote).queryByText('Custom')).toBeNull();
+    expect(within(quote).queryByRole('link', { name: /New version of business-quote/ })).toBeNull();
+    expect(within(quote).getByText(/choose Customise/)).toBeInTheDocument();
+    const support = screen.getByTestId('workflow-support');
+    expect(within(support).getByText('Custom')).toBeInTheDocument();
+  });
+
   it('workflows: a draft keeps all four actions, Discard included, inside its card (the actions wrap)', async () => {
     const cat = catalogue(true);
     const support = cat.workflows[0];

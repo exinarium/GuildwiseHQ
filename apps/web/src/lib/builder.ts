@@ -91,6 +91,8 @@ export interface BuilderField {
   label: string;
   type: CustomField['type'];
   required: boolean;
+  /** A text field that holds a date (the shipped business workflows); kept as it is. */
+  format?: CustomField['format'];
 }
 
 export interface BuilderModel {
@@ -178,6 +180,7 @@ export function fromDefinition(
       label: f.label,
       type: f.type,
       required: f.required,
+      ...(f.format ? { format: f.format } : {}),
     });
   }
   const fieldRef = (key: string) => fieldUids.get(key) ?? key;
@@ -297,6 +300,7 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       label: f.label,
       type: f.type,
       required: f.required,
+      ...(f.format && f.type === 'text' ? { format: f.format } : {}),
     })),
     cardTypes: [...model.cardTypes],
     initialStage: sid(model.initial),

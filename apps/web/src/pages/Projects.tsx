@@ -1,6 +1,26 @@
 import type { ProjectDto } from '@aom/shared';
-import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
-import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings } from 'lucide-react';
+import {
+  BUSINESS_CARD_TYPE_LABELS,
+  BUSINESS_CARD_TYPES,
+  BUSINESS_WORKFLOW_DESCRIPTION,
+  BUSINESS_WORKFLOW_KEY,
+  CreateProjectRequestSchema,
+  workflowUsesRepos,
+} from '@aom/shared';
+import {
+  Archive,
+  BellRing,
+  ClipboardList,
+  Code2,
+  FileText,
+  FlaskConical,
+  FolderKanban,
+  MessageCircleQuestion,
+  Receipt,
+  Repeat2,
+  Rss,
+  Settings,
+} from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { errorMessage } from '../api/client.ts';
@@ -294,6 +314,15 @@ function ArchivedProjects() {
   );
 }
 
+const BUSINESS_WORKFLOW_ICON: Record<(typeof BUSINESS_CARD_TYPES)[number], typeof Code2> = {
+  enquiry: MessageCircleQuestion,
+  follow_up: Repeat2,
+  document_request: FileText,
+  reminder: BellRing,
+  report: ClipboardList,
+  quote: Receipt,
+};
+
 const WORKFLOW_BLURB: Record<string, { title: string; text: string; icon: typeof Code2 }> = {
   code: {
     title: 'Code',
@@ -306,6 +335,17 @@ const WORKFLOW_BLURB: Record<string, { title: string; text: string; icon: typeof
     icon: FlaskConical,
   },
   feed: { title: 'Feed', text: 'Scheduled scans and digests you rate.', icon: Rss },
+  // The six shipped business workflows: title and text come from shared (also used by the help).
+  ...Object.fromEntries(
+    BUSINESS_CARD_TYPES.map((type) => [
+      BUSINESS_WORKFLOW_KEY[type],
+      {
+        title: BUSINESS_CARD_TYPE_LABELS[type],
+        text: BUSINESS_WORKFLOW_DESCRIPTION[type],
+        icon: BUSINESS_WORKFLOW_ICON[type],
+      },
+    ]),
+  ),
 };
 
 /** Built-in workflows that never run a project (New project does not offer them). */

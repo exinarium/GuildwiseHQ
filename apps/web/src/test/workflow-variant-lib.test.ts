@@ -1,6 +1,7 @@
 import { BUILTIN_ROLES, codeWorkflowV1 } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  canCustomise,
   canMoveInserted,
   checkVariant,
   type EditorInsertion,
@@ -104,5 +105,21 @@ describe('checkVariant', () => {
       { severity: 'error', code: 'role_cannot_claim_stage', message: 'x', stageId: 'a' },
     ]);
     expect(r.byStage.get('a')).toHaveLength(1);
+  });
+});
+
+describe('canCustomise', () => {
+  it('any workflow can be customised, built-in or custom, except a variant itself', () => {
+    for (const workflowKey of [
+      'code',
+      'research',
+      'feed',
+      'code-bugfix',
+      'business-quote',
+      'business-enquiry',
+      'my-flow',
+    ])
+      expect(canCustomise({ workflowKey, variantOf: null })).toBe(true);
+    expect(canCustomise({ workflowKey: 'code-toy', variantOf: { key: 'code', version: 1 } })).toBe(false);
   });
 });

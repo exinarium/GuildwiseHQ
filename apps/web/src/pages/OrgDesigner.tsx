@@ -540,6 +540,12 @@ function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId
                   {w.builtIn ? <Badge tone="blue">Built in</Badge> : <Badge tone="violet">Custom</Badge>}
                   {latest?.department && <Badge>{latest.department}</Badge>}
                 </div>
+                {w.builtIn && cat.canEdit && (
+                  <p className="mt-1 text-xs text-muted">
+                    Built-in workflows are not edited. To add steps for one project, open the project's
+                    settings and choose Customise.
+                  </p>
+                )}
                 <ul className="mt-2 flex flex-col gap-1">
                   {w.versions.map((v, i) => {
                     const prev = w.versions[i + 1];

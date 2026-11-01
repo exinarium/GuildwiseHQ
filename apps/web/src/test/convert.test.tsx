@@ -1,5 +1,6 @@
 import {
   type BoardResponse,
+  BUSINESS_WORKFLOWS,
   type ConvertPreview,
   codeWorkflowV1,
   feedWorkflowV1,
@@ -142,6 +143,28 @@ describe('convert dialog', () => {
     expect(screen.queryByTestId('convert-workflow-research')).toBeNull();
     await waitFor(() => expect(screen.getByRole('radio', { name: /Code/ })).toBeChecked());
     expect(screen.getByText(/started as research and has 2 published notes/)).toBeInTheDocument();
+  });
+
+  it('does not badge a shipped business workflow as custom, but a real custom workflow is', async () => {
+    const quote = BUSINESS_WORKFLOWS.find((d) => d.key === 'business-quote');
+    const mine = { ...researchWorkflowV1, key: 'my-flow', name: 'My flow', builtIn: false };
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/workflows'))
+        return json({
+          workflows: [codeWorkflowV1, quote, mine].map((definition, i) => ({
+            id: U(300 + i),
+            orgId: null,
+            status: 'active',
+            definition,
+          })),
+        });
+      if (url.includes('/convert-preview')) return json(previewBody);
+      return json({});
+    });
+    open();
+    const q = await screen.findByTestId('convert-workflow-business-quote');
+    expect(q).not.toHaveTextContent(/custom/i);
+    expect(screen.getByTestId('convert-workflow-my-flow')).toHaveTextContent(/custom/i);
   });
 
   it('needs a repository for code, takes an existing one and posts the decisions', async () => {

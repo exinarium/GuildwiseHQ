@@ -390,6 +390,12 @@ function BuilderSession({
             desk; until then cards keep using the current version.
           </Callout>
         )}
+        {found?.builtIn && cat.canEdit && (
+          <Callout tone="info" role="note" data-testid="builtin-note">
+            This is a built-in workflow and cannot be edited. To add steps for one project, open that
+            project's settings, find the workflow and choose Customise.
+          </Callout>
+        )}
         {status === 'active' && cat.canEdit && (
           <Callout tone="info" role="note">
             This version is live. To change it, use Edit as new version: running cards finish on the version

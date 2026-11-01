@@ -1,4 +1,11 @@
-import { BUILTIN_WORKFLOWS, type ProjectDto } from '@aom/shared';
+import {
+  BUILTIN_WORKFLOWS,
+  BUSINESS_CARD_TYPE_LABELS,
+  BUSINESS_CARD_TYPES,
+  BUSINESS_WORKFLOW_DESCRIPTION,
+  BUSINESS_WORKFLOW_KEY,
+  type ProjectDto,
+} from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -262,5 +269,31 @@ describe('New project', () => {
     // a custom workflow shows its own name, not its key
     expect(within(form).getByText('Support desk')).toBeInTheDocument();
     expect(within(form).getByText('A custom workflow of your organization.')).toBeInTheDocument();
+    // the shipped business workflows are described, not shown as custom workflows: the fallback is for `support` alone
+    expect(within(form).getAllByText('A custom workflow of your organization.')).toHaveLength(1);
+  });
+
+  it('New project describes each shipped business workflow with its own title and one line', async () => {
+    const latest = new Map(BUILTIN_WORKFLOWS.map((d) => [d.key, d]));
+    const workflows = [...latest.values()].map((definition, n) => ({
+      id: `0192f3a0-0000-7000-8000-00000000030${n}`,
+      orgId: null,
+      status: 'active',
+      definition,
+    }));
+    page('owner', PROJECTS, 200, workflows);
+    await userEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const form = await screen.findByRole('form', { name: 'New project' });
+    for (const type of BUSINESS_CARD_TYPES) {
+      const radio = within(form).getByRole('radio', {
+        name: new RegExp(BUSINESS_CARD_TYPE_LABELS[type]),
+      }) as HTMLInputElement;
+      expect(radio.value).toBe(BUSINESS_WORKFLOW_KEY[type]);
+      const option = radio.closest('label') as HTMLElement;
+      // the dialog rewords for the organization's terms; the sentence itself starts the same
+      expect(option).toHaveTextContent(BUSINESS_WORKFLOW_DESCRIPTION[type].split('.')[0] as string);
+      expect(option.querySelector('svg')).not.toBeNull();
+    }
+    expect(within(form).queryByText('A custom workflow of your organization.')).toBeNull();
   });
 });
