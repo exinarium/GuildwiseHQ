@@ -3,6 +3,12 @@
 Design report. First written against `main` before GWP-27 (org mode flag) and GWP-33 (business roles) landed; revised
 on 31 Oct 2026 after both landed (see section 9, assumption review).
 
+> **Superseded (1 Nov 2026, release 1.4.0).** Option A (true built-in workflows) was adopted after views replaced
+> organization modes: the reason for option C (a dev organization must not see the business workflows) no longer holds,
+> because every organization gets all six. They are `builtIn: true`, part of `BUILTIN_WORKFLOWS` and registered at boot
+> with `org_id NULL`; the pre-release per-organization copies are moved by the data migration `business-builtin-2026-11`.
+> Read section 3 as the history of the decision, not as the current design. See `docs/ARCHITECTURE.md` (Views).
+
 ## 1. Question
 
 How do we add six non-technical card types, each with its own fields and a default workflow that never touches a

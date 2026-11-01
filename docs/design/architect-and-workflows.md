@@ -200,7 +200,7 @@ Materialising: copy the base; for each insertion, for each redirected outcome `o
 - `fieldSet` and `cardTypes` from the base (cardTypes may be narrowed, never widened);
 - inserted stages: `kind: 'agent'`, outcomes `StageCompleted` only, effects none, data `none` (or `investigation` when the claim role has a stage pattern `investigate*`), `worktree` `reuse` (or `create` when inserted before the first worktree stage), `requiredFields` from the field set;
 - rule 3 with lineage: an inherited stage is claimable when the role claims `(def.key, id)` **or** `(def.extends.key, id)`; an inserted stage needs a role claiming `(def.key, id)`, `('*', pattern)` (architect) or a custom role naming the variant key;
-- `code-bugfix`, `feed` and `research` cannot be bases (internal / special); allowed bases: `code` and approved custom workflows.
+- Any workflow can be a base: `code`, `code-bugfix`, `research`, `feed`, the six business workflows and approved custom workflows (release 1.4.0 lifted the former exclusion of `code-bugfix`, `feed` and `research`; a variant is stored materialised and keeps the base's outcome events and effects, so `ResearchPublished`, `DigestPosted` and `resume_parent` work unchanged). A variant of a variant is refused (`variant_base_not_allowed`): `extends` names one base and the inherited-stage role rule and Rebase follow it.
 
 `roleClaimsStage` supports a trailing `*` in `stageId` (prefix match). Built-in roles' `claimableStages` otherwise unchanged; lineage is applied by the validator and by nothing else (the dispatcher routes by `workflow_stages.claim_role`).
 

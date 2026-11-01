@@ -96,7 +96,7 @@ Limits and checks: sub-workflows can be nested **three levels** deep, a workflow
 
 ### A project's own steps in a built-in workflow {#variants}
 
-You cannot edit the built-in Code workflow, but one project can have its own version of it with extra steps: in the project's settings, **Workflows**, click **Customise** and use **Insert step after ...** to add a step after any existing one. The base steps stay as they are. The new version goes to your desk for approval; running cards keep the version they started on, and a newer version of the base workflow can be applied with **Rebase**. In a design chat you can ask the BA to draft it (`aom org workflow variant`).
+You cannot edit a built-in workflow (Code, Research, Feed or one of the business workflows: Enquiry, Follow-up, Document request, Reminder, Report, Quote), but one project can have its own version of it with extra steps: in the project's settings, **Workflows**, click **Customise** and use **Insert step after ...** to add a step after any existing one. The base steps stay as they are. The new version goes to your desk for approval; running cards keep the version they started on, and a newer version of the base workflow can be applied with **Rebase**. In a design chat you can ask the BA to draft it (`aom org workflow variant`).
 
 ## Departments {#departments}
 
