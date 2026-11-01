@@ -160,10 +160,15 @@ test('an invitee starts a Business mode organization: no delivery surfaces, dire
   // no Releases nav entry, no Ask DevOps button; direct URLs show "not available"
   await expect(op.getByTestId('nav-releases')).toHaveCount(0);
   await expect(op.getByTestId('ask-devops-button')).toHaveCount(0);
-  for (const url of ['/releases', '/deploys']) {
-    await op.goto(url);
-    await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
-  }
+  // `/releases` is also a public page of the server (the blog's release pages, f40b15a9), so a full page load of it never
+  // reaches the app: open it as a link inside the app does (client-side route change). `/deploys` redirects there inside the app.
+  await op.evaluate(() => {
+    history.pushState({}, '', '/releases');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
+  await op.goto('/deploys');
+  await expect(op.getByTestId('not-available-business')).toContainText('Not available in Business mode');
 
   // the server refuses a pack by git URL with a readable 409 (hires and repositories: business-mode spec)
   const pack = await op.request.post('/api/packs', {

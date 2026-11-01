@@ -50,7 +50,7 @@ async function createCard(
       title,
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, ...(mock ? { mock } : {}) },
       specify,
       ...extra,
@@ -150,7 +150,7 @@ test('AC2: answering writes QuestionAnswered + LedgerEntryAdded, unblocks the ca
     90_000,
   );
   const shifts = await q<any>(
-    `SELECT progress_tail FROM shifts WHERE card_id=(SELECT id FROM cards WHERE ref=$1) AND stage='build' ORDER BY started_at`,
+    `SELECT progress_tail FROM shifts WHERE card_id=(SELECT id FROM cards WHERE ref=$1) AND stage='build' AND outcome IS DISTINCT FROM 'lost' ORDER BY started_at`, // a shift lost to a runner reconnect is not a build run
     [ref],
   );
   expect(shifts.length).toBe(2);

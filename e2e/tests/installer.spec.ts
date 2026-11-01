@@ -130,7 +130,7 @@ test('progress: waiting, then running, paired, health checks streaming in, done'
   ).toBe('1');
 });
 
-test('a failed install shows help and Contact us; starting over retires the old code', async () => {
+test('a failed install shows help; starting over retires the old code', async () => {
   await page.getByTestId('add-workstation-button').click();
   const command = (await page.getByTestId('install-command').innerText()).trim();
   const token = tokenOf(command);
@@ -143,9 +143,7 @@ test('a failed install shows help and Contact us; starting over retires the old 
   const failure = page.getByTestId('install-failure');
   await expect(failure).toContainText('Could not download the runner');
   await expect(failure.getByTestId('install-help')).toHaveAttribute('href', '/help/install-troubleshooting');
-  await expect(failure.getByTestId('install-contact')).toHaveAttribute(
-    'href',
-    '/help/contact?from=installer',
-  );
+  // "Contact us" is a help tab a hosting business plugs in (5b196b6f): the core app has none, so it offers no such link
+  await expect(failure.getByTestId('install-contact')).toHaveCount(0);
   writeFileSync(join(scratch, 'ok'), '1');
 });

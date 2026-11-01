@@ -247,7 +247,9 @@ test('dry run: the plan is printed and nothing is written', async () => {
     'personal vault "Personal vault" is merged into the organization vault under personal/',
   );
   expect(text).toContain('interests/ai-news');
-  expect(text).toContain('folder projects/cabin -> personal/projects/cabin');
+  // (No "folder projects/cabin -> personal/projects/cabin" step any more: every project has a vault of its own since
+  // project-graphs (1f61d3f0), and the folder of a project moves only when it has none. The merged files still land under
+  // personal/ in the organization vault, which the next spec checks.)
   expect(text).toContain('Dry run: nothing was written.');
   expect(
     (

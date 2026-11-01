@@ -175,13 +175,17 @@ test('setup: a paired mock runner, project PHS on the toy repo, a BA, a builder,
 });
 
 test('AC1: the local deploy target is added on the project settings page; the default follow-ups are deploy and regression', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
-  const form = page.getByRole('form', { name: 'Add deploy target' });
-  await form.getByLabel('Name').fill('local');
-  await form.getByLabel('App URL (optional)').fill('http://localhost:4601');
-  await form.getByLabel('How to deploy (notes)').fill('docker compose up -d in the toy repository');
-  await form.getByRole('button', { name: 'Add deploy target' }).click();
-  await expect(page.getByTestId('deploy-target-list')).toContainText('local');
+  // The project settings page no longer has the "Add deploy target" form (places are managed on Environments), so the
+  // local target is added through the same API call.
+  const added = await api.post(`/api/projects/${projectId}/deploy-targets`, {
+    data: {
+      name: 'local',
+      kind: 'local_docker',
+      appUrl: 'http://localhost:4601',
+      notes: 'docker compose up -d in the toy repository',
+    },
+  });
+  expect(added.status(), await added.text()).toBe(201);
   const t = await q<{ id: string; kind: string; workstation_id: string | null }>(
     `SELECT * FROM deploy_targets WHERE name='local'`,
   );
@@ -197,9 +201,8 @@ test('AC1: the local deploy target is added on the project settings page; the de
     },
   });
   expect(res.status(), await res.text()).toBe(200);
-  await page.reload();
-  await expect(page.getByTestId('followup-defaults')).toContainText('Deploy');
-  await page.screenshot({ path: join(paths.vaults, 'phases-settings.png'), fullPage: true });
+  const defaults = await (await api.get(`/api/projects/${projectId}/followup-defaults`)).json();
+  expect(JSON.stringify(defaults)).toContain('deploy');
 });
 
 test('AC2: the BA proposes a phase with two cards in an intake; the manager confirms it on the desk', async () => {
@@ -226,7 +229,7 @@ test('AC2: the BA proposes a phase with two cards in an intake; the manager conf
   );
   await page.goto('/intake');
   await page.getByLabel('Ticket or need').fill('PHS-1');
-  await page.getByRole('button', { name: 'Start intake' }).click();
+  await page.getByRole('button', { name: /^(Start intake|Work with the BA directly)$/ }).click();
   await expect(page.getByTestId('chat-panel')).toContainText('Proposed phase PHS-P1', { timeout: 60_000 });
   await expect(page.getByTestId('chat-panel')).toContainText('confirm PHS-P1 on the desk', {
     timeout: 60_000,
@@ -284,8 +287,8 @@ test('AC3: both cards finish; the BA reports the phase on the desk with the merg
   await expect(item.getByTestId('desk-kind')).toHaveText('Phase done');
   for (const m of merges) await expect(item.getByTestId('phase-cards')).toContainText(`${m.ref}`);
   for (const m of merges) await expect(item.getByTestId('phase-cards')).toContainText(m.commit.slice(0, 10));
-  await expect(item.getByTestId('followup-1')).toContainText('Deploy to local');
-  await expect(item.getByTestId('followup-2')).toContainText('regression run');
+  await expect(item.getByTestId('followup-1')).toContainText('Release to local');
+  await expect(item.getByTestId('followup-2')).toContainText(/regression run/i);
   await page.screenshot({ path: join(paths.vaults, 'phases-done.png'), fullPage: true });
 
   // edit while deciding: add a custom item the BA does itself
@@ -426,7 +429,10 @@ test('AC6: rejecting the follow-ups asks DevOps for nothing', async () => {
   expect(row.report_desk_item_id).toBeTruthy();
 });
 
-test('AC7: a pushed branch counts once it is merged into the working branch; the runner then deletes it, locally and on the remote', async () => {
+// Parked: this spec makes a card with completion action `push_branch`, which the API no longer accepts (retired in
+// 93879629, "no card or agent branch is pushed unless the goal is a pull request"; only old cards still carry it). The
+// merged-branch cleanup it covers is exercised by the runner and server tests; there is no API path to a push_branch card.
+test.fixme('AC7: a pushed branch counts once it is merged into the working branch; the runner then deletes it, locally and on the remote', async () => {
   const p = await newPhase('Phase 4: pushed branch', []);
   const c = await createCard('Pushed branch card', { completionAction: 'push_branch' });
   await put(c.id, p.id);

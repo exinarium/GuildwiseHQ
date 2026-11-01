@@ -49,8 +49,15 @@ async function shownText(): Promise<string> {
 async function visit(url: string): Promise<string> {
   await page.goto(url);
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
-  await page.waitForLoadState('networkidle');
-  return shownText();
+  // Not `networkidle`: a page with a live-updates stream or a poller never goes idle. Wait until the shown text has settled.
+  let last = await shownText();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(250);
+    const now = await shownText();
+    if (now === last) return now;
+    last = now;
+  }
+  return last;
 }
 
 const offending = (text: string) =>
@@ -89,7 +96,7 @@ test('dev org: the old words are shown', async () => {
   await visit('/ledger');
   await expect(page.getByTestId('nav-ledger')).toHaveText(/Ledger/);
   await expect(page.getByRole('heading', { name: 'Ledger', exact: true })).toBeVisible();
-  await expect(page.getByText('Reply in English')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reply in English' })).toBeVisible();
   await visit('/settings/vaults');
   await expect(page.getByRole('heading', { name: 'Vaults', exact: true })).toBeVisible();
   await expect(page.getByText('Organization vault').first()).toBeVisible();
@@ -115,12 +122,12 @@ test('business org: Rules & decisions and Knowledge pages, same routes and test-
   expect(new URL(page.url()).pathname).toBe('/ledger');
   await expect(page.getByTestId('nav-ledger')).toHaveText(/Rules & decisions/);
   await expect(page.getByRole('heading', { name: 'Rules & decisions', exact: true })).toBeVisible();
-  await expect(page.getByText('Reply in English')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reply in English' })).toBeVisible();
   await expect(page.getByText('Pick the blue logo')).toBeVisible();
 
   await visit('/settings/vaults');
   expect(new URL(page.url()).pathname).toBe('/settings/vaults');
-  await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Knowledge', exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText('Organization knowledge').first()).toBeVisible();
   await expect(page.getByText('Project knowledge').first()).toBeVisible();
 

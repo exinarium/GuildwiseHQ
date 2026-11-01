@@ -18,7 +18,7 @@ test('AC2: pairing code, aom-runner pair + start, workstation Connected with the
   await page.getByRole('link', { name: 'Workstations' }).click();
 
   await page
-    .getByRole('button', { name: /pair workstation/i })
+    .getByRole('button', { name: /pair with a code/i })
     .first()
     .click();
   await page.getByRole('button', { name: 'Generate pairing code' }).click();

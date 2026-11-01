@@ -68,11 +68,7 @@ test.beforeAll(async ({ browser }) => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);
   await inviteAndAccept(admin, INTAKER);
   api = await apiAs(INTAKER.email, INTAKER.password);
-  // BA routing is on for new organizations (questions start at the BA, and a blocking one reaches the desk at once with
-  // the BA's note). This spec asserts the escalation chain itself (peer, BA, desk), so the intaker turns routing off;
-  // reporter.spec.ts covers the routed flow with its own user.
-  const routing = await api.put('/api/reporting', { data: { routeViaBa: false } });
-  expect(routing.ok(), await routing.text()).toBeTruthy();
+  // (The BA reporter is retired: `PUT /api/reporting` no longer takes `routeViaBa`, so there is no routing to switch off here.)
   page = await (await browser.newContext({ storageState: await api.storageState() })).newPage();
 });
 
@@ -174,7 +170,7 @@ test('AC intake: the manager pastes a Jira key, the BA reads it with the skill, 
   await expect(page).toHaveURL(/\/intake$/);
   await page.getByLabel('Ticket or need').fill('INT-12');
   await expect(page.getByTestId('intake-source')).toContainText('Jira ticket INT-12');
-  await page.getByRole('button', { name: 'Start intake' }).click();
+  await page.getByRole('button', { name: /^(Start intake|Work with the BA directly)$/ }).click();
   await expect(page).toHaveURL(/\/intake\/[0-9a-f-]{36}$/);
 
   // the conversation: the manager's message, the BA's streamed reply, and the card it created linked on the side
@@ -230,7 +226,7 @@ test('AC unmapped: a ticket that fits no project becomes a desk question; the an
   source('ZZZ-9', { title: 'A mystery', body: 'Nobody knows where this belongs.' });
   await page.goto('/intake');
   await page.getByLabel('Ticket or need').fill('ZZZ-9 please');
-  await page.getByRole('button', { name: 'Start intake' }).click();
+  await page.getByRole('button', { name: /^(Start intake|Work with the BA directly)$/ }).click();
   await expect(page.getByTestId('intake-status')).toHaveText('Waiting for you to pick the project', {
     timeout: 60_000,
   });
@@ -284,7 +280,7 @@ test('AC GitHub: an issue is read with gh on the runner and mapped by its reposi
   await page.goto('/intake');
   await page.getByLabel('Ticket or need').fill('https://github.com/acme/toy/issues/7');
   await expect(page.getByTestId('intake-source')).toContainText('GitHub issue acme/toy#7');
-  await page.getByRole('button', { name: 'Start intake' }).click();
+  await page.getByRole('button', { name: /^(Start intake|Work with the BA directly)$/ }).click();
   await expect(page.getByTestId('intake-status')).toHaveText('Mapped to INT', { timeout: 60_000 });
   await expect(page.getByTestId('intake-cards')).toContainText('Add dark mode', { timeout: 60_000 });
   await expect(page.getByTestId('chat-panel')).toContainText('Read GitHub issue acme/toy#7: Add dark mode');
@@ -386,7 +382,11 @@ test('AC finalize: the BA claims Finalize and finalizes a small card without the
   });
   expect(move.ok(), await move.text()).toBeTruthy();
   await cardWhen(small.ref, 'finalized by the BA', (x) => x.status === 'done', 120_000);
-  const ba = (await q<any>(`SELECT id FROM agents WHERE name='Ben'`))[0];
+  const ba = (
+    await q<any>(`SELECT id FROM agents WHERE name='Ben' AND org_id=(SELECT org_id FROM cards WHERE id=$1)`, [
+      small.id,
+    ])
+  )[0];
   const handoff = (
     await q<any>(`SELECT agent_id, outcome, data FROM card_handoffs WHERE card_id=$1 AND stage='finalize'`, [
       small.id,
@@ -397,7 +397,7 @@ test('AC finalize: the BA claims Finalize and finalizes a small card without the
   expect(req?.payload).toMatchObject({ action: 'merge', requestedBy: ba.id });
   expect(req?.actor_kind).toBe('agent');
   // the small merge went straight into the working branch
-  expect(git(paths.origin, 'show', `main:aom-mock/${small.ref}.txt`)).toBeTruthy();
+  expect(git(paths.origin, 'show', `main:.guildwise-mock/${small.ref}.txt`)).toBeTruthy();
   // no desk approval was needed
   expect(
     await q('SELECT 1 FROM desk_items WHERE card_id=$1 AND kind=$2', [small.id, 'approval']),
@@ -482,7 +482,7 @@ test('AC repository setup: the BA asks for a repository, the owner approves on t
   // The first attempt fails (fake gh refuses once); the owner retries from the alert and it succeeds.
   mkdirSync(join(paths.vaults, 'fake-github'), { recursive: true });
   writeFileSync(join(paths.vaults, 'fake-github', 'fail-once'), '');
-  await item.getByRole('button', { name: 'Create repository' }).click();
+  await item.getByRole('button', { name: 'Create repository', exact: true }).click();
   const alert = page.locator('[data-testid^="desk-item-"]', {
     hasText: 'Could not create repository acme/e2e-new',
   });

@@ -257,8 +257,9 @@ test('smoke: every page fits a 390px screen without sideways scrolling', async (
   const offenders: string[] = [];
   for (const path of list) {
     await page.goto(path);
-    await page.waitForLoadState('networkidle').catch(() => undefined);
-    await page.waitForTimeout(250);
+    // Not `networkidle`: a page with a live-updates stream never goes idle and each wait would cost its 30 s timeout.
+    await expect(page.getByRole('main').first()).toBeVisible();
+    await page.waitForTimeout(500);
     if (!(await noHorizontalScroll(page))) {
       const w = await page.evaluate('document.documentElement.scrollWidth');
       offenders.push(`${path} (${w}px)`);

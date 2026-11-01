@@ -247,15 +247,15 @@ test('the desk approves: a workflow waits for its roles, then everything becomes
   await expect(wf).toContainText('claimed by triager');
   await expect(wf).toContainText('claimed by responder');
   // The roles are not approved yet: the workflow cannot be.
-  await wf.getByRole('button', { name: 'Approve' }).click();
+  await wf.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(page.getByRole('alert').first()).toContainText('approve the role first');
   expect((await q(`SELECT 1 FROM workflow_versions WHERE key='support' AND status='active'`)).length).toBe(0);
   for (const name of ['Triager', 'Responder']) {
     const c = deskCard(page, `Approve role "${name}" (v1)`);
-    await c.getByRole('button', { name: 'Approve' }).click();
+    await c.getByRole('button', { name: 'Approve', exact: true }).click();
     await expect(c).toHaveCount(0);
   }
-  await wf.getByRole('button', { name: 'Approve' }).click();
+  await wf.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(wf).toHaveCount(0);
   await waitFor(
     'the workflow is active',
@@ -321,10 +321,10 @@ test('the workflow builder: template, edit, send for approval, approved on the d
 
   await page.goto('/desk');
   const roleCard = deskCard(page, 'Approve role "Drafter" (v1)');
-  await roleCard.getByRole('button', { name: 'Approve' }).click();
+  await roleCard.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(roleCard).toHaveCount(0);
   const wfCard = deskCard(page, 'Approve workflow "Press note" (v1)');
-  await wfCard.getByRole('button', { name: 'Approve' }).click();
+  await wfCard.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(wfCard).toHaveCount(0);
   await waitFor(
     'the workflow is active',
@@ -380,7 +380,7 @@ test("a project's type is its workflow: created from the Projects page, filtered
   const dlg = page.getByRole('dialog');
   await dlg.getByLabel('Key').fill('SUP');
   await dlg.getByLabel('Name', { exact: true }).fill('Support desk');
-  await dlg.getByRole('radio', { name: /^support/ }).check();
+  await dlg.getByRole('radio', { name: /^support/i }).check();
   await dlg.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByRole('main').getByText('Support desk')).toBeVisible();
   projectId = (await q<{ id: string }>(`SELECT id FROM projects WHERE key='SUP'`))[0]?.id as string;
@@ -500,7 +500,7 @@ test('changing a workflow creates v2; a card in flight finishes on v1, new cards
   );
   await page.goto('/desk');
   await deskCard(page, 'Approve workflow "Support triage" (v2)')
-    .getByRole('button', { name: 'Approve' })
+    .getByRole('button', { name: 'Approve', exact: true })
     .click();
   await waitFor(
     'v2 is active, v1 superseded',

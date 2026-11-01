@@ -93,6 +93,16 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
     30_000,
   );
   const before = (await q<any>(`SELECT count(*)::int AS n FROM thread_messages`))[0].n;
+  // other specs' workstations queue commands too: count what is queued for this one from here on
+  const wsId = (await (await api.get('/api/workstations')).json()).workstations[0].id as string;
+  const queuedFor = async () =>
+    (
+      await q<any>(
+        `SELECT count(*)::int AS n FROM runner_commands WHERE workstation_id=$1 AND type NOT IN ('agent.wipe','worktree.remove','repos.rescan','vault.configure','env.ensure','repo.clone')`,
+        [wsId],
+      )
+    )[0].n as number;
+  const queuedBefore = await queuedFor();
   const drawer = await openChat();
   await drawer.getByTestId(`chat-row-${reviewerName}`).getByRole('button').first().click();
   await expect(drawer.getByTestId('chat-offline')).toContainText('offline');
@@ -102,11 +112,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   await page.screenshot({ path: '/tmp/aom-e2e-chat-offline.png' });
   // Not saved, not queued anywhere.
   expect((await q<any>(`SELECT count(*)::int AS n FROM thread_messages`))[0].n).toBe(before);
-  expect(
-    await q(
-      `SELECT 1 FROM runner_commands WHERE type NOT IN ('agent.wipe','worktree.remove','repos.rescan','vault.configure','env.ensure','repo.clone')`,
-    ),
-  ).toHaveLength(0);
+  expect(await queuedFor()).toBe(queuedBefore);
 
   // Back online: the banner clears and the same message now goes through.
   startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '150' });

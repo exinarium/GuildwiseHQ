@@ -88,7 +88,7 @@ test('a large card with one senior reviewer: warning on the tile and the card wi
       title: 'A large change',
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: SPEC,
       specify: true,
     },

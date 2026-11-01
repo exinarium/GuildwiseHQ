@@ -101,7 +101,11 @@ test('a developer organization offers only the developer card types', async () =
   expect(options).toContain('feature');
   for (const label of BUSINESS_LABELS) expect(options).not.toContain(label);
   // the server has not installed any business workflow either
-  const installed = await q(`SELECT key FROM workflow_versions WHERE key LIKE 'business-%'`);
+  // (this organization's: another spec's organization may already have been switched to Business mode)
+  const installed = await q(
+    `SELECT key FROM workflow_versions WHERE key LIKE 'business-%' AND org_id = (SELECT org_id FROM projects WHERE id=$1)`,
+    [projectId],
+  );
   expect(installed).toHaveLength(0);
 });
 

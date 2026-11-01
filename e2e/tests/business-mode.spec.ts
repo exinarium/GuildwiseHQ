@@ -40,9 +40,9 @@ async function hireRoleOptions(): Promise<string[]> {
   return options;
 }
 
-const hire = (name: string, roleKey: string) =>
+const hire = (name: string, roleKey: string, seniority = 'junior') =>
   api.post('/api/agents', {
-    data: { name, roleKey, seniority: 'junior', workstationId, runtime: 'mock' },
+    data: { name, roleKey, seniority, workstationId, runtime: 'mock' },
   });
 
 test.beforeAll(async ({ browser }) => {
@@ -77,7 +77,7 @@ test('setup: a new organization is in Developer mode; project BIZ with a reposit
 
 test('switching to Business mode is refused and lists the repository and the builder', async () => {
   await openGeneral();
-  await page.getByTestId('org-mode-business').check();
+  await page.getByTestId('org-mode-business').click();
   await page.getByRole('dialog').getByRole('button', { name: 'Switch to Business mode' }).click();
   const blocked = page.getByTestId('org-mode-blocked');
   await expect(blocked).toBeVisible();
@@ -95,7 +95,7 @@ test('with the repository and the builder gone it switches, and the event is rec
   expect(del.ok(), await del.text()).toBeTruthy();
 
   await openGeneral();
-  await page.getByTestId('org-mode-business').check();
+  await page.getByTestId('org-mode-business').click();
   await page.getByRole('dialog').getByRole('button', { name: 'Switch to Business mode' }).click();
   await expect(page.getByText('Business mode is on')).toBeVisible();
   await expect(page.getByTestId('org-mode-business')).toBeChecked();
@@ -111,10 +111,15 @@ test('in Business mode the delivery surfaces are gone and direct URLs show "not 
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
   await expect(page.getByTestId('nav-releases')).toHaveCount(0);
   await expect(page.getByTestId('ask-devops-button')).toHaveCount(0);
-  for (const url of ['/releases', '/p/BIZ/environments']) {
-    await page.goto(url);
-    await expect(page.getByTestId('not-available-business')).toBeVisible();
-  }
+  // `/releases` is also a public page of the server (the blog's release pages, f40b15a9), so a full page load of it never
+  // reaches the app: open it as a link inside the app does (client-side route change).
+  await page.evaluate(() => {
+    history.pushState({}, '', '/releases');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByTestId('not-available-business')).toBeVisible();
+  await page.goto('/p/BIZ/environments');
+  await expect(page.getByTestId('not-available-business')).toBeVisible();
 
   const roles = await hireRoleOptions();
   expect(roles.length).toBeGreaterThan(0);
@@ -127,7 +132,7 @@ test('in Business mode the delivery surfaces are gone and direct URLs show "not 
   await page.goto('/automations');
   await page.getByRole('button', { name: 'New automation' }).first().click();
   const wizard = page.getByTestId('schedule-wizard');
-  await wizard.getByTestId('wizard-next').click();
+  await page.getByTestId('wizard-next').click();
   await expect(wizard.getByTestId('tile-create_card')).toBeVisible();
   await expect(wizard.getByTestId('tile-devops_request')).toHaveCount(0);
   await expect(wizard.getByTestId('tile-regression_run')).toHaveCount(0);
@@ -152,13 +157,13 @@ test('in Business mode the server refuses a repository, dev hires and a pack by 
   expect(pack.status(), await pack.text()).toBe(409);
   expect((await pack.json()).error.message).toMatch(/git URL/);
   // a business role is still hired
-  const ok = await hire('Anna', 'architect');
+  const ok = await hire('Anna', 'architect', 'senior'); // the Architect is only available as senior;
   expect(ok.status(), await ok.text()).toBe(201);
 });
 
 test('switching back to Developer mode always works and shows every surface again', async () => {
   await openGeneral();
-  await page.getByTestId('org-mode-dev').check();
+  await page.getByTestId('org-mode-dev').click();
   await expect(page.getByText('Developer mode is on')).toBeVisible();
   expect((await (await api.get('/api/org')).json()).mode).toBe('dev');
   expect((await modeEvents()).at(-1)?.payload).toMatchObject({ mode: 'dev', previous: 'business' });

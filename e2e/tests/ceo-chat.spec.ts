@@ -16,7 +16,7 @@ test.beforeAll(async ({ browser }) => {
   // The built-in CEO of this organization is created by a data migration that ran before the role catalogue existed.
   execFileSync('pnpm', ['--filter', '@aom/server', 'exec', 'tsx', `${ROOT}/e2e/support/provision-ceo.ts`], {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL },
+    env: { ...process.env, DATABASE_URL, AOM_NO_LEAN_TEAM: 'true' },
     stdio: 'pipe',
   });
   // Only the organization Owner (the admin account) can chat with the CEO.
@@ -50,8 +50,10 @@ test('New chat on an empty chat keeps the one standing chat and show it in the l
   expect(standing).toHaveLength(1);
   await expect(page.getByTestId('chat-offline').or(page.getByText('Add a workstation'))).toBeVisible();
 
+  const urlBefore = page.url();
   await page.getByTestId('ceo-chat-new').click();
-  await expect(page.getByText('This chat is still empty')).toBeVisible();
+  // New chat on an empty chat is idempotent (fc4ba509): it stays on the standing chat
+  await expect(page).toHaveURL(urlBefore);
   await expect(page.getByTestId('ceo-chat-row')).toHaveCount(1);
   await expect(page.getByTestId('ceo-chat-list')).toContainText('Current chat');
 
@@ -61,10 +63,11 @@ test('New chat on an empty chat keeps the one standing chat and show it in the l
 
 test('Archive all closes the other chats and leaves the live CEO chat open', async () => {
   const agents = (await (await api.get('/api/agents')).json()).agents as any[];
-  for (const name of ['Ada', 'Grace']) {
+  for (const name of ['Grace', 'Linus']) {
     const a = agents.find((x) => x.name === name);
     expect(a, `agent ${name}`).toBeTruthy();
-    expect((await api.post('/api/chats', { data: { agentId: a.id } })).ok()).toBe(true);
+    const made = await api.post('/api/chats', { data: { agentId: a.id } });
+    expect(made.ok(), await made.text()).toBe(true);
   }
   await page.goto('/desk');
   await page.getByRole('button', { name: 'Chat', exact: true }).click();

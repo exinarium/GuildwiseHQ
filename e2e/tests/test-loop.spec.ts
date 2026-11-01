@@ -286,8 +286,8 @@ test('AC finalize merge (small): the runner merges to the working branch without
 
   await waitCard('TST-2', 'done', (c) => c?.status === 'done');
   expect(originMain()).not.toBe(before);
-  expect(originLog().split('\n')[0]).toMatch(/^Merge aom\/tst-2/);
-  expect(git(paths.origin, 'show', 'main:aom-mock/TST-2.txt')).toContain('Add the thing');
+  expect(originLog().split('\n')[0]).toMatch(/^Merge Add the thing/);
+  expect(git(paths.origin, 'show', 'main:.guildwise-mock/TST-2.txt')).toContain('Add the thing');
   const fin = await q<{ payload: { action: string; resultRef: { mergeCommit: string } } }>(
     `SELECT payload FROM events WHERE type='CardFinalized' AND payload->>'cardId'=$1`,
     [(await card('TST-2'))!.id],
@@ -302,7 +302,7 @@ test('AC finalize merge (small): the runner merges to the working branch without
     (e) => !e,
     30_000,
   );
-  expect(git(paths.toyClone, 'branch', '--list', 'aom/tst-2*').trim()).toBe('');
+  expect(git(paths.toyClone, 'branch', '--list', 'guildwise/tst-2*').trim()).toBe('');
 
   // a full-suite card was spawned for a tester; its (scripted) failure creates a bug card in Spec
   const suite = (await card('TST-4'))!;
@@ -376,10 +376,10 @@ test('AC finalize merge (large): waits for the manager on the desk; approving me
   const item = page.getByRole('article', { name: /Approve merge of TST-6/ });
   await expect(item).toBeVisible();
   await expect(item.getByTestId('desk-kind')).toHaveText('Merge approval');
-  await item.getByRole('button', { name: 'Approve merge' }).click();
+  await item.getByTestId('desk-approve').click();
   await waitCard(ref, 'done', (c) => c?.status === 'done');
   expect(originMain()).not.toBe(before);
-  expect(originLog().split('\n')[0]).toMatch(/^Merge aom\/tst-6/);
+  expect(originLog().split('\n')[0]).toMatch(/^Merge A large change/);
   const suite = await waitCard('TST-7', 'done', (c) => c?.status === 'done');
   expect(suite?.origin).toBe('full_suite');
   const runs = await q<{ result: string }>('SELECT result FROM test_runs WHERE card_id=$1', [suite!.id]);
@@ -431,7 +431,9 @@ test('AC rebase conflict: changing the working branch so the card conflicts -> R
   rmSync(other, { recursive: true, force: true });
   mkdirSync(paths.vaults, { recursive: true });
   git(paths.vaults, 'clone', paths.origin, other);
-  writeFileSync(join(other, 'aom-mock', `${ref}.txt`), 'someone else wrote this first\n', { flag: 'w' });
+  writeFileSync(join(other, '.guildwise-mock', `${ref}.txt`), 'someone else wrote this first\n', {
+    flag: 'w',
+  });
   git(other, 'add', '-A');
   git(other, 'commit', '-m', `conflicting change for ${ref}`);
   git(other, 'push', 'origin', 'main');
@@ -451,7 +453,7 @@ test('AC rebase conflict: changing the working branch so the card conflicts -> R
     120_000,
   );
   expect(ev[0]?.payload.stage).toBe('test');
-  expect(ev[0]?.payload.conflictedFiles).toEqual([`aom-mock/${ref}.txt`]);
+  expect(ev[0]?.payload.conflictedFiles).toEqual([`.guildwise-mock/${ref}.txt`]);
   const t = await q<{ to_stage: string; to_status: string }>(
     `SELECT to_stage, to_status FROM card_transitions WHERE card_id=$1 AND reason='RebaseConflict'`,
     [c.id],
@@ -460,9 +462,11 @@ test('AC rebase conflict: changing the working branch so the card conflicts -> R
   expect((await card(ref))!.rework_round).toBeGreaterThanOrEqual(1);
   const thread = await (await api.get(`/api/cards/${ref}`)).json();
   const msg = thread.thread.find((m: { body: string }) => /Rebase onto/.test(m.body));
-  expect(msg.body).toContain(`aom-mock/${ref}.txt`);
+  expect(msg.body).toContain(`.guildwise-mock/${ref}.txt`);
   // nothing resolved it silently: the working branch is exactly what the other person pushed
-  expect(git(paths.origin, 'show', `main:aom-mock/${ref}.txt`)).toBe('someone else wrote this first\n');
+  expect(git(paths.origin, 'show', `main:.guildwise-mock/${ref}.txt`)).toBe(
+    'someone else wrote this first\n',
+  );
   // stop the build -> review -> conflict loop of this fixture
   await api.post(`/api/cards/${ref}/cancel`, { data: { reason: 'e2e: fixture done' } });
   await api.post(`/api/cards/${hanging}/cancel`, { data: { reason: 'e2e: fixture done' } });

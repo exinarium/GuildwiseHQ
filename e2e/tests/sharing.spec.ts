@@ -177,7 +177,7 @@ test("AC6d: that agent claims any card of the project, including the owner's, an
       title: 'Owner card, member agent',
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       // build round 0 ok, review bounces once, rework round hangs: Gia holds the card when the owner removes her manager
       fields: { ...SPEC, mock: { build: ['ok', 'hang'], review: ['changes'] } },
       specify: true,

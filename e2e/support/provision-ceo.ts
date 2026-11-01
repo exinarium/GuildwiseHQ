@@ -13,7 +13,8 @@ import { buildProjectors } from '../../apps/server/src/projections/index.ts';
 
 const config = loadConfig();
 const app = await createApp(config, { background: false });
-await registerBuiltins(app.ctx);
+// the e2e server does not register the lean team flow (AOM_NO_LEAN_TEAM): this must not add it behind its back
+await registerBuiltins(app.ctx, config.noLeanTeam ? (d) => !(d.key === 'code' && d.version >= 6) : undefined);
 await app.close();
 const pool = createPool(config.databaseUrl, 2);
 try {

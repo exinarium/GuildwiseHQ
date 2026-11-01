@@ -74,7 +74,7 @@ test('the owner starts a boardroom: the cast, the format and the models, and rou
   await dialog.getByTestId('add-adhoc').click();
   await expect(dialog.getByRole('list', { name: 'Chosen cast' })).toContainText('Regulator');
   await expect(dialog.getByTestId('cast-counter')).toContainText('3');
-  await dialog.getByLabel('Round cap').selectOption('6');
+  await dialog.getByLabel('Round cap').fill('6');
   await dialog.getByLabel('Cost limit in USD (optional)').fill('25');
   for (const l of ['Personas run on', 'The Chair runs on', 'Minutes are written by'])
     await dialog.getByLabel(l).selectOption({ label: 'Mock: Mock' });

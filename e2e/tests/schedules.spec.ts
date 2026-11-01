@@ -959,6 +959,7 @@ test('agent output: without the local-network allowance, a webhook to this machi
       AOM_BLOG_DIGEST: 'false',
       AOM_WEEKLY_BRIEFING: 'false',
       AOM_WEBHOOK_ALLOW_PRIVATE: 'false',
+      AOM_NO_LEAN_TEAM: 'true', // this second server must not register the lean team flow the suite's server leaves out
       LOG_LEVEL: 'warn',
     },
     stdio: ['ignore', log, log],

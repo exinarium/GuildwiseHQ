@@ -56,7 +56,7 @@ async function createCard(
       title,
       cardType: 'feature',
       ...(project === projectId ? { repoId } : {}),
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, ...(mock ? { mock } : {}) },
       specify: true,
     },
@@ -68,7 +68,7 @@ async function createCard(
 test('AC1: pairing a workstation auto-hires exactly one DevOps engineer that cannot be fired, only reset', async () => {
   await page.goto('/workstations');
   await page
-    .getByRole('button', { name: /pair workstation/i })
+    .getByRole('button', { name: /pair with a code/i })
     .first()
     .click();
   await page.getByRole('button', { name: 'Generate pairing code' }).click();
@@ -155,7 +155,8 @@ test('AC5a: a builder running `aom devops "start the app"` opens a request threa
         summary: string;
         card_id: string;
       }>(
-        `SELECT id, status, requested_by_kind, requested_by_name, summary, card_id FROM devops_requests ORDER BY created_at`,
+        `SELECT id, status, requested_by_kind, requested_by_name, summary, card_id FROM devops_requests WHERE workstation_id=$1 ORDER BY created_at`,
+        [workstationId],
       ),
     (r) => r.length === 1 && r[0]?.status === 'done',
     60_000,
@@ -166,12 +167,14 @@ test('AC5a: a builder running `aom devops "start the app"` opens a request threa
     summary: 'start the app',
   });
   const changes = await q<{ summary: string; commands: string[] }>(
-    'SELECT summary, commands FROM environment_changes',
+    'SELECT summary, commands FROM environment_changes WHERE workstation_id=$1',
+    [workstationId],
   );
   expect(changes).toHaveLength(1);
   expect(changes[0]?.summary).toBe('mock: start the app');
   const thread = await q<{ kind: string }>(
-    `SELECT kind FROM threads WHERE id=(SELECT thread_id FROM devops_requests LIMIT 1)`,
+    `SELECT kind FROM threads WHERE id=(SELECT thread_id FROM devops_requests WHERE workstation_id=$1 LIMIT 1)`,
+    [workstationId],
   );
   expect(thread[0]?.kind).toBe('devops');
   // the request did not stop the builder: the card moved on to review
@@ -242,7 +245,7 @@ test('AC5b: a request outside the granted access waits on an approval and resume
   await page.goto('/workstations');
   await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   await expect(row).toHaveAttribute('data-status', 'done', { timeout: 60_000 });
-  const changes = await q('SELECT 1 FROM environment_changes');
+  const changes = await q('SELECT 1 FROM environment_changes WHERE workstation_id=$1', [workstationId]);
   expect(changes).toHaveLength(2);
   const approved = await q<{ payload: { resolution: string } }>(
     `SELECT payload FROM events WHERE type='DevOpsApprovalResolved'`,
@@ -268,13 +271,19 @@ test('AC5c: with the access granted from the workstation page the same request n
     async () => (await (await api.get('/api/workstations')).json()).workstations[0].devopsAccess,
     (a) => a.allowInstall && a.allowDocker,
   );
-  const ask = page.getByRole('form', { name: 'Ask DevOps on Dev Box' });
-  await ask.getByLabel('Ask DevOps').fill('install docker compose');
-  await ask.getByRole('button', { name: 'Send request' }).click();
+  // DevOps requests from the workstation page go through the CEO chat now (the form opens it prefilled); the request
+  // itself is the same call the CEO makes, so it is sent here directly.
+  const approvalsBefore = (await q(`SELECT 1 FROM events WHERE type='DevOpsApprovalNeeded'`)).length;
+  const sent = await api.post('/api/devops/requests', {
+    data: { workstationId, summary: 'install docker compose' },
+  });
+  expect(sent.status(), await sent.text()).toBeLessThan(300);
+  await page.reload();
+  await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   const row = requestRow('install docker compose');
   await expect(row).toHaveAttribute('data-status', 'done', { timeout: 60_000 });
   const ap = await q(`SELECT 1 FROM events WHERE type='DevOpsApprovalNeeded'`);
-  expect(ap).toHaveLength(1); // still only the earlier one
+  expect(ap).toHaveLength(approvalsBefore); // no new approval: only the earlier one
 });
 
 test('reset wipes the DevOps sandbox and keeps the engineer', async () => {
@@ -297,6 +306,11 @@ test('reset wipes the DevOps sandbox and keeps the engineer', async () => {
 });
 
 // ------------------------------------------------------------------------------------------- vaults
+// OPEN QUESTION (reported, not guessed): these four specs register the organization vault by git URL. Since project-graphs
+// (1f61d3f0, 24d95558) the organization gets a local folder vault of its own when the first project or graph needs one, and
+// `registerVault` then refuses a git URL for the organization (409 vault_exists) while `PATCH` refuses a remote on a local vault
+// (409 vault_local). Only a project's local vault can be given a git repository. Whether an organization vault may do the same
+// is a product decision, so the specs are parked with `test.fixme` until it is made.
 
 let WORK: VaultFixture; // the organization vault
 let PERSONAL: VaultFixture; // the vault of the HOB project
@@ -314,7 +328,7 @@ const workClone = () =>
     join(HOME, 'vaults', r[0]?.id ?? 'none'),
   );
 
-test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
+test.fixme('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
   await page.goto('/settings/vaults');
   await page.getByRole('button', { name: 'Register a vault' }).click();
   const form = page.getByRole('form', { name: 'Register vault' });
@@ -407,7 +421,7 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   );
 });
 
-test('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the organization vault, committed and pushed', async () => {
+test.fixme('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the organization vault, committed and pushed', async () => {
   // The real M2 path: a builder asks, the manager answers on the desk, the QuestionAnswered hook writes the file.
   const ref = await createCard('Needs a decision for the vault', { build: ['question', 'ok'] });
   await page.goto('/desk');
@@ -454,7 +468,7 @@ test('AC3: answering a question on the desk writes projects/<name>/decisions/<da
   );
 });
 
-test('AC3b: standing orders added to the ledger are appended to the vault standing-orders.md (project and global)', async () => {
+test.fixme('AC3b: standing orders added to the ledger are appended to the vault standing-orders.md (project and global)', async () => {
   const project = await api.post('/api/ledger', {
     data: {
       scope: 'standing_order',
@@ -489,7 +503,7 @@ test('AC3b: standing orders added to the ledger are appended to the vault standi
   expect(paths.map((p) => p.vault_path)).toEqual(['projects/dvo/standing-orders.md', 'standing-orders.md']);
 });
 
-test("AC4: a card shift sees only the vault of its project: the organization vault, or the project's own vault", async () => {
+test.fixme("AC4: a card shift sees only the vault of its project: the organization vault, or the project's own vault", async () => {
   const hobby = await api.post('/api/projects', {
     data: { key: 'HOB', name: 'Hobby', vaultFolder: 'projects/hob' },
   });
@@ -530,7 +544,7 @@ test("AC4: a card shift sees only the vault of its project: the organization vau
         title,
         cardType: 'feature',
         repoId: repo,
-        completionAction: 'push_branch',
+        completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
         fields: SPEC,
         specify: true,
       },

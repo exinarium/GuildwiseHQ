@@ -176,7 +176,7 @@ test('AC1: a research card made on the form flows question -> research -> fact-c
   for (const n of [1, 2, 3]) expect(note).toContain(`  - url: ${claim(n).url}`);
   expect(note).toContain('Claim number 1 about the question [1]');
   expect(git(vault.origin, 'log', '--format=%an|%s', '-1', 'main').trim()).toMatch(
-    /^[^|]+\|aom: research SHOOT-\d+ Is 6mm ARC enough for deer\?/,
+    /^[^|]+\|Research: Is 6mm ARC enough for deer\?/,
   );
 
   // the card page links the published note and shows a preview and the citations

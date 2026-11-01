@@ -44,7 +44,7 @@ async function createCard(title: string, mock?: Record<string, string[]>): Promi
       title,
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, ...(mock ? { mock } : {}) },
       specify: true,
     },
@@ -251,7 +251,7 @@ test('AC5: TOY-1 goes In progress -> Review -> Rework -> Review -> Test with two
       ['TOY-1'],
     )
   )[0];
-  expect(card?.branch_name).toMatch(/^aom\/toy-1-/);
+  expect(card?.branch_name).toMatch(/^guildwise\/toy-1-/);
   // the card's branch is shown in expert mode only
   expect((await api.put('/api/auth/git-expert', { data: { enabled: true } })).ok()).toBe(true);
   await page.reload();
@@ -263,10 +263,10 @@ test('AC5: TOY-1 goes In progress -> Review -> Rework -> Review -> Test with two
   });
   expect(log).toContain('mock build round 1: TOY-1');
   expect(log).toContain('mock build round 2: TOY-1');
-  const branches = execFileSync('git', ['-C', paths.toyClone, 'branch', '--list', 'aom/toy-1-*'], {
+  const branches = execFileSync('git', ['-C', paths.toyClone, 'branch', '--list', 'guildwise/toy-1-*'], {
     encoding: 'utf8',
   });
-  expect(branches).toContain('aom/toy-1-');
+  expect(branches).toContain('guildwise/toy-1-');
   await assertExclusiveClaims(['TOY-1']);
 });
 

@@ -194,17 +194,24 @@ test('AC2: answering sets the branch on the repository with a ledger entry; hygi
     reason: 'unconfirmed',
   });
 
-  // the held-back work is stored on a saved-work branch and pushed by the run the answer started: nothing lands on the
-  // working branch and the manager's checkout is left as it was
-  const saved = await waitFor(
-    'the saved-work branch reached origin',
-    async () => git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*'),
-    (b) => b.trim() !== '',
+  // the held-back work is kept in a stash entry of the manager's checkout (saved work leaves no branch and pushes nothing,
+  // f32c1368): nothing lands on the working branch or on origin, and the files stay where they were
+  await waitFor(
+    'the saved work is in a stash',
+    async () => git(CLONE, 'stash', 'list'),
+    (l) => /saved work \d{4}-\d{2}-\d{2}T/.test(l),
     90_000,
   );
-  const savedBranch = saved.trim().replace(/^[*+]?\s*/, '');
-  expect(git(ORIGIN, 'log', '-1', '--format=%s', savedBranch)).toContain('saved work');
-  expect(git(ORIGIN, 'show', `${savedBranch}:todo.md`)).toContain('unsaved work');
+  expect(git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*').trim()).toBe('');
+  const kept = (ref: string) => {
+    try {
+      return git(CLONE, 'show', ref);
+    } catch {
+      return '';
+    }
+  };
+  // the stash holds the tracked changes in W and the untracked files in its third parent
+  expect(`${kept('stash@{0}:todo.md')}${kept('stash@{0}^3:todo.md')}`).toContain('unsaved work');
   expect(originHead()).toBe(head);
   expect(git(CLONE, 'status', '--porcelain')).toContain('todo.md');
   const requestsNow = await requests();
@@ -215,18 +222,22 @@ test('AC2: answering sets the branch on the repository with a ledger entry; hygi
   expect(await questions()).toHaveLength(0);
 });
 
-test('AC3: uncommitted changes on a branch that is not the working branch are saved on a saved-work branch, not committed there', async () => {
+test('AC3: uncommitted changes on a branch that is not the working branch are saved in a stash, not committed there', async () => {
   git(CLONE, 'checkout', 'develop');
   writeFileSync(join(CLONE, 'scratch.txt'), 'on the wrong branch\n');
   const head = originHead('develop');
-  const savedBefore = git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*').split('\n').length;
+  const savedStashes = () =>
+    git(CLONE, 'stash', 'list')
+      .split('\n')
+      .filter((l) => /saved work/.test(l)).length;
+  const savedBefore = savedStashes();
   await runHygiene();
-  // the checkout and the branch it is on are left alone; the edits go to a new saved-work branch (no finding is raised)
+  // the checkout and the branch it is on are left alone; the edits go to a new saved-work stash entry (no finding is raised)
   expect(originHead('develop')).toBe(head);
   expect(git(CLONE, 'status', '--porcelain')).toContain('scratch.txt');
   await waitFor(
-    'a new saved-work branch holding scratch.txt',
-    async () => git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*').split('\n').length,
+    'a new saved-work stash entry',
+    async () => savedStashes(),
     (n) => n > savedBefore,
     30_000,
   );

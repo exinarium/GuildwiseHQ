@@ -54,7 +54,7 @@ async function ticketCard(title: string, externalRef: string, extra: Record<stri
       title,
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, externalRef, mock: { build: ['ok'] }, ...extra },
       specify: true,
     },
