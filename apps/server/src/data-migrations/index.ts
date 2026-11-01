@@ -7,6 +7,7 @@ import { migrateCeoBuiltin } from './ceo-builtin.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDelegationExplicit } from './delegation-explicit.ts';
+import { migrateDeployRemovedComputers } from './deploy-removed-computers.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
@@ -48,6 +49,11 @@ export {
 export { CEO_BUILTIN_MIGRATION, type CeoBuiltinReport, migrateCeoBuiltin } from './ceo-builtin.ts';
 export { CEO_MODELS_MIGRATION, type CeoModelsReport, migrateCeoModels } from './ceo-models.ts';
 export { CEO_WORKING_BRANCH_MIGRATION, migrateCeoWorkingBranch } from './ceo-working-branch.ts';
+export {
+  DEPLOY_REMOVED_COMPUTERS_MIGRATION,
+  type DeployRemovedComputersReport,
+  migrateDeployRemovedComputers,
+} from './deploy-removed-computers.ts';
 export {
   DESIGN_HELD_STATUS_MIGRATION,
   type DesignHeldStatusReport,
@@ -134,6 +140,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'video-schedule-2026-10', run: (env) => migrateVideoSchedule(env) },
   { name: 'guildwisehq-runner-rule-2026-10', run: (env) => migrateGuildwiseRunnerRule(env) },
   { name: 'business-builtin-2026-11', run: (env) => migrateBusinessBuiltin(env) },
+  { name: 'deploy-removed-computers-2026-11', run: (env) => migrateDeployRemovedComputers(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

@@ -22,6 +22,7 @@ const GUIDED = `EXISTS (SELECT 1 FROM deploy_target_keys gk WHERE gk.target_id =
 export const REACHABILITY_EVERY_MS = 24 * 3600_000;
 const MAX_PER_TICK = 5;
 
+/** A place whose computer was removed is skipped (`computer_removed_at`; the join on an active workstation covers old data). */
 /** Asks the target's computer to check, unless a check is already on its way or the target is not a guided one. Returns whether one was queued. */
 export async function queueReachabilityCheck(ctx: Ctx, targetId: string): Promise<boolean> {
   const t = await one(
@@ -29,7 +30,7 @@ export async function queueReachabilityCheck(ctx: Ctx, targetId: string): Promis
     `SELECT t.id, t.project_id, t.host, t.workstation_id, w.connected, c.capabilities
        FROM deploy_targets t JOIN workstations w ON w.id = t.workstation_id AND w.status='active'
        LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id
-      WHERE t.id=$1 AND t.kind='remote_ssh' AND t.removed_at IS NULL AND t.host IS NOT NULL AND ${GUIDED}`,
+      WHERE t.id=$1 AND t.kind='remote_ssh' AND t.removed_at IS NULL AND t.computer_removed_at IS NULL AND t.host IS NOT NULL AND ${GUIDED}`,
     [targetId],
   );
   if (!t || !t.connected || !(t.capabilities ?? []).includes(DEPLOY_CONNECT_CAPABILITY)) return false;
@@ -60,7 +61,7 @@ export async function reachabilityTick(ctx: Ctx): Promise<number> {
        JOIN workstations w ON w.id = t.workstation_id AND w.status='active' AND w.connected
        JOIN workstation_capabilities c ON c.workstation_id = w.id AND $2 = ANY(c.capabilities)
        LEFT JOIN deploy_target_connections k ON k.target_id = t.id AND k.workstation_id = t.workstation_id
-      WHERE t.kind='remote_ssh' AND t.removed_at IS NULL AND t.host IS NOT NULL AND ${GUIDED}
+      WHERE t.kind='remote_ssh' AND t.removed_at IS NULL AND t.computer_removed_at IS NULL AND t.host IS NOT NULL AND ${GUIDED}
         AND (k.at IS NULL OR k.at < $1)
       ORDER BY k.at NULLS FIRST LIMIT $3`,
     [new Date(ctx.clock.now().getTime() - REACHABILITY_EVERY_MS), DEPLOY_CONNECT_CAPABILITY, MAX_PER_TICK],

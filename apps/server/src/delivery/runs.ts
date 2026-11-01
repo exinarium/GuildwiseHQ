@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  computerRemovedMessage,
   DELIVERY_CAPABILITY,
+  DEPLOYING_COMPUTER_REMOVED,
   type DeployActor,
   type DeployExecPayload,
   DeployExecResultSchema,
@@ -23,6 +25,7 @@ import { withAppendTx, withTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { targetComputerRemoved } from './computer-removed.ts';
 import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge, MERGE_IN_REPO } from './gate.ts';
 import { releasesPaused } from './mode.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
@@ -121,7 +124,10 @@ async function deployWorkstation(
   project: Row,
   vault: ProjectVault,
   target: Row,
-): Promise<{ id: string } | { error: string }> {
+): Promise<{ id: string } | { error: string; reason?: string }> {
+  // the place's own computer was removed: that comes first, whatever the vault says
+  if (await targetComputerRemoved(db, target))
+    return { error: computerRemovedMessage(target.name), reason: DEPLOYING_COMPUTER_REMOVED };
   if (vault.storage === 'local') {
     if (target.workstation_id && target.workstation_id !== vault.workstationId)
       return {
@@ -136,7 +142,7 @@ async function deployWorkstation(
     const w = await one<{ id: string }>(db, `SELECT id FROM workstations WHERE id=$1 AND status='active'`, [
       target.workstation_id,
     ]);
-    return w ?? { error: `the workstation of ${target.name} is gone` };
+    return w ?? { error: computerRemovedMessage(target.name), reason: DEPLOYING_COMPUTER_REMOVED };
   }
   const id = await workstationForVault(db, project.id, vault, project.org_id);
   return id ? { id } : { error: 'no workstation of the project can deploy' };
@@ -638,7 +644,7 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
     }
     const ws = await deployWorkstation(ctx.pool, project, vault, t);
     if ('error' in ws) {
-      refuse('no_workstation', ws.error, [], commit);
+      refuse(ws.reason ?? 'no_workstation', ws.error, [], commit);
       continue;
     }
     if (await lacksCapability(ctx.pool, ws.id)) {

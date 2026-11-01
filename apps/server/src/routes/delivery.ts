@@ -38,6 +38,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
+import { assertTargetComputerActive } from '../delivery/computer-removed.ts';
 import {
   connectBlockedReason,
   forgetKeyAnyway,
@@ -492,9 +493,11 @@ export function deliveryRoutes(ctx: Ctx) {
         await projectOwnerOrThrow(ctx, s.user, req.params.id);
         const t = await one(
           ctx.pool,
-          'SELECT workstation_id FROM deploy_targets WHERE id=$1 AND project_id=$2',
+          'SELECT name, workstation_id, computer_removed_at FROM deploy_targets WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
           [req.params.targetId, req.params.id],
         );
+        // the computer that deploys this server was removed: nothing to check until the Owner chooses another one
+        if (t) await assertTargetComputerActive(ctx.pool, t);
         // one check a minute per server: the button cannot be used to hammer a customer's server
         const last = await one(
           ctx.pool,

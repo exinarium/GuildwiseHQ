@@ -21,6 +21,7 @@ import {
   type RollbackRequest,
   type SetupEnv,
   streamId,
+  type UnlinkImpactResponse,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -32,6 +33,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
+import { rowComputerRemoved } from './computer-removed.ts';
 import { revokeKeyOnRemoval } from './connect.ts';
 import { evaluateEnvGate } from './gate.ts';
 import { releasesPaused } from './mode.ts';
@@ -119,7 +121,7 @@ const nameList = (names: string[]) =>
 async function targetRows(db: Queryable, projectId: string): Promise<Row[]> {
   return rows(
     db,
-    `SELECT t.*, w.name AS workstation_name, w.connected AS workstation_connected
+    `SELECT t.*, w.name AS workstation_name, w.connected AS workstation_connected, w.status AS workstation_status
        FROM deploy_targets t LEFT JOIN workstations w ON w.id = t.workstation_id
       WHERE t.project_id=$1 AND t.removed_at IS NULL ORDER BY lower(t.name), t.created_at`,
     [projectId],
@@ -202,6 +204,39 @@ export function duplicateOfPlace(t: Row, all: Row[]): PlaceDto['duplicateOf'] {
   return null;
 }
 
+/** The live places that run on a computer, with the environments of the saved setup that use each (the Unpair dialog's list). */
+export async function placesOfComputer(db: Queryable, workstationId: string): Promise<UnlinkImpactResponse> {
+  const ts = await rows(
+    db,
+    `SELECT t.id, t.name, t.kind, t.production, t.project_id, p.name AS project_name
+       FROM deploy_targets t JOIN projects p ON p.id = t.project_id
+      WHERE t.workstation_id=$1 AND t.removed_at IS NULL ORDER BY lower(p.name), lower(t.name)`,
+    [workstationId],
+  );
+  const usages = new Map<string, Usage>();
+  const places: UnlinkImpactResponse['places'] = [];
+  for (const t of ts) {
+    let u = usages.get(t.project_id);
+    if (!u) {
+      u = await usageOf(db, t.project_id);
+      usages.set(t.project_id, u);
+    }
+    const envs = new Map<string, string>();
+    for (const e of u.saved.get(lc(t.name)) ?? []) envs.set(e.env, e.label);
+    for (const e of u.draft.get(lc(t.name)) ?? []) if (!envs.has(e)) envs.set(e, e);
+    places.push({
+      placeId: t.id,
+      placeName: t.name,
+      kind: t.kind === 'remote_ssh' ? 'server' : 'computer',
+      production: !!t.production,
+      projectId: t.project_id,
+      projectName: t.project_name,
+      environments: [...envs].map(([env, label]) => ({ env, label })),
+    });
+  }
+  return { places };
+}
+
 export async function listPlaces(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -241,6 +276,7 @@ export async function listPlaces(
       workstationId: t.workstation_id ?? null,
       workstationName: t.workstation_name ?? null,
       workstationOnline: t.workstation_id ? !!t.workstation_connected : null,
+      computerRemoved: rowComputerRemoved(t),
       host: t.host ?? null,
       appUrl: t.app_url ?? null,
       production: !!t.production,
@@ -775,8 +811,10 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
           .filter((c) => c.target_id === t.id && (!t.workstation_id || c.workstation_id === t.workstation_id))
           .sort((a, b) => +b.at - +a.at)[0]
       : undefined;
+    const computerRemoved = !!t && rowComputerRemoved(t);
     const cannotReach =
       !!t &&
+      !computerRemoved &&
       ((t.kind === 'remote_ssh' && !!conn && conn.state !== 'reachable') ||
         (!!t.workstation_id && !t.workstation_connected));
     const inSaved = !!v;
@@ -827,6 +865,9 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     if (updating) {
       state = 'updating';
       text = 'An update is running now.';
+    } else if (computerRemoved) {
+      state = 'cannot_reach';
+      text = `The computer that deploys ${place} was removed. Choose another computer for it.`;
     } else if (cannotReach) {
       state = 'cannot_reach';
       text =
@@ -887,6 +928,7 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
       hosting: v?.hosting ?? 'this_computer',
       runtime: v?.runtime ?? 'docker',
       placeId: t?.id ?? null,
+      computerRemoved,
       placeName: place,
       appUrl: v?.appUrl ?? null,
       releasedBy: v?.releasedBy ?? 'owner',

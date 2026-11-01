@@ -35,6 +35,7 @@ import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { rowComputerRemoved } from './computer-removed.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
 import { workingSetup } from './environments.ts';
 import { modeHistory, releasesPaused } from './mode.ts';
@@ -79,7 +80,7 @@ export async function projectOwnerOrThrow(ctx: Ctx, user: AuthSession['user'], p
 async function targetsOf(db: Queryable, projectId: string): Promise<Array<Record<string, any>>> {
   return rows(
     db,
-    `SELECT t.*, w.name AS workstation_name, w.connected AS workstation_connected
+    `SELECT t.*, w.name AS workstation_name, w.connected AS workstation_connected, w.status AS workstation_status
        FROM deploy_targets t LEFT JOIN workstations w ON w.id = t.workstation_id
       WHERE t.project_id=$1 AND t.removed_at IS NULL ORDER BY lower(t.name)`,
     [projectId],
@@ -116,6 +117,7 @@ export async function getSetupState(
       workstationId: t.workstation_id ?? null,
       workstationName: t.workstation_name ?? null,
       workstationOnline: t.workstation_id ? !!t.workstation_connected : null,
+      computerRemoved: rowComputerRemoved(t),
       host: t.host ?? null,
       appUrl: t.app_url ?? null,
       connection: c
@@ -181,7 +183,9 @@ export async function getSetupState(
   const writeBlocked = !vault
     ? NO_PROJECT_VAULT
     : !writeWs
-      ? 'No computer of the project can read the project files.'
+      ? vault.storage === 'local'
+        ? "The project's vault was on a computer that was removed. Connect your main computer so the vault moves to it, or give the project a git vault in Vaults, then save again."
+        : 'No computer of the project can read the project files.'
       : await setupBlockedReason(ctx.pool, writeWs);
   const proposals = await listProposalDtos(ctx.pool, projectId, 'deploy', true);
   const scan = await openScan(ctx.pool, projectId, 'deploy', ctx.clock.now());
@@ -551,7 +555,13 @@ export async function publishSetup(
   const vault = await projectVault(ctx.pool, projectId);
   if (!vault) throw conflict('no_vault', NO_PROJECT_VAULT);
   const wsId = await workstationForVault(ctx.pool, projectId, vault, p.org_id);
-  if (!wsId) throw conflict('no_workstation', 'no computer of the project can read the project files');
+  if (!wsId)
+    throw conflict(
+      'no_workstation',
+      vault.storage === 'local'
+        ? "The project's vault was on a computer that was removed. Connect your main computer so the vault moves to it, or give the project a git vault in Vaults, then save again."
+        : 'no computer of the project can read the project files',
+    );
   const blocked =
     (await setupBlockedReason(ctx.pool, wsId)) ??
     (needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??

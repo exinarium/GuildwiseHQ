@@ -415,7 +415,8 @@ export const phaseProjectors: Record<string, Projector> = {
               notes = COALESCE($10, notes), updated_at=$11,
               test_enabled = COALESCE($12, test_enabled), production = COALESCE($13, production),
               destructive_ok = COALESCE($14, destructive_ok), test_hosts = COALESCE($15::text[], test_hosts),
-              secret_names = COALESCE($16::text[], secret_names), role = COALESCE($17, role)
+              secret_names = COALESCE($16::text[], secret_names), role = COALESCE($17, role),
+              computer_removed_at = CASE WHEN $4::boolean AND $5::uuid IS NOT NULL THEN NULL ELSE computer_removed_at END
         WHERE id=$1`,
       [
         p.targetId,

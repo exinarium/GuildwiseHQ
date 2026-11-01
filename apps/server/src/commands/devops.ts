@@ -29,6 +29,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { COMPUTER_REMOVED, computerRemovedMessage } from '../delivery/computer-removed.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -369,7 +370,19 @@ export async function createDevOpsRequest(
     const ws = await one(tx, `SELECT user_id FROM workstations WHERE id=$1 AND status='active'`, [
       req.workstationId,
     ]);
-    if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
+    if (!ws || ws.user_id !== user.id) {
+      // an unpaired computer that still deploys a place of this person: say what to do instead of a bare 404
+      const lost = await one(
+        tx,
+        `SELECT t.name FROM deploy_targets t JOIN workstations w ON w.id = t.workstation_id
+          WHERE t.workstation_id=$1 AND w.user_id=$2 AND w.status <> 'active' AND t.removed_at IS NULL
+            AND ($3::uuid IS NULL OR t.project_id = $3::uuid)
+          ORDER BY lower(t.name) LIMIT 1`,
+        [req.workstationId, user.id, req.context?.projectId ?? null],
+      );
+      if (lost) throw conflict(COMPUTER_REMOVED, computerRemovedMessage(lost.name));
+      throw notFound('workstation not found');
+    }
     const card = req.cardId ? (await loadVisibleCard(tx, user.id, req.cardId)).card : undefined;
     await assertContextVisible(tx, user.id, req.context);
     const { requestId } = await createDevOpsRequestIn(ctx, tx, {

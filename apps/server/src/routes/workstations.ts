@@ -23,6 +23,7 @@ import {
   pairRunner,
   renameWorkstation,
   setShiftLimit,
+  unlinkImpact,
   unlinkWorkstation,
 } from '../commands/workstations.ts';
 import type { Ctx } from '../context.ts';
@@ -74,6 +75,11 @@ export function workstationRoutes(ctx: Ctx) {
         return own(s.user.id, req.params.id);
       },
     );
+
+    app.get('/api/workstations/:id/unlink-impact', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return unlinkImpact(ctx, s.user, req.params.id);
+    });
 
     app.post('/api/workstations/:id/unlink', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);

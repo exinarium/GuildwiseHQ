@@ -4,6 +4,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { assertTargetComputerActive } from '../delivery/computer-removed.ts';
 import { conflict, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { deliver } from './workstation-setup.ts';
@@ -21,16 +22,18 @@ export async function setTargetSecret(
   body: SetTargetSecretRequest,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
-      workstationId,
-      user.id,
-    ]);
-    if (!ws) throw notFound('workstation not found');
     const target = await one(tx, 'SELECT * FROM deploy_targets WHERE id=$1 AND removed_at IS NULL', [
       body.targetId,
     ]);
     if (!target) throw notFound('deploy target not found');
     await loadVisibleProject(tx, user.id, target.project_id);
+    // the value was meant for the place's own computer, and that computer was removed: say what to do
+    if (target.workstation_id === workstationId) await assertTargetComputerActive(tx, target);
+    const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
+      workstationId,
+      user.id,
+    ]);
+    if (!ws) throw notFound('workstation not found');
     if (!((target.secret_names ?? []) as string[]).includes(body.name))
       throw unprocessable(
         'unknown_secret_name',

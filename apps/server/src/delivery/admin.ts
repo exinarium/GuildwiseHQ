@@ -11,6 +11,7 @@ import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { assertNoRemovedPlaceOn } from './computer-removed.ts';
 
 async function ownerOrAdmin(ctx: Ctx, user: AuthSession['user'], orgId: string): Promise<'owner' | 'admin'> {
   const role = await orgRoleOf(ctx.pool, user.id, orgId);
@@ -118,7 +119,10 @@ export async function setDeploySecret(
       workstationId,
       user.id,
     ]);
-    if (!ws) throw notFound('workstation not found');
+    if (!ws) {
+      await assertNoRemovedPlaceOn(tx, project.id, workstationId);
+      throw notFound('workstation not found');
+    }
     const rec = await one(tx, 'SELECT parsed, approved_parsed FROM delivery_recipes WHERE project_id=$1', [
       project.id,
     ]);

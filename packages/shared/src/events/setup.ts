@@ -262,4 +262,13 @@ export const setupEvents = [
       at: z.iso.datetime(),
     }),
   ),
+  /**
+   * The computer that deploys this place was unpaired (or is gone). The place keeps its `workstation_id` for the record;
+   * the flag only says the Owner has to choose another computer for it. Cleared when the place gets an active computer
+   * (`DeployTargetUpdated` with a `workstationId`, or `DeployTargetConnected`).
+   */
+  defineEvent(
+    'DeployTargetComputerRemoved',
+    z.object({ targetId: Id, projectId: Id, workstationId: Id.nullable() }),
+  ),
 ];

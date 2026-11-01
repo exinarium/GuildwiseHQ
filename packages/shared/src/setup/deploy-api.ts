@@ -39,6 +39,8 @@ export const SetupTargetDtoSchema = z.object({
   workstationId: z.uuid().nullable(),
   workstationName: z.string().nullable(),
   workstationOnline: z.boolean().nullable(),
+  /** The computer that deploys this target was removed (unpaired). */
+  computerRemoved: z.boolean().optional(),
   host: z.string().nullable(),
   appUrl: z.string().nullable(),
   /** Can the deploying workstation sign in to the server? (`null`: never checked / not a server target.) */

@@ -167,6 +167,24 @@ export const WorkstationDtoSchema = z.object({
     .optional(),
 });
 export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
+/**
+ * `GET /api/workstations/:id/unlink-impact`: the places (deploy targets) that run on this computer, with the environments that
+ * use each, so the Unpair dialog can say what will need another computer. Unpairing still goes ahead once confirmed.
+ */
+export const UnlinkImpactResponseSchema = z.object({
+  places: z.array(
+    z.object({
+      placeId: z.uuid(),
+      placeName: z.string(),
+      kind: z.enum(['computer', 'server']),
+      production: z.boolean(),
+      projectId: z.uuid(),
+      projectName: z.string(),
+      environments: z.array(z.object({ env: z.string(), label: z.string() })),
+    }),
+  ),
+});
+export type UnlinkImpactResponse = z.infer<typeof UnlinkImpactResponseSchema>;
 export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });
 
 /** `GET /api/workstations/:id/sudo-key`: the public key to encrypt the sudo password with (RSA-OAEP, SHA-256). */

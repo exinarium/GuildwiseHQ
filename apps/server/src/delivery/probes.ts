@@ -18,6 +18,7 @@ import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { assertTargetComputerActive } from './computer-removed.ts';
 import { connectBlockedReason } from './connect.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 
@@ -59,6 +60,8 @@ export async function requestProbe(
       )
     : undefined;
   if (req.targetId && !target) throw notFound('deploy target not found');
+  // the place's own computer is gone: say so (an explicit foreign `workstationId` keeps its plain 404 below)
+  if (target && !req.workstationId) await assertTargetComputerActive(ctx.pool, target);
   let workstationId = req.workstationId ?? target?.workstation_id ?? null;
   if (!workstationId) {
     const mine = await rows(

@@ -210,6 +210,11 @@ export const deliveryProjectors: Record<string, Projector> = {
         p.at,
       ],
     );
+    // the place has a computer that signs in again: it is no longer marked as having lost its computer
+    await exec(tx, `UPDATE deploy_targets SET computer_removed_at = NULL WHERE id=$1 AND workstation_id=$2`, [
+      p.targetId,
+      p.workstationId,
+    ]);
   },
   DeployKeyRevoked: async (tx, e) => {
     const p = ev<'DeployKeyRevoked'>(e).payload;
@@ -307,6 +312,14 @@ export const deliveryProjectors: Record<string, Projector> = {
       tx,
       `UPDATE deploy_target_moves SET state='cancelled', current_step=NULL, old_app_stopped=false, finished_at=$2 WHERE id=$1`,
       [p.moveId, p.at],
+    );
+  },
+  DeployTargetComputerRemoved: async (tx, e) => {
+    const p = ev<'DeployTargetComputerRemoved'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_targets SET computer_removed_at = COALESCE(computer_removed_at, $2) WHERE id=$1`,
+      [p.targetId, e.createdAt],
     );
   },
   DeployTargetRetired: async (tx, e) => {

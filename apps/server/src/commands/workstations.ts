@@ -6,6 +6,8 @@ import type { Ctx } from '../context.ts';
 import { generatePairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { computerRemovedEvents } from '../delivery/computer-removed.ts';
+import { placesOfComputer } from '../delivery/environments.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -212,6 +214,13 @@ export async function unlinkWorkstation(ctx: Ctx, user: AuthSession['user'], id:
   });
 }
 
+/** What unpairing would leave without a computer (read-only; the same permission as unpairing). */
+export async function unlinkImpact(ctx: Ctx, user: AuthSession['user'], id: string) {
+  const ws = await one(ctx.pool, 'SELECT user_id, status FROM workstations WHERE id=$1', [id]);
+  if (!ws || !canUnlinkWorkstation(user, ws.user_id)) throw notFound('workstation not found');
+  return placesOfComputer(ctx.pool, id);
+}
+
 /** The unlink itself, inside the caller's transaction (also used when an administrator deactivates a user). */
 export async function unlinkWorkstationIn(
   ctx: Ctx,
@@ -321,6 +330,8 @@ export async function unlinkWorkstationIn(
           scope: orgScope(r.org_id),
         });
     }
+    // The places this computer deployed keep pointing at it for the record; they are marked so the Owner chooses another one.
+    events.push(...(await computerRemovedEvents(tx, { workstationId: id, now: ctx.clock.now() })));
     await ctx.store.append(events, { tx });
     await exec(
       tx,

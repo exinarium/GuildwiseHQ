@@ -13,6 +13,11 @@ export type EnvRole = z.infer<typeof EnvRoleSchema>;
 
 // ------------------------------------------------------------------------------------------------------- places
 
+/** The error code (409) and refusal reason when the computer that deploys a place was removed (unpaired). */
+export const DEPLOYING_COMPUTER_REMOVED = 'deploying_computer_removed';
+export const computerRemovedMessage = (placeName: string): string =>
+  `The computer that deploys ${placeName} was removed. Choose another computer for it.`;
+
 /** `GET /api/projects/:id/places` */
 export const PlaceDtoSchema = z.object({
   /** The deploy target's id (a place and a target are the same row). */
@@ -22,6 +27,8 @@ export const PlaceDtoSchema = z.object({
   workstationId: z.uuid().nullable(),
   workstationName: z.string().nullable(),
   workstationOnline: z.boolean().nullable(),
+  /** The computer that deploys this place was removed (unpaired) or is not active: the Owner has to choose another one. */
+  computerRemoved: z.boolean().optional(),
   /** The ssh alias (servers). */
   host: z.string().nullable(),
   appUrl: z.string().nullable(),
@@ -130,6 +137,8 @@ export const EnvironmentStatusDtoSchema = z.object({
   runtime: z.enum(['docker', 'direct']).default('docker'),
   placeId: z.uuid().nullable(),
   placeName: z.string(),
+  /** The computer that deploys this environment's place was removed: choose another one for the place. */
+  computerRemoved: z.boolean().optional(),
   appUrl: z.string().nullable(),
   /** Who may press release, and when it updates by itself, in words the page can print. */
   releasedBy: z.enum(['owner', 'ceo', 'auto']),

@@ -33,6 +33,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { COMPUTER_REMOVED, computerRemovedMessage } from './computer-removed.ts';
 import { ownComputer, serverTarget } from './connect.ts';
 import { resolveAddresses } from './dns.ts';
 import { projectOwnerOrThrow } from './setup.ts';
@@ -59,6 +60,15 @@ export async function moveBlockedReason(db: Queryable, workstationId: string): P
 }
 
 async function requireComputer(ctx: Ctx, user: AuthSession['user'], workstationId: string) {
+  // the computer of the move was unpaired: say which place needs another one (instead of "computer not found")
+  const lost = await one(
+    ctx.pool,
+    `SELECT t.name FROM deploy_targets t JOIN workstations w ON w.id = t.workstation_id
+      WHERE t.workstation_id=$1 AND w.user_id=$2 AND w.status <> 'active' AND t.removed_at IS NULL
+      ORDER BY lower(t.name) LIMIT 1`,
+    [workstationId, user.id],
+  );
+  if (lost) throw conflict(COMPUTER_REMOVED, computerRemovedMessage(lost.name));
   const ws = await ownComputer(ctx, user, workstationId);
   const blocked = await moveBlockedReason(ctx.pool, ws.id);
   if (blocked)
