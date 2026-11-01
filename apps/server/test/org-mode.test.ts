@@ -106,7 +106,11 @@ describe('the default view of the organization', () => {
     const m = await w.t.userSession(uniqueEmail('member'));
     await w.t.addOrgMember(orgId(), m.id, 'member');
     const h = { 'x-aom-org': orgId() };
-    const r = await w.t.req('PATCH', '/api/org', { cookie: m.cookie, headers: h, body: { mode: 'business' } });
+    const r = await w.t.req('PATCH', '/api/org', {
+      cookie: m.cookie,
+      headers: h,
+      body: { mode: 'business' },
+    });
     expect(r.status).toBe(403);
     expect((await getOrg()).mode).toBe('dev');
     expect((await putView(m.cookie, 'business', h)).status).toBe(200);
@@ -179,9 +183,9 @@ describe('the member view', () => {
       body: { view: 'business' },
     });
     expect(r.status).toBeGreaterThanOrEqual(400);
-    expect((await w.t.req('PUT', '/api/org/view', { cookie: w.owner.cookie, body: { view: 'x' } })).status).toBe(
-      400,
-    );
+    expect(
+      (await w.t.req('PUT', '/api/org/view', { cookie: w.owner.cookie, body: { view: 'x' } })).status,
+    ).toBe(400);
   });
 });
 
@@ -241,11 +245,21 @@ describe('(e) business workflows exist in every organization', () => {
     for (const k of BUSINESS_KEYS) expect(enabled).toContain(k);
   });
 
-  it('the boot check installs what is missing and changes nothing when complete', async () => {
+  it('the boot check installs what a project never had and changes nothing when complete', async () => {
+    // A project from before a workflow existed: no event ever listed it. (The events table is append-only; the test
+    // database is superuser, so the guard trigger is lifted for this one clean-up.)
     await q(`DELETE FROM project_workflows WHERE project_id=$1 AND workflow_key = ANY($2)`, [
       w.projectId,
       BUSINESS_KEYS,
     ]);
+    await q(`ALTER TABLE events DISABLE TRIGGER events_append_only`);
+    try {
+      await q(`DELETE FROM events WHERE stream_id=$1 AND type='ProjectWorkflowsSet'`, [
+        `project-${w.projectId}`,
+      ]);
+    } finally {
+      await q(`ALTER TABLE events ENABLE TRIGGER events_append_only`);
+    }
     await ensureBusinessWorkflowsAtBoot(w.t.app.ctx);
     const enabled = (
       await q(`SELECT workflow_key FROM project_workflows WHERE project_id=$1`, [w.projectId])
@@ -254,6 +268,32 @@ describe('(e) business workflows exist in every organization', () => {
     const seq = await lastSeq();
     await ensureBusinessWorkflowsAtBoot(w.t.app.ctx);
     expect(await eventsSince(seq)).toEqual([]);
+  });
+
+  it('a business workflow an owner turned off on a project stays off at the next boot', async () => {
+    const off = BUSINESS_KEYS[1] as string;
+    const current = (
+      await q(`SELECT workflow_key, default_card_types FROM project_workflows WHERE project_id=$1`, [
+        w.projectId,
+      ])
+    ).map((r: any) => ({ workflowKey: r.workflow_key, defaultCardTypes: r.default_card_types ?? [] }));
+    const res = await w.t.req('PUT', `/api/projects/${w.projectId}/workflows`, {
+      cookie: w.owner.cookie,
+      body: { enabled: current.filter((e: any) => e.workflowKey !== off) },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const keysNow = async () =>
+      (await q(`SELECT workflow_key FROM project_workflows WHERE project_id=$1`, [w.projectId])).map(
+        (r: any) => r.workflow_key,
+      );
+    expect(await keysNow()).not.toContain(off);
+    const seq = await lastSeq();
+    await ensureBusinessWorkflowsAtBoot(w.t.app.ctx);
+    expect(await keysNow()).not.toContain(off);
+    expect(await eventsSince(seq)).toEqual([]);
+    // and a replay of the projections agrees
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
+    expect(await keysNow()).not.toContain(off);
   });
 
   it('a new organization from an invitation has them with no mode chosen, and with Business too', async () => {

@@ -63,7 +63,8 @@ export async function businessWorkflowEvents(ctx: Ctx, tx: Tx, orgId: string): P
 
 /**
  * Registers the business workflows an organization is missing and enables each on its projects (the primary stays the
- * primary; every enabled entry is kept). Idempotent. Runs for every organization.
+ * primary; every enabled entry is kept). Idempotent. Runs for every organization. A workflow the project once had and
+ * an owner turned off is never enabled again; only workflows the project has never had are added.
  */
 export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): Promise<void> {
   const events = await businessWorkflowEvents(ctx, tx, orgId);
@@ -94,7 +95,20 @@ export async function ensureBusinessWorkflows(ctx: Ctx, tx: Tx, orgId: string): 
         ORDER BY is_primary DESC, enabled_at, workflow_key`,
       [p.id],
     );
-    const have = new Set(enabled.map((e) => e.workflow_key));
+    // A workflow an owner turned off stays off: only the workflows this project has never had are added. "Had" is read
+    // from the event history (every `ProjectWorkflowsSet` that listed it), so no migration or flag is needed.
+    const had = new Set(
+      (
+        await rows<{ key: string }>(
+          tx,
+          `SELECT DISTINCT x->>'workflowKey' AS key
+             FROM events e, jsonb_array_elements(e.payload->'enabled') x
+            WHERE e.stream_id=$1 AND e.type='ProjectWorkflowsSet'`,
+          [streamId.project(p.id)],
+        )
+      ).map((r) => r.key),
+    );
+    const have = new Set([...enabled.map((e) => e.workflow_key), ...had]);
     const missing = wanted.filter((w) => !have.has(w.key));
     if (!missing.length) continue;
     const taken = new Set(enabled.flatMap((e) => e.default_card_types ?? []));

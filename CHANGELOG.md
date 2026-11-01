@@ -22,6 +22,8 @@ Runner 0.1.65. Migrations 2751, 2791 and 2800. New optional environment variable
 
 ### Fixed
 
+- A business workflow an owner turned off on a project stays off. The check at start and the install on a new project only add the workflows the project has never had (read from its event history); it no longer switches a disabled one back on.
+
 - A deploy of a repository that holds another as a git submodule (the cloud holds the core) builds again: the runner fills each submodule of the deploy checkout at its pinned commit, from this workstation's own clone of that repository when it has one (a missing commit is fetched into that clone first), and removes such a checkout afterwards without leaving a worktree entry. Before, the submodule folder stayed empty and the build failed.
 
 - Run regression (the manual full suite) in a project with several repositories asks which repository; before, it ran on the first by id. `POST /api/projects/:id/full-suite` takes an optional `repoId` (an active repository of the project); without it a project with several repositories is refused with `choose_repo` naming them, and a project with one behaves as before. Project settings shows a repository picker (name and working branch) when there is more than one.
