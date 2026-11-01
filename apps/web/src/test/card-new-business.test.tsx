@@ -70,7 +70,15 @@ describe('new card in a business organization', () => {
     const options = within(screen.getByLabelText('Card type'))
       .getAllByRole('option')
       .map((o) => o.textContent);
-    expect(options).toEqual(['Enquiry', 'Follow-up', 'Document request', 'Reminder', 'Report', 'Quote']);
+    // the business types lead in their own order; the code types follow under More types
+    expect(options.slice(0, 6)).toEqual([
+      'Enquiry',
+      'Follow-up',
+      'Document request',
+      'Reminder',
+      'Report',
+      'Quote',
+    ]);
     expect(screen.getByLabelText('Card type')).toHaveValue('enquiry');
   });
 
