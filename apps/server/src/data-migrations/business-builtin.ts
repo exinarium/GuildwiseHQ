@@ -20,7 +20,7 @@ import type { DataMigrationEnv } from './orgs.ts';
  * reproduces the result, it is all events. `AOM_DATA_MIGRATIONS=false` skips it.
  */
 export const BUSINESS_BUILTIN_MIGRATION = 'business-builtin-2026-11';
-const LOCK_ID = 7337;
+const LOCK_ID = 7350;
 
 export interface BusinessBuiltinReport {
   retired: Array<{ orgId: string; key: string }>;

@@ -20,6 +20,7 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
+import { lineageKey } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -56,7 +57,7 @@ async function targetWorkflow(tx: Queryable, project: Row, toWorkflowKey: string
   const wf = await resolveWorkflow(tx, project.org_id, toWorkflowKey);
   if (!wf) throw badRequest('unknown_workflow', `workflow '${toWorkflowKey}' does not exist`);
   // `feed` belongs to interests and `code-bugfix` to the bug children of code cards: neither is a project workflow.
-  if (wf.definition.fieldSet === 'feed' || toWorkflowKey === 'code-bugfix')
+  if (wf.definition.fieldSet === 'feed' || lineageKey(wf.definition) === 'code-bugfix')
     throw badRequest('invalid_target', `a project cannot be converted to the ${toWorkflowKey} workflow`);
   if (toWorkflowKey === project.workflow_key)
     throw badRequest('same_workflow', 'the project already runs this workflow');

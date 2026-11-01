@@ -24,6 +24,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { ensureBusinessWorkflows } from '../catalogue/business-workflows.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
+import { lineageKey } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -63,7 +64,8 @@ export async function createProject(
     await assertWithinLimit(ctx, tx, org.id, 'projects');
     const workflowKey = input.workflowKey ?? ctx.config.defaultWorkflow;
     // `code-bugfix` runs only the bug cards a failed test files under a code card (Convert refuses it too)
-    if (workflowKey === 'code-bugfix')
+    const requested = await resolveWorkflow(tx, org.id, workflowKey);
+    if (requested && lineageKey(requested.definition) === 'code-bugfix')
       throw badRequest(
         'not_a_project_workflow',
         'the code-bugfix workflow only runs bug cards of code projects',

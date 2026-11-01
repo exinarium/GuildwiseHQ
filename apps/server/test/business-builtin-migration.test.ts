@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BUSINESS_WORKFLOW_KEY, BUSINESS_WORKFLOWS, streamId, type WorkflowDefinition } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ensureBusinessWorkflowsAtBoot } from '../src/catalogue/business-workflows.ts';
 import { loadWorkflowById, resolveWorkflow } from '../src/catalogue/loader.ts';
 import { BUSINESS_BUILTIN_MIGRATION, migrateBusinessBuiltin } from '../src/data-migrations/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -199,6 +200,13 @@ describe('business-builtin-2026-11', () => {
     // the first project had it enabled for quote cards: still the owner's edited version
     const first = await wfKeys(w.projectId);
     expect(first.find((e) => e.workflow_key === `${QUOTE}-custom`)?.default_card_types).toEqual(['quote']);
+    // a NON-primary entry was repointed: the project's primary is still code, the built-in quote is not re-enabled
+    expect(first.find((e) => e.is_primary)?.workflow_key).toBe('code');
+    expect(first.find((e) => e.workflow_key === `${QUOTE}-custom`)?.is_primary).toBe(false);
+    expect(first.some((e) => e.workflow_key === QUOTE)).toBe(false);
+    await ensureBusinessWorkflowsAtBoot(w.t.app.ctx);
+    expect((await wfKeys(w.projectId)).some((e) => e.workflow_key === QUOTE)).toBe(false);
+    expect((await wfKeys(quoteProject)).some((e) => e.workflow_key === QUOTE)).toBe(false);
     const wf = await resolveWorkflow(w.t.app.ctx.pool, orgId(), `${QUOTE}-custom`, w.projectId);
     expect(wf?.version).toBe(2);
   });

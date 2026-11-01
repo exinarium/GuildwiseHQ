@@ -15,7 +15,8 @@ let r: FakeRunner;
 let p: ReturnType<typeof pipeline>;
 
 const owner = () => ({ cookie: w.owner.cookie });
-const variantUrl = (id = '') => `/api/projects/${w.projectId}/workflow-variants${id ? `/${id}` : ''}`;
+const variantUrl = (id = '', projectId = w.projectId) =>
+  `/api/projects/${projectId}/workflow-variants${id ? `/${id}` : ''}`;
 const frontDesk = (id: string, after: string) => ({
   after,
   stage: {
@@ -55,7 +56,7 @@ const BASES: Array<{ key: string; after: string; insertion: (id: string) => unkn
   },
 ];
 
-async function approveVariant(baseKey: string, key: string, insertion: unknown) {
+async function approveVariant(baseKey: string, key: string, insertion: unknown, projectId = w.projectId) {
   const base = (
     await q(
       `SELECT version FROM workflow_versions WHERE org_id IS NULL AND key=$1 AND status='active' ORDER BY version DESC LIMIT 1`,
@@ -63,37 +64,46 @@ async function approveVariant(baseKey: string, key: string, insertion: unknown) 
     )
   )[0]!;
   const draft = await ok<any>(
-    w.t.req('POST', variantUrl(), {
+    w.t.req('POST', variantUrl('', projectId), {
       cookie: w.owner.cookie,
       body: { key, name: key, base: { key: baseKey, version: base.version }, insertions: [insertion] },
     }),
     201,
   );
   expect(draft.issues.filter((i: any) => i.severity === 'error')).toEqual([]);
-  const sub = await ok<any>(w.t.req('POST', variantUrl(`${draft.id}/submit`), owner()));
+  const sub = await ok<any>(w.t.req('POST', variantUrl(`${draft.id}/submit`, projectId), owner()));
   expect((await d.resolve(sub.deskItemId, 'approved')).status).toBe(200);
   return { id: draft.id as string, baseVersion: base.version as number };
 }
-const enable = async (key: string) => {
+const enableReq = async (key: string, projectId = w.projectId) => {
   const current = (await q(
     `SELECT workflow_key, default_card_types FROM project_workflows WHERE project_id=$1`,
-    [w.projectId],
+    [projectId],
   )) as any[];
-  await ok(
-    w.t.req('PUT', `/api/projects/${w.projectId}/workflows`, {
-      cookie: w.owner.cookie,
-      body: {
-        enabled: [
-          ...current.map((e) => ({
+  return w.t.req('PUT', `/api/projects/${projectId}/workflows`, {
+    cookie: w.owner.cookie,
+    body: {
+      enabled: [
+        // the shipped business workflows are enabled on every project, a research or feed project included
+        ...current
+          .filter((e) => !String(e.workflow_key).startsWith('business-') || key.startsWith('business-'))
+          .map((e) => ({
             workflowKey: e.workflow_key,
             defaultCardTypes: e.default_card_types ?? [],
           })),
-          { workflowKey: key, defaultCardTypes: [] },
-        ],
-      },
-    }),
-  );
+        { workflowKey: key, defaultCardTypes: [] },
+      ],
+    },
+  });
 };
+const enable = async (key: string, projectId = w.projectId) => ok(enableReq(key, projectId));
+const newProject = async (key: string, workflowKey: string) =>
+  (
+    await ok<any>(
+      w.t.req('POST', '/api/projects', { cookie: w.owner.cookie, body: { key, name: key, workflowKey } }),
+      201,
+    )
+  ).project.id as string;
 
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
@@ -179,19 +189,72 @@ describe('a card runs through a variant of a business workflow', () => {
   });
 });
 
-describe('a card runs through a variant of research (special publish event kept)', () => {
-  it('research: question, research, the inserted step, fact-check publishes the note', async () => {
+describe('variants of research, feed and code-bugfix follow the rules of their base', () => {
+  let researchProject: string;
+  let feedProject: string;
+  beforeAll(async () => {
     await w.hire('Rhea', 'researcher', 'junior');
     await w.hire('Chuck', 'checker', 'junior');
-    await enable('research-toy');
+    await w.hire('Sky', 'scout', 'junior');
+    researchProject = await newProject('RESP', 'research');
+    feedProject = await newProject('FEEP', 'feed');
+  });
+
+  it('a code project cannot enable them (the base cannot be enabled either)', async () => {
+    for (const key of ['research-toy', 'feed-toy', 'code-bugfix-toy']) {
+      const res = await enableReq(key);
+      expect(res.status, key).toBe(400);
+      expect(res.body.error.code, key).toBe('workflow_not_available');
+    }
+    // and the project settings do not offer them
+    const view = await ok<any>(
+      w.t.req('GET', `/api/projects/${w.projectId}/workflows`, { cookie: w.owner.cookie }),
+    );
+    const offered = [...view.enabled, ...view.available].map((x: any) => x.workflowKey);
+    for (const key of ['research-toy', 'feed-toy', 'code-bugfix-toy']) expect(offered).not.toContain(key);
+  });
+
+  it('a project cannot be created on a code-bugfix workflow or a variant of it', async () => {
+    for (const workflowKey of ['code-bugfix', 'code-bugfix-toy']) {
+      const res = await w.t.req('POST', '/api/projects', {
+        cookie: w.owner.cookie,
+        body: { key: 'BUGP', name: 'Bugs', workflowKey },
+      });
+      expect(res.status, workflowKey).toBe(400);
+    }
+  });
+
+  it('a project cannot be converted onto a variant of feed or code-bugfix', async () => {
+    for (const toWorkflowKey of ['feed-toy', 'code-bugfix-toy']) {
+      const res = await w.t.req('POST', `/api/projects/${w.projectId}/convert`, {
+        cookie: w.owner.cookie,
+        body: { toWorkflowKey, repos: [], defaultDecision: 'keep', cardDecisions: {} },
+      });
+      expect(res.status, toWorkflowKey).toBe(400);
+    }
+  });
+
+  it('a research project runs its own variant next to research, but no other workflow', async () => {
+    await approveVariant('research', 'research-mine', frontDesk('extra_check', 'research'), researchProject);
+    const other = await enableReq('business-quote', researchProject);
+    expect(other.status).toBe(400);
+    expect(other.body.error.code).toBe('single_workflow_project');
+    const view0 = await ok<any>(
+      w.t.req('GET', `/api/projects/${researchProject}/workflows`, { cookie: w.owner.cookie }),
+    );
+    expect([...view0.enabled, ...view0.available].map((x: any) => x.workflowKey)).toContain('research-mine');
+    await enable('research-mine', researchProject);
+  });
+
+  it('research: question, research, the inserted step, fact-check publishes the note (the base roles claim the inherited stages)', async () => {
     const res = await ok<any>(
       w.t.req('POST', '/api/cards', {
         cookie: w.owner.cookie,
         body: {
-          projectId: w.projectId,
+          projectId: researchProject,
           title: 'Is it so?',
           cardType: 'research',
-          workflowKey: 'research-toy',
+          workflowKey: 'research-mine',
           fields: { question: 'Is it so at 300 yards?', scope: 'Factory loads', depth: 'standard' },
           specify: true,
         },
@@ -214,13 +277,34 @@ describe('a card runs through a variant of research (special publish event kept)
       kind: 'outcome',
       outcomeId: 'published',
       note: 'verified',
-      data: { vaultPath: 'projects/toy/so.md', title: 'Is it so?', citations: [cite], excerpt: 'Yes.' },
+      data: { vaultPath: 'projects/resp/so.md', title: 'Is it so?', citations: [cite], excerpt: 'Yes.' },
     });
     expect(pub.res).toMatchObject({ accepted: true });
     await until(async () => ((await row()).status === 'done' ? true : undefined), 3000, 'card done');
-    expect(await row()).toMatchObject({ stage: 'done', status: 'done' });
     expect(
       await q(`SELECT 1 FROM events WHERE payload->>'cardId'=$1 AND type='ResearchPublished'`, [id]),
     ).toHaveLength(1);
+  }, 120_000);
+
+  it('feed: the scout claims the inherited first stage of a feed variant', async () => {
+    await approveVariant('feed', 'feed-mine', frontDesk('extra_check', 'scan'), feedProject);
+    await enable('feed-mine', feedProject);
+    const res = await ok<any>(
+      w.t.req('POST', '/api/cards', {
+        cookie: w.owner.cookie,
+        body: {
+          projectId: feedProject,
+          title: 'Scan',
+          cardType: 'feed',
+          workflowKey: 'feed-mine',
+          fields: {},
+          specify: true,
+        },
+      }),
+      201,
+    );
+    const id = res.card.id as string;
+    await p.run('Sky', { kind: 'outcome', outcomeId: 'handoff', note: 'found things', data: {} });
+    expect((await q('SELECT stage FROM cards WHERE id=$1', [id]))[0]).toMatchObject({ stage: 'extra_check' });
   }, 120_000);
 });

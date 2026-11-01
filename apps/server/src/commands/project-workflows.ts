@@ -15,7 +15,7 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
-import { enabledWorkflows, NOT_ENABLEABLE_WORKFLOWS } from '../catalogue/project-workflows.ts';
+import { enabledWorkflows, lineageKey, NOT_ENABLEABLE_WORKFLOWS } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -70,6 +70,11 @@ export async function projectWorkflowsView(
     [project.org_id, projectId],
   );
   const keys = [...new Set(wfRows.map((r) => r.key as string))];
+  const primaryKeyOfView = enabled.find((e) => e.isPrimary)?.workflowKey ?? project.workflow_key;
+  const primaryRow = wfRows.find((r) => r.key === primaryKeyOfView && r.status === 'active');
+  const primaryLineage = primaryRow
+    ? lineageKey(WorkflowDefinitionSchema.parse(primaryRow.definition))
+    : (primaryKeyOfView as string);
   const dtos: ProjectWorkflowDto[] = [];
   for (const key of keys) {
     const versions = wfRows.filter((r) => r.key === key);
@@ -80,7 +85,9 @@ export async function projectWorkflowsView(
     const shown = active ?? pending;
     if (!shown) continue;
     const entry = enabled.find((e) => e.workflowKey === key);
-    if (!entry && NOT_ENABLEABLE_WORKFLOWS.includes(key)) continue;
+    // research, feed and code-bugfix (and their variants) are only offered to a project of that very lineage
+    const lineage = lineageKey(WorkflowDefinitionSchema.parse(shown.definition));
+    if (!entry && NOT_ENABLEABLE_WORKFLOWS.includes(lineage) && lineage !== primaryLineage) continue;
     // Non-variants need an active version to be offered at all.
     if (!isVariant && !active) continue;
     const def = WorkflowDefinitionSchema.parse(shown.definition);
@@ -143,13 +150,21 @@ export async function setProjectWorkflows(
     const current = await enabledWorkflows(tx, project);
     const primary = current.find((e) => e.isPrimary);
     const primaryKey = (primary?.workflowKey ?? project.workflow_key) as string;
+    // A project of a special lineage (research, feed, code-bugfix) runs that workflow and its own variants only.
+    const primaryWf = await resolveWorkflow(tx, project.org_id, primaryKey, projectId);
+    const primaryLineage = primaryWf ? lineageKey(primaryWf.definition) : primaryKey;
+    const lineageOf = new Map<string, string>();
+    for (const e of req.enabled) {
+      const w = await resolveWorkflow(tx, project.org_id, e.workflowKey, projectId);
+      lineageOf.set(e.workflowKey, w ? lineageKey(w.definition) : e.workflowKey);
+    }
     if (
-      NOT_ENABLEABLE_WORKFLOWS.includes(primaryKey) &&
-      req.enabled.some((e) => e.workflowKey !== primaryKey)
+      NOT_ENABLEABLE_WORKFLOWS.includes(primaryLineage) &&
+      req.enabled.some((e) => lineageOf.get(e.workflowKey) !== primaryLineage)
     )
       throw badRequest(
         'single_workflow_project',
-        `a ${primaryKey} project runs one workflow: convert it first to enable others`,
+        `a ${primaryLineage} project runs one workflow: convert it first to enable others`,
       );
     const seen = new Set<string>();
     const entries: Array<{ workflowKey: string; defaultCardTypes: string[] }> = [];
@@ -157,7 +172,12 @@ export async function setProjectWorkflows(
       if (seen.has(e.workflowKey))
         throw badRequest('duplicate_workflow', `'${e.workflowKey}' is listed twice`);
       seen.add(e.workflowKey);
-      if (e.workflowKey !== primaryKey && NOT_ENABLEABLE_WORKFLOWS.includes(e.workflowKey))
+      const lineage = lineageOf.get(e.workflowKey) as string;
+      if (
+        e.workflowKey !== primaryKey &&
+        NOT_ENABLEABLE_WORKFLOWS.includes(lineage) &&
+        lineage !== primaryLineage
+      )
         throw badRequest(
           'workflow_not_available',
           `the ${e.workflowKey} workflow cannot be enabled on a project`,

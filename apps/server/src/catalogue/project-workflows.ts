@@ -6,6 +6,13 @@ import { resolveWorkflow, type WorkflowVersionRow } from './loader.ts';
 /** Built-in workflows a project cannot enable next to its own: internal (bug children) or special (feed, research). */
 export const NOT_ENABLEABLE_WORKFLOWS: readonly string[] = ['code-bugfix', 'feed', 'research'];
 
+/**
+ * The built-in a workflow descends from: its own key, or for a project variant the key of its base. The guards above
+ * (and the other "special workflow" rules) follow this, so a variant of research is treated like research.
+ */
+export const lineageKey = (def: { key: string; extends?: { key: string } | undefined }): string =>
+  def.extends?.key ?? def.key;
+
 export interface EnabledWorkflow {
   workflowKey: string;
   isPrimary: boolean;

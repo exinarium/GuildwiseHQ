@@ -10,7 +10,7 @@ import {
   WorkflowDefinitionSchema,
 } from '@aom/shared';
 import { type Queryable, rows } from '../db/sql.ts';
-import { enabledWorkflows } from './project-workflows.ts';
+import { enabledWorkflows, lineageKey } from './project-workflows.ts';
 
 /** Does this definition start a sub-workflow at all? (Most do not: the lookup is then never built.) */
 export function hasSubworkflowStages(def: unknown): boolean {
@@ -114,7 +114,7 @@ export async function subworkflowTargets(
     if (parsed.success) byKey.set(parsed.data.key, { def: parsed.data, builtIn: r.org_id === null });
   }
   const workflows = [...byKey.values()]
-    .filter(({ def }) => def.key !== 'code-bugfix')
+    .filter(({ def }) => lineageKey(def) !== 'code-bugfix')
     .map(({ def, builtIn }) => {
       const required = new Set(requiredChildFields(def));
       return {
