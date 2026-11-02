@@ -79,23 +79,28 @@ export function formRoutes(ctx: Ctx) {
 
       raw.post('/api/forms/logos', { bodyLimit: BODY_LIMIT }, async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
-        if (!Buffer.isBuffer(req.body)) throw badRequest('file_required', 'send the image as the request body');
+        if (!Buffer.isBuffer(req.body))
+          throw badRequest('file_required', 'send the image as the request body');
         const out = await uploadFormLogo(ctx, whoOf(a), req.body);
         reply.code(201);
         return out;
       });
 
-      raw.get('/api/forms/logos/:imageId', { schema: { params: z.object({ imageId: z.uuid() }) } }, async (req, reply) => {
-        const a = await requireOrg(ctx, req);
-        const img = await readFormLogo(ctx, a.orgId, req.params.imageId);
-        return reply
-          .header('content-type', img.contentType)
-          .header('content-security-policy', "sandbox; default-src 'none'")
-          .header('x-content-type-options', 'nosniff')
-          .header('cache-control', 'private, max-age=86400, immutable')
-          .header('cross-origin-resource-policy', 'same-origin')
-          .send(img.data);
-      });
+      raw.get(
+        '/api/forms/logos/:imageId',
+        { schema: { params: z.object({ imageId: z.uuid() }) } },
+        async (req, reply) => {
+          const a = await requireOrg(ctx, req);
+          const img = await readFormLogo(ctx, a.orgId, req.params.imageId);
+          return reply
+            .header('content-type', img.contentType)
+            .header('content-security-policy', "sandbox; default-src 'none'")
+            .header('x-content-type-options', 'nosniff')
+            .header('cache-control', 'private, max-age=86400, immutable')
+            .header('cross-origin-resource-policy', 'same-origin')
+            .send(img.data);
+        },
+      );
     });
   };
 }

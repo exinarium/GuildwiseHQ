@@ -5,8 +5,18 @@ import { Link, useNavigate } from 'react-router';
 import { errorMessage } from '../api/client.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useArchiveForm, useForms } from '../api/queries/forms.ts';
-import { Button, EmptyState, ErrorBox, ListSkeleton, Menu, MenuItem, PageHeader, Tabs, useToast } from '../components/ui.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
+import {
+  Button,
+  EmptyState,
+  ErrorBox,
+  ListSkeleton,
+  Menu,
+  MenuItem,
+  PageHeader,
+  Tabs,
+  useToast,
+} from '../components/ui.tsx';
 import { ageLabel } from '../lib/time.ts';
 
 /** The forms of the organization. Owners and Admins create and archive them; every member can open one. */
@@ -76,11 +86,14 @@ export function Forms() {
                 className="flex items-center gap-2 rounded-card border border-line bg-surface p-3"
                 data-testid={`form-row-${f.id}`}
               >
-                <Link to={`/forms/${f.id}`} className="min-w-0 flex-1 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25">
+                <Link
+                  to={`/forms/${f.id}`}
+                  className="min-w-0 flex-1 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25"
+                >
                   <span className="block font-medium text-fg [overflow-wrap:anywhere]">{f.title}</span>
                   <span className="block text-sm text-muted">
-                    {f.fieldCount} {f.fieldCount === 1 ? 'field' : 'fields'} · version {f.latestVersion} · updated{' '}
-                    {ageLabel(f.updatedAt)}
+                    {f.fieldCount} {f.fieldCount === 1 ? 'field' : 'fields'} · version {f.latestVersion} ·
+                    updated {ageLabel(f.updatedAt)}
                     {f.updatedByName ? ` by ${f.updatedByName}` : ''}
                   </span>
                 </Link>
@@ -91,7 +104,8 @@ export function Forms() {
                         archive.mutate(
                           { id: f.id, archive: status === 'active' },
                           {
-                            onSuccess: () => toast.success(status === 'active' ? 'Form archived.' : 'Form restored.'),
+                            onSuccess: () =>
+                              toast.success(status === 'active' ? 'Form archived.' : 'Form restored.'),
                             onError: (e) => toast.error(errorMessage(e)),
                           },
                         )

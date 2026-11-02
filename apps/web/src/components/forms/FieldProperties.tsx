@@ -9,8 +9,8 @@ import {
 import { useState } from 'react';
 import type { StorageConnectionOption } from '../../api/queries/forms.ts';
 import { FILE_TYPE_GROUPS, normaliseFileType } from '../../lib/formBuilder.ts';
-import { Select, TextArea, TextInput } from '../ui.tsx';
 import { cx } from '../ui/cx.ts';
+import { Select, TextArea, TextInput } from '../ui.tsx';
 
 /** The first issue whose path ends with `.<sub>`. */
 export const issueFor = (issues: readonly FormDefinitionIssue[], sub: string): string | undefined =>
@@ -108,6 +108,7 @@ export function FieldProperties({
   const id = `prop-${field.id}`;
   const [extra, setExtra] = useState('');
   const [optionsText, setOptionsText] = useState<string | null>(null);
+  const [sizeText, setSizeText] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-4" data-testid="field-properties">
@@ -130,12 +131,12 @@ export function FieldProperties({
         />
         Required
       </label>
-      {has('placeholder') && 'placeholder' in field && (
+      {has('placeholder') && (
         <TextInput
           id={`${id}-placeholder`}
           label="Placeholder"
           disabled={disabled}
-          value={field.placeholder ?? ''}
+          value={(field as { placeholder?: string }).placeholder ?? ''}
           maxLength={FORM_LIMITS.placeholder}
           onChange={(e) => set({ placeholder: e.target.value || undefined })}
         />
@@ -293,9 +294,11 @@ export function FieldProperties({
             min={1}
             max={FORM_LIMITS.fileMaxBytes / (1024 * 1024)}
             disabled={disabled}
-            value={Math.round((field.maxSizeBytes / (1024 * 1024)) * 100) / 100}
+            value={sizeText ?? Math.round((field.maxSizeBytes / (1024 * 1024)) * 100) / 100}
             error={issueFor(issues, 'maxSizeBytes')}
+            onBlur={() => setSizeText(null)}
             onChange={(e) => {
+              setSizeText(e.target.value);
               const mb = num(e.target.value);
               if (mb !== undefined) set({ maxSizeBytes: Math.round(mb * 1024 * 1024) });
             }}
@@ -314,7 +317,12 @@ export function FieldProperties({
       {issues.length > 0 && (
         <ul className={cx('list-disc pl-5 text-sm text-danger')} role="alert">
           {issues
-            .filter((i) => !/\.(label|minLength|maxLength|min|max|options|allowedTypes|maxSizeBytes|folder|name)$/.test(i.path))
+            .filter(
+              (i) =>
+                !/\.(label|minLength|maxLength|min|max|options|allowedTypes|maxSizeBytes|folder|name)$/.test(
+                  i.path,
+                ),
+            )
             .map((i) => (
               <li key={`${i.path}-${i.message}`}>{i.message}</li>
             ))}

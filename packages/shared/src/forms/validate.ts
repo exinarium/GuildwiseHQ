@@ -142,7 +142,8 @@ export function validateFieldAnswer(field: FormField, value: FormAnswerValue): F
     case 'file': {
       if (typeof value !== 'object' || Array.isArray(value)) return INVALID;
       const f = value as FormFileAnswer;
-      if (typeof f.name !== 'string' || typeof f.size !== 'number' || !Number.isFinite(f.size)) return INVALID;
+      if (typeof f.name !== 'string' || typeof f.size !== 'number' || !Number.isFinite(f.size))
+        return INVALID;
       if (!field.allowedTypes.some((t) => typeMatches(t, f)))
         return err(
           'file_type',

@@ -49,7 +49,9 @@ describe('form definition', () => {
 
   it('enforces schema limits', () => {
     expect(validateFormDefinition({ ...newFormDefinition(''), fields: [] }).ok).toBe(false);
-    const many = Array.from({ length: 101 }, (_, i) => newFormField('email', `f_many${String(i).padStart(4, '0')}`));
+    const many = Array.from({ length: 101 }, (_, i) =>
+      newFormField('email', `f_many${String(i).padStart(4, '0')}`),
+    );
     expect(validateFormDefinition(withFields(...many)).ok).toBe(false);
     const file = { ...newFormField('file', 'f_file0001'), maxSizeBytes: 26 * 1024 * 1024 };
     expect(validateFormDefinition(withFields(file as ReturnType<typeof newFormField>)).ok).toBe(false);

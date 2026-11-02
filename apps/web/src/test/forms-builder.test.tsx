@@ -33,7 +33,9 @@ const dto = (): FormDto => {
     status: 'active',
     latestVersion: latest,
     definition: server.get(latest) as FormDefinition,
-    versions: [...server.keys()].sort((a, b) => b - a).map((v) => ({ version: v, savedAt: '2026-11-02T10:00:00.000Z', savedByName: 'Pieter' })),
+    versions: [...server.keys()]
+      .sort((a, b) => b - a)
+      .map((v) => ({ version: v, savedAt: '2026-11-02T10:00:00.000Z', savedByName: 'Pieter' })),
   };
 };
 
@@ -53,9 +55,18 @@ beforeEach(() => {
           user: { id: 'u1', displayName: 'Pieter', email: 'p@x.test' },
           isAdmin: role === 'owner',
           visibleProjectIds: [],
-          activeOrg: { id: 'o1', name: 'Acme', role, status: 'active', plan: 'team', planName: 'Team', features: {} },
+          activeOrg: {
+            id: 'o1',
+            name: 'Acme',
+            role,
+            status: 'active',
+            plan: 'team',
+            planName: 'Team',
+            features: {},
+          },
         });
-      if (url === '/api/org/storage/connections') return json({ error: { code: 'not_found', message: 'nope' } }, 404);
+      if (url === '/api/org/storage/connections')
+        return json({ error: { code: 'not_found', message: 'nope' } }, 404);
       if (url === '/api/forms' && method === 'POST') {
         server.set(1, body.definition);
         return json(dto(), 201);
@@ -64,13 +75,27 @@ beforeEach(() => {
       if (ver) {
         const d = server.get(Number(ver[1]));
         return d
-          ? json({ formId: F1, version: Number(ver[1]), definition: d, savedAt: '2026-11-02T10:00:00.000Z', savedByName: 'Pieter' })
+          ? json({
+              formId: F1,
+              version: Number(ver[1]),
+              definition: d,
+              savedAt: '2026-11-02T10:00:00.000Z',
+              savedByName: 'Pieter',
+            })
           : json({ error: { code: 'not_found', message: 'no' } }, 404);
       }
       if (url === `/api/forms/${F1}` && method === 'GET') return json(dto());
       if (url === `/api/forms/${F1}` && method === 'PUT') {
         if (putStatus === 409)
-          return json({ error: { code: 'form_version_conflict', message: 'This form was changed by someone else. Reload to see version 2.' } }, 409);
+          return json(
+            {
+              error: {
+                code: 'form_version_conflict',
+                message: 'This form was changed by someone else. Reload to see version 2.',
+              },
+            },
+            409,
+          );
         const next = Math.max(...server.keys()) + 1;
         server.set(next, body.definition);
         return json({ form: dto(), created: true });
@@ -116,9 +141,13 @@ const dragPaletteTo = (type: string, target: HTMLElement) => {
   fireEvent.drop(target, { dataTransfer: dt });
 };
 const labels = () =>
-  screen
-    .queryAllByTestId(/^select-field-\d+$/)
-    .map((b) => b.textContent?.replace(/\s+/g, ' ').replace(/ required$/, '').trim() ?? '');
+  screen.queryAllByTestId(/^select-field-\d+$/).map(
+    (b) =>
+      b.textContent
+        ?.replace(/\s+/g, ' ')
+        .replace(/ required$/, '')
+        .trim() ?? '',
+  );
 
 const seed = (...fields: ReturnType<typeof newFormField>[]) => {
   server.set(1, { ...newFormDefinition('Rental application'), fields });
@@ -129,6 +158,7 @@ describe('forms builder: drag and drop, reorder and save', () => {
     const user = userEvent.setup();
     mount('/forms/new');
     await screen.findByTestId('field-palette');
+    await waitFor(() => expect(screen.getByTestId('palette-short_text')).toBeEnabled());
     dragPaletteTo(FORM_FIELD_TYPES[0] as string, screen.getByTestId('canvas-empty'));
     for (const t of FORM_FIELD_TYPES.slice(1)) dragPaletteTo(t, screen.getByTestId('canvas-end'));
     const names = FORM_FIELD_TYPES.map((t) => FIELD_TYPE_META[t].label);
@@ -173,19 +203,21 @@ describe('forms builder: drag and drop, reorder and save', () => {
     const user = userEvent.setup();
     mount('/forms/new');
     await screen.findByTestId('field-palette');
+    await waitFor(() => expect(screen.getByTestId('palette-short_text')).toBeEnabled());
     await user.click(screen.getByTestId('palette-email'));
     await user.click(screen.getByTestId('palette-phone'));
     await user.click(screen.getByTestId('select-field-0'));
     await user.click(screen.getByTestId('palette-number'));
-    expect(
-      labels().map((l) => FORM_FIELD_TYPES.find((t) => l.startsWith(FIELD_TYPE_META[t].label))),
-    ).toEqual(['email', 'number', 'phone']);
+    expect(labels().map((l) => FORM_FIELD_TYPES.find((t) => l.startsWith(FIELD_TYPE_META[t].label)))).toEqual(
+      ['email', 'number', 'phone'],
+    );
   });
 
   it('duplicates and deletes a field', async () => {
     const user = userEvent.setup();
     mount('/forms/new');
     await screen.findByTestId('field-palette');
+    await waitFor(() => expect(screen.getByTestId('palette-short_text')).toBeEnabled());
     await user.click(screen.getByTestId('palette-email'));
     await user.click(screen.getByRole('button', { name: 'Duplicate Email' }));
     expect(labels()[1]).toMatch(/^Email \(copy\)/);
@@ -248,11 +280,16 @@ describe('forms builder: properties and preview', () => {
     const put = calls.find((c) => c.method === 'PUT')?.body;
     expect(put.baseVersion).toBe(1);
     const [f0, f1, f2] = put.definition.fields;
-    expect(f0).toMatchObject({ label: 'Full name', required: true, placeholder: 'Jane Doe', helpText: 'As on your ID' });
+    expect(f0).toMatchObject({
+      label: 'Full name',
+      required: true,
+      placeholder: 'Jane Doe',
+      helpText: 'As on your ID',
+    });
     expect(f1.options).toEqual(['Cat', 'Dog']);
     expect(f2.maxSizeBytes).toBe(2 * 1024 * 1024);
     expect(f2.destination).toMatchObject({ folder: 'IDs/{form}', name: '{original}' });
-    expect(f2.allowedTypes).not.toContain('.heic');
+    expect(f2.allowedTypes).toContain('.heic');
   });
 
   it('shows the logo at the top of the preview', async () => {
@@ -283,10 +320,15 @@ describe('forms builder: properties and preview', () => {
 
 describe('forms builder: versions and roles', () => {
   it('opens an earlier version read-only with a banner', async () => {
-    server.set(1, { ...newFormDefinition('Old title'), fields: [{ ...newFormField('email', 'f_mail0001'), label: 'Old email' }] });
+    server.set(1, {
+      ...newFormDefinition('Old title'),
+      fields: [{ ...newFormField('email', 'f_mail0001'), label: 'Old email' }],
+    });
     server.set(2, { ...newFormDefinition('New title'), fields: [] });
     mount(`/forms/${F1}?version=1`);
-    expect(await screen.findByTestId('version-banner')).toHaveTextContent('You are looking at version 1. The latest is version 2.');
+    expect(await screen.findByTestId('version-banner')).toHaveTextContent(
+      'You are looking at version 1. The latest is version 2.',
+    );
     expect(await screen.findByText('Old email')).toBeInTheDocument();
     expect(screen.queryByTestId('save-form')).toBeNull();
     expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
@@ -309,7 +351,9 @@ describe('forms builder: versions and roles', () => {
     seed({ ...newFormField('email', 'f_mail0001'), label: 'Email' });
     mount(`/forms/${F1}`);
     await screen.findByTestId('canvas-field-0');
-    await waitFor(() => expect(screen.getByText(/Only Owners and Admins can change forms/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(/Only Owners and Admins can change forms/)).toBeInTheDocument(),
+    );
     expect(screen.queryByTestId('save-form')).toBeNull();
     expect(within(screen.getByTestId('field-palette')).getByTestId('palette-email')).toBeDisabled();
     expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
@@ -319,6 +363,7 @@ describe('forms builder: versions and roles', () => {
     const user = userEvent.setup();
     mount('/forms/new');
     await screen.findByTestId('field-palette');
+    await waitFor(() => expect(screen.getByTestId('palette-short_text')).toBeEnabled());
     const ev = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);

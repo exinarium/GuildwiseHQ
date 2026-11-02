@@ -25,6 +25,8 @@ import { FieldProperties } from '../components/forms/FieldProperties.tsx';
 import { FormCanvas } from '../components/forms/FormCanvas.tsx';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 import { FormSettingsPanel } from '../components/forms/FormSettingsPanel.tsx';
+import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
+import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Button,
   Callout,
@@ -37,8 +39,6 @@ import {
   Tabs,
   useToast,
 } from '../components/ui.tsx';
-import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
-import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   duplicateField,
   insertField,
@@ -68,7 +68,9 @@ export function FormBuilderPage() {
   const create = useCreateForm();
   const save = useSaveForm(id);
 
-  const [draft, setDraft] = useState<FormDefinition | null>(isNew ? newFormDefinition('Untitled form') : null);
+  const [draft, setDraft] = useState<FormDefinition | null>(
+    isNew ? newFormDefinition('Untitled form') : null,
+  );
   const [baseVersion, setBaseVersion] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -113,7 +115,9 @@ export function FormBuilderPage() {
     const index = at ?? (sel >= 0 ? sel + 1 : draft.fields.length);
     edit((d) => ({ ...d, fields: insertField(d.fields, field, index) }));
     setSelectedId(field.id);
-    setAnnounce(`${FIELD_TYPE_META[type].label} added at position ${index + 1} of ${draft.fields.length + 1}`);
+    setAnnounce(
+      `${FIELD_TYPE_META[type].label} added at position ${index + 1} of ${draft.fields.length + 1}`,
+    );
   };
 
   const move = (fid: string, to: number) => {
@@ -331,14 +335,28 @@ export function FormBuilderPage() {
         ) : (
           <div>
             <div className="mb-3 flex gap-2" role="group" aria-label="Preview width">
-              <Button size="sm" variant={phoneWidth ? 'secondary' : 'primary'} aria-pressed={!phoneWidth} onClick={() => setPhoneWidth(false)}>
+              <Button
+                size="sm"
+                variant={phoneWidth ? 'secondary' : 'primary'}
+                aria-pressed={!phoneWidth}
+                onClick={() => setPhoneWidth(false)}
+              >
                 Desktop
               </Button>
-              <Button size="sm" variant={phoneWidth ? 'primary' : 'secondary'} aria-pressed={phoneWidth} onClick={() => setPhoneWidth(true)}>
+              <Button
+                size="sm"
+                variant={phoneWidth ? 'primary' : 'secondary'}
+                aria-pressed={phoneWidth}
+                onClick={() => setPhoneWidth(true)}
+              >
                 Phone
               </Button>
             </div>
-            <div className="mx-auto" style={{ maxWidth: phoneWidth ? 390 : undefined }} data-testid="preview-frame">
+            <div
+              className="mx-auto"
+              style={{ maxWidth: phoneWidth ? 390 : undefined }}
+              data-testid="preview-frame"
+            >
               <FormRenderer
                 definition={draft}
                 logoUrl={draft.settings.logo ? formLogoUrl(draft.settings.logo.imageId) : undefined}

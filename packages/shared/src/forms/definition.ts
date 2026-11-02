@@ -29,7 +29,20 @@ export function isRealIsoDay(s: string): boolean {
   const mo = Number(m[2]);
   const d = Number(m[3]);
   if (mo < 1 || mo > 12 || d < 1) return false;
-  const dim = [31, y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const dim = [
+    31,
+    y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
   return d <= (dim[mo - 1] as number);
 }
 
@@ -47,7 +60,8 @@ export function templateProblem(template: string, kind: 'folder' | 'name'): stri
       const end = template.indexOf('}', i);
       if (end < 0) return 'A { has no closing }.';
       const key = template.slice(i + 1, end);
-      if (!keys.has(key)) return `{${key}} is not a known key. Use ${FORM_TEMPLATE_KEYS.map((k) => `{${k}}`).join(', ')}.`;
+      if (!keys.has(key))
+        return `{${key}} is not a known key. Use ${FORM_TEMPLATE_KEYS.map((k) => `{${k}}`).join(', ')}.`;
       i = end + 1;
     } else if (c === '}') {
       if (template[i + 1] === '}') {
@@ -64,7 +78,12 @@ export function templateProblem(template: string, kind: 'folder' | 'name'): stri
   return null;
 }
 
-function checkDestination(d: FormDestination, base: string, fieldId: string | undefined, out: FormDefinitionIssue[]) {
+function checkDestination(
+  d: FormDestination,
+  base: string,
+  fieldId: string | undefined,
+  out: FormDefinitionIssue[],
+) {
   const add = (sub: string, message: string) =>
     out.push({ path: `${base}.${sub}`, ...(fieldId ? { fieldId } : {}), message });
   const f = templateProblem(d.folder, 'folder');
@@ -93,7 +112,8 @@ export function validateFormDefinition(input: unknown): FormDefinitionCheck {
   const seen = new Set<string>();
   def.fields.forEach((f, i) => {
     const base = `fields.${i}`;
-    const add = (sub: string, message: string) => issues.push({ path: `${base}.${sub}`, fieldId: f.id, message });
+    const add = (sub: string, message: string) =>
+      issues.push({ path: `${base}.${sub}`, fieldId: f.id, message });
     if (seen.has(f.id)) add('id', 'Two fields share the same id.');
     seen.add(f.id);
     if (f.type === 'short_text' || f.type === 'long_text') {

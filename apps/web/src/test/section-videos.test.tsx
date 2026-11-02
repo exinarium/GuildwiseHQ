@@ -89,7 +89,8 @@ describe('the video registry', () => {
   });
 
   it('publishes every recorded video, each with its four files', () => {
-    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(!waiting.has(slug));
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS))
+      expect(e.published, slug).toBe(!waiting.has(slug));
   });
 
   it('shows a video without a sidebar entry in its Help article and on its pages', () => {

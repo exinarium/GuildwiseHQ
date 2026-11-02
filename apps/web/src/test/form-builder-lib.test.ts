@@ -17,8 +17,18 @@ describe('form builder list helpers', () => {
   const base = [mk('f_aaaaaaaa'), mk('f_bbbbbbbb'), mk('f_cccccccc')];
 
   it('inserts at a position, clamps, and appends by default', () => {
-    expect(ids(insertField(base, mk('f_new00001'), 1))).toEqual(['f_aaaaaaaa', 'f_new00001', 'f_bbbbbbbb', 'f_cccccccc']);
-    expect(ids(insertField(base, mk('f_new00001')))).toEqual(['f_aaaaaaaa', 'f_bbbbbbbb', 'f_cccccccc', 'f_new00001']);
+    expect(ids(insertField(base, mk('f_new00001'), 1))).toEqual([
+      'f_aaaaaaaa',
+      'f_new00001',
+      'f_bbbbbbbb',
+      'f_cccccccc',
+    ]);
+    expect(ids(insertField(base, mk('f_new00001')))).toEqual([
+      'f_aaaaaaaa',
+      'f_bbbbbbbb',
+      'f_cccccccc',
+      'f_new00001',
+    ]);
     expect(ids(insertField(base, mk('f_new00001'), -5))[0]).toBe('f_new00001');
     expect(ids(insertField(base, mk('f_new00001'), 99)).at(-1)).toBe('f_new00001');
     expect(base).toHaveLength(3);

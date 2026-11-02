@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   canonicalFormDefinition,
+  FORM_LIMITS,
   type FormDefinition,
   type FormDto,
   type FormLogoDto,
-  FORM_LIMITS,
   formLogoUrl,
   streamId,
   validateFormDefinition,
@@ -90,10 +90,11 @@ export async function saveForm(
         `This form was changed by someone else. Reload to see version ${f.latest_version}.`,
         { latestVersion: f.latest_version },
       );
-    const latest = await one(tx, 'SELECT definition_hash FROM form_versions WHERE form_id=$1 AND version=$2', [
-      formId,
-      f.latest_version,
-    ]);
+    const latest = await one(
+      tx,
+      'SELECT definition_hash FROM form_versions WHERE form_id=$1 AND version=$2',
+      [formId, f.latest_version],
+    );
     if (latest?.definition_hash === sha256(canonicalFormDefinition(def))) return false;
     await checkLogo(tx, who.orgId, def);
     await appendVersion(ctx, tx, who, formId, f.latest_version + 1, def);

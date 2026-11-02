@@ -9,8 +9,8 @@ import {
   validateFormAnswers,
 } from '@aom/shared';
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
-import { Button, inputCls } from '../ui.tsx';
 import { cx } from '../ui/cx.ts';
+import { Button, inputCls } from '../ui.tsx';
 
 type Answers = Record<string, FormAnswerValue>;
 
@@ -66,7 +66,10 @@ export function FormRenderer({
 
   if (done)
     return (
-      <div data-testid="form-done" className="mx-auto max-w-xl rounded-card border border-line bg-surface p-6">
+      <div
+        data-testid="form-done"
+        className="mx-auto max-w-xl rounded-card border border-line bg-surface p-6"
+      >
         <Header logoUrl={logoUrl} settings={definition.settings} />
         <p className="whitespace-pre-line text-base text-fg" data-testid="form-confirmation">
           {settings.confirmationText}
@@ -108,7 +111,9 @@ export function FormRenderer({
           data-testid="form-error-summary"
           className="rounded-control border border-danger bg-danger-soft p-3 text-sm text-danger-soft-fg"
         >
-          <p className="font-medium">Please fix {errorList.length === 1 ? 'this' : 'these'} before sending:</p>
+          <p className="font-medium">
+            Please fix {errorList.length === 1 ? 'this' : 'these'} before sending:
+          </p>
           <ul className="mt-1 list-disc pl-5">
             {errorList.map((f) => (
               <li key={f.id}>
@@ -141,7 +146,13 @@ export function FormRenderer({
   );
 }
 
-function Header({ logoUrl, settings }: { logoUrl?: string | undefined; settings: FormDefinition['settings'] }) {
+function Header({
+  logoUrl,
+  settings,
+}: {
+  logoUrl?: string | undefined;
+  settings: FormDefinition['settings'];
+}) {
   return (
     <header className="mb-4 flex flex-col gap-3">
       {logoUrl && (
@@ -153,7 +164,9 @@ function Header({ logoUrl, settings }: { logoUrl?: string | undefined; settings:
         />
       )}
       <h2 className="text-2xl font-semibold text-fg">{settings.title}</h2>
-      {settings.description && <p className="whitespace-pre-line text-base text-muted">{settings.description}</p>}
+      {settings.description && (
+        <p className="whitespace-pre-line text-base text-muted">{settings.description}</p>
+      )}
     </header>
   );
 }
@@ -199,7 +212,8 @@ function FieldView({
       )}
       {field.type === 'file' && (
         <p id={fileId} className="text-sm text-muted" data-testid={`file-help-${field.id}`}>
-          Allowed: {field.allowedTypes.map(formatAllowedType).join(', ')}. Up to {formatFormBytes(field.maxSizeBytes)}.
+          Allowed: {field.allowedTypes.map(formatAllowedType).join(', ')}. Up to{' '}
+          {formatFormBytes(field.maxSizeBytes)}.
         </p>
       )}
     </>
@@ -226,7 +240,10 @@ function FieldView({
         </legend>
         {help}
         {field.options.map((o, i) => (
-          <label key={o} className="flex min-h-9 items-center gap-2 text-base text-fg [@media(pointer:coarse)]:min-h-11">
+          <label
+            key={o}
+            className="flex min-h-9 items-center gap-2 text-base text-fg [@media(pointer:coarse)]:min-h-11"
+          >
             <input
               type={field.type}
               name={id}
@@ -298,7 +315,13 @@ function FieldView({
       break;
     default: {
       const type =
-        field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : field.type === 'short_text' ? 'text' : field.type;
+        field.type === 'email'
+          ? 'email'
+          : field.type === 'phone'
+            ? 'tel'
+            : field.type === 'short_text'
+              ? 'text'
+              : field.type;
       input = (
         <input
           {...common}

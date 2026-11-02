@@ -33,7 +33,11 @@ export function duplicateField(fields: readonly FormField[], id: string, newId: 
   const i = fields.findIndex((f) => f.id === id);
   if (i < 0) return fields as FormField[];
   const src = fields[i] as FormField;
-  const copy = { ...structuredClone(src), id: newId, label: `${src.label} (copy)`.slice(0, 200) } as FormField;
+  const copy = {
+    ...structuredClone(src),
+    id: newId,
+    label: `${src.label} (copy)`.slice(0, 200),
+  } as FormField;
   return insertField(fields, copy, i + 1);
 }
 

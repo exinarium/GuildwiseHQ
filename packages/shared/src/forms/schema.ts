@@ -56,7 +56,9 @@ const Base = {
   helpText: z.string().max(FORM_LIMITS.helpText).optional(),
 };
 const Placeholder = { placeholder: z.string().max(FORM_LIMITS.placeholder).optional() };
-const Options = { options: z.array(z.string().trim().min(1).max(FORM_LIMITS.label)).min(1).max(FORM_LIMITS.options) };
+const Options = {
+  options: z.array(z.string().trim().min(1).max(FORM_LIMITS.label)).min(1).max(FORM_LIMITS.options),
+};
 const IsoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const FormDestinationSchema = z.object({
@@ -146,15 +148,16 @@ export type FieldProperty =
 const COMMON: readonly FieldProperty[] = ['label', 'required', 'helpText'];
 
 /** Drives the palette labels and which inputs the property panel shows. */
-export const FIELD_TYPE_META: Record<FormFieldType, { label: string; properties: readonly FieldProperty[] }> = {
-  short_text: { label: 'Short text', properties: [...COMMON, 'placeholder', 'lengthRange'] },
-  long_text: { label: 'Long text', properties: [...COMMON, 'placeholder', 'lengthRange'] },
-  email: { label: 'Email', properties: [...COMMON, 'placeholder'] },
-  phone: { label: 'Phone', properties: [...COMMON, 'placeholder'] },
-  number: { label: 'Number', properties: [...COMMON, 'placeholder', 'numberRange'] },
-  date: { label: 'Date', properties: [...COMMON, 'dateRange'] },
-  dropdown: { label: 'Dropdown', properties: [...COMMON, 'placeholder', 'options'] },
-  radio: { label: 'Radio buttons', properties: [...COMMON, 'options'] },
-  checkbox: { label: 'Checkboxes', properties: [...COMMON, 'options'] },
-  file: { label: 'File upload', properties: [...COMMON, 'allowedTypes', 'maxSizeBytes', 'destination'] },
-};
+export const FIELD_TYPE_META: Record<FormFieldType, { label: string; properties: readonly FieldProperty[] }> =
+  {
+    short_text: { label: 'Short text', properties: [...COMMON, 'placeholder', 'lengthRange'] },
+    long_text: { label: 'Long text', properties: [...COMMON, 'placeholder', 'lengthRange'] },
+    email: { label: 'Email', properties: [...COMMON, 'placeholder'] },
+    phone: { label: 'Phone', properties: [...COMMON, 'placeholder'] },
+    number: { label: 'Number', properties: [...COMMON, 'placeholder', 'numberRange'] },
+    date: { label: 'Date', properties: [...COMMON, 'dateRange'] },
+    dropdown: { label: 'Dropdown', properties: [...COMMON, 'placeholder', 'options'] },
+    radio: { label: 'Radio buttons', properties: [...COMMON, 'options'] },
+    checkbox: { label: 'Checkboxes', properties: [...COMMON, 'options'] },
+    file: { label: 'File upload', properties: [...COMMON, 'allowedTypes', 'maxSizeBytes', 'destination'] },
+  };

@@ -17,7 +17,16 @@ export const formProjectors: Record<string, Projector> = {
       `INSERT INTO form_versions (form_id, version, org_id, definition, definition_hash, saved_by, saved_at, event_seq)
        VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8)
        ON CONFLICT (form_id, version) DO NOTHING`,
-      [p.formId, p.version, p.orgId, JSON.stringify(p.definition), p.definitionHash, p.by, e.createdAt, e.seq],
+      [
+        p.formId,
+        p.version,
+        p.orgId,
+        JSON.stringify(p.definition),
+        p.definitionHash,
+        p.by,
+        e.createdAt,
+        e.seq,
+      ],
     );
     await exec(
       tx,
@@ -30,7 +39,15 @@ export const formProjectors: Record<string, Projector> = {
          updated_by = EXCLUDED.updated_by,
          updated_at = EXCLUDED.updated_at
        WHERE forms.latest_version < EXCLUDED.latest_version`,
-      [p.formId, p.orgId, p.definition.settings.title, p.version, p.definition.fields.length, p.by, e.createdAt],
+      [
+        p.formId,
+        p.orgId,
+        p.definition.settings.title,
+        p.version,
+        p.definition.fields.length,
+        p.by,
+        e.createdAt,
+      ],
     );
   },
   FormArchived: async (tx, e) => {

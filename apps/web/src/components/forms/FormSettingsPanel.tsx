@@ -135,7 +135,11 @@ export function FormSettingsPanel({
         disabled={disabled}
         value={settings.confirmationText}
         maxLength={FORM_LIMITS.confirmation}
-        error={settings.confirmationText.trim() === '' ? 'Enter the text clients see after they submit.' : undefined}
+        error={
+          settings.confirmationText.trim() === ''
+            ? 'Enter the text clients see after they submit.'
+            : undefined
+        }
         onChange={(e) => onChange({ ...settings, confirmationText: e.target.value })}
       />
     </div>

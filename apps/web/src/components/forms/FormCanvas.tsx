@@ -100,6 +100,8 @@ export function FormCanvas({
       </p>
       {fields.length === 0 ? (
         <div
+          role="group"
+          aria-label="Empty form: drop a field here"
           data-testid="canvas-empty"
           onDragOver={(e) => allowDrop(e, 0)}
           onDragLeave={() => setOver(null)}

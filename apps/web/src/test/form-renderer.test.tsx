@@ -34,13 +34,22 @@ describe('FormRenderer', () => {
 
   it('honours label, required, placeholder, help text and min/max', () => {
     const d = def(
-      field('short_text', 'f_name0001', { label: 'Full name', required: true, placeholder: 'Jane', helpText: 'As on your ID' }),
+      field('short_text', 'f_name0001', {
+        label: 'Full name',
+        required: true,
+        placeholder: 'Jane',
+        helpText: 'As on your ID',
+      }),
       field('number', 'f_rooms001', { label: 'Rooms', min: 1, max: 10 }),
       field('date', 'f_move0001', { label: 'Move-in', min: '2026-01-01', max: '2026-12-31' }),
       field('dropdown', 'f_type0001', { label: 'Type', options: ['Flat', 'House'] }),
       field('radio', 'f_pets0001', { label: 'Pets', options: ['Yes', 'No'] }),
       field('checkbox', 'f_amen0001', { label: 'Extras', options: ['Parking', 'Storage'] }),
-      field('file', 'f_id000001', { label: 'ID copy', allowedTypes: ['.pdf', '.png'], maxSizeBytes: 5 * 1024 * 1024 }),
+      field('file', 'f_id000001', {
+        label: 'ID copy',
+        allowedTypes: ['.pdf', '.png'],
+        maxSizeBytes: 5 * 1024 * 1024,
+      }),
     );
     render(<FormRenderer definition={d} mode="preview" />);
     const name = screen.getByLabelText(/Full name/);
@@ -82,7 +91,9 @@ describe('FormRenderer', () => {
 
   it('checks a field when it loses focus and clears the message once fixed', async () => {
     const user = setup();
-    render(<FormRenderer definition={def(field('email', 'f_mail0001', { label: 'Email' }))} mode="preview" />);
+    render(
+      <FormRenderer definition={def(field('email', 'f_mail0001', { label: 'Email' }))} mode="preview" />,
+    );
     const email = screen.getByLabelText('Email');
     await user.type(email, 'bad');
     await user.tab();
@@ -100,11 +111,15 @@ describe('FormRenderer', () => {
     render(<FormRenderer definition={d} mode="preview" />);
     const input = screen.getByLabelText('ID copy');
     await user.upload(input, new File(['x'], 'x.exe', { type: 'application/x-msdownload' }));
-    expect(screen.getByTestId('error-f_id000001')).toHaveTextContent('This file type is not allowed. Allowed: PDF.');
+    expect(screen.getByTestId('error-f_id000001')).toHaveTextContent(
+      'This file type is not allowed. Allowed: PDF.',
+    );
     const big = new File(['x'], 'big.pdf', { type: 'application/pdf' });
     Object.defineProperty(big, 'size', { value: 3 * 1024 * 1024 });
     await user.upload(input, big);
-    expect(screen.getByTestId('error-f_id000001')).toHaveTextContent('The file is too large (3 MB). The limit is 1 MB.');
+    expect(screen.getByTestId('error-f_id000001')).toHaveTextContent(
+      'The file is too large (3 MB). The limit is 1 MB.',
+    );
     await user.upload(input, new File(['x'], 'ok.pdf', { type: 'application/pdf' }));
     expect(screen.queryByTestId('error-f_id000001')).toBeNull();
   });
@@ -115,7 +130,9 @@ describe('FormRenderer', () => {
     render(<FormRenderer definition={d} mode="preview" />);
     await user.type(screen.getByLabelText(/Name/), 'Jane');
     await user.click(screen.getByTestId('form-submit'));
-    expect(screen.getByTestId('form-confirmation')).toHaveTextContent('Thank you. We have received your answers.');
+    expect(screen.getByTestId('form-confirmation')).toHaveTextContent(
+      'Thank you. We have received your answers.',
+    );
     expect(screen.getByText(/Preview only: nothing was sent/)).toBeInTheDocument();
   });
 

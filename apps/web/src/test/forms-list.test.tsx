@@ -31,7 +31,15 @@ beforeEach(() => {
           user: { id: 'u1', displayName: 'Pieter', email: 'p@x.test' },
           isAdmin: role === 'owner',
           visibleProjectIds: [],
-          activeOrg: { id: 'o1', name: 'Acme', role, status: 'active', plan: 'team', planName: 'Team', features: {} },
+          activeOrg: {
+            id: 'o1',
+            name: 'Acme',
+            role,
+            status: 'active',
+            plan: 'team',
+            planName: 'Team',
+            features: {},
+          },
         });
       if (url === '/api/forms?status=active')
         return json({

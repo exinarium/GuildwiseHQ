@@ -79,6 +79,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Put a question to a group of personas and agents. Everyone answers on their own first and the answers are revealed together; then a Chair picks who speaks next, records disagreements and stops when it needs your decision. Interject or @mention a seat at any time, keep a whiteboard of ideas and risks, and pull the minutes into a PRD.',
     more: 'boardroom#start',
   },
+  forms: {
+    title: 'Forms',
+    body: 'Design the forms your clients fill in. Drag fields from the palette onto the page (or tap or press Enter to add one), set what each field needs, add your company logo and check the result in the live preview. Every save is a new version and the earlier ones stay readable.',
+    more: 'forms#build-a-form',
+  },
   projects: {
     title: 'Projects and phases',
     body: 'Each project has its own board, repositories and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, you approve the follow-ups (such as a deploy and a regression run) and they run in order.',
@@ -182,6 +187,7 @@ const SIDEBAR_ORDER = [
   'discovery',
   'boardroom',
   'schedules',
+  'forms',
   'projects',
   'agents',
   'org-chart',

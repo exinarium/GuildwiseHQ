@@ -26,7 +26,9 @@ const PNG = Buffer.concat([
 
 const defOf = (title = 'Rental application', n = 2) => {
   const d = newFormDefinition(title);
-  d.fields = Array.from({ length: n }, (_, i) => newFormField('short_text', `f_field0${i}x`, `Question ${i + 1}`));
+  d.fields = Array.from({ length: n }, (_, i) =>
+    newFormField('short_text', `f_field0${i}x`, `Question ${i + 1}`),
+  );
   return d;
 };
 const asOwner = (method: string, url: string, body?: unknown) =>
@@ -54,7 +56,12 @@ describe('forms API', () => {
     const got = await ok<any>(asOwner('GET', `/api/forms/${f.id}`));
     expect(got.definition).toEqual(f.definition);
     const list = await ok<any>(asOwner('GET', '/api/forms'));
-    expect(list.forms[0]).toMatchObject({ id: f.id, title: 'Rental application', fieldCount: 2, latestVersion: 1 });
+    expect(list.forms[0]).toMatchObject({
+      id: f.id,
+      title: 'Rental application',
+      fieldCount: 2,
+      latestVersion: 1,
+    });
   });
 
   it('every save is a new version; the previous one stays readable and unchanged', async () => {
@@ -73,7 +80,9 @@ describe('forms API', () => {
 
   it('an unchanged save appends nothing', async () => {
     const f = await create();
-    const again = await ok<any>(asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: f.definition }));
+    const again = await ok<any>(
+      asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: f.definition }),
+    );
     expect(again.created).toBe(false);
     expect(again.form.latestVersion).toBe(1);
     expect(await q('SELECT 1 FROM form_versions WHERE form_id=$1', [f.id])).toHaveLength(1);
@@ -101,10 +110,16 @@ describe('forms API', () => {
     const m = await memberCookie('member');
     expect((await w.t.req('GET', '/api/forms', { cookie: m })).status).toBe(200);
     expect((await w.t.req('GET', `/api/forms/${f.id}`, { cookie: m })).status).toBe(200);
-    expect((await w.t.req('POST', '/api/forms', { cookie: m, body: { definition: defOf() } })).status).toBe(403);
+    expect((await w.t.req('POST', '/api/forms', { cookie: m, body: { definition: defOf() } })).status).toBe(
+      403,
+    );
     expect(
-      (await w.t.req('PUT', `/api/forms/${f.id}`, { cookie: m, body: { baseVersion: 1, definition: defOf() } }))
-        .status,
+      (
+        await w.t.req('PUT', `/api/forms/${f.id}`, {
+          cookie: m,
+          body: { baseVersion: 1, definition: defOf() },
+        })
+      ).status,
     ).toBe(403);
     expect((await w.t.req('POST', `/api/forms/${f.id}/archive`, { cookie: m })).status).toBe(403);
     expect((await upload(m, PNG)).statusCode).toBe(403);
@@ -134,7 +149,9 @@ describe('forms API', () => {
     expect((await ok<any>(as('GET', '/api/forms'))).forms).toHaveLength(0);
     expect((await as('GET', `/api/forms/${f.id}`)).status).toBe(404);
     expect((await as('GET', `/api/forms/${f.id}/versions/1`)).status).toBe(404);
-    expect((await as('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('x') })).status).toBe(404);
+    expect((await as('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('x') })).status).toBe(
+      404,
+    );
     expect((await as('POST', `/api/forms/${f.id}/archive`)).status).toBe(404);
   });
 
@@ -142,7 +159,7 @@ describe('forms API', () => {
     const f = await create();
     await ok(asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('Two', 3) }));
     const before = await q('SELECT form_id, version, definition_hash FROM form_versions ORDER BY version');
-    await rebuildProjections(w.t.app.ctx);
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     const after = await q('SELECT form_id, version, definition_hash FROM form_versions ORDER BY version');
     expect(after).toEqual(before);
     expect((await q('SELECT latest_version, title FROM forms'))[0]).toMatchObject({
@@ -171,13 +188,15 @@ describe('form logo', () => {
     d.settings.logo = { imageId, alt: 'Logo' };
     const f = await create(d);
     expect(f.definition.settings.logo.imageId).toBe(imageId);
-    expect(JSON.stringify(await q('SELECT payload FROM events WHERE stream_id=$1', [`form-${f.id}`]))).not.toContain(
-      PNG.toString('base64'),
-    );
+    expect(
+      JSON.stringify(await q('SELECT payload FROM events WHERE stream_id=$1', [`form-${f.id}`])),
+    ).not.toContain(PNG.toString('base64'));
   });
 
   it('refuses SVG, text and anything over 512 KB', async () => {
-    expect((await upload(w.owner.cookie, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).statusCode).toBe(422);
+    expect(
+      (await upload(w.owner.cookie, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).statusCode,
+    ).toBe(422);
     expect((await upload(w.owner.cookie, Buffer.from('hello world, not an image'))).statusCode).toBe(422);
     const big = Buffer.concat([PNG, Buffer.alloc(513 * 1024)]);
     expect((await upload(w.owner.cookie, big)).statusCode).toBe(422);
