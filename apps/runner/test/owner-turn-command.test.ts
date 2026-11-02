@@ -102,7 +102,7 @@ describe('turn files', () => {
       turnDir: dir,
       brief: 'THE BRIEF',
       mode: 'order',
-      ipcEnv: { AOM_IPC_URL: 'http://x', AOM_SHIFT_TOKEN: 'tok' },
+      shiftEnv: { AOM_IPC_URL: 'http://x', AOM_SHIFT_TOKEN: 'tok' },
       runnerRoots: ['/data/runner'],
       pid: 4242,
       clones: [{ path: '/src/p4', name: 'p4' }],

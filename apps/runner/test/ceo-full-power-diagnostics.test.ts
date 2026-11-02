@@ -63,6 +63,21 @@ describe('permission mode of the CEO turns', () => {
     expect(c.args[c.args.indexOf('--settings') + 1]).toBe('/runner/ceo-turns/c1/floor.json');
   });
 
+  it.each(['bypass', 'auto'] as const)(
+    '%s turn command passes the full AOM_* shift environment through',
+    (permissionMode) => {
+      const shift = {
+        AOM_IPC_URL: 'http://127.0.0.1:1',
+        AOM_IPC_SOCKET: '/s/ipc.sock',
+        AOM_SHIFT_TOKEN: 't',
+        AOM_SHIFT_ID: 'c1',
+        AOM_CEO_TURN_DIR: '/runner/ceo-turns/c1',
+      };
+      const c = buildClaudeOwnerTurnCommand(input({ permissionMode, env: shift }), cfg, {});
+      for (const [k, v] of Object.entries(shift)) expect(c.env[k], k).toBe(v);
+    },
+  );
+
   it('an explicit auto (--strict) keeps the classifier and the relay', () => {
     const c = buildClaudeOwnerTurnCommand(input({ permissionMode: 'auto' }), cfg, {});
     expect(modeOf(c)).toBe('auto');
@@ -136,7 +151,7 @@ describe('the deny floor', () => {
       turnDir: join(dir, 't'),
       brief: 'b',
       mode: 'owner',
-      ipcEnv: {},
+      shiftEnv: {},
       runnerRoots: ['/h/.aom-runner-x'],
       pid: 1,
       clones: [{ path: '/src/p4', name: 'p4' }],

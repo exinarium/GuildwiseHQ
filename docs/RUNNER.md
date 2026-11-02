@@ -284,6 +284,7 @@ sections 3 and 5). It is a cap the machine owner holds against any server:
   existing opt-in: the Claude Code classifier plus the desk relay) or `bypass`. `guildwise-runner ceo full-power on --bypass` is the
   explicit opt-in to `--permission-mode bypassPermissions` for the Owner's own chat: nothing is judged or asked, like his terminal,
   and the runner sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so his shell cannot print the runner's provider credential.
+  That scrub also strips `AOM_SHIFT_TOKEN` from the shell, so every owner turn writes its shift variables to a 0600 `shift-env.json` in its turn dir and `aom` fills in only the missing ones from `<AOM_CEO_TURN_DIR>/shift-env.json` (variables already set win).
   `on --strict` sets `auto` again; plain `on` keeps the current choice. **A standing-order turn always runs `auto` with the desk
   relay**, whatever this says. The classifier's refusals are final and never reach the desk, so in `auto` an ordinary step can still be
   refused; that is the price of not choosing `--bypass`.

@@ -341,6 +341,8 @@ export function buildClaudeOwnerTurnCommand(
   Object.assign(env, { HOME: home, USERPROFILE: home }, input.env, provider);
   // Without the classifier or the relay in front of the shell, the runner's provider credential must not be readable by it
   // (`env`, `printenv`): Claude Code strips Anthropic and cloud-provider credentials from the subprocesses it starts.
+  // The scrub also removes credential-named variables such as AOM_SHIFT_TOKEN from the Bash children, so `aom` refills
+  // them from `<turnDir>/shift-env.json` (see ceo/shift-env.ts).
   if (ownerBypasses(input)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
 }
