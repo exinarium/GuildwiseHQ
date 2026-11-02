@@ -4,6 +4,16 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.5.0] - Unreleased
+
+Runner 0.1.66. Storage connections. Migration 2810. New optional environment variables `AOM_STORAGE_WRITE_TIMEOUT_MS`, `AOM_STORAGE_MAX_FILE_BYTES` and `AOM_STORAGE_MAX_IN_FLIGHT`; runner capability `storage:1`.
+
+### Added
+
+- Storage connections (Organization settings, Storage). An Owner or Admin connects the firm's own storage: OneDrive or SharePoint, Google Drive, S3-compatible storage (endpoint, bucket, region, access key), a local folder or NAS reachable from the runner's workstation, or a folder in a knowledge vault. Sign-in for OneDrive/SharePoint and Google Drive happens on the workstation with a code (device sign-in); S3 keys, the local path and the vault folder are sealed in the browser for the runner. Tokens and keys are stored encrypted on that workstation only (`secrets/storage.json`) and used only by the runner: the Guildwise server never receives, stores or logs them and knows only a connection id, its type, a display name, the workstation and the health. Each connection can be tested (the runner writes and deletes a small probe file and shows the result or a typed error), renamed and removed; removing it deletes the encrypted token from the workstation, also when the workstation was offline at the time (it is removed at the next connection). An expired or revoked sign-in shows as "Needs re-authentication" with a Reconnect action that keeps the folder settings.
+
+- A write operation for forms and journeys. The server streams a file in 256 KiB chunks to the one runner that holds the connection, under a credit window and one deadline, without writing it anywhere: no table, file or log holds the content, and the only thing recorded is the health of the connection. The runner writes the file into the folder given by a folder and name template (for example `{journey}/{client}/{field}-{date}`), never overwrites (a clash becomes `-2`, `-3`) and answers a reference (connection id, path or object key, size, checksum) that the caller may keep. When the storage cannot be reached the write ends with a typed error (`auth_expired`, `unavailable`, `quota`, `permission`, `not_found`, `too_large`, `runner_offline`, `timeout`) in a bounded time and nothing is kept on the server. `runner_offline` is answered at once when the workstation is not connected.
+
 ## [1.4.0] - 2026-11-01
 
 Runner 0.1.65. Software and Business views, the six business workflows built in, any workflow as a variant base, releases from start to finish, and a clear way back when a computer is removed. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.

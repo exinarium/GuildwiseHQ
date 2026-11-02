@@ -713,6 +713,16 @@ What the runner does: a GET with `hub.mode=subscribe` and the right `hub.verify_
 
 A `kind_mismatch` refusal in the runner log means the web app integration is not of kind WhatsApp.
 
+## Storage connections
+
+Storage connections let forms and journeys write documents and answers to the firm's own storage. Tokens and keys never leave this workstation.
+
+- **What is kept where**: `secrets/storage.json` holds every connection's settings and credentials, encrypted like the other secrets (mode 0600, keyed from the runner key). Received files are spooled in `tmp/storage/` while they are written and deleted straight after (the folder is emptied when the runner starts). The server knows only a connection id, its type, a display name, this workstation and the health.
+- **Kinds**: OneDrive/SharePoint and Google Drive (sign in with a code shown in the web page; the runner polls the provider), S3-compatible (endpoint, region, bucket, prefix; `http://` only for a loopback or private address), a local folder or NAS (an absolute path that is not the runner's data folder), and a folder in a vault of this workstation.
+- **Your own sign-in app**: the runner needs a Microsoft Entra app (public client, delegated `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `offline_access`) and a Google OAuth client of type "TVs and Limited Input devices" (scopes `drive.file`, `openid`, `email`, published to Production). Set `AOM_STORAGE_MS_CLIENT_ID` (and `AOM_STORAGE_MS_TENANT`, default `common`) and `AOM_STORAGE_GOOGLE_CLIENT_ID` and `AOM_STORAGE_GOOGLE_CLIENT_SECRET` in the runner's environment. Without them the connection says "This runner has no Microsoft (Google) app configured". Google Drive only exposes what the connector created, so files go under a base folder it creates ("Guildwise uploads" by default).
+- **Errors**: `auth_expired` (sign in again with Reconnect), `permission`, `quota`, `not_found` (folder, drive or bucket gone), `unavailable` (network, rate limit, NAS not mounted), `too_large`, `conflict` (too many files with the same name), `timeout`. The log has one line per write (`storage.write conn=<id> kind=<kind> size=<bytes> ok|<code> <ms>ms`) and never a path, a file name, a token or content.
+- **Removing**: removing a connection in the web page deletes its entry (and the file when it was the last one); a Google grant is also revoked. After a reconnect the server lists the connections this workstation should hold and the runner deletes the rest.
+
 ## Running and connecting
 
 ### Start command
