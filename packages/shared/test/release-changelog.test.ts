@@ -136,10 +136,10 @@ describe('releaseChangelog', () => {
 
   it('splits the real CHANGELOG.md head and releases it with the runner already set', () => {
     // Right after a release the real Unreleased section is empty: reopen the newest release as Unreleased, so the test reads
-    // a real head whatever the state of the file.
+    // a real head whatever the state of the file. A pre-written section dated 'unreleased' (a release in progress) is skipped.
     const file = readFileSync(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
     const real = file.replace(
-      /## \[Unreleased\]\n+## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\n/,
+      /## \[Unreleased\]\n+(?:## \[\d+\.\d+\.\d+\] - unreleased\n[\s\S]*?(?=## \[))?## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\n/,
       '## [Unreleased]\n',
     );
     const split = splitUnreleased(real);
