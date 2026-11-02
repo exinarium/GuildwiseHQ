@@ -28,6 +28,7 @@ import { intakeProjectors } from './intake.ts';
 import { intakeBatchProjectors } from './intake-batch.ts';
 import { interestRunProjectors } from './interest-runs.ts';
 import { interestProjectors } from './interests.ts';
+import { journeyProjectors } from './journeys.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
@@ -79,6 +80,7 @@ const domains: Array<Record<string, Projector>> = [
   agentProjectors,
   cardProjectors,
   subworkflowProjectors,
+  journeyProjectors,
   shiftProjectors,
   costProjectors,
   providerKeyProjectors,
@@ -199,6 +201,12 @@ export const PROJECTION_TABLES = [
   'card_dependencies',
   'card_groups',
   'subworkflow_runs',
+  'journeys',
+  'journey_versions',
+  'journey_records',
+  'journey_record_refs',
+  'journey_instances',
+  'journey_step_runs',
   'card_handoffs',
   'card_transitions',
   'card_activity',
