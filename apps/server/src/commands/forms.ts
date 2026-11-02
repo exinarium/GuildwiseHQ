@@ -12,7 +12,7 @@ import {
 import type { Who } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound, unprocessable } from '../errors.ts';
 import { getForm } from '../queries/forms.ts';
 import { orgScope, userActor } from './common.ts';
@@ -34,7 +34,7 @@ async function checkLogo(db: Queryable, orgId: string, def: FormDefinition): Pro
   if (!img) throw unprocessable('logo_not_found', 'the logo image was not found');
 }
 
-function appendVersion(ctx: Ctx, tx: Queryable, who: Who, formId: string, version: number, def: FormDefinition) {
+function appendVersion(ctx: Ctx, tx: Tx, who: Who, formId: string, version: number, def: FormDefinition) {
   return ctx.store.append(
     [
       {

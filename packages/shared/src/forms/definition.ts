@@ -151,7 +151,7 @@ export function newFormField(type: FormFieldType, id: string, label?: string): F
     case 'dropdown':
     case 'radio':
     case 'checkbox':
-      return { type, ...base, options: ['Option 1', 'Option 2'] };
+      return { type, ...base, options: ['Option 1', 'Option 2'] } as FormField;
     case 'file':
       return {
         type,
