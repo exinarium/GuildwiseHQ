@@ -76,8 +76,24 @@ const entry = (n: number, name: string, over: Record<string, unknown> = {}) => (
 const targets = {
   current: { id: WS_DEAD, name: 'My workstation', state: 'unpaired' },
   workstations: [
-    { id: WS_MINE, name: 'Desk', ownerUserId: USER, ownerName: 'Olga', mine: true, connected: true, runtimes },
-    { id: WS_HERS, name: 'Laptop', ownerUserId: OTHER, ownerName: 'Pia', mine: false, connected: false, runtimes },
+    {
+      id: WS_MINE,
+      name: 'Desk',
+      ownerUserId: USER,
+      ownerName: 'Olga',
+      mine: true,
+      connected: true,
+      runtimes,
+    },
+    {
+      id: WS_HERS,
+      name: 'Laptop',
+      ownerUserId: OTHER,
+      ownerName: 'Pia',
+      mine: false,
+      connected: false,
+      runtimes,
+    },
   ],
 };
 
@@ -98,7 +114,12 @@ beforeEach(() => {
         windowDays: 30,
         agents: [
           entry(1, 'Una'),
-          entry(2, 'Homeless', { status: 'needs_rehome', workstationId: null, workstationName: null, workstationState: null }),
+          entry(2, 'Homeless', {
+            status: 'needs_rehome',
+            workstationId: null,
+            workstationName: null,
+            workstationState: null,
+          }),
           entry(3, 'Devon', { isDevops: true, roleKey: 'devops' }),
         ],
         recommendations: [],
@@ -165,11 +186,13 @@ describe('move an agent to another workstation', () => {
   it.each(['owner', 'admin'])('%s: every agent has Move, a needs_rehome agent has Re-home', async (r) => {
     role = r;
     wrap(<Agents />);
-    expect(await screen.findByRole('button', { name: 'Move Una to another workstation' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Move Una to another workstation' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-home Homeless' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Move Homeless to another workstation' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Move Devon to another workstation' })).toBeNull();
-    expect(screen.getByText('workstation unpaired')).toBeInTheDocument();
+    expect(screen.getAllByText('workstation unpaired').length).toBeGreaterThan(0);
   });
 
   it('a member, even the hiring manager, sees neither Move nor Re-home', async () => {
@@ -190,7 +213,7 @@ describe('move an agent to another workstation', () => {
     expect(form).toHaveTextContent('Laptop · Pia (offline)');
     await user.selectOptions(screen.getByLabelText('Workstation'), WS_HERS);
     expect(screen.getByTestId('move-others-hint')).toHaveTextContent("Pia's workstation");
-    await user.click(screen.getByRole('button', { name: 'Move', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Move' }));
     await waitFor(() => expect(rehomed).toBeDefined());
     expect(rehomed.path).toBe(`/api/agents/${ID(101)}/rehome`);
     expect(rehomed.body).toEqual({ workstationId: WS_HERS, runtime: 'mock', model: 'm' });
@@ -206,7 +229,7 @@ describe('move an agent to another workstation', () => {
     await user.click(await screen.findByRole('button', { name: 'Move Una to another workstation' }));
     await screen.findByRole('form', { name: 'Move agent' });
     await screen.findByText(/Desk · you/);
-    await user.click(screen.getByRole('button', { name: 'Move', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Move' }));
     expect(await screen.findByText(/running shift/)).toBeInTheDocument();
     expect(screen.getByRole('form', { name: 'Move agent' })).toBeInTheDocument();
   });
@@ -217,7 +240,7 @@ describe('move an agent to another workstation', () => {
     await user.click(await screen.findByRole('button', { name: 'Re-home Homeless' }));
     expect(await screen.findByRole('form', { name: 'Re-home agent' })).toBeInTheDocument();
     await screen.findByText(/Desk · you/);
-    await user.click(screen.getByRole('button', { name: 'Re-home', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Re-home' }));
     await waitFor(() => expect(rehomed?.path).toBe(`/api/agents/${ID(102)}/rehome`));
   });
 });

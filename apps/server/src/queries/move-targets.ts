@@ -25,7 +25,9 @@ export async function listMoveTargets(
     [agent.org_id, agent.workstation_id ?? null, viewerId],
   );
   const cur = agent.workstation_id
-    ? await one(db, 'SELECT id, name, status, connected FROM workstations WHERE id=$1', [agent.workstation_id])
+    ? await one(db, 'SELECT id, name, status, connected FROM workstations WHERE id=$1', [
+        agent.workstation_id,
+      ])
     : undefined;
   return {
     current: cur

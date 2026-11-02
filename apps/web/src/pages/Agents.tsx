@@ -258,11 +258,7 @@ export function Agents() {
       {draftHire && <HireDialog open onOpenChange={(o) => !o && setDraftHire(null)} draft={draftHire} />}
       {packHireOpen && <PickPackToHire onClose={() => setPackHireOpen(false)} />}
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
-      <MoveAgentDialog
-        key={rehoming?.id ?? 'none'}
-        agent={rehoming}
-        onClose={() => setRehoming(null)}
-      />
+      <MoveAgentDialog key={rehoming?.id ?? 'none'} agent={rehoming} onClose={() => setRehoming(null)} />
       <AllowedProjectsDialog
         agent={allowing}
         projects={projects.data ?? []}
@@ -634,8 +630,8 @@ function MoveAgentDialog({ agent, onClose }: { agent: AgentDto | null; onClose: 
           )}
           {station && !station.mine && (
             <p className="text-xs text-subtle" data-testid="move-others-hint">
-              {station.ownerName}'s workstation: the agent works only the projects {station.ownerName} is on, with
-              the repositories cloned there.
+              {station.ownerName}'s workstation: the agent works only the projects {station.ownerName} is on,
+              with the repositories cloned there.
             </p>
           )}
           <Select label="Runtime" value={effRuntime} onChange={(e) => setRuntime(e.target.value)}>

@@ -12,8 +12,8 @@ import { requireUser } from '../auth/guards.ts';
 import {
   answerShare,
   listProjectInvitations,
-  previewRemoval,
   loadMovableAgent,
+  previewRemoval,
   rehomeAgent,
   rehomeCard,
   removeMember,
@@ -23,9 +23,9 @@ import {
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
 import { getAgentDto } from '../queries/agents.ts';
-import { listMoveTargets } from '../queries/move-targets.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getProjectDetail } from '../queries/misc.ts';
+import { listMoveTargets } from '../queries/move-targets.ts';
 import { typed } from './util.ts';
 
 /** Shared projects, member removal, agent re-homing, decision policy and card re-home (M3). */

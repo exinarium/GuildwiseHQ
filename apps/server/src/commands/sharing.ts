@@ -352,7 +352,11 @@ export async function removeMemberIn(
  * Loads the agent for a move and checks the caller: 404 when the agent is unknown or the caller has nothing to do with
  * it, 403 unless the caller is an Owner or Admin of its organization (the hiring manager no longer moves agents).
  */
-export async function loadMovableAgent(tx: Queryable, user: AuthSession['user'], agentId: string): Promise<Row> {
+export async function loadMovableAgent(
+  tx: Queryable,
+  user: AuthSession['user'],
+  agentId: string,
+): Promise<Row> {
   const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
   const role = a ? await orgRoleOf(tx, user.id, a.org_id) : null;
   if (!a || (!role && a.manager_user_id !== user.id)) throw notFound('agent not found');
@@ -424,10 +428,8 @@ export async function rehomeAgentIn(
     );
     if (member) throw conflict('workstation_unpaired', `${w.name} was unpaired: pick a paired workstation`);
   }
-  if (!w || !w.in_org)
-    throw notFound('workstation not found in this organization', 'workstation_not_found');
-  if (w.id === a.workstation_id)
-    throw conflict('same_workstation', `${a.name} already works on ${w.name}`);
+  if (!w || !w.in_org) throw notFound('workstation not found in this organization', 'workstation_not_found');
+  if (w.id === a.workstation_id) throw conflict('same_workstation', `${a.name} already works on ${w.name}`);
   const unsandboxedAck = await sandboxGate(
     ctx,
     tx,
