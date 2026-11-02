@@ -98,6 +98,19 @@ import {
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
+import {
+  StorageAuthBeginPayloadSchema,
+  StorageAuthCancelPayloadSchema,
+  StorageConnectPayloadSchema,
+  StorageDevicePromptSchema,
+  StorageHealthReportSchema,
+  StorageReferenceSchema,
+  StorageRemovePayloadSchema,
+  StorageSyncPayloadSchema,
+  StorageTestPayloadSchema,
+  StorageWriteErrorSchema,
+  STORAGE_CHUNK_BYTES,
+} from '../storage/index.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
 import { RELEASE_TAG_RE } from '../release/tags.ts';
@@ -1125,6 +1138,12 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.cancel',
   'integration.test',
   'integration.remove',
+  'storage.connect',
+  'storage.auth.begin',
+  'storage.auth.cancel',
+  'storage.test',
+  'storage.remove',
+  'storage.sync',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1229,6 +1248,12 @@ export const CommandPayloadSchemas = {
   'integration.cancel': IntegrationCancelPayloadSchema,
   'integration.test': IntegrationRequestPayloadSchema,
   'integration.remove': IntegrationRequestPayloadSchema,
+  'storage.connect': StorageConnectPayloadSchema,
+  'storage.auth.begin': StorageAuthBeginPayloadSchema,
+  'storage.auth.cancel': StorageAuthCancelPayloadSchema,
+  'storage.test': StorageTestPayloadSchema,
+  'storage.remove': StorageRemovePayloadSchema,
+  'storage.sync': StorageSyncPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -1295,6 +1320,7 @@ export type RunnerUpdateCheckResult = z.infer<typeof RunnerUpdateCheckResultSche
 export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
   'integration.connect',
   'integration.input',
+  'storage.connect',
   'env.secret.set',
   'deploy.secret.set',
   'deploy.connect',
@@ -2045,6 +2071,59 @@ export const RelayResponseSchema = msg('relay.response', {
     .optional(),
 });
 
+// ---------------------------------------------------------------- storage connections
+// The write relay: the server streams a public upload to the runner in credit-windowed chunks and keeps nothing.
+// None of the write frames is acked (a transfer has one deadline); `storage.report` and `storage.auth` are.
+
+/** Runner to server: the health of the connections it holds. */
+export const StorageReportSchema = msg('storage.report', {
+  connections: z.array(StorageHealthReportSchema).max(100),
+});
+/** Runner to server: progress of a sign-in (device flow) on the workstation. Never a token. */
+export const StorageAuthSchema = msg('storage.auth', {
+  sessionId: z.string().min(1).max(64),
+  connectionId: z.uuid(),
+  state: z.enum(['awaiting_user', 'done', 'failed', 'expired', 'cancelled']),
+  prompt: StorageDevicePromptSchema.optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+export const StorageWriteOpenSchema = msg('storage.write.open', {
+  transferId: z.uuid(),
+  connectionId: z.uuid(),
+  folder: z.string().max(400),
+  name: z.string().max(200),
+  vars: z.record(z.string().max(40), z.string().max(300)),
+  ext: z.string().max(12).optional(),
+  contentType: z.string().max(200),
+  size: z.number().int().nonnegative(),
+  deadlineMs: z.number().int().positive(),
+});
+export const StorageWriteChunkSchema = msg('storage.write.chunk', {
+  transferId: z.uuid(),
+  seq: z.number().int().nonnegative(),
+  data: z.base64().max(Math.ceil(STORAGE_CHUNK_BYTES / 3) * 4 + 4),
+});
+export const StorageWriteEndSchema = msg('storage.write.end', {
+  transferId: z.uuid(),
+  chunks: z.number().int().nonnegative(),
+  size: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export const StorageWriteAbortSchema = msg('storage.write.abort', {
+  transferId: z.uuid(),
+  reason: z.enum(['timeout', 'client_gone', 'too_large', 'shutdown']),
+});
+export const StorageWriteCreditSchema = msg('storage.write.credit', {
+  transferId: z.uuid(),
+  upTo: z.number().int().positive(),
+});
+export const StorageWriteResultSchema = msg('storage.write.result', {
+  transferId: z.uuid(),
+  ok: z.boolean(),
+  reference: StorageReferenceSchema.optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HelloSchema,
   OutboxFlushedSchema,
@@ -2091,6 +2170,10 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   TokenRotateSchema,
   RelayServeSchema,
   RelayResponseSchema,
+  StorageReportSchema,
+  StorageAuthSchema,
+  StorageWriteCreditSchema,
+  StorageWriteResultSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2110,6 +2193,10 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   RunFollowSchema,
   RelayServeResultSchema,
   RelayRequestSchema,
+  StorageWriteOpenSchema,
+  StorageWriteChunkSchema,
+  StorageWriteEndSchema,
+  StorageWriteAbortSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;
@@ -2137,6 +2224,8 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'run.plan.saved',
   'run.replay.failed',
   'integration.session',
+  'storage.report',
+  'storage.auth',
 ]);
 export const SERVER_ACKED_TYPES: ReadonlySet<string> = new Set<ServerToRunnerType>(['shift.stop']);
 

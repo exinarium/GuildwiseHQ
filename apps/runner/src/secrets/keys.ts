@@ -36,7 +36,7 @@ export class EnvelopeError extends Error {
 export interface EnvelopeOuter {
   workstationId: string;
   ref: string;
-  kind: IntegrationKindId;
+  kind: IntegrationKindId | 'storage';
   instance: string;
   op: IntegrationEnvelopeOp;
 }

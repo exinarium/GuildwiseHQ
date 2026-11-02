@@ -60,6 +60,7 @@ import {
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
   type ShiftLimitSetting,
+  STORAGE_CAPABILITY,
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
@@ -168,6 +169,8 @@ import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { ToolchainRegistry } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
+import { ReplayCache } from './integrations/seen.ts';
+import { StorageService } from './storage/service.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -322,6 +325,7 @@ export class Runner {
   readonly deployMover: DeployMover;
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
+  readonly storage: StorageService;
   readonly claudeStore: ClaudeCredentialStore;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
@@ -533,6 +537,24 @@ export class Runner {
       ...(opts.isPrimaryPairing ? { isPrimary: opts.isPrimaryPairing } : {}),
       log: this.log,
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
+    });
+    this.storage = new StorageService({
+      secretsDir: this.paths.secrets,
+      spoolDir: join(this.paths.root, 'tmp', 'storage'),
+      keyOf: (name) => this.keys.deriveFileKey(name),
+      keys: this.keys,
+      seen: new ReplayCache(join(this.paths.secrets, 'storage-seen.json')),
+      workstationId: opts.config.workstationId,
+      send: (type, payload) => void this.client.send(type as never, payload as never),
+      vaults: {
+        exclusive: (id, fn) => this.vaults.exclusive(id, fn),
+        isLocal: (id) => this.vaults.isLocal(id),
+        push: async (id) => void (await this.vaults.syncNow(id)),
+      },
+      oauthEnv: process.env,
+      forbiddenRoots: [this.paths.root],
+      // Connection, kind, size, outcome and duration only: never a path, a name or content.
+      log: (line) => this.log.info(line),
     });
     // Any account's login or usage state changing is logged (tagged with the account) and reported to the server.
     this.claudeAccounts.onChange((a) => {
@@ -807,6 +829,7 @@ export class Runner {
       this.serverFeatures = new Set(w.features ?? []);
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
       this.announceRelay();
+      this.storage.reportAll();
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
@@ -1400,6 +1423,7 @@ export class Runner {
             ? ['runs:1', 'runs:2']
             : ['runs:1', 'runs:2', 'runs:3']),
         'ceo:1',
+        STORAGE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
@@ -1826,6 +1850,12 @@ export class Runner {
       case 'chat.cancel':
         void this.chat.handleCancel(msg.chatId);
         break;
+      case 'storage.write.open':
+      case 'storage.write.chunk':
+      case 'storage.write.end':
+      case 'storage.write.abort':
+        this.storage.onMessage(msg);
+        break;
       case 'relay.request':
         void this.relay
           .dispatch(msg)
@@ -2239,6 +2269,9 @@ export class Runner {
       ) {
         // Refusals (web turned off, wrong envelope, machine-wide login) are answers: ok:true with a sentence, never a retry.
         done(true, await this.integrations.handle(command, payload));
+      } else if (command.startsWith('storage.')) {
+        // Typed errors are answers (ok:true with `error`), never a retry; no secret is ever in an answer.
+        done(true, await this.storage.handle(command, payload));
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
         done(true, { cleared: true });
