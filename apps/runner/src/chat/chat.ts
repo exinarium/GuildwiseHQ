@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { ownerTurnShiftEnv } from '../ceo/shift-env.ts';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -757,16 +758,18 @@ export class ChatManager {
     const turnDir = turnDirOf(paths.root, msg.chatId);
     chat.turnDir = turnDir;
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
-    const ipcEnv: Record<string, string> = {
-      AOM_IPC_URL: this.deps.ipc.url,
-      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-      AOM_SHIFT_TOKEN: chat.token,
-    };
+    const shiftEnv = ownerTurnShiftEnv({
+      ipcUrl: this.deps.ipc.url,
+      socketPath: this.deps.ipc.socketPath,
+      token: chat.token,
+      chatId: msg.chatId,
+      turnDir,
+    });
     writeTurnFiles({
       turnDir,
       brief: msg.context.ceo?.brief ?? '',
       mode,
-      ipcEnv,
+      shiftEnv,
       runnerRoots: [paths.root],
       pid: process.pid,
       clones: this.deps.guardClones?.() ?? [],
@@ -779,9 +782,7 @@ export class ChatManager {
       cwd,
       agent: msg.agent,
       env: {
-        ...ipcEnv,
-        AOM_SHIFT_ID: msg.chatId,
-        AOM_CEO_TURN_DIR: turnDir,
+        ...shiftEnv,
         PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
       },
       turnDir,

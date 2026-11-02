@@ -44,6 +44,7 @@ import {
   withGuardDeadline,
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
+import { resolveShiftEnv } from '../ceo/shift-env.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
 import {
   denyHook,
@@ -2990,7 +2991,9 @@ async function preloadGuardStdin(): Promise<string> {
 }
 
 if (isEntry) {
-  const confined = confinedReader(process.env, process.cwd());
+  // a bypass owner turn's Bash child has its credential-named variables scrubbed: refill what is missing from the turn dir
+  const entryEnv = resolveShiftEnv(process.env);
+  const confined = confinedReader(entryEnv, process.cwd());
   const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
   // the two time-limit hooks of a native subagent read their input the same way (the deadline fails closed, the done hook has nothing to protect)
   const readsHookInput =
@@ -2999,9 +3002,9 @@ if (isEntry) {
   (async () => {
     const stdinText = guardStdin ? await guardStdin : undefined;
     return runAom(process.argv.slice(2), {
-      env: process.env,
+      env: entryEnv,
       io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
-      fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
+      fetch: entryEnv.AOM_IPC_SOCKET ? socketFetch(entryEnv.AOM_IPC_SOCKET, fetch) : fetch,
       readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
     });
   })().then(

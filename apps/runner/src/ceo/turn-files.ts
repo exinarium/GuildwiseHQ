@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { writeShiftEnvFile } from './shift-env.ts';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { OWNER_BRIEF_FILE, OWNER_FLOOR_FILE, OWNER_MCP_FILE } from '../adapters/claude-code.ts';
@@ -106,8 +107,8 @@ export interface TurnFilesInput {
   /** The static brief (persona, routing rule, verbs, policy): written every turn, because a resumed session does not keep it. */
   brief: string;
   mode: 'owner' | 'order';
-  /** The IPC variables the relay needs (AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN). */
-  ipcEnv: Record<string, string>;
+  /** The shift variables (see OWNER_SHIFT_KEYS): the relay's environment and the `shift-env.json` fallback for `aom`. */
+  shiftEnv: Record<string, string>;
   runnerRoots: readonly string[];
   pid: number;
   clones: GuardClone[];
@@ -122,6 +123,7 @@ export function writeTurnFiles(i: TurnFilesInput): void {
   } catch {
     // not supported on every platform
   }
+  writeShiftEnvFile(i.turnDir, i.shiftEnv);
   writeFileSync(join(i.turnDir, OWNER_BRIEF_FILE), i.brief, { mode: 0o600 });
   const aom = selfCommand('aom');
   const relay = {
@@ -129,7 +131,7 @@ export function writeTurnFiles(i: TurnFilesInput): void {
       aom_permission: {
         command: aom[0],
         args: [...aom.slice(1), 'ceo-permission-mcp'],
-        env: { ...i.ipcEnv, AOM_PERMISSION_MODE: i.mode },
+        env: { ...i.shiftEnv, AOM_PERMISSION_MODE: i.mode },
       },
     },
   };
