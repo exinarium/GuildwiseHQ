@@ -410,6 +410,11 @@ function AgentCard({
           </Badge>
         </div>
       )}
+      {a.workstationRemoved && (
+        <p className="text-xs font-medium text-warning" data-testid="agent-workstation-removed">
+          Workstation removed – needs a new workstation
+        </p>
+      )}
       {a.sandbox === 'unsandboxed' && (
         <SandboxWarning testId="agent-sandbox-warning" lead="Warning:">
           {agentWarning(station || 'its workstation', a.sandboxReason)}

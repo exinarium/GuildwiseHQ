@@ -101,7 +101,18 @@ export const agentEvents = [
       previousSkills: z.array(z.string()).optional(),
     }),
   ),
-  defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
+  defineEvent(
+    'AgentRetired',
+    z.object({
+      agentId: Id,
+      by: Id,
+      releasedCardIds: z.array(Id),
+      /** Why: absent = fired by a manager. */
+      reason: z.enum(['fired', 'workstation_unpaired', 'orphaned_migration']).optional(),
+      /** The workstation that was removed, for a retirement caused by it. */
+      workstationId: Id.optional(),
+    }),
+  ),
   defineEvent('AgentReset', z.object({ agentId: Id })),
   /** The agent takes no new work (a running shift finishes). By the manager, or by the CEO on the owner's behalf. */
   defineEvent(

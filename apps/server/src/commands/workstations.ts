@@ -17,7 +17,8 @@ import {
   runnerAppliesShiftLimit,
 } from '../runner-gateway/shift-limit.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
-import { devopsHireEvents as devopsHireEventsNew, threadMessage } from './devops.ts';
+import { devopsHireEvents as devopsHireEventsNew } from './devops.ts';
+import { devopsRetireEvents, failDevopsRequestEvents } from './devops-retire.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
@@ -296,40 +297,31 @@ export async function unlinkWorkstationIn(
     const why = `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by a platform administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
     const requests = await rows(
       tx,
-      `SELECT id, thread_id, approval FROM devops_requests
+      `SELECT id, org_id, thread_id, approval FROM devops_requests
         WHERE workstation_id=$1 AND status IN ('queued','running','needs_approval') ORDER BY created_at`,
       [id],
     );
-    for (const r of requests) {
-      events.push(
-        {
-          streamId: streamId.thread(r.id),
-          event: {
-            type: 'DevOpsRequestCompleted',
-            payload: { requestId: r.id, status: 'failed', summary: why },
-          },
-          actor: SYSTEM_ACTOR,
-          scope: orgScope(r.org_id),
+    events.push(...failDevopsRequestEvents(requests, why, 'The workstation was unpaired; the request failed.'));
+    // The DevOps engineers of this workstation go with it, in the same append (history is kept: a soft retire).
+    const devops = await rows(
+      tx,
+      `SELECT id, org_id, name, workstation_id FROM agents
+        WHERE workstation_id=$1 AND is_devops AND status='active' ORDER BY hired_at, id FOR UPDATE`,
+      [id],
+    );
+    events.push(
+      ...(await devopsRetireEvents(tx, {
+        agents: devops,
+        reason: 'workstation_unpaired',
+        actor: userActor(user.id),
+        by: user.id,
+        skip: {
+          cardIds: new Set(claimed.map((c) => c.id as string)),
+          shiftIds: new Set(open.map((s) => s.id as string)),
+          requestIds: new Set(requests.map((r) => r.id as string)),
         },
-        threadMessage(r.thread_id, r.org_id, { kind: 'system' }, 'system', why),
-      );
-      const deskItemId = (r.approval as { deskItemId?: string } | null)?.deskItemId;
-      if (deskItemId)
-        events.push({
-          streamId: streamId.desk(deskItemId),
-          event: {
-            type: 'DeskItemResolved',
-            payload: {
-              deskItemId,
-              resolution: 'acknowledged',
-              note: 'The workstation was unpaired; the request failed.',
-              by: { kind: 'system' },
-            },
-          },
-          actor: SYSTEM_ACTOR,
-          scope: orgScope(r.org_id),
-        });
-    }
+      })),
+    );
     // The places this computer deployed keep pointing at it for the record; they are marked so the Owner chooses another one.
     events.push(...(await computerRemovedEvents(tx, { workstationId: id, now: ctx.clock.now() })));
     await ctx.store.append(events, { tx });

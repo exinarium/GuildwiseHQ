@@ -8,6 +8,7 @@ import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDelegationExplicit } from './delegation-explicit.ts';
 import { migrateDeployRemovedComputers } from './deploy-removed-computers.ts';
+import { migrateOrphanedDevops } from './orphaned-devops.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
@@ -54,6 +55,7 @@ export {
   type DeployRemovedComputersReport,
   migrateDeployRemovedComputers,
 } from './deploy-removed-computers.ts';
+export { migrateOrphanedDevops, ORPHANED_DEVOPS_MIGRATION, type OrphanedDevopsReport } from './orphaned-devops.ts';
 export {
   DESIGN_HELD_STATUS_MIGRATION,
   type DesignHeldStatusReport,
@@ -141,6 +143,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'guildwisehq-runner-rule-2026-10', run: (env) => migrateGuildwiseRunnerRule(env) },
   { name: 'business-builtin-2026-11', run: (env) => migrateBusinessBuiltin(env) },
   { name: 'deploy-removed-computers-2026-11', run: (env) => migrateDeployRemovedComputers(env) },
+  { name: 'orphaned-devops-2026-11', run: (env) => migrateOrphanedDevops(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {
