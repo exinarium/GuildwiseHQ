@@ -61,7 +61,7 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
     expect(request.request.status).toBe('failed');
     for (const a of before) {
       const ev = await q(
-        `SELECT payload, actor FROM events WHERE type='AgentRetired' AND payload->>'agentId'=$1`,
+        `SELECT payload, actor_kind, actor_id FROM events WHERE type='AgentRetired' AND payload->>'agentId'=$1`,
         [a.id],
       );
       expect(ev).toHaveLength(1);
@@ -70,7 +70,7 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
         workstationId: box.workstationId,
         by: w.owner.id,
       });
-      expect(ev[0].actor).toMatchObject({ kind: 'user', id: w.owner.id });
+      expect(ev[0]).toMatchObject({ actor_kind: 'user', actor_id: w.owner.id });
     }
     const board = await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
     const list = board.agents;
@@ -101,7 +101,7 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
     expect((await devopsOf(box.workstationId))[0].status).toBe('active');
   });
 
-  it('releases a card claimed by the DevOps engineer exactly once', async () => {
+  it('releases a card claimed on the unpaired workstation exactly once', async () => {
     const box = await pairWorkstation(w.t, w.owner, 'Claim box');
     const [agent] = await devopsOf(box.workstationId);
     const card = await w.card();
@@ -110,6 +110,26 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
       `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=$4, claim_shift_id=gen_random_uuid(),
               claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
       [card.id, claimId, agent.id, box.workstationId],
+    );
+    await ok(w.t.req('POST', `/api/workstations/${box.workstationId}/unlink`, { cookie: w.owner.cookie }));
+    const ev = await q(
+      `SELECT payload FROM events WHERE type='ClaimReleased' AND payload->>'cardId'=$1 AND payload->>'claimId'=$2`,
+      [card.id, claimId],
+    );
+    expect(ev).toHaveLength(1); // the workstation loop released it; the agent release skipped it
+    expect(ev[0].payload.reason).toBe('workstation_unlinked');
+    expect((await q('SELECT claim_id FROM cards WHERE id=$1', [card.id]))[0].claim_id).toBeNull();
+  });
+
+  it('releases a card the DevOps engineer holds without a claim workstation (agent_retired)', async () => {
+    const box = await pairWorkstation(w.t, w.owner, 'Claim box 2');
+    const [agent] = await devopsOf(box.workstationId);
+    const card = await w.card();
+    const claimId = randomUUID();
+    await q(
+      `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=NULL, claim_shift_id=gen_random_uuid(),
+              claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
+      [card.id, claimId, agent.id],
     );
     await ok(w.t.req('POST', `/api/workstations/${box.workstationId}/unlink`, { cookie: w.owner.cookie }));
     const ev = await q(
