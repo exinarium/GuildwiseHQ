@@ -12,7 +12,13 @@ import {
 import { writeTurnFiles } from '../src/ceo/turn-files.ts';
 
 const base = (dir: string) =>
-  ownerTurnShiftEnv({ ipcUrl: 'http://127.0.0.1:1', socketPath: '/s/ipc.sock', token: 'tok-1', chatId: 'chat-1', turnDir: dir });
+  ownerTurnShiftEnv({
+    ipcUrl: 'http://127.0.0.1:1',
+    socketPath: '/s/ipc.sock',
+    token: 'tok-1',
+    chatId: 'chat-1',
+    turnDir: dir,
+  });
 
 /** What Claude Code's subprocess scrub does to a Bash child: credential-named variables are gone. */
 const scrub = (env: Record<string, string>): NodeJS.ProcessEnv => {
@@ -33,7 +39,16 @@ describe('owner turn shift environment', () => {
   it.each(['owner', 'order'] as const)('writeTurnFiles writes an owner-only shift-env.json (%s)', (mode) => {
     const dir = join(mkdtempSync(join(tmpdir(), 'aom-shift-')), 't');
     const env = base(dir);
-    writeTurnFiles({ turnDir: dir, brief: 'b', mode, shiftEnv: env, runnerRoots: ['/h/.r'], pid: 1, clones: [], home: '/h' });
+    writeTurnFiles({
+      turnDir: dir,
+      brief: 'b',
+      mode,
+      shiftEnv: env,
+      runnerRoots: ['/h/.r'],
+      pid: 1,
+      clones: [],
+      home: '/h',
+    });
     expect(statSync(join(dir, SHIFT_ENV_FILE)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(join(dir, SHIFT_ENV_FILE), 'utf8'))).toEqual(env);
   });
@@ -41,7 +56,16 @@ describe('owner turn shift environment', () => {
   it('after the scrub, aom still resolves all variables from the turn dir (bypass)', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'aom-shift-')), 't');
     const env = base(dir);
-    writeTurnFiles({ turnDir: dir, brief: 'b', mode: 'owner', shiftEnv: env, runnerRoots: ['/h/.r'], pid: 1, clones: [], home: '/h' });
+    writeTurnFiles({
+      turnDir: dir,
+      brief: 'b',
+      mode: 'owner',
+      shiftEnv: env,
+      runnerRoots: ['/h/.r'],
+      pid: 1,
+      clones: [],
+      home: '/h',
+    });
     const scrubbed = scrub(env);
     expect(scrubbed.AOM_SHIFT_TOKEN).toBeUndefined();
     const resolved = resolveShiftEnv(scrubbed);

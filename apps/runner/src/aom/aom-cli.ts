@@ -44,8 +44,8 @@ import {
   withGuardDeadline,
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
-import { resolveShiftEnv } from '../ceo/shift-env.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
+import { resolveShiftEnv } from '../ceo/shift-env.ts';
 import {
   denyHook,
   loadSubagentGuardConfig,
