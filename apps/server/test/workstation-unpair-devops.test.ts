@@ -73,7 +73,7 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
       expect(ev[0].actor).toMatchObject({ kind: 'user', id: w.owner.id });
     }
     const board = await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
-    const list = board.agents ?? board;
+    const list = board.agents;
     expect(
       list.filter((a: any) => a.workstationId === box.workstationId && a.status === 'active'),
     ).toHaveLength(0);
@@ -96,8 +96,47 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
   it('keeps refusing to fire a DevOps engineer of a paired workstation', async () => {
     const box = await pairWorkstation(w.t, w.owner, 'Paired box');
     const [a] = await devopsOf(box.workstationId);
-    const r = await w.t.req('DELETE', `/api/agents/${a.id}`, { cookie: w.owner.cookie });
+    const r = await w.t.req('POST', `/api/agents/${a.id}/fire`, { cookie: w.owner.cookie });
     expect(r.status).toBe(409);
+    expect((await devopsOf(box.workstationId))[0].status).toBe('active');
+  });
+
+  it('releases a card claimed by the DevOps engineer exactly once', async () => {
+    const box = await pairWorkstation(w.t, w.owner, 'Claim box');
+    const [agent] = await devopsOf(box.workstationId);
+    const card = await w.card();
+    const claimId = randomUUID();
+    await q(
+      `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=$4, claim_shift_id=gen_random_uuid(),
+              claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
+      [card.id, claimId, agent.id, box.workstationId],
+    );
+    await ok(w.t.req('POST', `/api/workstations/${box.workstationId}/unlink`, { cookie: w.owner.cookie }));
+    const ev = await q(
+      `SELECT payload FROM events WHERE type='ClaimReleased' AND payload->>'cardId'=$1 AND payload->>'claimId'=$2`,
+      [card.id, claimId],
+    );
+    expect(ev).toHaveLength(1);
+    expect(ev[0].payload.reason).toBe('agent_retired');
+    const row = (await q('SELECT claim_id, claimed_by_agent_id FROM cards WHERE id=$1', [card.id]))[0];
+    expect(row.claim_id).toBeNull();
+    expect(row.claimed_by_agent_id).toBeNull();
+  });
+
+  it('keeps a non-DevOps agent active and flags it as needing a new workstation', async () => {
+    const box = await pairWorkstation(w.t, w.owner, 'Flag box');
+    const hired = await w.hire('Flagged', 'builder', 'junior', { workstationId: box.workstationId });
+    const id = hired.agent?.id ?? hired.id;
+    const flag = async () =>
+      (await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }))).agents.find(
+        (a: any) => a.id === id,
+      );
+    expect((await flag()).workstationRemoved).toBe(false);
+    await ok(w.t.req('POST', `/api/workstations/${box.workstationId}/unlink`, { cookie: w.owner.cookie }));
+    const after = await flag();
+    expect(after.status).not.toBe('retired');
+    expect(after.workstationRemoved).toBe(true);
+    expect((await q('SELECT status FROM agents WHERE id=$1', [id]))[0].status).not.toBe('retired');
   });
 
   it('re-pairing creates new DevOps engineers and leaves the retired ones retired', async () => {

@@ -29,7 +29,7 @@ export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<Orph
       return null;
     const orphans = await rows(
       pool,
-      `SELECT a.id, a.org_id, a.name, a.workstation_id, w.user_id AS ws_user_id
+      `SELECT a.id, a.org_id, a.name, a.workstation_id, a.hired_by_user_id, w.user_id AS ws_user_id
          FROM agents a LEFT JOIN workstations w ON w.id = a.workstation_id
         WHERE a.is_devops AND a.status = 'active' AND a.workstation_id IS NOT NULL
           AND (w.id IS NULL OR w.status <> 'active')
@@ -38,9 +38,11 @@ export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<Orph
     const byStation = new Map<string, typeof orphans>();
     for (const a of orphans) byStation.set(a.workstation_id, [...(byStation.get(a.workstation_id) ?? []), a]);
     let retired = 0;
+    let skipped = 0;
     for (const agents of byStation.values()) {
       const by =
         (agents[0]?.ws_user_id as string | null) ??
+        (agents.find((a) => a.hired_by_user_id)?.hired_by_user_id as string | undefined) ??
         (
           await one(
             pool,
@@ -48,7 +50,14 @@ export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<Orph
             [agents[0]?.org_id],
           )
         )?.user_id;
-      if (!by) continue;
+      if (!by) {
+        // Nobody to record as the actor: leave these active and do not mark the migration done, so a later boot retries.
+        skipped += agents.length;
+        log(
+          `${ORPHANED_DEVOPS_MIGRATION}: no user found for workstation ${agents[0]?.workstation_id}, skipped agents ${agents.map((a) => a.id).join(', ')}`,
+        );
+        continue;
+      }
       await withAppendTx(pool, async (tx) => {
         const events = await devopsRetireEvents(tx, {
           agents,
@@ -62,6 +71,7 @@ export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<Orph
     }
     const report: OrphanedDevopsReport = { retired };
     log(`${ORPHANED_DEVOPS_MIGRATION}: ${retired} orphaned DevOps engineer(s) retired`);
+    if (skipped > 0) return report;
     await exec(
       pool,
       `INSERT INTO data_migrations (name, completed_at, summary) VALUES ($1,$2,$3) ON CONFLICT (name) DO NOTHING`,
