@@ -47,6 +47,16 @@ removes it from every Bash command of a bypass turn. `aom`'s `ipc()` (`apps/runn
 refuses, correctly. `AOM_IPC_URL` (`http://127.0.0.1:<port>`), `AOM_IPC_SOCKET` (a path), `AOM_SHIFT_ID` (a uuid) and
 `AOM_CEO_TURN_DIR` (a path) have neither a credential name nor a credential-shaped value, so they survive.
 
+The same documentation also says: "A secret whose variable name and value don't look like a credential: Leaves it in
+place" and "Leave the scrub unset if a subprocess needs one of the removed variables". So the path-valued
+`AOM_CEO_TURN_DIR` is safe to depend on, and Claude Code offers no per-variable exemption.
+
+Not affected: the deny-floor `PreToolUse` hook (`aom ceo guard`) is also a scrubbed subprocess, but it reads only
+`AOM_CEO_TURN_DIR` (`GUARD_ENV`, `ceo/guard-hook.ts:30`) and never the token, so it keeps working in bypass. The relay MCP
+server (`ceo-permission-mcp`) is a scrubbed stdio MCP server too. Its explicit `env` holds the token, which the scrub
+probably removes as well. In bypass the relay is never called, so this does not show today. The design below covers it
+anyway.
+
 The runner already knows about this. The `scrubSubprocessEnv` option of the agent shifts (`apps/runner/src/config.ts:60-66`)
 is off by default "because it also removes variables Claude Code considers credentials, which may include the shift
 token the `aom` CLI needs". The bypass branch turns the scrub on unconditionally, so it hits exactly that case. A
@@ -294,12 +304,13 @@ Likely causes, for a separate card (not verified against the desk data, which th
    tried several such diagnostic variants in a row.
 3. Each denied or timed-out ask is retried by the model with a slightly different command, which adds more prompts.
 
-This has been put on the project backlog as a suggestion. The manager decides whether it becomes a card.
+This is filed on the project backlog as a suggestion ("CEO desk: repeated 'Authorize this execution? Bash' approvals in
+auto turns"). The manager decides whether it becomes a card.
 
 ## Related latent bug (follow-up, not in scope)
 
 Agent shifts with `claude.scrubSubprocessEnv: true` hit the same scrub. Since Claude Code 2.1.251 they lose
 `AOM_SHIFT_TOKEN` too, which the config comment already half-predicts. They have no `AOM_CEO_TURN_DIR`, so this card's
 fallback does not help them. A follow-up could generalize `shift-env.json` to every shift, through a non-credential
-pointer variable (for example `AOM_SHIFT_ENV_FILE`) in a place the sandboxed shell can read. This has been put on the
-backlog as a suggestion.
+pointer variable (for example `AOM_SHIFT_ENV_FILE`) in a place the sandboxed shell can read. This is filed on the
+backlog as a suggestion ("Agent shifts with scrubSubprocessEnv lose AOM_SHIFT_TOKEN").
