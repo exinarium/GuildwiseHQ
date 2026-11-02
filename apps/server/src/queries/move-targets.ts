@@ -1,6 +1,5 @@
 import type { MoveTargetsResponse, RuntimeInfo } from '@aom/shared';
-import type { Queryable, Row } from '../db/sql.ts';
-import { one, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 
 /** An active workstation of an active member of org `org` (any role), or the org's simulated one. */
