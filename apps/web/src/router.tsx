@@ -30,6 +30,8 @@ import { DiscoveryList } from './pages/Discovery.tsx';
 import { DiscoverySession } from './pages/DiscoverySession.tsx';
 import { DocumentsList, DocumentView } from './pages/Documents.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
+import { FormBuilderPage } from './pages/FormBuilderPage.tsx';
+import { Forms } from './pages/Forms.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { BatchView } from './pages/IntakeBatch.tsx';
@@ -127,6 +129,8 @@ export const routes = [
         ),
       },
       { path: '/automations', element: <Automations /> },
+      { path: '/forms', element: <Forms /> },
+      { path: '/forms/:id', element: <FormBuilderPage /> },
       { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
       { path: '/interests/:id', element: <InterestDetail /> },

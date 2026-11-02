@@ -31,6 +31,8 @@ const publish = (...slugs: string[]) => {
 const unpublish = (...slugs: string[]) => {
   for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = false;
 };
+/** Registered but not recorded yet: the video is made with the user guide (published: false). */
+const waiting = new Set(['forms']);
 let before: Record<string, boolean>;
 beforeEach(() => {
   resetVideoManifest();
@@ -42,9 +44,9 @@ afterEach(() => {
 });
 
 describe('the video registry', () => {
-  it('has 32 videos: the overview, Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
+  it('has 33 videos: the overview, Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
     const slugs = Object.keys(SECTION_VIDEOS);
-    expect(slugs).toHaveLength(32);
+    expect(slugs).toHaveLength(33);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 
@@ -87,7 +89,7 @@ describe('the video registry', () => {
   });
 
   it('publishes every recorded video, each with its four files', () => {
-    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(true);
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(!waiting.has(slug));
   });
 
   it('shows a video without a sidebar entry in its Help article and on its pages', () => {
@@ -101,7 +103,7 @@ describe('the video registry', () => {
 
   it('finds a video by nav id, article and path for every section', () => {
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
-      if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
+      if (slug === GETTING_STARTED_SLUG || waiting.has(slug)) continue; // Getting started: its own player on Help and in the tour (tour.test.tsx)
       if (e.nav) expect(videoForNav(e.nav)?.slug, slug).toBe(slug);
       const [article, anchor] = e.help.split('#');
       expect(
@@ -285,7 +287,7 @@ describe('every published video on its three places', () => {
       research: '/p/X/research',
     };
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
-      if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
+      if (slug === GETTING_STARTED_SLUG || waiting.has(slug)) continue; // Getting started: its own player on Help and in the tour (tour.test.tsx)
       resetVideoManifest();
       serve(slug);
       // Help: the article shows the player under the registered heading

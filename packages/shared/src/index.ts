@@ -49,6 +49,7 @@ export * from './projects/index.ts';
 export * from './prompt/index.ts';
 export * from './protocol/index.ts';
 export * from './questions/index.ts';
+export * from './forms/index.ts';
 export * from './relay/index.ts';
 export * from './release/index.ts';
 export * from './repo/index.ts';
