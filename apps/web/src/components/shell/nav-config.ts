@@ -10,6 +10,7 @@ import {
   Compass,
   FileText,
   FolderKanban,
+  Route,
   Inbox,
   KanbanSquare,
   LifeBuoy,
@@ -140,6 +141,7 @@ export function buildNav(opts: {
   });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
+    { id: 'journeys', label: 'Journeys', to: '/journeys', icon: Route },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
   );
   const knowledge: NavEntry[] = [];

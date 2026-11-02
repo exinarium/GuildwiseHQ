@@ -13,6 +13,9 @@ import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
 import { Automations } from './pages/Automations.tsx';
+import { JourneyDesigner } from './pages/JourneyDesigner.tsx';
+import { JourneyInstance } from './pages/JourneyInstance.tsx';
+import { Journeys } from './pages/Journeys.tsx';
 import { Backlog } from './pages/Backlog.tsx';
 import { Board } from './pages/Board.tsx';
 import { BoardroomList } from './pages/Boardroom.tsx';
@@ -127,6 +130,9 @@ export const routes = [
         ),
       },
       { path: '/automations', element: <Automations /> },
+      { path: '/journeys', element: <Journeys /> },
+      { path: '/journeys/instances/:id', element: <JourneyInstance /> },
+      { path: '/journeys/:id', element: <JourneyDesigner /> },
       { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
       { path: '/interests/:id', element: <InterestDetail /> },
