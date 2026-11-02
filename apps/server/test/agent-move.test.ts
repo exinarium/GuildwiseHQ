@@ -149,6 +149,20 @@ describe('move any agent to another workstation', () => {
     expect((await owner().post(`/api/agents/${a.id}/rehome`, body(second))).status).toBe(200);
   });
 
+  it('re-homes a needs_rehome agent whose shift was left open by a silent runner', async () => {
+    const a = await hire();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+       VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now())`,
+      [crypto.randomUUID(), orgId, a.id, w.workstationId],
+    );
+    await q(`UPDATE agents SET status='needs_rehome', workstation_id=NULL WHERE id=$1`, [a.id]);
+    const r = await owner().post(`/api/agents/${a.id}/rehome`, body(second));
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('active');
+    expect((await agentRow(a.id)).workstation_id).toBe(second);
+  });
+
   it('refuses built-in agents and fired agents', async () => {
     const devops = (await q(`SELECT id FROM agents WHERE org_id=$1 AND is_devops LIMIT 1`, [orgId]))[0];
     if (devops) {

@@ -398,11 +398,16 @@ export async function rehomeAgentIn(
         ? 'the CEO moves on the CEO page'
         : `${a.name} is the DevOps engineer of its workstation and stays with it: every workstation gets its own`,
     );
-  const shift = await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [a.id]);
+  // A needs_rehome agent has no workstation: removing its manager released its claims, and a shift left open by a
+  // runner that never reported back is orphaned (nothing would ever end it), so it must not block the re-home.
+  const shift =
+    a.status === 'needs_rehome'
+      ? null
+      : await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [a.id]);
   if (shift)
     throw conflict(
       'agent_busy',
-      `${a.name} is in a running shift: stop it or wait until it ends, then move ${a.name}. If that workstation is gone for good, unpair it to end its shifts.`,
+      `${a.name} is in a running shift: wait until it ends or stop it, then move ${a.name}.`,
     );
   const claim = await one(
     tx,
