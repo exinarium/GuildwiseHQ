@@ -113,7 +113,11 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['board'],
         ['card'],
         ['relay'],
+        ['storage'],
       ];
+    case 'storage':
+      // StorageConnection* events stream as storage-<connectionId>
+      return [['storage']];
     case 'relay':
       // RelayIntegration* events (create, rotate, revoke) stream as relay-<integrationId>
       return [['relay']];
