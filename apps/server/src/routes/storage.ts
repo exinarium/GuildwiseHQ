@@ -40,12 +40,16 @@ export function storageRoutes(ctx: Ctx) {
       return { connections: await listStorageConnections(ctx, a.orgId, a.session.user.id) };
     });
 
-    app.post('/api/org/storage/connections', { schema: { body: StorageConnectionCreateSchema } }, async (req, reply) => {
-      const a = await requireOrg(ctx, req, { min: 'admin' });
-      const connection = await createStorageConnection(ctx, a.session.user, a.orgId, req.body);
-      reply.code(201);
-      return { connection };
-    });
+    app.post(
+      '/api/org/storage/connections',
+      { schema: { body: StorageConnectionCreateSchema } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const connection = await createStorageConnection(ctx, a.session.user, a.orgId, req.body);
+        reply.code(201);
+        return { connection };
+      },
+    );
 
     app.patch(
       '/api/org/storage/connections/:id',

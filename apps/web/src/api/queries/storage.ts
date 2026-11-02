@@ -1,7 +1,7 @@
 import type { StorageConnectionCreate, StorageConnectionDto, StorageRequestDto } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { del, get, patch, post } from '../client.ts';
 import { storageNeedsPolling } from '../../lib/storage.ts';
+import { del, get, patch, post } from '../client.ts';
 
 export const storageKey = ['storage'] as const;
 const base = '/org/storage';
@@ -11,7 +11,8 @@ export function useStorageConnections(enabled = true) {
   return useQuery({
     enabled,
     queryKey: [...storageKey, 'connections'],
-    queryFn: async () => (await get<{ connections: StorageConnectionDto[] }>(`${base}/connections`)).connections,
+    queryFn: async () =>
+      (await get<{ connections: StorageConnectionDto[] }>(`${base}/connections`)).connections,
     refetchInterval: (q) => (storageNeedsPolling(q.state.data) ? 5000 : false),
   });
 }
@@ -80,7 +81,8 @@ export function useStorageRequest(rid: string | null) {
     queryKey: [...storageKey, 'request', rid],
     queryFn: async () => {
       const r = (await get<{ request: StorageRequestDto }>(`${base}/requests/${rid}`)).request;
-      if (REQUEST_DONE.includes(r.state)) void qc.invalidateQueries({ queryKey: [...storageKey, 'connections'] });
+      if (REQUEST_DONE.includes(r.state))
+        void qc.invalidateQueries({ queryKey: [...storageKey, 'connections'] });
       return r;
     },
     refetchInterval: (q) => (q.state.data && REQUEST_DONE.includes(q.state.data.state) ? false : 1000),

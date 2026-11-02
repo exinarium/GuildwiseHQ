@@ -17,7 +17,9 @@ describe('SigV4', () => {
     });
     expect(h.authorization).toContain('Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request');
     expect(h.authorization).toContain('SignedHeaders=host;range;x-amz-content-sha256;x-amz-date');
-    expect(h.authorization).toContain('Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41');
+    expect(h.authorization).toContain(
+      'Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41',
+    );
   });
   it('encodes reserved characters but keeps slashes in paths', () => {
     expect(uriEncode('a b/c+d', true)).toBe('a%20b/c%2Bd');
@@ -25,8 +27,15 @@ describe('SigV4', () => {
   });
   it('adds the session token to the signed headers', () => {
     const h = signV4({
-      method: 'PUT', host: 'h', path: '/k', payloadHash: 'x'.repeat(64), region: 'r', accessKeyId: 'a',
-      secretAccessKey: 's', sessionToken: 'tok', now: new Date('2020-01-01T00:00:00Z'),
+      method: 'PUT',
+      host: 'h',
+      path: '/k',
+      payloadHash: 'x'.repeat(64),
+      region: 'r',
+      accessKeyId: 'a',
+      secretAccessKey: 's',
+      sessionToken: 'tok',
+      now: new Date('2020-01-01T00:00:00Z'),
     });
     expect(h['x-amz-security-token']).toBe('tok');
     expect(h.authorization).toContain('x-amz-security-token');

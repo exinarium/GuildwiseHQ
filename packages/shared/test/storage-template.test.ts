@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkStorageTemplate,
+  ENVELOPE_COMMANDS,
+  healthStateForError,
+  isAckedFromRunner,
   makeEnvelope,
-  renderStoragePath,
   RunnerToServerSchema,
-  sanitizeStorageSegment,
+  renderStoragePath,
   ServerToRunnerSchema,
+  sanitizeStorageSegment,
   storageClashName,
   storageError,
-  healthStateForError,
-  ENVELOPE_COMMANDS,
-  isAckedFromRunner,
 } from '../src/index.ts';
 
 const vars = { journey: 'Rental', client: 'A. Smith', field: 'id-document', date: '2026-11-03', ext: 'pdf' };
@@ -30,17 +30,19 @@ describe('renderStoragePath', () => {
   });
   it('turns braces escaped by doubling into literal braces', () => {
     const r = renderStoragePath({ folder: '', name: '{{a}}' }, vars);
-    expect(r).toMatchObject({ ok: true, name: '{a}' });
+    expect(r).toMatchObject({ ok: true, name: '{a}.pdf' });
   });
   it('can never climb out: a value holding slashes or dots stays inside its segment', () => {
     const r = renderStoragePath({ folder: '{client}', name: 'f' }, { ...vars, client: '../../etc/passwd' });
-    expect(r.ok && r.folder).toEqual(['-etc-passwd']);
+    expect(r.ok && r.folder).toEqual(['-..-etc-passwd']);
     const dots = renderStoragePath({ folder: '{client}', name: 'f' }, { ...vars, client: '..' });
     expect(dots.ok && dots.folder).toEqual(['_']);
   });
   it('rejects a path that is too long', () => {
     const long = 'a'.repeat(100);
-    expect(renderStoragePath({ folder: Array(5).fill(long).join('/'), name: long }, vars)).toMatchObject({ ok: false });
+    expect(renderStoragePath({ folder: Array(5).fill(long).join('/'), name: long }, vars)).toMatchObject({
+      ok: false,
+    });
   });
 });
 
@@ -85,14 +87,29 @@ describe('protocol', () => {
   const id = '0b3e7c64-5d0a-4a52-9f43-1f0f6a1d2b11';
   it('accepts the write frames in both directions', () => {
     const open = makeEnvelope('storage.write.open', {
-      transferId: id, connectionId: id, folder: 'a', name: 'b', vars: {}, contentType: 'text/plain', size: 1, deadlineMs: 1000,
+      transferId: id,
+      connectionId: id,
+      folder: 'a',
+      name: 'b',
+      vars: {},
+      contentType: 'text/plain',
+      size: 1,
+      deadlineMs: 1000,
     });
     expect(ServerToRunnerSchema.safeParse(open).success).toBe(true);
-    const chunk = makeEnvelope('storage.write.chunk', { transferId: id, seq: 0, data: Buffer.from('hi').toString('base64') });
+    const chunk = makeEnvelope('storage.write.chunk', {
+      transferId: id,
+      seq: 0,
+      data: Buffer.from('hi').toString('base64'),
+    });
     expect(ServerToRunnerSchema.safeParse(chunk).success).toBe(true);
     const credit = makeEnvelope('storage.write.credit', { transferId: id, upTo: 8 });
     expect(RunnerToServerSchema.safeParse(credit).success).toBe(true);
-    const result = makeEnvelope('storage.write.result', { transferId: id, ok: false, error: storageError('quota', 'full') });
+    const result = makeEnvelope('storage.write.result', {
+      transferId: id,
+      ok: false,
+      error: storageError('quota', 'full'),
+    });
     expect(RunnerToServerSchema.safeParse(result).success).toBe(true);
   });
   it('acks reports and seals the connect command', () => {

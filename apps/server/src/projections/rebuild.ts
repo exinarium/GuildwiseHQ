@@ -34,7 +34,10 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
   { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
   // Health of storage connections (migration 2810): reported by the runner, not an event.
-  { table: 'storage_connection_health', restoreWhere: 'connection_id IN (SELECT id FROM storage_connections)' },
+  {
+    table: 'storage_connection_health',
+    restoreWhere: 'connection_id IN (SELECT id FROM storage_connections)',
+  },
   {
     table: 'storage_requests',
     restoreWhere:

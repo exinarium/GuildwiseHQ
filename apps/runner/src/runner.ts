@@ -133,6 +133,7 @@ import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './in
 import { type AdapterEnv, type IntegrationAdapter, IntegrationService } from './integrations/index.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import type { LoginSpawner } from './integrations/pty.ts';
+import { ReplayCache } from './integrations/seen.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import {
@@ -164,13 +165,12 @@ import { TargetSecrets } from './secrets/targets.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { ToolchainRegistry } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
-import { ReplayCache } from './integrations/seen.ts';
-import { StorageService } from './storage/service.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 

@@ -1,4 +1,4 @@
-import { StorageError, type FetchLike } from './types.ts';
+import { type FetchLike, StorageError } from './types.ts';
 
 /** Device authorization grant (RFC 8628), run on the workstation. Tokens never leave this process except to the provider. */
 export interface OAuthProvider {
@@ -95,7 +95,11 @@ async function postForm(
   return { status: res.status, json };
 }
 
-export async function beginDeviceFlow(p: OAuthProvider, fetchFn: FetchLike, now: number): Promise<DevicePrompt> {
+export async function beginDeviceFlow(
+  p: OAuthProvider,
+  fetchFn: FetchLike,
+  now: number,
+): Promise<DevicePrompt> {
   const { status, json } = await postForm(fetchFn, p.deviceUrl, { client_id: p.clientId, scope: p.scope });
   if (status >= 400 || typeof json.device_code !== 'string' || typeof json.user_code !== 'string') {
     if (status >= 500) throw new StorageError('unavailable', 'The sign-in service is unavailable.');
@@ -148,7 +152,8 @@ export async function pollDeviceFlow(
   for (;;) {
     await opts.sleep(interval * 1000, opts.signal);
     if (opts.signal.aborted) throw new StorageError('timeout', 'The sign-in was cancelled.');
-    if (opts.now() >= d.expiresAt) throw new StorageError('timeout', 'The sign-in code expired: start again.');
+    if (opts.now() >= d.expiresAt)
+      throw new StorageError('timeout', 'The sign-in code expired: start again.');
     const { status, json } = await postForm(
       fetchFn,
       p.tokenUrl,
@@ -169,7 +174,10 @@ export async function pollDeviceFlow(
     }
     if (err === 'expired_token') throw new StorageError('timeout', 'The sign-in code expired: start again.');
     if (err === 'access_denied' || err === 'authorization_declined')
-      throw new StorageError('permission', 'The sign-in was declined (your administrator may have to approve the app).');
+      throw new StorageError(
+        'permission',
+        'The sign-in was declined (your administrator may have to approve the app).',
+      );
     if (status >= 500) continue;
     throw new StorageError('permission', 'The sign-in failed.');
   }
@@ -191,7 +199,13 @@ export async function refreshTokens(
   });
   if (status < 400) return toTokens(json, now, refreshToken);
   const err = String(json.error ?? '');
-  if (err === 'invalid_grant' || err === 'interaction_required' || err === 'invalid_client' || status === 401 || status === 400)
+  if (
+    err === 'invalid_grant' ||
+    err === 'interaction_required' ||
+    err === 'invalid_client' ||
+    status === 401 ||
+    status === 400
+  )
     throw new StorageError('auth_expired', 'The sign-in expired: reconnect this storage.');
   throw new StorageError('unavailable', 'The sign-in service is unavailable.');
 }

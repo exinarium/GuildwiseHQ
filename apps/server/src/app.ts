@@ -33,6 +33,7 @@ import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerDevopsQuestionHook } from './commands/devops-routing.ts';
 import { registerProviderCapHook } from './commands/org-provider-keys.ts';
 import { registerPackReviewWaitHook } from './commands/pack-review-wait.ts';
+import { recordWriteOutcome } from './commands/storage-connections.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -112,7 +113,6 @@ import { providerRoutes } from './routes/providers.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
-import { storageRoutes } from './routes/storage.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -121,6 +121,7 @@ import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
+import { storageRoutes } from './routes/storage.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { tiktokPlatformRoutes } from './routes/tiktok-platform.ts';
@@ -134,13 +135,12 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { StorageRelay } from './storage-relay/hub.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 import { RelayHub } from './webhook-relay/hub.ts';
-import { StorageRelay } from './storage-relay/hub.ts';
-import { recordWriteOutcome } from './commands/storage-connections.ts';
 import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
@@ -544,7 +544,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     send: (ws, type, payload) =>
       ctx.services.runners.send(ws, type as 'storage.write.open', payload as never, ctx.clock.now()),
     onOutcome: (id, outcome) =>
-      recordWriteOutcome(ctx, id, outcome).catch((err) => ctx.log.warn({ err: err?.name }, 'storage health update failed')),
+      recordWriteOutcome(ctx, id, outcome).catch((err) =>
+        ctx.log.warn({ err: err?.name }, 'storage health update failed'),
+      ),
     // Connection, kind, size, outcome and duration only: never a path, a name or content.
     log: (entry) => ctx.log.info({ storage: entry }, 'storage write'),
     now: () => ctx.clock.now().getTime(),

@@ -4,7 +4,9 @@ import { type FileHandle, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   CommandPayloadSchemas,
+  healthStateForError,
   type RunnerToServer,
+  renderStoragePath,
   type SealedEnvelope,
   type ServerToRunner,
   STORAGE_WINDOW,
@@ -13,29 +15,27 @@ import {
   type StorageKind,
   type StorageReference,
   type StorageWriteError,
-  healthStateForError,
-  renderStoragePath,
   storageError,
 } from '@aom/shared';
-import { z } from 'zod';
-import { registerSecret, unregisterSecret } from '../redact.ts';
+import type { z } from 'zod';
 import type { ReplayCache } from '../integrations/seen.ts';
 import { EnvelopeError, type RunnerKeys } from '../secrets/keys.ts';
+import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
 import { fromNodeError } from './errors.ts';
 import { GDriveConnector } from './gdrive.ts';
-import { LocalConnector, checkLocalRoot } from './local.ts';
+import { checkLocalRoot, LocalConnector } from './local.ts';
 import {
+  beginDeviceFlow,
   type DevicePrompt,
   type OAuthEnv,
   type OAuthProvider,
-  beginDeviceFlow,
   oauthProvider,
   pollDeviceFlow,
   refreshTokens,
   revokeToken,
 } from './oauth.ts';
 import { OneDriveConnector, setupOneDrive } from './onedrive.ts';
-import { S3Connector, checkS3Endpoint } from './s3.ts';
+import { checkS3Endpoint, S3Connector } from './s3.ts';
 import { KeyedMutex, StorageStore } from './store.ts';
 import {
   type FetchLike,
@@ -44,7 +44,7 @@ import {
   StorageError,
   type StoredConnection,
 } from './types.ts';
-import { VaultConnector, type VaultAccess } from './vault.ts';
+import { type VaultAccess, VaultConnector } from './vault.ts';
 
 export interface StorageServiceDeps {
   secretsDir: string;
@@ -100,14 +100,18 @@ const defaultSleep = (ms: number, signal: AbortSignal) =>
     );
   });
 
-const abortAfter = (ms: number, parent: AbortSignal) => AbortSignal.any([parent, AbortSignal.timeout(Math.max(1, ms))]);
+const abortAfter = (ms: number, parent: AbortSignal) =>
+  AbortSignal.any([parent, AbortSignal.timeout(Math.max(1, ms))]);
 
 /** The workstation side of storage connections: credentials, sign-in, probe, remove and the write path. */
 export class StorageService {
   private readonly store: StorageStore;
   private readonly mutex = new KeyedMutex();
   private readonly transfers = new Map<string, Transfer>();
-  private readonly flows = new Map<string, { sessionId: string; connectionId: string; ctl: AbortController }>();
+  private readonly flows = new Map<
+    string,
+    { sessionId: string; connectionId: string; ctl: AbortController }
+  >();
   private readonly health = new Map<string, StorageHealthReport>();
   private readonly fetchFn: FetchLike;
   private readonly now: () => number;
@@ -131,7 +135,11 @@ export class StorageService {
 
   // ------------------------------------------------------------------------------------------------ reports
 
-  private report(id: string, state: StorageHealthReport['state'], error?: StorageWriteError): StorageHealthReport {
+  private report(
+    id: string,
+    state: StorageHealthReport['state'],
+    error?: StorageWriteError,
+  ): StorageHealthReport {
     const h: StorageHealthReport = {
       connectionId: id,
       state,
@@ -148,7 +156,9 @@ export class StorageService {
     const list: StorageHealthReport[] = this.store.list().map(([id, c]) => ({
       connectionId: id,
       state: c.needsReauth ? 'needs_reauth' : (this.health.get(id)?.state ?? 'connected'),
-      ...(c.needsReauth ? { errorCode: 'auth_expired' as const, message: 'The sign-in expired: reconnect this storage.' } : {}),
+      ...(c.needsReauth
+        ? { errorCode: 'auth_expired' as const, message: 'The sign-in expired: reconnect this storage.' }
+        : {}),
       checkedAt: new Date(this.now()).toISOString(),
     }));
     if (list.length) this.deps.send('storage.report', { connections: list.slice(0, 100) });
@@ -160,12 +170,15 @@ export class StorageService {
     return (force: boolean) =>
       this.mutex.run(id, async () => {
         const conn = this.store.get(id);
-        if (!conn || conn.auth?.type !== 'oauth') throw new StorageError('not_found', 'This storage is not set up on this workstation.');
-        if (conn.needsReauth) throw new StorageError('auth_expired', 'The sign-in expired: reconnect this storage.');
+        if (!conn || conn.auth?.type !== 'oauth')
+          throw new StorageError('not_found', 'This storage is not set up on this workstation.');
+        if (conn.needsReauth)
+          throw new StorageError('auth_expired', 'The sign-in expired: reconnect this storage.');
         const a = conn.auth;
         if (!force && a.expiresAt - 60_000 > this.now()) return a.accessToken;
         const p = oauthProvider(conn.kind as 'onedrive' | 'google_drive', this.deps.oauthEnv ?? {});
-        if (!p) throw new StorageError('invalid', 'This runner has no sign-in app configured for this storage.');
+        if (!p)
+          throw new StorageError('invalid', 'This runner has no sign-in app configured for this storage.');
         try {
           const t = await refreshTokens(p, a.refreshToken, this.fetchFn, this.now());
           this.store.put(id, { ...conn, auth: { type: 'oauth', ...t, account: t.account ?? a.account } });
@@ -192,7 +205,8 @@ export class StorageService {
             this.store.put(id, { ...cur, config: { ...cur.config, baseFolderId: folderId } });
         });
       case 's3': {
-        if (conn.auth?.type !== 'keys') throw new StorageError('auth_expired', 'The access keys are missing: enter them again.');
+        if (conn.auth?.type !== 'keys')
+          throw new StorageError('auth_expired', 'The access keys are missing: enter them again.');
         return new S3Connector(c, conn.auth, this.fetchFn);
       }
       case 'local':
@@ -235,12 +249,20 @@ export class StorageService {
     }
   }
 
-  private async connect(p: z.infer<(typeof CommandPayloadSchemas)['storage.connect']>): Promise<Record<string, unknown>> {
+  private async connect(
+    p: z.infer<(typeof CommandPayloadSchemas)['storage.connect']>,
+  ): Promise<Record<string, unknown>> {
     let plain: { fields: Record<string, string>; ref: string; exp: number };
     try {
       plain = this.deps.keys.open(
         p.envelope as SealedEnvelope,
-        { workstationId: this.deps.workstationId, ref: p.requestId, kind: 'storage', instance: p.connectionId, op: 'connect' },
+        {
+          workstationId: this.deps.workstationId,
+          ref: p.requestId,
+          kind: 'storage',
+          instance: p.connectionId,
+          op: 'connect',
+        },
         this.now(),
       );
     } catch (err) {
@@ -281,10 +303,16 @@ export class StorageService {
         conn = { kind: 'local', savedAt, config: { kind: 'local', root: f.root ?? '' } };
       } else if (p.kind === 'vault') {
         if (!f.vaultId) throw new StorageError('invalid', 'Choose a vault.');
-        conn = { kind: 'vault', savedAt, config: { kind: 'vault', vaultId: f.vaultId, folder: (f.folder ?? '').replace(/^\/+|\/+$/g, '') } };
-      } else throw new StorageError('invalid', 'This kind signs in with the sign-in code, not with typed values.');
+        conn = {
+          kind: 'vault',
+          savedAt,
+          config: { kind: 'vault', vaultId: f.vaultId, folder: (f.folder ?? '').replace(/^\/+|\/+$/g, '') },
+        };
+      } else
+        throw new StorageError('invalid', 'This kind signs in with the sign-in code, not with typed values.');
       const probe = await this.probeOf(p.connectionId, conn);
-      if (probe) return { health: this.report(p.connectionId, healthStateForError(probe.code), probe), error: probe };
+      if (probe)
+        return { health: this.report(p.connectionId, healthStateForError(probe.code), probe), error: probe };
       this.store.put(p.connectionId, conn);
       return { health: this.report(p.connectionId, 'connected') };
     } catch (err) {
@@ -303,7 +331,11 @@ export class StorageService {
       await this.connector(id, conn).probe(signal);
       return undefined;
     } catch (err) {
-      return this.typed(signal.aborted && !(err instanceof StorageError) ? new StorageError('timeout', 'The storage did not answer in time.') : err);
+      return this.typed(
+        signal.aborted && !(err instanceof StorageError)
+          ? new StorageError('timeout', 'The storage did not answer in time.')
+          : err,
+      );
     }
   }
 
@@ -324,7 +356,8 @@ export class StorageService {
 
   private async remove(id: string): Promise<Record<string, unknown>> {
     for (const f of this.flows.values()) if (f.connectionId === id) f.ctl.abort();
-    for (const t of [...this.transfers.values()]) if (t.connectionId === id) void this.abortTransfer(t, 'shutdown');
+    for (const t of [...this.transfers.values()])
+      if (t.connectionId === id) void this.abortTransfer(t, 'shutdown');
     const conn = this.store.get(id);
     const removed = this.store.remove(id);
     this.health.delete(id);
@@ -349,7 +382,9 @@ export class StorageService {
 
   // ------------------------------------------------------------------------------------------------ sign-in
 
-  private async authBegin(p: z.infer<(typeof CommandPayloadSchemas)['storage.auth.begin']>): Promise<Record<string, unknown>> {
+  private async authBegin(
+    p: z.infer<(typeof CommandPayloadSchemas)['storage.auth.begin']>,
+  ): Promise<Record<string, unknown>> {
     const provider = oauthProvider(p.kind, this.deps.oauthEnv ?? {});
     if (!provider)
       return {
@@ -391,7 +426,11 @@ export class StorageService {
         sessionId: p.sessionId,
         connectionId: id,
         state: 'awaiting_user',
-        prompt: { userCode: prompt.userCode, verificationUri: prompt.verificationUri, expiresAt: new Date(prompt.expiresAt).toISOString() },
+        prompt: {
+          userCode: prompt.userCode,
+          verificationUri: prompt.verificationUri,
+          expiresAt: new Date(prompt.expiresAt).toISOString(),
+        },
       });
       const t = await pollDeviceFlow(provider, prompt, this.fetchFn, {
         signal: ctl.signal,
@@ -404,11 +443,22 @@ export class StorageService {
       const setupSignal = abortAfter(60_000, ctl.signal);
       const tokenOnce = async () => t.accessToken;
       let config: StoredConnection['config'];
-      if (existing && existing.kind === p.kind && !p.options.siteUrl && !p.options.baseFolder) config = existing.config;
+      if (existing && existing.kind === p.kind && !p.options.siteUrl && !p.options.baseFolder)
+        config = existing.config;
       else if (p.kind === 'onedrive') {
         const baseFolder = p.options.baseFolder || 'Guildwise uploads';
-        const s = await setupOneDrive(this.fetchFn, tokenOnce, { ...(p.options.siteUrl ? { siteUrl: p.options.siteUrl } : {}), baseFolder }, setupSignal);
-        config = { kind: 'onedrive', ...(p.options.siteUrl ? { siteUrl: p.options.siteUrl } : {}), baseFolder, ...s };
+        const s = await setupOneDrive(
+          this.fetchFn,
+          tokenOnce,
+          { ...(p.options.siteUrl ? { siteUrl: p.options.siteUrl } : {}), baseFolder },
+          setupSignal,
+        );
+        config = {
+          kind: 'onedrive',
+          ...(p.options.siteUrl ? { siteUrl: p.options.siteUrl } : {}),
+          baseFolder,
+          ...s,
+        };
       } else {
         const baseFolder = p.options.baseFolder || 'Guildwise uploads';
         const g = new GDriveConnector({ baseFolder }, tokenOnce, this.fetchFn);
@@ -481,7 +531,8 @@ export class StorageService {
       this.result(m.transferId, { error: e });
     };
     if (!conn) return fail(storageError('not_found', 'This storage is not set up on this workstation.'));
-    if (conn.needsReauth) return fail(storageError('auth_expired', 'The sign-in expired: reconnect this storage.'));
+    if (conn.needsReauth)
+      return fail(storageError('auth_expired', 'The sign-in expired: reconnect this storage.'));
     const rendered = renderStoragePath({ folder: m.folder, name: m.name }, m.vars, m.ext);
     if (!rendered.ok) return fail(storageError('invalid', rendered.error));
     try {
@@ -517,10 +568,12 @@ export class StorageService {
 
   private async chunk(t: Transfer, seq: number, data: string): Promise<void> {
     if (t.finished) return;
-    if (seq !== t.chunks) return void (await this.fail(t, storageError('invalid', 'The upload arrived out of order.')));
+    if (seq !== t.chunks)
+      return void (await this.fail(t, storageError('invalid', 'The upload arrived out of order.')));
     const buf = Buffer.from(data, 'base64');
     t.bytes += buf.length;
-    if (t.bytes > t.size) return void (await this.fail(t, storageError('too_large', 'More data arrived than announced.')));
+    if (t.bytes > t.size)
+      return void (await this.fail(t, storageError('too_large', 'More data arrived than announced.')));
     try {
       await t.handle?.write(buf);
     } catch (err) {
@@ -528,7 +581,8 @@ export class StorageService {
     }
     t.hash.update(buf);
     t.chunks++;
-    if (t.chunks % 4 === 0) this.deps.send('storage.write.credit', { transferId: t.id, upTo: t.chunks + STORAGE_WINDOW });
+    if (t.chunks % 4 === 0)
+      this.deps.send('storage.write.credit', { transferId: t.id, upTo: t.chunks + STORAGE_WINDOW });
   }
 
   private async end(t: Transfer, m: { chunks: number; size: number; sha256: string }): Promise<void> {
@@ -539,7 +593,11 @@ export class StorageService {
     await t.handle?.close();
     t.handle = undefined;
     const conn = this.store.get(t.connectionId);
-    if (!conn) return void (await this.fail(t, storageError('not_found', 'This storage is not set up on this workstation.')));
+    if (!conn)
+      return void (await this.fail(
+        t,
+        storageError('not_found', 'This storage is not set up on this workstation.'),
+      ));
     const spooled: Spooled = { file: t.file, size: t.bytes, sha256: sha, contentType: t.contentType };
     const signal = abortAfter(t.deadline - this.now(), t.controller.signal);
     try {
@@ -562,12 +620,17 @@ export class StorageService {
         contentType: t.contentType,
         writtenAt: new Date(this.now()).toISOString(),
       };
-      this.log(`storage.write conn=${t.connectionId} kind=${t.kind} size=${t.bytes} ok ${this.now() - t.startedAt}ms`);
+      this.log(
+        `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.bytes} ok ${this.now() - t.startedAt}ms`,
+      );
       this.result(t.id, { reference });
       await this.cleanup(t);
     } catch (err) {
       if (t.finished) return void (await this.cleanup(t));
-      const e = signal.aborted && !(err instanceof StorageError) ? storageError('timeout', 'The storage did not answer in time.') : this.typed(err);
+      const e =
+        signal.aborted && !(err instanceof StorageError)
+          ? storageError('timeout', 'The storage did not answer in time.')
+          : this.typed(err);
       await this.fail(t, e);
     }
   }
@@ -576,7 +639,9 @@ export class StorageService {
     if (!t.written) return;
     try {
       await this.connector(t.connectionId, conn).delete(
-        t.written.providerId && conn.kind !== 's3' && conn.kind !== 'local' && conn.kind !== 'vault' ? `id:${t.written.providerId}` : t.written.path,
+        t.written.providerId && conn.kind !== 's3' && conn.kind !== 'local' && conn.kind !== 'vault'
+          ? `id:${t.written.providerId}`
+          : t.written.path,
         AbortSignal.timeout(10_000),
       );
     } catch {
@@ -587,7 +652,9 @@ export class StorageService {
   private async fail(t: Transfer, e: StorageWriteError): Promise<void> {
     if (t.finished) return;
     t.finished = true;
-    this.log(`storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} ${e.code} ${this.now() - t.startedAt}ms`);
+    this.log(
+      `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} ${e.code} ${this.now() - t.startedAt}ms`,
+    );
     this.result(t.id, { error: e });
     await this.cleanup(t);
   }
@@ -596,7 +663,10 @@ export class StorageService {
     const wasFinished = t.finished;
     t.finished = true;
     t.controller.abort();
-    if (!wasFinished) this.log(`storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} aborted ${this.now() - t.startedAt}ms`);
+    if (!wasFinished)
+      this.log(
+        `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} aborted ${this.now() - t.startedAt}ms`,
+      );
     await this.cleanup(t);
   }
 

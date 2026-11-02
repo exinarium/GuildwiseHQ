@@ -1,10 +1,17 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isSafeVaultPath, STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
 import { writeVaultBinary } from '../vaults/write.ts';
-import { existsSync } from 'node:fs';
 import { fromNodeError } from './errors.ts';
-import { PROBE_BODY, PROBE_NAME, type Spooled, type StorageConnector, StorageError, type StorageTarget } from './types.ts';
+import {
+  PROBE_BODY,
+  PROBE_NAME,
+  type Spooled,
+  type StorageConnector,
+  StorageError,
+  type StorageTarget,
+} from './types.ts';
 
 export interface VaultAccess {
   /** Runs `fn` with the vault's folder while no sync of that vault runs. Throws when the vault is not here. */
@@ -21,7 +28,8 @@ export class VaultConnector implements StorageConnector {
     private readonly vaultId: string,
     private readonly folder: string,
   ) {
-    if (folder && !isSafeVaultPath(folder)) throw new StorageError('invalid', 'The vault folder is not allowed.');
+    if (folder && !isSafeVaultPath(folder))
+      throw new StorageError('invalid', 'The vault folder is not allowed.');
   }
 
   private rel(parts: string[]): string {
@@ -43,7 +51,9 @@ export class VaultConnector implements StorageConnector {
     await this.withDir(async (dir) => {
       const rel = this.rel([PROBE_NAME()]);
       if (!isSafeVaultPath(rel)) throw new StorageError('invalid', 'The vault folder is not allowed.');
-      await writeVaultBinary(dir, { path: rel, commitMessage: 'probe' }, Buffer.from(PROBE_BODY), { commit: false });
+      await writeVaultBinary(dir, { path: rel, commitMessage: 'probe' }, Buffer.from(PROBE_BODY), {
+        commit: false,
+      });
       await rm(join(dir, ...rel.split('/')), { force: true });
     });
   }

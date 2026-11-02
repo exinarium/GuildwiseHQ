@@ -5,11 +5,18 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
 import { fromNodeError } from './errors.ts';
-import { PROBE_BODY, PROBE_NAME, type Spooled, type StorageConnector, StorageError, type StorageTarget } from './types.ts';
+import {
+  PROBE_BODY,
+  PROBE_NAME,
+  type Spooled,
+  type StorageConnector,
+  StorageError,
+  type StorageTarget,
+} from './types.ts';
 
 /** Validates a local root: absolute, an existing directory, not a drive/filesystem root. */
 export function checkLocalRoot(root: string, forbidden: string[] = []): void {
-  if (!root || !isAbsolute(root) && !/^\\\\[^\\]+\\[^\\]+/.test(root))
+  if (!root || (!isAbsolute(root) && !/^\\\\[^\\]+\\[^\\]+/.test(root)))
     throw new StorageError('invalid', 'The folder must be an absolute path on the workstation.');
   const r = resolve(root);
   if (r === resolve(sep) || /^[A-Za-z]:\\?$/.test(r))

@@ -27,19 +27,33 @@ export interface StorageWriteRequest {
   signal?: AbortSignal;
 }
 
-export type StorageWriteResult = { ok: true; reference: StorageReference } | { ok: false; error: StorageWriteError };
+export type StorageWriteResult =
+  | { ok: true; reference: StorageReference }
+  | { ok: false; error: StorageWriteError };
 
 export interface StorageRelayDeps {
   config: { writeTimeoutMs: number; maxFileBytes: number; maxInFlight: number };
   /** The active connection of this org, or undefined. */
-  lookup(orgId: string, connectionId: string): Promise<{ kind: StorageKind; workstationId: string } | undefined>;
+  lookup(
+    orgId: string,
+    connectionId: string,
+  ): Promise<{ kind: StorageKind; workstationId: string } | undefined>;
   isOnline(workstationId: string): boolean;
   /** Sends one frame; false when there is no open socket. */
   send(workstationId: string, type: string, payload: Record<string, unknown>): boolean;
   /** Records the outcome on the connection's health row (the only thing written). */
-  onOutcome(connectionId: string, outcome: { ok: true } | { ok: false; error: StorageWriteError }): Promise<void> | void;
+  onOutcome(
+    connectionId: string,
+    outcome: { ok: true } | { ok: false; error: StorageWriteError },
+  ): Promise<void> | void;
   /** One log line: `{ storage: { connectionId, kind, sizeBytes, outcome, latencyMs } }`. */
-  log(entry: { connectionId: string; kind: StorageKind | null; sizeBytes: number; outcome: string; latencyMs: number }): void;
+  log(entry: {
+    connectionId: string;
+    kind: StorageKind | null;
+    sizeBytes: number;
+    outcome: string;
+    latencyMs: number;
+  }): void;
   now?: () => number;
 }
 
@@ -79,10 +93,12 @@ export class StorageRelay {
         outcome: r.ok ? 'ok' : r.error.code,
         latencyMs: this.now() - start,
       });
-      if (kind) await this.deps.onOutcome(req.connectionId, r.ok ? { ok: true } : { ok: false, error: r.error });
+      if (kind)
+        await this.deps.onOutcome(req.connectionId, r.ok ? { ok: true } : { ok: false, error: r.error });
       return r;
     };
-    const fail = (code: StorageErrorCode, message: string) => finish({ ok: false, error: storageError(code, message) });
+    const fail = (code: StorageErrorCode, message: string) =>
+      finish({ ok: false, error: storageError(code, message) });
 
     const conn = await this.deps.lookup(req.orgId, req.connectionId);
     if (!conn) return fail('not_found', 'This storage connection does not exist.');
@@ -94,7 +110,7 @@ export class StorageRelay {
     if (this.pending.size >= this.deps.config.maxInFlight)
       return fail('unavailable', 'Too many uploads are running: try again in a moment.');
     if (!this.deps.isOnline(conn.workstationId))
-      return fail('runner_offline', 'The firm\'s workstation is offline, so the file cannot be stored now.');
+      return fail('runner_offline', "The firm's workstation is offline, so the file cannot be stored now.");
 
     const transferId = randomUUID();
     const deadline = start + this.deps.config.writeTimeoutMs;
@@ -120,12 +136,18 @@ export class StorageRelay {
         wake?.();
       },
       onResult: (r) => settle(r),
-      onGone: () => settle({ ok: false, error: storageError('unavailable', 'The workstation disconnected during the upload.') }),
+      onGone: () =>
+        settle({
+          ok: false,
+          error: storageError('unavailable', 'The workstation disconnected during the upload.'),
+        }),
     });
     const send = (type: string, payload: Record<string, unknown>) =>
       this.deps.send(conn.workstationId, type, { transferId, ...payload });
-    const abort = (reason: 'timeout' | 'client_gone' | 'too_large' | 'shutdown') => send('storage.write.abort', { reason });
-    const onClientGone = () => settle({ ok: false, error: storageError('unavailable', 'The upload was interrupted.') });
+    const abort = (reason: 'timeout' | 'client_gone' | 'too_large' | 'shutdown') =>
+      send('storage.write.abort', { reason });
+    const onClientGone = () =>
+      settle({ ok: false, error: storageError('unavailable', 'The upload was interrupted.') });
     req.signal?.addEventListener('abort', onClientGone, { once: true });
 
     try {
@@ -139,7 +161,11 @@ export class StorageRelay {
         size: req.size,
         deadlineMs: this.deps.config.writeTimeoutMs,
       });
-      if (!opened) return await fail('runner_offline', 'The firm\'s workstation is offline, so the file cannot be stored now.');
+      if (!opened)
+        return await fail(
+          'runner_offline',
+          "The firm's workstation is offline, so the file cannot be stored now.",
+        );
       // The first credit means "open accepted"; an early result ends it.
       const openBy = Math.min(deadline, this.now() + 10_000);
       while (upTo === 0 && !outcome && this.now() < openBy) await wait(openBy - this.now());
@@ -152,7 +178,7 @@ export class StorageRelay {
       const hash = createHash('sha256');
       let seq = 0;
       let total = 0;
-      let carry = Buffer.alloc(0);
+      let carry: Buffer = Buffer.alloc(0);
       const sendChunk = async (data: Buffer): Promise<boolean> => {
         while (seq >= upTo && !outcome && this.now() < deadline) await wait(deadline - this.now());
         if (outcome) return false;
@@ -167,7 +193,9 @@ export class StorageRelay {
           if (outcome || req.signal?.aborted) break;
           const next = await Promise.race([
             iterator.next(),
-            new Promise<'deadline'>((resolve) => setTimeout(() => resolve('deadline'), Math.max(0, deadline - this.now())).unref?.()),
+            new Promise<'deadline'>((resolve) =>
+              setTimeout(() => resolve('deadline'), Math.max(0, deadline - this.now())).unref?.(),
+            ),
           ]);
           if (next === 'deadline') break;
           if (next.done) break;
@@ -203,7 +231,10 @@ export class StorageRelay {
       if (!outcome) {
         const gone = req.signal?.aborted === true;
         abort(gone ? 'client_gone' : 'timeout');
-        return await fail(gone ? 'unavailable' : 'timeout', gone ? 'The upload was interrupted.' : 'The storage did not answer in time.');
+        return await fail(
+          gone ? 'unavailable' : 'timeout',
+          gone ? 'The upload was interrupted.' : 'The storage did not answer in time.',
+        );
       }
       const done = outcome as StorageWriteResult;
       if (done.ok) {
@@ -238,7 +269,11 @@ export class StorageRelay {
     const p = this.pending.get(transferId);
     if (!p || p.workstationId !== workstationId) return;
     if (r.ok && r.reference) p.onResult({ ok: true, reference: r.reference });
-    else p.onResult({ ok: false, error: r.error ?? storageError('unavailable', 'The storage did not store the file.') });
+    else
+      p.onResult({
+        ok: false,
+        error: r.error ?? storageError('unavailable', 'The storage did not store the file.'),
+      });
   }
 
   /** The runner socket closed: its transfers end as `unavailable` at once. */

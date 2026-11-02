@@ -32,7 +32,10 @@ export interface SignInput {
 
 /** AWS Signature Version 4 (header form). Returns the headers to send. */
 export function signV4(i: SignInput): Record<string, string> {
-  const amz = i.now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const amz = i.now
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
   const date = amz.slice(0, 8);
   const service = i.service ?? 's3';
   const headers: Record<string, string> = {

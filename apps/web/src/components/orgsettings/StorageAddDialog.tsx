@@ -31,7 +31,11 @@ export function StorageAddDialog({
   const submit = async () => {
     setError(null);
     try {
-      const r = await create.mutateAsync({ kind, label: label.trim(), workstationId: wsId || (mine[0]?.id ?? '') });
+      const r = await create.mutateAsync({
+        kind,
+        label: label.trim(),
+        workstationId: wsId || (mine[0]?.id ?? ''),
+      });
       setLabel('');
       onOpenChange(false);
       onCreated(r.connection);
@@ -63,15 +67,29 @@ export function StorageAddDialog({
     >
       <div className="space-y-3" data-testid="storage-add-dialog">
         {error && <Callout tone="danger">{error}</Callout>}
-        <Select label="Type" value={kind} onChange={(e) => setKind(e.target.value as StorageKind)} hint={STORAGE_KIND_HELP[kind]}>
+        <Select
+          label="Type"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as StorageKind)}
+          hint={STORAGE_KIND_HELP[kind]}
+        >
           {STORAGE_KINDS.map((k) => (
             <option key={k} value={k}>
               {STORAGE_KIND_LABEL[k]}
             </option>
           ))}
         </Select>
-        <TextInput label="Display name" maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} />
-        <Select label="Workstation" value={wsId || (mine[0]?.id ?? '')} onChange={(e) => setWsId(e.target.value)}>
+        <TextInput
+          label="Display name"
+          maxLength={80}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+        <Select
+          label="Workstation"
+          value={wsId || (mine[0]?.id ?? '')}
+          onChange={(e) => setWsId(e.target.value)}
+        >
           {mine.length === 0 && <option value="">No online workstation of yours</option>}
           {mine.map((w) => (
             <option key={w.id} value={w.id}>

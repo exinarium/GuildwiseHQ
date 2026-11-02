@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
 import { fromHttp } from './errors.ts';
 import { signV4, uriEncode } from './s3-sign.ts';
@@ -11,8 +13,6 @@ import {
   StorageError,
   type StorageTarget,
 } from './types.ts';
-import { createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
 
 export interface S3Config {
   endpoint: string;
@@ -27,7 +27,8 @@ export interface S3Keys {
   sessionToken?: string;
 }
 
-const PRIVATE_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|.*\.local$|[^.]+$)/i;
+const PRIVATE_HOST =
+  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|.*\.local$|[^.]+$)/i;
 
 /** `http://` is allowed only for a loopback or private address (MinIO on the LAN). */
 export function checkS3Endpoint(endpoint: string): URL {
@@ -38,7 +39,10 @@ export function checkS3Endpoint(endpoint: string): URL {
     throw new StorageError('invalid', 'The endpoint is not a valid address.');
   }
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && PRIVATE_HOST.test(u.hostname)))
-    throw new StorageError('invalid', 'The endpoint must use https (http is allowed only on a private network).');
+    throw new StorageError(
+      'invalid',
+      'The endpoint must use https (http is allowed only on a private network).',
+    );
   return u;
 }
 
@@ -69,7 +73,7 @@ export class S3Connector implements StorageConnector {
     key: string,
     signal: AbortSignal,
     payloadHash: string,
-    body?: BodyInit,
+    body?: RequestInit['body'],
     extra: Record<string, string> = {},
   ): Promise<Response> {
     const { url, host, path } = this.url(key);
@@ -91,7 +95,8 @@ export class S3Connector implements StorageConnector {
         signal,
       } as RequestInit);
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') throw new StorageError('timeout', 'The storage did not answer in time.');
+      if ((err as Error)?.name === 'AbortError')
+        throw new StorageError('timeout', 'The storage did not answer in time.');
       throw new StorageError('unavailable', 'The storage could not be reached.');
     }
   }
@@ -121,7 +126,11 @@ export class S3Connector implements StorageConnector {
     if (!del.ok && del.status !== 404) await this.fail(del);
   }
 
-  async put(target: StorageTarget, file: Spooled, signal: AbortSignal): Promise<{ path: string; providerId?: string }> {
+  async put(
+    target: StorageTarget,
+    file: Spooled,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }> {
     const empty = createHash('sha256').update('').digest('hex');
     for (let n = 1; n <= STORAGE_MAX_CLASH; n++) {
       const name = n === 1 ? target.name : storageClashName(target.name, n);
@@ -129,14 +138,15 @@ export class S3Connector implements StorageConnector {
       const head = await this.call('HEAD', key, signal, empty);
       if (head.status === 200) continue;
       if (head.status !== 404) await this.fail(head);
-      const body = Readable.toWeb(createReadStream(file.file)) as unknown as BodyInit;
+      const body = Readable.toWeb(createReadStream(file.file)) as unknown as RequestInit['body'];
       const res = await this.call('PUT', key, signal, file.sha256, body, {
         'content-type': file.contentType,
         'content-length': String(file.size),
       });
       if (!res.ok) await this.fail(res);
       await res.arrayBuffer().catch(() => undefined);
-      const id = res.headers.get('x-amz-version-id') ?? res.headers.get('etag')?.replace(/"/g, '') ?? undefined;
+      const id =
+        res.headers.get('x-amz-version-id') ?? res.headers.get('etag')?.replace(/"/g, '') ?? undefined;
       return { path: key, ...(id ? { providerId: id.slice(0, 300) } : {}) };
     }
     throw new StorageError('conflict', 'Too many files with the same name.');

@@ -204,8 +204,10 @@ export class RunnerGateway {
       return true;
     }
     const m = parsed.data;
-    if (m.type === 'storage.write.credit') this.ctx.services.storage.onCredit(conn.workstationId, m.transferId, m.upTo);
-    else if (m.type === 'storage.write.result') this.ctx.services.storage.onResult(conn.workstationId, m.transferId, m);
+    if (m.type === 'storage.write.credit')
+      this.ctx.services.storage.onCredit(conn.workstationId, m.transferId, m.upTo);
+    else if (m.type === 'storage.write.result')
+      this.ctx.services.storage.onResult(conn.workstationId, m.transferId, m);
     return true;
   }
 

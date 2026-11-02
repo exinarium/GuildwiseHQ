@@ -15,7 +15,8 @@ export const STORAGE_KIND_HELP: Record<StorageKind, string> = {
     'You sign in on your workstation with a code. Guildwise can only see the folder it creates; you can move or share that folder afterwards.',
   s3: 'Keys are sealed in your browser for your workstation and never stored on the Guildwise server.',
   local: 'A folder (or network share) that your workstation can write to.',
-  vault: 'A folder inside one of your knowledge vaults. Files stay in the vault history even after they are deleted.',
+  vault:
+    'A folder inside one of your knowledge vaults. Files stay in the vault history even after they are deleted.',
 };
 
 export type StorageTone = 'success' | 'warning' | 'danger' | 'neutral';

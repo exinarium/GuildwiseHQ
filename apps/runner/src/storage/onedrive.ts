@@ -111,7 +111,11 @@ export class OneDriveConnector implements StorageConnector {
     if (id) await this.delete(`id:${id}`, signal);
   }
 
-  async put(target: StorageTarget, file: Spooled, signal: AbortSignal): Promise<{ path: string; providerId?: string }> {
+  async put(
+    target: StorageTarget,
+    file: Spooled,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }> {
     let parent = this.base;
     for (const seg of target.folder)
       parent = await ensureChild(this.fetchFn, this.token, this.cfg.driveId, parent, seg, signal);
@@ -160,7 +164,8 @@ export class OneDriveConnector implements StorageConnector {
           signal,
         });
       } catch (err) {
-        if ((err as Error)?.name === 'AbortError') throw new StorageError('timeout', 'The storage did not answer in time.');
+        if ((err as Error)?.name === 'AbortError')
+          throw new StorageError('timeout', 'The storage did not answer in time.');
         throw new StorageError('unavailable', 'The storage could not be reached.');
       }
       sent += buf.length;

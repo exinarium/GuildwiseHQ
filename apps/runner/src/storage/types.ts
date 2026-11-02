@@ -29,7 +29,11 @@ export interface StorageConnector {
   /** Writes and deletes a small probe file in the base folder. */
   probe(signal: AbortSignal): Promise<void>;
   /** Writes the spooled file without overwriting; a name clash is resolved by the connector (`-2`, `-3`...). */
-  put(target: StorageTarget, file: Spooled, signal: AbortSignal): Promise<{ path: string; providerId?: string }>;
+  put(
+    target: StorageTarget,
+    file: Spooled,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }>;
   /** Best-effort delete of a path returned by `put`. */
   delete(path: string, signal: AbortSignal): Promise<void>;
 }
@@ -42,7 +46,14 @@ export type StorageConfig =
   | { kind: 'vault'; vaultId: string; folder: string };
 
 export type StorageAuth =
-  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number; scope: string; account?: string }
+  | {
+      type: 'oauth';
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scope: string;
+      account?: string;
+    }
   | { type: 'keys'; accessKeyId: string; secretAccessKey: string; sessionToken?: string };
 
 export interface StoredConnection {

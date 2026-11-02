@@ -44,12 +44,6 @@ import {
   applyIntegrationSession,
   applyIntegrationsReport,
 } from '../commands/integrations.ts';
-import {
-  applyStorageAuth,
-  applyStorageCommandResult,
-  applyStorageReport,
-  sendStorageSync,
-} from '../commands/storage-connections.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
@@ -94,6 +88,12 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import {
+  applyStorageAuth,
+  applyStorageCommandResult,
+  applyStorageReport,
+  sendStorageSync,
+} from '../commands/storage-connections.ts';
 import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
@@ -1064,7 +1064,9 @@ export class RunnerHandlers {
         RELAY_FEATURE,
       ],
     });
-    await sendStorageSync(ctx, conn.workstationId).catch((err) => ctx.log.warn({ err }, 'storage sync not queued'));
+    await sendStorageSync(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'storage sync not queued'),
+    );
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
   }

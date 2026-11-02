@@ -34,7 +34,9 @@ function TestResult({ rid }: { rid: string }) {
   const r = useStorageRequest(rid).data;
   if (!r || !REQUEST_DONE.includes(r.state)) return <span className="text-sm text-muted">Testing…</span>;
   return r.state === 'done' ? (
-    <span className="text-sm text-success" data-testid="storage-test-ok">Test passed.</span>
+    <span className="text-sm text-success" data-testid="storage-test-ok">
+      Test passed.
+    </span>
   ) : (
     <span className="text-sm text-danger" data-testid="storage-test-failed">
       {storageErrorText(r.errorCode, r.message)}
@@ -100,8 +102,9 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
         }
       >
         <p className="mb-4 text-sm text-muted">
-          Form documents and answers are written to your own storage through the runner on your workstation. Sign-ins
-          and keys stay encrypted on that workstation; Guildwise keeps only a name, a type and the status.
+          Form documents and answers are written to your own storage through the runner on your workstation.
+          Sign-ins and keys stay encrypted on that workstation; Guildwise keeps only a name, a type and the
+          status.
         </p>
         {list.isPending ? (
           <ListSkeleton />
@@ -135,12 +138,21 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
                   {canManage && (
                     <div className="flex flex-wrap gap-2">
                       {action && (
-                        <Button size="sm" variant="primary" onClick={() => setConnecting(c)} data-testid={`storage-connect-${c.id}`}>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => setConnecting(c)}
+                          data-testid={`storage-connect-${c.id}`}
+                        >
                           {action === 'connect' ? 'Connect' : 'Reconnect'}
                         </Button>
                       )}
                       {c.canConnect && (
-                        <Button size="sm" onClick={() => void runTest(c)} data-testid={`storage-test-${c.id}`}>
+                        <Button
+                          size="sm"
+                          onClick={() => void runTest(c)}
+                          data-testid={`storage-test-${c.id}`}
+                        >
                           Test connection
                         </Button>
                       )}
@@ -153,7 +165,12 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
                       >
                         Rename
                       </Button>
-                      <Button size="sm" variant="danger" onClick={() => setRemoving(c)} data-testid={`storage-remove-${c.id}`}>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setRemoving(c)}
+                        data-testid={`storage-remove-${c.id}`}
+                      >
                         Remove
                       </Button>
                     </div>
@@ -165,7 +182,11 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
         )}
       </Panel>
       {canManage && <StorageAddDialog open={adding} onOpenChange={setAdding} onCreated={setConnecting} />}
-      <StorageConnectDialog connection={connecting} open={connecting !== null} onOpenChange={(o) => !o && setConnecting(null)} />
+      <StorageConnectDialog
+        connection={connecting}
+        open={connecting !== null}
+        onOpenChange={(o) => !o && setConnecting(null)}
+      />
       <Dialog
         open={renaming !== null}
         onOpenChange={(o) => !o && setRenaming(null)}
@@ -173,13 +194,23 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
         footer={
           <>
             <Button onClick={() => setRenaming(null)}>Cancel</Button>
-            <Button variant="primary" disabled={!newLabel.trim()} loading={rename.isPending} onClick={() => void doRename()}>
+            <Button
+              variant="primary"
+              disabled={!newLabel.trim()}
+              loading={rename.isPending}
+              onClick={() => void doRename()}
+            >
               Save
             </Button>
           </>
         }
       >
-        <TextInput label="Display name" maxLength={80} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+        <TextInput
+          label="Display name"
+          maxLength={80}
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+        />
       </Dialog>
       <ConfirmDialog
         open={removing !== null}

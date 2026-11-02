@@ -35,7 +35,10 @@ function DevicePanel({ rid, onDone }: { rid: string; onDone: () => void }) {
   return (
     <div className="space-y-3 text-center" data-testid="storage-device-panel">
       <p className="text-sm text-muted">Open the sign-in page on any device and enter this code:</p>
-      <p className="select-all text-3xl font-semibold tracking-widest text-fg" data-testid="storage-device-code">
+      <p
+        className="select-all text-3xl font-semibold tracking-widest text-fg"
+        data-testid="storage-device-code"
+      >
         {r.prompt?.userCode}
       </p>
       <div className="flex flex-wrap justify-center gap-2">
@@ -70,7 +73,8 @@ function RequestResult({ rid, onDone }: { rid: string; onDone: () => void }) {
   useEffect(() => {
     if (r?.state === 'done') onDone();
   }, [r?.state, onDone]);
-  if (!r || !REQUEST_DONE.includes(r.state)) return <Spinner label="Testing the connection on your workstation" />;
+  if (!r || !REQUEST_DONE.includes(r.state))
+    return <Spinner label="Testing the connection on your workstation" />;
   if (r.state !== 'done')
     return (
       <Callout tone="danger" data-testid="storage-connect-error">
@@ -168,7 +172,12 @@ export function StorageConnectDialog({
         <>
           <Button onClick={close}>{rid ? 'Close' : 'Cancel'}</Button>
           {!rid && isOAuthKind(kind) && (
-            <Button variant="primary" loading={begin.isPending} onClick={() => void startAuth()} data-testid="storage-signin">
+            <Button
+              variant="primary"
+              loading={begin.isPending}
+              onClick={() => void startAuth()}
+              data-testid="storage-signin"
+            >
               Get sign-in code
             </Button>
           )}
@@ -187,7 +196,9 @@ export function StorageConnectDialog({
       }
     >
       <div className="space-y-3" data-testid="storage-connect-dialog">
-        <p className="text-sm text-muted">{STORAGE_KIND_LABEL[kind]} on {connection?.workstation.name}</p>
+        <p className="text-sm text-muted">
+          {STORAGE_KIND_LABEL[kind]} on {connection?.workstation.name}
+        </p>
         {error && <Callout tone="danger">{error}</Callout>}
         {rid && isOAuthKind(kind) && <DevicePanel rid={rid} onDone={() => onOpenChange(false)} />}
         {rid && !isOAuthKind(kind) && <RequestResult rid={rid} onDone={() => onOpenChange(false)} />}
@@ -222,16 +233,60 @@ export function StorageConnectDialog({
         )}
         {!rid && kind === 's3' && (
           <>
-            <TextInput label="Endpoint" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://s3.eu-west-1.amazonaws.com" value={fields.endpoint ?? ''} onChange={(e) => set('endpoint', e.target.value)} />
-            <TextInput label="Region" autoComplete="off" spellCheck={false} placeholder="eu-west-1" value={fields.region ?? ''} onChange={(e) => set('region', e.target.value)} />
-            <TextInput label="Bucket" autoComplete="off" spellCheck={false} value={fields.bucket ?? ''} onChange={(e) => set('bucket', e.target.value)} />
-            <TextInput label="Folder prefix (optional)" autoComplete="off" spellCheck={false} value={fields.prefix ?? ''} onChange={(e) => set('prefix', e.target.value)} />
+            <TextInput
+              label="Endpoint"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://s3.eu-west-1.amazonaws.com"
+              value={fields.endpoint ?? ''}
+              onChange={(e) => set('endpoint', e.target.value)}
+            />
+            <TextInput
+              label="Region"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="eu-west-1"
+              value={fields.region ?? ''}
+              onChange={(e) => set('region', e.target.value)}
+            />
+            <TextInput
+              label="Bucket"
+              autoComplete="off"
+              spellCheck={false}
+              value={fields.bucket ?? ''}
+              onChange={(e) => set('bucket', e.target.value)}
+            />
+            <TextInput
+              label="Folder prefix (optional)"
+              autoComplete="off"
+              spellCheck={false}
+              value={fields.prefix ?? ''}
+              onChange={(e) => set('prefix', e.target.value)}
+            />
             <label className="flex min-h-11 items-center gap-2 text-sm">
-              <input type="checkbox" checked={fields.pathStyle === 'true'} onChange={(e) => set('pathStyle', e.target.checked ? 'true' : '')} />
+              <input
+                type="checkbox"
+                checked={fields.pathStyle === 'true'}
+                onChange={(e) => set('pathStyle', e.target.checked ? 'true' : '')}
+              />
               Use path-style addresses (MinIO and most self-hosted stores)
             </label>
-            <TextInput label="Access key id" autoComplete="off" spellCheck={false} value={fields.accessKeyId ?? ''} onChange={(e) => set('accessKeyId', e.target.value)} />
-            <TextInput label="Secret access key" type="password" autoComplete="off" spellCheck={false} value={fields.secretAccessKey ?? ''} onChange={(e) => set('secretAccessKey', e.target.value)} />
+            <TextInput
+              label="Access key id"
+              autoComplete="off"
+              spellCheck={false}
+              value={fields.accessKeyId ?? ''}
+              onChange={(e) => set('accessKeyId', e.target.value)}
+            />
+            <TextInput
+              label="Secret access key"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={fields.secretAccessKey ?? ''}
+              onChange={(e) => set('secretAccessKey', e.target.value)}
+            />
           </>
         )}
         {!rid && kind === 'local' && (
@@ -246,7 +301,11 @@ export function StorageConnectDialog({
         )}
         {!rid && kind === 'vault' && (
           <>
-            <Select label="Vault" value={fields.vaultId ?? ''} onChange={(e) => set('vaultId', e.target.value)}>
+            <Select
+              label="Vault"
+              value={fields.vaultId ?? ''}
+              onChange={(e) => set('vaultId', e.target.value)}
+            >
               <option value="">Choose a vault</option>
               {vaultList.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -254,10 +313,19 @@ export function StorageConnectDialog({
                 </option>
               ))}
             </Select>
-            <TextInput label="Folder inside the vault" autoComplete="off" spellCheck={false} placeholder="client-documents" value={fields.folder ?? ''} onChange={(e) => set('folder', e.target.value)} />
+            <TextInput
+              label="Folder inside the vault"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="client-documents"
+              value={fields.folder ?? ''}
+              onChange={(e) => set('folder', e.target.value)}
+            />
           </>
         )}
-        {!rid && !isOAuthKind(kind) && !canSeal && ws.isPending && <Spinner label="Reading the workstation key" />}
+        {!rid && !isOAuthKind(kind) && !canSeal && ws.isPending && (
+          <Spinner label="Reading the workstation key" />
+        )}
       </div>
     </Dialog>
   );

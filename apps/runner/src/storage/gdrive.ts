@@ -34,7 +34,10 @@ export class GDriveConnector implements StorageConnector {
     private readonly onBaseFolder: (id: string) => void = () => undefined,
   ) {}
 
-  private json = (headers: Record<string, string> = {}) => ({ ...headers, 'content-type': 'application/json' });
+  private json = (headers: Record<string, string> = {}) => ({
+    ...headers,
+    'content-type': 'application/json',
+  });
 
   private async createFolder(name: string, parent: string | undefined, signal: AbortSignal): Promise<string> {
     const res = await authed(
@@ -79,7 +82,12 @@ export class GDriveConnector implements StorageConnector {
     return created;
   }
 
-  private async find(name: string, parent: string, folder: boolean, signal: AbortSignal): Promise<string | undefined> {
+  private async find(
+    name: string,
+    parent: string,
+    folder: boolean,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
     const query = `name='${q(name)}' and '${q(parent)}' in parents and trashed=false${folder ? ` and mimeType='${FOLDER}'` : ''}`;
     const res = await authed(
       this.fetchFn,
@@ -106,7 +114,13 @@ export class GDriveConnector implements StorageConnector {
     await this.delete(`id:${id}`, signal);
   }
 
-  private async create(parent: string, name: string, body: Buffer, type: string, signal: AbortSignal): Promise<string> {
+  private async create(
+    parent: string,
+    name: string,
+    body: Buffer,
+    type: string,
+    signal: AbortSignal,
+  ): Promise<string> {
     const start = await authed(
       this.fetchFn,
       'google_drive',
@@ -130,14 +144,19 @@ export class GDriveConnector implements StorageConnector {
         signal,
       });
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') throw new StorageError('timeout', 'The storage did not answer in time.');
+      if ((err as Error)?.name === 'AbortError')
+        throw new StorageError('timeout', 'The storage did not answer in time.');
       throw new StorageError('unavailable', 'The storage could not be reached.');
     }
     if (!res.ok) throw await httpError('google_drive', res);
     return ((await res.json()) as { id: string }).id;
   }
 
-  async put(target: StorageTarget, file: Spooled, signal: AbortSignal): Promise<{ path: string; providerId?: string }> {
+  async put(
+    target: StorageTarget,
+    file: Spooled,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }> {
     const parent = await this.folderPath(target.folder, signal);
     for (let n = 1; n <= STORAGE_MAX_CLASH; n++) {
       const name = n === 1 ? target.name : storageClashName(target.name, n);
@@ -150,6 +169,13 @@ export class GDriveConnector implements StorageConnector {
 
   async delete(path: string, signal: AbortSignal): Promise<void> {
     if (!path.startsWith('id:')) return;
-    await authed(this.fetchFn, 'google_drive', this.token, `${API}/files/${encodeURIComponent(path.slice(3))}`, { method: 'DELETE' }, signal);
+    await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(path.slice(3))}`,
+      { method: 'DELETE' },
+      signal,
+    );
   }
 }

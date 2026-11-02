@@ -17,9 +17,14 @@ export async function authed(
     const t = await token(attempt > 0);
     let res: Response;
     try {
-      res = await fetchFn(url, { ...init, headers: { ...(init.headers ?? {}), authorization: `Bearer ${t}` }, signal });
+      res = await fetchFn(url, {
+        ...init,
+        headers: { ...(init.headers ?? {}), authorization: `Bearer ${t}` },
+        signal,
+      });
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') throw new StorageError('timeout', 'The storage did not answer in time.');
+      if ((err as Error)?.name === 'AbortError')
+        throw new StorageError('timeout', 'The storage did not answer in time.');
       throw new StorageError('unavailable', 'The storage could not be reached.');
     }
     if (res.status === 401 && attempt === 0) {

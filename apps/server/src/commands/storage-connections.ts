@@ -192,7 +192,12 @@ export async function renameStorageConnection(
   ]);
 }
 
-export async function removeStorageConnection(ctx: Ctx, userId: string, orgId: string, id: string): Promise<void> {
+export async function removeStorageConnection(
+  ctx: Ctx,
+  userId: string,
+  orgId: string,
+  id: string,
+): Promise<void> {
   const c = await ownConnection(ctx, orgId, id);
   await withAppendTx(ctx.pool, async (tx) => {
     await ctx.store.append(
@@ -261,7 +266,13 @@ export async function requestStorageConnect(
     await insertRequest(
       ctx,
       tx,
-      { id: body.requestId, connectionId: id, workstationId: c.workstation_id, userId: user.id, op: 'connect' },
+      {
+        id: body.requestId,
+        connectionId: id,
+        workstationId: c.workstation_id,
+        userId: user.id,
+        op: 'connect',
+      },
       commandId,
       REQUEST_TTL_MS + 5 * 60_000,
     );
@@ -403,7 +414,14 @@ export async function applyStorageReport(
        ON CONFLICT (connection_id) DO UPDATE SET state=EXCLUDED.state, error_code=EXCLUDED.error_code,
          message=EXCLUDED.message, checked_at=EXCLUDED.checked_at,
          last_ok_at=COALESCE(EXCLUDED.last_ok_at, storage_connection_health.last_ok_at)`,
-      [h.connectionId, h.state, h.errorCode ?? null, clip(h.message, 300), new Date(h.checkedAt), workstationId],
+      [
+        h.connectionId,
+        h.state,
+        h.errorCode ?? null,
+        clip(h.message, 300),
+        new Date(h.checkedAt),
+        workstationId,
+      ],
     );
   }
 }
@@ -512,7 +530,13 @@ export async function applyStorageCommandResult(
   await exec(
     ctx.pool,
     `UPDATE storage_requests SET state=$2, error_code=$3, message=$4, updated_at=$5 WHERE id=$1`,
-    [req.id, failure ? 'failed' : 'done', failure ? (code(r.error?.code) ?? 'unavailable') : null, clip(failure, 300), now],
+    [
+      req.id,
+      failure ? 'failed' : 'done',
+      failure ? (code(r.error?.code) ?? 'unavailable') : null,
+      clip(failure, 300),
+      now,
+    ],
   );
 }
 
@@ -530,7 +554,9 @@ export async function sendStorageSync(ctx: Ctx, workstationId: string): Promise<
       WHERE workstation_id=$1 AND type='storage.sync' AND status='pending'`,
     [workstationId],
   );
-  await enqueueRunnerCommand(ctx.pool, workstationId, 'storage.sync', { connectionIds: ids.map((i) => i.id) });
+  await enqueueRunnerCommand(ctx.pool, workstationId, 'storage.sync', {
+    connectionIds: ids.map((i) => i.id),
+  });
   deliver(ctx, [workstationId]);
 }
 
@@ -543,5 +569,7 @@ export async function pruneStorage(ctx: Ctx): Promise<void> {
       WHERE expires_at < $1 AND state NOT IN ('done','failed','cancelled','expired')`,
     [now],
   );
-  await exec(ctx.pool, `DELETE FROM storage_requests WHERE created_at < $1`, [new Date(now.getTime() - 24 * 3_600_000)]);
+  await exec(ctx.pool, `DELETE FROM storage_requests WHERE created_at < $1`, [
+    new Date(now.getTime() - 24 * 3_600_000),
+  ]);
 }

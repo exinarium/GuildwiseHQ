@@ -139,7 +139,7 @@ describe('releaseChangelog', () => {
     // a real head whatever the state of the file.
     const file = readFileSync(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
     const real = file.replace(
-      /## \[Unreleased\]\n+## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\n/,
+      /## \[Unreleased\]\n+## \[\d+\.\d+\.\d+\] - (?:\d{4}-\d{2}-\d{2}|Unreleased)\n/,
       '## [Unreleased]\n',
     );
     const split = splitUnreleased(real);

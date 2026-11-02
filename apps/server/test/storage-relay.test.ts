@@ -23,12 +23,18 @@ function make(over: Partial<StorageRelayDeps> = {}, opts: { answer?: 'ok' | 'sil
     config: { writeTimeoutMs: 5000, maxFileBytes: 10 * 1024 * 1024, maxInFlight: 2 },
     lookup: async (_org, id) => (id === CONN ? { kind: 'local', workstationId: WS } : undefined),
     isOnline: () => true,
-    send: (_ws, type, payload) => {
+    send: (_ws, type, rawPayload) => {
+      const payload = rawPayload as Record<string, any>;
       frames.push({ type, payload });
       const tid = payload.transferId as string;
       if (type === 'storage.write.open') {
         if (opts.answer === 'early_error')
-          queueMicrotask(() => relay.onResult(WS, tid, { ok: false, error: { code: 'auth_expired', message: 'expired', retryable: false } }));
+          queueMicrotask(() =>
+            relay.onResult(WS, tid, {
+              ok: false,
+              error: { code: 'auth_expired', message: 'expired', retryable: false },
+            }),
+          );
         else if (opts.answer !== 'silent') {
           creditedUpTo = STORAGE_WINDOW;
           queueMicrotask(() => relay.onCredit(WS, tid, creditedUpTo));
@@ -46,8 +52,13 @@ function make(over: Partial<StorageRelayDeps> = {}, opts: { answer?: 'ok' | 'sil
       if (type === 'storage.write.end' && opts.answer !== 'silent') {
         const body = Buffer.concat(received);
         const reference: StorageReference = {
-          v: 1, connectionId: CONN, kind: 'local', path: 'a/b.txt', size: payload.size,
-          sha256: createHash('sha256').update(body).digest('hex'), contentType: 'text/plain',
+          v: 1,
+          connectionId: CONN,
+          kind: 'local',
+          path: 'a/b.txt',
+          size: payload.size,
+          sha256: createHash('sha256').update(body).digest('hex'),
+          contentType: 'text/plain',
           writtenAt: new Date().toISOString(),
         };
         queueMicrotask(() => relay.onResult(WS, tid, { ok: true, reference }));
@@ -63,7 +74,15 @@ function make(over: Partial<StorageRelayDeps> = {}, opts: { answer?: 'ok' | 'sil
 }
 
 const req = (src: AsyncIterable<Buffer>, size: number, extra = {}) => ({
-  orgId: 'org', connectionId: CONN, folder: '{client}', name: 'doc', vars: { client: 'Smith' }, contentType: 'text/plain', size, source: src, ...extra,
+  orgId: 'org',
+  connectionId: CONN,
+  folder: '{client}',
+  name: 'doc',
+  vars: { client: 'Smith' },
+  contentType: 'text/plain',
+  size,
+  source: src,
+  ...extra,
 });
 
 describe('StorageRelay.write', () => {
@@ -93,9 +112,18 @@ describe('StorageRelay.write', () => {
 
   it('refuses unknown connections, bad templates, too large files and too many uploads without touching the runner', async () => {
     const t = make();
-    expect(await t.relay.write({ ...req(source([]), 0), connectionId: 'nope' })).toMatchObject({ ok: false, error: { code: 'not_found' } });
-    expect(await t.relay.write({ ...req(source([]), 0), folder: '{bogus}' })).toMatchObject({ ok: false, error: { code: 'invalid' } });
-    expect(await t.relay.write(req(source([]), 11 * 1024 * 1024))).toMatchObject({ ok: false, error: { code: 'too_large' } });
+    expect(await t.relay.write({ ...req(source([]), 0), connectionId: 'nope' })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+    expect(await t.relay.write({ ...req(source([]), 0), folder: '{bogus}' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' },
+    });
+    expect(await t.relay.write(req(source([]), 11 * 1024 * 1024))).toMatchObject({
+      ok: false,
+      error: { code: 'too_large' },
+    });
     expect(t.frames).toEqual([]);
   });
 
@@ -108,7 +136,10 @@ describe('StorageRelay.write', () => {
   });
 
   it('times out within the deadline when the runner is silent, sends abort and holds nothing', async () => {
-    const t = make({ config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 2 } }, { answer: 'silent' });
+    const t = make(
+      { config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 2 } },
+      { answer: 'silent' },
+    );
     const started = Date.now();
     const r = await t.relay.write(req(source([Buffer.from('x')]), 1));
     expect(r).toMatchObject({ ok: false, error: { code: 'timeout' } });
@@ -141,16 +172,25 @@ describe('StorageRelay.write', () => {
   it('logs only ids, size, outcome and latency', async () => {
     const t = make();
     await t.relay.write(req(source([Buffer.from('hello')]), 5));
-    expect(Object.keys(t.logs[0] as object).sort()).toEqual(['connectionId', 'kind', 'latencyMs', 'outcome', 'sizeBytes']);
+    expect(Object.keys(t.logs[0] as object).sort()).toEqual([
+      'connectionId',
+      'kind',
+      'latencyMs',
+      'outcome',
+      'sizeBytes',
+    ]);
   });
 
   it('ignores credit and results from another workstation', async () => {
     const t = make({}, { answer: 'silent' });
-    const p = t.relay.write(req(source([Buffer.from('x')]), 1), );
+    const p = t.relay.write(req(source([Buffer.from('x')]), 1));
     const tid = await new Promise<string>((res) => {
       const i = setInterval(() => {
         const open = t.frames.find((f) => f.type === 'storage.write.open');
-        if (open) { clearInterval(i); res(open.payload.transferId); }
+        if (open) {
+          clearInterval(i);
+          res(open.payload.transferId);
+        }
       }, 5);
     });
     t.relay.onResult('other-ws', tid, { ok: false });

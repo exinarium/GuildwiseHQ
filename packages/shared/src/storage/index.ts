@@ -236,7 +236,10 @@ export function renderStoragePath(
   const n = fill(t.name, vars);
   if (!n.ok) return n;
   let name = sanitizeStorageSegment(n.text);
-  const e = (ext ?? vars.ext ?? '').replace(/^\./, '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+  const e = (ext ?? vars.ext ?? '')
+    .replace(/^\./, '')
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(0, 12);
   if (e && !/\.[A-Za-z0-9]{1,12}$/.test(name)) name = `${name}.${e}`;
   if ([...folder, name].join('/').length > MAX_PATH) return { ok: false, error: 'the path is too long' };
   return { ok: true, folder, name };

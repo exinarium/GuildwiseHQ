@@ -66,7 +66,12 @@ export function storageSecretsOf(v: StorageSecrets): string[] {
 export class StorageStore {
   private readonly file: SealedFile<StorageSecrets>;
   constructor(secretsDir: string, keyOf: (name: string) => Buffer) {
-    this.file = new SealedFile(join(secretsDir, 'storage.json'), keyOf, StorageSecretsSchema, storageSecretsOf);
+    this.file = new SealedFile(
+      join(secretsDir, 'storage.json'),
+      keyOf,
+      StorageSecretsSchema,
+      storageSecretsOf,
+    );
   }
   private all(): StorageSecrets {
     return this.file.load() ?? { connections: {} };
