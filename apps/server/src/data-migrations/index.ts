@@ -8,7 +8,6 @@ import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDelegationExplicit } from './delegation-explicit.ts';
 import { migrateDeployRemovedComputers } from './deploy-removed-computers.ts';
-import { migrateOrphanedDevops } from './orphaned-devops.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
@@ -16,6 +15,7 @@ import { migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migrateOrphanedDevops } from './orphaned-devops.ts';
 import { migratePackSkillKeys } from './pack-skill-keys.ts';
 import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
@@ -55,7 +55,6 @@ export {
   type DeployRemovedComputersReport,
   migrateDeployRemovedComputers,
 } from './deploy-removed-computers.ts';
-export { migrateOrphanedDevops, ORPHANED_DEVOPS_MIGRATION, type OrphanedDevopsReport } from './orphaned-devops.ts';
 export {
   DESIGN_HELD_STATUS_MIGRATION,
   type DesignHeldStatusReport,
@@ -75,6 +74,11 @@ export {
 } from './no-personal.ts';
 export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
+export {
+  migrateOrphanedDevops,
+  ORPHANED_DEVOPS_MIGRATION,
+  type OrphanedDevopsReport,
+} from './orphaned-devops.ts';
 export {
   migratePackSkillKeys,
   PACK_SKILL_KEYS_MIGRATION,

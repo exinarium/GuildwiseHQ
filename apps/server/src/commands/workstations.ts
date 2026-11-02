@@ -301,7 +301,9 @@ export async function unlinkWorkstationIn(
         WHERE workstation_id=$1 AND status IN ('queued','running','needs_approval') ORDER BY created_at`,
       [id],
     );
-    events.push(...failDevopsRequestEvents(requests, why, 'The workstation was unpaired; the request failed.'));
+    events.push(
+      ...failDevopsRequestEvents(requests, why, 'The workstation was unpaired; the request failed.'),
+    );
     // The DevOps engineers of this workstation go with it, in the same append (history is kept: a soft retire).
     const devops = await rows(
       tx,

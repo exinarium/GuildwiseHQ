@@ -1,8 +1,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { clearUnpairedState } from './unpaired.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
+import { clearUnpairedState } from './unpaired.ts';
 
 /**
  * Pairings: one runner process on a machine can be paired with several workstations (one per account/organization,

@@ -40,7 +40,10 @@ export function toAgentDto(
           ? 'connected'
           : 'offline',
     workstationRemoved:
-      a.status === 'active' && !!a.workstation_id && !!a.workstation_status && a.workstation_status !== 'active',
+      a.status === 'active' &&
+      !!a.workstation_id &&
+      !!a.workstation_status &&
+      a.workstation_status !== 'active',
     name: a.name,
     roleKey: a.role_key,
     roleVersion: a.role_version,

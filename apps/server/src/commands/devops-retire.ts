@@ -49,7 +49,10 @@ export function failDevopsRequestEvents(requests: Row[], why: string, deskNote: 
     events.push(
       {
         streamId: streamId.thread(r.id),
-        event: { type: 'DevOpsRequestCompleted', payload: { requestId: r.id, status: 'failed', summary: why } },
+        event: {
+          type: 'DevOpsRequestCompleted',
+          payload: { requestId: r.id, status: 'failed', summary: why },
+        },
         actor: SYSTEM_ACTOR,
         scope: orgScope(r.org_id),
       },
@@ -82,7 +85,11 @@ export async function devopsRetireEvents(
     reason: 'workstation_unpaired' | 'orphaned_migration';
     actor: Actor;
     by: string;
-    skip?: { cardIds?: ReadonlySet<string>; shiftIds?: ReadonlySet<string>; requestIds?: ReadonlySet<string> };
+    skip?: {
+      cardIds?: ReadonlySet<string>;
+      shiftIds?: ReadonlySet<string>;
+      requestIds?: ReadonlySet<string>;
+    };
   },
 ): Promise<AppendInput[]> {
   const events: AppendInput[] = [];
@@ -93,14 +100,18 @@ export async function devopsRetireEvents(
   for (const a of opts.agents) {
     const released = await releaseClaimsOfAgentEvents(
       db,
-      a,
+      { id: a.id as string },
       opts.actor,
       `${a.name} was retired with its workstation; the card is back in the queue with the last handoff attached.`,
       opts.skip?.cardIds,
     );
     events.push(...released.events);
     const shifts = (
-      await rows(db, `SELECT id, org_id, agent_id, card_id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`, [a.id])
+      await rows(
+        db,
+        `SELECT id, org_id, agent_id, card_id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`,
+        [a.id],
+      )
     ).filter((s) => !opts.skip?.shiftIds?.has(s.id));
     for (const s of shifts)
       events.push({
@@ -128,7 +139,9 @@ export async function devopsRetireEvents(
         [a.id],
       )
     ).filter((r) => !opts.skip?.requestIds?.has(r.id));
-    events.push(...failDevopsRequestEvents(requests, why, 'The DevOps engineer was retired; the request failed.'));
+    events.push(
+      ...failDevopsRequestEvents(requests, why, 'The DevOps engineer was retired; the request failed.'),
+    );
     events.push({
       streamId: streamId.agent(a.id),
       event: {

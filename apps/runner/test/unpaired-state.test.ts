@@ -37,7 +37,7 @@ describe('clearUnpairedState', () => {
   it('re-pairing the same machine to a new workstation clears the old state', () => {
     const root = tmp();
     saveConfig(join(root, 'config.json'), makeConfig('http://aom.example.com/'));
-    const first = loadIndex(root).pairings[0];
+    const first = loadIndex(root).pairings[0]!;
     seed(entryDir(root, first));
     addPairing(root, {
       serverUrl: 'http://aom.example.com/',
@@ -45,7 +45,7 @@ describe('clearUnpairedState', () => {
       workstationId: '019e3f6a-7b1c-7a2d-8c3e-0123456789c3',
       runnerToken: 'aomr_new',
     } as never);
-    const dir = entryDir(root, loadIndex(root).pairings[0]);
+    const dir = entryDir(root, loadIndex(root).pairings[0]!);
     expect(existsSync(join(dir, 'active-shifts'))).toBe(false);
     expect(existsSync(join(dir, 'agents', 'devops-1'))).toBe(false);
     expect(existsSync(join(dir, 'agents', 'builder-1'))).toBe(true);

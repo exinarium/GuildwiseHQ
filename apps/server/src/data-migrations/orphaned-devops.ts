@@ -1,7 +1,7 @@
-import { withAppendTx } from '../db/tx.ts';
-import { exec, one, rows } from '../db/sql.ts';
-import { devopsRetireEvents } from '../commands/devops-retire.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
+import { devopsRetireEvents } from '../commands/devops-retire.ts';
+import { exec, one, rows } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
 import type { DataMigrationEnv } from './orgs.ts';
 
 /**
@@ -20,11 +20,13 @@ export interface OrphanedDevopsReport {
 
 export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<OrphanedDevopsReport | null> {
   const { pool, store, clock, log } = env;
-  if (await one(pool, 'SELECT 1 FROM data_migrations WHERE name=$1', [ORPHANED_DEVOPS_MIGRATION])) return null;
+  if (await one(pool, 'SELECT 1 FROM data_migrations WHERE name=$1', [ORPHANED_DEVOPS_MIGRATION]))
+    return null;
   const lock = await pool.connect();
   try {
     await lock.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
-    if (await one(pool, 'SELECT 1 FROM data_migrations WHERE name=$1', [ORPHANED_DEVOPS_MIGRATION])) return null;
+    if (await one(pool, 'SELECT 1 FROM data_migrations WHERE name=$1', [ORPHANED_DEVOPS_MIGRATION]))
+      return null;
     const orphans = await rows(
       pool,
       `SELECT a.id, a.org_id, a.name, a.workstation_id, w.user_id AS ws_user_id
@@ -38,17 +40,22 @@ export async function migrateOrphanedDevops(env: DataMigrationEnv): Promise<Orph
     let retired = 0;
     for (const agents of byStation.values()) {
       const by =
-        (agents[0].ws_user_id as string | null) ??
+        (agents[0]?.ws_user_id as string | null) ??
         (
           await one(
             pool,
             `SELECT user_id FROM org_members WHERE org_id=$1 AND status='active' ORDER BY (role='owner') DESC, user_id LIMIT 1`,
-            [agents[0].org_id],
+            [agents[0]?.org_id],
           )
         )?.user_id;
       if (!by) continue;
       await withAppendTx(pool, async (tx) => {
-        const events = await devopsRetireEvents(tx, { agents, reason: 'orphaned_migration', actor: SYSTEM_ACTOR, by });
+        const events = await devopsRetireEvents(tx, {
+          agents,
+          reason: 'orphaned_migration',
+          actor: SYSTEM_ACTOR,
+          by,
+        });
         if (events.length) await store.append(events, { tx });
       });
       retired += agents.length;

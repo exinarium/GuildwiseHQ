@@ -68,9 +68,9 @@ describe('unpairing retires the DevOps engineers of the workstation', () => {
       expect(ev[0].payload).toMatchObject({
         reason: 'workstation_unpaired',
         workstationId: box.workstationId,
-        by: w.owner.userId,
+        by: w.owner.id,
       });
-      expect(ev[0].actor).toMatchObject({ kind: 'user', id: w.owner.userId });
+      expect(ev[0].actor).toMatchObject({ kind: 'user', id: w.owner.id });
     }
     const board = await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
     const list = board.agents ?? board;
