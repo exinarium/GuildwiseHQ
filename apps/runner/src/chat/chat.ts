@@ -1,5 +1,4 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { ownerTurnShiftEnv } from '../ceo/shift-env.ts';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -47,6 +46,7 @@ import type { PackViewer } from '../capabilities/packs.ts';
 import { type CapabilityRegistry, makePackScriptGate, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
+import { ownerTurnShiftEnv } from '../ceo/shift-env.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
 import {
   type DelegateCaller,

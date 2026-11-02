@@ -1065,6 +1065,7 @@ The five open questions are answered. These answers override the sections they t
    organization can press **Authorize**; that grants the permission to the waiting session (once, or for the turn).
    Deny, and a 10-minute timeout, refuse it. A phone push is just a notification of the desk item. In `order` turns the
    same question is raised; the turn does not block on it, it reports the step as waiting.
+   *(Bypass turns and the shift variables: `--bypass` also sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which strips credential-named variables such as `AOM_SHIFT_TOKEN` from Bash children. Both modes build the shift variables in one step (`ceo/shift-env.ts`) and every turn writes them to a 0600 `shift-env.json` in its turn dir; the `aom` entry fills in only the variables that are missing from `<AOM_CEO_TURN_DIR>/shift-env.json`.)*
 2. **Production release (§9.3).** The recipe decides who releases each environment. When the recipe names the CEO as
    releaser, the CEO releases by default once the gate's requirements hold. Otherwise the release goes into a **release
    queue**: a list of ready releases (commit, environment, target) where the Owner or an Admin clicks **Release** and,

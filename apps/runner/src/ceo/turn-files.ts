@@ -1,5 +1,4 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { writeShiftEnvFile } from './shift-env.ts';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { OWNER_BRIEF_FILE, OWNER_FLOOR_FILE, OWNER_MCP_FILE } from '../adapters/claude-code.ts';
@@ -12,6 +11,7 @@ import {
   type GuardConfig,
   writeGuardState,
 } from './guard-hook.ts';
+import { writeShiftEnvFile } from './shift-env.ts';
 
 const quote = (w: string): string => `'${w.replace(/'/g, `'\\''`)}'`;
 
