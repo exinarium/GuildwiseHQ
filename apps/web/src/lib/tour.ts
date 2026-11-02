@@ -89,6 +89,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Topics you want an agent to keep an eye on, for example a competitor or a technology. Each interest has a schedule for when the agent looks and another for when you get the digest.',
     more: 'interests#run-and-delivery',
   },
+  journeys: {
+    title: 'Journeys',
+    body: 'One whole process made of your workflows linked by handoffs, working on one shared record such as a client or a deal. Design it, start it on a record and follow its steps.',
+    more: 'org-chart-and-design#custom-workflows',
+  },
   schedules: {
     title: 'Automations',
     body: 'Work that starts by itself: every weekday morning, when a phase finishes, when a card reaches a stage, or when a ticket gets a label. Pick a trigger, then an action such as creating a card or sending a webhook.',
@@ -182,6 +187,7 @@ const SIDEBAR_ORDER = [
   'discovery',
   'boardroom',
   'schedules',
+  'journeys',
   'projects',
   'agents',
   'org-chart',

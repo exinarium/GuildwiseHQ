@@ -133,7 +133,7 @@ export const useJourneyInstance = (id: string | undefined) =>
     queryFn: () => get<InstanceView>(`/journey-instances/${id}`),
   });
 
-function useInstanceMutation<V>(id: string, fn: (v: V) => Promise<unknown>) {
+function useInstanceMutation<V, R = unknown>(id: string, fn: (v: V) => Promise<R>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,

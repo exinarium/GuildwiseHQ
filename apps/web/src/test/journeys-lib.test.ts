@@ -35,7 +35,9 @@ describe('journey designer edits', () => {
     expect(d.handoffs.find((x) => x.id === h.id)?.condition?.field).toBe('rooms');
     const before = d.handoffs.filter((x) => x.from === 'lead').map((x) => x.id);
     const after = moveHandoff(d, h.id, -1).handoffs.filter((x) => x.from === 'lead').map((x) => x.id);
-    expect(after).toEqual([h.id, ...before.filter((x) => x !== h.id)]);
+    // one step up swaps with its neighbour
+    expect(before.at(-1)).toBe(h.id);
+    expect(after).toEqual([...before.slice(0, -2), h.id, before.at(-2)]);
   });
   it('removing a step removes its handoffs and moves the first step on', () => {
     const d = removeStep(rentals(), 'lead');
