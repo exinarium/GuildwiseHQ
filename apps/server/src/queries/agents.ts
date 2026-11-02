@@ -31,6 +31,14 @@ export function toAgentDto(
     hiredByUserId: a.hired_by_user_id,
     managerUserId: a.manager_user_id,
     workstationId: a.workstation_id,
+    workstationName: a.workstation_name ?? null,
+    workstationState: !a.workstation_id
+      ? null
+      : a.workstation_status !== 'active'
+        ? 'unpaired'
+        : a.workstation_connected
+          ? 'connected'
+          : 'offline',
     name: a.name,
     roleKey: a.role_key,
     roleVersion: a.role_version,
@@ -82,6 +90,7 @@ export async function listAgents(
     `SELECT a.*, (SELECT r.department FROM role_definitions r
                    WHERE r.key = a.role_key AND (r.org_id = a.org_id OR r.org_id IS NULL)
                    ORDER BY (r.version = a.role_version) DESC, (r.org_id IS NULL), r.version DESC LIMIT 1) AS department,
+            ws.name AS workstation_name, ws.status AS workstation_status, ws.connected AS workstation_connected,
             rt.info->>'sandbox' AS sandbox, rt.info->>'sandboxReason' AS sandbox_reason
        FROM agents a
        LEFT JOIN workstations ws ON ws.id = a.workstation_id

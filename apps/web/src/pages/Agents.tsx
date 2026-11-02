@@ -14,7 +14,7 @@ import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
 import { useMcpServers } from '../api/queries/mcp.ts';
-import { useRehomeAgent } from '../api/queries/members.ts';
+import { useMoveTargets, useRehomeAgent } from '../api/queries/members.ts';
 import { useHirablePacks } from '../api/queries/my-capabilities.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
@@ -113,6 +113,11 @@ export function Agents() {
   const canManage = (a: AgentDto) =>
     !!myId && (orgRole(a) === 'owner' || orgRole(a) === 'admin' || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
+  const canMove = (a: AgentDto) =>
+    (orgRole(a) === 'owner' || orgRole(a) === 'admin') &&
+    !a.isDevops &&
+    a.roleKey !== 'ceo' &&
+    a.status !== 'retired';
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
   const active = board.data?.agents ?? [];
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
@@ -208,7 +213,7 @@ export function Agents() {
               hr={h}
               roleName={roleName(h.agent.roleKey)}
               role={roles.data?.find((r) => r.definition.key === h.agent.roleKey)?.definition}
-              station={stationName(h.agent.workstationId)}
+              station={h.agent.workstationName ?? stationName(h.agent.workstationId)}
               projects={projects.data ?? []}
               canManage={canManage(h.agent)}
               mcpCandidates={mcp.data ?? []}
@@ -216,6 +221,7 @@ export function Agents() {
               onProjects={() => setAllowing(h.agent)}
               onFire={() => setFiring(h.agent)}
               onRehome={() => setRehoming(h.agent)}
+              canMove={canMove(h.agent)}
               onModel={() => setChangingModel(h.agent)}
               onRole={() => setChangingRole(h.agent)}
               onReset={() => reset.mutate(h.agent.id)}
@@ -252,7 +258,11 @@ export function Agents() {
       {draftHire && <HireDialog open onOpenChange={(o) => !o && setDraftHire(null)} draft={draftHire} />}
       {packHireOpen && <PickPackToHire onClose={() => setPackHireOpen(false)} />}
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
-      <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
+      <MoveAgentDialog
+        key={rehoming?.id ?? 'none'}
+        agent={rehoming}
+        onClose={() => setRehoming(null)}
+      />
       <AllowedProjectsDialog
         agent={allowing}
         projects={projects.data ?? []}
@@ -293,6 +303,7 @@ function AgentCard({
   onProjects,
   onFire,
   onRehome,
+  canMove,
   onModel,
   onRole,
   onReset,
@@ -312,6 +323,7 @@ function AgentCard({
   onProjects: () => void;
   onFire: () => void;
   onRehome: () => void;
+  canMove: boolean;
   onModel: () => void;
   onRole: () => void;
   onReset: () => void;
@@ -395,6 +407,13 @@ function AgentCard({
         {a.effort ? ` · ${a.effort}` : ''}
         {station && ` · ${station}`}
       </p>
+      {(a.workstationState === 'offline' || a.workstationState === 'unpaired') && (
+        <div>
+          <Badge tone="amber" data-testid="agent-workstation-state">
+            {a.workstationState === 'unpaired' ? 'workstation unpaired' : 'workstation offline'}
+          </Badge>
+        </div>
+      )}
       {a.sandbox === 'unsandboxed' && (
         <SandboxWarning testId="agent-sandbox-warning" lead="Warning:">
           {agentWarning(station || 'its workstation', a.sandboxReason)}
@@ -485,9 +504,19 @@ function AgentCard({
         </div>
       ) : canManage ? (
         <div className="mt-auto flex flex-wrap items-center gap-1 border-t border-line pt-3">
-          {a.status === 'needs_rehome' && (
+          {canMove && a.status === 'needs_rehome' && (
             <Button variant="primary" size="sm" aria-label={`Re-home ${a.name}`} onClick={onRehome}>
               Re-home
+            </Button>
+          )}
+          {canMove && a.status !== 'needs_rehome' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Move ${a.name} to another workstation`}
+              onClick={onRehome}
+            >
+              Move
             </Button>
           )}
           <Button variant="ghost" size="sm" aria-label={`Allowed projects of ${a.name}`} onClick={onProjects}>
@@ -527,30 +556,44 @@ function AgentCard({
   );
 }
 
-/** A removed manager's agent needs a new home: one of your own workstations and runtime. Name and history carry over. */
-function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () => void }) {
-  const stations = useWorkstations();
+/**
+ * Moves an agent to another workstation of its organization: a `needs_rehome` agent gets a new home ("rehome"), any
+ * other agent moves (for example off a workstation that is offline or was unpaired). Name and history carry over.
+ */
+function MoveAgentDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () => void }) {
+  const targets = useMoveTargets(agent?.id);
   const rehome = useRehomeAgent();
-  const active = (stations.data ?? []).filter((w) => w.status === 'active');
+  const rehoming = agent?.status === 'needs_rehome';
+  const list = targets.data?.workstations ?? [];
   const [stationId, setStationId] = useState('');
   const [runtime, setRuntime] = useState('');
   const [model, setModel] = useState('');
-  const eff = stationId || active[0]?.id || '';
-  const station = active.find((w) => w.id === eff);
+  const eff = stationId || list[0]?.id || '';
+  const station = list.find((w) => w.id === eff);
   const runtimes = station?.runtimes.filter((r) => r.available).map((r) => r.id) ?? [];
-  const effRuntime = runtime && runtimes.includes(runtime) ? runtime : (runtimes[0] ?? agent?.runtime ?? '');
+  const effRuntime =
+    runtime && runtimes.includes(runtime)
+      ? runtime
+      : agent && runtimes.includes(agent.runtime)
+        ? agent.runtime
+        : (runtimes[0] ?? agent?.runtime ?? '');
   const rehomeUnsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effRuntime);
   const [rehomeAck, setRehomeAck] = useState(false);
+  const current = targets.data?.current;
+  const close = () => {
+    rehome.reset();
+    onClose();
+  };
   return (
     <Dialog
       open={!!agent}
-      onOpenChange={(o) => !o && onClose()}
-      title={`Re-home ${agent?.name ?? ''}`}
-      description="Pick one of your workstations and a runtime. The name, history and track record carry over; the old sandbox stays behind."
+      onOpenChange={(o) => !o && close()}
+      title={rehoming ? `Re-home ${agent?.name ?? ''}` : `Move ${agent?.name ?? ''} to another workstation`}
+      description="The name, history, projects and track record carry over; the old sandbox stays behind."
     >
       {agent && (
         <form
-          aria-label="Re-home agent"
+          aria-label={rehoming ? 'Re-home agent' : 'Move agent'}
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
@@ -563,18 +606,38 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
                 model: model.trim() || agent.model,
                 ...(rehomeUnsandboxed && rehomeAck ? { acknowledgeUnsandboxed: true } : {}),
               },
-              { onSuccess: onClose },
+              { onSuccess: close },
             );
           }}
         >
-          <Select label="Workstation" value={eff} onChange={(e) => setStationId(e.target.value)}>
-            {active.length === 0 && <option value="">No workstation paired</option>}
-            {active.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} {w.connected ? '(connected)' : '(offline)'}
-              </option>
-            ))}
-          </Select>
+          {targets.data && (
+            <p className="text-sm text-subtle" data-testid="move-now-on">
+              {current ? `Now on: ${current.name} (${current.state})` : 'Now on: no workstation'}
+            </p>
+          )}
+          {targets.data && list.length === 0 ? (
+            <p className="text-sm" data-testid="move-no-targets">
+              No other workstation in this organization.{' '}
+              <Link to="/workstations" className="text-brand-text hover:underline">
+                Pair one on the Workstations page.
+              </Link>
+            </p>
+          ) : (
+            <Select label="Workstation" value={eff} onChange={(e) => setStationId(e.target.value)}>
+              {list.length === 0 && <option value="">Loading workstations…</option>}
+              {list.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name} · {w.mine ? 'you' : w.ownerName} ({w.connected ? 'connected' : 'offline'})
+                </option>
+              ))}
+            </Select>
+          )}
+          {station && !station.mine && (
+            <p className="text-xs text-subtle" data-testid="move-others-hint">
+              {station.ownerName}'s workstation: the agent works only the projects {station.ownerName} is on, with
+              the repositories cloned there.
+            </p>
+          )}
           <Select label="Runtime" value={effRuntime} onChange={(e) => setRuntime(e.target.value)}>
             {(runtimes.length ? runtimes : [agent.runtime]).map((r) => (
               <option key={r} value={r}>
@@ -604,11 +667,11 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
               </label>
             </div>
           )}
-          <ErrorBox error={rehome.error} />
-          <div className="flex justify-end gap-2">
-            <Button onClick={onClose}>Cancel</Button>
+          <ErrorBox error={rehome.error ?? targets.error} />
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button onClick={close}>Cancel</Button>
             <Button type="submit" variant="primary" disabled={rehome.isPending || !eff}>
-              Re-home
+              {rehoming ? 'Re-home' : 'Move'}
             </Button>
           </div>
         </form>
