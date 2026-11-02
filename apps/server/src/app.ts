@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { RUNNER_SUBPROTOCOL } from '@aom/shared';
+import { RUNNER_SUBPROTOCOL, type StorageKind } from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -38,7 +38,7 @@ import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
 import { createCostStampInterceptor } from './costs/stamp.ts';
 import { createPool } from './db/pool.ts';
-import { rows } from './db/sql.ts';
+import { one, rows } from './db/sql.ts';
 import { LogRing } from './diagnostics/log-ring.ts';
 import { Dispatcher } from './dispatcher/dispatcher.ts';
 import { Reaper } from './dispatcher/reaper.ts';
@@ -112,6 +112,7 @@ import { providerRoutes } from './routes/providers.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
+import { storageRoutes } from './routes/storage.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -138,6 +139,8 @@ import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 import { RelayHub } from './webhook-relay/hub.ts';
+import { StorageRelay } from './storage-relay/hub.ts';
+import { recordWriteOutcome } from './commands/storage-connections.ts';
 import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
@@ -463,6 +466,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(inboundRoutes(ctx));
   await app.register(hookRoutes(ctx));
   await app.register(relayIntegrationRoutes(ctx));
+  await app.register(storageRoutes(ctx));
   await app.register(relayPublicRoutes(ctx));
   await app.register(approvalRoutes(ctx));
   await app.register(interestRoutes(ctx));
@@ -526,6 +530,25 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.storage = new StorageRelay({
+    config: ctx.config.storage,
+    lookup: async (orgId, connectionId) => {
+      const r = await one<{ kind: StorageKind; workstation_id: string }>(
+        ctx.pool,
+        `SELECT kind, workstation_id FROM storage_connections WHERE id=$1 AND org_id=$2 AND status='active'`,
+        [connectionId, orgId],
+      );
+      return r ? { kind: r.kind, workstationId: r.workstation_id } : undefined;
+    },
+    isOnline: (ws) => ctx.services.runners.isOnline(ws),
+    send: (ws, type, payload) =>
+      ctx.services.runners.send(ws, type as 'storage.write.open', payload as never, ctx.clock.now()),
+    onOutcome: (id, outcome) =>
+      recordWriteOutcome(ctx, id, outcome).catch((err) => ctx.log.warn({ err: err?.name }, 'storage health update failed')),
+    // Connection, kind, size, outcome and duration only: never a path, a name or content.
+    log: (entry) => ctx.log.info({ storage: entry }, 'storage write'),
+    now: () => ctx.clock.now().getTime(),
+  });
   // After a restart nothing is served until the runners announce again (right after their welcome).
   await ctx.services.webhookRelay
     .markAllOffline()

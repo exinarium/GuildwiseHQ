@@ -1,6 +1,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RELAY_BODY_HARD_MAX_BYTES, RELAY_KINDS, type RelayKind } from '@aom/shared';
+import {
+  RELAY_BODY_HARD_MAX_BYTES,
+  RELAY_KINDS,
+  type RelayKind,
+  STORAGE_HARD_MAX_FILE_BYTES,
+  STORAGE_MAX_FILE_BYTES,
+} from '@aom/shared';
 import { z } from 'zod';
 
 /**
@@ -194,6 +200,15 @@ const EnvSchema = z.object({
   AOM_RELAY_RETRY_AFTER_SEC: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_RELAY_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(100000).default(200),
   AOM_RELAY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+  /** Storage connections (the write relay to a firm's own storage; nothing is kept on this server). */
+  AOM_STORAGE_WRITE_TIMEOUT_MS: z.coerce.number().int().min(5000).max(300000).default(60000),
+  AOM_STORAGE_MAX_FILE_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(STORAGE_HARD_MAX_FILE_BYTES)
+    .default(STORAGE_MAX_FILE_BYTES),
+  AOM_STORAGE_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(1000).default(20),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -292,6 +307,8 @@ export interface Config {
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
+  /** Storage connections: the write relay limits. */
+  storage: { writeTimeoutMs: number; maxFileBytes: number; maxInFlight: number };
   /** Inbound webhook relay (business mode). */
   relay: {
     /** Largest request body forwarded (`AOM_RELAY_MAX_BODY_BYTES`); bigger is a 413. */
@@ -411,6 +428,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     videoPushUrl: e.AOM_VIDEO_PUSH_URL,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
+    storage: {
+      writeTimeoutMs: e.AOM_STORAGE_WRITE_TIMEOUT_MS,
+      maxFileBytes: e.AOM_STORAGE_MAX_FILE_BYTES,
+      maxInFlight: e.AOM_STORAGE_MAX_IN_FLIGHT,
+    },
     relay: {
       maxBodyBytes: e.AOM_RELAY_MAX_BODY_BYTES,
       perMinute: e.AOM_RELAY_RATE_PER_MINUTE,

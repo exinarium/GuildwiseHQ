@@ -255,3 +255,49 @@ export function storageClashName(name: string, n: number): string {
   return dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`;
 }
 export const STORAGE_MAX_CLASH = 20;
+
+// ------------------------------------------------------------------------------------------------ API
+
+export const StorageConnectionCreateSchema = z.object({
+  kind: StorageKindSchema,
+  label: z.string().trim().min(1).max(80),
+  workstationId: z.uuid(),
+});
+export type StorageConnectionCreate = z.infer<typeof StorageConnectionCreateSchema>;
+export const StorageConnectionRenameSchema = z.object({ label: z.string().trim().min(1).max(80) });
+export const StorageConnectBodySchema = z.object({
+  requestId: z.string().min(1).max(64),
+  envelope: z.record(z.string(), z.unknown()),
+});
+export const StorageAuthBodySchema = z.object({
+  siteUrl: z.string().trim().max(300).optional(),
+  baseFolder: z.string().trim().max(120).optional(),
+});
+export const StorageTestBodySchema = z.object({ requestId: z.string().min(1).max(64) });
+
+/** What the list shows. No endpoint, bucket, path, account or token: the server does not know them. */
+export interface StorageConnectionDto {
+  id: string;
+  kind: StorageKind;
+  label: string;
+  workstation: { id: string; name: string; online: boolean };
+  health: {
+    state: StorageHealthState | 'runner_offline';
+    errorCode: StorageErrorCode | null;
+    message: string | null;
+    checkedAt: string | null;
+    lastOkAt: string | null;
+  };
+  createdAt: string;
+  /** The signed-in user owns the workstation and may connect, test and reconnect from here. */
+  canConnect: boolean;
+}
+
+export interface StorageRequestDto {
+  id: string;
+  op: 'connect' | 'auth' | 'test' | 'remove';
+  state: StorageRequestState;
+  prompt: StorageDevicePrompt | null;
+  errorCode: StorageErrorCode | null;
+  message: string | null;
+}

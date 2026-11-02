@@ -44,6 +44,12 @@ import {
   applyIntegrationSession,
   applyIntegrationsReport,
 } from '../commands/integrations.ts';
+import {
+  applyStorageAuth,
+  applyStorageCommandResult,
+  applyStorageReport,
+  sendStorageSync,
+} from '../commands/storage-connections.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
@@ -451,6 +457,18 @@ export class RunnerHandlers {
       case 'capabilities.project.report':
         await applyProjectCapabilitiesReport(this.ctx, ws, msg);
         return;
+      case 'storage.report':
+        await applyStorageReport(this.ctx, conn.workstationId, msg.connections);
+        return this.ack(conn, msg);
+      case 'storage.auth':
+        await applyStorageAuth(this.ctx, conn.workstationId, msg);
+        return this.ack(conn, msg);
+      case 'storage.write.credit':
+        this.ctx.services.storage.onCredit(conn.workstationId, msg.transferId, msg.upTo);
+        return;
+      case 'storage.write.result':
+        this.ctx.services.storage.onResult(conn.workstationId, msg.transferId, msg);
+        return;
       case 'relay.serve': {
         const r = await this.ctx.services.webhookRelay.serve(conn, msg.integrations);
         this.send(conn, 'relay.serve.result', r);
@@ -659,6 +677,17 @@ export class RunnerHandlers {
       // hold a sealed envelope: it is emptied here.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyIntegrationCommandResult(
+        this.ctx,
+        conn.workstationId,
+        { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type?.startsWith('storage.')) {
+      // Terminal: a typed refusal is an answer. The payload may hold a sealed envelope: it is emptied here.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyStorageCommandResult(
         this.ctx,
         conn.workstationId,
         { id: msg.commandId, type: cmd.type, payload: cmd.payload },
@@ -1035,6 +1064,7 @@ export class RunnerHandlers {
         RELAY_FEATURE,
       ],
     });
+    await sendStorageSync(ctx, conn.workstationId).catch((err) => ctx.log.warn({ err }, 'storage sync not queued'));
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
   }

@@ -23,6 +23,7 @@ import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
 import type { VideoDestinationClient } from './video/destinations.ts';
 import type { YouTubeClient } from './video/youtube.ts';
+import type { StorageRelay } from './storage-relay/hub.ts';
 import type { RelayHub } from './webhook-relay/hub.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
@@ -81,6 +82,8 @@ export interface Services {
   cloud: CloudServices;
   /** The inbound webhook relay: which runner serves which integration, and the requests waiting for an answer. */
   webhookRelay: RelayHub;
+  /** The write relay to a firm's own storage: streams a file to the runner that holds the connection and keeps nothing. */
+  storage: StorageRelay;
   /** Web Push notifier (only when VAPID is configured). */
   push?: PushService;
 }

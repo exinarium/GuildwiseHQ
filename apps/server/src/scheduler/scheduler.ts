@@ -6,6 +6,7 @@ import { publishPendingDocuments } from '../commands/documents.ts';
 import { followUpSweep } from '../commands/follow-up.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
+import { pruneStorage } from '../commands/storage-connections.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
@@ -196,6 +197,7 @@ export class Scheduler {
     await sweepSubworkflows(this.ctx).catch((err) => this.ctx.log.error({ err }, 'sub-workflows failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
+    await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
   }
 
