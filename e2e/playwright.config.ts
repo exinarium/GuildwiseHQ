@@ -45,6 +45,8 @@ export default defineConfig({
     { name: 'business-card-types', testMatch: 'business-card-types.spec.ts', dependencies: ['auth'] },
     // Business mode wording (Knowledge, Rules & decisions): its own user and organization; needs only the shared stack.
     { name: 'business-terms', testMatch: 'business-terms.spec.ts', dependencies: ['auth'] },
+    // Storage connections (Organization settings > Storage): its own user and mock runner; a local folder under the e2e dir.
+    { name: 'storage', testMatch: 'storage.spec.ts', dependencies: ['auth'] },
     // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
     { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
     // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
