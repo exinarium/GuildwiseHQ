@@ -82,7 +82,7 @@ describe('storage connections', () => {
     });
     expect(res.status).toBe(409);
     await q(
-      `UPDATE workstation_capabilities SET capabilities = capabilities || 'storage:1' WHERE workstation_id=$1`,
+      `UPDATE workstation_capabilities SET capabilities = array_append(capabilities, 'storage:1') WHERE workstation_id=$1`,
       [w.workstationId],
     );
   });
@@ -266,7 +266,12 @@ describe('storage connections', () => {
     expect((await list()).find((x) => x.id === c.id)?.health.state).toBe('runner_offline');
     expect((await api('DELETE', `/api/org/storage/connections/${c.id}`)).status).toBe(204);
     r = await w.connectRunner({ capabilities: ['storage:1'] });
-    const cmd = await commandFor('storage.remove', 0);
+    const cmd = (await r.waitFor(
+      'command',
+      (f: any) => f.command === 'storage.remove' && f.payload?.connectionId === c.id,
+      8000,
+      0,
+    )) as any;
     expect(cmd.payload).toEqual({ connectionId: c.id });
   });
 

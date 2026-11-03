@@ -420,7 +420,8 @@ export async function applyStorageReport(
     await exec(
       ctx.pool,
       `INSERT INTO storage_connection_health (connection_id, state, error_code, message, checked_at, last_ok_at)
-       SELECT c.id, $2, $3, $4, $5, CASE WHEN $2='connected' THEN $5 ELSE NULL END
+       SELECT c.id, $2::text, $3::text, $4::text, $5::timestamptz,
+              CASE WHEN $2::text='connected' THEN $5::timestamptz ELSE NULL END
          FROM storage_connections c WHERE c.id=$1 AND c.workstation_id=$6 AND c.status='active'
        ON CONFLICT (connection_id) DO UPDATE SET state=EXCLUDED.state, error_code=EXCLUDED.error_code,
          message=EXCLUDED.message, checked_at=EXCLUDED.checked_at,
