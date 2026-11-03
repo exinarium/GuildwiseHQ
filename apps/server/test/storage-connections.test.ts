@@ -8,8 +8,9 @@ import { createWorld, ok, until, type World } from './helpers/world.ts';
 // Storage connections (GWP-63): commands, routes and projection with a fake runner. The access and refresh token
 // below exist only "on the workstation" (the fake runner): the server must never see them, and the sealed envelope
 // of a typed connect (which stands in for the S3 secret key) must be wiped from the queue once answered.
-const ACCESS = 'ACCESS-TOKEN-MARKER-7f3a91';
-const REFRESH = 'REFRESH-TOKEN-MARKER-2c84be';
+// Shaped like real ones (Google access token, Google refresh token) so the server's scrubbing applies.
+const ACCESS = 'ya29.ACCESSMARKER7f3a91';
+const REFRESH = '1//REFRESHMARKER2c84be';
 const SEALED = 'SEALED-S3-SECRET-MARKER-91d0aa';
 const MARKERS = [ACCESS, REFRESH, SEALED];
 
@@ -101,6 +102,8 @@ describe('storage connections', () => {
       commandId: cmd.commandId,
       ok: true,
       result: {
+        accessToken: ACCESS,
+        refreshToken: REFRESH,
         prompt: {
           userCode: 'ABCD-EFGH',
           verificationUri: 'https://example.test/device',
@@ -115,9 +118,25 @@ describe('storage connections', () => {
       5000,
       'device code shown',
     );
-    r.send('storage.auth', { sessionId: began.sessionId, connectionId: c.id, state: 'done' });
+    r.send('storage.auth', {
+      sessionId: began.sessionId,
+      connectionId: c.id,
+      state: 'done',
+      accessToken: ACCESS,
+      refreshToken: REFRESH,
+      error: { code: 'unavailable', message: `done, access_token=${ACCESS} refresh_token: ${REFRESH}` },
+    });
     r.send('storage.report', {
-      connections: [{ connectionId: c.id, state: 'connected', checkedAt: new Date().toISOString() }],
+      connections: [
+        {
+          connectionId: c.id,
+          state: 'connected',
+          message: `Bearer ${ACCESS}`,
+          accessToken: ACCESS,
+          refreshToken: REFRESH,
+          checkedAt: new Date().toISOString(),
+        },
+      ],
     });
     await until(
       async () => (await list()).find((x) => x.id === c.id)?.health.state === 'connected',
@@ -135,7 +154,9 @@ describe('storage connections', () => {
       commandId: test.commandId,
       ok: true,
       result: {
-        error: { code: 'auth_expired', message: 'Sign-in expired' },
+        accessToken: ACCESS,
+        refreshToken: REFRESH,
+        error: { code: 'auth_expired', message: `Sign-in expired (${ACCESS} / ${REFRESH})` },
         health: {
           connectionId: c.id,
           state: 'needs_reauth',
@@ -150,7 +171,7 @@ describe('storage connections', () => {
           connectionId: c.id,
           state: 'needs_reauth',
           errorCode: 'auth_expired',
-          message: 'Sign-in expired',
+          message: `Sign-in expired, refresh_token=${REFRESH}`,
           checkedAt: new Date().toISOString(),
         },
       ],
@@ -176,6 +197,25 @@ describe('storage connections', () => {
       async () => (await list()).find((x) => x.id === c.id)?.health.state === 'connected',
       5000,
       'reconnected',
+    );
+
+    // a failed command answer whose error text carries both tokens
+    const hostile = await create('onedrive');
+    from = r.received.length;
+    const hostileSession = (
+      await ok<any>(api('POST', `/api/org/storage/connections/${hostile.id}/auth`, {}), 202)
+    ).sessionId;
+    const hostileCmd = await commandFor('storage.auth.begin', from);
+    r.send('command.result', {
+      commandId: hostileCmd.commandId,
+      ok: false,
+      error: `sign-in failed: access_token=${ACCESS}, refresh_token=${REFRESH}`,
+    });
+    await until(
+      async () =>
+        (await api('GET', `/api/org/storage/requests/${hostileSession}`)).body?.request?.state === 'failed',
+      5000,
+      'hostile sign-in failed',
     );
 
     // typed connect (S3): the sealed envelope is wiped from the queue once the runner has answered
@@ -209,6 +249,7 @@ describe('storage connections', () => {
       await list(),
       (await api('GET', `/api/org/storage/requests/${began.sessionId}`)).body,
       (await api('GET', `/api/org/storage/requests/${rid}`)).body,
+      (await api('GET', `/api/org/storage/requests/${hostileSession}`)).body,
       (await api('GET', `/api/org/storage/requests/${requestId}`)).body,
     ]);
     for (const m of MARKERS) {

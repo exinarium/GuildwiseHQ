@@ -397,7 +397,18 @@ export async function getStorageRequest(ctx: Ctx, userId: string, rid: string): 
 
 // ------------------------------------------------------------------------------------------------ from the runner
 
-const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.slice(0, n) : null);
+/** Token shapes a misbehaving workstation could leak in a free-text message: Google, JWT, bearer and key=value forms. */
+const TOKEN_SHAPES = [
+  /(?:access|refresh|id)[_\s-]?token["']?\s*[:=]\s*\S+/gi,
+  /bearer\s+\S+/gi,
+  /\bya29\.\S+/g,
+  /\b1\/\/\S+/g,
+  /\beyJ[\w-]{8,}\.[\w-]{4,}(?:\.[\w-]*)?/g,
+];
+export const scrubTokens = (s: string): string =>
+  TOKEN_SHAPES.reduce((acc, re) => acc.replace(re, '[removed]'), s);
+/** Free text from the workstation is clipped and scrubbed of anything that looks like a token before it is stored. */
+const clip = (s: unknown, n: number) => (typeof s === 'string' ? scrubTokens(s).slice(0, n) : null);
 
 /** Writes the health the runner reported. Only for connections of that workstation. */
 export async function applyStorageReport(
