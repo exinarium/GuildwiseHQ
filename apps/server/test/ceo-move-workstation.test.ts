@@ -50,7 +50,7 @@ const homeOf = async (id: string) =>
   (await q('SELECT workstation_id FROM agents WHERE id=$1', [id]))[0]!.workstation_id;
 const audit = (agentId: string, mode: string) =>
   q(
-    `SELECT payload, actor FROM events WHERE type='CeoActionTaken' AND payload->>'class'='agent.move_workstation'
+    `SELECT payload, actor_kind, actor_id FROM events WHERE type='CeoActionTaken' AND payload->>'class'='agent.move_workstation'
        AND payload->>'subjectId'=$1 AND payload->>'mode'=$2 ORDER BY seq`,
     [agentId, mode],
   );
@@ -79,11 +79,11 @@ describe('CEO action move-workstation', () => {
     const res = await move(a.name, second);
     expect(res.status).toBe('executed');
     expect(await homeOf(a.id)).toBe(second);
-    const ev = await q(`SELECT actor, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed'`, [
+    const ev = await q(`SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed'`, [
       `agent-${a.id}`,
     ]);
     expect(ev).toHaveLength(1);
-    expect(ev[0]!.actor.kind).toBe('agent');
+    expect(ev[0]!.actor_kind).toBe('agent');
     expect(ev[0]!.payload).toMatchObject({ fromWorkstationId: w.workstationId, workstationId: second });
     expect(await audit(a.id, 'decided')).toHaveLength(1);
   });
