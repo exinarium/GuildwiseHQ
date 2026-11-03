@@ -480,7 +480,7 @@ describe('Schedule settings', () => {
     await user.click(await screen.findByTestId('video-tab-settings'));
     const long = await screen.findByTestId('schedule-long');
     expect(screen.getByTestId('schedule-cap').textContent).toBe(
-      'The writer drafts 3 long and 3 Short scripts a week.',
+      'The writer keeps drafting while fewer than 6 long and 6 Short scripts wait for review or publishing; the days only decide when approved videos go out.',
     );
     await user.click(within(long).getByTestId('day-long-tue'));
     const body = JSON.parse(calls.find((c) => c.method === 'PATCH')?.body ?? '{}');
@@ -490,7 +490,9 @@ describe('Schedule settings', () => {
 
   it('derives the cap text from the days', () => {
     const sch = defaultSchedule(4, 1);
-    expect(weeklyCapText(sch)).toBe('The writer drafts 4 long and 1 Short scripts a week.');
+    expect(weeklyCapText(sch)).toBe(
+      'The writer keeps drafting while fewer than 8 long and 2 Short scripts wait for review or publishing; the days only decide when approved videos go out.',
+    );
     expect(weeklyCapText(defaultSchedule(0, 0))).toContain('no scripts');
   });
 
