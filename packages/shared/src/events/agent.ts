@@ -128,6 +128,8 @@ export const agentEvents = [
       agentId: Id,
       /** Null clears the home (the built-in CEO when the Owner changes and the new Owner has no workstation). */
       workstationId: Id.nullable(),
+      /** Where the agent was before (the audit trail of a move); absent on events written before it was recorded. */
+      fromWorkstationId: Id.nullable().optional(),
       runtime: z.string(),
       model: z.string(),
       unsandboxedAck: UnsandboxedAckSchema.optional(),

@@ -309,7 +309,8 @@ SA = super admin, O = Owner, A = Admin, M = Member, G = Guest. "proj" = only in 
 | Standing orders: project-wide / org-wide | | yes / yes | yes / yes | | |
 | **Agents** (org-wide, per-agent allow-list, `restructure.md`) | | | | | |
 | Hire | | yes, any allow-list | yes, any allow-list | onto own workstation, allow-list within proj | onto own workstation, allow-list within shared proj |
-| Change, fire, rehome, permissions (narrow) | | any org agent | any org agent | own hires | own hires |
+| Change, fire, permissions (narrow) | | any org agent | any org agent | own hires | own hires |
+| Move or re-home an agent to another workstation of the organization | | any org agent | any org agent | none | none |
 | Widen permissions | | yes | yes | | |
 | Direct / chat | | any | any | agents allowed on a proj, in that project's context | same |
 | **Catalogue and org designer** | | | | | |

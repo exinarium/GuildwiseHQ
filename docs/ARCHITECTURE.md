@@ -2011,7 +2011,8 @@ Admins get the administration view only; being admin grants no visibility into o
 | Set a project's concurrency cap (`PUT /api/projects/:id/concurrency-cap`) | any active project member |
 | Add a standing order (`POST /api/ledger`, or `ledger.scope=standing_order` when answering a desk item) | project owner for project-wide orders (also when a `cardId` is given: the order is still project-wide); the organization owner for organization-wide orders (a guest manager's answer may carry decisions and requirements, never standing orders) |
 | Change an agent's `permissions` | anyone who may change the agent, but only to narrow the role definition; widening non-core limits (web/MCP tools, risk tiers, repos) needs the org owner; the role's hard limits (`edit`/`shell` tools it lacks, `mayCommit`, its denied shell patterns, its writable globs) are never widened (`checkPermissions`, `permissions_exceed_role`); changing the role resets permissions to the new role's; a new version of the agent's own role is followed automatically (`AgentPermissionsRebased`: new role + the agent's deviations) |
-| Change / fire / rehome agent | org owner (any agent of the org) or `manager_user_id` (own hires) |
+| Change / fire agent | org owner (any agent of the org) or `manager_user_id` (own hires) |
+| Move / rehome agent (`POST /api/agents/:id/rehome`) | org Owner or Admin only, any non-retired, non-built-in agent, onto any active workstation of an active member of the agent's organization. Refused (409 `agent_busy`) while the agent has an open shift or holds a claim. `AgentRehomed` carries `fromWorkstationId?` (the audit entry) |
 | Direct / chat with an agent | org Owner and Admins for any agent; anyone else for an agent that is allowed on a project they are on (`sharesAllowedProject`, thread linked to that project). Re-checked on every `chat.send` (a removed member or deactivated account cannot keep using an old thread); project chats are labelled "visible to this project's managers" in the UI |
 | Extend / reset built-in roles, create custom roles/workflows/departments | org owner |
 | Rate digest items, approve outbound for a card | card owner (outbound) / project members (ratings) |
@@ -2076,6 +2077,7 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `POST /api/cards/:id/move` `{toStage, reason}` · `POST /api/cards/:id/release` · `POST /api/cards/:id/release-backoff` · `POST /api/cards/:id/cancel` | manager overrides | M1 |
 | `POST /api/cards/:id/decision-policy` `{policy}` | | M3 |
 | `POST /api/cards/:id/rehome` | | M3 |
+| `GET /api/agents/:id/move-targets` | Owner/Admin: the workstations (active, of active members of the agent's organization) the agent can move to, the caller's own first, plus where it is now | GWP-59 |
 | `POST /api/cards/:id/finalize` `{action?}` | manager-triggered finalize | M4 |
 | `GET /api/agents?projectId=` · `POST /api/agents` (hire) · `PATCH /api/agents/:id` · `POST /api/agents/:id/fire` · `POST /api/agents/:id/reset` · `POST /api/agents/:id/rehome` | | M1 (rehome/reset M3) |
 | `GET /api/agents/name-suggestions?theme=&count=` | name generator (skips used + retired names) | M1 |

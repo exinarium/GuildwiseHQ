@@ -1,5 +1,6 @@
 import {
   type DecisionPolicyRequest,
+  MoveTargetsResponseSchema,
   type ProjectInvitationDto,
   ProjectInvitationsResponseSchema,
   type RehomeAgentRequest,
@@ -73,7 +74,19 @@ export function useRehomeAgent() {
         model: v.model,
         ...(v.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] });
+      qc.invalidateQueries({ queryKey: ['move-targets'] });
+    },
+  });
+}
+
+/** The workstations an agent can move to; lazy: it only runs while the move dialog is open. */
+export function useMoveTargets(agentId: string | undefined) {
+  return useQuery({
+    queryKey: ['move-targets', agentId],
+    queryFn: () => get(`/agents/${agentId}/move-targets`, MoveTargetsResponseSchema),
+    enabled: !!agentId,
   });
 }
 

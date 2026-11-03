@@ -32,12 +32,12 @@ export const DESTINATION_LABEL: Record<VideoDestination, string> = {
   tiktok: 'TikTok',
 };
 
-/** "The writer drafts 3 long and 3 Short scripts a week": the cap follows the ticked days. */
+/** What the ticked days mean for the writer: the waiting pile is 2 x the days; the slots only decide when a video goes out. */
 export function weeklyCapText(schedule: Pick<VideoSchedule, 'long' | 'short'>): string {
   const l = schedule.long.days.length;
   const s = schedule.short.days.length;
   if (l === 0 && s === 0) return 'The writer drafts no scripts: tick at least one day.';
-  return `The writer drafts ${l} long and ${s} Short scripts a week.`;
+  return `The writer keeps drafting while fewer than ${2 * l} long and ${2 * s} Short scripts wait for review or publishing; the days only decide when approved videos go out.`;
 }
 
 /** A slot as the owner reads it: weekday, date and time on this computer's clock. */

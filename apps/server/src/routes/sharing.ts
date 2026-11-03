@@ -3,6 +3,7 @@ import {
   DecisionPolicyRequestSchema,
   IdParamsSchema,
   MemberParamsSchema,
+  MoveTargetsResponseSchema,
   RehomeAgentRequestSchema,
   ShareProjectRequestSchema,
 } from '@aom/shared';
@@ -11,6 +12,7 @@ import { requireUser } from '../auth/guards.ts';
 import {
   answerShare,
   listProjectInvitations,
+  loadMovableAgent,
   previewRemoval,
   rehomeAgent,
   rehomeCard,
@@ -23,6 +25,7 @@ import { notFound } from '../errors.ts';
 import { getAgentDto } from '../queries/agents.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getProjectDetail } from '../queries/misc.ts';
+import { listMoveTargets } from '../queries/move-targets.ts';
 import { typed } from './util.ts';
 
 /** Shared projects, member removal, agent re-homing, decision policy and card re-home (M3). */
@@ -88,6 +91,13 @@ export function sharingRoutes(ctx: Ctx) {
         return a;
       },
     );
+
+    /** The workstations an Owner or Admin can move this agent to (same rule as the move itself). */
+    app.get('/api/agents/:id/move-targets', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const a = await loadMovableAgent(ctx.pool, s.user, req.params.id);
+      return MoveTargetsResponseSchema.parse(await listMoveTargets(ctx.pool, a, s.user.id));
+    });
 
     app.post(
       '/api/cards/:id/decision-policy',
