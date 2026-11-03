@@ -355,7 +355,7 @@ to `needs_reconnect`, pauses uploads and mails the super admins once.
 **Settings** (`GET/PATCH /api/platform/video/settings`, the `videoPosts` platform setting): `enabled`, `articleVideos`,
 `releaseVideos`, `tutorials`, `shorts`, `schedule`, `privacy` (`public` | `unlisted` | `private`, default `public`), `playlists`
 `{ article?, release?, tutorial? }` (YouTube playlist ids), `categoryId` (`28`). A person's own submit ignores the per-kind
-switches and the caps; the writer's does not (`409 kind_off`, `409 weekly_cap`, `409 backlog_full`).
+switches and the caps; the writer's does not (`409 kind_off`, `409 backlog_full`).
 
 **The schedule** (`schedule`, always present in what the API returns): `timezone` (IANA, default `Africa/Johannesburg`, validated)
 and, per format `long` and `short`, `days` (`mon`..`sun`, each once, none allowed), `time` (`HH:MM` local), `destinations`
@@ -368,10 +368,11 @@ they are (daylight saving correct: a time that does not exist moves forward, one
 the schedule keeps the slots posts already hold; `status.offSchedule` counts the scheduled posts whose slot is no longer one
 of the schedule's.
 
-**The writer's room.** The weekly limit of a format is the number of days ticked (`capacity.<format>.limit`; `used` = the
-writer's posts of the last 7 days that were not rejected). A backlog guard stops the writer too: posts in review plus
-scheduled-not-yet-published ones (recorded help videos excluded) at or over twice the weekly slots (`backlog`,
-`backlogLimit`, `409 backlog_full`). With no days ticked the writer drafts nothing.
+**The writer's room.** Only a backlog guard stops the writer: posts in review plus approved-not-yet-published ones (recorded help
+videos excluded) at or over twice the number of days ticked (`capacity.<format>.backlog`, `backlogLimit`, `409 backlog_full`). The
+publishing slots do not limit drafting; they decide when an approved video goes out. `capacity.<format>.limit` is the number of days
+ticked and `used` the writer's posts of the last 7 days that were not rejected; both are for display. With no days ticked the backlog
+limit is 0 and the writer drafts nothing.
 
 **Data.** Event-sourced `VideoPostSubmitted`, `VideoPostRevised`, `VideoPostApproved` (`renderId` is optional), `VideoPostScheduled`
 (`slotAt`, `mode` `slot|now`, `destinations`, `captions?`, `reason` `approved|moved|slipped|reflow|migrated`, `by` a person or
@@ -598,7 +599,7 @@ Routes (all `/api/platform/video`, session cookie, platform accounts only):
 - `submitVideoPost(ctx, { kind, format, ref, script, parentId? }, origin, status)` in `commands/video-posts.ts` returns
   `{ post, created }`. Idempotent per `(kind, ref, format)`; `origin` `{ system: 'blog-writer' }`, `status` `'in_review'`. It validates
   the script (`VideoScriptSchema` and `videoScriptIssues`), needs `videoPosts.enabled` (`503 video_disabled`), applies the kind
-  switches, the weekly cap and the backlog guard to a system origin, renders nothing, and for a `tutorial` whose `ref` is a Video topic id marks the topic drafted.
+  switches and the backlog guard to a system origin, renders nothing, and for a `tutorial` whose `ref` is a Video topic id marks the topic drafted.
 - `articlesNeedingVideo(ctx, maxAgeDays = 7)`: published, non-launch articles published after the channel was connected, without a
   long video; returns `{ slug, title, summary, tags, publishedAt, content }[]`. `releasesNeedingVideo(ctx, maxAgeDays = 7)`
   returns `Release[]` (use `whatsNewFor`/`loadReleases` for the content and `SECTION_VIDEOS` help anchors for clips). Both return `[]`

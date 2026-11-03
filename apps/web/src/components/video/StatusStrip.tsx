@@ -74,7 +74,8 @@ export function StatusStrip({ status, posts }: { status: VideoStatus; posts: Vid
           {status.nextSlot.short ? slotLabel(status.nextSlot.short) : 'none'}
         </span>
         <span>
-          This week: {cap.long.used} of {cap.long.limit} videos, {cap.short.used} of {cap.short.limit} Shorts
+          Waiting: {cap.long.backlog} of {cap.long.backlogLimit} videos, {cap.short.backlog} of{' '}
+          {cap.short.backlogLimit} Shorts
         </span>
       </div>
       {alerts.map((a) => (

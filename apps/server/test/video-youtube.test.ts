@@ -594,7 +594,7 @@ describe('editing and approval rules', () => {
     expect(back.status).toBe('in_review');
   });
 
-  it('a submit is idempotent per kind, ref and format, and a writer respects the weekly cap', async () => {
+  it('a submit is idempotent per kind, ref and format, and a writer is not capped by the weekly slots', async () => {
     const a = await submit('article', 'long', 'idem');
     const again = await ok(
       api('POST', '/api/platform/video/posts', {
@@ -609,20 +609,23 @@ describe('editing and approval rules', () => {
     await q('DELETE FROM video_posts');
     await days(1);
     const writer = { system: 'blog-writer' as const };
-    await submitVideoPost(
-      t.app.ctx,
-      { kind: 'article', format: 'long', ref: 'w1', script: script('article', 'long', 'w1') },
-      writer,
-      'in_review',
-    );
+    for (const ref of ['w1', 'w2']) {
+      // one slot a week, backlog limit 2: both drafts are accepted
+      await submitVideoPost(
+        t.app.ctx,
+        { kind: 'article', format: 'long', ref, script: script('article', 'long', ref) },
+        writer,
+        'in_review',
+      );
+    }
     await expect(
       submitVideoPost(
         t.app.ctx,
-        { kind: 'article', format: 'long', ref: 'w2', script: script('article', 'long', 'w2') },
+        { kind: 'article', format: 'long', ref: 'w2b', script: script('article', 'long', 'w2b') },
         writer,
         'in_review',
       ),
-    ).rejects.toMatchObject({ code: 'weekly_cap' });
+    ).rejects.toMatchObject({ code: 'backlog_full' });
     // a person is not capped
     await submit('article', 'long', 'w3');
     await days(3);
@@ -638,7 +641,35 @@ describe('editing and approval rules', () => {
     await settings({ articleVideos: true });
   });
 
-  it('a rejected writer draft frees its weekly slot; other statuses still count', async () => {
+  it('writer drafts beyond the 7-day count are accepted while the backlog has room, refused when it is full', async () => {
+    await q('DELETE FROM video_posts');
+    await days(3, 3); // 3 slots a week, backlog limit 6
+    await settings({ articleVideos: true, shorts: true });
+    const writer = { system: 'blog-writer' as const };
+    const draft = (ref: string, format: 'long' | 'short', status: 'draft' | 'in_review') =>
+      submitVideoPost(
+        t.app.ctx,
+        { kind: 'article', format, ref, script: script('article', format, ref) },
+        writer,
+        status,
+      );
+    for (let i = 0; i < 7; i++) {
+      await draft(`over-${i}`, 'long', 'draft'); // not waiting for review: used, not backlog
+      await draft(`over-${i}`, 'short', 'draft');
+    }
+    expect(await videoCapacity(t.app.ctx)).toMatchObject({
+      long: { used: 7, limit: 3, backlog: 0, backlogLimit: 6 },
+      short: { used: 7, limit: 3, backlog: 0, backlogLimit: 6 },
+    });
+    for (const format of ['long', 'short'] as const) {
+      for (let i = 0; i < 6; i++) expect((await draft(`wait-${i}`, format, 'in_review')).created).toBe(true);
+      await expect(draft('wait-6', format, 'in_review')).rejects.toMatchObject({ code: 'backlog_full' });
+    }
+    await q('DELETE FROM video_posts');
+    await days(7);
+  });
+
+  it('a rejected writer draft frees its backlog place; other statuses still count', async () => {
     await q('DELETE FROM video_posts');
     await days(1, 1);
     await settings({ articleVideos: true, shorts: true });
@@ -656,22 +687,25 @@ describe('editing and approval rules', () => {
       long: { used: 1, limit: 1, backlog: 1, backlogLimit: 2 },
       short: { used: 1, limit: 1, backlog: 1, backlogLimit: 2 },
     });
-    await expect(draft('cap-b', 'long')).rejects.toMatchObject({ code: 'weekly_cap' });
-    await expect(draft('cap-b', 'short')).rejects.toMatchObject({ code: 'weekly_cap' });
+    await draft('cap-b', 'long'); // over the weekly slots, under the backlog limit
+    await draft('cap-b', 'short');
+    await expect(draft('cap-c', 'long')).rejects.toMatchObject({ code: 'backlog_full' });
+    await expect(draft('cap-c', 'short')).rejects.toMatchObject({ code: 'backlog_full' });
     await ok(api('POST', `/api/platform/video/posts/${a.post.id}/reject`, { reason: 'unwanted' }));
     await ok(api('POST', `/api/platform/video/posts/${s.post.id}/reject`, { reason: 'unwanted' }));
-    expect(await videoCapacity(t.app.ctx)).toMatchObject({ long: { used: 0 }, short: { used: 0 } });
-    const b = await draft('cap-b', 'long');
-    expect(b.created).toBe(true);
-    await draft('cap-b', 'short');
-    expect(await videoCapacity(t.app.ctx)).toMatchObject({ long: { used: 1 }, short: { used: 1 } });
-    // every non-rejected status counts (draft, in_review, approved)
+    expect(await videoCapacity(t.app.ctx)).toMatchObject({
+      long: { used: 1, backlog: 1 },
+      short: { used: 1, backlog: 1 },
+    });
+    const c = await draft('cap-c', 'long'); // the rejected drafts freed their backlog places
+    expect(c.created).toBe(true);
+    // every non-rejected status counts for `used` (draft, in_review, approved)
     for (const st of ['draft', 'in_review', 'approved']) {
-      await q('UPDATE video_posts SET status=$1 WHERE id=$2', [st, b.post.id]);
-      expect((await videoCapacity(t.app.ctx)).long.used).toBe(1);
+      await q('UPDATE video_posts SET status=$1 WHERE id=$2', [st, c.post.id]);
+      expect((await videoCapacity(t.app.ctx)).long.used).toBe(2);
     }
-    await q("UPDATE video_posts SET status='rejected' WHERE id=$1", [b.post.id]);
-    expect((await videoCapacity(t.app.ctx)).long.used).toBe(0);
+    await q("UPDATE video_posts SET status='rejected' WHERE id=$1", [c.post.id]);
+    expect((await videoCapacity(t.app.ctx)).long.used).toBe(1);
     await days(7);
   });
 
@@ -1422,7 +1456,7 @@ describe('the app and the editing rules', () => {
     }
   });
 
-  it('concurrent writer submissions cannot pass the weekly cap together', async () => {
+  it('concurrent writer submissions cannot pass the backlog limit together', async () => {
     await days(2, 2);
     const writer = { system: 'blog-writer' as const };
     const results = await Promise.allSettled(
@@ -1435,10 +1469,10 @@ describe('the app and the editing rules', () => {
         ),
       ),
     );
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(4); // backlog limit: twice the 2 slots
     expect(
       (await q(`SELECT count(*)::int AS n FROM video_posts WHERE origin_system IS NOT NULL`))[0]?.n,
-    ).toBe(2);
+    ).toBe(4);
     await days(7);
   });
 
