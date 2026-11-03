@@ -302,3 +302,36 @@ Tests: server vitest (own database `aom_test_gwp58`), with new tests in `test/wo
 `test/data-migration-orphaned-devops.test.ts`; runner vitest (`test/unpaired-state.test.ts`, plus extending the host and
 pairings tests); web vitest for the badge. The e2e item in the test plan (pair, unpair in the UI, check the board) is
 for the testers.
+
+## Rebase onto release/1.5.0 (2026-11-03)
+
+Question: the rebase onto release/1.5.0 conflicted in `CHANGELOG.md`, `apps/server/src/queries/agents.ts` and
+`apps/web/src/pages/Agents.tsx`. How do we combine both sides and keep the approved work (cc51faa5)?
+
+Findings:
+
+- The branch is already rebased onto `a0914669`, which is the current head of `origin/release/1.5.0` (no newer
+  commits after a fresh fetch). The commits are `407ca9b8` (this report), `e22a9817`, `153d4e9d`, `02e25d40`,
+  `fbfd4034` and `c40a1ba7`.
+- `git diff a0914669 c40a1ba7` is **byte-identical** to `git diff 1c6b4693 71c1fe9b`. Tree `71c1fe9b` is the approved
+  resolution `f07bcdd3` with `cc51faa5` applied on top. So all 21 files, including the three that conflicted, carry
+  the approved GWP-58 change unchanged, and release/1.5.0's side is kept as it is. No more conflict resolution is
+  needed.
+- `packages/shared` `vitest run test/release-changelog.test.ts` at `c40a1ba7`: 1 file passed, 10 tests passed. The
+  GWP-58 entry is under `[1.5.0]` / `### Fixed`, and `[Unreleased]` is empty.
+- **One problem:** the top commit `eaaabfbf` ("Work in progress") adds 15 empty files. They are local editor and tool
+  placeholders that must not land: `.claude/{agents,commands,hooks,launch.json,loop.md,output-styles,routines,
+  scheduled_tasks.json,settings.json,settings.local.json,skills,workflows}`, `.idea`, `.mcp.json` and `.vscode`.
+
+Fix (the build step):
+
+1. Remove those 15 paths from the index only, then commit:
+   `git rm --cached -r -q .claude .idea .mcp.json .vscode`. Commit message: "Remove local tool placeholder files". Do not
+   delete the files in the working tree; some of them are mounted read-only. After the commit,
+   `git diff --stat a0914669 HEAD` must list exactly the 21 files above and nothing under `.claude`, `.idea`,
+   `.mcp.json` or `.vscode`.
+2. Do not change any product file. Check with `diff <(git diff 1c6b4693 71c1fe9b) <(git diff a0914669 HEAD)`, which
+   must print nothing.
+3. Run the unit tests again: `packages/shared` release-changelog, `apps/runner` `test/unpaired-state.test.ts`,
+   `apps/web` `src/test/agent-*`, and `tsc --noEmit` for the server, runner and e2e. When Postgres on 5433 is reachable,
+   also run the server suite `workstation-unpair-devops`.
