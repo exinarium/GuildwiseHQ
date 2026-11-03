@@ -1,5 +1,5 @@
 import {
-  canManageAgentInOrg,
+  type Actor,
   canManageCard,
   type DecisionPolicyRequest,
   isOrgManager,
@@ -17,6 +17,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { orgWorkstationSql } from '../queries/move-targets.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { sandboxGate } from './agents.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
@@ -347,7 +348,24 @@ export async function removeMemberIn(
 
 // ------------------------------------------------------------------------------------ agent re-home
 
-/** Owner (or the agent's current manager) re-homes a `needs_rehome` agent onto one of their own workstations. */
+/**
+ * Loads the agent for a move and checks the caller: 404 when the agent is unknown or the caller has nothing to do with
+ * it, 403 unless the caller is an Owner or Admin of its organization (the hiring manager no longer moves agents).
+ */
+export async function loadMovableAgent(
+  tx: Queryable,
+  user: AuthSession['user'],
+  agentId: string,
+): Promise<Row> {
+  const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
+  const role = a ? await orgRoleOf(tx, user.id, a.org_id) : null;
+  if (!a || (!role && a.manager_user_id !== user.id)) throw notFound('agent not found');
+  if (!isOrgManager({ orgRole: role }))
+    throw forbidden('only the organization Owner and Admins can move an agent to another workstation');
+  return a;
+}
+
+/** An Owner or Admin moves an agent (active or needs_rehome) to another workstation of its organization. */
 export async function rehomeAgent(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -355,56 +373,116 @@ export async function rehomeAgent(
   req: RehomeAgentRequest,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
-    const role = a ? await orgRoleOf(tx, user.id, a.org_id) : null;
-    if (!a || !(isOrgManager({ orgRole: role }) || a.manager_user_id === user.id))
-      throw notFound('agent not found');
-    if (!canManageAgentInOrg({ userId: user.id, orgRole: role, managerUserId: a.manager_user_id }))
-      throw forbidden('only the organization Owner and Admins or the hiring manager can do this');
-    if (a.status !== 'needs_rehome')
-      throw conflict('not_homeless', 'only agents that need a new home can be re-homed');
-    const ws = await one(
-      tx,
-      `SELECT id, runtimes FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
-      [req.workstationId, user.id],
-    );
-    if (!ws) throw notFound('workstation not found');
-    const unsandboxedAck = await sandboxGate(
-      ctx,
-      tx,
-      user.id,
-      req.workstationId,
-      req.runtime,
-      req.acknowledgeUnsandboxed,
-    );
-    // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4).
-    const used = await one(
-      tx,
-      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
-      [a.org_id, req.workstationId],
-    );
-    if (!used) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.agent(agentId),
-          event: {
-            type: 'AgentRehomed',
-            payload: {
-              agentId,
-              workstationId: req.workstationId,
-              runtime: req.runtime,
-              model: req.model,
-              ...(unsandboxedAck ? { unsandboxedAck } : {}),
-            },
-          },
-          actor: userActor(user.id),
-          scope: orgScope(a.org_id),
-        },
-      ],
-      { tx },
-    );
+    const a = await loadMovableAgent(tx, user, agentId);
+    await rehomeAgentIn(ctx, tx, { userId: user.id, actor: userActor(user.id) }, a, req);
   });
+}
+
+/**
+ * The move itself, inside the caller's append transaction (so the busy check cannot race a claim). The caller has
+ * already checked who may move the agent. Every refusal throws before anything is appended: the agent stays where it was.
+ */
+export async function rehomeAgentIn(
+  ctx: Ctx,
+  tx: Tx,
+  by: { userId: string; actor: Actor },
+  a: Row,
+  req: RehomeAgentRequest,
+): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+  if (a.status === 'retired')
+    throw conflict('agent_retired', `${a.name} was fired; a fired agent cannot be moved`);
+  if (a.is_builtin)
+    throw conflict(
+      'builtin_agent',
+      a.role_key === 'ceo'
+        ? 'the CEO moves on the CEO page'
+        : `${a.name} is the DevOps engineer of its workstation and stays with it: every workstation gets its own`,
+    );
+  // A needs_rehome agent has no workstation: removing its manager released its claims, and a shift left open by a
+  // runner that never reported back is orphaned (nothing would ever end it), so it must not block the re-home.
+  const shift =
+    a.status === 'needs_rehome'
+      ? null
+      : await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [a.id]);
+  if (shift)
+    throw conflict(
+      'agent_busy',
+      `${a.name} is in a running shift: wait until it ends or stop it, then move ${a.name}.`,
+    );
+  const claim = await one(
+    tx,
+    `SELECT ref FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`,
+    [a.id],
+  );
+  if (claim)
+    throw conflict(
+      'agent_busy',
+      `${a.name} is working on ${claim.ref}: release the card or wait until the shift ends.`,
+    );
+  const w = await one(
+    tx,
+    `SELECT w.id, w.name, w.status, w.user_id, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
+       FROM workstations w WHERE w.id=$1`,
+    [req.workstationId, a.org_id],
+  );
+  if (w && !w.in_org && w.status !== 'active') {
+    const member = await one(
+      tx,
+      `SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
+      [a.org_id, w.user_id],
+    );
+    if (member) throw conflict('workstation_unpaired', `${w.name} was unpaired: pick a paired workstation`);
+  }
+  if (!w || !w.in_org) throw notFound('workstation not found in this organization', 'workstation_not_found');
+  if (w.id === a.workstation_id) throw conflict('same_workstation', `${a.name} already works on ${w.name}`);
+  const unsandboxedAck = await sandboxGate(
+    ctx,
+    tx,
+    by.userId,
+    w.id,
+    req.runtime,
+    req.acknowledgeUnsandboxed,
+    { roleKey: a.role_key, isDevops: a.is_devops, permissions: a.permissions, model: req.model },
+  );
+  // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4);
+  // the one this agent leaves counts as one less when it was the last agent there.
+  const used = await one(
+    tx,
+    `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
+    [a.org_id, w.id],
+  );
+  let delta = used ? 0 : 1;
+  if (a.status === 'active' && a.workstation_id) {
+    const others = await one(
+      tx,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin AND id<>$3 LIMIT 1`,
+      [a.org_id, a.workstation_id, a.id],
+    );
+    if (!others) delta -= 1;
+  }
+  if (delta > 0) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.agent(a.id),
+        event: {
+          type: 'AgentRehomed',
+          payload: {
+            agentId: a.id,
+            workstationId: w.id,
+            fromWorkstationId: a.workstation_id ?? null,
+            runtime: req.runtime,
+            model: req.model,
+            ...(unsandboxedAck ? { unsandboxedAck } : {}),
+          },
+        },
+        actor: by.actor,
+        scope: orgScope(a.org_id),
+      },
+    ],
+    { tx },
+  );
+  return { fromWorkstationId: a.workstation_id ?? null, toWorkstationId: w.id };
 }
 
 // ------------------------------------------------------------------------------------ card actions
