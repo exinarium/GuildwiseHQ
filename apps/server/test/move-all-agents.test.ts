@@ -115,7 +115,9 @@ describe('move all agents from one workstation to another', () => {
 
   it('skips the DevOps engineer of the source and leaves it there', async () => {
     const dev = (
-      await q(`SELECT id FROM agents WHERE is_devops AND status='active' AND workstation_id=$1`, [w.workstationId])
+      await q(`SELECT id FROM agents WHERE is_devops AND status='active' AND workstation_id=$1`, [
+        w.workstationId,
+      ])
     )[0]!;
     const a = await hire(); // hired onto the world's workstation, next to its DevOps engineer
     const r = await moveAll(w.workstationId);
@@ -177,7 +179,9 @@ describe('move all agents from one workstation to another', () => {
   it('AC5: a Member gets 403 on every route, an Admin is allowed', async () => {
     const s = await station(1);
     const m = as(memberS.cookie);
-    expect((await m.post(`/api/workstations/${s.id}/move-agents`, { targetWorkstationId: target })).status).toBe(403);
+    expect(
+      (await m.post(`/api/workstations/${s.id}/move-agents`, { targetWorkstationId: target })).status,
+    ).toBe(403);
     expect(
       (await m.get(`/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`)).status,
     ).toBe(403);

@@ -32,8 +32,24 @@ const homes = {
 const targets = {
   current: { id: WS_DEAD, name: 'My workstation', state: 'unpaired' },
   workstations: [
-    { id: WS_MINE, name: 'Desk', ownerUserId: USER, ownerName: 'Olga', mine: true, connected: true, runtimes },
-    { id: WS_HERS, name: 'Laptop', ownerUserId: ID(2), ownerName: 'Pia', mine: false, connected: false, runtimes },
+    {
+      id: WS_MINE,
+      name: 'Desk',
+      ownerUserId: USER,
+      ownerName: 'Olga',
+      mine: true,
+      connected: true,
+      runtimes,
+    },
+    {
+      id: WS_HERS,
+      name: 'Laptop',
+      ownerUserId: ID(2),
+      ownerName: 'Pia',
+      mine: false,
+      connected: false,
+      runtimes,
+    },
   ],
 };
 const ref = (n: number, name: string) => ({ agentId: ID(100 + n), name });
