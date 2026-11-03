@@ -9,6 +9,7 @@ import {
   useStorageRequest,
 } from '../../api/queries/storage.ts';
 import { agoText } from '../../lib/ago.ts';
+import { newId } from '../../lib/secure.ts';
 import {
   STORAGE_KIND_LABEL,
   storageConnectAction,
@@ -58,7 +59,7 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
   const [tests, setTests] = useState<Record<string, string>>({});
 
   const runTest = async (c: StorageConnectionDto) => {
-    const requestId = crypto.randomUUID();
+    const requestId = newId();
     try {
       await post(`/org/storage/connections/${c.id}/test`, { requestId });
       setTests((t) => ({ ...t, [c.id]: requestId }));

@@ -11,10 +11,9 @@ import {
 } from '../../api/queries/storage.ts';
 import { useVaults } from '../../api/queries/vaults.ts';
 import { sealIntegration } from '../../lib/runner-seal.ts';
+import { canSealHere, copyText, newId } from '../../lib/secure.ts';
 import { isOAuthKind, STORAGE_KIND_HELP, STORAGE_KIND_LABEL, storageErrorText } from '../../lib/storage.ts';
 import { Button, Callout, Dialog, Select, Spinner, TextInput } from '../ui.tsx';
-
-const newId = () => crypto.randomUUID();
 
 /** The device sign-in: a large code to type on any device, a link to the provider's page, and what is happening. */
 function DevicePanel({ rid, onDone }: { rid: string; onDone: () => void }) {
@@ -44,8 +43,7 @@ function DevicePanel({ rid, onDone }: { rid: string; onDone: () => void }) {
       <div className="flex flex-wrap justify-center gap-2">
         <Button
           onClick={() => {
-            void navigator.clipboard?.writeText(r.prompt?.userCode ?? '');
-            setCopied(true);
+            void copyText(r.prompt?.userCode ?? '').then(setCopied);
           }}
         >
           {copied ? 'Copied' : 'Copy code'}
@@ -160,7 +158,7 @@ export function StorageConnectDialog({
   };
 
   const vaultList = useMemo(() => vaults.data ?? [], [vaults.data]);
-  const canSeal = !!ws.data?.key;
+  const canSeal = !!ws.data?.key && canSealHere();
 
   return (
     <Dialog
@@ -323,7 +321,13 @@ export function StorageConnectDialog({
             />
           </>
         )}
-        {!rid && !isOAuthKind(kind) && !canSeal && ws.isPending && (
+        {!rid && !isOAuthKind(kind) && !canSealHere() && (
+          <Callout tone="warning" data-testid="storage-insecure-context">
+            This page is not on HTTPS, so the browser cannot encrypt these details for your workstation. Open
+            Guildwise over HTTPS or on localhost to connect this storage.
+          </Callout>
+        )}
+        {!rid && !isOAuthKind(kind) && canSealHere() && !ws.data?.key && ws.isPending && (
           <Spinner label="Reading the workstation key" />
         )}
       </div>
