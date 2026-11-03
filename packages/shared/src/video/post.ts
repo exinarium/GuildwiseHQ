@@ -241,9 +241,9 @@ export const VideoPostSchema = z.object({
 export type VideoPost = z.infer<typeof VideoPostSchema>;
 
 /**
- * `limit`: drafts the writer may add per rolling week (= the days ticked); `used`: its drafts of the last 7 days that were
- * not rejected; `backlog`: posts in review plus scheduled and not yet published. The writer stops when `used >= limit`
- * or `backlog >= backlogLimit`.
+ * `limit`: the days ticked (the publishing slots a week); `used`: the writer's drafts of the last 7 days that were not
+ * rejected (both are for display only); `backlog`: posts in review plus approved and not yet published. The writer stops
+ * only when `backlog >= backlogLimit` (twice the days ticked).
  */
 export const VideoCapacityEntrySchema = z.object({
   used: z.number().int(),

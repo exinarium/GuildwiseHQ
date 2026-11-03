@@ -466,8 +466,8 @@ export async function listVideoPosts(
 /**
  * The writer's room per format. `limit` = the days ticked in the schedule; `used` = writer posts of the last 7 days that
  * were not rejected (the owner turned those down); `backlog` = posts waiting for the owner (in review) plus scheduled ones
- * not yet published, the recorded help videos excluded. The writer stops when `used >= limit` or `backlog >= backlogLimit`
- * (twice the weekly slots).
+ * not yet published, the recorded help videos excluded. The writer stops when `backlog >= backlogLimit`
+ * (twice the weekly slots); `used` and `limit` are for display only.
  */
 export async function videoCapacity(ctx: Ctx): Promise<VideoCapacity> {
   const { schedule } = await videoSettings(ctx);
@@ -616,7 +616,7 @@ export async function withLock<T>(ctx: Ctx, key: string, fn: () => Promise<T>): 
  * writer's finished script. The hosted blog writer and the platform route both come through here.
  *
  * Needs `videoPosts.enabled` (503 `video_disabled`). A writer's post (`origin.system`) also respects the per-kind switches,
- * the weekly cap (the days ticked in the schedule) and the backlog guard (409 `kind_off`, `weekly_cap`, `backlog_full`);
+ * the backlog guard (409 `kind_off`, `backlog_full`); how many drafts were made in the last 7 days does not limit it;
  * a person's own submit does not.
  */
 export async function submitVideoPost(
@@ -629,7 +629,7 @@ export async function submitVideoPost(
   assertVideoEnabled(settings);
   const script = VideoScriptSchema.parse(input.script);
   checkScript(script, { kind: input.kind, format: input.format });
-  // writer submissions share one lock for the weekly caps: concurrent submits cannot both pass the count
+  // writer submissions share one lock for the backlog guard: concurrent submits cannot both pass the count
   const guarded = <T>(fn: () => Promise<T>): Promise<T> =>
     origin.system ? withLock(ctx, 'video-writer-cap', fn) : fn();
   return guarded(() =>
@@ -653,8 +653,6 @@ export async function submitVideoPost(
           );
         const cap = await videoCapacity(ctx);
         const c = cap[input.format];
-        if (c.used >= c.limit)
-          throw conflict('weekly_cap', `the weekly limit of ${c.limit} ${input.format} videos is reached`);
         if (c.backlog >= c.backlogLimit)
           throw conflict(
             'backlog_full',
