@@ -287,10 +287,11 @@ test('the Running tab filters instances by step and status', async () => {
   await page.getByRole('tab', { name: 'Running' }).click();
   const list = page.getByTestId('instance-list');
   await expect(list.getByRole('link', { name: 'Ann Tenant' })).toBeVisible();
-  await page.getByLabel('Status').selectOption('completed');
+  // exact labels: the sidebar's "Get started: 1 of 5 steps done" button also matches a loose 'Step'
+  await page.getByLabel('Status', { exact: true }).selectOption('completed');
   await expect(page.getByText('Nothing running')).toBeVisible();
-  await page.getByLabel('Status').selectOption('');
-  await page.getByLabel('Step').selectOption('rent');
+  await page.getByLabel('Status', { exact: true }).selectOption('');
+  await page.getByLabel('Step', { exact: true }).selectOption('rent');
   await expect(list.getByRole('link', { name: 'Ann Tenant' })).toBeVisible();
   const byStep = await (await api.get(`/api/journey-instances?stepId=lead&projectId=${projectId}`)).json();
   expect(byStep.items).toHaveLength(0);
