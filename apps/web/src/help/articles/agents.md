@@ -47,6 +47,7 @@ You can star up to 10 projects per agent. Removing a project from the allow-list
 
 - **Pause** (Owner and Admin, on the agent's card) stops the agent taking new work; **Resume** starts it again. A paused agent is not given cards until it is resumed. The CEO's card has Pause too, and **Manage on the CEO page** opens the CEO page.
 - **Re-home** appears on the card when the agent needs a new home, for example because its manager was removed. Pick one of your own workstations. If that workstation runs agents without an OS sandbox, the dialog shows a warning with a box to acknowledge it.
+- **Move all agents** (Owners and Admins, in the Workstations section at the top of the page) moves every agent of one workstation to another, for example off a workstation that was removed. The dialog shows how many agents will move. Agents in a running shift are skipped and listed with the reason; the workstation's own DevOps engineer and the CEO stay where they are. Agents already moved are not undone if another one cannot move.
 
 ## Seniority {#seniority}
 
