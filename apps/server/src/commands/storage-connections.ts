@@ -466,7 +466,7 @@ export async function recordWriteOutcome(
   await exec(
     ctx.pool,
     `UPDATE storage_connection_health SET state=$2, error_code=$3, message=$4, checked_at=$5 WHERE connection_id=$1`,
-    [connectionId, state, outcome.error.code, outcome.error.message.slice(0, 300), now],
+    [connectionId, state, outcome.error.code, clip(outcome.error.message, 300), now],
   );
 }
 
