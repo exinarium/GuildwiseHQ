@@ -38,6 +38,9 @@ import { BatchView } from './pages/IntakeBatch.tsx';
 import { Integrations, IntegrationsIndex } from './pages/Integrations.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
+import { JourneyDesigner } from './pages/JourneyDesigner.tsx';
+import { JourneyInstance } from './pages/JourneyInstance.tsx';
+import { Journeys } from './pages/Journeys.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
@@ -131,6 +134,9 @@ export const routes = [
       { path: '/automations', element: <Automations /> },
       { path: '/forms', element: <Forms /> },
       { path: '/forms/:id', element: <FormBuilderPage /> },
+      { path: '/journeys', element: <Journeys /> },
+      { path: '/journeys/instances/:id', element: <JourneyInstance /> },
+      { path: '/journeys/:id', element: <JourneyDesigner /> },
       { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
       { path: '/interests/:id', element: <InterestDetail /> },

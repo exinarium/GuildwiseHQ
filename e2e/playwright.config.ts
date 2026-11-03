@@ -72,6 +72,8 @@ export default defineConfig({
     { name: 'org-chart', testMatch: 'org-chart.spec.ts', dependencies: ['budgets'] },
     { name: 'installer', testMatch: 'installer.spec.ts', dependencies: ['org-chart'] },
     { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['installer'] },
+    // Journeys (designer, instances, handoffs, the shared record): its own user, organization and project.
+    { name: 'journeys', testMatch: 'journeys.spec.ts', dependencies: ['auth'] },
     // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the
     // iPhone 15 viewport, touch and user agent. Needs only the paired workstation and project TOY (pairing); the spec hires its own builders and reviewer.
     {

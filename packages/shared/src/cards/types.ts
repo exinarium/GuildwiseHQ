@@ -119,6 +119,8 @@ export const CardOrigin = z.enum([
   'trigger',
   /** Started by an inbound e-mail. */
   'email',
+  /** Started by a step of a journey instance. */
+  'journey',
 ]);
 export type CardOrigin = z.infer<typeof CardOrigin>;
 

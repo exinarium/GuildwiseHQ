@@ -28,6 +28,7 @@ import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
 import { interestEvents } from './interest.ts';
+import { journeyEvents } from './journey.ts';
 import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
@@ -119,6 +120,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...agentUxEvents,
   ...relayEvents,
   ...formEvents,
+  ...journeyEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -153,6 +155,7 @@ export * from './hygiene.ts';
 export * from './intake.ts';
 export * from './intake-batch.ts';
 export * from './interest.ts';
+export * from './journey.ts';
 export * from './ledger.ts';
 export * from './mail.ts';
 export * from './org.ts';

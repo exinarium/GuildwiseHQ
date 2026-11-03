@@ -14,6 +14,7 @@ import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
+import { sweepJourneys } from '../commands/journey-runtime.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
@@ -194,6 +195,7 @@ export class Scheduler {
   /** Sub-workflow starts and resolutions, event triggers and the deliveries (webhooks, e-mail) that are due; a failure of one never stops the other. */
   private async triggers(): Promise<void> {
     await sweepSubworkflows(this.ctx).catch((err) => this.ctx.log.error({ err }, 'sub-workflows failed'));
+    await sweepJourneys(this.ctx).catch((err) => this.ctx.log.error({ err }, 'journeys failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));

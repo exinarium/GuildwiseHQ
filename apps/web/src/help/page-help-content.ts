@@ -179,6 +179,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'phases#phase-done',
   },
+  '/journeys': {
+    title: 'Journeys',
+    intro:
+      'A journey is one whole process, from trigger to outcome, made of your workflows linked by handoffs and working on one shared record such as a client, a matter or a deal.',
+    controls: [
+      {
+        name: 'New journey',
+        text: 'Start from nothing or from the rentals template, then open the designer.',
+      },
+      {
+        name: 'Running',
+        text: 'Instances in progress, with filters by journey, step and status. Open one to see its history.',
+      },
+    ],
+    article: 'org-chart-and-design#custom-workflows',
+  },
   '/forms': {
     title: 'Forms',
     intro: 'The forms your organisation has designed. Open one to edit it, or start a new one.',

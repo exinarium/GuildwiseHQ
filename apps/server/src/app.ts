@@ -106,6 +106,7 @@ import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
+import { journeyRoutes } from './routes/journeys.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
@@ -477,6 +478,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
   await app.register(playbookRoutes(ctx));
+  await app.register(journeyRoutes(ctx));
   await app.register(agentUxRoutes(ctx));
   await app.register(delegationRoutes(ctx));
   await app.register(governanceRoutes(ctx));
