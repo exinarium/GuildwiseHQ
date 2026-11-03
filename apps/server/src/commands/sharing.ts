@@ -354,7 +354,8 @@ export async function removeMemberIn(
 
 /**
  * Loads the agent for a move and checks the caller: 404 when the agent is unknown or the caller has nothing to do with
- * it, 403 unless the caller is an Owner or Admin of its organization (the hiring manager no longer moves agents).
+ * it, 403 unless the caller is an Owner or Admin of its organization, or the hiring manager of a non-built-in agent.
+ * Only an Owner or Admin moves a DevOps engineer.
  */
 export async function loadMovableAgent(
   tx: Queryable,
@@ -364,12 +365,18 @@ export async function loadMovableAgent(
   const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
   const role = a ? await orgRoleOf(tx, user.id, a.org_id) : null;
   if (!a || (!role && a.manager_user_id !== user.id)) throw notFound('agent not found');
-  if (!isOrgManager({ orgRole: role }))
-    throw forbidden('only the organization Owner and Admins can move an agent to another workstation');
+  const orgManager = isOrgManager({ orgRole: role });
+  const hiringManager = !!role && a.manager_user_id === user.id;
+  if (a.is_builtin && a.is_devops && !orgManager)
+    throw forbidden('only the organization Owner and Admins can move a DevOps engineer');
+  if (!orgManager && !(hiringManager && !a.is_builtin))
+    throw forbidden(
+      "only the organization Owner, its Admins and the agent's hiring manager can move an agent to another workstation",
+    );
   return a;
 }
 
-/** An Owner or Admin moves an agent (active or needs_rehome) to another workstation of its organization. */
+/** An Owner, Admin or the hiring manager moves an agent (active or needs_rehome) to another workstation of its organization. */
 export async function rehomeAgent(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -403,13 +410,7 @@ export async function checkAgentMove(
 ): Promise<AgentMovePlan> {
   if (a.status === 'retired')
     throw conflict('agent_retired', `${a.name} was fired; a fired agent cannot be moved`);
-  if (a.is_builtin)
-    throw conflict(
-      'builtin_agent',
-      a.role_key === 'ceo'
-        ? 'the CEO moves on the CEO page'
-        : `${a.name} is the DevOps engineer of its workstation and stays with it: every workstation gets its own`,
-    );
+  if (a.is_builtin && a.role_key === 'ceo') throw conflict('builtin_agent', 'the CEO moves on the CEO page');
   // A needs_rehome agent has no workstation: removing its manager released its claims, and a shift left open by a
   // runner that never reported back is orphaned (nothing would ever end it), so it must not block the re-home.
   const shift =
@@ -420,16 +421,6 @@ export async function checkAgentMove(
     throw conflict(
       'agent_busy',
       `${a.name} is in a running shift: wait until it ends or stop it, then move ${a.name}.`,
-    );
-  const claim = await one(
-    tx,
-    `SELECT ref FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`,
-    [a.id],
-  );
-  if (claim)
-    throw conflict(
-      'agent_busy',
-      `${a.name} is working on ${claim.ref}: release the card or wait until the shift ends.`,
     );
   const w = await one(
     tx,
@@ -447,6 +438,26 @@ export async function checkAgentMove(
   }
   if (!w || !w.in_org) throw notFound('workstation not found in this organization', 'workstation_not_found');
   if (w.id === a.workstation_id) throw conflict('same_workstation', `${a.name} already works on ${w.name}`);
+  if (a.is_devops) {
+    const cur = a.workstation_id
+      ? await one(tx, 'SELECT name, status FROM workstations WHERE id=$1', [a.workstation_id])
+      : undefined;
+    if (cur && cur.status === 'active')
+      throw conflict(
+        'devops_stays',
+        `${a.name} is the DevOps engineer of ${cur.name}, which is still paired, so it stays there. Only the DevOps engineer of an unpaired workstation can move.`,
+      );
+    const other = await one(
+      tx,
+      `SELECT name FROM agents WHERE org_id=$1 AND workstation_id=$2 AND is_devops AND status='active' AND id<>$3 LIMIT 1`,
+      [a.org_id, w.id, a.id],
+    );
+    if (other)
+      throw conflict(
+        'one_devops_per_workstation',
+        `${w.name} already has a DevOps engineer, ${other.name}: the rule is one DevOps engineer per workstation (agents_one_devops), so ${a.name} cannot move there.`,
+      );
+  }
   const unsandboxedAck = await sandboxGate(
     ctx,
     tx,
@@ -463,8 +474,8 @@ export async function checkAgentMove(
     `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
     [a.org_id, w.id],
   );
-  let delta = used ? 0 : 1;
-  if (a.status === 'active' && a.workstation_id) {
+  let delta = a.is_builtin ? 0 : used ? 0 : 1;
+  if (!a.is_builtin && a.status === 'active' && a.workstation_id) {
     const others = await one(
       tx,
       `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin AND id<>$3 LIMIT 1`,
@@ -528,10 +539,46 @@ export async function rehomeAgentIn(
   by: { userId: string; actor: Actor },
   a: Row,
   req: RehomeAgentRequest,
-): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+): Promise<{ fromWorkstationId: string | null; toWorkstationId: string; releasedCardIds: string[] }> {
   const p = await prepareAgentMove(ctx, tx, by, a, req);
-  await ctx.store.append([p.append], { tx });
-  return { fromWorkstationId: p.fromWorkstationId, toWorkstationId: p.toWorkstationId };
+  // Work the agent still holds without an open shift (a lost shift whose lease has not expired) goes back to the queue.
+  const claims = await rows(tx, `SELECT * FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL`, [
+    a.id,
+  ]);
+  const tasks = await rows(
+    tx,
+    `SELECT id, org_id, project_id FROM ba_tasks WHERE agent_id=$1 AND status='running'`,
+    [a.id],
+  );
+  const releases: AppendInput[] = [];
+  for (const c of claims) {
+    releases.push({
+      streamId: streamId.card(c.id),
+      event: {
+        type: 'ClaimReleased',
+        payload: { cardId: c.id, claimId: c.claim_id, agentId: a.id, reason: 'agent_moved' },
+      },
+      actor: by.actor,
+      scope: projectScope(c.org_id, c.project_id),
+    });
+    releases.push(
+      cardMessage(c, { kind: 'system' }, 'system', `Claim released: ${a.name} moved to another workstation.`),
+    );
+  }
+  for (const t of tasks) {
+    releases.push({
+      streamId: streamId.baTask(t.id),
+      event: { type: 'BaTaskRequeued', payload: { taskId: t.id, reason: 'agent_moved', attempt: false } },
+      actor: by.actor,
+      scope: t.project_id ? projectScope(t.org_id, t.project_id) : orgScope(t.org_id),
+    });
+  }
+  await ctx.store.append([...releases, p.append], { tx });
+  return {
+    fromWorkstationId: p.fromWorkstationId,
+    toWorkstationId: p.toWorkstationId,
+    releasedCardIds: claims.map((c) => c.id as string),
+  };
 }
 
 // ------------------------------------------------------------------------------- move all agents

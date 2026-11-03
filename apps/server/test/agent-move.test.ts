@@ -97,16 +97,17 @@ describe('move any agent to another workstation', () => {
     expect(ev[0]!.payload.fromWorkstationId).toBeNull();
   });
 
-  it('a Member (also the hiring manager) gets 403, a non-member 404', async () => {
+  it('a plain Member gets 403, a non-member 404, the hiring manager may move', async () => {
     const a = await hire();
     expect((await as(memberS.cookie).post(`/api/agents/${a.id}/rehome`, body(second))).status).toBe(403);
-    await q('UPDATE agents SET manager_user_id=$2 WHERE id=$1', [a.id, memberS.id]);
-    const r = await as(memberS.cookie).post(`/api/agents/${a.id}/rehome`, body(second));
-    expect(r.status).toBe(403);
-    expect(r.body.error?.message ?? r.body.message).toBeTruthy();
-    expect((await as(outsider.cookie).post(`/api/agents/${a.id}/rehome`, body(second))).status).toBe(404);
     expect((await as(memberS.cookie).get(`/api/agents/${a.id}/move-targets`)).status).toBe(403);
+    expect((await as(outsider.cookie).post(`/api/agents/${a.id}/rehome`, body(second))).status).toBe(404);
     expect((await agentRow(a.id)).workstation_id).toBe(w.workstationId);
+    expect(await moved(a.id)).toHaveLength(0);
+    await q('UPDATE agents SET manager_user_id=$2 WHERE id=$1', [a.id, memberS.id]);
+    expect((await as(memberS.cookie).get(`/api/agents/${a.id}/move-targets`)).status).toBe(200);
+    expect((await as(memberS.cookie).post(`/api/agents/${a.id}/rehome`, body(second))).status).toBe(200);
+    expect((await agentRow(a.id)).workstation_id).toBe(second);
   });
 
   it('refuses another organization, unknown, guest, unpaired and current workstations', async () => {
@@ -129,7 +130,7 @@ describe('move any agent to another workstation', () => {
     expect(await moved(a.id)).toHaveLength(0);
   });
 
-  it('refuses an agent in a running shift or holding a claim, and it stays', async () => {
+  it('refuses an agent in a running shift, and it stays', async () => {
     const a = await hire();
     const shiftId = crypto.randomUUID();
     await q(
@@ -166,9 +167,10 @@ describe('move any agent to another workstation', () => {
   it('refuses built-in agents and fired agents', async () => {
     const devops = (await q(`SELECT id FROM agents WHERE org_id=$1 AND is_devops LIMIT 1`, [orgId]))[0];
     if (devops) {
+      // A DevOps engineer of a still-paired workstation stays with it.
       const r = await owner().post(`/api/agents/${devops.id}/rehome`, body(second));
       expect(r.status).toBe(409);
-      expect(JSON.stringify(r.body)).toContain('builtin_agent');
+      expect(JSON.stringify(r.body)).toContain('devops_stays');
     }
     const ceo = (await q(`SELECT id FROM agents WHERE org_id=$1 AND role_key='ceo' LIMIT 1`, [orgId]))[0];
     if (ceo) {

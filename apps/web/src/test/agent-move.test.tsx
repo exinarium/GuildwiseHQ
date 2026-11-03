@@ -191,16 +191,19 @@ describe('move an agent to another workstation', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-home Homeless' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Move Homeless to another workstation' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Move Devon to another workstation' })).toBeNull();
+    // Devon is a DevOps engineer on an unpaired workstation: the only DevOps move there is.
+    expect(screen.getByRole('button', { name: 'Move Devon to another workstation' })).toBeInTheDocument();
     expect(screen.getAllByText('workstation unpaired').length).toBeGreaterThan(0);
   });
 
-  it('a member, even the hiring manager, sees neither Move nor Re-home', async () => {
+  it('a member who hired the agent sees Move and Re-home, but not Move for a DevOps engineer', async () => {
     role = 'member';
     wrap(<Agents />);
-    await screen.findByText('Una');
-    expect(screen.queryByRole('button', { name: /Move Una/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Re-home/ })).toBeNull();
+    expect(
+      await screen.findByRole('button', { name: 'Move Una to another workstation' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-home Homeless' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Move Devon/ })).toBeNull();
   });
 
   it('the dialog lists the targets with their state and owner, and submits the move', async () => {

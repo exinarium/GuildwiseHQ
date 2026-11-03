@@ -77,6 +77,7 @@ export function useRehomeAgent() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents'] });
       qc.invalidateQueries({ queryKey: ['move-targets'] });
+      qc.invalidateQueries({ queryKey: ['org-chart'] });
     },
   });
 }

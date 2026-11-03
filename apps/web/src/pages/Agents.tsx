@@ -16,7 +16,6 @@ import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
 import { useMcpServers } from '../api/queries/mcp.ts';
-import { useMoveTargets, useRehomeAgent } from '../api/queries/members.ts';
 import { useHirablePacks } from '../api/queries/my-capabilities.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
@@ -29,6 +28,7 @@ import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
 import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
+import { MoveAgentDialog } from '../components/agents/MoveAgentDialog.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import { AllowedProjectsDialog, WorksOn } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
@@ -57,9 +57,10 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { canMoveAgent } from '../lib/agentMove.ts';
 import { money } from '../lib/money.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
-import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
+import { agentWarning } from '../lib/sandbox.ts';
 
 /**
  * The HR board (docs/SPEC.md "HR board"): one card per agent with avatar, role, model, status, hiring manager, stats
@@ -119,10 +120,15 @@ export function Agents() {
     !!myId && (orgRole(a) === 'owner' || orgRole(a) === 'admin' || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const canMove = (a: AgentDto) =>
-    (orgRole(a) === 'owner' || orgRole(a) === 'admin') &&
-    !a.isDevops &&
-    a.roleKey !== 'ceo' &&
-    a.status !== 'retired';
+    canMoveAgent({
+      myId,
+      orgRole: orgRole(a),
+      managerUserId: a.managerUserId,
+      roleKey: a.roleKey,
+      isDevops: a.isDevops,
+      status: a.status,
+      unpaired: a.workstationState === 'unpaired',
+    });
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
   const active = board.data?.agents ?? [];
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
@@ -498,6 +504,16 @@ function AgentCard({
               Reset
             </Button>
           )}
+          {canMove && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Move ${a.name} to another workstation`}
+              onClick={onRehome}
+            >
+              Move to workstation
+            </Button>
+          )}
         </div>
       ) : canManage && isCeo ? (
         <div className="mt-auto flex flex-wrap items-center gap-1 border-t border-line pt-3">
@@ -528,7 +544,7 @@ function AgentCard({
               aria-label={`Move ${a.name} to another workstation`}
               onClick={onRehome}
             >
-              Move
+              Move to workstation
             </Button>
           )}
           <Button variant="ghost" size="sm" aria-label={`Allowed projects of ${a.name}`} onClick={onProjects}>
@@ -608,130 +624,6 @@ function WorkstationsSection({
         ))}
       </ul>
     </Disclosure>
-  );
-}
-
-/**
- * Moves an agent to another workstation of its organization: a `needs_rehome` agent gets a new home ("rehome"), any
- * other agent moves (for example off a workstation that is offline or was unpaired). Name and history carry over.
- */
-function MoveAgentDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () => void }) {
-  const targets = useMoveTargets(agent?.id);
-  const rehome = useRehomeAgent();
-  const rehoming = agent?.status === 'needs_rehome';
-  const list = targets.data?.workstations ?? [];
-  const [stationId, setStationId] = useState('');
-  const [runtime, setRuntime] = useState('');
-  const [model, setModel] = useState('');
-  const eff = stationId || list[0]?.id || '';
-  const station = list.find((w) => w.id === eff);
-  const runtimes = station?.runtimes.filter((r) => r.available).map((r) => r.id) ?? [];
-  const effRuntime =
-    runtime && runtimes.includes(runtime)
-      ? runtime
-      : agent && runtimes.includes(agent.runtime)
-        ? agent.runtime
-        : (runtimes[0] ?? agent?.runtime ?? '');
-  const rehomeUnsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effRuntime);
-  const [rehomeAck, setRehomeAck] = useState(false);
-  const current = targets.data?.current;
-  const close = () => {
-    rehome.reset();
-    onClose();
-  };
-  return (
-    <Dialog
-      open={!!agent}
-      onOpenChange={(o) => !o && close()}
-      title={rehoming ? `Re-home ${agent?.name ?? ''}` : `Move ${agent?.name ?? ''} to another workstation`}
-      description="The name, history, projects and track record carry over; the old sandbox stays behind."
-    >
-      {agent && (
-        <form
-          aria-label={rehoming ? 'Re-home agent' : 'Move agent'}
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!eff) return;
-            rehome.mutate(
-              {
-                agentId: agent.id,
-                workstationId: eff,
-                runtime: effRuntime,
-                model: model.trim() || agent.model,
-                ...(rehomeUnsandboxed && rehomeAck ? { acknowledgeUnsandboxed: true } : {}),
-              },
-              { onSuccess: close },
-            );
-          }}
-        >
-          {targets.data && (
-            <p className="text-sm text-subtle" data-testid="move-now-on">
-              {current ? `Now on: ${current.name} (${current.state})` : 'Now on: no workstation'}
-            </p>
-          )}
-          {targets.data && list.length === 0 ? (
-            <p className="text-sm" data-testid="move-no-targets">
-              No other workstation in this organization.{' '}
-              <Link to="/workstations" className="text-brand-text hover:underline">
-                Pair one on the Workstations page.
-              </Link>
-            </p>
-          ) : (
-            <Select label="Workstation" value={eff} onChange={(e) => setStationId(e.target.value)}>
-              {list.length === 0 && <option value="">Loading workstations…</option>}
-              {list.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name} · {w.mine ? 'you' : w.ownerName} ({w.connected ? 'connected' : 'offline'})
-                </option>
-              ))}
-            </Select>
-          )}
-          {station && !station.mine && (
-            <p className="text-xs text-subtle" data-testid="move-others-hint">
-              {station.ownerName}'s workstation: the agent works only the projects {station.ownerName} is on,
-              with the repositories cloned there.
-            </p>
-          )}
-          <Select label="Runtime" value={effRuntime} onChange={(e) => setRuntime(e.target.value)}>
-            {(runtimes.length ? runtimes : [agent.runtime]).map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </Select>
-          <TextInput
-            label="Model"
-            placeholder={agent.model}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
-          {rehomeUnsandboxed && station && (
-            <div className="flex flex-col gap-2">
-              <SandboxWarning testId="rehome-sandbox-warning" role="alert" lead="Warning:">
-                {agentWarning(station.name, sandboxReasonOf(station.runtimes, effRuntime))}
-              </SandboxWarning>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={rehomeAck}
-                  onChange={(e) => setRehomeAck(e.target.checked)}
-                  className="mt-1"
-                />
-                <span>I understand this agent runs without an OS sandbox on {station.name}</span>
-              </label>
-            </div>
-          )}
-          <ErrorBox error={rehome.error ?? targets.error} />
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button onClick={close}>Cancel</Button>
-            <Button type="submit" variant="primary" disabled={rehome.isPending || !eff}>
-              {rehoming ? 'Re-home' : 'Move'}
-            </Button>
-          </div>
-        </form>
-      )}
-    </Dialog>
   );
 }
 

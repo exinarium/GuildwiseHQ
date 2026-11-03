@@ -658,6 +658,7 @@ Names in **bold** are from the spec; the rest are infrastructure events the spec
 | `WorkstationPaired` | `{workstationId, userId, name, platform, hostname, runnerVersion, tokenHash}` | insert workstations; pairing code marked used (command handler, same tx); triggers auto-hire of DevOps engineer (M3) |
 | `WorkstationRenamed` | `{workstationId, name}` | name |
 | `WorkstationUnlinked` | `{workstationId, by:'owner'|'admin'}` | status unlinked; token invalid; open WS closed with 4403; claims on it released (ClaimReleased reason `workstation_unlinked`) |
+| `AgentRehomed` (move) | `{agentId, workstationId, fromWorkstationId, runtime, model, unsandboxedAck?}` | `workstation_id`, runtime, model; status active. Appended by `POST /api/agents/:id/rehome` (Owner, Admin, or the hiring manager of a non-built-in agent) in one transaction with `ClaimReleased` (reason `agent_moved`, plus a system card message) for claims held without an open shift and `BaTaskRequeued` (reason `agent_moved`) for a running BA task. A running shift refuses the move (409 `agent_busy`). A DevOps engineer moves only off an unpaired workstation onto one without a DevOps engineer (409 `devops_stays`, `one_devops_per_workstation`) |
 | `WorkstationConnected` / `WorkstationDisconnected` | `{workstationId, runnerVersion?}` | connected flag (also operational); used for presence and metrics |
 
 Heartbeats are not events.

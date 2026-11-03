@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- Moving an agent. The hiring manager can now move their own agent, and the Org chart agent card has **Move to workstation** next to the Agents page button. A move releases claims the agent holds without a running shift (`ClaimReleased` reason `agent_moved`) instead of refusing, and still refuses a running shift. A DevOps engineer moves only off an unpaired workstation onto one without a DevOps engineer (409 `devops_stays` / `one_devops_per_workstation`); the dialog warns first. `GET /api/agents/:id/move-targets` names the DevOps engineer on each target.
+
 ## [1.5.0]
 
 ### Added

@@ -4,7 +4,7 @@ import { money } from '../../lib/money.ts';
 import { escalationText, STATUS_META, statusLine } from '../../lib/orgChart.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { AgentAvatar } from '../Face.tsx';
-import { Badge, Dialog } from '../ui.tsx';
+import { Badge, Button, Dialog } from '../ui.tsx';
 
 const TONE = { success: 'green', danger: 'red', neutral: 'neutral', warning: 'amber' } as const;
 
@@ -20,10 +20,16 @@ export function AgentDialog({
   agent,
   chart,
   onClose,
+  canMove = false,
+  onMove,
 }: {
   agent: OrgChartAgent | null;
   chart: OrgChart;
   onClose: () => void;
+  /** The user may move this agent to another workstation. */
+  canMove?: boolean;
+  /** Opens the move dialog (on the page: no nested dialog). */
+  onMove?: () => void;
 }) {
   if (!agent) return null;
   const projects = new Map(chart.projects.map((p) => [p.id, p]));
@@ -38,12 +44,19 @@ export function AgentDialog({
       description={`${agent.seniority} ${agent.roleLabel}`}
       size="lg"
       footer={
-        <Link
-          to="/agents"
-          className="inline-flex h-9 items-center justify-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
-        >
-          Open on the Agents page
-        </Link>
+        <>
+          {canMove && onMove && (
+            <Button aria-label={`Move ${agent.name} to another workstation`} onClick={onMove}>
+              Move to workstation
+            </Button>
+          )}
+          <Link
+            to="/agents"
+            className="inline-flex h-9 items-center justify-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
+          >
+            Open on the Agents page
+          </Link>
+        </>
       }
     >
       <div data-testid="org-agent-card" className="flex flex-col gap-4">
@@ -105,6 +118,13 @@ export function AgentDialog({
               'None'
             )}
           </Row>
+          {canMove && agent.status === 'working' && (
+            <Row label="Move">
+              <span className="text-muted" data-testid="org-agent-move-hint">
+                In a running shift: the move waits until it ends.
+              </span>
+            </Row>
+          )}
           <Row label="Spend">
             <span className="tnum" data-testid="org-agent-spend">
               {money(agent.spend.monthMicros, agent.spend.currency)} this month,{' '}

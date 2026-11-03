@@ -18,8 +18,10 @@ export async function listMoveTargets(
 ): Promise<MoveTargetsResponse> {
   const list = await rows(
     db,
-    `SELECT w.id, w.name, w.user_id, w.connected, w.runtimes, u.display_name
+    `SELECT w.id, w.name, w.user_id, w.connected, w.runtimes, u.display_name,
+            d.id AS devops_id, d.name AS devops_name
        FROM workstations w JOIN users u ON u.id = w.user_id
+       LEFT JOIN agents d ON d.workstation_id = w.id AND d.org_id = $1::uuid AND d.is_devops AND d.status = 'active'
       WHERE ${orgWorkstationSql('w', '$1::uuid')} AND w.id IS DISTINCT FROM $2::uuid
       ORDER BY (w.user_id = $3::uuid) DESC, lower(u.display_name), lower(w.name), w.id`,
     [agent.org_id, agent.workstation_id ?? null, viewerId],
@@ -45,6 +47,7 @@ export async function listMoveTargets(
       mine: w.user_id === viewerId,
       connected: w.connected === true,
       runtimes: (w.runtimes ?? []) as RuntimeInfo[],
+      devops: w.devops_id ? { agentId: w.devops_id, name: w.devops_name } : null,
     })),
   };
 }
