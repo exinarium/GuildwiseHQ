@@ -30,6 +30,8 @@ export const CEO_ACTIONS = [
   'model',
   'seniority',
   'allow',
+  /** `aom ceo act move-workstation`: move an agent to another workstation of the Owner (the owner/admin move). */
+  'move-workstation',
   'hire',
   'bench',
   'retire',

@@ -35,6 +35,7 @@ export const ACTION_CLASSES = [
   'agent.change_model',
   'agent.change_seniority',
   'agent.allow_list',
+  'agent.move_workstation',
   'agent.hire',
   'agent.bench',
   'agent.retire',
@@ -63,6 +64,7 @@ export const STAFFING_CLASSES: readonly ActionClass[] = [
   'agent.change_model',
   'agent.change_seniority',
   'agent.allow_list',
+  'agent.move_workstation',
 ];
 export const isStaffingClass = (c: string): boolean => (STAFFING_CLASSES as readonly string[]).includes(c);
 
@@ -87,6 +89,7 @@ export const CLASS_LABEL: Record<ActionClass, string> = {
   'agent.change_model': 'Change an agent model',
   'agent.change_seniority': 'Promote or demote an agent',
   'agent.allow_list': 'Change where an agent works',
+  'agent.move_workstation': 'Move an agent to another workstation',
   'agent.hire': 'Hire an agent',
   'agent.bench': 'Bench an agent',
   'agent.retire': 'Retire (fire) an agent',
@@ -211,6 +214,7 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'agent.change_model': decide,
     'agent.change_seniority': decide,
     'agent.allow_list': decide,
+    'agent.move_workstation': recommend,
     'agent.hire': decide,
     'agent.bench': decide,
     'agent.retire': recommend,
@@ -357,6 +361,7 @@ const UNTRUSTED_RECOMMEND: readonly string[] = [
   'agent.change_model',
   'agent.change_seniority',
   'agent.allow_list',
+  'agent.move_workstation',
   'standing_order.propose',
   'standing_order.activate',
   'standing_order.retire',
@@ -460,3 +465,12 @@ export function withDelegation(policy: CeoPolicy, key: OwnerReservedKey, on: boo
   next.delegated = [...set];
   return next;
 }
+
+/** `aom ceo act move-workstation --agent-id <name|id> --target-workstation-id <name|id>`. */
+export const MoveWorkstationParamsSchema = z
+  .object({
+    agentId: z.string().trim().min(1).max(120),
+    targetWorkstationId: z.string().trim().min(1).max(120),
+  })
+  .strict();
+export type MoveWorkstationParams = z.infer<typeof MoveWorkstationParamsSchema>;
