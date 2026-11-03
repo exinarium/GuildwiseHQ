@@ -5,6 +5,7 @@ import {
   BriefcaseBusiness,
   Building2,
   ChartColumn,
+  ClipboardList,
   Cloud,
   Coins,
   Compass,
@@ -140,6 +141,7 @@ export function buildNav(opts: {
   });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
+    { id: 'forms', label: 'Forms', to: '/forms', icon: ClipboardList, testId: 'nav-forms' },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
   );
   const knowledge: NavEntry[] = [];

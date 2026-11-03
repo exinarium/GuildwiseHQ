@@ -4,11 +4,13 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-## [1.5.0] - Unreleased
+## [1.5.0]
 
-Runner 0.1.66. Storage connections. Migration 2810. New optional environment variables `AOM_STORAGE_WRITE_TIMEOUT_MS`, `AOM_STORAGE_MAX_FILE_BYTES` and `AOM_STORAGE_MAX_IN_FLIGHT`; runner capability `storage:1`.
+Runner 0.1.66. Forms builder and storage connections. Migrations 2810 and 2820. New optional environment variables `AOM_STORAGE_WRITE_TIMEOUT_MS`, `AOM_STORAGE_MAX_FILE_BYTES` and `AOM_STORAGE_MAX_IN_FLIGHT`; runner capability `storage:1`.
 
 ### Added
+
+- Forms builder. Owners and Admins design forms under Work > Forms: drag fields from a palette (short text, long text, email, phone, number, date, dropdown, radio, checkbox, file upload) or add them with a tap or the keyboard, reorder, duplicate and delete them, and set label, required, placeholder, help text, min/max, options and upload types, size limit and destination. The form settings add a title, description, company logo, a destination for the answers and a confirmation text. A live preview shows the form as a client will see it, with the same validation messages. Every save is a new version; earlier versions stay readable. Migration 2820.
 
 - Storage connections (Organization settings, Storage). An Owner or Admin connects the firm's own storage: OneDrive or SharePoint, Google Drive, S3-compatible storage (endpoint, bucket, region, access key), a local folder or NAS reachable from the runner's workstation, or a folder in a knowledge vault. Sign-in for OneDrive/SharePoint and Google Drive happens on the workstation with a code (device sign-in); S3 keys, the local path and the vault folder are sealed in the browser for the runner. Tokens and keys are stored encrypted on that workstation only (`secrets/storage.json`) and used only by the runner: the Guildwise server never receives, stores or logs them and knows only a connection id, its type, a display name, the workstation and the health. Each connection can be tested (the runner writes and deletes a small probe file and shows the result or a typed error), renamed and removed; removing it deletes the encrypted token from the workstation, also when the workstation was offline at the time (it is removed at the next connection). An expired or revoked sign-in shows as "Needs re-authentication" with a Reconnect action that keeps the folder settings.
 

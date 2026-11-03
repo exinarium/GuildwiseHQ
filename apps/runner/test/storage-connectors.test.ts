@@ -101,7 +101,7 @@ describe('OneDrive write (AC3)', () => {
       if (url.endsWith('/children')) return json(201, { id: 'folder1' });
       if (url.includes('createUploadSession')) return json(200, { uploadUrl: 'https://upload.test/u1' });
       if (url === 'https://upload.test/u1') {
-        range = (init?.headers as Record<string, string>)['content-range'] ?? '';
+        range = (init?.headers as Record<string, string> | undefined)?.['content-range'] ?? '';
         return json(201, { id: 'item-9' });
       }
       return json(500, {});

@@ -21,6 +21,7 @@ import { discoveryProjectors } from './discovery.ts';
 import { documentProjectors } from './documents.ts';
 import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
+import { formProjectors } from './forms.ts';
 import { governanceProjectors } from './governance.ts';
 import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
@@ -127,6 +128,7 @@ const domains: Array<Record<string, Projector>> = [
   agentUxProjectors,
   relayProjectors,
   storageProjectors,
+  formProjectors,
 ];
 
 /**
@@ -254,6 +256,8 @@ export const PROJECTION_TABLES = [
   'backlog_items',
   'relay_integrations',
   'storage_connections',
+  'forms',
+  'form_versions',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',

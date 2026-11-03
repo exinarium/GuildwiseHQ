@@ -188,7 +188,9 @@ describe('StorageConnectDialog', () => {
     await userEvent.type(screen.getByLabelText('Folder on the workstation'), '/srv/clients');
     await userEvent.click(screen.getByTestId('storage-seal-connect'));
     await waitFor(() => expect(seal).toHaveBeenCalledTimes(1));
-    expect((seal.mock.calls[0]?.[0] as { fields: unknown }).fields).toEqual({ root: '/srv/clients' });
+    expect((seal.mock.calls[0]?.[0] as { fields?: unknown } | undefined)?.fields).toEqual({
+      root: '/srv/clients',
+    });
     expect(JSON.stringify(calls)).not.toContain('/srv/clients');
     unmount();
 
@@ -197,7 +199,7 @@ describe('StorageConnectDialog', () => {
     await userEvent.type(screen.getByLabelText('Folder inside the vault'), 'client-documents');
     await userEvent.click(screen.getByTestId('storage-seal-connect'));
     await waitFor(() => expect(seal).toHaveBeenCalledTimes(2));
-    expect((seal.mock.calls[1]?.[0] as { fields: unknown }).fields).toEqual({
+    expect((seal.mock.calls[1]?.[0] as { fields?: unknown } | undefined)?.fields).toEqual({
       vaultId: 'v1',
       folder: 'client-documents',
     });
