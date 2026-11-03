@@ -5,6 +5,7 @@ import { ACTIONS3 } from './actions3.ts';
 import { ACTIONS4 } from './actions4.ts';
 import { ACTIONS5 } from './actions5.ts';
 import { ACTIONS6 } from './actions6.ts';
+import { ACTIONS7 } from './actions7.ts';
 import type { ActionDef } from './types.ts';
 
 /** Every management action the CEO has, by its CLI name. */
@@ -15,4 +16,5 @@ export const ACTIONS: Partial<Record<CeoActionName, ActionDef>> = {
   ...ACTIONS4,
   ...ACTIONS5,
   ...ACTIONS6,
+  ...ACTIONS7,
 };

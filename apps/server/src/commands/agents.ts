@@ -26,7 +26,7 @@ import { projectRole } from '../authz/scope.ts';
 import { qualifiedSkillKeys } from '../capabilities/agent-skills.ts';
 import { isOthersPrivateRole, loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -226,7 +226,7 @@ export function assertRuntimeFitsRole(
  */
 export async function sandboxGate(
   ctx: Ctx,
-  tx: Tx,
+  tx: Queryable,
   userId: string,
   workstationId: string,
   runtimeId: string,

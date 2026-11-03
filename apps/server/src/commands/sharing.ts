@@ -7,6 +7,7 @@ import {
   type RehomeAgentRequest,
   type RemovalPreview,
   streamId,
+  type UnsandboxedAck,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -378,17 +379,23 @@ export async function rehomeAgent(
   });
 }
 
+/** What the checks of a move found: the target workstation and the unsandboxed acknowledgement to record. */
+export interface AgentMovePlan {
+  w: Row;
+  unsandboxedAck: UnsandboxedAck | undefined;
+}
+
 /**
- * The move itself, inside the caller's append transaction (so the busy check cannot race a claim). The caller has
- * already checked who may move the agent. Every refusal throws before anything is appended: the agent stays where it was.
+ * Every rule of a move, reads only: throws the HttpError the move would throw and returns what the append needs.
+ * `rehomeAgentIn` runs it inside its append transaction; the CEO's move runs it first to refuse early.
  */
-export async function rehomeAgentIn(
+export async function checkAgentMove(
   ctx: Ctx,
-  tx: Tx,
-  by: { userId: string; actor: Actor },
+  tx: Queryable,
+  by: { userId: string },
   a: Row,
   req: RehomeAgentRequest,
-): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+): Promise<AgentMovePlan> {
   if (a.status === 'retired')
     throw conflict('agent_retired', `${a.name} was fired; a fired agent cannot be moved`);
   if (a.is_builtin)
@@ -461,6 +468,21 @@ export async function rehomeAgentIn(
     if (!others) delta -= 1;
   }
   if (delta > 0) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
+  return { w, unsandboxedAck };
+}
+
+/**
+ * The move itself, inside the caller's append transaction (so the busy check cannot race a claim). The caller has
+ * already checked who may move the agent. Every refusal throws before anything is appended: the agent stays where it was.
+ */
+export async function rehomeAgentIn(
+  ctx: Ctx,
+  tx: Tx,
+  by: { userId: string; actor: Actor },
+  a: Row,
+  req: RehomeAgentRequest,
+): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+  const { w, unsandboxedAck } = await checkAgentMove(ctx, tx, by, a, req);
   await ctx.store.append(
     [
       {
