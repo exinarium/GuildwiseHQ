@@ -5,12 +5,12 @@ import {
   BriefcaseBusiness,
   Building2,
   ChartColumn,
+  ClipboardList,
   Cloud,
   Coins,
   Compass,
   FileText,
   FolderKanban,
-  Route,
   Inbox,
   KanbanSquare,
   LifeBuoy,
@@ -21,6 +21,7 @@ import {
   Plug,
   Puzzle,
   Rocket,
+  Route,
   Server,
   Settings,
   Timer,
@@ -141,6 +142,7 @@ export function buildNav(opts: {
   });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
+    { id: 'forms', label: 'Forms', to: '/forms', icon: ClipboardList, testId: 'nav-forms' },
     { id: 'journeys', label: 'Journeys', to: '/journeys', icon: Route },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
   );

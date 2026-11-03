@@ -36,6 +36,7 @@ describe('the tour steps', () => {
       'discovery',
       'boardroom',
       'schedules',
+      'forms',
       'journeys',
       'projects',
       'agents',

@@ -3,7 +3,7 @@ import { AvatarStyleSchema } from '../avatars/index.ts';
 import { PackPersonaRefSchema } from '../capabilities/pack-team.ts';
 import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AgentChangesSchema } from '../events/agent.ts';
-import { SandboxStateSchema } from '../protocol/runner.ts';
+import { RuntimeInfoSchema, SandboxStateSchema } from '../protocol/runner.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { IsoTime } from './common.ts';
 
@@ -19,6 +19,9 @@ export const AgentDtoSchema = z.object({
   hiredByUserId: z.uuid(),
   managerUserId: z.uuid(),
   workstationId: z.uuid().nullable(),
+  /** The agent's workstation by name and state, so a stuck agent shows where it is (absent: not reported). */
+  workstationName: z.string().nullable().optional(),
+  workstationState: z.enum(['connected', 'offline', 'unpaired']).nullable().optional(),
   name: z.string(),
   roleKey: z.string(),
   roleVersion: z.number().int(),
@@ -121,6 +124,26 @@ export const RehomeAgentRequestSchema = z.object({
   acknowledgeUnsandboxed: z.boolean().optional(),
 });
 export type RehomeAgentRequest = z.infer<typeof RehomeAgentRequestSchema>;
+
+/** A workstation an agent can be moved to (`GET /api/agents/:id/move-targets`). */
+export const MoveTargetDtoSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  ownerUserId: z.uuid(),
+  ownerName: z.string(),
+  /** The workstation belongs to the caller. */
+  mine: z.boolean(),
+  connected: z.boolean(),
+  runtimes: z.array(RuntimeInfoSchema),
+});
+export type MoveTargetDto = z.infer<typeof MoveTargetDtoSchema>;
+export const MoveTargetsResponseSchema = z.object({
+  current: z
+    .object({ id: z.uuid(), name: z.string(), state: z.enum(['connected', 'offline', 'unpaired']) })
+    .nullable(),
+  workstations: z.array(MoveTargetDtoSchema),
+});
+export type MoveTargetsResponse = z.infer<typeof MoveTargetsResponseSchema>;
 
 export const NameSuggestionsQuerySchema = z.object({
   theme: z.string().optional(),

@@ -84,6 +84,7 @@ import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
+import { formRoutes } from './routes/forms.ts';
 import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
@@ -491,6 +492,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(setupChecklistRoutes(ctx));
   await app.register(pushRoutes(ctx));
   await app.register(cardAttachmentRoutes(ctx));
+  await app.register(formRoutes(ctx));
   const assistantClient =
     opts.assistantClient !== undefined
       ? opts.assistantClient

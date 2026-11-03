@@ -159,7 +159,7 @@ function FormatCard({
   );
 }
 
-/** When each format goes out and where; the writer's weekly cap is derived from the ticked days. */
+/** When each format goes out and where; the writer's waiting-pile limit (2 x the ticked days) is derived from them. */
 export function ScheduleSettings({ status }: { status: VideoStatus }) {
   const patch = usePatchVideoSettings();
   const channels = useVideoChannels();

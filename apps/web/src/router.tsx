@@ -13,9 +13,6 @@ import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
 import { Automations } from './pages/Automations.tsx';
-import { JourneyDesigner } from './pages/JourneyDesigner.tsx';
-import { JourneyInstance } from './pages/JourneyInstance.tsx';
-import { Journeys } from './pages/Journeys.tsx';
 import { Backlog } from './pages/Backlog.tsx';
 import { Board } from './pages/Board.tsx';
 import { BoardroomList } from './pages/Boardroom.tsx';
@@ -33,12 +30,17 @@ import { DiscoveryList } from './pages/Discovery.tsx';
 import { DiscoverySession } from './pages/DiscoverySession.tsx';
 import { DocumentsList, DocumentView } from './pages/Documents.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
+import { FormBuilderPage } from './pages/FormBuilderPage.tsx';
+import { Forms } from './pages/Forms.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { BatchView } from './pages/IntakeBatch.tsx';
 import { Integrations, IntegrationsIndex } from './pages/Integrations.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
+import { JourneyDesigner } from './pages/JourneyDesigner.tsx';
+import { JourneyInstance } from './pages/JourneyInstance.tsx';
+import { Journeys } from './pages/Journeys.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
@@ -130,6 +132,8 @@ export const routes = [
         ),
       },
       { path: '/automations', element: <Automations /> },
+      { path: '/forms', element: <Forms /> },
+      { path: '/forms/:id', element: <FormBuilderPage /> },
       { path: '/journeys', element: <Journeys /> },
       { path: '/journeys/instances/:id', element: <JourneyInstance /> },
       { path: '/journeys/:id', element: <JourneyDesigner /> },

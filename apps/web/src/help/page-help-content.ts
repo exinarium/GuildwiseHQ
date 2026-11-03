@@ -195,6 +195,45 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'org-chart-and-design#custom-workflows',
   },
+  '/forms': {
+    title: 'Forms',
+    intro: 'The forms your organisation has designed. Open one to edit it, or start a new one.',
+    controls: [
+      {
+        name: 'New form',
+        text: 'Owners and Admins start a new form. Everyone else can open a form and see its preview.',
+      },
+      {
+        name: 'Active and Archived',
+        text: 'Archiving hides a form from the active list. Its versions stay readable, and you can bring it back.',
+      },
+    ],
+    article: 'forms#build-a-form',
+  },
+  '/forms/:id': {
+    title: 'Form builder',
+    intro:
+      'Design the form on the Build tab and check it on the Preview tab. Every save is a new version; earlier versions stay readable.',
+    controls: [
+      {
+        name: 'Palette',
+        text: 'Drag a field type onto the canvas, or click it or press Enter to add it after the selected field.',
+      },
+      {
+        name: 'Canvas',
+        text: 'Drag the grip to reorder, or focus it and use the arrow keys. Move up, Move down, Duplicate and Delete are on every field.',
+      },
+      {
+        name: 'Properties',
+        text: 'Label, required, placeholder, help text, minimum and maximum, options, and for file uploads the allowed types, size limit and destination.',
+      },
+      {
+        name: 'Save and Versions',
+        text: 'Save creates a new version. The Versions menu opens an earlier one read-only.',
+      },
+    ],
+    article: 'forms#field-types',
+  },
   '/automations': {
     title: 'Automations',
     intro:
