@@ -37,6 +37,14 @@ test.beforeAll(async ({ browser }) => {
   await inviteAndAccept(admin, STORER);
   api = await apiAs(STORER.email, STORER.password);
   page = await (await browser.newContext({ storageState: await api.storageState() })).newPage();
+  // Global setup may pin the server's test clock hours ahead (a run between 22:00 and 08:30 UTC), while the runner checks
+  // the sealed values' expiry against the workstation's real clock. Seal with the real time, as a live server would give.
+  await page.route('**/api/workstations/*/integrations', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (typeof body?.serverTime === 'string') body.serverTime = new Date().toISOString();
+    await route.fulfill({ response: res, json: body });
+  });
   mkdirSync(FOLDER, { recursive: true });
 });
 
