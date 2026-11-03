@@ -36,6 +36,8 @@ docker compose -f docker-compose.dev.yml up -d postgres   # dev Postgres on 127.
 pnpm dev                                                  # server on :4600, web app on :5173
 ```
 
+The web app's dev (`vite`) and preview (`vite preview`) servers proxy the API to `http://127.0.0.1:4600`. To point them at a server on another port or host (for example a test environment), set `API_PROXY_TARGET` to a full origin and restart the server, for example `API_PROXY_TARGET=http://localhost:24150 pnpm --filter @aom/web dev`. A value that is not an http(s) origin stops startup with an error naming the variable. It is read by the Vite config only and never reaches the built bundle.
+
 Other scripts:
 
 | Command | Purpose |
