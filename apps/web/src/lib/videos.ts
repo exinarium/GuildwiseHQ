@@ -85,6 +85,13 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     help: 'boardroom#start',
     published: true,
   },
+  // Not recorded yet: the video is made with the user guide for this release, then `published` becomes true.
+  forms: {
+    title: 'Forms: build a form',
+    nav: 'forms',
+    help: 'forms#build-a-form',
+    published: false,
+  },
   capabilities: {
     title: 'Capabilities and packs',
     nav: 'capabilities',

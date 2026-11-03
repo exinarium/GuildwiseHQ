@@ -4,6 +4,12 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.5.0]
+
+### Added
+
+- Forms builder. Owners and Admins design forms under Work > Forms: drag fields from a palette (short text, long text, email, phone, number, date, dropdown, radio, checkbox, file upload) or add them with a tap or the keyboard, reorder, duplicate and delete them, and set label, required, placeholder, help text, min/max, options and upload types, size limit and destination. The form settings add a title, description, company logo, a destination for the answers and a confirmation text. A live preview shows the form as a client will see it, with the same validation messages. Every save is a new version; earlier versions stay readable. Migration 2820.
+
 ## [1.4.0] - 2026-11-01
 
 Runner 0.1.65. Software and Business views, the six business workflows built in, any workflow as a variant base, releases from start to finish, and a clear way back when a computer is removed. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.

@@ -20,6 +20,7 @@ import { discoveryEvents } from './discovery.ts';
 import { documentEvents } from './document.ts';
 import { environmentEvents } from './environment.ts';
 import { feedEvents } from './feed.ts';
+import { formEvents } from './form.ts';
 import { governanceEvents } from './governance.ts';
 import { graphEvents } from './graph.ts';
 import { hrEvents } from './hr.ts';
@@ -117,6 +118,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...governanceEvents,
   ...agentUxEvents,
   ...relayEvents,
+  ...formEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -144,6 +146,7 @@ export * from './document.ts';
 export * from './envelope.ts';
 export * from './environment.ts';
 export * from './feed.ts';
+export * from './form.ts';
 export * from './governance.ts';
 export * from './hr.ts';
 export * from './hygiene.ts';
