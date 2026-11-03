@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
-import { waitFor } from '../support/db.ts';
+import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, POLISHER, paths } from '../support/env.ts';
 import { pairRunner, startRunner } from '../support/runner.ts';
 import { expandWorkstation } from '../support/ui.ts';
@@ -239,4 +239,37 @@ test('Unpair: asks first, then the workstation is gone, its runner stops by itse
   expect((await (await api.get('/api/workstations')).json()).workstations).toHaveLength(0);
   expect(await exited).toBe(0);
   expect(readFileSync(`${HOME}.out.log`, 'utf8')).toContain('this workstation was unpaired');
+});
+
+test('after Unpair: its DevOps engineers are retired with an audit entry, other agents stay active and are flagged', async () => {
+  type A = { id: string; name: string; isDevops: boolean; status: string; workstationId: string; workstationRemoved?: boolean };
+  const agents = (await (await api.get('/api/agents')).json()).agents as A[];
+  const onBox = agents.filter((a) => a.workstationId === workstationId);
+  const devops = onBox.filter((a) => a.isDevops);
+  expect(devops.length).toBeGreaterThan(0);
+  // soft retire: the rows are still listed, none of them is active
+  for (const d of devops) expect(d.status).toBe('retired');
+  expect(onBox.filter((a) => a.isDevops && a.status === 'active')).toHaveLength(0);
+  for (const d of devops) {
+    const ev = await q<{ payload: Record<string, unknown>; actor_kind: string }>(
+      `SELECT payload, actor_kind FROM events WHERE type='AgentRetired' AND payload->>'agentId'=$1`,
+      [d.id],
+    );
+    expect(ev).toHaveLength(1);
+    expect(ev[0]?.payload).toMatchObject({ reason: 'workstation_unpaired', workstationId });
+    expect(ev[0]?.actor_kind).toBe('user');
+  }
+  // no card stays claimed by a retired engineer
+  const claims = await q(
+    `SELECT 1 FROM cards WHERE claim_id IS NOT NULL AND claimed_by_agent_id = ANY($1::uuid[])`,
+    [devops.map((d) => d.id)],
+  );
+  expect(claims).toHaveLength(0);
+
+  const pia = onBox.find((a) => a.id === agentId);
+  expect(pia).toMatchObject({ status: 'active', isDevops: false, workstationRemoved: true });
+  await page.goto('/agents');
+  await expect(page.getByTestId('agent-Pia').getByTestId('agent-workstation-removed')).toHaveText(
+    'Workstation removed – needs a new workstation',
+  );
 });
