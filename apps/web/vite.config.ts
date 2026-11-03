@@ -4,12 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { loadEnv } from 'vite';
 import { defineConfig, type Plugin } from 'vitest/config';
 import { BRAND } from './src/brand.ts';
-
-// AOM_API_TARGET points the dev proxy at another server (the screenshot harness uses the seeded demo world).
-const target = process.env.AOM_API_TARGET ?? 'http://127.0.0.1:4600';
-const headers = process.env.AOM_API_TARGET ? { Origin: target } : undefined;
+import { resolveProxyTarget } from './src/proxy-target.ts';
 
 /** What "Contact us" tells support about the build: the package version and the commit (APP_VERSION_SHA in a Docker build, where there is no .git). */
 const appVersion = (): string => {
@@ -55,32 +53,40 @@ const extensionSources = (): Plugin => ({
   },
 });
 
-export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
-  plugins: [extensionSources(), react(), tailwindcss(), brandHtml()],
-  resolve: { alias: { '@aom/web-extension': extensionAlias } },
-  build: { rollupOptions: { input: { main: resolve(webRoot, 'index.html') } } },
-  server: {
-    port: Number(process.env.AOM_WEB_PORT ?? 5173),
-    proxy: {
-      '/api': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
-      '/ws': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
-      // The public blog is rendered by the server (it changes every few hours; the landing page is prerendered).
-      '^/blog(/|$)': { target, changeOrigin: false },
-      '/sitemap.xml': { target, changeOrigin: false },
-      '/robots.txt': { target, changeOrigin: false },
-      // The help videos are served by the media container, through the app server (AOM_MEDIA_URL).
-      '/videos': { target, changeOrigin: false },
+export default defineConfig(({ mode }) => {
+  // API_PROXY_TARGET (default http://127.0.0.1:4600) points the dev/preview proxy at another server. AOM_API_TARGET is the
+  // screenshot harness's older alias. Read here only (no VITE_ prefix, no define): it never reaches the client bundle.
+  const { target, headers } = resolveProxyTarget({
+    ...loadEnv(mode, webRoot, ['API_PROXY_TARGET']),
+    AOM_API_TARGET: process.env.AOM_API_TARGET,
+  });
+  return {
+    define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+    plugins: [extensionSources(), react(), tailwindcss(), brandHtml()],
+    resolve: { alias: { '@aom/web-extension': extensionAlias } },
+    build: { rollupOptions: { input: { main: resolve(webRoot, 'index.html') } } },
+    server: {
+      port: Number(process.env.AOM_WEB_PORT ?? 5173),
+      proxy: {
+        '/api': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
+        '/ws': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
+        // The public blog is rendered by the server (it changes every few hours; the landing page is prerendered).
+        '^/blog(/|$)': { target, changeOrigin: false },
+        '/sitemap.xml': { target, changeOrigin: false },
+        '/robots.txt': { target, changeOrigin: false },
+        // The help videos are served by the media container, through the app server (AOM_MEDIA_URL).
+        '/videos': { target, changeOrigin: false },
+      },
     },
-  },
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
-    globals: false,
-    css: false,
-    // jsdom renders are CPU-bound and the packages' suites run side by side: the 5 s default is a guess at an idle
-    // machine, not a property of the tests (they wait on conditions, never on fixed sleeps).
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
-  },
+    test: {
+      environment: 'jsdom',
+      setupFiles: ['./src/test/setup.ts'],
+      globals: false,
+      css: false,
+      // jsdom renders are CPU-bound and the packages' suites run side by side: the 5 s default is a guess at an idle
+      // machine, not a property of the tests (they wait on conditions, never on fixed sleeps).
+      testTimeout: 30_000,
+      hookTimeout: 30_000,
+    },
+  };
 });
