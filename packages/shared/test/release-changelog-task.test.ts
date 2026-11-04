@@ -146,7 +146,7 @@ describe('release_changelog task kind', () => {
       (o) => commandForOutcome(o as never),
     );
     expect(text).toContain('Added, Changed, Deprecated, Removed, Fixed, Security');
-    expect(text).toContain('step-changelog-unattended.md');
+    expect(text).toContain('step-05-changelog-unattended.md');
     expect(text).toContain('aom report release-changelog --file');
   });
 });

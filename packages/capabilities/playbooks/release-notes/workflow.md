@@ -23,5 +23,5 @@ Steps:
 The notes have these headings: Highlights, New, Improved, Fixed, Behind the scenes, Upgrade notes.
 
 Unattended (release prep): the "Write changelog" step of release prep runs without an owner. It follows
-`steps/step-changelog-unattended.md` and uses the changelog headings (Added, Changed, Fixed, ...) instead of the ones
+`steps/step-05-changelog-unattended.md` and uses the changelog headings (Added, Changed, Fixed, ...) instead of the ones
 above. The interactive steps are unchanged.
