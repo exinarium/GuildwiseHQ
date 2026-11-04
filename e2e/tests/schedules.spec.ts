@@ -349,7 +349,13 @@ test('the webhook test button, and a failed delivery that is retried with a grow
     15_000,
   );
   const id = await scheduleId('Tell Slack');
-  const [pending] = (await runsOf('Tell Slack')).filter((r) => r.status === 'pending');
+  // The hook counts the request when it arrives; the server records the failed attempt only after it has the 503 back.
+  const pending = await waitFor(
+    'the failed first try recorded',
+    async () => (await runsOf('Tell Slack')).find((r) => r.status === 'pending'),
+    (r) => r?.attempts === 1,
+    15_000,
+  );
   expect(pending).toMatchObject({ attempts: 1 });
   await clock(2 * 60_000);
   await waitFor(

@@ -151,4 +151,7 @@ The in-app help articles. The ones that match the visitor's question are attache
 - Open source and self-hosting: Guildwise HQ is free and open source (Apache 2.0). Where the code is, what self-hosting needs, how to ask for a feature and how to help.
 - Pricing: How much it costs and what the plans are, for how many people. Guildwise HQ is free.…
 - Governance and audit: What an agent may do, approval gates, approving from a notification, exporting the audit log, and offboarding a person.
+- Forms: Design a form with drag and drop, set the fields and their rules, add your company logo, preview it as a client sees it, and keep every…
+- Journeys: One whole process from trigger to outcome: steps made of your workflows, handoffs, waits, approval gates, webhooks and the shared record.
+- Storage connections: Connect your own OneDrive, Google Drive, S3, folder or vault so forms and journeys write client files to your storage, not to Guildwise.
 </help_topics>
