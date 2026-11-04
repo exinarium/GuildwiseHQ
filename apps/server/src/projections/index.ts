@@ -288,6 +288,7 @@ export const PROJECTION_TABLES = [
   'release_docs_prep_runs',
   'release_docs_prep_repos',
   'release_docs_prep_steps',
+  'release_docs_prep_tasks',
   'deploy_targets',
   'phases',
   'phase_followups',
