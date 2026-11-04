@@ -137,6 +137,8 @@ export const MoveTargetDtoSchema = z.object({
   mine: z.boolean(),
   connected: z.boolean(),
   runtimes: z.array(RuntimeInfoSchema),
+  /** The DevOps engineer already on this workstation for the agent's organization (one per workstation). */
+  devops: z.object({ agentId: z.uuid(), name: z.string() }).nullable().optional(),
 });
 export type MoveTargetDto = z.infer<typeof MoveTargetDtoSchema>;
 export const MoveTargetsResponseSchema = z.object({

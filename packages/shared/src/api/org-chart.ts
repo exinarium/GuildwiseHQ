@@ -28,7 +28,9 @@ export const OrgChartAgentSchema = z.object({
   model: z.string(),
   capacity: z.number().int(),
   hiredAt: IsoTime,
-  workstation: z.object({ id: z.uuid(), name: z.string(), online: z.boolean() }).nullable(),
+  workstation: z
+    .object({ id: z.uuid(), name: z.string(), online: z.boolean(), unpaired: z.boolean().optional() })
+    .nullable(),
   /** The hiring manager: the agent's reporting line (it reports to them, and through them to the Owner). */
   reportsTo: z.object({
     userId: z.uuid(),

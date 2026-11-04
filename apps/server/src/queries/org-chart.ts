@@ -38,7 +38,7 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
   const online = new Date(now.getTime() - ONLINE_WINDOW_MS);
   const list = await rows(
     db,
-    `SELECT a.*, ws.name AS ws_name, (ws.connected AND ws.last_seen_at > $2) AS ws_online,
+    `SELECT a.*, ws.name AS ws_name, (ws.connected AND ws.last_seen_at > $2) AS ws_online, ws.status AS ws_status,
             mu.display_name AS manager_name, mom.role AS manager_org_role,
             (SELECT r.definition->>'name' FROM role_definitions r
               WHERE r.key = a.role_key AND (r.org_id = a.org_id OR r.org_id IS NULL) AND r.status = 'active'
@@ -133,7 +133,12 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
       capacity: a.capacity,
       hiredAt: iso(a.hired_at) as string,
       workstation: a.workstation_id
-        ? { id: a.workstation_id, name: a.ws_name ?? 'Workstation', online: Boolean(a.ws_online) }
+        ? {
+            id: a.workstation_id,
+            name: a.ws_name ?? 'Workstation',
+            online: Boolean(a.ws_online),
+            unpaired: a.ws_status !== 'active',
+          }
         : null,
       reportsTo: {
         userId: a.manager_user_id,

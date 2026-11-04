@@ -60,7 +60,9 @@ const moveWorkstation: ActionDef<MoveWorkstationParams> = {
       acknowledgeUnsandboxed: false,
     };
     try {
-      await checkAgentMove(env.ctx, db, { userId: env.owner.id }, a, req);
+      await checkAgentMove(env.ctx, db, { userId: env.owner.id }, a, req, {
+        releaseHeldClaims: true,
+      });
     } catch (err) {
       if (err instanceof HttpError) return { ...base, refuse: err.message };
       throw err;

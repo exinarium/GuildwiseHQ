@@ -1,12 +1,15 @@
 import { isOrgManager, type OrgChartAgent } from '@aom/shared';
 import { Network } from 'lucide-react';
 import { useState } from 'react';
+import { useMe } from '../api/queries/auth.ts';
 import { useOrgChart } from '../api/queries/costs.ts';
+import { type MovableAgent, MoveAgentDialog } from '../components/agents/MoveAgentDialog.tsx';
 import { AgentDialog } from '../components/orgchart/AgentDialog.tsx';
 import { ChartCanvas } from '../components/orgchart/ChartCanvas.tsx';
 import { DevopsPanel } from '../components/orgchart/DevopsPanel.tsx';
 import { ListView } from '../components/orgchart/ListView.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Segmented, Select } from '../components/ui.tsx';
+import { canMoveAgent } from '../lib/agentMove.ts';
 import { worksOn } from '../lib/orgChart.ts';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { useIsTabletUp } from '../lib/useMediaQuery.ts';
@@ -20,6 +23,8 @@ export function OrgChartPage() {
   usePageTitle('Org chart');
   const q = useOrgChart();
   const role = useActiveOrgRole();
+  const me = useMe();
+  const [moving, setMoving] = useState<MovableAgent | null>(null);
   const wide = useIsTabletUp();
   const [view, setView] = useState<'chart' | 'list' | null>(null);
   const [project, setProject] = useState('');
@@ -44,6 +49,16 @@ export function OrgChartPage() {
   const tree = shown.filter((a) => !a.isDevops);
   const current = view ?? (wide ? 'chart' : 'list');
   const selected = chart.agents.find((a) => a.id === open) ?? null;
+  const movable = (a: OrgChartAgent) =>
+    canMoveAgent({
+      myId: me.data?.user.id,
+      orgRole: role,
+      managerUserId: a.reportsTo.userId,
+      roleKey: a.roleKey,
+      isDevops: a.isDevops,
+      status: a.status === 'needs_rehome' ? 'needs_rehome' : 'active',
+      unpaired: !!a.workstation?.unpaired,
+    });
   const onOpen = (a: OrgChartAgent) => setOpen(a.id);
 
   return (
@@ -112,7 +127,25 @@ export function OrgChartPage() {
           <DevopsPanel chart={{ ...chart, workstations: chart.workstations }} onOpen={onOpen} />
         </>
       )}
-      <AgentDialog agent={selected} chart={chart} onClose={() => setOpen(null)} />
+      <AgentDialog
+        agent={selected}
+        chart={chart}
+        onClose={() => setOpen(null)}
+        canMove={!!selected && movable(selected)}
+        onMove={() => {
+          if (!selected) return;
+          setMoving({
+            id: selected.id,
+            name: selected.name,
+            status: selected.status === 'needs_rehome' ? 'needs_rehome' : 'active',
+            runtime: selected.runtime,
+            model: selected.model,
+            isDevops: selected.isDevops,
+          });
+          setOpen(null);
+        }}
+      />
+      <MoveAgentDialog key={moving?.id ?? 'none'} agent={moving} onClose={() => setMoving(null)} />
     </div>
   );
 }
