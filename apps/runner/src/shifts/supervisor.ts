@@ -145,13 +145,19 @@ import {
 import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
 import {
   decideTestServices,
+  noTestServicesNote,
+  notAnsweringLine,
   refusedProgress,
   TEST_SERVICE_ROLES,
   type TestServiceDecision,
   type TestServicesSeen,
+  isTesterShift,
+  testerScratchNote,
+  testerShiftEnv,
   testServiceDomains,
   testServicesNote,
   testServicesSpec,
+  withReachability,
 } from '../sandbox/test-services.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
@@ -337,6 +343,8 @@ export interface SupervisorDeps {
   targetSecrets?: TargetSecrets;
   /** Test hook: how a remote target is probed before a tester shift starts (default: an HTTP request). */
   probeTarget?: (url: string) => Promise<string | null>;
+  /** Test hook: whether a declared local test service answers at shift start (default: a 1 s TCP connect). */
+  probePort?: (host: string, port: number) => Promise<boolean>;
   /** Claude sessions started on this workstation (resume decisions); default: `<data dir>/sessions.json`. */
   sessions?: SessionRegistry;
   /** Test hook: free bytes of a folder (default: statfs). */
@@ -1368,12 +1376,28 @@ export class ShiftSupervisor {
     if (hasEnv && testEnv)
       texts.instructions += `\n${environmentNote(testEnv, testEnv.envId ? this.deps.runs?.testEnvironment(testEnv.envId) : null)}\n`;
     // The project's local test services (GWP-41): the loopback ports this shift's sandbox may reach, decided here.
-    const testDecisions = await this.decideTestServices(msg, adapter, hasEnv ? testEnv : undefined);
-    const testNote = testServicesNote(testDecisions);
+    // A tester's every bash bridges the allowed ones (BASH_ENV, GWP-102); the runner first checks that each answers here.
+    const isTester = isTesterShift(msg.kind, msg.agent.roleKey, !!msg.agent.isDevops);
+    const testDecisions = await withReachability(
+      await this.decideTestServices(msg, adapter, hasEnv ? testEnv : undefined),
+      this.deps.probePort,
+    );
+    const autoBridged = isTester && testServicesSpec(testDecisions) !== '';
+    const testNote =
+      testServicesNote(testDecisions, { autoBridged }) ||
+      (isTester && msg.agent.permissions.allowedTools.includes('shell') ? noTestServicesNote() : '');
     if (testNote) texts.instructions += `\n${testNote}\n`;
     for (const d of testDecisions)
       if (d.state === 'refused') this.addProgress(s, 'status', refusedProgress(d));
+      else if (d.answering === false) this.addProgress(s, 'status', notAnsweringLine(d));
     this.recordTestServices(msg, testDecisions);
+    // The tester's per-shift E2E scratch: under its own TMPDIR, so inside the write allow-list and swept at shift end.
+    const testerEnv = testerShiftEnv({ isTester, autoBridged, tmp: sandbox.tmp, binDir: paths.bin });
+    if (testerEnv.AOM_E2E_DIR && testerEnv.AOM_AGENT_TMP_ROOT && testerEnv.PLAYWRIGHT_HTML_OUTPUT_DIR) {
+      mkdirSync(testerEnv.AOM_AGENT_TMP_ROOT, { recursive: true, mode: 0o700 });
+      mkdirSync(testerEnv.PLAYWRIGHT_HTML_OUTPUT_DIR, { recursive: true });
+      texts.instructions += `\n${testerScratchNote(testerEnv.AOM_E2E_DIR)}\n`;
+    }
     // Delegation (R3b): only an agent that was granted targets is told about `aom delegate`, and only a Claude Code agent gets
     // native subagents (the same targets, in its own process). The work a child shares with this shift is its working directory.
     s.delegateWork = {
@@ -1449,6 +1473,8 @@ export class ShiftSupervisor {
     // The sandbox opens each allowed test service; `aom-env` bridges a local listener to it (never a bare host).
     const testSpec = testServicesSpec(testDecisions);
     if (testSpec) s.env.AOM_TEST_SERVICES = testSpec;
+    // Tester only (GWP-102): every bash sources the bridges, so a plain command reaches the declared ports; E2E scratch.
+    Object.assign(s.env, testerEnv);
 
     // Resume the agent's own earlier session when it may (same agent, under 120K context tokens and 4 hours old).
     let resumeSessionId: string | undefined;

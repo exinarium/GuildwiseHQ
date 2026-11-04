@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { type AgentPermissions, testServiceDomain } from '@aom/shared';
 import { protectedGitPaths } from '../git/harden.ts';
-import { TEST_SERVICE_ROLES, type TestServicesSeen } from '../sandbox/test-services.ts';
+import { TEST_SERVICE_ROLES, TEST_SERVICES_SETTING, type TestServicesSeen } from '../sandbox/test-services.ts';
 import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**
@@ -1048,15 +1048,21 @@ export function testServiceDoctorLines(
     for (const d of decisions)
       out.push(
         d.state === 'allowed'
-          ? {
-              ok: true,
-              name: 'test service',
-              detail: `${project} ${d.name} ${testServiceDomain(d)} (build, review and test shifts; as of ${at})`,
-            }
+          ? d.answering === false
+            ? {
+                ok: 'warn',
+                name: 'test service',
+                detail: `${project} ${d.name} ${testServiceDomain(d)} opened but not answering on this workstation (as of ${at})`,
+              }
+            : {
+                ok: true,
+                name: 'test service',
+                detail: `${project} ${d.name} ${testServiceDomain(d)} (build, review and test shifts; as of ${at})`,
+              }
           : {
               ok: 'warn',
               name: 'test service',
-              detail: `${project} ${d.name} ${testServiceDomain(d)} not opened: ${d.reason}`,
+              detail: `${project} ${d.name} ${testServiceDomain(d)} not opened: ${d.reason} (change it in ${TEST_SERVICES_SETTING})`,
             },
       );
   if (out.length === 0)
