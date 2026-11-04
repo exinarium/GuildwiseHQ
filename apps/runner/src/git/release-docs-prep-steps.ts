@@ -39,7 +39,9 @@ export type DocsPrepExec = (
 
 export type DocsPrepStepHandler = (
   ctx: DocsPrepStepContext,
-) => Promise<{ ok: true; files: string[]; output?: unknown } | { ok: false; error: string; output?: unknown }>;
+) => Promise<
+  { ok: true; files: string[]; output?: unknown } | { ok: false; error: string; output?: unknown }
+>;
 
 /** A sibling card adds one entry here (and one registry entry in the shared package). */
 export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler> = {

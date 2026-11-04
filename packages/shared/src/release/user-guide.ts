@@ -250,8 +250,14 @@ export type GuideEdit = z.infer<typeof GuideEditSchema>;
 /** What the writer returns (a JSON file). */
 export const GuideProposalSchema = z.object({
   edits: z.array(GuideEditSchema).max(40).default([]),
-  covered: z.array(z.object({ source: z.string().max(80), section: z.string().max(200) })).max(500).default([]),
-  skipped: z.array(z.object({ source: z.string().max(80), reason: z.string().max(300) })).max(500).default([]),
+  covered: z
+    .array(z.object({ source: z.string().max(80), section: z.string().max(200) }))
+    .max(500)
+    .default([]),
+  skipped: z
+    .array(z.object({ source: z.string().max(80), reason: z.string().max(300) }))
+    .max(500)
+    .default([]),
   notes: z.array(z.string().max(500)).max(50).default([]),
 });
 export type GuideProposal = z.infer<typeof GuideProposalSchema>;
@@ -342,13 +348,15 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
   const titles = new Set(doc.headings.filter((h) => h.level <= 3).map((h) => norm(h.title)));
   const slugs = new Set(doc.headings.map((h) => h.slug));
 
-  edits.forEach((e, i) => {
+  const applyOne = (e: GuideEdit, i: number): void => {
     const what = `edit ${i + 1} (${e.op})`;
     if (e.op === 'add_section') {
       const s = resolve(doc, e.after);
       if (typeof s === 'string') return void errors.push(`${what}: ${s}`);
       if (/^\d+(\.\d+[a-z]?)?\.?\s/.test(e.title.trim()))
-        return void errors.push(`${what}: the title must not carry a number; the number is chosen by the update`);
+        return void errors.push(
+          `${what}: the title must not carry a number; the number is chosen by the update`,
+        );
       if (/[\r\n]/.test(e.title) || e.title.includes('#'))
         return void errors.push(`${what}: the title must be one line of text`);
       const errs = textErrors(what, e.body, true);
@@ -365,13 +373,20 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
         else {
           const base = `${c}.${n}`;
           const letters = list.filter((x) => x.startsWith(base) && /[a-z]$/.test(x) && numKey(x)[1] === n);
-          const max = letters.map((x) => x.slice(-1)).sort().at(-1);
+          const max = letters
+            .map((x) => x.slice(-1))
+            .sort()
+            .at(-1);
           const next = max ? String.fromCharCode(max.charCodeAt(0) + 1) : 'a';
           if (next > 'z') return void errors.push(`${what}: no free letter after ${base}z`);
           number = `${base}${next}`;
           // after the last existing section of this base
           const sibs = doc.sections.filter(
-            (x) => x.chapter.line === s.chapter.line && x.heading.number && numKey(x.heading.number)[0] === c && numKey(x.heading.number)[1] === n,
+            (x) =>
+              x.chapter.line === s.chapter.line &&
+              x.heading.number &&
+              numKey(x.heading.number)[0] === c &&
+              numKey(x.heading.number)[1] === n,
           );
           anchor = sibs.at(-1) ?? s;
         }
@@ -401,7 +416,8 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
         if (e.replace && joined.includes(e.replace)) return void duplicates.push(e);
         return void errors.push(`${what}: the text to replace is not in ${s.heading.text}`);
       }
-      if (count > 1) return void errors.push(`${what}: the text to replace occurs ${count} times in ${s.heading.text}`);
+      if (count > 1)
+        return void errors.push(`${what}: the text to replace occurs ${count} times in ${s.heading.text}`);
       bodies.set(s.heading.line, joined.replace(e.find, () => e.replace).split('\n'));
       edited.add(s.heading.line);
       return;
@@ -415,7 +431,8 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
     const trailing = body.slice(core);
     let at = core;
     const isApp = (l: string | undefined): boolean => !!l && l.startsWith('> **In the app:**');
-    while (at > 0 && (isApp(body[at - 1]) || ((body[at - 1] as string).trim() === '' && isApp(body[at - 2])))) at--;
+    while (at > 0 && (isApp(body[at - 1]) || ((body[at - 1] as string).trim() === '' && isApp(body[at - 2]))))
+      at--;
     while (at < core && (body[at] as string).trim() === '') at++;
     const before = body.slice(0, at);
     while (before.length > 0 && (before.at(-1) as string).trim() === '') before.pop();
@@ -429,7 +446,8 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
       ...(trailing.length ? trailing : ['']),
     ]);
     edited.add(s.heading.line);
-  });
+  };
+  for (const [i, e] of edits.entries()) applyOne(e, i);
   if (errors.length > 0) return { kind: 'error', errors };
   if (bodies.size === 0 && inserts.size === 0) return { kind: 'unchanged', duplicates };
 
@@ -449,7 +467,12 @@ export function applyGuideEdits(md: string, edits: readonly GuideEdit[]): ApplyG
       let a = 0;
       while (a < orig.length && a < body.length && orig[a] === body[a]) a++;
       let b = 0;
-      while (b < orig.length - a && b < body.length - a && orig[orig.length - 1 - b] === body[body.length - 1 - b]) b++;
+      while (
+        b < orig.length - a &&
+        b < body.length - a &&
+        orig[orig.length - 1 - b] === body[body.length - 1 - b]
+      )
+        b++;
       written.push([out.length + a, out.length + body.length - b]);
       out.push(...body);
       if (edited.has(s.heading.line) && !changed.includes(s.heading.text)) changed.push(s.heading.text);
@@ -519,10 +542,15 @@ export function scrubGuideText(text: string, denyList: readonly string[] = []): 
     if (!NOT_KEYS.has(m[1] as string)) out.push(`a ticket key ("${m[0]}")`);
   for (const m of text.matchAll(/\b[0-9a-f]{7,40}\b/g))
     if (/\d/.test(m[0]) && /[a-f]/.test(m[0])) out.push(`a commit id ("${m[0]}")`);
-  if (/\b(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{10,}|\bsk-[A-Za-z0-9-]{16,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY/.test(text))
+  if (
+    /\b(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{10,}|\bsk-[A-Za-z0-9-]{16,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY/.test(
+      text,
+    )
+  )
     out.push('something that looks like a secret');
   const low = text.toLowerCase();
-  for (const t of denyList) if (t.trim() && low.includes(t.trim().toLowerCase())) out.push(`the term "${t.trim()}"`);
+  for (const t of denyList)
+    if (t.trim() && low.includes(t.trim().toLowerCase())) out.push(`the term "${t.trim()}"`);
   return out;
 }
 
@@ -550,7 +578,8 @@ function structural(doc: GuideDoc, ctx: GuideCheckContext): string[] {
     }
     for (const [base, letters] of bases)
       letters.sort().forEach((l, i) => {
-        if (l !== String.fromCharCode(97 + i)) errs.push(`section letters of ${base} have a gap before ${base}${l}`);
+        if (l !== String.fromCharCode(97 + i))
+          errs.push(`section letters of ${base} have a gap before ${base}${l}`);
       });
   }
   const slugs = new Map<string, number>();
@@ -601,13 +630,17 @@ export function checkGuideUpdate(
   const ranges = ctx.changedRanges ?? [];
   const wrote = ranges.flatMap(([s, e]) => a.lines.slice(s, e));
   const numbers = new Set(a.headings.filter((h) => h.number).map((h) => h.number as string));
-  const chapters = new Set(a.headings.filter((h) => h.level === 2 && h.number).map((h) => h.number as string));
+  const chapters = new Set(
+    a.headings.filter((h) => h.level === 2 && h.number).map((h) => h.number as string),
+  );
   for (const l of wrote) {
     if (/^#{2,4} /.test(l)) continue;
     for (const m of l.matchAll(SECTION_REF))
-      if (!numbers.has(m[1] as string)) errors.push(`the text refers to section ${m[1]}, which does not exist`);
+      if (!numbers.has(m[1] as string))
+        errors.push(`the text refers to section ${m[1]}, which does not exist`);
     for (const m of l.matchAll(/\bchapter (\d+)\b/gi))
-      if (!chapters.has(m[1] as string)) errors.push(`the text refers to chapter ${m[1]}, which does not exist`);
+      if (!chapters.has(m[1] as string))
+        errors.push(`the text refers to chapter ${m[1]}, which does not exist`);
     for (const m of l.matchAll(/\/help\/([a-z0-9-]+)(?:#([a-z0-9-]+))?/g)) {
       if (!ctx.helpRef) warnings.push(`the Help link /help/${m[1]} could not be checked`);
       else if (!ctx.helpRef(m[1] as string, m[2] ?? null))
@@ -639,7 +672,9 @@ export const ReleaseDocsPrepGuideOutputSchema = z.object({
   status: z.enum(['passed', 'failed']),
   skipped: z.literal('no user guide').optional(),
   nothing: z.string().max(200).optional(),
-  changed: cap(z.object({ section: z.string().max(200), sources: z.array(z.string().max(80)).max(50).default([]) })),
+  changed: cap(
+    z.object({ section: z.string().max(200), sources: z.array(z.string().max(80)).max(50).default([]) }),
+  ),
   added: cap(
     z.object({
       section: z.string().max(200),

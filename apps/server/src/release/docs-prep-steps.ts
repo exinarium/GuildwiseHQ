@@ -57,7 +57,12 @@ const WRITER_ROLES = ['architect', 'ba', 'builder'];
  * The agent that writes a step's text: an active agent of the run's organization hosted on the workstation that has
  * the repository, preferring an architect, then a business analyst, then a builder (by name). Null: there is none.
  */
-export async function docsPrepWriter(ctx: Ctx, db: Queryable, run: Row, repo: Row): Promise<AgentRuntimeSpec | null> {
+export async function docsPrepWriter(
+  ctx: Ctx,
+  db: Queryable,
+  run: Row,
+  repo: Row,
+): Promise<AgentRuntimeSpec | null> {
   const a = await one(
     db,
     `SELECT a.* FROM agents a

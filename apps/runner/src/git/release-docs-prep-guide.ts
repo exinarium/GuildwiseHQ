@@ -12,8 +12,8 @@ import {
   guideOutline,
   locateSections,
   parseGuide,
-  type ReleaseDocsPrepGuideOutput,
   ReleaseDocsPrepGuideInputSchema,
+  type ReleaseDocsPrepGuideOutput,
 } from '@aom/shared';
 import { git } from './git.ts';
 import { areaOf } from './release-docs-prep.ts';
@@ -42,7 +42,11 @@ export function guideInstructions(): string {
   return body.trim();
 }
 
-const lines = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter(Boolean);
+const lines = (s: string): string[] =>
+  s
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 
 /** The changes of the release, one per first-parent merge (or per commit when there are no merges). */
 export async function guideChangeItems(ctx: DocsPrepStepContext): Promise<GuideChangeItem[]> {
@@ -50,14 +54,25 @@ export async function guideChangeItems(ctx: DocsPrepStepContext): Promise<GuideC
   if (!s) return [];
   const wt = ctx.worktree;
   const out: GuideChangeItem[] = [];
-  const routesOf = (t: string): string[] => [...t.matchAll(/(?<![\w/])(\/[a-z][a-z0-9/_-]*)/g)].map((m) => m[1] as string);
+  const routesOf = (t: string): string[] =>
+    [...t.matchAll(/(?<![\w/])(\/[a-z][a-z0-9/_-]*)/g)].map((m) => m[1] as string);
   const finish = (sources: string[], title: string, subjects: string[], files: string[]): void => {
     const areas = [...new Set(files.map((f) => areaOf(f, ctx.payload.components)))];
-    out.push({ sources, title, subjects, files, areas, routes: [...new Set([title, ...subjects].flatMap(routesOf))] });
+    out.push({
+      sources,
+      title,
+      subjects,
+      files,
+      areas,
+      routes: [...new Set([title, ...subjects].flatMap(routesOf))],
+    });
   };
   if (s.merges.length > 0) {
     for (const m of s.merges) {
-      const files = lines((await git(wt, ['diff', '--name-only', `${m.sha}^1`, m.sha])).stdout).slice(0, FILES_MAX);
+      const files = lines((await git(wt, ['diff', '--name-only', `${m.sha}^1`, m.sha])).stdout).slice(
+        0,
+        FILES_MAX,
+      );
       const subjects = lines((await git(wt, ['log', '--format=%s', `${m.sha}^1..${m.sha}^2`])).stdout).slice(
         0,
         SUBJECTS_MAX,
@@ -68,7 +83,10 @@ export async function guideChangeItems(ctx: DocsPrepStepContext): Promise<GuideC
     return out;
   }
   for (const c of s.commits) {
-    const files = lines((await git(wt, ['show', '--name-only', '--format=', c.sha])).stdout).slice(0, FILES_MAX);
+    const files = lines((await git(wt, ['show', '--name-only', '--format=', c.sha])).stdout).slice(
+      0,
+      FILES_MAX,
+    );
     finish([`commit:${c.sha}`], c.subject, [], files);
   }
   return out;
@@ -124,16 +142,19 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const input = ReleaseDocsPrepGuideInputSchema.safeParse(ctx.payload.stepInput ?? {});
   if (!input.success) return fail('the user guide step got an invalid input from the server');
   const guidePath = normalize(input.data.guidePath || DEFAULT_GUIDE_PATH);
-  if (isAbsolute(guidePath) || guidePath.startsWith('..')) return fail(`refusing the guide path ${guidePath}`);
+  if (isAbsolute(guidePath) || guidePath.startsWith('..'))
+    return fail(`refusing the guide path ${guidePath}`);
   const abs = join(wt, guidePath);
   if (!existsSync(abs) || !statSync(abs).isFile())
     return { ok: true, files: [], output: { ...empty('passed'), skipped: 'no user guide' } };
-  if (!ctx.summary) return fail('Update user guide needs Analyse changes: tick it in the release prep settings');
+  if (!ctx.summary)
+    return fail('Update user guide needs Analyse changes: tick it in the release prep settings');
 
   const items = await guideChangeItems(ctx);
   const covered = new Set(input.data.coveredSources);
   const uncovered = items.filter((i) => i.sources.some((s) => !covered.has(s)));
-  if (uncovered.length === 0) return { ok: true, files: [], output: { ...empty('passed'), nothing: 'no new changes' } };
+  if (uncovered.length === 0)
+    return { ok: true, files: [], output: { ...empty('passed'), nothing: 'no new changes' } };
 
   const before = await readFile(abs, 'utf8');
   const guideDir = dirname(guidePath);
@@ -153,7 +174,8 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
     denyList: input.data.denyList,
   };
   const pre = checkGuideUpdate(null, before, checkCtx);
-  if (pre.errors.length > 0) return fail(`the user guide has problems before the update: ${pre.errors[0]}`, pre);
+  if (pre.errors.length > 0)
+    return fail(`the user guide has problems before the update: ${pre.errors[0]}`, pre);
 
   const doc = parseGuide(before);
   const sectionText = (ref: string): string => {
@@ -218,7 +240,9 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
     const named = [...new Set(proposal.edits.map((e) => (e.op === 'add_section' ? e.after : e.section)))];
     const again = await ask(
       `Your previous edits were refused:\n- ${result.errors.join('\n- ')}\nSections you named, as they are now:\n${named
-        .map((n) => doc.sections.find((s) => s.heading.number === n || s.heading.text === n)?.heading.text ?? n)
+        .map(
+          (n) => doc.sections.find((s) => s.heading.number === n || s.heading.text === n)?.heading.text ?? n,
+        )
         .map(sectionText)
         .join('\n\n')}\nReturn the whole JSON again.`,
     );
@@ -260,7 +284,9 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
     duplicates: a.duplicates.length,
     changed: a.changed.map((section) => ({
       section,
-      sources: sourcesFor((e) => e.op !== 'add_section' && [section, num(section)].includes(e.section.trim())),
+      sources: sourcesFor(
+        (e) => e.op !== 'add_section' && [section, num(section)].includes(e.section.trim()),
+      ),
     })),
     added: a.added.map((x) => ({
       ...x,
@@ -279,7 +305,9 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
       ['corepack', ['pnpm', 'install', '--frozen-lockfile', '--prefer-offline'], 10 * 60_000],
       ['corepack', ['pnpm', '--filter', '@aom/e2e', 'exec', 'playwright', 'install', 'chromium'], 5 * 60_000],
       ['node', [assemble], 2 * 60_000],
-      ...(existsSync(join(wt, build)) ? ([['node', [build], 10 * 60_000]] as Array<[string, string[], number]>) : []),
+      ...(existsSync(join(wt, build))
+        ? ([['node', [build], 10 * 60_000]] as Array<[string, string[], number]>)
+        : []),
     ];
     for (const [cmd, args, timeoutMs] of steps) {
       const r = await ctx.exec(cmd, args, { cwd: wt, timeoutMs });

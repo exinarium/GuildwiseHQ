@@ -326,8 +326,7 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
         .map((l) => l.slice(3).trim())
         .filter(Boolean);
       const extra = status.filter((f) => !out.files.includes(f));
-      if (extra.length > 0)
-        return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, output);
+      if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, output);
       if (status.length === 0) return passed({ notices: ['no changes'], ...output });
       const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], {
         env: commitEnv(identity),

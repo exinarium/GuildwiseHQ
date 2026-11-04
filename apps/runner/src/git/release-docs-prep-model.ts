@@ -41,14 +41,22 @@ export function docsPrepModel(
       return { ok: false, error: `${NO_WRITER}: the runtime ${writer.runtime} cannot write files` };
     const sandbox = deps.sandbox
       ? await deps.sandbox(writer)
-      : await ensureSandbox(deps.paths, writer.agentId, writer.name, await resolveCommitIdentity(deps.paths.root));
+      : await ensureSandbox(
+          deps.paths,
+          writer.agentId,
+          writer.name,
+          await resolveCommitIdentity(deps.paths.root),
+        );
     const release = holdAgentTmp(sandbox);
     const work = join(sandbox.scratch, 'release-prep', randomUUID());
     try {
       await mkdir(work, { recursive: true });
       return await runIn(deps, adapter, writer, sandbox, work, req);
     } catch (err) {
-      return { ok: false, error: `the writer could not run: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        ok: false,
+        error: `the writer could not run: ${err instanceof Error ? err.message : String(err)}`,
+      };
     } finally {
       await rm(work, { recursive: true, force: true }).catch(() => {});
       release();
@@ -95,7 +103,8 @@ async function runIn(
   } finally {
     clearTimeout(timer);
   }
-  if (timedOut) return { ok: false, error: `the writer did not finish within ${Math.round(req.timeoutMs / 60_000)} min` };
+  if (timedOut)
+    return { ok: false, error: `the writer did not finish within ${Math.round(req.timeoutMs / 60_000)} min` };
   if (!exit || exit.code !== 0) {
     const why = exit?.usageLimit
       ? `the usage limit was hit (resets ${exit.usageLimit.until})`

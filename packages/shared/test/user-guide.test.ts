@@ -11,8 +11,8 @@ import {
   missingReleaseDocsPrepRequirements,
   parseGuide,
   ReleaseDocsPrepPayloadSchema,
-  renderGuideToc,
   releaseDocsPrepStep,
+  renderGuideToc,
   scrubGuideText,
 } from '../src/index.ts';
 
@@ -112,7 +112,13 @@ describe('locateSections', () => {
 describe('applyGuideEdits', () => {
   it('edits only the named section and names it', () => {
     const out = applyGuideEdits(SAMPLE, [
-      { op: 'replace_text', section: '4.28', find: 'lists each version', replace: 'lists each version and its prep', sources: ['card:GWP-1'] },
+      {
+        op: 'replace_text',
+        section: '4.28',
+        find: 'lists each version',
+        replace: 'lists each version and its prep',
+        sources: ['card:GWP-1'],
+      },
     ]);
     expect(out.kind).toBe('changed');
     if (out.kind !== 'changed') return;
@@ -121,13 +127,20 @@ describe('applyGuideEdits', () => {
     const b = out.md.split('\n');
     expect(b.length).toBe(a.length);
     const diff = a.map((l, i) => (l === b[i] ? -1 : i)).filter((i) => i >= 0);
-    expect(diff).toEqual([a.indexOf('The **Releases** page lists each version. Press **Approve release** to ship it (see 4.24).')]);
+    expect(diff).toEqual([
+      a.indexOf('The **Releases** page lists each version. Press **Approve release** to ship it (see 4.24).'),
+    ]);
     expect(checkGuideUpdate(SAMPLE, out.md, { ...ctx, changedRanges: out.written }).errors).toEqual([]);
   });
 
   it('appends before the trailing In the app callout', () => {
     const out = applyGuideEdits(SAMPLE, [
-      { op: 'append', section: '4.28 Releases', text: '**Update user guide.** Prep updates the guide.', sources: [] },
+      {
+        op: 'append',
+        section: '4.28 Releases',
+        text: '**Update user guide.** Prep updates the guide.',
+        sources: [],
+      },
     ]);
     if (out.kind !== 'changed') throw new Error(out.kind);
     const b = out.md.split('\n');
@@ -139,16 +152,30 @@ describe('applyGuideEdits', () => {
 
   it('numbers a new section after one with a later sibling with a letter, and again with the next letter', () => {
     const out = applyGuideEdits(SAMPLE, [
-      { op: 'add_section', after: '4.28', title: 'Release prep', body: 'Prep text.', sources: ['card:GWP-2'] },
+      {
+        op: 'add_section',
+        after: '4.28',
+        title: 'Release prep',
+        body: 'Prep text.',
+        sources: ['card:GWP-2'],
+      },
       { op: 'add_section', after: '4.28', title: 'Release notes', body: 'Notes text.', sources: [] },
       { op: 'add_section', after: '4.24a', title: 'Build cache', body: 'Cache text.', sources: [] },
     ]);
     if (out.kind !== 'changed') throw new Error(JSON.stringify(out));
-    expect(out.added.map((a) => a.section)).toEqual(['4.24b Build cache', '4.28a Release prep', '4.28b Release notes']);
-    const heads = parseGuide(out.md).headings.map((h) => h.number).filter(Boolean);
+    expect(out.added.map((a) => a.section)).toEqual([
+      '4.24b Build cache',
+      '4.28a Release prep',
+      '4.28b Release notes',
+    ]);
+    const heads = parseGuide(out.md)
+      .headings.map((h) => h.number)
+      .filter(Boolean);
     expect(heads).toEqual(['4', '4.24', '4.24a', '4.24b', '4.28', '4.28a', '4.28b', '4.29', '4.30']);
     expect(out.md).toContain('  - [4.28a Release prep](#428a-release-prep)');
-    expect(checkGuideUpdate(SAMPLE, out.md, { ...ctx, changedRanges: out.written, addedSections: 3 }).errors).toEqual([]);
+    expect(
+      checkGuideUpdate(SAMPLE, out.md, { ...ctx, changedRanges: out.written, addedSections: 3 }).errors,
+    ).toEqual([]);
   });
 
   it('gives the next integer after the last section of a chapter, and none after an unnumbered one', () => {
@@ -162,19 +189,33 @@ describe('applyGuideEdits', () => {
 
   it('refuses a numbered title, a heading in the body, a figure, an unknown or ambiguous section and a slug clash', () => {
     const bad = (e: Parameters<typeof applyGuideEdits>[1][number]) => applyGuideEdits(SAMPLE, [e]).kind;
-    expect(bad({ op: 'add_section', after: '4.28', title: '4.28a Prep', body: 'x', sources: [] })).toBe('error');
+    expect(bad({ op: 'add_section', after: '4.28', title: '4.28a Prep', body: 'x', sources: [] })).toBe(
+      'error',
+    );
     expect(bad({ op: 'append', section: '4.28', text: '### New', sources: [] })).toBe('error');
-    expect(bad({ op: 'append', section: '4.28', text: '![x](guide/assets/x.jpg)', sources: [] })).toBe('error');
+    expect(bad({ op: 'append', section: '4.28', text: '![x](guide/assets/x.jpg)', sources: [] })).toBe(
+      'error',
+    );
     expect(bad({ op: 'append', section: '9.9', text: 'x', sources: [] })).toBe('error');
-    expect(bad({ op: 'replace_text', section: '4.28', find: 'nope', replace: 'x', sources: [] })).toBe('error');
-    expect(bad({ op: 'add_section', after: 'The section map', title: 'The section map!', body: 'x', sources: [] })).toBe('error');
+    expect(bad({ op: 'replace_text', section: '4.28', find: 'nope', replace: 'x', sources: [] })).toBe(
+      'error',
+    );
+    expect(
+      bad({ op: 'add_section', after: 'The section map', title: 'The section map!', body: 'x', sources: [] }),
+    ).toBe('error');
   });
 
   it('drops edits that are already in the guide, so a second run changes nothing', () => {
     const edits = [
       { op: 'append' as const, section: '4.28', text: '**Prep.** It runs before the ship.', sources: [] },
       { op: 'add_section' as const, after: '4.28', title: 'Release prep', body: 'Prep text.', sources: [] },
-      { op: 'replace_text' as const, section: '4.29', find: 'Charts of the work.', replace: 'Charts of the work and its cost.', sources: [] },
+      {
+        op: 'replace_text' as const,
+        section: '4.29',
+        find: 'Charts of the work.',
+        replace: 'Charts of the work and its cost.',
+        sources: [],
+      },
     ];
     const once = applyGuideEdits(SAMPLE, edits);
     if (once.kind !== 'changed') throw new Error(once.kind);
@@ -198,7 +239,9 @@ describe('checkGuideUpdate', () => {
     expect(e(SAMPLE.replace('(#430-costs)', '(#430-cost)')).join()).toMatch(/link #430-cost/);
     expect(e(SAMPLE.replace('  - [4.30 Costs](#430-costs)\n', '')).join()).toMatch(/contents block/);
     expect(
-      checkGuideUpdate(null, `${SAMPLE}\n![Shot](guide/assets/none.jpg)\n`, { assetExists: () => false }).errors.join(),
+      checkGuideUpdate(null, `${SAMPLE}\n![Shot](guide/assets/none.jpg)\n`, {
+        assetExists: () => false,
+      }).errors.join(),
     ).toMatch(/figure/);
     const lines = SAMPLE.split('\n');
     const at = lines.indexOf('Charts of the work.');
@@ -216,9 +259,15 @@ describe('checkGuideUpdate', () => {
     lines[at] = 'See `/help/metrics#charts`.';
     const after = lines.join('\n');
     const r = [[at, at + 1]] as Array<[number, number]>;
-    expect(checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r }).warnings.join()).toMatch(/could not be checked/);
-    expect(checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r, helpRef: () => false }).errors.join()).toMatch(/goes nowhere/);
-    expect(checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r, helpRef: () => true }).errors).toEqual([]);
+    expect(checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r }).warnings.join()).toMatch(
+      /could not be checked/,
+    );
+    expect(
+      checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r, helpRef: () => false }).errors.join(),
+    ).toMatch(/goes nowhere/);
+    expect(checkGuideUpdate(SAMPLE, after, { ...ctx, changedRanges: r, helpRef: () => true }).errors).toEqual(
+      [],
+    );
   });
 
   it('refuses an update that rewrites too much', () => {
@@ -241,12 +290,22 @@ describe('checkGuideUpdate', () => {
 describe('the guide step in the registry', () => {
   it('is on by default, writes files and needs Analyse changes', () => {
     expect(releaseDocsPrepStep('guide')).toEqual(GUIDE_STEP);
-    expect(GUIDE_STEP).toMatchObject({ order: 30, defaultOn: true, producesFiles: true, requires: ['analyse'] });
+    expect(GUIDE_STEP).toMatchObject({
+      order: 30,
+      defaultOn: true,
+      producesFiles: true,
+      requires: ['analyse'],
+    });
     const commit = releaseDocsPrepStep('commit')!;
-    expect(missingReleaseDocsPrepRequirements([GUIDE_STEP, commit]).map((m) => [m.step.id, m.missing.map((x) => x.id)])).toEqual([
-      ['guide', ['analyse']],
-    ]);
-    expect(missingReleaseDocsPrepRequirements([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit])).toEqual([]);
+    expect(
+      missingReleaseDocsPrepRequirements([GUIDE_STEP, commit]).map((m) => [
+        m.step.id,
+        m.missing.map((x) => x.id),
+      ]),
+    ).toEqual([['guide', ['analyse']]]);
+    expect(missingReleaseDocsPrepRequirements([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit])).toEqual(
+      [],
+    );
   });
   it('collects the covered sources of an output and ignores bad data', () => {
     expect(
@@ -270,6 +329,9 @@ describe('the guide step in the registry', () => {
       step: 'guide',
     };
     expect(ReleaseDocsPrepPayloadSchema.safeParse(base).success).toBe(true);
-    expect(ReleaseDocsPrepPayloadSchema.safeParse({ ...base, stepInput: { guidePath: 'docs/USER-GUIDE.md' } }).success).toBe(true);
+    expect(
+      ReleaseDocsPrepPayloadSchema.safeParse({ ...base, stepInput: { guidePath: 'docs/USER-GUIDE.md' } })
+        .success,
+    ).toBe(true);
   });
 });

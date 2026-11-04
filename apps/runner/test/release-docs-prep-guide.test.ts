@@ -85,7 +85,13 @@ const PROPOSAL = {
       text: '**Release prep.** Run release prep before you approve a release.',
       sources: ['card:GWP-89'],
     },
-    { op: 'add_section', after: '4.28', title: 'Release prep', body: 'Release prep runs before the ship.', sources: ['card:GWP-89'] },
+    {
+      op: 'add_section',
+      after: '4.28',
+      title: 'Release prep',
+      body: 'Release prep runs before the ship.',
+      sources: ['card:GWP-89'],
+    },
   ],
   covered: [],
   skipped: [],
@@ -119,9 +125,17 @@ async function analyseThenGuide(
   e = fakeExec(),
   stepInput: Record<string, unknown> = {},
 ): Promise<{ analyse: ReleaseDocsPrepResult; guide: ReleaseDocsPrepResult }> {
-  const analyse = await runReleaseDocsPrep({ payload: payload(s), repoPath: s.repo.clone, integrationDir: s.integrationDir });
+  const analyse = await runReleaseDocsPrep({
+    payload: payload(s),
+    repoPath: s.repo.clone,
+    integrationDir: s.integrationDir,
+  });
   const guide = await runReleaseDocsPrep({
-    payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}), stepInput }),
+    payload: payload(s, {
+      step: 'guide',
+      ...(analyse.summary ? { summary: analyse.summary } : {}),
+      stepInput,
+    }),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
     runModel: m.runModel,
@@ -219,7 +233,11 @@ describe("release prep step 'guide'", () => {
     expect(sh(s.repo.clone, 'git', ['rev-parse', `refs/guildwise/docs-prep/${RUN}/work`])).toBe(work);
     // the commit step squashes one guide change, not two
     const commit = await runReleaseDocsPrep({
-      payload: payload(s, { step: 'commit', phase: 'prepare', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      payload: payload(s, {
+        step: 'commit',
+        phase: 'prepare',
+        ...(analyse.summary ? { summary: analyse.summary } : {}),
+      }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
     });
@@ -235,9 +253,17 @@ describe("release prep step 'guide'", () => {
     const m = fakeModel();
     const e = fakeExec();
     // the server dispatches only the ticked steps: here 'analyse' and 'commit', never 'guide'
-    const analyse = await runReleaseDocsPrep({ payload: payload(s), repoPath: s.repo.clone, integrationDir: s.integrationDir });
+    const analyse = await runReleaseDocsPrep({
+      payload: payload(s),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+    });
     const commit = await runReleaseDocsPrep({
-      payload: payload(s, { step: 'commit', phase: 'prepare', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      payload: payload(s, {
+        step: 'commit',
+        phase: 'prepare',
+        ...(analyse.summary ? { summary: analyse.summary } : {}),
+      }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
       runModel: m.runModel,
@@ -248,7 +274,9 @@ describe("release prep step 'guide'", () => {
     expect(commit.commit).toBeUndefined();
     expect(m.calls).toHaveLength(0);
     expect(e.calls).toHaveLength(0);
-    expect(sh(s.repo.clone, 'git', ['show', 'origin/release/1.5.0:docs/USER-GUIDE.md'])).toBe(GUIDE.trimEnd());
+    expect(sh(s.repo.clone, 'git', ['show', 'origin/release/1.5.0:docs/USER-GUIDE.md'])).toBe(
+      GUIDE.trimEnd(),
+    );
     expect(sh(s.repo.clone, 'git', ['status', '--porcelain'])).toBe('');
   });
 
@@ -265,7 +293,8 @@ describe("release prep step 'guide'", () => {
   it('rebuilds the PDF with the repository scripts and commits it with the text', async () => {
     const s = setup({ scripts: true });
     const e = fakeExec((cwd, args) => {
-      if (String(args[0]).endsWith('assemble-guide.mjs')) writeFileSync(join(cwd, 'docs/guide/guide.html'), '<html/>');
+      if (String(args[0]).endsWith('assemble-guide.mjs'))
+        writeFileSync(join(cwd, 'docs/guide/guide.html'), '<html/>');
     });
     const { guide } = await analyseThenGuide(s, fakeModel(), e);
     expect(guide.state).toBe('passed');
@@ -304,7 +333,11 @@ describe("release prep step 'guide'", () => {
 
   it('fails clearly when no model is available on this runner', async () => {
     const s = setup();
-    const analyse = await runReleaseDocsPrep({ payload: payload(s), repoPath: s.repo.clone, integrationDir: s.integrationDir });
+    const analyse = await runReleaseDocsPrep({
+      payload: payload(s),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+    });
     const guide = await runReleaseDocsPrep({
       payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
       repoPath: s.repo.clone,

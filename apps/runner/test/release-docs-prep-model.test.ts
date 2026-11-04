@@ -72,7 +72,13 @@ function setup(adapter?: RuntimeAdapter) {
   const paths = runnerPaths(root);
   const scratch = join(root, 'scratch');
   mkdirSync(scratch, { recursive: true });
-  const sb = { home: root, configDir: join(root, 'cfg'), scratch, tmp: join(root, 'tmp'), cacheRoot: undefined } as unknown as Sandbox;
+  const sb = {
+    home: root,
+    configDir: join(root, 'cfg'),
+    scratch,
+    tmp: join(root, 'tmp'),
+    cacheRoot: undefined,
+  } as unknown as Sandbox;
   const outDir = tmp('aom-docs-prep-out-');
   const repo = tmp('aom-docs-prep-repo-');
   const run = docsPrepModel(
@@ -90,13 +96,17 @@ function setup(adapter?: RuntimeAdapter) {
   return { run, req, outDir, repo, scratch };
 }
 
-const writeTarget = (input: ChatStartInput): string => /Write the JSON to (\S+)\./.exec(input.message)?.[1] as string;
+const writeTarget = (input: ChatStartInput): string =>
+  /Write the JSON to (\S+)\./.exec(input.message)?.[1] as string;
 
 describe('release prep model call', () => {
   it('runs one headless call as the writer, writing only in its scratch folder, and hands the file to the step', async () => {
     const f = fakeAdapter((input) => {
       writeFileSync(writeTarget(input), '{"edits":[]}');
-      return [{ kind: 'final', text: 'done' }, { kind: 'exit', code: 0 }];
+      return [
+        { kind: 'final', text: 'done' },
+        { kind: 'exit', code: 0 },
+      ];
     });
     const s = setup(f.adapter);
     const r = await s.run(s.req());
@@ -128,11 +138,17 @@ describe('release prep model call', () => {
       capabilities: async () => ({ runtime: 'fake', version: '1', available: false, capabilities: [] }),
     });
     const s2 = setup(off.adapter);
-    expect(await s2.run(s2.req())).toMatchObject({ ok: false, error: expect.stringMatching(/not available/) });
+    expect(await s2.run(s2.req())).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/not available/),
+    });
     expect(off.starts).toHaveLength(0);
     const tools = fakeAdapter(() => [], { instructionStyle: 'tools' });
     const s3 = setup(tools.adapter);
-    expect(await s3.run(s3.req())).toMatchObject({ ok: false, error: expect.stringMatching(/cannot write files/) });
+    expect(await s3.run(s3.req())).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/cannot write files/),
+    });
   });
 
   it('fails when the call exits with an error, and copies nothing', async () => {
