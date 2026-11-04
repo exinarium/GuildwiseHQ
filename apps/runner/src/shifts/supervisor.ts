@@ -77,7 +77,7 @@ import {
   type ProjectIndexResult,
   skillRpc,
 } from '../capabilities/registry.ts';
-import { detectChecks } from '../checks/detect.ts';
+import { detectChecksFromRef } from '../checks/detect.ts';
 import { runHandoffChecks } from '../checks/run.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
@@ -101,7 +101,7 @@ import {
   type GitReply,
 } from '../git/architect-git.ts';
 import { computeCardDiff } from '../git/card-diff.ts';
-import { computeDiffStats, riskTier } from '../git/diffstat.ts';
+import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import {
@@ -2743,7 +2743,9 @@ export class ShiftSupervisor {
   private async proposeChecks(s: ActiveShift): Promise<void> {
     try {
       if (!s.worktree) return;
-      const suites = detectChecks(s.worktree.path, s.msg.brief.project.projectPath ?? '.');
+      const base = await baseRef(s.worktree.path, s.worktree.baseBranch);
+      const suites = await detectChecksFromRef(s.worktree.path, base, s.msg.brief.project.projectPath ?? '.');
+      if (suites.length === 0) return;
       const r = await this.deps.rpc(s.msg.shiftId, 'env.suites.propose', { suites });
       if (!r.ok) this.log.warn(`check proposal for shift ${s.msg.shiftId} refused: ${r.error ?? 'unknown'}`);
     } catch (err) {

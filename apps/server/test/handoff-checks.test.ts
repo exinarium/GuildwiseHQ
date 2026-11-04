@@ -181,6 +181,20 @@ describe('settings with checks', () => {
     r.ended(start.shiftId, 'reported');
   });
 
+  it('refuses to confirm a proposed check whose folder leaves the repository', async () => {
+    await team();
+    await cardInBuild();
+    const start = await p.next('Bea');
+    await p.startShift(r, start);
+    await rpc(start.shiftId, 'env.suites.propose', {
+      suites: [{ name: 'esc', cmd: ['sh', '-c', 'id'], kind: 'check', cwd: '../..' }],
+    });
+    const res = await call('POST', `${settingsUrl()}/suites/esc/confirm`, { confirmed: true }, 400);
+    expect(JSON.stringify(res)).toContain('inside the repository');
+    expect((await call('GET', settingsUrl())).settings.suites[0].confirmed).toBe(false);
+    r.ended(start.shiftId, 'reported');
+  });
+
   it('refuses a check that runs longer than 10 minutes and a fix on a test suite', async () => {
     await team();
     const bad = await call(

@@ -1,6 +1,16 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, posix } from 'node:path';
 import { parseCommandLine } from '@aom/shared';
+import { git } from '../git/git.ts';
 
 /**
  * Proposes `check` suites from what a repository declares: the CI workflow, the package.json scripts and the config of
@@ -86,9 +96,22 @@ function harden(argv: string[], scripts: Record<string, string>): string[] {
   let out = [...argv];
   const script = scriptOf(out);
   const body = script ? (scripts[script] ?? '') : '';
+  // a flag the command line or the script body already sets is left alone
+  const has = (flag: string) =>
+    out.some((a) => a === flag || a.startsWith(`${flag}=`)) || body.includes(flag);
+  const add = (...flags: string[]) => {
+    out = out[0] === 'npm' ? [...out, '--', ...flags] : [...out, ...flags];
+  };
   const runsBiome = out.includes('biome') || /\bbiome\b/.test(body);
-  if (runsBiome && !out.some((a) => a.startsWith('--max-diagnostics')) && !/--max-diagnostics/.test(body))
-    out = out[0] === 'npm' ? [...out, '--', '--max-diagnostics=none'] : [...out, '--max-diagnostics=none'];
+  // Errors only: warnings are not failures of the card, and thousands of them would push the card's error out of the output.
+  if (runsBiome) {
+    const flags = [];
+    if (!has('--max-diagnostics')) flags.push('--max-diagnostics=none');
+    if (!has('--diagnostic-level')) flags.push('--diagnostic-level=error');
+    if (flags.length) add(...flags);
+  }
+  const runsEslint = out.includes('eslint') || /\beslint\b/.test(body);
+  if (runsEslint && !has('--quiet')) add('--quiet');
   const ri = out.findIndex((a) => a === '-r' || a === '--recursive');
   if (ri >= 0 && !out.includes('--no-bail')) out.splice(ri + 1, 0, '--no-bail');
   return out;
@@ -174,7 +197,7 @@ export function detectChecks(worktree: string, relDir = '.'): CheckProposal[] {
     const has = (...names: string[]) => names.some((n) => existsSync(join(dir, n)));
     if (has('biome.json', 'biome.jsonc'))
       add(
-        ['npx', 'biome', 'check', '.', '--max-diagnostics=none'],
+        ['npx', 'biome', 'check', '.', '--max-diagnostics=none', '--diagnostic-level=error'],
         ['npx', 'biome', 'format', '--write', '.'],
       );
     if (
@@ -189,7 +212,7 @@ export function detectChecks(worktree: string, relDir = '.'): CheckProposal[] {
         '.eslintrc.cjs',
       )
     )
-      add(['npx', 'eslint', '.']);
+      add(['npx', 'eslint', '.', '--quiet']);
     if (has('.prettierrc', '.prettierrc.json', '.prettierrc.js', 'prettier.config.js', 'prettier.config.mjs'))
       add(['npx', 'prettier', '--check', '.'], ['npx', 'prettier', '--write', '.']);
     if (has('ruff.toml', '.ruff.toml') || /\[tool\.ruff\]/.test(read(join(dir, 'pyproject.toml')) ?? '')) {
@@ -217,4 +240,67 @@ function pmOf(dir: string, root: string, declared?: string): 'pnpm' | 'npm' | 'y
     if (existsSync(join(base, 'package-lock.json'))) return 'npm';
   }
   return 'npm';
+}
+
+const CONFIG_FILES = new Set([
+  'package.json',
+  'biome.json',
+  'biome.jsonc',
+  'eslint.config.js',
+  'eslint.config.mjs',
+  'eslint.config.cjs',
+  'eslint.config.ts',
+  '.eslintrc',
+  '.eslintrc.json',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.prettierrc',
+  '.prettierrc.json',
+  '.prettierrc.js',
+  'prettier.config.js',
+  'prettier.config.mjs',
+  'ruff.toml',
+  '.ruff.toml',
+  'pyproject.toml',
+  '.editorconfig',
+]);
+const LOCKFILES = new Set(['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json']);
+
+/**
+ * Detection from the repository's base branch (`ref`), not from the card branch the builder controls: a builder (or text it
+ * was fed) could add a workflow line there that would be proposed as "from the repository". Only the files detection reads
+ * are exported (lockfiles as empty files), into a temp folder that is removed afterwards.
+ */
+export async function detectChecksFromRef(
+  worktree: string,
+  ref: string,
+  relDir = '.',
+): Promise<CheckProposal[]> {
+  const list = await git(worktree, ['ls-tree', '-r', '--name-only', '-z', ref]);
+  if (list.exitCode !== 0) return [];
+  const dir = relDir === '.' || relDir === '' ? '' : relDir.replace(/\/+$/, '');
+  const wanted = list.stdout.split('\0').filter((f) => {
+    if (!f) return false;
+    if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(f)) return true;
+    const d = posix.dirname(f) === '.' ? '' : posix.dirname(f);
+    if (d !== '' && d !== dir) return false;
+    const b = posix.basename(f);
+    return CONFIG_FILES.has(b) || LOCKFILES.has(b) || /\.(sln|slnx|csproj)$/.test(b);
+  });
+  const tmp = mkdtempSync(join(tmpdir(), 'aom-detect-'));
+  try {
+    for (const f of wanted) {
+      const out = join(tmp, f);
+      mkdirSync(dirname(out), { recursive: true });
+      if (LOCKFILES.has(posix.basename(f))) {
+        writeFileSync(out, '');
+        continue;
+      }
+      const blob = await git(worktree, ['show', `${ref}:${f}`]);
+      if (blob.exitCode === 0) writeFileSync(out, blob.stdout);
+    }
+    return detectChecks(tmp, relDir);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }

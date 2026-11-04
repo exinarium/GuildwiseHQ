@@ -43,6 +43,26 @@ describe('runHandoffChecks', () => {
     expect(r.summary).toContain('lint passed');
   });
 
+  it('a warning in a changed file never blocks: the tool exits 0 (errors-only flags keep it quiet otherwise)', async () => {
+    const r = await run({ suites: [suite('lint', 'echo "src/a.ts:1:1 lint/style/noVar warn"; exit 0')] });
+    expect(r.evidence[0]?.status).toBe('passed');
+    expect(r.blocking).toEqual([]);
+  });
+
+  it('a folder outside the repository is not run', async () => {
+    let launched = false;
+    const r = await run({
+      launch: async (a) => {
+        launched = true;
+        return sh(a);
+      },
+      suites: [suite('esc', 'echo hi', { cwd: '../..' }), suite('abs', 'echo hi', { cwd: '/etc' })],
+    });
+    expect(launched).toBe(false);
+    expect(r.evidence.map((e) => e.status)).toEqual(['error', 'error']);
+    expect(r.evidence[0]?.summary).toContain('inside the repository');
+  });
+
   it('a failure in a changed file blocks: the refusal has the lines, the fix, the log path and the rest as information', async () => {
     const s = setup();
     const r = await runHandoffChecks({

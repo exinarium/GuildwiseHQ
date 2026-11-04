@@ -146,8 +146,8 @@ describe('checks at aom handoff', () => {
     expect(posts[1]?.json.accepted).toBe(true);
   }, 60_000);
 
-  it('detect: proposes the repository checks once through env.suites.propose', async () => {
-    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  it('detect: reads the base branch, not the builder branch: a workflow line added on the card branch is not proposed', async () => {
+    const calls: Array<{ method: string }> = [];
     await run(
       { suites: [], detect: true },
       async (wt, post) => {
@@ -158,14 +158,11 @@ describe('checks at aom handoff', () => {
       },
       {
         rpc: (m) => {
-          calls.push({ method: m.method, params: m.params });
+          calls.push({ method: m.method });
           return { ok: true, result: {} };
         },
       },
     );
-    const proposals = calls.filter((c) => c.method === 'env.suites.propose');
-    expect(proposals).toHaveLength(1);
-    const proposed = (proposals[0]?.params.suites ?? []) as Array<{ kind: string }>;
-    expect(proposed[0]?.kind).toBe('check');
+    expect(calls.filter((c) => c.method === 'env.suites.propose')).toHaveLength(0);
   }, 60_000);
 });

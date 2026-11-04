@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CHECKS_BUDGET_MS, type CheckEvidence, type IntegrationSuite } from '@aom/shared';
+import { CHECKS_BUDGET_MS, type CheckEvidence, type IntegrationSuite, isSafeRelativeDir } from '@aom/shared';
 import { type Attribution, attribute, stripAnsi } from './attribute.ts';
 
 /** The most output of one check the runner keeps in memory (the rest is dropped and the result says so). */
@@ -265,6 +265,10 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
       });
       logs.push('');
     };
+    if (!isSafeRelativeDir(suite.cwd)) {
+      fail('error', 'the folder must stay inside the repository');
+      continue;
+    }
     const key = `${i.headSha}\0${suite.name}\0${suite.cmd.join(' ')}\0${suite.cwd}`;
     const hit = i.cache?.get(key);
     if (hit) {

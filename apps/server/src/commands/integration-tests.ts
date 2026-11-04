@@ -172,6 +172,12 @@ export async function confirmSuite(
       ...settings,
       suites: settings.suites.map((s) => (s === hit ? { ...s, confirmed } : s)),
     };
+    // A proposal comes from an agent: it must be a valid suite (a folder inside the repository, a check's longest run, ...)
+    // before the owner's click makes it run.
+    if (confirmed) {
+      const problems = validateIntegrationTests(next, await projectRepoIds(tx, projectId));
+      if (problems.length) throw badRequest('invalid_integration_tests', problems.join('; '));
+    }
     await ctx.store.append(
       [
         {
