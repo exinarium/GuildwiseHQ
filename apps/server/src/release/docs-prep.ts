@@ -594,7 +594,7 @@ export async function sendDocsPrepStepCommand(
   repo: Row,
   o: {
     step: string;
-    phase?: CommitPhase;
+    phase?: string;
     projectKey: string;
     commitAs: ReleaseDocsPrepPayload['commitAs'];
     changelog?: ReleaseDocsPrepPayload['changelog'];

@@ -52,10 +52,15 @@ const M = (path: string): VideoChange => ({ path, status: 'M' });
 
 describe('Generate videos step registry', () => {
   it('sits between analyse and commit and is off by default, even when prep is on', () => {
-    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'videos', 'commit']);
-    expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual(['analyse', 'commit']);
+    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'changelog', 'videos', 'commit']);
+    expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual([
+      'analyse',
+      'changelog',
+      'commit',
+    ]);
     expect(enabledReleaseDocsPrepSteps({ steps: { videos: true } }).map((s) => s.id)).toEqual([
       'analyse',
+      'changelog',
       'videos',
       'commit',
     ]);

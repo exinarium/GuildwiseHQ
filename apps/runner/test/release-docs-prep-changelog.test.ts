@@ -188,6 +188,11 @@ describe('release.docs_prep changelog', () => {
       payload: { step: 'changelog' } as never,
       summary: undefined,
       ...ctxStubs(),
+      phase: '',
+      input: undefined,
+      repoPath: wt,
+      dataDir: undefined,
+      start: '',
     });
     expect(r).toEqual({ ok: false, error: 'the server sent no changelog entries: update the server' });
   });
@@ -202,6 +207,11 @@ describe('release.docs_prep changelog', () => {
       payload: { step: 'changelog', changelog: { projectName: 'P', entries: ENTRIES } } as never,
       summary: undefined,
       ...ctxStubs(),
+      phase: '',
+      input: undefined,
+      repoPath: wt,
+      dataDir: undefined,
+      start: '',
     });
     expect(r.ok).toBe(true);
     const md = readFileSync(join(wt, 'CHANGELOG.md'), 'utf8');
