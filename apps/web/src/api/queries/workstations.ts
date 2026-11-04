@@ -8,6 +8,9 @@ import {
   type PairingCodeResponse,
   PairingCodeResponseSchema,
   type PatchUserRequest,
+  RetirePreviewSchema,
+  type RetireWorkstationRequest,
+  RetireWorkstationResponseSchema,
   type SetShiftLimitRequest,
   UnlinkImpactResponseSchema,
   type UpdateCheckResponse,
@@ -130,6 +133,39 @@ export function useCheckForUpdates(id: string) {
       // The runner answers within seconds (a download takes longer; the list polls anyway).
       for (const ms of [0, 1500, 4000])
         setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
+  });
+}
+
+/** What retiring a workstation would do (its agents, who is working, the cards that restart); only while the dialog is open. */
+export function useRetirePreview(id: string | undefined) {
+  return useQuery({
+    queryKey: ['retire-preview', id],
+    queryFn: () => get(`/workstations/${id}/retire-preview`, RetirePreviewSchema),
+    enabled: !!id,
+    // a refusal ("these agents are working") must be re-checkable, never served from a stale cache
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/** Retires a workstation and hands its agents over (move them, or mark them as needing a new home). */
+export function useRetireWorkstation(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: RetireWorkstationRequest) =>
+      post(`/workstations/${id}/retire`, b, RetireWorkstationResponseSchema),
+    onSuccess: () => {
+      for (const k of [
+        'workstations',
+        'agents',
+        'hr',
+        'agent-homes',
+        'move-targets',
+        'retire-preview',
+        'org-chart',
+      ])
+        qc.invalidateQueries({ queryKey: [k] });
     },
   });
 }

@@ -120,4 +120,13 @@ export const agentProjectors: Record<string, Projector> = {
       [p.agentId, p.workstationId, p.runtime, p.model],
     );
   },
+  // Same shape and guard as the projections of a removed member: no home, to be re-homed (the built-in agents are never sent here).
+  AgentNeedsRehome: async (tx, e) => {
+    const p = (e.event as EventOf<'AgentNeedsRehome'>).payload;
+    await exec(
+      tx,
+      `UPDATE agents SET status='needs_rehome', workstation_id=NULL WHERE id=$1 AND status <> 'retired'`,
+      [p.agentId],
+    );
+  },
 };

@@ -53,6 +53,8 @@ export default defineConfig({
     { name: 'deploy-connect', testMatch: 'deploy-connect.spec.ts', dependencies: ['auth'] },
     // Moving to a new server (v3): TWO real sshd containers (old and new server, each with a fake docker); own runner and project.
     { name: 'deploy-move', testMatch: 'deploy-move.spec.ts', dependencies: ['auth'] },
+    // Retiring a workstation with agent handover: its own Owner (paired mock workstations, no runner process), an Admin and a Member.
+    { name: 'workstation-retire', testMatch: 'workstation-retire.spec.ts', dependencies: ['auth'] },
     // The Environments redesign (docs/design/environments-ux.md section 12): the page against the real server; the full journeys run
     // with the mocked web app (playwright.environments-msw.config.ts).
     { name: 'environments', testMatch: 'environments.spec.ts', dependencies: ['pairing'] },

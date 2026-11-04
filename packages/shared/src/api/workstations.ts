@@ -260,3 +260,55 @@ export type ForgeRepoList = z.infer<typeof ForgeRepoListSchema>;
 /** `POST /api/workstations/:id/update-check`: the check was queued (the answer shows in `updateCheck` of the workstation). */
 export const UpdateCheckResponseSchema = z.object({ ok: z.literal(true), requestedAt: IsoTime });
 export type UpdateCheckResponse = z.infer<typeof UpdateCheckResponseSchema>;
+
+// ------------------------------------------------------------------------------------ retire a workstation
+
+/** What happens to the agents of a retired workstation: move them all to another one, or let them be re-homed later. */
+export const RETIRE_HANDOVERS = ['move', 'needs_rehome'] as const;
+export const RetireWorkstationRequestSchema = z
+  .object({
+    /** Required when the workstation has agents to hand over. */
+    handover: z.enum(RETIRE_HANDOVERS).optional(),
+    /** Required for `move`. */
+    targetWorkstationId: z.uuid().optional(),
+    /** Passed to the sandbox gate of the move. */
+    acknowledgeUnsandboxed: z.boolean().optional(),
+  })
+  .refine((r) => r.handover !== 'move' || !!r.targetWorkstationId, { path: ['targetWorkstationId'] });
+export type RetireWorkstationRequest = z.infer<typeof RetireWorkstationRequestSchema>;
+
+const RetireAgentRefSchema = z.object({ id: z.uuid(), name: z.string(), roleKey: z.string() });
+export type RetireAgentRef = z.infer<typeof RetireAgentRefSchema>;
+
+/** `GET /api/workstations/:id/retire-preview`: what retiring would do (nothing is written). */
+export const RetirePreviewSchema = z.object({
+  workstation: z.object({
+    id: z.uuid(),
+    name: z.string(),
+    /** `unlinked` = unpaired or retired. */
+    status: z.enum(['active', 'unlinked']),
+    mine: z.boolean(),
+  }),
+  /** The agents to hand over (not the DevOps engineers). */
+  agents: z.array(RetireAgentRefSchema.extend({ status: z.string(), otherOrg: z.boolean() })),
+  /** Retired together with the workstation. */
+  devops: z.array(RetireAgentRefSchema),
+  /** Agents in a running shift: retiring is refused while there are any. */
+  working: z.array(RetireAgentRefSchema.extend({ cardRef: z.string().nullable() })),
+  /** Open cards whose stage restarts from the base branch. */
+  homedCards: z.array(z.object({ ref: z.string(), title: z.string() })),
+  /** Still paired and the caller's own machine: retiring also unpairs it. */
+  canUnpair: z.boolean(),
+});
+export type RetirePreview = z.infer<typeof RetirePreviewSchema>;
+
+export const RetireWorkstationResponseSchema = z.object({
+  workstationId: z.uuid(),
+  unlinked: z.boolean(),
+  handover: z.enum(['move', 'needs_rehome', 'none']),
+  moved: z.array(RetireAgentRefSchema),
+  needsRehome: z.array(RetireAgentRefSchema),
+  retiredDevops: z.array(RetireAgentRefSchema),
+  rehomedCardIds: z.array(z.uuid()),
+});
+export type RetireWorkstationResponse = z.infer<typeof RetireWorkstationResponseSchema>;

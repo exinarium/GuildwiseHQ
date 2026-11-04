@@ -146,4 +146,9 @@ export const agentEvents = [
       unsandboxedAck: UnsandboxedAckSchema.optional(),
     }),
   ),
+  /** The agent's workstation was retired: it has no home until someone re-homes it (status needs_rehome). */
+  defineEvent(
+    'AgentNeedsRehome',
+    z.object({ agentId: Id, by: Id, fromWorkstationId: Id, reason: z.enum(['workstation_retired']) }),
+  ),
 ] as const;
