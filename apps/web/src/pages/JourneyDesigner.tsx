@@ -126,8 +126,8 @@ export function JourneyDesigner() {
           role="status"
         >
           <ul className="list-disc pl-5">
-            {[...issues.errors, ...issues.warnings].map((i, n) => (
-              <li key={`${i.code}-${n}`}>{i.message}</li>
+            {[...issues.errors, ...issues.warnings].map((i) => (
+              <li key={`${i.code}|${i.message}`}>{i.message}</li>
             ))}
           </ul>
         </Callout>

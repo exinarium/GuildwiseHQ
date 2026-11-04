@@ -419,6 +419,7 @@ function CallSettings({
       <div className="flex flex-col gap-2 sm:col-span-2">
         <span className="text-sm font-medium text-fg">Headers</span>
         {headers.map((h, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: header rows are user-edited name/value pairs with no id; a content key would remount the input and drop focus on every keystroke
           <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
             <TextInput
               label="Name"

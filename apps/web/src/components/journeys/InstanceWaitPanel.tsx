@@ -87,8 +87,8 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
       )}
       {w.events.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1 text-sm" data-testid="wait-events">
-          {w.events.map((e, i) => (
-            <li key={i}>
+          {w.events.map((e) => (
+            <li key={`${e.at}|${e.text}`}>
               <span className="text-subtle">{when(e.at)}</span> {e.text}
             </li>
           ))}
