@@ -134,6 +134,18 @@ Leave everything else in the test as it is: the readonly check, the switch, the 
 No assertion is removed or loosened. Two assertions get one more expected element (more strict, not less), and the PUT
 body names one more step.
 
+Checked against the base commit before applying:
+
+- `VIDEOS_STEP` (`packages/shared/src/release/docs-prep-videos.ts` l.10-16): id `videos`, label `Generate videos`,
+  order 40, `defaultOn: false`. With analyse 10, changelog 20, guide 30 and commit 1000, the checklist order is the
+  five labels above.
+- The server stores every registered step when the settings are saved, filling a missing one from `defaultOn`
+  (`apps/server/src/release/docs-prep.ts` l.112:
+  `releaseDocsPrepSteps().map((d) => [d.id, input.steps[d.id] ?? before.steps[d.id] ?? d.defaultOn])`). So after the
+  switch is turned on, `release_docs_prep.steps` holds `videos: false`, and the exact `toEqual` at l.298 needs it.
+- In the narrow PUT, `videos: false` would also be kept without naming it (`before.steps.videos` is `false`). Naming
+  it makes the "runs below use Analyse and Commit only" setup explicit and does not depend on the earlier state.
+
 ### Who builds it
 
 Every edit is under `e2e/**`. The ledger rulings (aadf93f9, 69b39b28, and f87e3c86 for GWP-103, an e2e-only card) say
