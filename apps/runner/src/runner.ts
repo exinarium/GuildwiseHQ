@@ -60,8 +60,12 @@ import {
   SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
+  SHIFT_LIMIT_REPORT_CAPABILITY,
   type ShiftLimitSetting,
+  type ShiftLimitSource,
   STORAGE_CAPABILITY,
+  shiftLimitSourceOf,
+  UNLIMITED_SHIFTS,
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
@@ -166,7 +170,7 @@ import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
-import { ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
+import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
 import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
@@ -371,7 +375,7 @@ export class Runner {
   }
   private readonly lastAuthProbe = new Map<string, number>();
   private readonly lastUsageProbe = new Map<string, number>();
-  private maxConcurrent: number;
+  private limit: ShiftCap;
   /** The shift limit the owner chose on the Workstations page, saved so it holds after a restart (backlog #76). */
   private readonly serverLimitFile: string;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
@@ -456,9 +460,11 @@ export class Runner {
     // A Vertex service-account key file left by a session that ended abnormally (no claude process outlives the runner).
     sweepVertexKeys(this.paths.secrets);
     this.serverLimitFile = join(this.paths.root, 'server-limits.json');
-    // Until the server says otherwise: the owner's saved choice, else this runner's own configured value.
-    this.maxConcurrent =
-      loadServerLimit(this.serverLimitFile)?.maxConcurrentShifts ?? opts.config.maxConcurrentShifts;
+    // Until the server says otherwise (the local fallback): the owner's saved choice, else this runner's configured value.
+    this.limit = {
+      max: loadServerLimit(this.serverLimitFile)?.maxConcurrentShifts ?? opts.config.maxConcurrentShifts,
+      source: 'local_fallback',
+    };
     this.sync = new SyncService({
       file: join(this.paths.root, 'sync-targets.json'),
       findRepo: (n) => this.findRepo(n),
@@ -608,7 +614,7 @@ export class Runner {
       buildHello: () => this.buildHello(),
       buildHeartbeat: () => ({
         activeShifts: this.supervisor.activeShifts().map((s) => s.shiftId),
-        load: { runningShifts: this.supervisor.size },
+        load: this.shiftLoad(),
       }),
     });
     this.packCredentials = new PackCredentialStore(
@@ -695,8 +701,7 @@ export class Runner {
           : method === 'hygiene.change_state'
             ? this.changeState(params)
             : this.rpc(shiftId, method, params),
-      maxConcurrentShifts: () =>
-        Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
+      shiftCap: () => this.effectiveShiftLimit(),
       maxShiftMsOverride: opts.maxShiftMsOverride,
       ...(opts.idle ? { idle: opts.idle } : {}),
       reportWaitMs: opts.reportWaitMs,
@@ -850,7 +855,7 @@ export class Runner {
       this.runs.reportAll();
       opts.onConnected?.();
       opts.onRunnerPin?.(w.runnerPin?.version ?? null);
-      this.applyShiftLimit(w.limits.shiftLimit, w.limits.maxConcurrentShifts);
+      this.applyShiftLimit(w.limits.shiftLimit, w.limits.maxConcurrentShifts, w.limits.source);
       this.writeStatus(true);
       this.scheduleStartupSweep();
       void this.roleSmokeOnce();
@@ -977,27 +982,57 @@ export class Runner {
 
   /** The config as it is on disk now (`aom-runner org-folder` edits it without a restart); the in-memory one without a file. */
   /**
-   * The shift limit in force (backlog #76). A choice of the owner (`shiftLimit` a number or `unlimited`) replaces the
-   * configured value, takes effect at once and is saved for restarts. No choice (null), or an older server that sends
-   * none (undefined), leaves `config.json`'s `maxConcurrentShifts` as the ceiling, under what the server allows.
+   * The shift limit in force (backlog #76, GWP-95). The server's workstation setting is the one source of truth:
+   * a choice of the owner (`shiftLimit` a number or `unlimited`) replaces the configured value, takes effect for the
+   * next shift start (running shifts are never stopped) and is saved for restarts. No choice (null: "Runner's own
+   * value"), or an older server that sends none (undefined), leaves `config.json`'s `maxConcurrentShifts` as the
+   * ceiling, under what the server allows. Until the server has answered once since this process started, the last
+   * saved server value (else `config.json`) applies as the local fallback.
    */
-  private applyShiftLimit(shiftLimit: ShiftLimitSetting | undefined, serverMax: number): void {
+  private applyShiftLimit(
+    shiftLimit: ShiftLimitSetting | undefined,
+    serverMax: number,
+    wireSource?: string,
+  ): void {
     if (shiftLimit === undefined || shiftLimit === null) {
       if (shiftLimit === null) clearServerLimit(this.serverLimitFile);
-      this.maxConcurrent = Math.min(serverMax, this.freshConfig().maxConcurrentShifts);
+      this.limit = {
+        max: Math.min(serverMax, this.freshConfig().maxConcurrentShifts),
+        source: 'runner_config',
+      };
     } else {
       try {
         saveServerLimit(this.serverLimitFile, { shiftLimit, maxConcurrentShifts: serverMax });
       } catch (err) {
         this.log.warn(`could not save the shift limit: ${String(err)}`);
       }
-      this.maxConcurrent = serverMax;
+      const ceiling = shiftLimit === 'unlimited' ? UNLIMITED_SHIFTS : shiftLimit;
+      const source: ShiftLimitSource =
+        shiftLimitSourceOf(wireSource) ?? (serverMax < ceiling ? 'platform_cap' : 'workstation_setting');
+      this.limit = { max: serverMax, source };
     }
   }
 
-  /** The most shifts this runner may run now (the machine-wide budget of several pairings is read from it). */
+  /**
+   * The limit this pairing's server granted (the machine-wide budget of several pairings is read from it, so it is not
+   * reduced by that budget).
+   */
   shiftLimit(): number {
-    return this.maxConcurrent;
+    return this.limit.max;
+  }
+
+  /** The heartbeat's `load`: the shifts taking a slot, and the limit enforced now with its source (`shift-limit:2`). */
+  shiftLoad(): { runningShifts: number; maxShifts: number; limitSource: ShiftLimitSource } {
+    const eff = this.effectiveShiftLimit();
+    return { runningShifts: this.supervisor.slotCount, maxShifts: eff.max, limitSource: eff.source };
+  }
+
+  /** What the supervisor enforces for the next start: the grant, or the machine budget when that is smaller. */
+  effectiveShiftLimit(): ShiftCap {
+    const shared = this.opts.sharedCap?.();
+    return shared !== undefined && shared < this.limit.max
+      ? { max: shared, source: 'pairing_budget' }
+      : this.limit;
   }
 
   private freshConfig(): RunnerConfig {
@@ -1422,7 +1457,8 @@ export class Runner {
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
       activeChats: this.chat.activeIds(),
-      maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
+      // "Runner's own value" on the Workstations page: config.json as it is now, not the limit in force
+      maxConcurrentShifts: this.freshConfig().maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
       // Run a branch needs process groups and /proc or ps: not on native Windows. Test environments for cards (`runs:3`) are
       // for real testers: the mock runtime (CI, demos) runs no tests, so its cards keep the plain test step.
@@ -1435,6 +1471,7 @@ export class Runner {
         'ceo:1',
         STORAGE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
+        SHIFT_LIMIT_REPORT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
@@ -1966,8 +2003,8 @@ export class Runner {
       } else if (command === 'shifts.limit') {
         // The owner changed the limit on the Workstations page: it applies to the next shift offered, no restart.
         const p = CommandPayloadSchemas['shifts.limit'].parse(payload);
-        this.applyShiftLimit(p.shiftLimit, p.maxConcurrentShifts);
-        done(true, { maxConcurrentShifts: this.maxConcurrent });
+        this.applyShiftLimit(p.shiftLimit, p.maxConcurrentShifts, p.source);
+        done(true, { maxConcurrentShifts: this.limit.max, source: this.limit.source });
       } else if (command === 'worktrees.sweep') {
         // The hygiene job's sweep: the result is an answer (ok:true) even when nothing could be swept.
         CommandPayloadSchemas['worktrees.sweep'].parse(payload);
@@ -2239,7 +2276,10 @@ export class Runner {
         done(true, await this.outboundDelivery.run(CommandPayloadSchemas['delivery.send'].parse(payload)));
       } else if (command === 'journey.webhook.call') {
         // A failed call is an answer (ok:true, result.ok:false, retryable): the server retries with backoff.
-        done(true, await this.journeyWebhook.run(CommandPayloadSchemas['journey.webhook.call'].parse(payload)));
+        done(
+          true,
+          await this.journeyWebhook.run(CommandPayloadSchemas['journey.webhook.call'].parse(payload)),
+        );
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));

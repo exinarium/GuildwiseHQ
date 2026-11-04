@@ -47,7 +47,7 @@ import { ModelProviders } from '../components/workstations/ModelProviders.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RetireWorkstationDialog } from '../components/workstations/RetireWorkstationDialog.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
-import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
+import { ShiftLimit, ShiftLimitStatus } from '../components/workstations/ShiftLimit.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
 import { useBusinessView } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
@@ -418,6 +418,7 @@ export function WorkstationCard({
                         : `${w.shifts.running} (limit shown while connected)`
                     : 'Not reported'}
                 </p>
+                <ShiftLimitStatus w={w} />
                 {!admin && <ShiftLimit w={w} />}
                 {!admin && <CardlessShifts workstationId={w.id} />}
               </div>

@@ -140,7 +140,7 @@ describe('ceo shifts on the mock runtime', () => {
       await gate;
     });
     h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
-    (h.runner as any).maxConcurrent = 1;
+    (h.runner as any).limit = { max: 1, source: 'workstation_setting' };
     const card = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: 'TOY-1', title: 'one' });
     h.server.send('shift.start', card);
     await h.server.waitFor('shift.started', (m) => m.shiftId === card.shiftId);

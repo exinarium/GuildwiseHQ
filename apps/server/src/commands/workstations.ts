@@ -15,6 +15,7 @@ import {
   dropStaleShiftLimitCommands,
   effectiveShiftLimit,
   runnerAppliesShiftLimit,
+  shiftLimitSourceFor,
 } from '../runner-gateway/shift-limit.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvents as devopsHireEventsNew } from './devops.ts';
@@ -188,11 +189,14 @@ export async function setShiftLimit(
   const conn = ctx.services.runners.get(id);
   if (!conn) return;
   conn.maxShifts = effectiveShiftLimit(ctx, limit, conn.reportedMaxShifts);
+  conn.limitSource = shiftLimitSourceFor(ctx, limit);
+  conn.limitChangedAt = ctx.clock.now();
   await dropStaleShiftLimitCommands(ctx.pool, id);
   if (await runnerAppliesShiftLimit(ctx.pool, id)) {
     await enqueueRunnerCommand(ctx.pool, id, 'shifts.limit', {
       shiftLimit: limit,
       maxConcurrentShifts: conn.maxShifts,
+      source: conn.limitSource,
     });
     void Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
   }

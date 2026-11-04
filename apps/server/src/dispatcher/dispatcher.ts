@@ -13,6 +13,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { orgCapPaused, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { SLOT_KINDS_SQL } from '../runner-gateway/shift-limit.ts';
 import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
@@ -233,11 +234,14 @@ export class Dispatcher {
     return out;
   }
 
-  /** Agent shifts that are not finished, per workstation (chats are not counted: the runner runs them apart). */
+  /**
+   * Agent shifts that are not finished and take a slot, per workstation (`takesShiftSlot`: chats and the CEO shift are
+   * not counted, as on the runner and the Workstations page).
+   */
   private async shiftLoad(): Promise<Map<string, number>> {
     const list = await rows<{ workstation_id: string; n: number }>(
       this.ctx.pool,
-      `SELECT workstation_id, count(*)::int AS n FROM shifts WHERE status <> 'ended' AND kind <> 'chat' GROUP BY workstation_id`,
+      `SELECT workstation_id, count(*)::int AS n FROM shifts WHERE status <> 'ended' AND ${SLOT_KINDS_SQL()} GROUP BY workstation_id`,
     );
     return new Map(list.map((r) => [r.workstation_id, r.n]));
   }
@@ -266,9 +270,12 @@ export class Dispatcher {
     const accountScope = (row: Row, capped = false) => scopeOf(settings, row as never, at, capped);
     // Shifts each workstation runs now against the limit its owner set (backlog #76): a full workstation is not offered more.
     const load = await this.shiftLoad();
+    // What the runner reports it enforces counts too, so a runner that would turn a shift away is not offered it.
     const full = (workstationId: string): boolean => {
-      const limit = this.ctx.services.runners.get(workstationId)?.maxShifts;
-      return limit !== undefined && limit < UNLIMITED_SHIFTS && (load.get(workstationId) ?? 0) >= limit;
+      const conn = this.ctx.services.runners.get(workstationId);
+      if (!conn) return false;
+      const limit = Math.min(conn.maxShifts, conn.enforcedMaxShifts ?? UNLIMITED_SHIFTS);
+      return limit < UNLIMITED_SHIFTS && (load.get(workstationId) ?? 0) >= limit;
     };
     for (const [cardId, p] of [...this.preferred]) {
       if (p.until < nowMs) {

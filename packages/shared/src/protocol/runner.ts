@@ -1107,6 +1107,65 @@ export const QUESTION_CONTINUE_CAPABILITY = 'question-continue:1';
 /** Announced in `hello.capabilities` by a runner that applies `limits.shiftLimit` and the `shifts.limit` command. */
 export const SHIFT_LIMIT_CAPABILITY = 'shift-limit:1';
 /**
+ * Announced by a runner that reports the shift limit it enforces (`heartbeat.load.maxShifts` and `limitSource`),
+ * ignores the retired `pairings.json` `maxConcurrentShifts` and sends `capacity` with a `busy` rejection.
+ */
+export const SHIFT_LIMIT_REPORT_CAPABILITY = 'shift-limit:2';
+/**
+ * Where the shift limit in force comes from: the owner's workstation setting, the platform cap (over the setting or
+ * Unlimited), the runner's `config.json` (owner chose "Runner's own value"), the runner's local fallback (before the
+ * server has answered since the runner started) or the budget the pairings on one machine share.
+ */
+export const SHIFT_LIMIT_SOURCES = [
+  'workstation_setting',
+  'platform_cap',
+  'runner_config',
+  'local_fallback',
+  'pairing_budget',
+] as const;
+export const ShiftLimitSourceSchema = z.enum(SHIFT_LIMIT_SOURCES);
+export type ShiftLimitSource = z.infer<typeof ShiftLimitSourceSchema>;
+/** On the wire a source travels as a string, so a source a reader does not know never breaks the message. */
+export const WireShiftLimitSourceSchema = z.string().max(40);
+/** Narrows a wire source to a known one (undefined when absent or unknown). */
+export function shiftLimitSourceOf(value: unknown): ShiftLimitSource | undefined {
+  const p = ShiftLimitSourceSchema.safeParse(value);
+  return p.success ? p.data : undefined;
+}
+/** Plain words for a source, for messages and the Workstations page. */
+export const SHIFT_LIMIT_SOURCE_LABEL: Record<ShiftLimitSource, string> = {
+  workstation_setting: 'workstation setting',
+  platform_cap: 'platform cap',
+  runner_config: 'runner config',
+  local_fallback: 'runner local fallback',
+  pairing_budget: 'shared with other pairings',
+};
+/**
+ * Shift kinds that take no slot of the workstation's shift limit: chat turns (owner chat, CEO owner/order turns and
+ * @mention work) and the CEO shift (it has its own slot, one at a time). The runner, the dispatcher and the
+ * Workstations page all count with this one rule.
+ */
+export const SHIFT_KINDS_OUTSIDE_LIMIT = ['chat', 'ceo'] as const;
+export function takesShiftSlot(kind: string): boolean {
+  return !(SHIFT_KINDS_OUTSIDE_LIMIT as readonly string[]).includes(kind);
+}
+/** Who holds a slot, in a `busy` rejection and on the Workstations page: identifiers only. */
+export const ShiftSlotHolderSchema = z.object({
+  shiftId: z.uuid(),
+  kind: z.string().max(20),
+  cardRef: z.string().max(40).optional(),
+  agentName: z.string().max(80).optional(),
+});
+export type ShiftSlotHolder = z.infer<typeof ShiftSlotHolderSchema>;
+/** With a `busy` rejection: the limit that applied, its source and the shifts holding the slots. */
+export const ShiftCapacitySchema = z.object({
+  limit: z.number().int().nonnegative(),
+  source: WireShiftLimitSourceSchema,
+  running: z.number().int().nonnegative(),
+  holders: z.array(ShiftSlotHolderSchema).max(50),
+});
+export type ShiftCapacity = z.infer<typeof ShiftCapacitySchema>;
+/**
  * Announced by a runner that can run the architect's design shift without a card branch (`worktree.mode: 'readonly'`:
  * a detached, read-only checkout of the working branch). The server offers an unlanded-dependency design only to these.
  */
@@ -1281,6 +1340,8 @@ export const CommandPayloadSchemas = {
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
     maxConcurrentShifts: z.number().int().positive(),
+    /** Additive: where `maxConcurrentShifts` comes from (`ShiftLimitSource`, a string on the wire). */
+    source: WireShiftLimitSourceSchema.optional(),
   }),
   /**
    * Safe mode (platform team): run exactly this runner version (an older one too: a rollback), or null to follow the
@@ -1416,7 +1477,14 @@ export const HelloSchema = msg('hello', {
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {
   activeShifts: z.array(z.string()),
-  load: z.object({ runningShifts: z.number().int().nonnegative() }),
+  load: z.object({
+    /** Shifts that take a slot of the shift limit (`takesShiftSlot`). */
+    runningShifts: z.number().int().nonnegative(),
+    /** Additive (`shift-limit:2`): the limit the runner enforces now (`UNLIMITED_SHIFTS` or more: none). */
+    maxShifts: z.number().int().nonnegative().optional(),
+    /** Additive (`shift-limit:2`): where `maxShifts` comes from (`ShiftLimitSource`, a string on the wire). */
+    limitSource: WireShiftLimitSourceSchema.optional(),
+  }),
 });
 /** The runtimes' probe result changed (sandbox state, availability): sent after a re-probe, not only in `hello`. */
 export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(RuntimeInfoSchema) });
@@ -1562,6 +1630,8 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
       createFailed: z.string().max(500).optional(),
     })
     .optional(),
+  /** Additive, with `reason: 'busy'` (`shift-limit:2`): the limit that applied, its source and who holds the slots. */
+  capacity: ShiftCapacitySchema.optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),
@@ -1889,6 +1959,8 @@ export const WelcomeSchema = msg('welcome', {
      * `shift-limit:1` uses `maxConcurrentShifts` as is, ignoring its own config value, and keeps it across restarts.
      */
     shiftLimit: ShiftLimitSettingSchema.optional(),
+    /** Additive: where `maxConcurrentShifts` comes from (`ShiftLimitSource`, a string on the wire). */
+    source: WireShiftLimitSourceSchema.optional(),
   }),
   /** Additive, safe mode: the runner version this workstation is pinned to (absent or null: none). */
   runnerPin: z

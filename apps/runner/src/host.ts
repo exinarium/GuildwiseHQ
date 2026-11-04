@@ -66,6 +66,7 @@ export class RunnerHost {
   private reloading: Promise<void> = Promise.resolve();
   /** What the self-updater last said; every pairing reports it to its server. */
   private updateStatus: UpdateStatus | null = null;
+  private retiredLimitLogged = false;
 
   constructor(private readonly opts: HostOptions) {
     this.fatal = new Promise<number>((r) => {
@@ -121,25 +122,27 @@ export class RunnerHost {
     for (const r of this.running.values()) r.runner.reportUpdate();
   }
 
-  /** The machine-wide shift limit: the index value, else the largest limit of the configured pairings. */
-  private machineLimit(): number {
-    const index = loadIndex(this.opts.root);
-    if (index.maxConcurrentShifts) return index.maxConcurrentShifts;
-    let max = 1;
-    // A pairing whose owner raised the limit on the Workstations page (backlog #76) may use what the server grants.
-    for (const r of this.running.values())
-      max = Math.max(
-        max,
-        loadSafe(entryConfigPath(this.opts.root, r.entry))?.maxConcurrentShifts ?? 4,
-        r.runner.shiftLimit(),
+  /**
+   * The machine-wide shift limit: the largest limit any running pairing's server granted (GWP-95). Nothing local
+   * lowers it below a server setting: `pairings.json`'s `maxConcurrentShifts` is retired (read only to say so once).
+   */
+  machineLimit(): number {
+    const retired = loadIndex(this.opts.root).maxConcurrentShifts;
+    if (retired && !this.retiredLimitLogged) {
+      this.retiredLimitLogged = true;
+      this.opts.log.info(
+        `pairings.json maxConcurrentShifts (${retired}) is no longer used: the shift limit is set on the Workstations page`,
       );
+    }
+    let max = 1;
+    for (const r of this.running.values()) max = Math.max(max, r.runner.shiftLimit());
     return max;
   }
 
-  /** Shifts the pairing `id` may still run: the machine limit minus what the other pairings run. */
-  private capFor(id: string): number {
+  /** Shifts the pairing `id` may still run: the machine limit minus the slots the other pairings hold. */
+  capFor(id: string): number {
     let others = 0;
-    for (const [k, r] of this.running) if (k !== id) others += r.runner.supervisor.size;
+    for (const [k, r] of this.running) if (k !== id) others += r.runner.supervisor.slotCount;
     return Math.max(0, this.machineLimit() - others);
   }
 

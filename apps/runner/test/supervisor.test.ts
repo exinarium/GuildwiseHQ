@@ -323,7 +323,7 @@ describe('supervisor', () => {
     );
     // busy: first shift holds the only slot (config maxConcurrentShifts via welcome limit)
     const first = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-1', title: 'one' });
-    (h!.runner as any).maxConcurrent = 1;
+    (h!.runner as any).limit = { max: 1, source: 'workstation_setting' };
     h!.server.send('shift.start', first);
     await h!.server.waitFor('shift.started');
     const second = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-2', title: 'two' });

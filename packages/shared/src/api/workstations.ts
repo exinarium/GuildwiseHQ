@@ -11,6 +11,7 @@ import {
   RunnerUpdateStateSchema,
   RuntimeInfoSchema,
   ShiftLimitSettingSchema,
+  ShiftLimitSourceSchema,
   ToolchainInfoSchema,
 } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
@@ -163,6 +164,34 @@ export const WorkstationDtoSchema = z.object({
       platformCap: z.number().int().positive().nullable().default(null),
       runnerLimit: z.number().int().positive().nullable().default(null),
       supported: z.boolean().nullable().default(null),
+      /** Where `limit` comes from on the server (null: offline with nothing set). */
+      source: ShiftLimitSourceSchema.nullable().default(null),
+      /**
+       * What the runner reports it enforces (`limit` null: no limit). Null while it is offline, before its first report
+       * and for a runner without `shift-limit:2`.
+       */
+      enforced: z
+        .object({ limit: z.number().int().nonnegative().nullable(), source: ShiftLimitSourceSchema })
+        .nullable()
+        .default(null),
+      /**
+       * `in_sync`: the runner enforces what the server holds; `applying`: a change has not been reported back yet;
+       * `mismatch`: the runner enforces something else; `unknown`: offline or the runner does not report it.
+       */
+      sync: z.enum(['in_sync', 'applying', 'mismatch', 'unknown']).default('unknown'),
+      /** Chat and CEO turns running now: they take no slot (`SHIFT_KINDS_OUTSIDE_LIMIT`). */
+      otherRunning: z.number().int().nonnegative().default(0),
+      /** The shifts holding a slot now (identifiers only). */
+      holders: z
+        .array(
+          z.object({
+            shiftId: z.uuid(),
+            kind: z.string(),
+            cardRef: z.string().nullable(),
+            agentName: z.string().nullable(),
+          }),
+        )
+        .default([]),
     })
     .optional(),
 });
