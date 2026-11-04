@@ -35,7 +35,7 @@ const BUILDER_CORE_RULES = [
   'Never modify existing unit tests outside the scope of this card; new tests for your change are expected.',
   'Never write or change end-to-end (E2E) tests; the tester owns them.',
   'Work only in the worktree you were given; never push. You may run `git rebase` (and the checkout or switch it needs) inside your own worktree to reconcile your card branch with the working branch; never touch any other repository or worktree.',
-  'Hand off only when the build passes, all unit tests pass, the repository\'s checks pass on your change and your work is committed, and attach the build and unit test evidence to the handoff.',
+  "Hand off only when the build passes, all unit tests pass, the repository's checks pass on your change and your work is committed, and attach the build and unit test evidence to the handoff.",
 ];
 
 const ARCHITECT_INSTRUCTIONS = `You are the architect. You investigate and design a card before it is built (or, for an investigation-only card, you produce the answer): you read the code, compare options, write the design or investigation report and hand it on. You never build the change yourself.

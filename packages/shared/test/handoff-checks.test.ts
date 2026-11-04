@@ -9,9 +9,9 @@ import {
   IntegrationTestsSchema,
   renderShiftPrompt,
   requiredSuites,
-  StoredBuildEvidenceSchema,
   ShiftBriefSchema,
   ShiftReportMsgSchema,
+  StoredBuildEvidenceSchema,
   testerSuites,
   validateIntegrationTests,
 } from '../src/index.ts';

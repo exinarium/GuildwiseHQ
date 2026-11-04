@@ -79,8 +79,10 @@ export const CHECKS_MAX = 10;
 export const CHECK_TIMEOUT_MAX_MIN = 10;
 
 /** The suites the tester works with: everything except the builder's checks. */
-export const testerSuites = <T extends Pick<IntegrationSuite, 'kind'>>(s: { suites: T[] }): T[] =>
-  s.suites.filter((x) => x.kind !== 'check');
+export const testerSuites = <T extends Pick<IntegrationSuite, 'kind'>>(s: {
+  suites: T[];
+}): Array<T & { kind: Exclude<T['kind'], 'check'> }> =>
+  s.suites.filter((x): x is T & { kind: Exclude<T['kind'], 'check'> } => x.kind !== 'check');
 
 /** The confirmed checks of one repository; only these run (and block) at a builder handoff. */
 export const checkSuites = (s: Pick<IntegrationTests, 'suites'>, repoId: string): IntegrationSuite[] =>
