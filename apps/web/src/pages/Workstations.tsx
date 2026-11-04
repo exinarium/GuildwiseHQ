@@ -2,6 +2,7 @@ import type { WorkstationDto } from '@aom/shared';
 import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import { useAgentHomes } from '../api/queries/agent-move.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useRuns } from '../api/queries/runs.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
@@ -44,6 +45,7 @@ import { ClaudeAccountsTable } from '../components/workstations/ClaudeAccountsTa
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { ModelProviders } from '../components/workstations/ModelProviders.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
+import { RetireWorkstationDialog } from '../components/workstations/RetireWorkstationDialog.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
@@ -160,6 +162,7 @@ export function Workstations() {
             />
           ))}
       </ul>
+      <StrandedWorkstations />
       <AddWorkstationWizard
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -171,6 +174,43 @@ export function Workstations() {
 }
 
 /** Running shifts of this workstation that belong to no card (DevOps work, chats): each can be stopped here. */
+/** Owner/Admin: workstations that were unpaired but still hold the organization's agents; retiring one hands them over. */
+function StrandedWorkstations() {
+  const canManage = useCanManageOrg();
+  const homes = useAgentHomes(canManage);
+  const [retire, setRetire] = useState<{ id: string; name: string } | null>(null);
+  const stranded = (homes.data ?? []).filter((h) => h.status === 'unlinked' && h.agentCount > 0);
+  if (!canManage || stranded.length === 0) return null;
+  return (
+    <section className="mt-6" data-testid="stranded-workstations" aria-labelledby="stranded-title">
+      <h2 id="stranded-title" className="mb-2 text-sm font-medium">
+        Removed workstations with agents
+      </h2>
+      <ul className="flex flex-col gap-2">
+        {stranded.map((h) => (
+          <li
+            key={h.id}
+            className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+          >
+            <span>
+              {h.name} ({h.ownerName}), {h.agentCount} {h.agentCount === 1 ? 'agent' : 'agents'}
+            </span>
+            <Button
+              size="sm"
+              className="max-sm:min-h-11"
+              aria-label={`Hand over agents of ${h.name}`}
+              onClick={() => setRetire({ id: h.id, name: h.name })}
+            >
+              Hand over agents
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <RetireWorkstationDialog workstation={retire} onClose={() => setRetire(null)} />
+    </section>
+  );
+}
+
 function CardlessShifts({ workstationId }: { workstationId: string }) {
   const running = useRunningShifts();
   const list = (running.data ?? []).filter(
@@ -220,6 +260,8 @@ export function WorkstationCard({
   const toast = useToast();
   const business = useBusinessView();
   const [confirm, setConfirm] = useState(false);
+  const [retireOpen, setRetireOpen] = useState(false);
+  const canRetire = useCanManageOrg() && !admin;
   const [own, setOwn] = useState(false);
   const expanded = expandedProp ?? own;
   const setExpanded = (v: boolean) => (onExpandedChange ? onExpandedChange(v) : setOwn(v));
@@ -303,6 +345,16 @@ export function WorkstationCard({
               >
                 Integrations
               </ButtonLink>
+            )}
+            {canRetire && (
+              <Button
+                variant="danger-ghost"
+                size="sm"
+                aria-label={`Retire ${w.name}`}
+                onClick={() => setRetireOpen(true)}
+              >
+                Retire
+              </Button>
             )}
             <Button
               variant="danger-ghost"
@@ -408,6 +460,12 @@ export function WorkstationCard({
           </div>
         )}
       </Panel>
+      {canRetire && (
+        <RetireWorkstationDialog
+          workstation={retireOpen ? { id: w.id, name: w.name } : null}
+          onClose={() => setRetireOpen(false)}
+        />
+      )}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

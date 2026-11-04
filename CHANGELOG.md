@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Retire a workstation with agent handover. On the Workstations page an Owner or Admin can retire a workstation and either move all its agents to another workstation or mark them as needing a new home (re-home them one by one later). Retiring is refused while one of its agents is in a running shift, and the refusal names them. A workstation that was already unpaired but still holds agents is listed under "Removed workstations with agents" with a "Hand over agents" button. The retirement and each handover are written to the audit log. New events `WorkstationRetired` and `AgentNeedsRehome`; endpoints `GET /api/workstations/:id/retire-preview` and `POST /api/workstations/:id/retire`.
+
 ## [1.5.0]
 
 ### Added

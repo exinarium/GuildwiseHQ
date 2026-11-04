@@ -5,19 +5,22 @@ import {
   PairingCodeResponseSchema,
   PatchWorkstationRequestSchema,
   RemoveToolchainRequestSchema,
+  RetireWorkstationRequestSchema,
   RunnerPairRequestSchema,
   SetOrgFolderRequestSchema,
   SetShiftLimitRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireAdmin, requireUser } from '../auth/guards.ts';
+import { requireAdmin, requireOrg, requireUser } from '../auth/guards.ts';
+import { whoOf } from '../auth/org-context.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
 import { requestRepoSync } from '../commands/repo-sync.ts';
 import { requestToolchainRemove } from '../commands/toolchains.ts';
 import { requestUpdateCheck } from '../commands/update-check.ts';
+import { retirePreview, retireWorkstation } from '../commands/workstation-retire.ts';
 import {
   createPairingCode,
   pairRunner,
@@ -86,6 +89,24 @@ export function workstationRoutes(ctx: Ctx) {
       await unlinkWorkstation(ctx, s.user, req.params.id);
       return { ok: true };
     });
+
+    /** Owner/Admin: what retiring a workstation would do (its agents, who is working, the cards that restart). */
+    app.get('/api/workstations/:id/retire-preview', { schema: { params: IdParamsSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return retirePreview(ctx, whoOf(a), req.params.id);
+    });
+
+    /** Owner/Admin: retires a workstation and hands its agents over (move them or mark them needs_rehome). */
+    app.post(
+      '/api/workstations/:id/retire',
+      { schema: { params: IdParamsSchema, body: RetireWorkstationRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const r = await retireWorkstation(ctx, whoOf(a), req.params.id, req.body);
+        ctx.services.dispatcher.trigger();
+        return r;
+      },
+    );
 
     /** Ask the runner to re-read its git logins and report them (the "Check again" button). */
     app.post('/api/workstations/:id/git/recheck', { schema: { params: IdParamsSchema } }, async (req) => {
