@@ -8,7 +8,7 @@ import {
   libraryVoiceLabel,
   mapChangesToVideos,
   nextReleaseDocsPrepAction,
-  phaseIndex,
+  stepPhaseIndex,
   releaseDocsPrepSteps,
   stepPhases,
   type VideoChange,
@@ -61,7 +61,7 @@ describe('Generate videos step registry', () => {
     expect(isServerPhase('videos', 'render')).toBe(false);
     expect(stepPhases('commit')).toEqual(['prepare', 'push']);
     expect(stepPhases('analyse')).toEqual(['']);
-    expect(phaseIndex('videos', 'render')).toBeGreaterThan(phaseIndex('videos', 'plan'));
+    expect(stepPhaseIndex('videos', 'render')).toBeGreaterThan(stepPhaseIndex('videos', 'plan'));
   });
 });
 

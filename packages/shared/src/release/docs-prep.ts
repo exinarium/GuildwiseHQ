@@ -102,7 +102,7 @@ export const isServerPhase = (id: string, phase: string): boolean =>
   !!phase && (releaseDocsPrepStep(id)?.serverPhases ?? []).includes(phase);
 
 /** Index of a phase in its step (for ordering); unknown phases sort last. */
-export const phaseIndex = (id: string, phase: string): number => {
+export const stepPhaseIndex = (id: string, phase: string): number => {
   const i = stepPhases(id).indexOf(phase);
   return i < 0 ? Number.MAX_SAFE_INTEGER : i;
 };

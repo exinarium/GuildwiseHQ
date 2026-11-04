@@ -20,7 +20,7 @@ describe('release docs prep step registry', () => {
   });
   it('knows only registered steps', () => {
     expect(isReleaseDocsPrepStep('analyse')).toBe(true);
-    expect(isReleaseDocsPrepStep('videos')).toBe(false);
+    expect(isReleaseDocsPrepStep('nope')).toBe(false);
   });
   it('enables steps by default and honours the checklist', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual([
