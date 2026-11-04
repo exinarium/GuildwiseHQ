@@ -236,7 +236,7 @@ describe('GWP-95: the server setting decides, the runner reports what it enforce
       ['TOY-1', 'Ada'],
       ['TOY-2', 'Ken'],
     ]);
-    expect(rej.detail).toContain('limit 1, workstation setting');
+    expect(rej.detail).toContain('(limit 1), source: workstation setting');
     expect(rej.detail).toContain('TOY-1 (Ada)');
     // nothing that was running was stopped
     expect(h.server.of('shift.ended')).toHaveLength(0);
@@ -291,10 +291,10 @@ describe('GWP-95: busy rejection text', () => {
       agentName: 'Anvil',
     });
     expect(busyDetail(capacity)).toBe(
-      '2 shifts already running (limit 4, shared with other pairings): GWP-94 (Ada), devops (Anvil)',
+      '2 shifts already running (limit 4), source: shared with other pairings; held by GWP-94 (Ada), devops (Anvil)',
     );
     expect(busyDetail({ ...capacity, limit: 100_000, source: 'workstation_setting' })).toContain(
-      '(limit none, workstation setting)',
+      '(limit none), source: workstation setting',
     );
   });
 });

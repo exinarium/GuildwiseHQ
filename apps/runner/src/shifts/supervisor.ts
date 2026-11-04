@@ -221,14 +221,18 @@ export function capacityOf(
   };
 }
 
-/** The text of a `busy` rejection: "4 shifts already running (limit 4, workstation setting): GWP-94 (Ada), devops (Anvil)". */
+/**
+ * The text of a `busy` rejection: "4 shifts already running (limit 4), source: workstation setting; held
+ * by GWP-94 (Ada), devops (Anvil)". It starts with the text older runners sent ("4 shifts already running (limit 4)"), so readers that
+ * match that prefix keep working.
+ */
 export function busyDetail(capacity: ShiftCapacity): string {
   const label = SHIFT_LIMIT_SOURCE_LABEL[capacity.source as ShiftLimitSource] ?? capacity.source;
   const limit = capacity.limit >= UNLIMITED_SHIFTS ? 'none' : String(capacity.limit);
   const refs = capacity.holders
     .map((h) => `${h.cardRef ?? h.kind}${h.agentName ? ` (${h.agentName})` : ''}`)
     .join(', ');
-  return `${capacity.running} shifts already running (limit ${limit}, ${label})${refs ? `: ${refs}` : ''}`.slice(
+  return `${capacity.running} shifts already running (limit ${limit}), source: ${label}${refs ? `; held by ${refs}` : ''}`.slice(
     0,
     500,
   );
