@@ -18,7 +18,16 @@ let projectId: string;
 
 const BUSINESS_LABELS = ['Enquiry', 'Follow-up', 'Document request', 'Reminder', 'Report', 'Quote'];
 
-const cardRow = (ref: string) =>
+const BUSINESS_KEYS = [
+  'business-enquiry',
+  'business-follow-up',
+  'business-document-request',
+  'business-reminder',
+  'business-report',
+  'business-quote',
+];
+
+const cardRow =(ref: string) =>
   q<{ stage: string; status: string; repo_id: string | null; branch_name: string | null; card_type: string }>(
     'SELECT stage, status, repo_id, branch_name, card_type FROM cards WHERE ref=$1',
     [ref],
@@ -35,7 +44,9 @@ const waitStage = (ref: string, stage: string, status: string) =>
 async function pickerOptions(): Promise<string[]> {
   await page.goto('/cards/new');
   const type = page.getByRole('form', { name: 'New card' }).getByLabel('Card type');
-  await expect(type.locator('option').first()).toBeAttached();
+  // the business types come with the project's enabled workflows, which the Software view does not wait for
+  for (const label of BUSINESS_LABELS)
+    await expect(type.locator('option').filter({ hasText: new RegExp(`^${label}$`) })).toHaveCount(1);
   return type.locator('option').allInnerTexts();
 }
 
@@ -101,12 +112,25 @@ test('the Software view leads with the developer card types and has the business
   const options = await pickerOptions();
   expect(options[0]).toBe('feature');
   for (const label of BUSINESS_LABELS) expect(options).toContain(label);
-  // every organization has the business workflows, installed at creation
-  const installed = await q(
-    `SELECT key FROM workflow_versions WHERE key LIKE 'business-%' AND org_id = (SELECT org_id FROM projects WHERE id=$1)`,
-    [projectId],
+  // the six business workflows are built-ins, and every project has them enabled from the start
+  const builtIn = await q<{ key: string }>(
+    `SELECT DISTINCT key FROM workflow_versions
+      WHERE key = ANY($1::text[]) AND org_id IS NULL AND project_id IS NULL AND status='active'`,
+    [BUSINESS_KEYS],
   );
-  expect(installed.length).toBeGreaterThan(0);
+  expect(builtIn.map((r) => r.key).sort()).toEqual([...BUSINESS_KEYS].sort());
+  const enabled = await q<{ workflow_key: string }>(
+    `SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND workflow_key = ANY($2::text[])`,
+    [projectId, BUSINESS_KEYS],
+  );
+  expect(enabled.map((r) => r.workflow_key).sort()).toEqual([...BUSINESS_KEYS].sort());
+  // none is an organization copy (they were until release 1.4.0)
+  expect(
+    await q(
+      `SELECT 1 FROM workflow_versions WHERE key = ANY($1::text[]) AND org_id = (SELECT org_id FROM projects WHERE id=$2)`,
+      [BUSINESS_KEYS, projectId],
+    ),
+  ).toEqual([]);
 });
 
 test('the Business view leads with the six business types and keeps the developer types under More types', async () => {
