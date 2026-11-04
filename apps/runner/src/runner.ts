@@ -2201,6 +2201,7 @@ export class Runner {
               payload: p,
               repoPath: repo.localPath,
               integrationDir: this.paths.integration,
+              dataDir: this.paths.root,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
               // The writer of the model-backed steps (the user guide): one headless call as the agent the server chose.
               runModel: docsPrepModel(

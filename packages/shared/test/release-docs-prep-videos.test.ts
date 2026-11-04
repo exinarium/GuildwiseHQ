@@ -119,6 +119,24 @@ describe('planner with phases', () => {
     });
     expect(after).toEqual({ kind: 'dispatch', step: 'commit', phase: 'prepare', repoIds: ['cloud'] });
   });
+  it('renders after an author phase that had no new video to write', () => {
+    const r = nextReleaseDocsPrepAction({
+      status: 'running',
+      steps,
+      repos: [
+        {
+          repoId: 'a',
+          state: 'running',
+          steps: [
+            done,
+            { step: 'videos', phase: 'plan', state: 'passed' },
+            { step: 'videos', phase: 'author', state: 'skipped', error: 'no new videos' },
+          ],
+        },
+      ],
+    });
+    expect(r).toEqual({ kind: 'dispatch', step: 'videos', phase: 'render', repoIds: ['a'] });
+  });
   it('a failed plan (voice unavailable) fails the run before commit', () => {
     const r = nextReleaseDocsPrepAction({
       status: 'running',

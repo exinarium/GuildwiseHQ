@@ -202,7 +202,7 @@ const stepStateOf = (r: RunSnapshotRepo, step: string, phase = ''): ReleaseDocsP
  * What to do next for a run. The first step (in run order) that is not finished in every active repo is dispatched to
  * the repos that have not started it; any failed repo ends the run as failed (the later steps stay pending, so nothing
  * is committed). A step with phases runs each phase in every repo before the next (`commit`: `prepare`, then `push`).
- * A phase whose earlier phase was skipped in a repo is skipped there too (`skip`), with that phase's note.
+ * When the first phase of a step was skipped in a repo, its later phases are skipped there too (`skip`), with its note.
  */
 export function nextReleaseDocsPrepAction(run: RunSnapshot): ReleaseDocsPrepAction {
   if (run.status !== 'running') return { kind: 'wait' };
@@ -226,11 +226,14 @@ export function nextReleaseDocsPrepAction(run: RunSnapshot): ReleaseDocsPrepActi
       const todo = active.filter((r) => stepStateOf(r, step, phase) === 'pending');
       if (todo.length === 0) continue;
       const notes: Record<string, string> = {};
-      for (const r of todo) {
-        const earlier = phases.slice(0, k).map((p) => stepRowOf(r, step, p));
-        const skipped = earlier.find((row) => row?.state === 'skipped');
-        if (skipped) notes[r.repoId] = skipped.error?.trim() || `${step} skipped`;
-      }
+      // Only the first phase decides that a step does not apply to a repo (videos: no harness). A later phase that had
+      // nothing to do (videos author: no new videos) is skipped on its own and does not skip the phases after it.
+      const first = phases[0] ?? '';
+      if (k > 0)
+        for (const r of todo) {
+          const row = stepRowOf(r, step, first);
+          if (row?.state === 'skipped') notes[r.repoId] = row.error?.trim() || `${step} skipped`;
+        }
       const skipIds = Object.keys(notes);
       if (skipIds.length > 0) return { kind: 'skip', step, phase, repoIds: skipIds, notes };
       return {

@@ -151,7 +151,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'videos', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -173,7 +173,7 @@ describe('Release prep (docs and videos) settings', () => {
       ).status,
     ).toBe(404);
     expect(
-      (await owner('PUT', `${base()}/settings`, { enabled: true, steps: { videos: true } })).status,
+      (await owner('PUT', `${base()}/settings`, { enabled: true, steps: { nope: true } })).status,
     ).toBe(400);
     const before = await events('ReleaseDocsPrepSettingsSet');
     expect((await enable({ analyse: false })).status).toBe(200);
@@ -526,5 +526,127 @@ describe('the ship gate', () => {
     expect(view?.blocked).toBe(true);
     expect(view?.message).toContain('Release prep (docs and videos)');
     expect(view?.link).toContain(`release-docs-prep-${w.projectId}`);
+  });
+});
+
+describe('Generate videos step', () => {
+  const plan = (videos: unknown[], needsAuthoring: unknown[] = []) => ({
+    ok: true,
+    state: 'passed',
+    files: [],
+    notices: [],
+    report: { harness: true, rule: 'rule', voice: 'Kokoro af_heart', videos, shared: [], unmapped: [], ignoredCount: 0, needsAuthoring },
+  });
+  const regen = { slug: 'backlog', action: 'regenerate', reasons: ['screen Backlog changed: x'], state: 'pending' };
+  const tag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
+  const stepRows = () => q2(`SELECT step, phase, state, error, report FROM release_docs_prep_steps ORDER BY step, phase`);
+
+  it('is off by default even with prep on', async () => {
+    await enable();
+    await owner('POST', `${base()}/runs`);
+    expect((await latest()).steps).toEqual(['analyse', 'commit']);
+  });
+
+  it('runs plan, skips author with nothing new, hands the plan to render, then commits; the report is shown', async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(plan([regen]));
+    const render = await cmds();
+    expect(render.map(tag)).toEqual(['analyse', 'videos:plan', 'videos:render']);
+    const input = render[2].payload.input;
+    expect(input.authored).toEqual([]);
+    expect(input.plan.videos[0].slug).toBe('backlog');
+    const author = (await stepRows()).find((r: any) => r.phase === 'author');
+    expect(author.state).toBe('skipped');
+    expect(author.error).toBe('no new videos');
+    await answer({
+      ok: true,
+      state: 'passed',
+      files: ['media/videos/backlog.webm'],
+      notices: [],
+      report: { harness: true, videos: [{ ...regen, state: 'rendered' }] },
+    });
+    expect((await cmds()).map(tag).slice(3)).toEqual(['commit:prepare']);
+    const run = await latest();
+    const steps = run.repos[0].steps;
+    expect(steps.map((s: any) => `${s.step}:${s.phase}`)).toEqual([
+      'analyse:',
+      'videos:plan',
+      'videos:author',
+      'videos:render',
+      'commit:prepare',
+      'commit:push',
+    ]);
+    expect(steps.find((s: any) => s.phase === 'render').report.videos[0].state).toBe('rendered');
+  });
+
+  it("skips author and render in a repo with no harness ('skipped: no videos') and still commits", async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer({ ok: true, state: 'skipped', error: 'skipped: no videos', files: [], notices: [], report: { harness: false } });
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan', 'commit:prepare']);
+    const rows = (await stepRows()).filter((r: any) => r.step === 'videos');
+    expect(rows.map((r: any) => [r.phase, r.state, r.error])).toEqual([
+      ['author', 'skipped', 'skipped: no videos'],
+      ['plan', 'skipped', 'skipped: no videos'],
+      ['render', 'skipped', 'skipped: no videos'],
+    ]);
+  });
+
+  it("fails the run on 'voice unavailable': no render, no commit, ship stays blocked", async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer({
+      ok: true,
+      state: 'failed',
+      error: 'voice unavailable: Kokoro af_heart is not installed on ws',
+      files: [],
+      notices: [],
+    });
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan']);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('voice unavailable');
+    expect((await approveShip()).status).toBe(409);
+  });
+
+  it('fails the author phase naming each new video that has no script writer yet', async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(
+      plan(
+        [{ slug: 'forms', action: 'create', reasons: ['new screen'], state: 'pending' }],
+        [{ slug: 'forms', title: 'Forms', pages: ['apps/web/src/pages/Forms.tsx'], reasons: ['new screen'] }],
+      ),
+    );
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan']);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('forms: could not write the video script');
+  });
+
+  it('stores a failed render report naming the video and its error', async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(plan([regen]));
+    await answer({
+      ok: true,
+      state: 'failed',
+      error: '1 video(s) failed: backlog: selector not found',
+      files: [],
+      notices: [],
+      report: { harness: true, videos: [{ ...regen, state: 'failed', error: 'selector not found\nstack' }] },
+    });
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('backlog: selector not found');
+    const r = run.repos[0].steps.find((s: any) => s.phase === 'render');
+    expect(r.report.videos[0].error).toContain('selector not found');
+    expect((await cmds()).map(tag)).not.toContain('commit:prepare');
   });
 });

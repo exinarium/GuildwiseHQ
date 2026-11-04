@@ -1,4 +1,4 @@
-import type { EventOf } from '@aom/shared';
+import { type EventOf, stepPhases } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
 
@@ -49,8 +49,7 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         [p.runId, r.repoId, r.branch, r.mainBranch, r.workstationId],
       );
       for (const step of p.steps) {
-        const phases = step === 'commit' ? ['prepare', 'push'] : [''];
-        for (const phase of phases)
+        for (const phase of stepPhases(step))
           await exec(
             tx,
             `INSERT INTO release_docs_prep_steps (run_id, repo_id, step, phase, state)
@@ -79,7 +78,8 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepStepFinished'>(e).payload;
     await exec(
       tx,
-      `UPDATE release_docs_prep_steps SET state=$5, finished_at=$6, files=$7::text[], error=$8, output=$9::jsonb
+      `UPDATE release_docs_prep_steps SET state=$5, finished_at=$6, files=$7::text[], error=$8, output=$9::jsonb,
+         report=COALESCE($10::jsonb, report)
         WHERE run_id=$1 AND repo_id=$2 AND step=$3 AND phase=$4`,
       [
         p.runId,
@@ -91,6 +91,7 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         p.files,
         p.error ?? null,
         p.output === undefined ? null : JSON.stringify(p.output),
+        p.report ? JSON.stringify(p.report) : null,
       ],
     );
     await exec(

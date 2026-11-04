@@ -41,7 +41,7 @@ export const releaseDocsPrepEvents = [
       runId: Id,
       repoId: Id,
       step: z.string(),
-      phase: z.enum(['prepare', 'push']).optional(),
+      phase: z.string().max(20).optional(),
       commandId: Id.optional(),
     }),
   ),
@@ -51,7 +51,7 @@ export const releaseDocsPrepEvents = [
       runId: Id,
       repoId: Id,
       step: z.string(),
-      phase: z.enum(['prepare', 'push']).optional(),
+      phase: z.string().max(20).optional(),
       state: StepState,
       error: z.string().optional(),
       files: z.array(z.string()).default([]),
@@ -63,6 +63,8 @@ export const releaseDocsPrepEvents = [
       pushed: z.boolean().optional(),
       /** The step's report (content steps), shown on the Releases page. */
       output: z.unknown().optional(),
+      /** The step's own report (videos: what was chosen, why, and each render's result). */
+      report: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
   defineEvent(
