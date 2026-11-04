@@ -1643,6 +1643,11 @@ the worktree has changes, the runner posts a card note ("The shift ended without
 in the worktree", up to 30 files with their `git status` codes, and the leftovers commit it made) before it sends
 `shift.ended`. The work itself was already kept by the shift-end auto-commit; the note makes it visible to the next shift
 and the owner. Read-only roles (reviewer, ...) leave nothing behind and get no note.
+The leftovers commit is refused (nothing is committed, reset, restored or deleted; the changes stay uncommitted) when it
+deletes more than 25 tracked files, or more than 10% of them from 5 deleted files on, or when its tree equals the tree
+of one of the last 1000 earlier commits. The runner then logs a WARN and posts a second card note ("The runner did not
+commit the leftovers of shift ...") with the shift, the deleted-file count, the reason and up to 30 paths; the unreported
+note says the runner refused to commit. See ARCHITECTURE section 13.7.
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
 above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`

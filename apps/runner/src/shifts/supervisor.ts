@@ -166,7 +166,14 @@ import {
   transcriptPath,
 } from '../transcript/service.ts';
 import { readVaultContexts, withVaultContexts } from '../vaults/context.ts';
-import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
+import {
+  type AutoCommitResult,
+  autoCommit,
+  autoCommitRefusedNote,
+  describeRefusal,
+  uncommittedFiles,
+  unreportedWorkNote,
+} from './autocommit.ts';
 import {
   type BranchSnapshot,
   discardOutOfScope,
@@ -359,6 +366,8 @@ interface ActiveShift {
   mainShas: string[];
   /** Shas of the card's base and working branch (local and origin/): merges of them are exempt in the guard. */
   baseTips: string[];
+  /** Refusals of the leftovers commit already noted on the card this shift (reason and tree): one note each. */
+  autoCommitRefusals: Set<string>;
   /** When the shift's start sha was taken (ms since epoch). */
   startedAtMs?: number;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
@@ -529,6 +538,7 @@ export class ShiftSupervisor {
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
       baseTips: resume?.baseTips ? [...resume.baseTips] : [],
+      autoCommitRefusals: new Set<string>(),
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
@@ -1562,14 +1572,9 @@ export class ShiftSupervisor {
       const unreported =
         s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout' || s.stopReason === 'idle');
       const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
-      const committed =
-        holdCommit.length > 0
-          ? false
-          : await autoCommit({
-              worktree: s.worktree.path,
-              ticket: ticketOf(msg),
-              env: s.env,
-            });
+      const ac: AutoCommitResult | null =
+        holdCommit.length > 0 ? null : await this.leftoversCommit(s, 'shift_end');
+      const committed = ac?.committed === true;
       if (leftovers.length > 0) {
         const sha = committed
           ? (await git(s.worktree.path, ['rev-parse', '--short', 'HEAD'])).stdout.trim()
@@ -1585,6 +1590,7 @@ export class ShiftSupervisor {
           note: unreportedWorkNote(leftovers, {
             outcome: how,
             committed,
+            ...(ac?.refused ? { refused: true } : {}),
             ...(sha ? { sha } : {}),
             branch: s.worktree.branchName,
           }),
@@ -2088,6 +2094,30 @@ export class ShiftSupervisor {
       items: cards.flatMap((c) => c.attachments.map((attachment) => ({ ref: c.ref, attachment }))),
     });
     return { ok: true, result: describeSynced(synced) };
+  }
+
+  /** The leftovers commit of a shift: a refusal (mass deletion, tree revert) is logged and noted on the card once. */
+  private async leftoversCommit(s: ActiveShift, where: 'shift_end' | 'report'): Promise<AutoCommitResult> {
+    const wt = s.worktree;
+    if (!wt) return { committed: false, skipped: 'clean' };
+    const r = await autoCommit({ worktree: wt.path, ticket: ticketOf(s.msg), env: s.env });
+    if (r.refused) {
+      const f = r.refused;
+      this.log.warn(
+        `refused to auto-commit the leftovers of shift ${s.msg.shiftId} (${f.reason}): ${f.deleted} of ${f.tracked} tracked files deleted, ${f.added} added, ${f.modified} modified${f.revertsTo ? `, tree of ${f.revertsTo.slice(0, 8)}` : ''}`,
+      );
+      const key = `${f.reason}:${f.tree}`;
+      if (!s.autoCommitRefusals.has(key)) {
+        s.autoCommitRefusals.add(key);
+        await this.submit(s, {
+          kind: 'comment',
+          note: autoCommitRefusedNote(f, { shiftId: s.msg.shiftId, branch: wt.branchName, where }),
+        });
+      }
+    } else if (!r.committed && r.skipped === 'git_failed') {
+      this.log.warn(`could not auto-commit the leftovers of shift ${s.msg.shiftId}`);
+    }
+    return r;
   }
 
   /** Records the tips of the card's base and working branch (local and origin/): merges of them are base content. */
@@ -2629,11 +2659,8 @@ export class ShiftSupervisor {
         if (outcome.kind === 'success' && outcome.data === 'investigation') {
           // The report must be committed on the card branch (or copied into the vault) before the card moves on.
           if (msg.agent.permissions.mayCommit) {
-            await autoCommit({
-              worktree: s.worktree.path,
-              ticket: ticketOf(msg),
-              env: s.env,
-            });
+            const ac = await this.leftoversCommit(s, 'report');
+            if (ac.refused) return rejected(refusedReport(ac.refused));
           }
           const prepared = await this.prepareInvestigation(s, toSend.data as unknown as InvestigationData);
           if ('error' in prepared) return rejected(prepared.error);
@@ -2641,11 +2668,8 @@ export class ShiftSupervisor {
         }
         if (outcome.kind === 'success' && (outcome.data === 'diffStats' || outcome.data === 'buildHandoff')) {
           if (msg.agent.permissions.mayCommit) {
-            await autoCommit({
-              worktree: s.worktree.path,
-              ticket: ticketOf(msg),
-              env: s.env,
-            });
+            const ac = await this.leftoversCommit(s, 'report');
+            if (ac.refused) return rejected(refusedReport(ac.refused));
           }
           const stats = await computeDiffStats({
             worktree: s.worktree.path,
@@ -2737,6 +2761,9 @@ function mainSyncNote(sync: NonNullable<ActiveShift['syncMain']>): string {
       return '## Main branch\nThe latest main branch conflicts with the working branch; it was not merged.';
   }
 }
+
+const refusedReport = (f: Parameters<typeof describeRefusal>[0]): string =>
+  `The runner did not commit your pending changes as Work in progress: ${describeRefusal(f)}. Nothing in the worktree was changed. If the deletion is intended, commit it yourself with a message that says why, then report again. If it is not, restore the files from HEAD and report again. If you did not make these changes, ask with aom question.`;
 
 const rejected = (error: string, matches?: LedgerMatch[]): IpcReportResponse => ({
   accepted: false,

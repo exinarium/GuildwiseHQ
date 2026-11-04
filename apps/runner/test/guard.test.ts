@@ -171,9 +171,9 @@ describe('autocommit', () => {
       ticket: 'DCPL-4276',
       env,
     };
-    expect(await autoCommit(input)).toBe(false);
+    expect((await autoCommit(input)).committed).toBe(false);
     writeFileSync(join(path, 'left.txt'), 'l');
-    expect(await autoCommit(input)).toBe(true);
+    expect((await autoCommit(input)).committed).toBe(true);
     expect(sh(path, 'git', ['log', '-1', '--format=%s|%an|%cn'])).toBe(
       'DCPL-4276: Work in progress|Pieter Jordaan|Pieter Jordaan',
     );
@@ -261,7 +261,7 @@ describe('test output directories are artifacts, not changes', () => {
     expect(await discardTestArtifacts(path)).toBe(true);
     expect(existsSync(join(path, 'test-results'))).toBe(false);
     expect(existsSync(join(path, 'apps/web/test-results'))).toBe(false);
-    expect(await autoCommit({ worktree: path, env: {} })).toBe(false);
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(false);
     expect(await discardTestArtifacts(path)).toBe(false);
   });
 });
