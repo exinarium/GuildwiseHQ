@@ -173,7 +173,6 @@ export function Workstations() {
   );
 }
 
-/** Running shifts of this workstation that belong to no card (DevOps work, chats): each can be stopped here. */
 /** Owner/Admin: workstations that were unpaired but still hold the organization's agents; retiring one hands them over. */
 function StrandedWorkstations() {
   const canManage = useCanManageOrg();
@@ -211,6 +210,7 @@ function StrandedWorkstations() {
   );
 }
 
+/** Running shifts of this workstation that belong to no card (DevOps work, chats): each can be stopped here. */
 function CardlessShifts({ workstationId }: { workstationId: string }) {
   const running = useRunningShifts();
   const list = (running.data ?? []).filter(

@@ -156,6 +156,21 @@ describe('retire a workstation with agent handover', () => {
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(s.id);
   });
 
+  it("a preview by an Admin who is not the machine's user hides other organizations' agents; the machine's user sees them", async () => {
+    const s = await station(2);
+    const out = await w.t.userSession(uniqueEmail('out'));
+    const outOrg = (await q('SELECT org_id FROM org_members WHERE user_id=$1 LIMIT 1', [out.id]))[0]!.org_id;
+    await q('UPDATE agents SET org_id=$2 WHERE id=$1', [s.agents[1]!.id, outOrg]);
+    const adminView = await as(adminS.cookie).get(`/api/workstations/${s.id}/retire-preview`);
+    expect(adminView.status).toBe(200);
+    expect(adminView.body.agents.map((a: any) => a.id)).toEqual([s.agents[0]!.id]);
+    expect(adminView.body.canUnpair).toBe(false);
+    const ownerView = await owner().get(`/api/workstations/${s.id}/retire-preview`);
+    expect(ownerView.body.agents).toHaveLength(2);
+    expect(ownerView.body.agents.find((a: any) => a.id === s.agents[1]!.id).otherOrg).toBe(true);
+    expect(ownerView.body.canUnpair).toBe(true);
+  });
+
   it('AC6: a Member gets 403 on the preview and on retiring', async () => {
     const s = await station(1, true);
     const m = as(memberS.cookie);

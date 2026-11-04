@@ -64,13 +64,15 @@ export async function retirePreview(ctx: Ctx, who: Who, workstationId: string): 
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [workstationId]);
   const active = src.status === 'active';
   const all = await agentsOn(ctx.pool, workstationId, false);
-  const relevant = all.filter((a) => a.org_id === who.orgId || active);
+  // Other organizations' agents are only visible to the person who may unpair the machine (as the POST requires).
+  const seesOthers = active && ws?.user_id === who.userId;
+  const relevant = all.filter((a) => a.org_id === who.orgId || seesOthers);
   const working = await workingAgents(
     ctx.pool,
     workstationId,
     relevant.map((a) => a.id as string),
   );
-  const cards = await homedCards(ctx.pool, workstationId, who.orgId, active);
+  const cards = await homedCards(ctx.pool, workstationId, who.orgId, seesOthers);
   return {
     workstation: {
       id: src.id,
@@ -223,7 +225,9 @@ export async function retireWorkstation(
       for (const a of ceos) {
         // The CEO follows only the Owner onto the Owner's own workstation; otherwise it has no home until the Owner picks one.
         const ownerTarget =
-          who.role === 'owner' && (target.user_id === who.userId || target.simulation_org_id === a.org_id);
+          who.role === 'owner' &&
+          a.org_id === who.orgId &&
+          (target.user_id === who.userId || target.simulation_org_id === a.org_id);
         if (!ownerTarget) {
           events.push(noHomeEvent(a));
           continue;
