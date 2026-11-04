@@ -259,6 +259,8 @@ function split(out: string): string[][] {
 
 const workRef = (runId: string): string => `${KEPT}/${runId}/work`;
 const commitRef = (runId: string): string => `${KEPT}/${runId}/commit`;
+/** Where the work chain was started: the base of the squash commit when there is no analysis to name it. */
+const startRef = (runId: string): string => `${KEPT}/${runId}/start`;
 
 async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
@@ -270,7 +272,10 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
   } catch (err) {
     return failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err));
   }
-  const start = (await revParse(repoPath, workRef(p.runId))) ?? p.summary?.headSha ?? tip;
+  const kept = await revParse(repoPath, workRef(p.runId));
+  const start = kept ?? p.summary?.headSha ?? tip;
+  if (!kept && !(await revParse(repoPath, startRef(p.runId))))
+    await git(repoPath, ['update-ref', startRef(p.runId), start]);
   const made = await withIntegrationWorktree(
     {
       repoPath,
@@ -318,7 +323,9 @@ async function commitPrepare(
   tip: string,
 ): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
-  const analysed = p.summary?.headSha ?? tip;
+  // The commit the work chain was built on. The release branch may have moved since; the newer commits are carried
+  // over below, never reverted.
+  const analysed = p.summary?.headSha ?? (await revParse(repoPath, startRef(p.runId))) ?? tip;
   const work = await revParse(repoPath, workRef(p.runId));
   // Nothing produced a change: no commit (the repository is left as it is).
   if (!work || (await treeOf(repoPath, work)) === (await treeOf(repoPath, analysed)))
@@ -418,5 +425,5 @@ async function commitPush(
 }
 
 async function cleanup(repoPath: string, runId: string): Promise<void> {
-  for (const r of [workRef(runId), commitRef(runId)]) await git(repoPath, ['update-ref', '-d', r]);
+  for (const r of [workRef(runId), commitRef(runId), startRef(runId)]) await git(repoPath, ['update-ref', '-d', r]);
 }

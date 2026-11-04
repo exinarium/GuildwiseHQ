@@ -225,6 +225,24 @@ describe('release.docs_prep commit', () => {
     expect(sh(s.repo.origin, 'git', ['show', 'release/1.4.0:docs/USER-GUIDE.md'])).toBe('# Guide');
   });
 
+  it('with Analyse changes unticked, keeps commits pushed to the release branch after a content step', async () => {
+    const s = setup();
+    const guide = await run(s, { step: 'guide' });
+    expect(guide.state).toBe('passed');
+    // somebody pushes to the release branch in between
+    commit(s.repo.clone, 'apps/server/b.ts', 'b', 'feat: b');
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.4.0']);
+    const prep = await run(s, { step: 'commit', phase: 'prepare' });
+    expect(prep.state).toBe('passed');
+    expect(prep.commit).toBeTruthy();
+    const push = await run(s, { step: 'commit', phase: 'push' });
+    expect(push.state).toBe('passed');
+    expect(sh(s.repo.origin, 'git', ['show', 'release/1.4.0:apps/server/b.ts'])).toBe('b');
+    expect(sh(s.repo.origin, 'git', ['show', 'release/1.4.0:docs/USER-GUIDE.md'])).toBe('# Guide');
+    // the kept refs, the start ref included, are gone after the push
+    expect(sh(s.repo.clone, 'git', ['for-each-ref', 'refs/guildwise/docs-prep/'])).toBe('');
+  });
+
   it('fails a step whose handler fails, and an unknown step, without touching origin', async () => {
     const s = setup();
     const head = originHead(s.repo.origin);
