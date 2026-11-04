@@ -16,7 +16,12 @@ import {
   ProjectCapabilitiesReportSchema,
 } from '../capabilities/pack-wire.ts';
 import { CapabilityMetaSchema } from '../capabilities/parse.ts';
-import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
+import {
+  CHANGED_PATHS_MAX,
+  CheckEvidenceSchema,
+  DiffUploadSchema,
+  E2eAreaMapSchema,
+} from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { RunnerDiagnosticsRequestSchema } from '../ceo/diagnostics.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
@@ -112,8 +117,10 @@ import {
 } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
+  CHECKS_MAX,
   EnvSecretClearPayloadSchema,
   EnvSecretSetPayloadSchema,
+  IntegrationSuiteSchema,
   ShiftEnvironmentSchema,
 } from '../runs/integration.ts';
 import {
@@ -542,6 +549,16 @@ export const ShiftBriefSchema = z.object({
       }),
     )
     .optional(),
+  /**
+   * lean team, a build stage: the project's confirmed checks of the card's repository (the runner runs them at `aom handoff`)
+   * and whether it should propose checks from the repository first. Absent: an older server.
+   */
+  checks: z
+    .object({
+      suites: z.array(IntegrationSuiteSchema).max(CHECKS_MAX).default([]),
+      detect: z.boolean().default(false),
+    })
+    .optional(),
   /** lean team: the build and unit test evidence of the card's handoff, bound to a commit (reviewers read it instead of building). */
   buildEvidence: z
     .object({
@@ -554,6 +571,8 @@ export const ShiftBriefSchema = z.object({
           result: z.string(),
         }),
       ),
+      /** The runner's check results at the handoff (absent: an older runner or a project without checks). */
+      checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
       waived: z.string().optional(),
       at: z.string(),
     })
@@ -842,6 +861,9 @@ export const RELEASE_FACTS_CAPABILITY = 'release-facts:1';
  * bumped), pushed without force. Idempotent: a branch that already has the version section answers `alreadyDone`.
  */
 export const RELEASE_SHIP_CAPABILITY = 'release-ship:1';
+
+/** The runner runs the project's confirmed `check` suites (lint, format, typecheck) at `aom handoff` and refuses on failures. */
+export const CHECKS_CAPABILITY = 'checks:1';
 export const ReleaseShipStepSchema = z.enum(['prepare', 'components', 'changelog', 'commit', 'push']);
 export type ReleaseShipStep = z.infer<typeof ReleaseShipStepSchema>;
 export const ReleaseShipPayloadSchema = z.object({
@@ -1738,6 +1760,8 @@ export const ShiftReportMsgSchema = msg('shift.report', {
   headSha: z.string().min(7).max(64).optional(),
   changedPaths: z.array(z.string().max(500)).max(CHANGED_PATHS_MAX).optional(),
   diff: DiffUploadSchema.optional(),
+  /** lean team, a build handoff: what the checks found (additive; an older runner sends none and is never refused for it). */
+  checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
 });
 export const ShiftEndedSchema = msg('shift.ended', {
   shiftId: z.uuid(),

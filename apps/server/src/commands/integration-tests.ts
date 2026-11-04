@@ -1,4 +1,5 @@
 import {
+  CHECKS_CAPABILITY,
   type IntegrationTests,
   type IntegrationTestsResponse,
   IntegrationTestsSchema,
@@ -46,17 +47,19 @@ export function cardIntegrationTests(card: Row, projectSettings: IntegrationTest
   return typeof own === 'boolean' ? own : integrationTestsOn(projectSettings);
 }
 
-async function workstationCanProvision(db: Queryable, projectId: string): Promise<boolean> {
+async function workstationCan(db: Queryable, projectId: string, capability: string): Promise<boolean> {
   const r = await one(
     db,
     `SELECT 1 AS ok FROM workstation_capabilities c
        JOIN workstations w ON w.id = c.workstation_id AND w.status = 'active'
        JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
-      WHERE 'runs:3' = ANY (c.capabilities) LIMIT 1`,
-    [projectId],
+      WHERE $2 = ANY (c.capabilities) LIMIT 1`,
+    [projectId, capability],
   );
   return !!r;
 }
+
+const workstationCanProvision = (db: Queryable, projectId: string) => workstationCan(db, projectId, 'runs:3');
 
 export async function getIntegrationTests(
   ctx: Ctx,
@@ -74,6 +77,7 @@ export async function getIntegrationTests(
     repos: repos.map((r) => ({ repoId: r.id, name: r.name })),
     targets: await testableTargets(ctx.pool, projectId),
     canProvision: await workstationCanProvision(ctx.pool, projectId),
+    canRunChecks: await workstationCan(ctx.pool, projectId, CHECKS_CAPABILITY),
   };
 }
 
@@ -116,7 +120,9 @@ export async function setIntegrationTests(
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
-    const problems = validateIntegrationTests(req.settings, await projectRepoIds(tx, projectId));
+    // The repositories whose checks were proposed are the server's record, not the client's.
+    const settings = { ...req.settings, checkDetection: integrationTestsOf(p).checkDetection };
+    const problems = validateIntegrationTests(settings, await projectRepoIds(tx, projectId));
     if (req.settings.mode === 'remote' && req.settings.deployTargetId) {
       const t = await one(
         tx,
@@ -135,7 +141,7 @@ export async function setIntegrationTests(
           streamId: streamId.project(projectId),
           event: {
             type: 'ProjectIntegrationTestsSet',
-            payload: { projectId, settings: req.settings, by: user.id },
+            payload: { projectId, settings, by: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
@@ -166,6 +172,12 @@ export async function confirmSuite(
       ...settings,
       suites: settings.suites.map((s) => (s === hit ? { ...s, confirmed } : s)),
     };
+    // A proposal comes from an agent: it must be a valid suite (a folder inside the repository, a check's longest run, ...)
+    // before the owner's click makes it run.
+    if (confirmed) {
+      const problems = validateIntegrationTests(next, await projectRepoIds(tx, projectId));
+      if (problems.length) throw badRequest('invalid_integration_tests', problems.join('; '));
+    }
     await ctx.store.append(
       [
         {

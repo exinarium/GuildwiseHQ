@@ -757,6 +757,8 @@ describe('after merge: a burst deploys once', () => {
     const card = await d.w.card({ title: 'A merged card' });
     await mergeLanded(d, '1'.repeat(40), card.id);
     await mergeLanded(d, '2'.repeat(40), card.id);
+    // the gateway queues the same trigger from the events, asynchronously: let it finish before the clock moves
+    await ctx().notifier.flush();
     const before = execs().length;
     expect(await queueMergeTrigger(ctx(), card.id, '1'.repeat(40))).toBe(true);
     await advance(d, 60_000);

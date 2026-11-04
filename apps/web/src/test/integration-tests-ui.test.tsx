@@ -144,6 +144,72 @@ describe('integration test settings', () => {
     expect(calls.some((c) => c.method === 'PUT')).toBe(false);
   });
 
+  it('the Checks fieldset shows while the mode is off, hides checks from the Suites list and adds a check with a fix command', async () => {
+    routes[`GET ${URL_}`] = () => json(response());
+    routes[`PUT ${URL_}`] = (init) => json(response({ settings: JSON.parse(String(init.body)).settings }));
+    const user = userEvent.setup();
+    wrap(<IntegrationTestsSettings projectId={PROJECT} canEdit />);
+    const checks = await screen.findByTestId('checks-settings');
+    expect(screen.getByTestId('integration-mode')).toHaveValue('off');
+    expect(checks).toHaveTextContent('Proposed checks do not run until you confirm them');
+    await user.click(screen.getByTestId('add-check'));
+    const row = within(screen.getByTestId('checks-settings'));
+    await user.type(row.getByLabelText('Name'), 'lint');
+    await user.type(row.getByLabelText('Command'), 'pnpm lint');
+    await user.type(row.getByLabelText('Fix command (optional)'), 'pnpm format');
+    await user.click(screen.getByTestId('integration-save'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
+    expect(calls.find((c) => c.method === 'PUT')?.body.settings.suites).toEqual([
+      {
+        name: 'lint',
+        repoId: WEB,
+        cwd: '.',
+        cmd: ['pnpm', 'lint'],
+        kind: 'check',
+        timeoutMin: 5,
+        destructive: false,
+        fix: ['pnpm', 'format'],
+        confirmed: true,
+      },
+    ]);
+    // a check is never listed among the suites
+    await user.selectOptions(screen.getByTestId('integration-mode'), 'local');
+    expect(screen.queryByTestId('suite-row-lint')).toBeNull();
+    expect(screen.getByTestId('check-row-lint')).toBeInTheDocument();
+  });
+
+  it('shows a check proposed from the repository and confirms it; warns when no runner runs checks', async () => {
+    const proposed = {
+      name: 'lint',
+      repoId: WEB,
+      cwd: '.',
+      cmd: ['pnpm', 'lint', '--max-diagnostics=none'],
+      kind: 'check',
+      timeoutMin: 5,
+      destructive: false,
+      fix: ['pnpm', 'format'],
+      confirmed: false,
+    };
+    const settings = (confirmed: boolean) => ({
+      mode: 'off',
+      services: [],
+      suites: [{ ...proposed, confirmed }],
+      keepOnFailureMin: 60,
+      flakyRetry: 1,
+      checkDetection: [WEB],
+    });
+    routes[`GET ${URL_}`] = () => json(response({ settings: settings(false), canRunChecks: false }));
+    routes[`POST ${URL_}/suites/lint/confirm`] = () => json(response({ settings: settings(true) }));
+    const user = userEvent.setup();
+    wrap(<IntegrationTestsSettings projectId={PROJECT} canEdit />);
+    const row = await screen.findByTestId('check-row-lint');
+    expect(row).toHaveTextContent('Proposed from the repository');
+    expect(screen.getByText(/runs checks at the handoff yet/)).toBeInTheDocument();
+    await user.click(screen.getByTestId('confirm-suite-lint'));
+    await waitFor(() => expect(screen.queryByText('Proposed from the repository')).toBeNull());
+    expect(calls.find((c) => c.url.endsWith('/suites/lint/confirm'))?.body).toEqual({ confirmed: true });
+  });
+
   it('is read-only for someone who is not the project owner', async () => {
     routes[`GET ${URL_}`] = () => json(response());
     wrap(<IntegrationTestsSettings projectId={PROJECT} canEdit={false} />);

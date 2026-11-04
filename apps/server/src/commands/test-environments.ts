@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   branchName,
+  CHECK_TIMEOUT_MAX_MIN,
   DEFAULT_RUN_PORT_RANGE,
   DESK_SUBKIND,
   expandEnvId,
@@ -19,6 +20,7 @@ import {
   type TestEnvProblem,
   type TestSuiteReport,
   TestSuiteReportSchema,
+  testerSuites,
   type WorkflowCardView,
   workflowHasIntegrationGuard,
 } from '@aom/shared';
@@ -99,7 +101,7 @@ async function remoteEnvironment(
   if (!t || t.project_id !== projectId) return undefined;
   return {
     mode: 'remote',
-    suites: settings.suites,
+    suites: testerSuites(settings),
     flakyRetry: settings.flakyRetry,
     target: {
       id: t.id,
@@ -135,7 +137,7 @@ export async function shiftEnvironmentFor(
     [card.id, workstationId],
   );
   if (!env) return undefined;
-  return { mode: 'local', envId: env.id, suites: settings.suites, flakyRetry: settings.flakyRetry };
+  return { mode: 'local', envId: env.id, suites: testerSuites(settings), flakyRetry: settings.flakyRetry };
 }
 
 // --------------------------------------------------------------------------------------- provisioning
@@ -809,7 +811,9 @@ export async function recordSuiteResult(
     if (agent?.role_key !== 'tester') return [false, undefined, 'only a tester reports suites'];
     const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
     const settings = integrationTestsOf(project);
-    const configured = settings.suites.find((s) => s.name.toLowerCase() === parsed.data.name.toLowerCase());
+    const configured = testerSuites(settings).find(
+      (s) => s.name.toLowerCase() === parsed.data.name.toLowerCase(),
+    );
     const earlier = await rows<{ status: string }>(
       tx,
       `SELECT status FROM test_suite_results WHERE shift_id=$1 AND lower(suite)=lower($2) ORDER BY created_at, event_seq`,
@@ -948,7 +952,7 @@ export async function openSuitesOf(db: Queryable, card: Row, shift: Row): Promis
   );
   const remote =
     settings.mode === 'remote' ? await remoteEnvironment(db, card.project_id, settings) : undefined;
-  let suites = settings.suites;
+  let suites = testerSuites(settings);
   if (remote?.target) {
     // Against a target that does not allow tests that change data, the destructive suites are skipped, not required.
     if (!remote.target.destructiveOk) suites = suites.filter((x) => !x.destructive);
@@ -986,7 +990,18 @@ export async function proposeSuites(
       const repoId =
         repos.find((r) => r.id === given || r.name.toLowerCase() === String(given ?? '').toLowerCase())?.id ??
         card.repo_id;
-      return IntegrationSuiteSchema.safeParse({ ...(s as object), repoId, confirmed: false });
+      // A proposed check gets a timeout the owner can save (default 5, at most the limit); set here, never in the projector.
+      const raw = s as { kind?: string; timeoutMin?: unknown };
+      const timeout =
+        raw.kind === 'check'
+          ? {
+              timeoutMin: Math.min(
+                CHECK_TIMEOUT_MAX_MIN,
+                typeof raw.timeoutMin === 'number' && raw.timeoutMin >= 1 ? raw.timeoutMin : 5,
+              ),
+            }
+          : {};
+      return IntegrationSuiteSchema.safeParse({ ...(s as object), ...timeout, repoId, confirmed: false });
     });
     const bad = parsed.find((r) => !r.success);
     if (bad && !bad.success) return [false, undefined, `invalid suite: ${bad.error.issues[0]?.message}`];
@@ -1024,7 +1039,7 @@ export async function suitesFor(db: Queryable, shift: Row): Promise<[boolean, un
   if (!card) return [false, undefined, 'card not found'];
   const project = await one(db, 'SELECT integration_tests FROM projects WHERE id=$1', [card.project_id]);
   const s = integrationTestsOf(project);
-  return [true, { mode: s.mode, flakyRetry: s.flakyRetry, suites: s.suites }];
+  return [true, { mode: s.mode, flakyRetry: s.flakyRetry, suites: testerSuites(s) }];
 }
 
 // --------------------------------------------------------------------- leaving Review: the test guard

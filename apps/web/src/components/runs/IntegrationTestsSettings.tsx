@@ -18,10 +18,12 @@ interface Row {
   repoId: string;
   cwd: string;
   cmd: string;
-  kind: 'integration' | 'e2e';
+  kind: 'integration' | 'e2e' | 'check';
   timeoutMin: number;
   destructive: boolean;
   junit: string;
+  /** A check only: the formatter or import sorter that repairs what the check reports. */
+  fix: string;
   confirmed: boolean;
 }
 
@@ -35,12 +37,14 @@ const toRow = (s: IntegrationSuite, key: number): Row => ({
   timeoutMin: s.timeoutMin,
   destructive: s.destructive,
   junit: s.junit ?? '',
+  fix: s.fix ? formatCommandLine(s.fix) : '',
   confirmed: s.confirmed,
 });
 
 function fromRow(r: Row): IntegrationSuite {
-  const where = `Suite "${r.name || '(no name)'}"`;
-  if (!r.name.trim()) throw new Error('Every suite needs a name');
+  const what = r.kind === 'check' ? 'Check' : 'Suite';
+  const where = `${what} "${r.name || '(no name)'}"`;
+  if (!r.name.trim()) throw new Error(`Every ${what.toLowerCase()} needs a name`);
   if (!r.cmd.trim()) throw new Error(`${where}: the command is empty`);
   try {
     return {
@@ -52,6 +56,7 @@ function fromRow(r: Row): IntegrationSuite {
       timeoutMin: r.timeoutMin,
       destructive: r.destructive,
       ...(r.junit.trim() ? { junit: r.junit.trim() } : {}),
+      ...(r.kind === 'check' && r.fix.trim() ? { fix: parseCommandLine(r.fix) } : {}),
       confirmed: r.confirmed,
     };
   } catch (err) {
@@ -96,7 +101,7 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
         <ErrorBox error={q.error} onRetry={() => q.refetch()} />
       </Panel>
     );
-  const { repos, targets, canProvision } = q.data;
+  const { repos, targets, canProvision, canRunChecks } = q.data;
   const patchRow = (key: number, over: Partial<Row>) =>
     setRows((cur) => cur.map((r) => (r.key === key ? { ...r, ...over } : r)));
 
@@ -117,6 +122,7 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
       suites,
       keepOnFailureMin: keep,
       flakyRetry: retry,
+      checkDetection: q.data.settings.checkDetection,
     };
     const issues = validateIntegrationTests(
       settings,
@@ -224,110 +230,112 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
                 card. With none listed, the tester reads TESTING.md, BUILD.md and the test config, runs what
                 it finds and proposes it here for you to confirm.
               </p>
-              {rows.map((r) => (
-                <div
-                  key={r.key}
-                  className="flex flex-col gap-2 rounded-control border border-line p-3"
-                  data-testid={`suite-row-${r.name || r.key}`}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    {!r.confirmed && <Badge tone="warning">Proposed by a tester</Badge>}
-                    {!r.confirmed && canEdit && (
-                      <Button
-                        size="sm"
-                        data-testid={`confirm-suite-${r.name}`}
-                        loading={confirm.isPending}
-                        onClick={() => confirm.mutate({ name: r.name, confirmed: true })}
+              {rows
+                .filter((r) => r.kind !== 'check')
+                .map((r) => (
+                  <div
+                    key={r.key}
+                    className="flex flex-col gap-2 rounded-control border border-line p-3"
+                    data-testid={`suite-row-${r.name || r.key}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!r.confirmed && <Badge tone="warning">Proposed by a tester</Badge>}
+                      {!r.confirmed && canEdit && (
+                        <Button
+                          size="sm"
+                          data-testid={`confirm-suite-${r.name}`}
+                          loading={confirm.isPending}
+                          onClick={() => confirm.mutate({ name: r.name, confirmed: true })}
+                        >
+                          Confirm {r.name}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <TextInput
+                        label="Name"
+                        value={r.name}
+                        disabled={!canEdit}
+                        onChange={(e) => patchRow(r.key, { name: e.target.value })}
+                      />
+                      <Select
+                        label="Kind"
+                        value={r.kind}
+                        disabled={!canEdit}
+                        onChange={(e) => patchRow(r.key, { kind: e.target.value as Row['kind'] })}
                       >
-                        Confirm {r.name}
-                      </Button>
+                        <option value="integration">Integration</option>
+                        <option value="e2e">End-to-end</option>
+                      </Select>
+                      <Select
+                        label="Repository"
+                        value={r.repoId}
+                        disabled={!canEdit}
+                        onChange={(e) => patchRow(r.key, { repoId: e.target.value })}
+                      >
+                        {repos.map((x) => (
+                          <option key={x.repoId} value={x.repoId}>
+                            {x.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <TextInput
+                      label="Command"
+                      value={r.cmd}
+                      disabled={!canEdit}
+                      placeholder="npx playwright test"
+                      onChange={(e) => patchRow(r.key, { cmd: e.target.value })}
+                    />
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <TextInput
+                        label="Folder"
+                        value={r.cwd}
+                        disabled={!canEdit}
+                        onChange={(e) => patchRow(r.key, { cwd: e.target.value })}
+                      />
+                      <TextInput
+                        label="JUnit report (optional)"
+                        value={r.junit}
+                        disabled={!canEdit}
+                        placeholder="results/*.xml"
+                        onChange={(e) => patchRow(r.key, { junit: e.target.value })}
+                      />
+                      <TextInput
+                        label="Longest run (minutes)"
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={r.timeoutMin}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          patchRow(r.key, { timeoutMin: Math.max(1, Number(e.target.value) || 1) })
+                        }
+                      />
+                    </div>
+                    <label className="flex min-h-9 items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={r.destructive}
+                        disabled={!canEdit}
+                        onChange={(e) => patchRow(r.key, { destructive: e.target.checked })}
+                      />
+                      Writes or deletes data (only runs against a target that allows it)
+                    </label>
+                    {canEdit && (
+                      <div>
+                        <Button
+                          size="sm"
+                          variant="danger-ghost"
+                          onClick={() => setRows((cur) => cur.filter((x) => x.key !== r.key))}
+                        >
+                          <Trash2 aria-hidden="true" className="size-4" />
+                          Remove {r.name || 'suite'}
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <TextInput
-                      label="Name"
-                      value={r.name}
-                      disabled={!canEdit}
-                      onChange={(e) => patchRow(r.key, { name: e.target.value })}
-                    />
-                    <Select
-                      label="Kind"
-                      value={r.kind}
-                      disabled={!canEdit}
-                      onChange={(e) => patchRow(r.key, { kind: e.target.value as Row['kind'] })}
-                    >
-                      <option value="integration">Integration</option>
-                      <option value="e2e">End-to-end</option>
-                    </Select>
-                    <Select
-                      label="Repository"
-                      value={r.repoId}
-                      disabled={!canEdit}
-                      onChange={(e) => patchRow(r.key, { repoId: e.target.value })}
-                    >
-                      {repos.map((x) => (
-                        <option key={x.repoId} value={x.repoId}>
-                          {x.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <TextInput
-                    label="Command"
-                    value={r.cmd}
-                    disabled={!canEdit}
-                    placeholder="npx playwright test"
-                    onChange={(e) => patchRow(r.key, { cmd: e.target.value })}
-                  />
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <TextInput
-                      label="Folder"
-                      value={r.cwd}
-                      disabled={!canEdit}
-                      onChange={(e) => patchRow(r.key, { cwd: e.target.value })}
-                    />
-                    <TextInput
-                      label="JUnit report (optional)"
-                      value={r.junit}
-                      disabled={!canEdit}
-                      placeholder="results/*.xml"
-                      onChange={(e) => patchRow(r.key, { junit: e.target.value })}
-                    />
-                    <TextInput
-                      label="Longest run (minutes)"
-                      type="number"
-                      min={1}
-                      max={120}
-                      value={r.timeoutMin}
-                      disabled={!canEdit}
-                      onChange={(e) =>
-                        patchRow(r.key, { timeoutMin: Math.max(1, Number(e.target.value) || 1) })
-                      }
-                    />
-                  </div>
-                  <label className="flex min-h-9 items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={r.destructive}
-                      disabled={!canEdit}
-                      onChange={(e) => patchRow(r.key, { destructive: e.target.checked })}
-                    />
-                    Writes or deletes data (only runs against a target that allows it)
-                  </label>
-                  {canEdit && (
-                    <div>
-                      <Button
-                        size="sm"
-                        variant="danger-ghost"
-                        onClick={() => setRows((cur) => cur.filter((x) => x.key !== r.key))}
-                      >
-                        <Trash2 aria-hidden="true" className="size-4" />
-                        Remove {r.name || 'suite'}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                ))}
               {canEdit && repos.length > 0 && (
                 <div>
                   <Button
@@ -345,6 +353,7 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
                           timeoutMin: 20,
                           destructive: false,
                           junit: '',
+                          fix: '',
                           confirmed: true,
                         },
                       ])
@@ -358,6 +367,138 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
             </fieldset>
           </>
         )}
+
+        <fieldset className="flex flex-col gap-3" data-testid="checks-settings">
+          <legend className="text-sm font-medium">Checks</legend>
+          <p className="text-xs text-subtle">
+            The runner runs every confirmed check on the builder's committed change at each handoff and
+            refuses the handoff while the change fails a check in a file it changed. Failures only in other
+            files are shown to the reviewers. Proposed checks do not run until you confirm them.
+          </p>
+          {!canRunChecks && (
+            <Callout tone="warning">
+              None of the project's workstations runs a runner that runs checks at the handoff yet. Update the
+              runner on the workstation that has a builder; until then handoffs are not checked.
+            </Callout>
+          )}
+          {rows
+            .filter((r) => r.kind === 'check')
+            .map((r) => (
+              <div
+                key={r.key}
+                className="flex flex-col gap-2 rounded-control border border-line p-3"
+                data-testid={`check-row-${r.name || r.key}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {!r.confirmed && <Badge tone="warning">Proposed from the repository</Badge>}
+                  {!r.confirmed && canEdit && (
+                    <Button
+                      size="sm"
+                      data-testid={`confirm-suite-${r.name}`}
+                      loading={confirm.isPending}
+                      onClick={() => confirm.mutate({ name: r.name, confirmed: true })}
+                    >
+                      Confirm {r.name}
+                    </Button>
+                  )}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TextInput
+                    label="Name"
+                    value={r.name}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { name: e.target.value })}
+                  />
+                  <Select
+                    label="Repository"
+                    value={r.repoId}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { repoId: e.target.value })}
+                  >
+                    {repos.map((x) => (
+                      <option key={x.repoId} value={x.repoId}>
+                        {x.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <TextInput
+                  label="Command"
+                  value={r.cmd}
+                  disabled={!canEdit}
+                  placeholder="pnpm lint"
+                  onChange={(e) => patchRow(r.key, { cmd: e.target.value })}
+                />
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <TextInput
+                    label="Folder"
+                    value={r.cwd}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { cwd: e.target.value })}
+                  />
+                  <TextInput
+                    label="Fix command (optional)"
+                    value={r.fix}
+                    disabled={!canEdit}
+                    placeholder="pnpm format"
+                    hint="A formatter or import sorter only. The builder may run it; the runner never does."
+                    onChange={(e) => patchRow(r.key, { fix: e.target.value })}
+                  />
+                  <TextInput
+                    label="Longest run (minutes)"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={r.timeoutMin}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      patchRow(r.key, { timeoutMin: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })
+                    }
+                  />
+                </div>
+                {canEdit && (
+                  <div>
+                    <Button
+                      size="sm"
+                      variant="danger-ghost"
+                      onClick={() => setRows((cur) => cur.filter((x) => x.key !== r.key))}
+                    >
+                      <Trash2 aria-hidden="true" className="size-4" />
+                      Remove {r.name || 'check'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          {canEdit && repos.length > 0 && (
+            <div>
+              <Button
+                data-testid="add-check"
+                onClick={() =>
+                  setRows((cur) => [
+                    ...cur,
+                    {
+                      key: Math.max(-1, ...cur.map((x) => x.key)) + 1,
+                      name: '',
+                      repoId: repos[0]?.repoId ?? '',
+                      cwd: '.',
+                      cmd: '',
+                      kind: 'check',
+                      timeoutMin: 5,
+                      destructive: false,
+                      junit: '',
+                      fix: '',
+                      confirmed: true,
+                    },
+                  ])
+                }
+              >
+                <Plus aria-hidden="true" className="size-4" />
+                Add a check
+              </Button>
+            </div>
+          )}
+        </fieldset>
 
         {problem && (
           <p role="alert" className="text-sm font-medium text-danger" data-testid="integration-problem">

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CHECKS_MAX } from '../runs/integration.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
 /**
@@ -26,6 +27,71 @@ export const BuildEvidenceInputSchema = z.object({
 });
 export type BuildEvidenceInput = z.infer<typeof BuildEvidenceInputSchema>;
 
+// ---------------------------------------------------------------------------------------------- checks
+
+/** The total time the runner spends on the checks of one handoff. */
+export const CHECKS_BUDGET_MS = 6 * 60_000;
+
+/**
+ * The result of one repository check (a `check` suite) the runner ran at `aom handoff`. `failed`: it found problems in
+ * files the card changed (the handoff is refused). `preexisting`: problems only in files the card did not change
+ * (information). `error` / `timeout`: it could not be judged (a warning, never a silent pass).
+ */
+export const CheckEvidenceSchema = z.object({
+  name: z.string().max(60),
+  command: z.string().max(500),
+  cwd: z.string().max(300).default('.'),
+  status: z.enum(['passed', 'failed', 'preexisting', 'error', 'timeout']),
+  exitCode: z.number().int().nullable().default(null),
+  durationMs: z.number().int().min(0).default(0),
+  /** One line: counts, or why it could not run. */
+  summary: z.string().max(500).default(''),
+  /** Problems in files this card changed (at most 20 lines). */
+  introduced: z.array(z.string().max(300)).max(20).default([]),
+  /** Problems in files this card did not change (at most 20 lines; the count is complete). */
+  elsewhere: z.array(z.string().max(300)).max(20).default([]),
+  elsewhereCount: z.number().int().min(0).default(0),
+  /** The formatter or import sorter command the builder may run to repair it. */
+  fix: z.string().max(500).optional(),
+});
+export type CheckEvidence = z.infer<typeof CheckEvidenceSchema>;
+
+/** Why these check results cannot back a handoff (the first failed check), or null. Only `failed` refuses. */
+export function checkEvidenceProblem(c: readonly CheckEvidence[] | undefined | null): string | null {
+  const f = c?.find((x) => x.status === 'failed');
+  if (!f) return null;
+  const fix = f.fix ? ` Fix: \`${f.fix}\`, commit, then hand off again.` : '';
+  return `the check "${f.name}" (\`${f.command}\`) fails in files this card changed${f.summary ? `: ${f.summary}` : ''}.${fix}`;
+}
+
+/** How one check reads to a person. */
+export function checkStatusLabel(status: CheckEvidence['status']): string {
+  switch (status) {
+    case 'passed':
+      return 'passed';
+    case 'failed':
+      return 'failed';
+    case 'preexisting':
+      return 'passed (failures only in files the card did not change)';
+    case 'timeout':
+      return 'timed out';
+    default:
+      return 'could not run';
+  }
+}
+
+/** The checks as rows next to the build and test commands (owner approval, card view). */
+export function checkEvidenceRows(
+  c: readonly CheckEvidence[] | undefined | null,
+): Array<{ kind: 'check'; command: string; status: string; result: string }> {
+  return (c ?? []).map((x) => ({
+    kind: 'check' as const,
+    command: x.command,
+    status: checkStatusLabel(x.status),
+    result: x.summary,
+  }));
+}
+
 /** The evidence as stored on the card: bound to the head SHA the runner measured after the shift's autocommit. */
 export const StoredBuildEvidenceSchema = BuildEvidenceInputSchema.extend({
   sha: z.string().min(7).max(64),
@@ -33,6 +99,8 @@ export const StoredBuildEvidenceSchema = BuildEvidenceInputSchema.extend({
   agentId: z.string().nullable().optional(),
   /** A clean rebase before review moved the head: the evidence followed it (from the earlier SHA). */
   rebasedFrom: z.string().optional(),
+  /** What the runner's checks (lint, format, typecheck) found on this commit at the handoff. Absent: an older runner. */
+  checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
 });
 export type StoredBuildEvidence = z.infer<typeof StoredBuildEvidenceSchema>;
 

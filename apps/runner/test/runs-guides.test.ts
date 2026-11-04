@@ -163,6 +163,12 @@ describe('service sandbox: .NET user secrets', () => {
     expect(args.some((x, k) => x === '--bind' && args[k + 1] === userSecretsDir(home))).toBe(false);
   });
 
+  it('userSecrets: false (the builder checks) never mounts them', () => {
+    const home = tmp();
+    mkdirSync(join(home, '.microsoft', 'usersecrets', 'abc'), { recursive: true });
+    expect(bwrapArgs({ ...spec, realHome: home, userSecrets: false }).join(' ')).not.toContain('usersecrets');
+  });
+
   it('adds nothing when the folder does not exist', () => {
     const args = bwrapArgs({ ...spec, realHome: tmp() });
     expect(args.join(' ')).not.toContain('usersecrets');

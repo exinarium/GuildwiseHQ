@@ -8,6 +8,7 @@ import {
   CEO_FULL_POWER_CAPABILITY,
   CHAT_ACCOUNTS_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
+  CHECKS_CAPABILITY,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
   CommandPayloadSchemas,
@@ -1478,6 +1479,8 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
+        // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
+        CHECKS_CAPABILITY,
         RELEASE_DOCS_PREP_CAPABILITY,
         RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
         RELEASE_PUBLISH_CAPABILITY,

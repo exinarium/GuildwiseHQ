@@ -1,4 +1,5 @@
 import { feedMaxItems } from '../cards/fields.ts';
+import type { CheckEvidence } from '../cards/lean-v6.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderUntrusted } from './untrusted.ts';
@@ -6,6 +7,27 @@ import { renderUntrusted } from './untrusted.ts';
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const list = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+/** One check result for the reviewers: a passed check one line; failures and unjudged checks say what to trust. */
+function checkEvidenceLines(c: CheckEvidence): string[] {
+  const head = `- check ${c.name}: \`${c.command}\``;
+  if (c.status === 'passed') return [`${head} passed`];
+  if (c.status === 'error' || c.status === 'timeout')
+    return [
+      `${head} could not run: ${c.summary || c.status}; treat it as unverified (run it yourself if it matters for this change)`,
+    ];
+  const intro = c.status === 'failed' ? c.introduced.slice(0, 5).map((l) => `  - ${l}`) : [];
+  return [
+    `${head} ${c.status}${c.summary ? `: ${c.summary}` : ''}`,
+    ...intro,
+    ...(c.elsewhere.length
+      ? [
+          `  Failures in files this card did not change (${c.elsewhereCount || c.elsewhere.length}, information):`,
+          ...c.elsewhere.slice(0, 5).map((l) => `  - ${l}`),
+        ]
+      : []),
+  ];
+}
 
 const section = (title: string, body: string): string | null =>
   body.trim() ? `## ${title}\n${body.trim()}` : null;
@@ -354,6 +376,19 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
           .join('\n') || 'None.',
       ),
     );
+  if (brief.checks?.suites.length)
+    parts.push(
+      section(
+        'Checks on handoff',
+        [
+          'The runner runs these repository checks on your committed change at `aom handoff` and refuses the handoff while they fail in files you changed (failures only in other files do not block). Run them yourself first. The checks can take minutes: give `aom handoff` a Bash timeout of 10 minutes.',
+          ...brief.checks.suites.map(
+            (c) =>
+              `- ${c.name}: \`${c.cmd.join(' ')}\` in ${c.cwd}${c.fix ? ` (fix: \`${c.fix.join(' ')}\`)` : ''}`,
+          ),
+        ].join('\n'),
+      ),
+    );
   if (brief.buildEvidence) {
     const e = brief.buildEvidence;
     parts.push(
@@ -365,6 +400,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
             (c) => `- ${c.kind}: \`${c.command}\` ${c.status}${c.result ? `: ${c.result}` : ''}`,
           ),
           ...(e.waived ? [`- No build or tests, because: ${e.waived}`] : []),
+          ...(e.checks ?? []).flatMap((c) => checkEvidenceLines(c)),
         ].join('\n'),
       ),
     );

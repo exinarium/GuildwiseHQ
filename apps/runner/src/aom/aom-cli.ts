@@ -1876,7 +1876,7 @@ const VERBS: Record<string, Verb> = {
   env: async (ctx, p) => {
     const sub = p.positionals[0] ?? 'info';
     const usage =
-      'usage: aom env info | logs <service> [--lines N] | restart | suites | suites propose --name <suite> --cmd "<command>" [--kind integration|e2e] [--cwd <dir>] [--repo <name>] [--timeout <min>] [--junit <glob>] [--destructive]';
+      'usage: aom env info | logs <service> [--lines N] | restart | suites | suites propose --name <suite> --cmd "<command>" [--kind integration|e2e|check] [--cwd <dir>] [--repo <name>] [--timeout <min>] [--junit <glob>] [--destructive]';
     const say = (m: string | undefined, dflt = ''): void => {
       const t = m ?? dflt;
       ctx.io.out(t.endsWith('\n') ? t : `${t}\n`);

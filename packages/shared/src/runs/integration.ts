@@ -11,7 +11,7 @@ export const INTEGRATION_MODES = ['off', 'local', 'remote'] as const;
 export const IntegrationModeSchema = z.enum(INTEGRATION_MODES);
 export type IntegrationMode = z.infer<typeof IntegrationModeSchema>;
 
-export const INTEGRATION_SUITE_KINDS = ['integration', 'e2e'] as const;
+export const INTEGRATION_SUITE_KINDS = ['integration', 'e2e', 'check'] as const;
 export const IntegrationSuiteKindSchema = z.enum(INTEGRATION_SUITE_KINDS);
 export type IntegrationSuiteKind = z.infer<typeof IntegrationSuiteKindSchema>;
 
@@ -37,6 +37,11 @@ export const IntegrationSuiteSchema = z.object({
   destructive: z.boolean().default(false),
   /** Where the suite writes its JUnit report (glob relative to `cwd`): counts then come from the report. */
   junit: z.string().max(300).optional(),
+  /**
+   * A check only (kind `check`): a formatter or import sorter that repairs what the check reports. The builder may run it
+   * before the handoff and commit the result; the runner names it in its refusal but never runs it.
+   */
+  fix: Cmd.optional(),
   /** False: proposed by a tester (`aom env suites propose`), waiting for the owner to confirm it. */
   confirmed: z.boolean().default(true),
 });
@@ -56,6 +61,8 @@ export const IntegrationTestsSchema = z.object({
   keepOnFailureMin: z.number().int().min(0).max(1440).default(DEFAULT_KEEP_ON_FAILURE_MIN),
   /** A failing suite is run again this many times; a pass on a retry is reported as flaky. */
   flakyRetry: z.number().int().min(0).max(3).default(DEFAULT_FLAKY_RETRY),
+  /** Repositories whose checks were already proposed from the repository, so the runner does not look again. */
+  checkDetection: z.array(z.uuid()).max(100).default([]),
 });
 export type IntegrationTests = z.infer<typeof IntegrationTestsSchema>;
 
@@ -66,9 +73,24 @@ export const INTEGRATION_TESTS_OFF: IntegrationTests = IntegrationTestsSchema.pa
 export const integrationTestsOn = (s: Pick<IntegrationTests, 'mode'> | null | undefined): boolean =>
   !!s && s.mode !== 'off';
 
-/** The suites a tester must report on: confirmed ones. */
+/** The most checks one handoff runs. */
+export const CHECKS_MAX = 10;
+/** The longest a single check may run (minutes). */
+export const CHECK_TIMEOUT_MAX_MIN = 10;
+
+/** The suites the tester works with: everything except the builder's checks. */
+export const testerSuites = <T extends Pick<IntegrationSuite, 'kind'>>(s: {
+  suites: T[];
+}): Array<T & { kind: Exclude<T['kind'], 'check'> }> =>
+  s.suites.filter((x): x is T & { kind: Exclude<T['kind'], 'check'> } => x.kind !== 'check');
+
+/** The confirmed checks of one repository; only these run (and block) at a builder handoff. */
+export const checkSuites = (s: Pick<IntegrationTests, 'suites'>, repoId: string): IntegrationSuite[] =>
+  s.suites.filter((x) => x.kind === 'check' && x.confirmed && x.repoId === repoId).slice(0, CHECKS_MAX);
+
+/** The suites a tester must report on: confirmed ones (checks belong to the builder's handoff, not the tester). */
 export const requiredSuites = (s: Pick<IntegrationTests, 'suites'>): IntegrationSuite[] =>
-  s.suites.filter((x) => x.confirmed);
+  s.suites.filter((x) => x.confirmed && x.kind !== 'check');
 
 /** Problems the schema cannot see (empty list: fine). `repoIds` are the project's repositories. */
 export function validateIntegrationTests(s: IntegrationTests, repoIds: readonly string[]): string[] {
@@ -84,6 +106,9 @@ export function validateIntegrationTests(s: IntegrationTests, repoIds: readonly 
       problems.push(`suite "${x.name}": the folder must stay inside the repository`);
     if (x.junit !== undefined && !isSafeRelativeDir(x.junit))
       problems.push(`suite "${x.name}": the report path must be relative and stay inside the folder`);
+    if (x.kind === 'check' && x.timeoutMin > CHECK_TIMEOUT_MAX_MIN)
+      problems.push(`check "${x.name}": a check runs at most ${CHECK_TIMEOUT_MAX_MIN} minutes`);
+    if (x.kind !== 'check' && x.fix) problems.push(`suite "${x.name}": only a check has a fix command`);
   }
   if (s.mode === 'remote' && !s.deployTargetId)
     problems.push('remote mode needs a deploy target (Project settings > Deploy targets)');
@@ -165,6 +190,8 @@ export const IntegrationTestsResponseSchema = z.object({
   ),
   /** The workstations' environments need a runner that can provision them; false when none of the project's can. */
   canProvision: z.boolean(),
+  /** False when none of the project's workstations runs a runner that runs checks at the handoff. */
+  canRunChecks: z.boolean().default(true),
 });
 export type IntegrationTestsResponse = z.infer<typeof IntegrationTestsResponseSchema>;
 

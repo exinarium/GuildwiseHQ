@@ -148,6 +148,7 @@ export function useIntegrationTests(projectId: string | undefined) {
         repos: d.repos ?? [],
         targets: d.targets ?? [],
         canProvision: d.canProvision ?? false,
+        canRunChecks: d.canRunChecks ?? true,
       };
     },
   });

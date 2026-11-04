@@ -1,4 +1,6 @@
 import {
+  type CheckEvidence,
+  checkEvidenceRows,
   type LeanCardDto,
   QA_FOCUS_MAX,
   type ReviewRiskDto,
@@ -74,6 +76,7 @@ export function leanCardDto(card: Row): LeanCardDto {
     commands?: Array<{ kind: string; command: string; status: string; result: string }>;
     waived?: string;
     at: string;
+    checks?: CheckEvidence[];
   } | null;
   return {
     groupId: card.group_id ?? null,
@@ -81,7 +84,14 @@ export function leanCardDto(card: Row): LeanCardDto {
     headSha: card.head_sha ?? null,
     highRisk: card.high_risk === true,
     highRiskPaths: ((card.high_risk_paths ?? []) as string[]).slice(0, 50),
-    evidence: ev ? { sha: ev.sha, commands: ev.commands ?? [], waived: ev.waived ?? null, at: ev.at } : null,
+    evidence: ev
+      ? {
+          sha: ev.sha,
+          commands: [...(ev.commands ?? []), ...checkEvidenceRows(ev.checks)],
+          waived: ev.waived ?? null,
+          at: ev.at,
+        }
+      : null,
     ownerApproval: {
       required: card.owner_approval_required ?? null,
       reason: card.owner_approval_reason ?? null,

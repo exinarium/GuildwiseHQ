@@ -39,10 +39,20 @@ export const runProjectors: Record<string, Projector> = {
     const added = p.suites
       .filter((s) => !known.has(s.name.toLowerCase()))
       .map((s) => ({ ...s, confirmed: false }));
-    if (added.length === 0 || settings.suites.length + added.length > 30) return;
+    const fits = settings.suites.length + added.length <= 30;
+    // Repositories whose checks were proposed (also those dropped as duplicates): the runner looks only once. Replay-safe:
+    // an event without check suites changes nothing here.
+    const detected = [...new Set(p.suites.filter((s) => s.kind === 'check').map((s) => s.repoId))];
+    const newlyDetected = detected.filter((r) => !settings.checkDetection.includes(r));
+    const take = fits ? added : [];
+    if (take.length === 0 && newlyDetected.length === 0) return;
     await exec(tx, 'UPDATE projects SET integration_tests=$2::jsonb WHERE id=$1', [
       p.projectId,
-      JSON.stringify({ ...settings, suites: [...settings.suites, ...added] }),
+      JSON.stringify({
+        ...settings,
+        suites: [...settings.suites, ...take],
+        checkDetection: [...settings.checkDetection, ...newlyDetected].slice(0, 100),
+      }),
     ]);
   },
   TestSuiteReported: async (tx, e) => {
