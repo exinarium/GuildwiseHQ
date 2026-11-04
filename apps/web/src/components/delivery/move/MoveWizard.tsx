@@ -276,7 +276,7 @@ export function MoveWizard({
             </>
           )}
           <ErrorBox error={start.error} />
-          <div className="sticky bottom-[var(--app-bottom-inset,0px)] z-10 -mx-4 flex gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0">
+          <div className="sticky bottom-0 z-10 -mx-4 flex gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0">
             <Button onClick={onClose}>Close</Button>
             <Button
               variant="primary"

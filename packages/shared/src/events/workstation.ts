@@ -32,6 +32,21 @@ export const workstationEvents = [
   ),
   defineEvent('WorkstationRenamed', z.object({ workstationId: Id, name: z.string().min(1) })),
   defineEvent('WorkstationUnlinked', z.object({ workstationId: Id, by: z.enum(['owner', 'admin']) })),
+  /** An Owner or Admin retired a workstation and handed its agents over (the audit of the retirement, one per organization). */
+  defineEvent(
+    'WorkstationRetired',
+    z.object({
+      workstationId: Id,
+      orgId: Id,
+      by: Id,
+      handover: z.enum(['move', 'needs_rehome', 'none']),
+      targetWorkstationId: Id.nullable(),
+      movedAgentIds: z.array(Id),
+      needsRehomeAgentIds: z.array(Id),
+      /** True when this retirement also unpaired the machine. */
+      unlinked: z.boolean(),
+    }),
+  ),
   defineEvent('WorkstationConnected', z.object({ workstationId: Id, runnerVersion: z.string().optional() })),
   /** A runner re-probe changed a runtime's availability or sandbox state (drives live refresh; no projection). */
   defineEvent(

@@ -1,6 +1,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RELAY_BODY_HARD_MAX_BYTES, RELAY_KINDS, type RelayKind } from '@aom/shared';
+import {
+  RELAY_BODY_HARD_MAX_BYTES,
+  RELAY_KINDS,
+  type RelayKind,
+  STORAGE_HARD_MAX_FILE_BYTES,
+  STORAGE_MAX_FILE_BYTES,
+} from '@aom/shared';
 import { z } from 'zod';
 
 /**
@@ -194,6 +200,32 @@ const EnvSchema = z.object({
   AOM_RELAY_RETRY_AFTER_SEC: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_RELAY_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(100000).default(200),
   AOM_RELAY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+  /** Storage connections (the write relay to a firm's own storage; nothing is kept on this server). */
+  AOM_STORAGE_WRITE_TIMEOUT_MS: z.coerce.number().int().min(5000).max(300000).default(60000),
+  AOM_STORAGE_MAX_FILE_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(STORAGE_HARD_MAX_FILE_BYTES)
+    .default(STORAGE_MAX_FILE_BYTES),
+  AOM_STORAGE_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(1000).default(20),
+  /** Public forms (docs/security/public-forms.md). */
+  AOM_FORMS_POW_BITS: z.coerce.number().int().min(0).max(22).default(16),
+  AOM_FORMS_MIN_FILL_MS: z.coerce.number().int().min(0).max(600000).default(3000),
+  AOM_FORMS_SESSION_TTL_MIN: z.coerce.number().int().min(1).max(1440).default(240),
+  AOM_FORMS_SUBMISSION_TTL_MIN: z.coerce.number().int().min(1).max(1440).default(120),
+  AOM_FORMS_MAX_FILES: z.coerce.number().int().min(1).max(100).default(20),
+  AOM_FORMS_MAX_SUBMISSION_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(100 * 1024 * 1024),
+  AOM_FORMS_IP_PER_MIN: z.coerce.number().int().min(1).max(100000).default(120),
+  AOM_FORMS_IP_BURST: z.coerce.number().int().min(1).max(100000).default(60),
+  AOM_FORMS_IP_SUBMITS_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(10),
+  AOM_FORMS_IP_SUBMIT_BURST: z.coerce.number().int().min(1).max(100000).default(5),
+  AOM_FORMS_FORM_SUBMITS_PER_MIN: z.coerce.number().int().min(1).max(100000).default(60),
+  AOM_FORMS_FORM_SUBMIT_BURST: z.coerce.number().int().min(1).max(100000).default(30),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -292,6 +324,23 @@ export interface Config {
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
+  /** Storage connections: the write relay limits. */
+  storage: { writeTimeoutMs: number; maxFileBytes: number; maxInFlight: number };
+  /** Public forms: bot protection, submission limits and the rate buckets. */
+  publicForms: {
+    powBits: number;
+    minFillMs: number;
+    sessionTtlMin: number;
+    submissionTtlMin: number;
+    maxFiles: number;
+    maxSubmissionBytes: number;
+    ipPerMin: number;
+    ipBurst: number;
+    ipSubmitsPerHour: number;
+    ipSubmitBurst: number;
+    formSubmitsPerMin: number;
+    formSubmitBurst: number;
+  };
   /** Inbound webhook relay (business mode). */
   relay: {
     /** Largest request body forwarded (`AOM_RELAY_MAX_BODY_BYTES`); bigger is a 413. */
@@ -411,6 +460,25 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     videoPushUrl: e.AOM_VIDEO_PUSH_URL,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
+    storage: {
+      writeTimeoutMs: e.AOM_STORAGE_WRITE_TIMEOUT_MS,
+      maxFileBytes: e.AOM_STORAGE_MAX_FILE_BYTES,
+      maxInFlight: e.AOM_STORAGE_MAX_IN_FLIGHT,
+    },
+    publicForms: {
+      powBits: e.AOM_FORMS_POW_BITS,
+      minFillMs: e.AOM_FORMS_MIN_FILL_MS,
+      sessionTtlMin: e.AOM_FORMS_SESSION_TTL_MIN,
+      submissionTtlMin: e.AOM_FORMS_SUBMISSION_TTL_MIN,
+      maxFiles: e.AOM_FORMS_MAX_FILES,
+      maxSubmissionBytes: e.AOM_FORMS_MAX_SUBMISSION_BYTES,
+      ipPerMin: e.AOM_FORMS_IP_PER_MIN,
+      ipBurst: e.AOM_FORMS_IP_BURST,
+      ipSubmitsPerHour: e.AOM_FORMS_IP_SUBMITS_PER_HOUR,
+      ipSubmitBurst: e.AOM_FORMS_IP_SUBMIT_BURST,
+      formSubmitsPerMin: e.AOM_FORMS_FORM_SUBMITS_PER_MIN,
+      formSubmitBurst: e.AOM_FORMS_FORM_SUBMIT_BURST,
+    },
     relay: {
       maxBodyBytes: e.AOM_RELAY_MAX_BODY_BYTES,
       perMinute: e.AOM_RELAY_RATE_PER_MINUTE,

@@ -1,4 +1,4 @@
-import { type AgentPermissions, type GuardViolation, isRunnerOwnedBranch } from '@aom/shared';
+import { type AgentPermissions, type GuardViolation, CARD_BRANCH_PREFIXES, isRunnerOwnedBranch } from '@aom/shared';
 import picomatch from 'picomatch';
 import {
   statusLinesWithoutStubs,
@@ -71,10 +71,22 @@ export interface GuardInput {
    */
   mainMergeShas?: string[];
   /**
+   * Tips of the card's base and working branch (local and origin/), recorded by the runner at the shift start and after
+   * each runner fetch. A merge parent that is, or is an ancestor of, one of these is base-branch content.
+   */
+  baseTipShas?: string[];
+  /** When the shift started (ms since epoch, taken with startSha): HEAD reflog entries since then are this shift's. */
+  startedAtMs?: number;
+  /**
    * The card's base (target) branch. Lets the builder e2e check compare against the merge-base with it instead of the
    * shift start: a revert of an e2e file to its base content is not an edit. Absent: every changed e2e path counts.
    */
   baseBranch?: string;
+  /** The card's ref (`GWP-85`) and the project key (`GWP`): name a branch's card. Absent: no name-based attribution. */
+  cardRef?: string;
+  projectKey?: string;
+  /** Main, the project working branch and the base branch: strict unless checked out in a sibling worktree. */
+  protectedBranches?: string[];
 }
 
 /**
@@ -134,47 +146,170 @@ export async function discardTestArtifacts(worktree: string): Promise<boolean> {
   return dirs.size > 0;
 }
 
+export interface MergeExemptOpts {
+  mainShas?: readonly string[];
+  baseTips?: readonly string[];
+}
+
+export interface MergeExemptions {
+  /** Paths whose change since the shift start is main or base-branch content. */
+  exempt: Set<string>;
+  /** Where to restore a path from instead of the shift start (the latest exempt merge), so a discard never undoes a merge. */
+  restoreFrom: Map<string, string>;
+  /** Paths changed by hand inside a base merge commit: not exempt, judged normally. */
+  handEdits: Set<string>;
+}
+
+export const exemptOpts = (input: GuardInput): MergeExemptOpts => ({
+  ...(input.mainMergeShas ? { mainShas: input.mainMergeShas } : {}),
+  ...(input.baseTipShas ? { baseTips: input.baseTipShas } : {}),
+});
+
+const lines = (out: string): string[] =>
+  out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+async function diffNames(worktree: string, a: string, b: string): Promise<Set<string>> {
+  return new Set(lines((await git(worktree, ['diff', '--name-only', a, b])).stdout));
+}
+
 /**
- * Paths that a merge commit of the recorded main branch brought in and nothing changed afterwards: main's own work (a
- * conflict resolution included), exempt from the role's write scope. A path edited again after the merge, or edited
- * without committing, is not exempt. Merge commits whose second parent is not a recorded main SHA never count.
+ * What merges of the recorded main branch or of the card's base/working branch brought in, and nothing changed
+ * afterwards: that work is not the agent's, so it is exempt from the role's write scope.
+ *
+ * - Main merge (a parent is a recorded main sha): everything the merge brought in, a conflict resolution included.
+ * - Base merge (a parent is, or is an ancestor of, a recorded base tip): the paths taken from the base side or changed
+ *   on both sides (conflict resolution). A path changed by hand inside the merge commit stays judged.
+ * - A fast-forward onto base content (no merge commit): the commits that are base history are exempt as well.
+ * A path edited again after the merge, or edited without committing, is not exempt.
  */
-export async function mainMergeExemptPaths(
+export async function mergeExemptions(
   worktree: string,
   startSha: string,
-  mainShas: readonly string[],
-): Promise<Set<string>> {
-  const exempt = new Set<string>();
-  if (mainShas.length === 0) return exempt;
-  const log = await git(worktree, ['rev-list', '--merges', '--parents', `${startSha}..HEAD`]);
-  for (const line of log.stdout.split('\n')) {
-    const [sha, first, ...others] = line.trim().split(' ');
-    if (!sha || !first || !others.some((p) => mainShas.includes(p))) continue;
-    const brought = await git(worktree, ['diff', '--name-only', first, sha]);
-    const after = new Set(
-      (await git(worktree, ['diff', '--name-only', sha, 'HEAD'])).stdout.split('\n').filter(Boolean),
-    );
-    for (const p of brought.stdout.split('\n')) if (p.trim() && !after.has(p.trim())) exempt.add(p.trim());
+  opts: MergeExemptOpts = {},
+): Promise<MergeExemptions> {
+  const res: MergeExemptions = { exempt: new Set(), restoreFrom: new Map(), handEdits: new Set() };
+  const mainShas = opts.mainShas ?? [];
+  const baseTips = [...new Set(opts.baseTips ?? [])];
+  if (mainShas.length === 0 && baseTips.length === 0) return res;
+
+  const baseCache = new Map<string, boolean>();
+  const isBase = async (sha: string): Promise<boolean> => {
+    const hit = baseCache.get(sha);
+    if (hit !== undefined) return hit;
+    let ok = false;
+    for (const t of baseTips) {
+      if (t === sha || (await git(worktree, ['merge-base', '--is-ancestor', sha, t])).exitCode === 0) {
+        ok = true;
+        break;
+      }
+    }
+    baseCache.set(sha, ok);
+    return ok;
+  };
+
+  const logArgs = ['rev-list', '--merges', '--parents', `${startSha}..HEAD`];
+  if (baseTips.length) logArgs.push('--not', ...baseTips);
+  const log = await git(worktree, logArgs);
+  for (const line of lines(log.stdout)) {
+    const [sha, first, ...others] = line.split(' ');
+    if (!sha || !first || others.length === 0) continue;
+    const brought = await diffNames(worktree, first, sha);
+    const after = await diffNames(worktree, sha, 'HEAD');
+    let candidates: Set<string>;
+    if (others.some((p) => mainShas.includes(p))) {
+      candidates = brought;
+    } else {
+      let baseParent: string | undefined;
+      for (const p of others) {
+        if (await isBase(p)) {
+          baseParent = p;
+          break;
+        }
+      }
+      if (!baseParent) continue;
+      const mb = await git(worktree, ['merge-base', first, baseParent]);
+      const mergeBase = mb.exitCode === 0 ? mb.stdout.trim() : '';
+      const baseChanged = mergeBase ? await diffNames(worktree, mergeBase, baseParent) : new Set<string>();
+      const cardChanged = mergeBase ? await diffNames(worktree, mergeBase, first) : new Set<string>();
+      const fromBase = await diffNames(worktree, baseParent, sha);
+      candidates = new Set();
+      for (const p of brought) {
+        const hand = fromBase.has(p) && !(baseChanged.has(p) && cardChanged.has(p));
+        if (hand) {
+          res.handEdits.add(p);
+          if (!res.restoreFrom.has(p)) res.restoreFrom.set(p, baseChanged.has(p) ? baseParent : first);
+        } else candidates.add(p);
+      }
+    }
+    for (const p of candidates) {
+      if (!after.has(p)) res.exempt.add(p);
+      else if (!res.restoreFrom.has(p)) res.restoreFrom.set(p, sha); // newest merge first
+    }
   }
-  return exempt;
+
+  // A fast-forward onto base content leaves no merge commit: the commits startSha..X are base history.
+  if (baseTips.length) {
+    let best: string | undefined;
+    for (const t of baseTips) {
+      const mb = await git(worktree, ['merge-base', 'HEAD', t]);
+      const x = mb.exitCode === 0 ? mb.stdout.trim() : '';
+      if (!x || x === startSha) continue;
+      if ((await git(worktree, ['merge-base', '--is-ancestor', startSha, x])).exitCode !== 0) continue;
+      if (!best || (await git(worktree, ['merge-base', '--is-ancestor', best, x])).exitCode === 0) best = x;
+    }
+    if (best) {
+      const brought = await diffNames(worktree, startSha, best);
+      const after = await diffNames(worktree, best, 'HEAD');
+      for (const p of brought) {
+        if (!after.has(p)) res.exempt.add(p);
+        else if (!res.restoreFrom.has(p)) res.restoreFrom.set(p, best);
+      }
+    }
+  }
+  for (const p of res.handEdits) res.exempt.delete(p);
+  return res;
+}
+
+/**
+ * The sha of `origin/<branch>` when the latest update of that remote-tracking ref was the runner's own: a fetch (other
+ * shifts of the same clone fetch it while this shift runs) or a push (the runner lands other cards on the base by pushing
+ * from this clone, which writes "update by push"; agents cannot push). A ref an agent moved by hand (`update-ref`, no
+ * fetch or push entry in its reflog) is not trusted. Null when the ref is missing or was last moved some other way.
+ */
+export async function fetchedRemoteTip(worktree: string, branch: string): Promise<string | null> {
+  const ref = `refs/remotes/origin/${branch}`;
+  const rl = await git(worktree, ['reflog', 'show', '--format=%H%x09%gs', '-n', '1', ref]);
+  if (rl.exitCode !== 0) return null;
+  const [sha, subject = ''] = rl.stdout.trim().split('\t');
+  return sha && /^(fetch|pull)\b|^update by push$/.test(subject) ? sha : null;
+}
+
+/** Uncommitted paths (tracked and untracked), minus the sandbox stubs and test output dirs. */
+async function dirtyPaths(worktree: string): Promise<string[]> {
+  const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  const out = new Set<string>();
+  // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
+  const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
+  for (const l of dirtyLines) {
+    if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
+  }
+  return [...out].filter((p) => !isTestArtifact(p));
 }
 
 /** Changed paths: committed since the shift start plus uncommitted (tracked and untracked), minus test output dirs. */
 export async function changedPaths(
   worktree: string,
   startSha: string,
-  mainMergeShas: readonly string[] = [],
+  opts: MergeExemptOpts = {},
 ): Promise<string[]> {
   const committed = await git(worktree, ['diff', '--name-only', `${startSha}..HEAD`]);
-  const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
-  const exempt = await mainMergeExemptPaths(worktree, startSha, mainMergeShas);
+  const { exempt } = await mergeExemptions(worktree, startSha, opts);
   const out = new Set<string>();
   for (const l of committed.stdout.split('\n')) if (l.trim() && !exempt.has(l.trim())) out.add(l.trim());
-  // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
-  const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
-  for (const l of dirtyLines) {
-    if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
-  }
+  for (const p of await dirtyPaths(worktree)) out.add(p);
   return [...out].filter((p) => !isTestArtifact(p));
 }
 
@@ -222,22 +357,110 @@ export async function resetReadOnlyWorktree(input: {
   return true;
 }
 
+export interface DiscardResult {
+  discarded: string[];
+  /** Out of scope but left alone: not part of the shift's own changes (another process brought it onto the branch). */
+  kept: string[];
+  /** Set when nothing was discarded because HEAD left the shift's history. */
+  skipped?: { reason: 'head_moved'; from: string; to: string };
+}
+
+interface HeadReflogEntry {
+  sha: string;
+  ts: number;
+  subject: string;
+}
+
 /**
- * Throws away out-of-scope changes (uncommitted edits, untracked files and out-of-scope edits already committed since
- * `startSha`) so that the shift-end autocommit never commits them. Returns the discarded paths.
+ * This worktree's HEAD reflog entries since the shift started (`startedAtMs`, one second of slack); every entry when
+ * `startedAtMs` is absent. Null when the reflog cannot be read.
  */
-export async function discardOutOfScope(input: GuardInput): Promise<string[]> {
-  const bad = outOfScope(input, await changedPaths(input.worktree, input.startSha, input.mainMergeShas));
+async function headReflogSince(
+  worktree: string,
+  startedAtMs: number | undefined,
+): Promise<HeadReflogEntry[] | null> {
+  const rl = await git(worktree, ['reflog', 'show', '--date=unix', '--format=%H%x09%gd%x09%gs', 'HEAD']);
+  if (rl.exitCode !== 0) return null;
+  const since = startedAtMs === undefined ? undefined : Math.floor(startedAtMs / 1000) - 1;
+  const out: HeadReflogEntry[] = [];
+  for (const line of lines(rl.stdout)) {
+    const [sha, sel, subject = ''] = line.split('\t');
+    const ts = Number(/@\{(\d+)\}/.exec(sel ?? '')?.[1]);
+    if (!sha || !Number.isFinite(ts) || (since !== undefined && ts < since)) continue;
+    out.push({ sha, ts, subject });
+  }
+  return out;
+}
+
+/** Paths of the commits this worktree created since the shift started (HEAD reflog), or of its non-merge commits. */
+async function ownCommitPaths(input: GuardInput): Promise<Set<string>> {
+  const out = new Set<string>();
+  const wt = input.worktree;
+  const addCommit = async (c: string): Promise<void> => {
+    const d = await git(wt, ['diff', '--name-only', `${c}^1`, c]);
+    if (d.exitCode === 0) for (const p of lines(d.stdout)) out.add(p);
+  };
+  if (input.startedAtMs !== undefined) {
+    const entries = await headReflogSince(wt, input.startedAtMs);
+    if (entries) {
+      for (const { sha, subject } of entries) {
+        const own =
+          /^(commit|cherry-pick|revert)\b/.test(subject) || /^merge .*: Merge made by/.test(subject);
+        if (!own) continue;
+        if ((await git(wt, ['merge-base', '--is-ancestor', sha, 'HEAD'])).exitCode !== 0) continue;
+        await addCommit(sha);
+      }
+      return out;
+    }
+  }
+  const revs = await git(wt, ['rev-list', '--no-merges', `${input.startSha}..HEAD`]);
+  for (const c of lines(revs.stdout)) await addCommit(c);
+  return out;
+}
+
+/** Out-of-scope paths that are uncommitted (the ones a skipped discard leaves behind). */
+export async function uncommittedOutOfScope(input: GuardInput): Promise<string[]> {
+  return outOfScope(input, await dirtyPaths(input.worktree));
+}
+
+/**
+ * Throws away the shift's own out-of-scope changes (uncommitted edits, untracked files and out-of-scope edits it
+ * committed since `startSha`) so that the shift-end autocommit never commits them. Never reverts content that arrived
+ * through a main or base-branch merge or that another process put on the branch, and does nothing when HEAD left the
+ * shift's history (a reset, rebase or rewrite).
+ */
+export async function discardOutOfScope(input: GuardInput): Promise<DiscardResult> {
+  const result: DiscardResult = { discarded: [], kept: [] };
+  if (!effectiveWritableGlobs(input)) return result;
+  const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  if (
+    head !== input.startSha &&
+    (await git(input.worktree, ['merge-base', '--is-ancestor', input.startSha, 'HEAD'])).exitCode !== 0
+  ) {
+    result.skipped = { reason: 'head_moved', from: input.startSha, to: head };
+    return result;
+  }
+  const opts = exemptOpts(input);
+  const bad = outOfScope(input, await changedPaths(input.worktree, input.startSha, opts));
+  if (bad.length === 0) return result;
+  const ex = await mergeExemptions(input.worktree, input.startSha, opts);
+  const own = new Set([...(await dirtyPaths(input.worktree)), ...(await ownCommitPaths(input))]);
   for (const p of bad) {
-    const atStart = await git(input.worktree, ['cat-file', '-e', `${input.startSha}:${p}`]);
-    if (atStart.exitCode === 0) {
-      await git(input.worktree, ['checkout', input.startSha, '--', p]);
+    if (!own.has(p)) {
+      result.kept.push(p);
+      continue;
+    }
+    const from = ex.restoreFrom.get(p) ?? input.startSha;
+    const there = await git(input.worktree, ['cat-file', '-e', `${from}:${p}`]);
+    if (there.exitCode === 0) {
+      await git(input.worktree, ['checkout', from, '--', p]);
     } else {
       await git(input.worktree, ['rm', '-rf', '--cached', '--ignore-unmatch', '--', p]);
       await git(input.worktree, ['clean', '-fdq', '--', p]);
     }
+    result.discarded.push(p);
   }
-  return bad;
+  return result;
 }
 
 /** Post-shift guard (docs/ARCHITECTURE.md section 13.7). Returns the violations; empty means the report may go ahead. */
@@ -258,7 +481,7 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     ];
   }
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-  const changed = await changedPaths(input.worktree, input.startSha, input.mainMergeShas);
+  const changed = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
 
   if (!input.permissions.mayCommit && (head !== input.startSha || changed.length > 0)) {
     violations.push({
@@ -288,7 +511,7 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
             : input.roleKey === 'architect'
               ? 'architect_edited_non_docs'
               : 'edited_outside_writable_globs',
-        detail: `${input.roleKey === 'writer' ? 'Writers may only change documentation' : input.roleKey === 'architect' ? 'The architect may only change documentation and its report (never product code or tests, except main-branch merge conflicts)' : 'This role may only change paths matching'} (${effectiveWritableGlobs(input)?.join(', ') || 'nothing'}); changed: ${bad.slice(0, 10).join(', ')}`,
+        detail: `${input.roleKey === 'writer' ? 'Writers may only change documentation' : input.roleKey === 'architect' ? 'The architect may only change documentation and its report (never product code or tests, except merge conflicts of the main or base branch)' : 'This role may only change paths matching'} (${effectiveWritableGlobs(input)?.join(', ') || 'nothing'}); changed: ${bad.slice(0, 10).join(', ')}`,
       });
     }
   }
@@ -316,20 +539,83 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
       detail: `The worktree must stay on ${input.branchName} but is on ${branch ?? 'a detached HEAD'}`,
     });
   }
+  const other = await otherBranchViolation(input);
+  if (other) violations.push(other);
+  return violations;
+}
+
+/** The card ref a branch name carries (`backup/gwp-63-x` -> `GWP-63`), for the project's key only; null when none. */
+export function cardRefOfBranch(name: string, projectKey: string | undefined): string | null {
+  if (!projectKey) return null;
+  const key = projectKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`(?:^|/)(${key}-\\d+)(?=$|[-/_.])`, 'i').exec(name);
+  return m?.[1] ? m[1].toUpperCase() : null;
+}
+
+/** Heads this worktree's HEAD pointed at through a commit-creating action since the shift began; null: unknown. */
+async function shiftHeadShas(input: GuardInput): Promise<Set<string> | null> {
+  const cfg = await git(input.worktree, ['config', '--get', 'core.logAllRefUpdates']);
+  if (cfg.stdout.trim() === 'false') return null;
+  const entries = await headReflogSince(input.worktree, input.startedAtMs);
+  if (!entries) return null;
+  return new Set(entries.filter((e) => !/^(checkout|reset):/.test(e.subject)).map((e) => e.sha));
+}
+
+/** The moved branch's tip, or one of its new commits that is not on the card branch, was created by this shift. */
+async function madeByThisShift(
+  input: GuardInput,
+  tip: string,
+  before: string | undefined,
+  shas: Set<string>,
+): Promise<boolean> {
+  if (shas.has(tip)) return true;
+  const args = ['rev-list', tip, '--not', '--remotes', `refs/heads/${input.branchName}`];
+  if (before) args.push(before);
+  const r = await git(input.worktree, args);
+  return lines(r.stdout).some((c) => shas.has(c.trim()));
+}
+
+/**
+ * commits_on_other_branch. Main, the working and base branch, the card's own other branches and non-card branches are
+ * refused whenever they gain local commits. A branch of another card (its ref in the name, a card branch prefix, or
+ * checked out in a sibling worktree) is refused only when this shift made the move (its commits are in this worktree's
+ * HEAD reflog since the shift started); without a HEAD reflog it is refused too.
+ */
+export async function otherBranchViolation(input: GuardInput): Promise<GuardViolation | null> {
   const now = await snapshotBranches(input.worktree);
   const siblings = await siblingWorktreeBranches(input.worktree);
+  const protectedSet = new Set(input.protectedBranches ?? []);
+  if (input.baseBranch) protectedSet.add(input.baseBranch);
+  const head = await git(input.worktree, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+  if (head.exitCode === 0 && head.stdout.trim()) protectedSet.add(head.stdout.trim().replace(/^origin\//, ''));
+  const ownRef = input.cardRef?.toUpperCase();
+  let shas: Set<string> | null | undefined;
   const moved: string[] = [];
   for (const b of Object.keys(now)) {
-    if (b === input.branchName || siblings.has(b) || input.branchesAtStart[b] === now[b]) continue;
+    const tip = now[b] as string;
+    const before = input.branchesAtStart[b];
+    if (b === input.branchName || before === tip) continue;
     if (isRunnerOwnedBranch(b)) continue;
-    if (await isSyncOnly(input.worktree, now[b] as string, input.branchesAtStart[b])) continue;
-    moved.push(b);
+    if (await isSyncOnly(input.worktree, tip, before)) continue;
+    let provenance: boolean;
+    if (protectedSet.has(b)) provenance = siblings.has(b);
+    else if (siblings.has(b)) provenance = true;
+    else {
+      const ref = cardRefOfBranch(b, input.projectKey);
+      if (ref && ref === ownRef) provenance = false;
+      else provenance = ref !== null || CARD_BRANCH_PREFIXES.some((p) => b.startsWith(p));
+    }
+    if (!provenance) {
+      moved.push(b);
+      continue;
+    }
+    if (shas === undefined) shas = await shiftHeadShas(input);
+    if (shas === null) moved.push(`${b} (provenance unknown: this worktree keeps no HEAD reflog)`);
+    else if (await madeByThisShift(input, tip, before, shas)) moved.push(`${b} (commits made in this worktree)`);
   }
-  if (moved.length > 0) {
-    violations.push({
-      rule: 'commits_on_other_branch',
-      detail: `Branches other than ${input.branchName} changed: ${moved.join(', ')}`,
-    });
-  }
-  return violations;
+  if (moved.length === 0) return null;
+  return {
+    rule: 'commits_on_other_branch',
+    detail: `Branches other than ${input.branchName} changed: ${moved.join(', ')}`,
+  };
 }

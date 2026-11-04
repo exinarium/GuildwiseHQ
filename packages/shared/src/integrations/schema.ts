@@ -151,7 +151,8 @@ export const SealedPlaintextSchema = z.object({
   v: z.literal(1),
   ref: z.string().min(1).max(64),
   workstationId: z.string().min(1).max(64),
-  kind: IntegrationKindIdSchema,
+  /** `storage`: the sealed fields of a storage connection (GWP-63). */
+  kind: z.union([IntegrationKindIdSchema, z.literal('storage')]),
   instance: z.string().max(200),
   op: z.enum(INTEGRATION_OPS),
   method: z.string().max(40).optional(),

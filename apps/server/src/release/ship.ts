@@ -7,6 +7,7 @@ import {
   type ReleaseShipPayload,
   ReleaseShipPayloadSchema,
   ReleaseShipResultSchema,
+  releaseDocsPrepLink,
   streamId,
 } from '@aom/shared';
 import { projectRole } from '../authz/scope.ts';
@@ -18,6 +19,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { loadReleaseDocsPrepGate } from './docs-prep.ts';
 import { enqueueReleasePublish, planReleasePublish } from './publish.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -149,6 +151,13 @@ export async function startReleaseShipIn(
     [proposal.repo_id, proposal.version],
   );
   if (done) return undefined;
+  // Release prep (docs and videos): off reads the switch and allows; on, the ship waits for a passed or skipped run.
+  const gate = await loadReleaseDocsPrepGate(tx, proposal);
+  if (!gate.allowed)
+    throw conflict(gate.code, gate.message, {
+      projectId: proposal.project_id,
+      link: releaseDocsPrepLink(proposal.project_id),
+    });
   const workstationId = await shipWorkstation(tx, proposal.repo_id, user.id);
   const date = ctx.clock.now().toISOString().slice(0, 10);
   const payload = await shipPayloadFromProposal(tx, proposal, date);

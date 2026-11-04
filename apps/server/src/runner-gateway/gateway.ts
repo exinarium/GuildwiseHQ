@@ -89,6 +89,7 @@ export class RunnerGateway {
       // frames of the in-order chain, so it is handled at once.
       const live = conn as RunnerConn | null;
       if (live && this.relayAnswer(live, data.toString())) return;
+      if (live && this.storageAnswer(live, data.toString())) return;
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
         if (!c) return;
@@ -102,7 +103,7 @@ export class RunnerGateway {
         if (!parsed.success) {
           // A relay frame holds a provider's content: never log what an issue echoes, only where it is.
           const t = (json as { type?: unknown } | null)?.type;
-          if (typeof t === 'string' && t.startsWith('relay.'))
+          if (typeof t === 'string' && (t.startsWith('relay.') || t.startsWith('storage.')))
             ctx.log.warn(
               { type: t, paths: parsed.error.issues.slice(0, 3).map((i) => i.path.join('.')) },
               'invalid runner message',
@@ -126,6 +127,7 @@ export class RunnerGateway {
       // Requests waiting on this runner end as "offline" now, not after their timeout.
       const gone = conn as RunnerConn | null;
       if (gone) void ctx.services.webhookRelay.disconnected(gone);
+      if (gone) ctx.services.storage.onDisconnect(gone.workstationId);
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
         if (!c || this.closing) return;
@@ -176,6 +178,36 @@ export class RunnerGateway {
       return true;
     }
     if (parsed.data.type === 'relay.response') this.ctx.services.webhookRelay.onResponse(conn, parsed.data);
+    return true;
+  }
+
+  /**
+   * The fast path of `storage.write.credit` and `storage.write.result`: they free a waiting upload, so they do not queue
+   * behind slow handlers. Invalid frames log paths only (a result can carry a path).
+   */
+  private storageAnswer(conn: RunnerConn, text: string): boolean {
+    if (!text.slice(0, 160).includes('"storage.write.')) return false;
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return false;
+    }
+    const type = (json as { type?: unknown } | null)?.type;
+    if (type !== 'storage.write.credit' && type !== 'storage.write.result') return false;
+    const parsed = RunnerToServerSchema.safeParse(json);
+    if (!parsed.success) {
+      this.ctx.log.warn(
+        { type, paths: parsed.error.issues.slice(0, 3).map((i) => i.path.join('.')) },
+        'invalid runner message',
+      );
+      return true;
+    }
+    const m = parsed.data;
+    if (m.type === 'storage.write.credit')
+      this.ctx.services.storage.onCredit(conn.workstationId, m.transferId, m.upTo);
+    else if (m.type === 'storage.write.result')
+      this.ctx.services.storage.onResult(conn.workstationId, m.transferId, m);
     return true;
   }
 

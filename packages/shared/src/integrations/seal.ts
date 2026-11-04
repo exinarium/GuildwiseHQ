@@ -60,7 +60,7 @@ export interface SealInput {
   workstationId: string;
   /** The request id (connect) or the session id (input). */
   ref: string;
-  kind: IntegrationKindId;
+  kind: IntegrationKindId | 'storage';
   instance: string;
   op: IntegrationEnvelopeOp;
   method?: string;

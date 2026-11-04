@@ -247,6 +247,7 @@ export function DiscoverySession() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col" data-testid="discovery-session">
       <PageHeader
+        className="kbd-hide"
         title={s.title}
         documentTitle={`Discovery: ${s.title}`}
         back={{ to: '/discovery', label: 'All discovery sessions' }}
@@ -280,7 +281,7 @@ export function DiscoverySession() {
           )
         }
       />
-      <div className="mb-4 flex flex-col gap-3">
+      <div className="kbd-hide mb-4 flex flex-col gap-3">
         {s.config.playbookRun && <PlaybookSteps run={s.config.playbookRun} />}
         <PhaseStepper
           phase={s.config.phase}
@@ -296,6 +297,7 @@ export function DiscoverySession() {
       {mobile ? (
         <div className="flex min-h-0 flex-col">
           <Tabs
+            className="kbd-hide"
             label="Session"
             prefix="session"
             value={tab}
@@ -311,7 +313,7 @@ export function DiscoverySession() {
             ]}
           />
           {tab === 'conversation' && (
-            <div className="h-[calc(100dvh-27rem)] min-h-[20rem] flex flex-col">{conversation}</div>
+            <div className="flex h-[calc(var(--app-content-h,100dvh)-2.5rem)] min-h-0 flex-col">{conversation}</div>
           )}
           {tab === 'panel' && panel}
           {tab === 'draft' && drafts}

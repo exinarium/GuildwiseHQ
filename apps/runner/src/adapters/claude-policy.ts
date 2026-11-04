@@ -45,6 +45,11 @@ export interface ClaudePolicyContext {
    * shell, never writable, and their secret files (`.env`, keys, ...) stay unreadable. See read-only-dirs.ts.
    */
   readDirs?: string[];
+  /**
+   * Read-only folders split off `readDirs` because they hold the working folder or a git dir (the card's own main clone).
+   * Only their secret-file Read denies are kept (see `splitOwnRepository`).
+   */
+  ownRepoDirs?: string[];
   /** The runner's `bin/` (the `aom` shim) and where the shim's script lives: readable although inside the data dir. */
   aomReadPaths: string[];
   /** Unix socket of the runner's IPC server (the `aom` CLI talks over it: the sandbox has no loopback route out). */
@@ -348,6 +353,8 @@ function sandboxBlock(
       // vault, or the runner's private state
       denyWrite: [
         ...ctx.gitDirs.flatMap((g) => [join(g, 'hooks'), join(g, 'config')]),
+        // the other cards' worktree admin dirs (index, HEAD, logs, pointers): only this card's own stays writable
+        ...otherWorktreeAdmins(ctx),
         // the pointers and the configuration git reads when the runner (or the owner) next runs it in this worktree: the
         // `.git` file and the worktree's admin entries `commondir`, `gitdir`, `config`, `config.worktree`, `hooks`
         // (security review, finding 9)
@@ -408,6 +415,58 @@ export function denyAround(root: string, keep: string): string[] {
   return out;
 }
 
+/** A role that cannot edit and may not commit: its worktree is read-only. */
+export const isReadOnlyWorktreeRole = (p: Pick<AgentPermissions, 'allowedTools' | 'mayCommit'>): boolean =>
+  !p.allowedTools.includes('edit') && !p.mayCommit;
+
+const realOr = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+};
+
+/**
+ * Read-only folders that hold the shift's working folder or one of its git dirs (the card's own main clone, opened
+ * through the organization folder or a reference repository). Claude Code binds every denyWrite after every allowWrite,
+ * so such a folder in denyWrite would cover the writable git dir beneath it (GWP-86). It is split off: no --add-dir, no
+ * additionalDirectories, no allowRead, no denyWrite, no Edit deny; only its secret-file Read denies stay.
+ */
+export function splitOwnRepository(
+  readDirs: string[],
+  cwd: string,
+  gitDirs: string[],
+): { readDirs: string[]; ownRepoDirs: string[] } {
+  const targets = [cwd, ...gitDirs].map(realOr);
+  const own = (d: string): boolean => {
+    const r = realOr(d);
+    return targets.some((t) => inside(t, r));
+  };
+  return { readDirs: readDirs.filter((d) => !own(d)), ownRepoDirs: readDirs.filter(own) };
+}
+
+/** `<common>/worktrees/<other>` of every other linked worktree: the shift may write only its own admin dir. */
+function otherWorktreeAdmins(ctx: Pick<ClaudePolicyContext, 'cwd' | 'gitDirs'>): string[] {
+  const admin = gitAdminDirOf(ctx.cwd);
+  if (!admin) return [];
+  return ctx.gitDirs.flatMap((g) => {
+    const wt = join(g, 'worktrees');
+    return inside(admin, wt) && admin !== wt ? denyAround(wt, admin) : [];
+  });
+}
+
+/**
+ * Diagnostic only: `denyWrite` entries that are a strict ancestor of an `allowWrite` entry or of the working folder.
+ * Claude Code binds those after the allows, so they hide the writable path (GWP-86). Never used to drop denies.
+ */
+export function shadowedWrites(fs: { allowWrite: string[]; denyWrite: string[] }, cwd: string): string[] {
+  const targets = [...fs.allowWrite, cwd];
+  return fs.denyWrite.filter((d) =>
+    targets.some((t) => resolve(t) !== resolve(d) && inside(resolve(t), resolve(d))),
+  );
+}
+
 /** `aom`, `aom *` and the same for the shim's absolute path in the runner's bin dir. */
 export function aomExcluded(aomReadPaths: string[]): string[] {
   const out = ['aom', 'aom *'];
@@ -433,11 +492,11 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
 }
 
 /** Read-only folders: no Edit or Write there (a deny wins over every allow), and no secret file is readable. */
-function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs'>): string[] {
+function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs' | 'ownRepoDirs'>): string[] {
   const dirs = ctx.readDirs ?? [];
   return [
     ...dirs.flatMap((d) => [`Edit(${ruleAbs(d)}/**)`, `Edit(${ruleAbs(d)})`]),
-    ...secretReadDenies(dirs),
+    ...secretReadDenies([...dirs, ...(ctx.ownRepoDirs ?? [])]),
   ];
 }
 
@@ -698,7 +757,7 @@ export function buildShiftSettings(
     paths.home,
     paths.scratch,
     paths.tmp,
-    { browser: runsBrowsers(p, roleKey), readOnlyWorktree: !tools.has('edit') && !p.mayCommit },
+    { browser: runsBrowsers(p, roleKey), readOnlyWorktree: isReadOnlyWorktreeRole(p) },
     testDomains,
   );
   if (sb) out.sandbox = sb;
@@ -793,6 +852,16 @@ export function buildChatSettings(
     out.sandbox = sb;
   }
   return out;
+}
+
+/** `<repo>/.git/worktrees/<name>` of a linked worktree (read from its `.git` file), if `cwd` is one. */
+export function gitAdminDirOf(cwd: string): string | undefined {
+  try {
+    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(cwd, '.git'), 'utf8'));
+    return m?.[1] ? resolve(cwd, m[1].trim()) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The main repository's `.git` directory of a linked worktree (its `.git` file says `gitdir: <repo>/.git/worktrees/x`). */

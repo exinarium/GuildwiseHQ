@@ -36,8 +36,11 @@ export const streamId = {
   mailInbox: (id: string) => `mailinbox-${id}`,
   repo: (id: string) => `repo-${id}`,
   release: (id: string) => `release-${id}`,
+  /** Release prep (docs and videos) runs. The kind must not start with `release-` so the web can route it. */
+  releaseDocsPrep: (id: string) => `releasedocs-${id}`,
   schedule: (id: string) => `schedule-${id}`,
   relayIntegration: (id: string) => `relay-${id}`,
+  storageConnection: (id: string) => `storage-${id}`,
   form: (id: string) => `form-${id}`,
   interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,

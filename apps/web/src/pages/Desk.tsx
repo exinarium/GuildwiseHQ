@@ -225,7 +225,7 @@ export function Desk() {
       </Dialog>
 
       {items.length + decisions.length > 0 && (
-        <div className="sticky top-14 z-10 -mx-4 mb-4 flex items-center gap-2 border-b border-line bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div className="sticky top-14 max-md:top-0 z-10 -mx-4 mb-4 flex items-center gap-2 border-b border-line bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <div
             className="scroll-fade-x flex flex-1 gap-2 overflow-x-auto"
             role="group"

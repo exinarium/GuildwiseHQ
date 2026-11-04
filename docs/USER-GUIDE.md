@@ -1399,6 +1399,11 @@ The CEO is never the releaser unless the recipe says so, and an Owner or Admin c
 
 > **In the app:** watch the video "Releases" (Help, "Phases and follow-ups", `/help/phases#releases`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
+
+**Release prep (docs and videos)** is an optional step before a release ships. It is off by default. In **Project settings > Release prep (docs and videos)** the project Owner (or an organization Owner or Admin) turns it on and ticks the steps to run: **Analyse changes** lists the commits, cards and changed files of the release branch in every repository since the last release; **Commit results** commits what the steps produced to the release branch. Other members see the settings read-only.
+
+When it is on, a **Release prep** tab appears on the Releases page. Press **Run release prep** for the release: you see the state (not run, running, passed, failed or skipped), each step per repository, the change summary and the commit numbers. While it has not passed, **Approve release** on the Ship release item is greyed out with the reason and a **See release prep** link, and the server refuses the approval too. If it fails you see the step, repository and error, and choose **Retry prep** or **Skip prep for this release**; skipping is recorded with your name and lets the release ship as it does without release prep.
+
 ### 4.29 Metrics
 
 **Metrics** (sidebar, Organization group) shows what the team delivered, where it waited on you and where quality slipped. Everybody who can see the organization can open it.

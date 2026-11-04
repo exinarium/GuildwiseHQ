@@ -393,6 +393,24 @@ A reverse proxy in front of the server must not write an access log for `/relay/
 
 On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` tells the runner to serve an integration (restart the runner to apply); `relay list` and `relay remove` manage the list.
 
+### Public forms
+
+A form published from the forms builder is open to anyone with its address (`https://<your domain>/f/<id>`) or a personal link. Answers and files go to the firm's own storage through its runner; the server keeps references only. Read [docs/security/public-forms.md](security/public-forms.md) before you enable it for strangers.
+
+- Put the server behind a reverse proxy that sets `X-Forwarded-For`: the per-address limits depend on it (the per-form limit does not).
+- Set `AOM_SECRET_KEY`. Personal links and page sessions are signed with a key derived from it; rotating it ends every personal link.
+- A public request to `/f/*` must not be cached by the proxy (the server sends `Cache-Control: no-store`).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_FORMS_POW_BITS` | `16` | Zero bits of the proof of work a page solves before sending. `0` turns it off, at most `22`. |
+| `AOM_FORMS_MIN_FILL_MS` | `3000` | A page must have been open this long before it can send. |
+| `AOM_FORMS_SESSION_TTL_MIN`, `AOM_FORMS_SUBMISSION_TTL_MIN` | `240`, `120` | How long a page session and an open submission stay valid. |
+| `AOM_FORMS_MAX_FILES`, `AOM_FORMS_MAX_SUBMISSION_BYTES` | `20`, `104857600` | Files and total bytes of one submission. |
+| `AOM_FORMS_IP_PER_MIN`, `AOM_FORMS_IP_BURST` | `120`, `60` | Public form requests per client address. More is `429`. |
+| `AOM_FORMS_IP_SUBMITS_PER_HOUR`, `AOM_FORMS_IP_SUBMIT_BURST` | `10`, `5` | Submissions started per client address. |
+| `AOM_FORMS_FORM_SUBMITS_PER_MIN`, `AOM_FORMS_FORM_SUBMIT_BURST` | `60`, `30` | Submissions started per form, whatever the address. |
+
 ## 11. Operations
 
 ```bash

@@ -14,6 +14,20 @@ import { loadComponentRules } from './rules.ts';
 
 export type FactsTrigger = 'release_pr' | 'sync' | 'manual';
 
+/**
+ * The release branch of a repository: its own working branch, else the project's. A repository whose main branch is that
+ * branch has nothing to release (null). One rule for the release facts and for Release prep (docs and videos).
+ */
+export function repoReleaseBranch(repo: {
+  working_branch?: string | null;
+  project_branch?: string | null;
+  main_branch?: string | null;
+}): string | null {
+  const head = repo.working_branch ?? repo.project_branch ?? null;
+  if (!head || (repo.main_branch && repo.main_branch === head)) return null;
+  return head;
+}
+
 const PENDING_MS = 5 * 60_000;
 const SYNC_MS = 30 * 60_000;
 
@@ -40,9 +54,8 @@ export async function requestReleaseFacts(
     [repoId],
   );
   if (!repo) return { queued: false, reason: 'skipped' };
-  const head: string | null = repo.working_branch ?? repo.project_branch ?? null;
-  if (!head || (repo.main_branch && repo.main_branch === head) || isResearchStage(repo.workflow_key))
-    return { queued: false, reason: 'skipped' };
+  const head = repoReleaseBranch(repo);
+  if (!head || isResearchStage(repo.workflow_key)) return { queued: false, reason: 'skipped' };
   // Release facts follow the repository, never the view: a project with a repository gets them.
   const org = await one(ctx.pool, 'SELECT simulation FROM organizations WHERE id=$1', [repo.org_id]);
   if (org?.simulation) return { queued: false, reason: 'skipped' };

@@ -141,7 +141,7 @@ describe('releaseChangelog', () => {
     // A release being prepared has a heading without a date; leave it out, the test needs the dated releases.
     const file = raw.replace(/## \[\d+\.\d+\.\d+\]\n[\s\S]*?(?=## \[)/, '');
     const real = file.replace(
-      /## \[Unreleased\]\n+## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\n/,
+      /## \[Unreleased\]\n+## \[\d+\.\d+\.\d+\] - (?:\d{4}-\d{2}-\d{2}|Unreleased)\n/,
       '## [Unreleased]\n',
     );
     const split = splitUnreleased(real);

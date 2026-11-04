@@ -7,14 +7,16 @@ import { followUpSweep } from '../commands/follow-up.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
+import { sweepJourneys } from '../commands/journey-runtime.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
+import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
-import { sweepJourneys } from '../commands/journey-runtime.ts';
+import { pruneStorage } from '../commands/storage-connections.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
@@ -198,6 +200,10 @@ export class Scheduler {
     await sweepJourneys(this.ctx).catch((err) => this.ctx.log.error({ err }, 'journeys failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
+    await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
+    await pruneFormSubmissions(this.ctx).catch((err) =>
+      this.ctx.log.error({ err }, 'form submission prune failed'),
+    );
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
   }
 

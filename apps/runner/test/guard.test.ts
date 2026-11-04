@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { autoCommit } from '../src/shifts/autocommit.ts';
 import {
+  cardRefOfBranch,
   discardOutOfScope,
   discardTestArtifacts,
   resetReadOnlyWorktree,
@@ -171,9 +172,9 @@ describe('autocommit', () => {
       ticket: 'DCPL-4276',
       env,
     };
-    expect(await autoCommit(input)).toBe(false);
+    expect((await autoCommit(input)).committed).toBe(false);
     writeFileSync(join(path, 'left.txt'), 'l');
-    expect(await autoCommit(input)).toBe(true);
+    expect((await autoCommit(input)).committed).toBe(true);
     expect(sh(path, 'git', ['log', '-1', '--format=%s|%an|%cn'])).toBe(
       'DCPL-4276: Work in progress|Pieter Jordaan|Pieter Jordaan',
     );
@@ -208,7 +209,7 @@ describe('writable globs are enforced for every role (review M3)', () => {
     expect((await runGuard(input([]))).map((x) => x.rule)).toContain('edited_outside_writable_globs');
     // and the runner throws the out-of-scope edit away instead of committing it
     const dropped = await discardOutOfScope(input(['notes/**']));
-    expect(dropped).toEqual(['src.ts']);
+    expect(dropped.discarded).toEqual(['src.ts']);
     expect(repo.clone).toBeTruthy();
   });
 });
@@ -257,11 +258,152 @@ describe('test output directories are artifacts, not changes', () => {
       branchesAtStart: {},
       e2eGlobs: ['e2e/**'],
     };
-    expect(await discardOutOfScope(input)).toEqual([]);
+    expect((await discardOutOfScope(input)).discarded).toEqual([]);
     expect(await discardTestArtifacts(path)).toBe(true);
     expect(existsSync(join(path, 'test-results'))).toBe(false);
     expect(existsSync(join(path, 'apps/web/test-results'))).toBe(false);
-    expect(await autoCommit({ worktree: path, env: {} })).toBe(false);
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(false);
     expect(await discardTestArtifacts(path)).toBe(false);
+  });
+});
+
+describe('guard: commits_on_other_branch attribution by card', () => {
+  const key = 'TOY';
+  async function twoCards(extra: { startedAtMs?: number | null; protectedBranches?: string[] } = {}) {
+    const a = await setup('builder');
+    const bPath = join(tmp(), 'wt-b');
+    await ensureWorktree({
+      repoPath: a.repo.clone,
+      roots: ['/'],
+      spec: {
+        mode: 'create',
+        repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+        remoteUrlNormalized: 'x',
+        baseBranch: 'main',
+        branchName: 'aom/toy-2-y',
+      },
+      defaultPath: bPath,
+    });
+    const startSha = sh(a.path, 'git', ['rev-parse', 'HEAD']).trim();
+    const branchesAtStart = await snapshotBranches(a.path);
+    const startedAtMs = extra.startedAtMs === null ? undefined : (extra.startedAtMs ?? Date.now());
+    const guard = async () =>
+      (
+        await runGuard({
+          worktree: a.path,
+          roleKey: 'builder',
+          permissions: role('builder').permissions,
+          branchName: 'aom/toy-1-x',
+          startSha,
+          branchesAtStart,
+          e2eGlobs: ['e2e/**'],
+          cardRef: 'TOY-1',
+          projectKey: key,
+          ...(extra.protectedBranches ? { protectedBranches: extra.protectedBranches } : {}),
+          ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+        })
+      ).filter((v) => v.rule === 'commits_on_other_branch');
+    const commit = (wt: string, f: string) => {
+      writeFileSync(join(wt, f), f);
+      sh(wt, 'git', ['add', '-A']);
+      sh(wt, 'git', ['commit', '-m', f]);
+    };
+    return { ...a, bPath, guard, commit };
+  }
+
+  it('card B moving its backup or card branches does not refuse card A', async () => {
+    const t = await twoCards();
+    t.commit(t.bPath, 'b1.txt');
+    sh(t.bPath, 'git', ['branch', 'backup/toy-2-partial', 'HEAD']);
+    sh(t.bPath, 'git', ['branch', 'guildwise/toy-2-z', 'HEAD']);
+    expect(await t.guard()).toEqual([]);
+  });
+
+  it('card B merging card A branch does not refuse card A', async () => {
+    const t = await twoCards();
+    t.commit(t.path, 'a1.txt');
+    sh(t.bPath, 'git', ['merge', '--no-ff', '-m', 'merge a', 'aom/toy-1-x']);
+    expect(await t.guard()).toEqual([]);
+  });
+
+  it("card A committing on card B's backup branch is refused", async () => {
+    const t = await twoCards();
+    sh(t.repo.clone, 'git', ['branch', 'backup/toy-2-partial', 'main']);
+    sh(t.path, 'git', ['checkout', 'backup/toy-2-partial']);
+    t.commit(t.path, 'x.txt');
+    sh(t.path, 'git', ['checkout', 'aom/toy-1-x']);
+    const v = await t.guard();
+    expect(v).toHaveLength(1);
+    expect(v[0]?.detail).toContain('backup/toy-2-partial (commits made in this worktree)');
+  });
+
+  it("card A pointing card B's branch at its own commit is refused, also for a sibling branch", async () => {
+    const t = await twoCards();
+    sh(t.repo.clone, 'git', ['branch', 'aom/toy-2-old', 'main']);
+    t.commit(t.path, 'a1.txt');
+    sh(t.path, 'git', ['branch', '-f', 'aom/toy-2-old', 'HEAD']);
+    expect((await t.guard())[0]?.detail).toContain('aom/toy-2-old');
+    const t2 = await twoCards();
+    t2.commit(t2.path, 'a1.txt');
+    sh(t2.path, 'git', ['update-ref', 'refs/heads/aom/toy-2-y', 'HEAD']);
+    expect((await t2.guard())[0]?.detail).toContain('aom/toy-2-y');
+  });
+
+  it('main and the base branch stay strict', async () => {
+    const t = await twoCards({ protectedBranches: ['main', 'release/x'] });
+    sh(t.repo.clone, 'git', ['branch', 'release/x', 'main']);
+    expect(await t.guard()).toEqual([]);
+    t.commit(t.repo.clone, 'm.txt');
+    expect((await t.guard())[0]?.detail).toContain('main');
+    const u = await twoCards({ protectedBranches: ['main', 'release/y'] });
+    sh(u.repo.clone, 'git', ['branch', 'release/y', 'main']);
+    sh(u.repo.clone, 'git', ['checkout', 'release/y']);
+    u.commit(u.repo.clone, 'r.txt');
+    expect((await u.guard())[0]?.detail).toContain('release/y');
+  });
+
+  it("card A's own branch and own-family backups are judged as before", async () => {
+    const t = await twoCards();
+    t.commit(t.path, 'a1.txt');
+    expect(await t.guard()).toEqual([]);
+    sh(t.path, 'git', ['branch', 'backup/toy-1-save', 'HEAD']);
+    expect((await t.guard())[0]?.detail).toContain('backup/toy-1-save');
+    const u = await twoCards();
+    sh(u.path, 'git', ['checkout', '-b', 'rogue']);
+    u.commit(u.path, 'r.txt');
+    sh(u.path, 'git', ['checkout', 'aom/toy-1-x']);
+    expect((await u.guard())[0]?.detail).toContain('rogue');
+  });
+
+  it('a commit made before the shift start does not count; without a start time it does', async () => {
+    const t = await twoCards({ startedAtMs: Date.now() + 60_000 });
+    sh(t.repo.clone, 'git', ['branch', 'aom/toy-2-old', 'main']);
+    t.commit(t.path, 'a1.txt');
+    sh(t.path, 'git', ['branch', '-f', 'aom/toy-2-old', 'HEAD']);
+    expect(await t.guard()).toEqual([]);
+    const u = await twoCards({ startedAtMs: null });
+    sh(u.repo.clone, 'git', ['branch', 'aom/toy-2-old', 'main']);
+    u.commit(u.path, 'a1.txt');
+    sh(u.path, 'git', ['branch', '-f', 'aom/toy-2-old', 'HEAD']);
+    expect((await u.guard())).toHaveLength(1);
+  });
+
+  it('without a HEAD reflog a foreign branch move is refused as provenance unknown', async () => {
+    const t = await twoCards();
+    sh(t.repo.clone, 'git', ['config', 'core.logAllRefUpdates', 'false']);
+    t.commit(t.bPath, 'b1.txt');
+    sh(t.bPath, 'git', ['branch', 'backup/toy-2-partial', 'HEAD']);
+    const v = await t.guard();
+    expect(v[0]?.detail).toContain('provenance unknown');
+  });
+
+  it('cardRefOfBranch uses the project key and a boundary', () => {
+    expect(cardRefOfBranch('backup/gwp-63-partial-rebase-0c0bf3f8', 'GWP')).toBe('GWP-63');
+    expect(cardRefOfBranch('aom/gwp-63-finalize', 'GWP')).toBe('GWP-63');
+    expect(cardRefOfBranch('conflict/GWP-27-a1', 'GWP')).toBe('GWP-27');
+    expect(cardRefOfBranch('aom/gwp-630-x', 'GWP')).toBe('GWP-630');
+    expect(cardRefOfBranch('feat/video-1.3', 'GWP')).toBeNull();
+    expect(cardRefOfBranch('release/1.5.0', 'GWP')).toBeNull();
+    expect(cardRefOfBranch('aom/gwp-63-x', undefined)).toBeNull();
   });
 });

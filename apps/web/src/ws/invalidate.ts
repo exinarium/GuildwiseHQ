@@ -113,7 +113,17 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['board'],
         ['card'],
         ['relay'],
+        ['storage'],
       ];
+    case 'form':
+      // FormPublished / FormClientLink* / FormSubmitted stream as form-<formId>
+      return [['forms']];
+    case 'releasedocs':
+      // ReleaseDocsPrep* run events stream as releasedocs-<runId>; the ship gate shows on the desk item and the repo row.
+      return [['release-docs-prep'], ['desk'], ['projects'], ['project']];
+    case 'storage':
+      // StorageConnection* events stream as storage-<connectionId>
+      return [['storage']];
     case 'relay':
       // RelayIntegration* events (create, rotate, revoke) stream as relay-<integrationId>
       return [['relay']];
@@ -141,6 +151,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         // RunPlanSaved / SetupProposalSubmitted / SetupProposalResolved: the guided run steps
         ['run-plan'],
         ['commit-as'],
+        // ReleaseDocsPrepSettingsSet
+        ['release-docs-prep'],
         // deploy targets and the default follow-ups live on the project stream
         ['deploy-targets'],
         ['followup-defaults'],

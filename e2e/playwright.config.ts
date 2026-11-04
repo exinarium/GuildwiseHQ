@@ -37,6 +37,8 @@ export default defineConfig({
     { name: 'architect', testMatch: 'architect.spec.ts', dependencies: ['intake'] },
     { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
     { name: 'phases', testMatch: 'phases.spec.ts', dependencies: ['intake'] },
+    // Release prep (docs and videos): its own owner, guest, runner (mock) and two local origins; needs only the shared stack.
+    { name: 'release-docs-prep', testMatch: 'release-docs-prep.spec.ts', dependencies: ['auth'] },
     // Guided run steps and Scan with DevOps (v1a): its own user, runner and project; needs only the shared stack.
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Business mode: its own user and paired mock workstation (no runner process); needs only the shared stack.
@@ -45,12 +47,16 @@ export default defineConfig({
     { name: 'business-card-types', testMatch: 'business-card-types.spec.ts', dependencies: ['auth'] },
     // Business mode wording (Knowledge, Rules & decisions): its own user and organization; needs only the shared stack.
     { name: 'business-terms', testMatch: 'business-terms.spec.ts', dependencies: ['auth'] },
+    // Storage connections (Organization settings > Storage): its own user and mock runner; a local folder under the e2e dir.
+    { name: 'storage', testMatch: 'storage.spec.ts', dependencies: ['auth'] },
     // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
     { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
     // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
     { name: 'deploy-connect', testMatch: 'deploy-connect.spec.ts', dependencies: ['auth'] },
     // Moving to a new server (v3): TWO real sshd containers (old and new server, each with a fake docker); own runner and project.
     { name: 'deploy-move', testMatch: 'deploy-move.spec.ts', dependencies: ['auth'] },
+    // Retiring a workstation with agent handover: its own Owner (paired mock workstations, no runner process), an Admin and a Member.
+    { name: 'workstation-retire', testMatch: 'workstation-retire.spec.ts', dependencies: ['auth'] },
     // The Environments redesign (docs/design/environments-ux.md section 12): the page against the real server; the full journeys run
     // with the mocked web app (playwright.environments-msw.config.ts).
     { name: 'environments', testMatch: 'environments.spec.ts', dependencies: ['pairing'] },

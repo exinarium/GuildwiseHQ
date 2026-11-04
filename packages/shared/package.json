@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./events": "./src/events/index.ts",
+    "./forms": "./src/forms/index.ts",
     "./workflows": "./src/workflows/index.ts",
     "./roles": "./src/roles/index.ts",
     "./cards": "./src/cards/index.ts",

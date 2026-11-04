@@ -88,6 +88,12 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import {
+  applyStorageAuth,
+  applyStorageCommandResult,
+  applyStorageReport,
+  sendStorageSync,
+} from '../commands/storage-connections.ts';
 import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
@@ -129,6 +135,7 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
+import { applyReleaseDocsPrepResult } from '../release/docs-prep.ts';
 import { applyReleaseFactsResult } from '../release/facts.ts';
 import { applyReleasePublishResult } from '../release/publish.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
@@ -451,6 +458,18 @@ export class RunnerHandlers {
       case 'capabilities.project.report':
         await applyProjectCapabilitiesReport(this.ctx, ws, msg);
         return;
+      case 'storage.report':
+        await applyStorageReport(this.ctx, conn.workstationId, msg.connections);
+        return this.ack(conn, msg);
+      case 'storage.auth':
+        await applyStorageAuth(this.ctx, conn.workstationId, msg);
+        return this.ack(conn, msg);
+      case 'storage.write.credit':
+        this.ctx.services.storage.onCredit(conn.workstationId, msg.transferId, msg.upTo);
+        return;
+      case 'storage.write.result':
+        this.ctx.services.storage.onResult(conn.workstationId, msg.transferId, msg);
+        return;
       case 'relay.serve': {
         const r = await this.ctx.services.webhookRelay.serve(conn, msg.integrations);
         this.send(conn, 'relay.serve.result', r);
@@ -570,6 +589,17 @@ export class RunnerHandlers {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseShipResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'release.docs_prep') {
+      // Terminal: the step is recorded and the run moves on (or fails with Retry/Skip); never redelivered blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleaseDocsPrepResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
     } else if (cmd?.type === 'release.publish') {
       // Terminal: the tag and release are recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -659,6 +689,17 @@ export class RunnerHandlers {
       // hold a sealed envelope: it is emptied here.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyIntegrationCommandResult(
+        this.ctx,
+        conn.workstationId,
+        { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type?.startsWith('storage.')) {
+      // Terminal: a typed refusal is an answer. The payload may hold a sealed envelope: it is emptied here.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyStorageCommandResult(
         this.ctx,
         conn.workstationId,
         { id: msg.commandId, type: cmd.type, payload: cmd.payload },
@@ -1035,6 +1076,9 @@ export class RunnerHandlers {
         RELAY_FEATURE,
       ],
     });
+    await sendStorageSync(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'storage sync not queued'),
+    );
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
   }

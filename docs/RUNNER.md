@@ -713,6 +713,16 @@ What the runner does: a GET with `hub.mode=subscribe` and the right `hub.verify_
 
 A `kind_mismatch` refusal in the runner log means the web app integration is not of kind WhatsApp.
 
+## Storage connections
+
+Storage connections let forms and journeys write documents and answers to the firm's own storage. Tokens and keys never leave this workstation.
+
+- **What is kept where**: `secrets/storage.json` holds every connection's settings and credentials, encrypted like the other secrets (mode 0600, keyed from the runner key). Received files are spooled in `tmp/storage/` while they are written and deleted straight after (the folder is emptied when the runner starts). The server knows only a connection id, its type, a display name, this workstation and the health.
+- **Kinds**: OneDrive/SharePoint and Google Drive (sign in with a code shown in the web page; the runner polls the provider), S3-compatible (endpoint, region, bucket, prefix; `http://` only for a loopback or private address), a local folder or NAS (an absolute path that is not the runner's data folder), and a folder in a vault of this workstation.
+- **Your own sign-in app**: the runner needs a Microsoft Entra app (public client, delegated `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `offline_access`) and a Google OAuth client of type "TVs and Limited Input devices" (scopes `drive.file`, `openid`, `email`, published to Production). Set `AOM_STORAGE_MS_CLIENT_ID` (and `AOM_STORAGE_MS_TENANT`, default `common`) and `AOM_STORAGE_GOOGLE_CLIENT_ID` and `AOM_STORAGE_GOOGLE_CLIENT_SECRET` in the runner's environment. Without them the connection says "This runner has no Microsoft (Google) app configured". Google Drive only exposes what the connector created, so files go under a base folder it creates ("Guildwise uploads" by default).
+- **Errors**: `auth_expired` (sign in again with Reconnect), `permission`, `quota`, `not_found` (folder, drive or bucket gone), `unavailable` (network, rate limit, NAS not mounted), `too_large`, `conflict` (too many files with the same name), `timeout`. The log has one line per write (`storage.write conn=<id> kind=<kind> size=<bytes> ok|<code> <ms>ms`) and never a path, a file name, a token or content.
+- **Removing**: removing a connection in the web page deletes its entry (and the file when it was the last one); a Google grant is also revoked. After a reconnect the server lists the connections this workstation should hold and the runner deletes the rest.
+
 ## Running and connecting
 
 ### Start command
@@ -1488,6 +1498,16 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
 
 A failure comes back as an answer (`ok: false`, the `step` and git's message), never a crash. Runners announce `release-ship:1`.
 
+### `release.docs_prep`
+
+One step of Release prep (docs and videos) in one repository (`apps/runner/src/git/release-docs-prep.ts`), always under `withRepoLock`. The payload carries `runId`, `releaseBranch`, `mainBranch`, `step` (`analyse`, `commit` with `phase` `prepare` or `push`, or a content step) and, after `analyse`, its `summary` and `base`.
+
+- **analyse** fetches the release branch, the main branch and the tags and reads (writes nothing): commits, merges with card keys, and files by area since the newest release tag merged into the branch (`lastReleaseTagAt`), else since the merge base with main. A branch missing on origin answers `state: skipped`. It deletes kept refs of other runs.
+- **content steps** (handlers in `release-docs-prep-steps.ts`) run in a throwaway worktree and commit locally to `refs/guildwise/docs-prep/<run>/work`. A step must produce byte-identical files when its content is already on the branch.
+- **commit / prepare** squashes `work` into one commit on the branch tip (carried over by cherry-pick when the branch moved), as the project identity; no change, no commit. **commit / push** pushes it to `refs/heads/<release branch>` with `pushFastForward` (no force, never main, never a tag) and answers `alreadyPushed` when it is on origin already.
+
+Answers are `{ok, state: passed|failed|skipped, error?, summary?, files, commit?, pushed?}`, never a crash. Runners announce `release-docs-prep:1`.
+
 ### `release.publish`
 
 After the release commit: bring it to the main branch, tag it, create the forge release. It runs under the per-clone lock
@@ -1577,8 +1597,34 @@ cannot loosen anything.
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the copied `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
-| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the other cards' `.git/worktrees/<other>` admin folders, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git; see "Git metadata in the shift sandbox" below |
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+
+**Git metadata in the shift sandbox.** A card worktree is a linked worktree: git keeps its index, `HEAD`, `logs`,
+`ORIG_HEAD` and `MERGE_*` files in the main clone's `.git/worktrees/<card>` admin folder, and its commits in the clone's
+`objects`, `refs` and `logs`. What the shell may write there depends on the role:
+
+| Path (card worktree of clone `R`) | Role that may edit or commit (builder, architect, tester, ...) | Read-only role (no `edit`, no commit: reviewer, ...) | Read-only checkout (design before dependencies land), chats |
+| --- | --- | --- | --- |
+| the worktree | writable (the Edit tool only within the role's globs) | read-only | read-only folder |
+| `R/.git/worktrees/<card>` (`index`, `index.lock`, `HEAD`, `logs`, `ORIG_HEAD`, `MERGE_*`) | writable | as before: writable with the common `.git`, except where a read-only folder covers it | not writable (no git dir is opened) |
+| `R/.git/objects`, `refs`, `logs`, `packed-refs` | writable | as before | not writable |
+| the worktree's `.git` file; `commondir`, `gitdir`, `config`, `config.worktree`, `hooks` of its admin folder | read-only | read-only | read-only |
+| `R/.git/hooks`, `R/.git/config` | read-only | read-only | read-only |
+| `R/.git/worktrees/<other card>` | read-only | read-only | read-only |
+| `R`'s own working tree (the owner's checkout) | not writable; not opened to the Read tool; its secret files stay masked | read-only folder | read-only folder |
+
+Claude Code's sandbox binds every `denyWrite` path after every `allowWrite` path, so a read-only folder that *contains*
+a writable path covers it. This was the cause of `index.lock: Read-only file system` in architect shifts: the
+organization source folder (and sometimes a reference repository with a different id) opened the card's own main clone
+as a read-only folder, and its read-only bind covered the writable `.git` beneath it. A read-only folder that holds the
+shift's working folder or git dir is therefore split off for roles that may edit or commit. It gets no `--add-dir`, no
+`additionalDirectories`, no `allowRead`, no `denyWrite` and no `Edit` deny. Only its secret-file `Read` denies stay.
+It cannot be written anyway, because the sandbox's write list is allow-only. Other cards' admin folders are denied entry
+by entry (a worktree added after the shift started is not covered). The runner logs a warning when a generated
+`denyWrite` entry is a parent of an `allowWrite` entry or of the working folder. Codex and the harness box are not
+affected: Codex resolves the most specific path, and the harness box mounts parents before children. A read-only role is
+told in its instructions that a "Read-only file system" error from a write in its worktree is by design.
 
 **Bash "denied in don't ask mode".** Roles with a shell get the bare `Bash` allow, so any command is approved except the
 deny list (`git push`, `git reset --hard`, `sudo`, `rm -rf /*`, the role's own patterns). One thing the rules cannot
@@ -1597,6 +1643,11 @@ the worktree has changes, the runner posts a card note ("The shift ended without
 in the worktree", up to 30 files with their `git status` codes, and the leftovers commit it made) before it sends
 `shift.ended`. The work itself was already kept by the shift-end auto-commit; the note makes it visible to the next shift
 and the owner. Read-only roles (reviewer, ...) leave nothing behind and get no note.
+The leftovers commit is refused (nothing is committed, reset, restored or deleted; the changes stay uncommitted) when it
+deletes more than 25 tracked files, or more than 10% of them from 5 deleted files on, or when its tree equals the tree
+of one of the last 1000 earlier commits. The runner then logs a WARN and posts a second card note ("The runner did not
+commit the leftovers of shift ...") with the shift, the deleted-file count, the reason and up to 30 paths; the unreported
+note says the runner refused to commit. See ARCHITECTURE section 13.7.
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
 above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`
@@ -1748,6 +1799,10 @@ is no config key that does: what an agent may read beyond its own work folder co
   worktree on this workstation (a chat about a project, or about a card not started here), the project's own clones
   (`kind: 'project'`). A chat about a card whose worktree is here keeps its read-only worktree as working directory. The
   DevOps engineer is unsandboxed and reads anywhere, so it gets none of this.
+- **The card's own clone is not a read-only folder for a role that edits or commits.** When a read-only folder contains
+  the shift's worktree or its git dir (the organization folder or a reference repository can name the card's own main
+  clone), only its secret-file deny rules are kept. A read-only bind over it would cover the writable `.git` (see "Git
+  metadata in the shift sandbox").
 - **How it is enforced** (`ClaudePolicyContext.readDirs`, `claude-policy.ts`): the folders are passed with `--add-dir` and
   listed in `permissions.additionalDirectories` (the Read, Grep and Glob tools); `Edit(//<dir>/**)` (which covers Write
   and NotebookEdit) is denied, and the folder is in the sandbox's `denyWrite`, so a shell cannot write there either; the
@@ -1978,6 +2033,16 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   `architect_edited_non_docs`, with one exception: what a merge commit whose second parent is an `origin/<main>` SHA the
   runner recorded in this shift changed (the "merge latest main first" step, `aom git merge-main`; kept across a runner
   restart in the persisted shift record). Edits made to those files after the merge, committed or not, are not exempt.
+  The same exemption covers a merge of the card's base or working branch (for example `origin/release/1.5.0`): a merge
+  parent that is, or is an ancestor of, a branch tip the runner recorded (`origin/<b>` and `<b>`, at the shift start and
+  after `aom git fetch` / `merge-main`; persisted like the main SHAs), or a fast-forward onto such content. Because other
+  shifts of the same clone fetch and land on the base while this one runs, the tips are refreshed again before the
+  report-time guard and the shift-end discard; then only `origin/<b>` counts, and only when the latest entry of its reflog
+  is the runner's own fetch or push (`update by push`, written by a landing push from this clone). A ref moved by hand
+  (`update-ref`) and `refs/heads/<b>` are not trusted mid-shift. Paths changed by
+  hand inside the merge commit are still judged. The shift-end discard never reverts exempt content, leaves out-of-scope
+  paths it did not make itself alone, and skips entirely (WARN plus a card note naming the old and new HEAD) when the
+  branch was reset or rewritten during the shift.
   A main merge left unresolved is reported as `merge_unresolved`; it is never committed half done (auto-commit and the
   out-of-scope discard skip a worktree with `MERGE_HEAD`), and the next architect shift inherits it.
 - **Commit, push, merge, fetch.** The agent keeps `git push*`, `git fetch*`, `git pull*`, `git remote*`, `git rebase*`,

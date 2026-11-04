@@ -173,3 +173,15 @@ describe('chat list: archive all', () => {
     expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${ID(9)}`);
   });
 });
+
+describe('chat drawer on a phone', () => {
+  it('spans the visible viewport (top and bottom from the viewport variables, no inline style)', async () => {
+    setup();
+    await screen.findByLabelText('Search chats');
+    const drawer = document.querySelector('[aria-label="Chat"]') as HTMLElement;
+    expect(drawer.className).toContain('max-md:top-[var(--vv-top,0px)]');
+    expect(drawer.className).toContain('max-md:bottom-[var(--kbd-gap,0px)]');
+    expect(drawer.className).toContain('md:inset-y-0');
+    expect(drawer.style.bottom).toBe('');
+  });
+});

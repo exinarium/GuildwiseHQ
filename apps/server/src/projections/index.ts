@@ -41,9 +41,11 @@ import { playbookProjectors } from './playbooks.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
+import { publicFormProjectors } from './public-forms.ts';
 import { questionFlowProjectors } from './question-flow.ts';
 import { relayProjectors } from './relay.ts';
 import { releaseProjectors } from './release.ts';
+import { releaseDocsPrepProjectors } from './release-docs-prep.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
@@ -53,6 +55,7 @@ import { sessionProjectors } from './sessions.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { socialPostProjectors } from './social-posts.ts';
+import { storageProjectors } from './storage.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';
@@ -106,6 +109,7 @@ const domains: Array<Record<string, Projector>> = [
   outboundProjectors,
   repoProjectors,
   releaseProjectors,
+  releaseDocsPrepProjectors,
   phaseProjectors,
   reporterProjectors,
   interestProjectors,
@@ -128,7 +132,9 @@ const domains: Array<Record<string, Projector>> = [
   governanceProjectors,
   agentUxProjectors,
   relayProjectors,
+  storageProjectors,
   formProjectors,
+  publicFormProjectors,
 ];
 
 /**
@@ -261,8 +267,11 @@ export const PROJECTION_TABLES = [
   'intake_batch_items',
   'backlog_items',
   'relay_integrations',
+  'storage_connections',
   'forms',
   'form_versions',
+  'form_publications',
+  'form_client_links',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',
@@ -271,6 +280,9 @@ export const PROJECTION_TABLES = [
   'repo_requests',
   'release_proposals',
   'release_ships',
+  'release_docs_prep_runs',
+  'release_docs_prep_repos',
+  'release_docs_prep_steps',
   'deploy_targets',
   'phases',
   'phase_followups',

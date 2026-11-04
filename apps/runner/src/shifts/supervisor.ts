@@ -24,6 +24,7 @@ import {
   identityLast,
   isDelegateServerRpc,
   isPublishRequest,
+  isSafeGitRef,
   isTerminalReport,
   isValidReportPath,
   type LedgerMatch,
@@ -47,6 +48,7 @@ import {
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
+import { isReadOnlyWorktreeRole } from '../adapters/claude-policy.ts';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
@@ -164,15 +166,24 @@ import {
   transcriptPath,
 } from '../transcript/service.ts';
 import { readVaultContexts, withVaultContexts } from '../vaults/context.ts';
-import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
+import {
+  type AutoCommitResult,
+  autoCommit,
+  autoCommitRefusedNote,
+  describeRefusal,
+  uncommittedFiles,
+  unreportedWorkNote,
+} from './autocommit.ts';
 import {
   type BranchSnapshot,
   discardOutOfScope,
   discardTestArtifacts,
+  fetchedRemoteTip,
   type GuardInput,
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
+  uncommittedOutOfScope,
 } from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
@@ -353,6 +364,12 @@ interface ActiveShift {
   syncMain?: { result: NonNullable<ShiftStartedSyncMain['result']>; commit?: string; files?: string[] };
   /** `origin/<main>` SHAs merged into the card branch this shift: the guard exempts what those merges brought in. */
   mainShas: string[];
+  /** Shas of the card's base and working branch (local and origin/): merges of them are exempt in the guard. */
+  baseTips: string[];
+  /** Refusals of the leftovers commit already noted on the card this shift (reason and tree): one note each. */
+  autoCommitRefusals: Set<string>;
+  /** When the shift's start sha was taken (ms since epoch). */
+  startedAtMs?: number;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
   forwards?: EnvForwards;
   /** Releases the hold on the agent's TMPDIR (see `holdAgentTmp`). */
@@ -380,6 +397,7 @@ interface PersistedShift {
   msg: ShiftStartMsg;
   startedSent: boolean;
   mainShas?: string[];
+  baseTips?: string[];
 }
 
 /**
@@ -488,7 +506,7 @@ export class ShiftSupervisor {
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
   async handleStart(
     msg: ShiftStartMsg,
-    resume?: { startedSent: boolean; mainShas?: string[] },
+    resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[] },
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
@@ -519,6 +537,8 @@ export class ShiftSupervisor {
       counter: new ContextCounter(msg.graph?.arm ?? 'none'),
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
+      baseTips: resume?.baseTips ? [...resume.baseTips] : [],
+      autoCommitRefusals: new Set<string>(),
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
@@ -572,6 +592,7 @@ export class ShiftSupervisor {
         void this.handleStart(rec.msg, {
           startedSent: rec.startedSent,
           ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
+          ...(rec.baseTips ? { baseTips: rec.baseTips } : {}),
         });
       } catch (err) {
         this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
@@ -608,6 +629,7 @@ export class ShiftSupervisor {
         msg: s.msg,
         startedSent: !!s.startedSent,
         ...(s.mainShas.length ? { mainShas: s.mainShas } : {}),
+        ...(s.baseTips.length ? { baseTips: s.baseTips } : {}),
       };
       writeFileSync(`${file}.tmp`, JSON.stringify(rec), { mode: 0o600 });
       renameSync(`${file}.tmp`, file);
@@ -1040,6 +1062,8 @@ export class ShiftSupervisor {
         this.log.warn(`${msg.brief.card.ref}: ${note}`);
       }
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
+      s.startedAtMs = Date.now();
+      await this.recordBaseTips(s);
       s.branchesAtStart = await snapshotBranches(cwd);
       const seen = await originBranchNames(repo.localPath);
       if (seen.length) s.originBranches = seen;
@@ -1189,6 +1213,9 @@ export class ShiftSupervisor {
       texts.instructions += `\n${renderReadableFolders(mergeReadFolders(registeredFolders, vaultReadFolder), { workingDir: cwd })}\n`;
     else if (vaultReadFolder.length > 0)
       texts.instructions += `\n${renderReadableFolders(vaultReadFolder, { workingDir: cwd })}\n`;
+    if (msg.kind === 'card' && msg.worktree && isReadOnlyWorktreeRole(msg.agent.permissions))
+      texts.instructions +=
+        '\nYour working folder is read-only in this role. A "Read-only file system" error from a write there (files, git add, git commit) is by design, not an environment fault: do not ask DevOps to fix it.\n';
     // The card's attachments, copied read-only next to the shift (outside the worktree) and listed in the instructions.
     const attachDir = cardAttachmentsDir(sandbox.tmp);
     mkdirSync(attachDir, { recursive: true });
@@ -1516,22 +1543,38 @@ export class ShiftSupervisor {
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
       await discardTestArtifacts(s.worktree.path);
+      let holdCommit: string[] = [];
       // (not while a main-branch merge waits for the architect: discarding paths would wreck the merge state)
       if (s.startSha && !(await mergeInProgress(s.worktree.path))) {
-        const dropped = await discardOutOfScope(this.guardInput(s, s.worktree.path, s.startSha));
-        if (dropped.length > 0)
-          this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${dropped.join(', ')}`);
+        await this.recordBaseTips(s, true);
+        const input = this.guardInput(s, s.worktree.path, s.startSha);
+        const r = await discardOutOfScope(input);
+        if (r.discarded.length > 0)
+          this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${r.discarded.join(', ')}`);
+        if (r.kept.length > 0)
+          this.log.warn(
+            `kept ${r.kept.length} out-of-scope paths of shift ${msg.shiftId} that are not its own changes: ${r.kept.slice(0, 10).join(', ')}`,
+          );
+        if (r.skipped) {
+          holdCommit = await uncommittedOutOfScope(input);
+          const text =
+            `The out-of-scope discard was skipped: HEAD moved from ${r.skipped.from.slice(0, 8)} to ${r.skipped.to.slice(0, 8)} ` +
+            `outside this shift's commits (a reset, rebase or rewrite of ${s.worktree.branchName}). Nothing was reverted.` +
+            (holdCommit.length > 0
+              ? ` These out-of-scope files were left uncommitted: ${holdCommit.slice(0, 10).join(', ')}.`
+              : '');
+          this.log.warn(`${msg.brief.card.ref}: ${text}`);
+          await this.submit(s, { kind: 'comment', note: text });
+        }
       }
       // A shift that ends without a report but with work in the worktree says so on the card (a denied tool used to
       // end shifts silently, with the work only in the worktree).
       const unreported =
         s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout' || s.stopReason === 'idle');
       const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
-      const committed = await autoCommit({
-        worktree: s.worktree.path,
-        ticket: ticketOf(msg),
-        env: s.env,
-      });
+      const ac: AutoCommitResult | null =
+        holdCommit.length > 0 ? null : await this.leftoversCommit(s, 'shift_end');
+      const committed = ac?.committed === true;
       if (leftovers.length > 0) {
         const sha = committed
           ? (await git(s.worktree.path, ['rev-parse', '--short', 'HEAD'])).stdout.trim()
@@ -1547,6 +1590,7 @@ export class ShiftSupervisor {
           note: unreportedWorkNote(leftovers, {
             outcome: how,
             committed,
+            ...(ac?.refused ? { refused: true } : {}),
             ...(sha ? { sha } : {}),
             branch: s.worktree.branchName,
           }),
@@ -2052,6 +2096,61 @@ export class ShiftSupervisor {
     return { ok: true, result: describeSynced(synced) };
   }
 
+  /** The leftovers commit of a shift: a refusal (mass deletion, tree revert) is logged and noted on the card once. */
+  private async leftoversCommit(s: ActiveShift, where: 'shift_end' | 'report'): Promise<AutoCommitResult> {
+    const wt = s.worktree;
+    if (!wt) return { committed: false, skipped: 'clean' };
+    const r = await autoCommit({ worktree: wt.path, ticket: ticketOf(s.msg), env: s.env });
+    if (r.refused) {
+      const f = r.refused;
+      this.log.warn(
+        `refused to auto-commit the leftovers of shift ${s.msg.shiftId} (${f.reason}): ${f.deleted} of ${f.tracked} tracked files deleted, ${f.added} added, ${f.modified} modified${f.revertsTo ? `, tree of ${f.revertsTo.slice(0, 8)}` : ''}`,
+      );
+      const key = `${f.reason}:${f.tree}`;
+      if (!s.autoCommitRefusals.has(key)) {
+        s.autoCommitRefusals.add(key);
+        await this.submit(s, {
+          kind: 'comment',
+          note: autoCommitRefusedNote(f, { shiftId: s.msg.shiftId, branch: wt.branchName, where }),
+        });
+      }
+    } else if (!r.committed && r.skipped === 'git_failed') {
+      this.log.warn(`could not auto-commit the leftovers of shift ${s.msg.shiftId}`);
+    }
+    return r;
+  }
+
+  /** Records the tips of the card's base and working branch (local and origin/): merges of them are base content. */
+  private async recordBaseTips(s: ActiveShift, onlyFetched = false): Promise<void> {
+    const wt = s.worktree?.path;
+    if (!wt) return;
+    const branches = new Set(
+      [s.worktree?.baseBranch, s.msg.brief.project.workingBranch].filter(
+        (b): b is string => !!b && isSafeGitRef(b),
+      ),
+    );
+    let added = false;
+    const add = (sha: string | null | undefined): void => {
+      if (sha && !s.baseTips.includes(sha)) {
+        s.baseTips.push(sha);
+        added = true;
+      }
+    };
+    for (const b of branches) {
+      if (onlyFetched) {
+        // after the start only a runner fetch counts (other shifts of this clone fetch while this one runs): refs the
+        // agent can write (refs/heads/<b>, a hand-moved origin/<b>) are not trusted mid-shift
+        add(await fetchedRemoteTip(wt, b));
+        continue;
+      }
+      for (const ref of [`refs/remotes/origin/${b}`, `refs/heads/${b}`]) {
+        const r = await git(wt, ['rev-parse', '--verify', '--quiet', ref]);
+        if (r.exitCode === 0) add(r.stdout.trim());
+      }
+    }
+    if (added) this.persist(s);
+  }
+
   /** The guard's view of this shift: the role's scope plus what the project and the main-branch merges add. */
   private guardInput(s: ActiveShift, worktree: string, startSha: string): GuardInput {
     const { msg } = s;
@@ -2061,10 +2160,22 @@ export class ShiftSupervisor {
       msg.agent.roleKey === 'architect' && inv && inv.location === 'repo'
         ? [...(inv.folder ? [`${inv.folder}/**`] : []), inv.reportPath]
         : [];
+    const protectedBranches = [
+      ...new Set(
+        [
+          msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch,
+          msg.brief.project.workingBranch,
+          s.worktree?.baseBranch,
+        ].filter((b): b is string => typeof b === 'string' && b.length > 0),
+      ),
+    ];
     return {
       worktree,
       roleKey: msg.agent.roleKey,
       permissions: msg.agent.permissions,
+      cardRef: msg.brief.card.ref,
+      projectKey: msg.brief.project.key,
+      ...(protectedBranches.length ? { protectedBranches } : {}),
       branchName: s.worktree?.branchName ?? '',
       startSha,
       branchesAtStart: s.branchesAtStart,
@@ -2072,6 +2183,8 @@ export class ShiftSupervisor {
       ...(s.worktree?.baseBranch ? { baseBranch: s.worktree.baseBranch } : {}),
       ...(extra.length ? { extraWritableGlobs: extra } : {}),
       ...(s.mainShas.length ? { mainMergeShas: s.mainShas } : {}),
+      ...(s.baseTips.length ? { baseTipShas: s.baseTips } : {}),
+      ...(s.startedAtMs ? { startedAtMs: s.startedAtMs } : {}),
     };
   }
 
@@ -2168,6 +2281,7 @@ export class ShiftSupervisor {
     else if (method === 'git.fetch') r = await architectFetch(ctx);
     else if (method === 'git.merge_main') r = await architectMergeMain(ctx);
     else r = await architectVerifyMerge(ctx);
+    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main')) await this.recordBaseTips(s, true);
     this.addProgress(
       s,
       'status',
@@ -2540,6 +2654,7 @@ export class ShiftSupervisor {
       }
 
       if (s.worktree && s.startSha) {
+        await this.recordBaseTips(s, true);
         const violations = await runGuard(this.guardInput(s, s.worktree.path, s.startSha));
         if (violations.length > 0) {
           for (const v of violations) {
@@ -2556,11 +2671,8 @@ export class ShiftSupervisor {
         if (outcome.kind === 'success' && outcome.data === 'investigation') {
           // The report must be committed on the card branch (or copied into the vault) before the card moves on.
           if (msg.agent.permissions.mayCommit) {
-            await autoCommit({
-              worktree: s.worktree.path,
-              ticket: ticketOf(msg),
-              env: s.env,
-            });
+            const ac = await this.leftoversCommit(s, 'report');
+            if (ac.refused) return rejected(refusedReport(ac.refused));
           }
           const prepared = await this.prepareInvestigation(s, toSend.data as unknown as InvestigationData);
           if ('error' in prepared) return rejected(prepared.error);
@@ -2568,11 +2680,8 @@ export class ShiftSupervisor {
         }
         if (outcome.kind === 'success' && (outcome.data === 'diffStats' || outcome.data === 'buildHandoff')) {
           if (msg.agent.permissions.mayCommit) {
-            await autoCommit({
-              worktree: s.worktree.path,
-              ticket: ticketOf(msg),
-              env: s.env,
-            });
+            const ac = await this.leftoversCommit(s, 'report');
+            if (ac.refused) return rejected(refusedReport(ac.refused));
           }
           const stats = await computeDiffStats({
             worktree: s.worktree.path,
@@ -2664,6 +2773,9 @@ function mainSyncNote(sync: NonNullable<ActiveShift['syncMain']>): string {
       return '## Main branch\nThe latest main branch conflicts with the working branch; it was not merged.';
   }
 }
+
+const refusedReport = (f: Parameters<typeof describeRefusal>[0]): string =>
+  `The runner did not commit your pending changes as Work in progress: ${describeRefusal(f)}. Nothing in the worktree was changed. If the deletion is intended, commit it yourself with a message that says why, then report again. If it is not, restore the files from HEAD and report again. If you did not make these changes, ask with aom question.`;
 
 const rejected = (error: string, matches?: LedgerMatch[]): IpcReportResponse => ({
   accepted: false,

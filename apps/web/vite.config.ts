@@ -38,6 +38,17 @@ const brandHtml = (): Plugin => ({
 
 const webRoot = fileURLToPath(new URL('.', import.meta.url));
 
+/** In development `/f/<id>` is the small public form page (the server sends form.html in production). */
+const publicFormDev = (): Plugin => ({
+  name: 'public-form-dev',
+  configureServer(server) {
+    server.middlewares.use((req, _res, next) => {
+      if (req.url && /^\/f\/[^/?#]+/.test(req.url)) req.url = '/form.html';
+      next();
+    });
+  },
+});
+
 /**
  * A hosted build adds its own web extension (src/extension/types.ts): `AOM_WEB_EXTENSION` names the module that default-exports
  * it. Its directory is added to Tailwind's sources, so the classes it uses are generated too. Unset: no extension.
@@ -62,9 +73,13 @@ export default defineConfig(({ mode }) => {
   });
   return {
     define: { __APP_VERSION__: JSON.stringify(appVersion()) },
-    plugins: [extensionSources(), react(), tailwindcss(), brandHtml()],
+    plugins: [extensionSources(), react(), tailwindcss(), brandHtml(), publicFormDev()],
     resolve: { alias: { '@aom/web-extension': extensionAlias } },
-    build: { rollupOptions: { input: { main: resolve(webRoot, 'index.html') } } },
+    build: {
+      rollupOptions: {
+        input: { main: resolve(webRoot, 'index.html'), form: resolve(webRoot, 'form.html') },
+      },
+    },
     server: {
       port: Number(process.env.AOM_WEB_PORT ?? 5173),
       proxy: {

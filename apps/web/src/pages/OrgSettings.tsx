@@ -10,6 +10,7 @@ import { MembersTab } from '../components/orgsettings/MembersTab.tsx';
 import { PlanTab } from '../components/orgsettings/PlanTab.tsx';
 import { ProjectLinksTab } from '../components/orgsettings/ProjectLinksTab.tsx';
 import { RelayTab } from '../components/orgsettings/RelayTab.tsx';
+import { StorageTab } from '../components/orgsettings/StorageTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
 import { ext } from '../extension/index.ts';
@@ -26,6 +27,7 @@ type TabId =
   | 'plan'
   | 'audit'
   | 'relay'
+  | 'storage'
   | (string & {});
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
@@ -39,6 +41,7 @@ export function OrgSettings() {
     { id: 'general', label: 'General' },
     { id: 'members', label: 'Members' },
     { id: 'relay', label: 'Inbound webhooks' },
+    { id: 'storage', label: 'Storage' },
     ...(manager
       ? [
           { id: 'invitations', label: 'Invitations' },
@@ -87,6 +90,7 @@ export function OrgSettings() {
         {tab === 'general' && <GeneralTab org={org.data} userId={me.data.user.id} />}
         {tab === 'members' && role && <MembersTab me={{ userId: me.data.user.id, role }} />}
         {tab === 'relay' && <RelayTab canManage={manager} />}
+        {tab === 'storage' && <StorageTab canManage={manager} />}
         {tab === 'invitations' && manager && role && (
           <InvitationsTab role={role === 'owner' ? 'owner' : 'admin'} />
         )}

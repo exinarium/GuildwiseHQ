@@ -12,8 +12,6 @@ import {
   useDeleteChat,
   useRestoreChat,
 } from '../api/queries/chats.ts';
-import { useIsMobile } from '../hooks/useIsMobile.ts';
-import { useViewportBottomGap } from '../hooks/useViewportBottomGap.ts';
 import { ceoChatPath } from '../lib/openCeoChat.ts';
 import { useWorkingThreads } from '../ws/socket.ts';
 import { ChatPanel } from './ChatPanel.tsx';
@@ -48,9 +46,7 @@ export function ChatDrawer({
   projectId?: string;
 }) {
   const agents = useAgents();
-  const mobile = useIsMobile();
   const nav = useNavigate();
-  const gap = useViewportBottomGap(mobile && open);
   const chats = useChats();
   const working = useWorkingThreads();
   const create = useCreateChat();
@@ -95,8 +91,7 @@ export function ChatDrawer({
         <RadixDialog.Content
           aria-label="Chat"
           aria-describedby={undefined}
-          style={mobile && gap > 0 ? { bottom: gap } : undefined}
-          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-line bg-surface pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl sm:w-[28rem]"
+          className="fixed right-0 z-50 flex w-full max-md:top-[var(--vv-top,0px)] max-md:bottom-[var(--kbd-gap,0px)] md:inset-y-0 flex-col overflow-hidden border-l border-line bg-surface pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl sm:w-[28rem]"
         >
           <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1.5">
             {threadId ? (

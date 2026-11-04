@@ -134,4 +134,8 @@ You do not need to do anything. Running the install command again still upgrades
 
 ## Unpairing {#unpairing}
 
-If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click **Unpair** on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents wait until you re-home them. To use the machine again, pair it with a new code.
+If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click **Unpair** on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents stay on it until you retire it or move them. To use the machine again, pair it with a new code.
+
+## Retiring a workstation {#retiring}
+
+Owners and Admins can click **Retire** on a workstation's card to hand its agents over before it goes. Choose **Move its agents to another workstation** (pick the new one in the list) or **Mark its agents as needing a new home** (they show the Re-home action on the Agents page). Retiring also unpairs the computer, retires its DevOps engineer, and sends cards whose work lived there back to start from the base branch. It is refused while one of its agents is in a shift; the dialog names them, and you can check again when they finish. A workstation you already unpaired that still holds agents is listed under **Removed workstations with agents**: use **Hand over agents** there.

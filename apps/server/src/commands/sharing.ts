@@ -604,6 +604,19 @@ export async function loadSourceWorkstation(
 }
 
 /**
+ * A bulk move keeps each agent's runtime: the target must offer it. A target that has not reported its runtimes yet
+ * (an empty list) is not judged here; the sandbox gate still applies.
+ */
+export function assertTargetRuntime(target: Row, a: Row): void {
+  const targetRuntimes = (target.runtimes ?? []) as Array<{ id: string; available?: boolean }>;
+  if (targetRuntimes.length > 0 && !targetRuntimes.some((r) => r.id === a.runtime && r.available !== false))
+    throw conflict(
+      'runtime_missing',
+      `${target.name} has no ${a.runtime} runtime: move this agent on its own and pick a runtime`,
+    );
+}
+
+/**
  * Moves every agent of workstation `sourceId` (any status of the workstation, even one that no longer exists as a
  * computer) to `req.targetWorkstationId`, one transaction per agent through the single-move checks. Agents in a running
  * shift (or on a claimed card), the DevOps engineer and the CEO are skipped; an agent the single move refuses is
@@ -642,7 +655,6 @@ export async function moveAllAgents(
       throw conflict('workstation_unpaired', `${target.name} was unpaired: pick a paired workstation`);
   }
   if (!target || !target.in_org) throw notFoundWs();
-  const targetRuntimes = (target.runtimes ?? []) as Array<{ id: string; available?: boolean }>;
 
   const agents = await rows(
     ctx.pool,
@@ -685,14 +697,7 @@ export async function moveAllAgents(
       await withAppendTx(ctx.pool, async (tx) => {
         const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [planned.id]);
         if (!a || a.status === 'retired' || a.workstation_id !== sourceId) return;
-        if (
-          targetRuntimes.length > 0 &&
-          !targetRuntimes.some((r) => r.id === a.runtime && r.available !== false)
-        )
-          throw conflict(
-            'runtime_missing',
-            `${target.name} has no ${a.runtime} runtime: move this agent on its own and pick a runtime`,
-          );
+        assertTargetRuntime(target, a);
         const p = await prepareAgentMove(
           ctx,
           tx,

@@ -44,6 +44,7 @@ import { qaEvents } from './qa.ts';
 import { questionFlowEvents } from './question-flow.ts';
 import { relayEvents } from './relay.ts';
 import { releaseEvents } from './release.ts';
+import { releaseDocsPrepEvents } from './release-docs-prep.ts';
 import { repoEvents } from './repo.ts';
 import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
@@ -53,6 +54,7 @@ import { sessionEvents } from './session.ts';
 import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
+import { storageEvents } from './storage.ts';
 import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
 import { vaultEvents } from './vault.ts';
@@ -106,6 +108,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...qaEvents,
   ...approvalEvents,
   ...releaseEvents,
+  ...releaseDocsPrepEvents,
   ...questionFlowEvents,
   ...platformEvents,
   ...codeV6Events,
@@ -119,6 +122,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...governanceEvents,
   ...agentUxEvents,
   ...relayEvents,
+  ...storageEvents,
   ...formEvents,
   ...journeyEvents,
 ]);
@@ -175,6 +179,7 @@ export * from './schedule.ts';
 export * from './session.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
+export * from './storage.ts';
 export * from './testing.ts';
 export * from './user.ts';
 export * from './vault.ts';

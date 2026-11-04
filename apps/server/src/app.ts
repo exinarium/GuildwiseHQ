@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { RUNNER_SUBPROTOCOL } from '@aom/shared';
+import { RUNNER_SUBPROTOCOL, type StorageKind } from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -33,12 +33,13 @@ import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerDevopsQuestionHook } from './commands/devops-routing.ts';
 import { registerProviderCapHook } from './commands/org-provider-keys.ts';
 import { registerPackReviewWaitHook } from './commands/pack-review-wait.ts';
+import { recordWriteOutcome } from './commands/storage-connections.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
 import { createCostStampInterceptor } from './costs/stamp.ts';
 import { createPool } from './db/pool.ts';
-import { rows } from './db/sql.ts';
+import { one, rows } from './db/sql.ts';
 import { LogRing } from './diagnostics/log-ring.ts';
 import { Dispatcher } from './dispatcher/dispatcher.ts';
 import { Reaper } from './dispatcher/reaper.ts';
@@ -54,6 +55,7 @@ import { registerMediaProxy } from './media-proxy.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
+import { publicFormRoutes } from './public-forms/routes.ts';
 import { registerPushNotifier } from './push/notifier.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentUxRoutes } from './routes/agent-ux.ts';
@@ -96,6 +98,7 @@ import { intakeRoutes } from './routes/intakes.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
+import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
@@ -106,14 +109,15 @@ import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
-import { journeyRoutes } from './routes/journeys.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
+import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
+import { releaseDocsPrepRoutes } from './routes/release-docs-prep.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -122,6 +126,7 @@ import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
+import { storageRoutes } from './routes/storage.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { tiktokPlatformRoutes } from './routes/tiktok-platform.ts';
@@ -135,6 +140,7 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { StorageRelay } from './storage-relay/hub.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
@@ -208,11 +214,16 @@ const DESK_LINK_TOKEN =
  * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
  */
 export function redactUrl(url: string): string {
-  return url
-    .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
-    .replace(DESK_LINK_TOKEN, '$1[redacted]')
-    .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
-    .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
+  return (
+    url
+      .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
+      // a published form's public id is a capability to an organization's form
+      .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(DESK_LINK_TOKEN, '$1[redacted]')
+      .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+  );
 }
 
 /** pino `req` serializer: the default one with the URL redacted. */
@@ -270,6 +281,13 @@ export const LOG_REDACT = {
     'body.envelope',
     'payload.envelope',
     'err.body.envelope',
+    // Answers of a public form are never logged, whatever object holds them.
+    'req.body.answers',
+    '*.answers',
+    'body.answers',
+    '*.website',
+    '*.x-form-link',
+    '*.x-upload-token',
     // The text of an automation's result for the runner channels never reaches a log line.
     '*.whatsapp.text',
     '*.sheet.row',
@@ -458,6 +476,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgProviderRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
+  await app.register(releaseDocsPrepRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));
@@ -465,6 +484,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(inboundRoutes(ctx));
   await app.register(hookRoutes(ctx));
   await app.register(relayIntegrationRoutes(ctx));
+  await app.register(storageRoutes(ctx));
   await app.register(relayPublicRoutes(ctx));
   await app.register(approvalRoutes(ctx));
   await app.register(interestRoutes(ctx));
@@ -493,6 +513,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(pushRoutes(ctx));
   await app.register(cardAttachmentRoutes(ctx));
   await app.register(formRoutes(ctx));
+  await app.register(publicFormAdminRoutes(ctx));
+  await app.register(publicFormRoutes(ctx, { webRoot: () => (config.serveWeb ? webDistDir(config) : null) }));
   const assistantClient =
     opts.assistantClient !== undefined
       ? opts.assistantClient
@@ -530,6 +552,27 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.storage = new StorageRelay({
+    config: ctx.config.storage,
+    lookup: async (orgId, connectionId) => {
+      const r = await one<{ kind: StorageKind; workstation_id: string }>(
+        ctx.pool,
+        `SELECT kind, workstation_id FROM storage_connections WHERE id=$1 AND org_id=$2 AND status='active'`,
+        [connectionId, orgId],
+      );
+      return r ? { kind: r.kind, workstationId: r.workstation_id } : undefined;
+    },
+    isOnline: (ws) => ctx.services.runners.isOnline(ws),
+    send: (ws, type, payload) =>
+      ctx.services.runners.send(ws, type as 'storage.write.open', payload as never, ctx.clock.now()),
+    onOutcome: (id, outcome) =>
+      recordWriteOutcome(ctx, id, outcome).catch((err) =>
+        ctx.log.warn({ err: err?.name }, 'storage health update failed'),
+      ),
+    // Connection, kind, size, outcome and duration only: never a path, a name or content.
+    log: (entry) => ctx.log.info({ storage: entry }, 'storage write'),
+    now: () => ctx.clock.now().getTime(),
+  });
   // After a restart nothing is served until the runners announce again (right after their welcome).
   await ctx.services.webhookRelay
     .markAllOffline()
