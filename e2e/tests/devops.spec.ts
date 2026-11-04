@@ -25,6 +25,7 @@ let workstationId: string;
 let devopsAgentId: string;
 let projectId: string;
 let repoId: string;
+let danaId: string;
 
 const SPEC = {
   context: 'The toy project needs a feature.',
@@ -134,6 +135,7 @@ test('setup: project DVO with the toy repo and a builder', async () => {
     },
   });
   expect(hire.status(), await hire.text()).toBe(201);
+  danaId = (await hire.json()).id as string;
   await waitFor(
     'the workstation holds the toy repo',
     async () => (await (await api.get('/api/workstations')).json()).workstations[0].repos.length,
@@ -519,22 +521,37 @@ test("AC4: a card shift reads the organization vault's standing orders and its p
     data: { kind: 'project', projectId: hobId, remoteUrl: PERSONAL.origin, syncIntervalSec: 2 },
   });
   expect(hobVault.status(), await hobVault.text()).toBe(201);
+  const hobVaultId = (await hobVault.json()).id as string;
+  // the organization vault registered in AC2 (the same lookup as workClone)
+  const workVaultId = (
+    await q<{ id: string }>(
+      `SELECT id FROM vaults WHERE kind='org' AND org_id = (SELECT org_id FROM projects WHERE id=$1)`,
+      [projectId],
+    )
+  )[0]?.id as string;
+  expect(workVaultId).toBeTruthy();
   const add = await api.post(`/api/projects/${hobId}/repos`, {
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
   });
   expect(add.status()).toBe(201);
-  // both repository vaults are cloned on the workstation by now (the projects' automatic local folders are not clones)
+  // this test's two repository vaults are cloned on Dev Box, with their files on disk. The wait reads only these two
+  // vaults on this workstation: rows other specs leave in workstation_vaults must not satisfy it. local_path is
+  // recorded before the clone has its files, so the seed files are checked too.
   await waitFor(
-    'both vaults cloned',
-    async () =>
-      existsSync(join(HOME, 'vaults')) &&
-      (
-        await q<{ n: number }>(
-          `SELECT count(*)::int AS n FROM workstation_vaults wv JOIN vaults v ON v.id = wv.vault_id
-            WHERE wv.local_path IS NOT NULL AND v.storage = 'git'`,
-        )
-      )[0]?.n,
-    (n) => n === 2,
+    'the organization and HOB vaults are cloned on Dev Box',
+    async () => {
+      const rows = await q<{ vault_id: string }>(
+        `SELECT vault_id FROM workstation_vaults
+          WHERE workstation_id = $1 AND vault_id = ANY($2::uuid[]) AND local_path IS NOT NULL`,
+        [workstationId, [workVaultId, hobVaultId]],
+      );
+      return (
+        rows.length === 2 &&
+        existsSync(join(HOME, 'vaults', workVaultId, 'standing-orders.md')) &&
+        existsSync(join(HOME, 'vaults', hobVaultId, 'projects', 'hob', 'PROJECT.md'))
+      );
+    },
+    (ok) => ok,
     30_000,
   );
   await waitFor(
@@ -572,9 +589,6 @@ test("AC4: a card shift reads the organization vault's standing orders and its p
   });
   expect(hal.status(), await hal.text()).toBe(201);
   const halId = (await hal.json()).id as string;
-  const dana = (await (await api.get('/api/agents')).json()).agents.find(
-    (a: { name: string }) => a.name === 'Dana',
-  );
   const instructions = (agent: string) =>
     readFileSync(join(HOME, 'agents', agent, 'claude', 'CLAUDE.md'), 'utf8');
   const handedOff = (ref: string) =>
@@ -590,7 +604,7 @@ test("AC4: a card shift reads the organization vault's standing orders and its p
   await handedOff(workRef);
   await handedOff(hobRef);
 
-  const w = instructions(dana.id);
+  const w = instructions(danaId);
   expect(w).toContain('- Key: DVO');
   expect(w).toContain('WORK-MARK project doc for DVO');
   expect(w).toContain('WORK-ORDER');
