@@ -106,6 +106,9 @@ const REASON_PATHS = 5;
 const compile = (globs: readonly string[]) => globs.map(globToRegExp);
 const matches = (res: RegExp[], path: string) => res.some((re) => re.test(path));
 
+/** Whether a path matches any of the screen map's globs (`**`, `*`, `?`). */
+export const videoGlobMatches = (globs: readonly string[], path: string): boolean => matches(compile(globs), path);
+
 /** `JourneyDesigner.tsx` -> `journey-designer`. */
 export const kebabOfStem = (path: string): string => {
   const stem = (path.split('/').pop() ?? path).replace(/\.[^.]+$/, '');

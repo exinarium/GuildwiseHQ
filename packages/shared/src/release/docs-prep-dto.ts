@@ -118,6 +118,9 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
           files: z.array(z.string()),
           /** What the step reports (per step id; 'changelog': ReleaseChangelogOutput, 'guide': ReleaseDocsPrepGuideOutput). */
           output: z.unknown().optional(),
+          /** The step's own report (e.g. the videos chosen and why); absent for steps that keep none. */
+          report: z.record(z.string(), z.unknown()).nullable().optional(),
+          attempt: z.number().int().optional(),
         }),
       ),
     }),
@@ -158,7 +161,8 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   releaseBranch: z.string().min(1).max(200),
   mainBranch: z.string().max(200).optional(),
   step: z.string().min(1).max(40),
-  phase: z.enum(['prepare', 'push']).optional(),
+  /** The phase of a step with phases (commit: prepare/push; videos: plan/render). Widened from the commit enum. */
+  phase: z.string().max(20).optional(),
   components: z.array(ComponentRuleSchema).max(20).default([]),
   projectKey: z.string().max(40).default(''),
   summary: ReleaseDocsPrepSummarySchema.optional(),
@@ -172,6 +176,8 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   writer: AgentRuntimeSpecSchema.optional(),
   /** Step 'changelog': the checked entries to merge into Unreleased. */
   changelog: ReleasePrepChangelogPayloadSchema.optional(),
+  /** What an earlier phase handed on (videos render: the plan and the authored slugs). */
+  input: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type ReleaseDocsPrepPayload = z.infer<typeof ReleaseDocsPrepPayloadSchema>;
@@ -192,6 +198,8 @@ export const ReleaseDocsPrepResultSchema = z.object({
   notices: z.array(z.string().max(500)).default([]),
   /** A content step's report (shown on the Releases page; the server checks the size and the step's schema). */
   output: z.unknown().optional(),
+  /** The step's report, stored on the step row (capped by the server at 64 KB). */
+  report: z.record(z.string(), z.unknown()).optional(),
 });
 export type ReleaseDocsPrepResult = z.infer<typeof ReleaseDocsPrepResultSchema>;
 
