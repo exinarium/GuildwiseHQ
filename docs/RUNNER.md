@@ -2020,7 +2020,11 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   restart in the persisted shift record). Edits made to those files after the merge, committed or not, are not exempt.
   The same exemption covers a merge of the card's base or working branch (for example `origin/release/1.5.0`): a merge
   parent that is, or is an ancestor of, a branch tip the runner recorded (`origin/<b>` and `<b>`, at the shift start and
-  after `aom git fetch` / `merge-main`; persisted like the main SHAs), or a fast-forward onto such content. Paths changed by
+  after `aom git fetch` / `merge-main`; persisted like the main SHAs), or a fast-forward onto such content. Because other
+  shifts of the same clone fetch and land on the base while this one runs, the tips are refreshed again before the
+  report-time guard and the shift-end discard; then only `origin/<b>` counts, and only when the latest entry of its reflog
+  is the runner's own fetch or push (`update by push`, written by a landing push from this clone). A ref moved by hand
+  (`update-ref`) and `refs/heads/<b>` are not trusted mid-shift. Paths changed by
   hand inside the merge commit are still judged. The shift-end discard never reverts exempt content, leaves out-of-scope
   paths it did not make itself alone, and skips entirely (WARN plus a card note naming the old and new HEAD) when the
   branch was reset or rewritten during the shift.

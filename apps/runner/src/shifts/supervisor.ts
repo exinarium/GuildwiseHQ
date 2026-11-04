@@ -170,13 +170,13 @@ import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.t
 import {
   type BranchSnapshot,
   discardOutOfScope,
-  fetchedRemoteTip,
-  uncommittedOutOfScope,
   discardTestArtifacts,
+  fetchedRemoteTip,
   type GuardInput,
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
+  uncommittedOutOfScope,
 } from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
@@ -2239,8 +2239,7 @@ export class ShiftSupervisor {
     else if (method === 'git.fetch') r = await architectFetch(ctx);
     else if (method === 'git.merge_main') r = await architectMergeMain(ctx);
     else r = await architectVerifyMerge(ctx);
-    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main'))
-      await this.recordBaseTips(s, true);
+    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main')) await this.recordBaseTips(s, true);
     this.addProgress(
       s,
       'status',

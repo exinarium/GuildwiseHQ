@@ -281,7 +281,10 @@ describe('the base moves while the shift runs', () => {
     t.releasePush({ 'rel/early.ts': 'early\n' });
     const startTips = t.tips();
     // another shift of the same clone fetches a newer release while this architect shift runs
-    t.releasePush({ 'rel/late.ts': 'late\n', 'src/existing.ts': 'export const a = 5;\n', 'rel/old.ts': null }, 'later');
+    t.releasePush(
+      { 'rel/late.ts': 'late\n', 'src/existing.ts': 'export const a = 5;\n', 'rel/old.ts': null },
+      'later',
+    );
     sh(t.path, 'git', ['merge', '--no-ff', '-m', 'merge release', `origin/${REL}`]);
     const fresh = await fetchedRemoteTip(t.path, REL);
     expect(fresh).toBe(t.tips()[0]);
@@ -293,13 +296,68 @@ describe('the base moves while the shift runs', () => {
     expect(await discardOutOfScope(input)).toEqual({ discarded: [], kept: [] });
     await autoCommit({
       worktree: t.path,
-      env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@x.test', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@x.test' },
+      env: {
+        GIT_AUTHOR_NAME: 'a',
+        GIT_AUTHOR_EMAIL: 'a@x.test',
+        GIT_COMMITTER_NAME: 'a',
+        GIT_COMMITTER_EMAIL: 'a@x.test',
+      },
     });
     expect(sh(t.path, 'git', ['diff', '--name-status', before, 'HEAD'])).toBe('A\tok.md');
     expect(existsSync(join(t.path, 'rel/late.ts'))).toBe(true);
   });
 
-  it('only a fetch makes origin/<base> a trusted tip; a hand-moved ref is not', async () => {
+  it('a newer origin/<base> landed by a push from the same clone (no fetch) is trusted; the merge of it reverts nothing', async () => {
+    const t = await setup();
+    const startTips = t.tips();
+    // the runner lands another card on the base by pushing from this clone (as git/worktrees.ts and completion do)
+    const landing = join(tmp(), 'landing');
+    sh(t.repo.clone, 'git', ['worktree', 'add', '--detach', landing, `origin/${REL}`]);
+    write(landing, 'rel/landed.ts', 'landed\n');
+    write(landing, 'src/existing.ts', 'export const a = 7;\n');
+    sh(landing, 'git', ['rm', '-q', 'rel/old.ts']);
+    sh(landing, 'git', ['add', '-A']);
+    sh(landing, 'git', ['commit', '-m', 'other card lands']);
+    const landed = sh(landing, 'git', ['rev-parse', 'HEAD']);
+    sh(landing, 'git', ['push', 'origin', `${landed}:refs/heads/${REL}`]);
+    expect(
+      sh(t.path, 'git', ['reflog', 'show', '--format=%gs', '-n', '1', `refs/remotes/origin/${REL}`]),
+    ).toBe('update by push');
+    // a later fetch is a no-op and writes no reflog entry
+    sh(t.path, 'git', ['fetch', 'origin', REL]);
+    const fresh = await fetchedRemoteTip(t.path, REL);
+    expect(fresh).toBe(landed);
+    expect(startTips).not.toContain(fresh);
+
+    // the architect merges the newer base, then the shift ends rejected: discard + autoCommit
+    sh(t.path, 'git', ['merge', '--no-ff', '-m', 'merge release', `origin/${REL}`]);
+    const merge = sh(t.path, 'git', ['rev-parse', 'HEAD']);
+    const files = sh(t.path, 'git', ['ls-files']);
+    const input = t.input({ baseTipShas: [...startTips, fresh as string] });
+    expect(await rules(runGuard(input))).toEqual([]);
+    write(t.path, 'ok.md', 'ok\n');
+    expect(await discardOutOfScope(input)).toEqual({ discarded: [], kept: [] });
+    await autoCommit({
+      worktree: t.path,
+      env: {
+        GIT_AUTHOR_NAME: 'a',
+        GIT_AUTHOR_EMAIL: 'a@x.test',
+        GIT_COMMITTER_NAME: 'a',
+        GIT_COMMITTER_EMAIL: 'a@x.test',
+      },
+    });
+    expect(sh(t.path, 'git', ['diff', '--name-status', merge, 'HEAD'])).toBe('A\tok.md');
+    expect(sh(t.path, 'git', ['ls-files'])).toBe(`${files}\nok.md`.split('\n').sort().join('\n'));
+    expect(existsSync(join(t.path, 'rel/landed.ts'))).toBe(true);
+    expect(existsSync(join(t.path, 'rel/old.ts'))).toBe(false);
+    expect(readFileSync(join(t.path, 'src/existing.ts'), 'utf8')).toBe('export const a = 7;\n');
+    // without the refreshed tip the same merge would be judged as the architect's own product-code change
+    expect(await rules(runGuard(t.input({ startSha: t.startSha, baseTipShas: startTips })))).toContain(
+      'architect_edited_non_docs',
+    );
+  });
+
+  it('only a runner fetch or push makes origin/<base> a trusted tip; a hand-moved ref is not', async () => {
     const t = await setup();
     t.releasePush({ 'rel/x.ts': 'x\n' });
     expect(await fetchedRemoteTip(t.path, REL)).toBe(t.tips()[0]);

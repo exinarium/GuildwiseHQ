@@ -269,16 +269,17 @@ export async function mergeExemptions(
 }
 
 /**
- * The sha of `origin/<branch>` when the latest update of that remote-tracking ref was a fetch (the runner's own: other
- * shifts of the same clone fetch it while this shift runs). A ref an agent moved by hand (`update-ref`, no fetch entry in
- * its reflog) is not trusted. Null when the ref is missing or was not last moved by a fetch.
+ * The sha of `origin/<branch>` when the latest update of that remote-tracking ref was the runner's own: a fetch (other
+ * shifts of the same clone fetch it while this shift runs) or a push (the runner lands other cards on the base by pushing
+ * from this clone, which writes "update by push"; agents cannot push). A ref an agent moved by hand (`update-ref`, no
+ * fetch or push entry in its reflog) is not trusted. Null when the ref is missing or was last moved some other way.
  */
 export async function fetchedRemoteTip(worktree: string, branch: string): Promise<string | null> {
   const ref = `refs/remotes/origin/${branch}`;
   const rl = await git(worktree, ['reflog', 'show', '--format=%H%x09%gs', '-n', '1', ref]);
   if (rl.exitCode !== 0) return null;
   const [sha, subject = ''] = rl.stdout.trim().split('\t');
-  return sha && /^(fetch|pull)\b/.test(subject) ? sha : null;
+  return sha && /^(fetch|pull)\b|^update by push$/.test(subject) ? sha : null;
 }
 
 /** Uncommitted paths (tracked and untracked), minus the sandbox stubs and test output dirs. */
@@ -375,7 +376,8 @@ async function ownCommitPaths(input: GuardInput): Promise<Set<string>> {
         const [sha, sel, subject = ''] = line.split('\t');
         const ts = Number(/@\{(\d+)\}/.exec(sel ?? '')?.[1]);
         if (!sha || !Number.isFinite(ts) || ts < since) continue;
-        const own = /^(commit|cherry-pick|revert)\b/.test(subject) || /^merge .*: Merge made by/.test(subject);
+        const own =
+          /^(commit|cherry-pick|revert)\b/.test(subject) || /^merge .*: Merge made by/.test(subject);
         if (!own) continue;
         if ((await git(wt, ['merge-base', '--is-ancestor', sha, 'HEAD'])).exitCode !== 0) continue;
         await addCommit(sha);
