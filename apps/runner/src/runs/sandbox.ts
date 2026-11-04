@@ -32,6 +32,8 @@ export interface SandboxSpec {
   gitDirs?: string[];
   /** OS user id for `/run/user/<uid>` (injectable for tests). */
   uid?: number;
+  /** Mount the .NET user secrets (default true). The builder's checks never get them. */
+  userSecrets?: boolean;
 }
 
 /** The services' HOME inside the sandbox (inside the private `/tmp`). */
@@ -96,7 +98,8 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
   // .NET user secrets (`dotnet run` in Development reads them): read-only, at the services' HOME. Services only: an
   // agent's shell never gets them.
   const secrets = userSecretsDir(spec.realHome);
-  if (existsSync(secrets)) args.push('--ro-bind', secrets, `${SERVICE_HOME}/.microsoft/usersecrets`);
+  if (spec.userSecrets !== false && existsSync(secrets))
+    args.push('--ro-bind', secrets, `${SERVICE_HOME}/.microsoft/usersecrets`);
   return args;
 }
 

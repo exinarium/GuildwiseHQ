@@ -1170,6 +1170,60 @@ export class RunManager {
     );
   }
 
+  private scrubbedEnv(): Record<string, string> {
+    const out = scrubEnv(process.env);
+    const dirs = this.deps.pathDirs?.() ?? [];
+    if (dirs.length)
+      out.PATH = [...dirs, ...(out.PATH ?? '').split(delimiter)]
+        .filter((x, i, a) => x && a.indexOf(x) === i)
+        .join(delimiter);
+    return out;
+  }
+
+  /**
+   * The command line for one of the builder's checks at `aom handoff` (lint, format, typecheck) in the card's worktree: the
+   * run-step sandbox profile (credential folders, the runner's data dir and the buses masked, no .NET user secrets) and the
+   * scrubbed run-step environment. `key` names the private tmp dir (`<agentTmpRoot>/aom-check-<key>`); the caller removes it.
+   * Throws for a Docker command and when the sandbox is required but unavailable.
+   */
+  async checkLaunch(o: { key: string; worktree: string; argv: string[] }): Promise<{
+    cmd: string;
+    args: string[];
+    env: Record<string, string>;
+    sandbox: 'sandboxed' | 'off';
+    tmp: string;
+  }> {
+    if (isDockerCommand(o.argv)) throw new Error('checks never run Docker');
+    const kind = await this.sandboxKind(o.argv, false);
+    const tmp = `${agentTmpRoot()}/aom-check-${slug(o.key).slice(0, 16)}`;
+    mkdirSync(join(tmp, 'home'), { recursive: true, mode: 0o700 });
+    let cmd = o.argv[0] as string;
+    let args = o.argv.slice(1);
+    if (kind === 'sandboxed') {
+      const cacheRoot = sharedCacheRoot(this.deps.paths);
+      await ensureSharedCaches(cacheRoot);
+      const c = sandboxCommand(
+        {
+          runnerRoot: this.deps.paths.root,
+          realHome: this.deps.realHome ?? homedir(),
+          worktrees: [o.worktree],
+          cacheRoot,
+          runTmp: tmp,
+          gitDirs: gitDirOf(o.worktree),
+          userSecrets: false,
+        },
+        o.argv,
+      );
+      cmd = c.cmd;
+      args = c.args;
+    }
+    // unsandboxed: still without the runner's credentials (scrubEnv), plus the registered toolchains on PATH
+    const env: Record<string, string> = kind === 'sandboxed' ? this.baseEnv(true) : this.scrubbedEnv();
+    env.NO_COLOR = '1';
+    env.FORCE_COLOR = '0';
+    return { cmd, args, env, sandbox: kind === 'sandboxed' ? 'sandboxed' : 'off', tmp };
+  }
+
   /** The command line a step or service is really started with, and the environment it gets. */
   private async launch(
     env: EnvState,

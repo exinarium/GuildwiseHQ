@@ -9,10 +9,14 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type BriefAttachment,
+  BuildHandoffDataSchema,
+  buildEvidenceProblem,
+  type CheckEvidence,
   DELEGATE_RPC,
   type GuardViolation,
   hasTranscript,
@@ -73,6 +77,8 @@ import {
   type ProjectIndexResult,
   skillRpc,
 } from '../capabilities/registry.ts';
+import { detectChecks } from '../checks/detect.ts';
+import { runHandoffChecks } from '../checks/run.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import {
@@ -96,7 +102,7 @@ import {
 } from '../git/architect-git.ts';
 import { computeCardDiff } from '../git/card-diff.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
-import { git, originBranchNames } from '../git/git.ts';
+import { git, gitOk, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import {
   addPrepTaskWorktree,
@@ -436,6 +442,12 @@ interface ActiveShift {
   autoCommitRefusals: Set<string>;
   /** When the shift's start sha was taken (ms since epoch). */
   startedAtMs?: number;
+  /** A handoff's checks are running (a second `aom handoff` meanwhile is refused). */
+  checksRunning?: boolean;
+  /** Aborted when the shift ends: kills the running checks. */
+  checkAbort?: AbortController;
+  /** Check results by head, check and command: a second handoff at the same head does not run them again. */
+  checkCache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
   forwards?: EnvForwards;
   /** Releases the hold on the agent's TMPDIR (see `holdAgentTmp`). */
@@ -650,6 +662,7 @@ export class ShiftSupervisor {
       this.delegates.endCaller(msg.shiftId, 'the shift ended');
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
+      shift.checkAbort?.abort();
       shift.releaseWorktree?.();
       this.active.delete(msg.shiftId);
       // every outcome (done, crash, stop, timeout): the agent's per-shift temp content goes (backlog #81)
@@ -2726,6 +2739,18 @@ export class ShiftSupervisor {
     return { data: { ...data, items: next } };
   }
 
+  /** Proposes `check` suites from what the card's repository declares (once per repository: the server says when). */
+  private async proposeChecks(s: ActiveShift): Promise<void> {
+    try {
+      if (!s.worktree) return;
+      const suites = detectChecks(s.worktree.path, s.msg.brief.project.projectPath ?? '.');
+      const r = await this.deps.rpc(s.msg.shiftId, 'env.suites.propose', { suites });
+      if (!r.ok) this.log.warn(`check proposal for shift ${s.msg.shiftId} refused: ${r.error ?? 'unknown'}`);
+    } catch (err) {
+      this.log.warn(`check proposal for shift ${s.msg.shiftId} failed`, err);
+    }
+  }
+
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
   private async submit(
     s: ActiveShift,
@@ -2742,6 +2767,7 @@ export class ShiftSupervisor {
     }
 
     let attach: Record<string, unknown> = {};
+    let checkNote = '';
     let toSend: ShiftReport = report;
     if (report.kind === 'outcome') {
       const outcome = msg.brief.shift.outcomes.find((o) => o.id === report.outcomeId);
@@ -2844,6 +2870,59 @@ export class ShiftSupervisor {
           if (outcome.data === 'buildHandoff') {
             const cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch);
             attach = { ...attach, headSha: cd.headSha, changedPaths: cd.changedPaths, diff: cd.diff };
+            // The repository's confirmed checks (lint, format, typecheck) run on this commit, by the runner: a failure in a
+            // changed file refuses the handoff here, so nothing reaches the server or the reviewers.
+            const cb = msg.brief.checks;
+            if (cb?.detect) void this.proposeChecks(s);
+            if (cb?.suites.length) {
+              const problem = buildEvidenceProblem(BuildHandoffDataSchema.parse(toSend.data).buildEvidence); // do not run minutes of checks for a refusal the server would give anyway
+              if (problem) return rejected(problem);
+              if (s.checksRunning)
+                return rejected(
+                  'the checks of an earlier `aom handoff` are still running: wait for that command to finish',
+                );
+              s.checksRunning = true;
+              s.checkAbort ??= new AbortController();
+              s.checkCache ??= new Map();
+              const wt = s.worktree.path;
+              const tmps: string[] = [];
+              let r: Awaited<ReturnType<typeof runHandoffChecks>>;
+              try {
+                const runs = this.deps.runs;
+                r = await runHandoffChecks({
+                  suites: cb.suites,
+                  worktree: wt,
+                  changedPaths: cd.changedPaths,
+                  headSha: cd.headSha,
+                  logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'checks'),
+                  signal: s.checkAbort.signal,
+                  cache: s.checkCache,
+                  ...(runs
+                    ? {
+                        launch: async (argv: string[], key: string) => {
+                          const l = await runs.checkLaunch({
+                            key: `${msg.shiftId.slice(0, 8)}-${key}`,
+                            worktree: wt,
+                            argv,
+                          });
+                          tmps.push(l.tmp);
+                          return l;
+                        },
+                      }
+                    : {}),
+                });
+              } finally {
+                s.checksRunning = false;
+                for (const t of tmps) rmSync(t, { recursive: true, force: true });
+              }
+              if ((await gitOk(wt, ['rev-parse', 'HEAD'])) !== cd.headSha)
+                return rejected(
+                  'the branch moved while the checks ran: commit, then run `aom handoff` again',
+                );
+              if (r.blocking.length) return rejected(r.refusal);
+              attach = { ...attach, checks: r.evidence };
+              checkNote = r.summary;
+            }
           }
         }
       }
@@ -2900,7 +2979,7 @@ export class ShiftSupervisor {
     }
     return {
       accepted: true,
-      message: result.message ?? (terminal ? ACCEPTED_MESSAGE : 'Recorded.'),
+      message: `${result.message ?? (terminal ? ACCEPTED_MESSAGE : 'Recorded.')}${checkNote ? ` ${checkNote}` : ''}`,
       ...(result.matches ? { matches: result.matches } : {}),
     };
   }
