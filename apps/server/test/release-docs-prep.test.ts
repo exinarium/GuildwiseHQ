@@ -351,6 +351,15 @@ describe('the ship gate', () => {
     expect((await approveShip()).status).toBe(200);
   });
 
+  it('on with Analyse changes unticked: a passed run does not need a recorded base tag', async () => {
+    await enable({ analyse: false });
+    expect((await owner('POST', `${base()}/runs`)).status).toBeLessThan(300);
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    expect((await latest()).status).toBe('passed');
+    expect((await approveShip()).status).toBe(200);
+  });
+
   it('on and skipped: the ship starts exactly as today', async () => {
     await enable();
     await owner('POST', `${base()}/skip`);

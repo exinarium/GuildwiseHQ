@@ -176,7 +176,7 @@ export interface ReleaseDocsPrepGateInput {
     failedStep?: string | null;
     failedRepoName?: string | null;
   } | null;
-  repo: { inRun: boolean; baseTag: string | null; commitSha: string | null } | null;
+  repo: { inRun: boolean; baseTag: string | null; commitSha: string | null; analysed?: boolean } | null;
   /** Newest published ship of this repository. */
   lastPublishedAt: string | null;
   proposalLastTag: string | null;
@@ -214,7 +214,8 @@ export function releaseDocsPrepGate(i: ReleaseDocsPrepGateInput): ReleaseDocsPre
   // passed
   if (!i.repo?.inRun)
     return refuse(`${name} ran for ${b} without this repository. Run it again on the Releases page.`);
-  if (i.repo.baseTag !== i.proposalLastTag)
+  // The base tag is recorded by the analyse step only; without it the staleness rule above is what ties the run to this release.
+  if (i.repo.analysed !== false && i.repo.baseTag !== i.proposalLastTag)
     return refuse(`${name} ran for an earlier release of ${b}. Run it again on the Releases page.`);
   const sha = i.repo.commitSha;
   if (sha) {

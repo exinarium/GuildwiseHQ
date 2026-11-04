@@ -158,6 +158,10 @@ describe('releaseDocsPrepGate', () => {
   });
   it('refuses a passed run of an earlier release or without the repo', () => {
     expect(g({ proposalLastTag: 'v1.5.0' }).allowed).toBe(false);
+    // analyse unticked: no base tag was recorded, so it is not compared
+    expect(
+      g({ proposalLastTag: 'v1.5.0', repo: { inRun: true, baseTag: null, commitSha: null, analysed: false } }).allowed,
+    ).toBe(true);
     expect(g({ repo: { inRun: false, baseTag: null, commitSha: null } }).allowed).toBe(false);
   });
   it('wants the prep commit in the facts read', () => {

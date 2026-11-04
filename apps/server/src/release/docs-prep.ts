@@ -591,7 +591,12 @@ async function gateInput(db: Queryable, proposal: Row, p: Row): Promise<ReleaseD
         }
       : null,
     repo: repoRow
-      ? { inRun: true, baseTag: repoRow.base_tag ?? null, commitSha: repoRow.commit_sha ?? null }
+      ? {
+          inRun: true,
+          baseTag: repoRow.base_tag ?? null,
+          commitSha: repoRow.commit_sha ?? null,
+          analysed: repoRow.summary != null,
+        }
       : null,
     lastPublishedAt: published?.at ? new Date(published.at).toISOString() : null,
     proposalLastTag: proposal.last_tag ?? null,
