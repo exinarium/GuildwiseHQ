@@ -7,6 +7,10 @@ Design report. First written on GuildwiseHQ `release/1.5.0` (tip 3bc3b30b) befor
 Section 0 says what changed. Sections 4.1, 4.7, 4.8, 4.10, 4.11, 5, 6 and 10 are rewritten to the landed names; the
 guide helpers (4.2 to 4.6) and the prompt (4.9) stand as designed.
 
+**Rework round 2 (2026-11-04): section 11** is the plan for merging `origin/release/1.5.0` into this branch after
+GWP-90 ('Write changelog') landed first and added its own version of the generic pieces. Read section 11 first; the
+rest of the report describes the step as built and approved.
+
 ## 0. Assumption review (GWP-89 landed)
 
 | # | Assumption | Holds? | What the landed code does | Design change |
@@ -501,3 +505,210 @@ all passed), A6 (prep runs in the runner process on the workstation), A7 (prep d
 (registry shape; `requires` added; no per-step capability), A2 (change items derived in the handler), A3 (own worktree
 per step; `runModel`/`exec` added to the context; writer in the payload), A5 (`output` column added; covered sources
 read from it).
+
+## 11. Rework round 2: merging `release/1.5.0` after GWP-90 landed
+
+### 11.1 Question
+
+The card was approved, tested (e2e 10/10 twice) and approved by the owner, but it cannot land: GWP-90 ('Write
+changelog') landed on `release/1.5.0` after this branch was cut, and it built its own version of the same generic
+pieces (`requires`, step `output` column and DTO field, output size cap). How do the two sides fit together so that
+both steps work, nothing is duplicated and nothing that was reviewed changes behaviour?
+
+### 11.2 Findings (trial merge in a scratch clone)
+
+Merge base `05edba06`; this branch `d38de40d`; `origin/release/1.5.0` `fdfb78c8` (GWP-90 merge `0bedbf62`, plus
+GWP-68 / GWP-76 / GWP-95 work that does not touch release prep). `git merge fdfb78c8` gives **11 conflicted files**;
+`runner.ts`, `projections/release-docs-prep.ts`, `packages/shared/src/release/index.ts` and the e2e spec merge cleanly.
+
+What GWP-90 already has, and how it compares with this branch:
+
+| Piece | GWP-90 (on release/1.5.0) | This branch | Same behaviour? |
+|---|---|---|---|
+| Migration for `release_docs_prep_steps.output jsonb` | `2840_release_docs_prep_output.sql` | `2840_release_docs_prep_step_output.sql` | Yes: both are exactly `ADD COLUMN IF NOT EXISTS output jsonb`. Duplicate. |
+| Projector writes `output` | yes | yes | Byte-identical change; git merged it cleanly. |
+| `requires?: string[]` on the step def | yes | yes | Same field, different comment. |
+| Start check for a missing required step | `missingReleaseDocsPrepRequirement(steps)` (first miss or null, with message) and 409 **`release_docs_prep_requires`**, message "`<Step> needs <Req>. Turn it on in the project settings.`" | `missingReleaseDocsPrepRequirements(steps)` (list) and 409 **`step_requires`** | Same rule, different code and wording. The web checklist on release/1.5.0 already shows "Needs Analyse changes" from `requires` (`ReleaseDocsPrepPanel.tsx`). |
+| Output size cap and storage | `storedStepOutput(step, output, payload.changelog)` in `server/src/release/docs-prep-changelog.ts`: schema check for `changelog`, a 64 KB cap (`RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES`) for every other step | `stepOutput(output)` with a local `OUTPUT_MAX = 64 * 1024` in `docs-prep.ts` | Same for `guide` (64 KB cap, drop if larger). |
+| Run DTO `output` | `z.unknown().optional()`; `runDto` spreads it only when not null | `z.unknown().nullable().default(null)`; `runDto` always sets it | Same to the web: `GuideStepOutput` is guarded by `s.output != null`. |
+| Result / event `output` | `output: z.unknown().optional()` | same | Same field, different comment. |
+| Runner `contentStep` passes `output` through | yes, but only on success | yes, also on failure (`failed(error, output)`) | This branch is a superset; keep it. |
+| Payload extras | `changelog?: ReleasePrepChangelogPayloadSchema` | `stepInput?: record`, `writer?: lazy(AgentRuntimeSpecSchema)` | Different fields; keep all three. |
+| Dispatch in `advance()` | refactored: per-step decision, `failedHere` flag, new exported `sendDocsPrepStepCommand(ctx, tx, run, repo, o)` builds the payload and appends `ReleaseDocsPrepStepStarted` | inline payload with hook `stepInput` / `writer`; no-writer path appends Started + Finished(failed), then `advance()` and `return` | Fold the guide hook into GWP-90's structure (11.3). |
+| Writer of the text | a BA **task** (`release_changelog`, migration 2841) proposes entries; the server checks them and sends them in the payload | one headless model call on the runner as `payload.writer` (`release-docs-prep-model.ts`) | Two mechanisms. Both stay for now (see 11.5). |
+| Old-runner guard | `RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY`, checked before dispatch | none: an old runner answers "no handler for the step 'guide': update the runner" | Acceptable; unchanged. |
+
+Things that break after the merge even where git does not report a conflict:
+
+1. **Default steps become `analyse, changelog, guide, commit`.** Every test that assumed three steps, or that turned
+   prep on with `steps: {}` and expected the run to reach `commit`, now also runs a step that needs a BA task
+   (`changelog`) or a writer agent (`guide`):
+   - `apps/server/test/release-docs-prep-changelog-flow.test.ts:81` sets `{"enabled": true, "steps": {}}`: the guide
+     step then fails at dispatch (no writer agent in that test), so the flow never reaches commit. Line 271 likewise.
+   - `e2e/tests/release-docs-prep.spec.ts:283,298,301` (this branch's version wins the merge; release/1.5.0's own copy
+     was never updated for GWP-90).
+   - `packages/shared/test/release-changelog-merge.test.ts:96,105` (registry list, `changelog: false` list).
+2. **`apps/runner/test/release-docs-prep-changelog.test.ts:179,192`** call `changelogStep({ worktree, payload, summary })`
+   directly. With this branch's required `outDir`, `runModel` and `exec` on `DocsPrepStepContext` that is a type error.
+3. **`docs/guide/guide.html`** is not regenerated by the merge: GWP-90 edited `USER-GUIDE.md` 4.28 without
+   re-assembling, so the HTML lacks its paragraph.
+4. **`packages/shared/src/capabilities/builtin-data.ts`** is generated: both sides added a playbook file
+   (`user-guide/*` here; `release-notes/steps/step-05-changelog-unattended.md` and the `workflow.md` change there).
+5. `migrate.ts` tracks files by name and ignores applied rows whose file is gone, so deleting this branch's 2840 file
+   is safe on any database that applied it (the column exists; GWP-90's `IF NOT EXISTS` is a no-op).
+
+### 11.3 Options
+
+| Option | What | Verdict |
+|---|---|---|
+| A. Keep GWP-90's generic pieces, fold the guide step into them | Take release/1.5.0's names and shapes wherever they overlap; add only what the guide needs on top (`stepInput`, `writer`, the context's `outDir`/`runModel`/`exec`, the hooks). | **Chosen.** Matches the brief ("reuse if GWP-90 already added them") and section 0 ("follow GWP-90's shape"). GWP-90 is landed and tested; nothing it ships changes. |
+| B. Keep this branch's pieces and convert GWP-90 to them | Rename the 409 code to `step_requires`, make `output` nullable, drop `storedStepOutput`. | Rejected: changes landed, tested behaviour (409 code, messages, tests, web) for no gain. |
+| C. Re-design the guide writer as a BA task like the changelog | One writer mechanism. | Rejected for this card: a new design of an approved step and a new BA task kind, not a merge. Logged as a follow-up (11.5). |
+
+### 11.4 Resolution, file by file (the builder does the merge)
+
+How: `aom git fetch`, then in the card worktree `git merge --no-ff origin/release/1.5.0` (`aom git merge-main` merges
+`main`, which is already in, so it does not help). If the sandbox refuses the merge, ask DevOps with `aom devops`.
+Resolve as below, `git add`, `git commit --no-edit`.
+
+**Delete** `apps/server/migrations/2840_release_docs_prep_step_output.sql` (this branch). Keep GWP-90's
+`2840_release_docs_prep_output.sql`.
+
+**`packages/shared/src/release/docs-prep.ts`**
+- Keep both step defs. `STEPS = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, COMMIT_STEP]` (orders 10/20/30, commit last).
+- Keep GWP-90's `requires` comment and **only** `missingReleaseDocsPrepRequirement` (singular). Delete
+  `missingReleaseDocsPrepRequirements`.
+
+**`packages/shared/src/release/docs-prep-dto.ts`**
+- Imports: keep both `AgentRuntimeSpecSchema` (with the "read lazily" comment) and `ReleasePrepChangelogPayloadSchema`.
+- Run DTO step `output`: take GWP-90's `output: z.unknown().optional()` with its comment, extended to name both:
+  `/** What the step reports (per step id; 'changelog': ReleaseChangelogOutput, 'guide': ReleaseDocsPrepGuideOutput). */`
+- Payload: keep all three: `stepInput`, `writer`, `changelog`.
+- Result `output`: take GWP-90's comment.
+
+**`packages/shared/src/events/release-docs-prep.ts`**: take GWP-90's side (the comment line).
+
+**`apps/server/src/release/docs-prep.ts`**
+- Imports: both `./docs-prep-steps.ts` (`DOCS_PREP_STEP_HOOKS`, `docsPrepWriter`) and `./docs-prep-changelog.ts`.
+  From `@aom/shared` import `missingReleaseDocsPrepRequirement` only, and `type AgentRuntimeSpec` if needed.
+- `startReleaseDocsPrep`: GWP-90's check, unchanged (409 `release_docs_prep_requires`, `missing.message`).
+- Delete this branch's `stepOutput()` and `OUTPUT_MAX`; `applyReleaseDocsPrepResult` keeps GWP-90's
+  `storedStepOutput(step, r.output, payload.changelog)` (its generic branch is the same 64 KB cap for `guide`).
+- `runDto`: GWP-90's `...(s.output != null ? { output: s.output } : {})`.
+- `advance()`: GWP-90's loop, with the guide hook added after the changelog block and before the send:
+
+```ts
+    const hook = action.phase ? undefined : DOCS_PREP_STEP_HOOKS[action.step];
+    let writer: AgentRuntimeSpec | null = null;
+    if (hook?.needsWriter) {
+      writer = await docsPrepWriter(ctx, tx, run, repo);
+      if (!writer) {
+        // Not dispatched: the step fails here with the reason (Retry or Skip), as for 'changelog' above.
+        await failStepBeforeDispatch(ctx, tx, run, repoId, action.step,
+          `no agent on the workstation that has ${repo.name} can write the release documentation`);
+        failedHere = true;
+        continue;
+      }
+    }
+    const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
+    deliver.push(
+      await sendDocsPrepStepCommand(ctx, tx, run, repo, {
+        step: action.step,
+        ...(action.phase ? { phase: action.phase } : {}),
+        projectKey: project?.key ?? '',
+        commitAs: commitAs ?? null,
+        ...(changelog ? { changelog } : {}),
+        ...(stepInput ? { stepInput } : {}),
+        ...(writer ? { writer } : {}),
+      }),
+    );
+```
+
+  `failStepBeforeDispatch` is a small local helper that appends the `ReleaseDocsPrepStepStarted` +
+  `ReleaseDocsPrepStepFinished(failed)` pair; use it for GWP-90's changelog `fail` branch too (same events, so no
+  behaviour change there). Note the one intended difference from this branch: the no-writer case now uses GWP-90's
+  `failedHere` + `continue` (other repos of the same step are still handled, then one `advance()`), instead of
+  `advance()` + `return` inside the loop. That is GWP-90's rule for a step that fails before dispatch; the run still ends
+  failed with the reason, as the approved behaviour requires.
+- `sendDocsPrepStepCommand`'s `o` gains `stepInput?: ReleaseDocsPrepPayload['stepInput']` and
+  `writer?: ReleaseDocsPrepPayload['writer']`, spread into the payload the same way as `changelog`.
+- `apps/server/src/release/docs-prep-steps.ts` (this branch, no conflict): unchanged. Its `guideCoveredSources` keeps
+  its own "since the last published ship" rule; GWP-90's `coveredSourcesFor` (same base tag) stays for the changelog.
+
+**`apps/runner/src/git/release-docs-prep-steps.ts`**: both imports; this branch's handler type (a failure may carry
+`output`); `DOCS_PREP_STEP_HANDLERS = { changelog: changelogStep, guide: runGuideStep }`.
+
+**`apps/runner/src/git/release-docs-prep.ts`** (`contentStep`): take this branch's side. `output` is declared once,
+right after the handler call; drop GWP-90's second `const output = ...` line (a redeclaration otherwise).
+
+**`apps/web/src/components/delivery/ReleaseDocsPrepTab.tsx`**: import both components and render both lines:
+
+```tsx
+{s.step === 'guide' && s.output != null && <GuideStepOutput output={s.output} />}
+{s.step === 'changelog' && !s.error && (
+  <ChangelogStepOutput repoName={repo.repoName} state={s.state} output={s.output} />
+)}
+```
+
+**`docs/USER-GUIDE.md`** (4.28): keep this branch's first paragraph (the step list naming **Update user guide**), then
+GWP-90's **Write changelog** paragraph unchanged, then this branch's "When it is on..." paragraph (it names the guide
+sections changed or added). No heading changes. Then re-assemble: `node docs/guide/assemble-guide.mjs` so `guide.html`
+matches; run it twice and check the bytes are equal. Do not rebuild the PDF here (not reproducible; still a QA item).
+
+**`packages/shared/src/capabilities/builtin-data.ts`**: take either side, then run `node packages/capabilities/generate.mjs`
+and check that both `user-guide` and `release-notes/steps/step-05-changelog-unattended.md` are in the output.
+
+**Tests**
+- `packages/shared/test/release-docs-prep.test.ts`: merge both: defaults `['analyse','changelog','guide','commit']`;
+  `analyse: false` gives `['changelog','guide','commit']`; `guide: false` gives `['analyse','changelog','commit']`; keep
+  the `builtinPlaybookText('user-guide')` test.
+- `packages/shared/test/release-changelog-merge.test.ts:96,105`: the full list now has `guide`; `changelog: false` gives
+  `['analyse','guide','commit']`. Its `missingReleaseDocsPrepRequirement` cases stay (changelog is first in order).
+- `packages/shared/test/user-guide.test.ts:~295-310`: rewrite to the singular helper:
+  `missingReleaseDocsPrepRequirement([GUIDE_STEP, commit])` is
+  `{ step: 'guide', requires: 'analyse', message: 'Update user guide needs Analyse changes. Turn it on in the project settings.' }`,
+  and `null` with Analyse ticked.
+- `apps/server/test/release-docs-prep.test.ts`: `enable` unticks both:
+  `steps: { changelog: false, guide: false, ...steps }` with a comment naming both; settings list
+  `['analyse','changelog','guide','commit']`; the guide test at ~316 expects code `release_docs_prep_requires` and the
+  message above (rename the test). Keep GWP-90's test at ~428.
+- `apps/server/test/release-docs-prep-changelog-flow.test.ts:81,271`: add `"guide": false` to both settings.
+- `apps/runner/test/release-docs-prep-changelog.test.ts:179,192`: pass `outDir`, `runModel` and `exec` stubs (a tiny
+  `ctxStubs()` helper in the test), or the runner typecheck fails.
+- `e2e/tests/release-docs-prep.spec.ts`: labels `['Analyse changes','Write changelog','Update user guide','Commit results']`;
+  saved steps `{ analyse: true, changelog: true, guide: true, commit: true }`; the runs at ~301 use
+  `{ analyse: true, changelog: false, guide: false, commit: true }` (the mock runner has no writer and no BA task flow).
+- New regression test (server, DB): with `guide` ticked, `changelog` unticked and **no** writer agent on two repos'
+  workstations, the guide step fails in both repos with the "no agent ... can write" error and the run ends failed
+  (covers the moved no-writer path).
+
+**Check after the merge** (unit only, in the foreground, with time limits):
+`pnpm --filter @aom/shared exec vitest run`; runner `vitest run test/release-docs-prep*.test.ts` and the capability /
+playbook tests; web `vitest run src/test/release-docs-prep*.test.tsx`; server DB suites through `aom-env`:
+`test/release-docs-prep.test.ts test/release-docs-prep-changelog-flow.test.ts test/release-docs-prep-changelog.test.ts
+test/release-changelog-parity.test.ts`; typecheck of shared, server, runner and web; biome on the touched files.
+`e2e/tests/release-docs-prep.spec.ts` is for the testers. `grep -rn "<<<<<<<\|>>>>>>>"` must find nothing.
+
+### 11.5 Risks and follow-ups
+
+- **GWP-92 (videos) is in build on the same files.** It will meet the same registry, payload, `advance()` and tab
+  conflicts. Land this card first; GWP-92 then merges release/1.5.0 once and adds a fourth entry the same way.
+- **Two writer mechanisms** (BA task for the changelog, runner headless call for the guide). Both are reviewed and
+  work; unifying them is a design decision of its own. Backlog suggestion filed.
+- A guide-less repository still needs a writer agent on its workstation before it can be skipped (unchanged reviewer
+  follow-up), and the committed PDF was not rebuilt for the 4.28 text (QA item, unchanged).
+- The pre-existing shared failure `release-changelog.test.ts` "splits the real CHANGELOG.md head" may now pass or fail
+  differently because GWP-90 changed `CHANGELOG.md` handling; it is not part of this card. Note the result in the handoff.
+
+### 11.6 Acceptance criteria after the merge
+
+No criterion's design changes; the merge only renames shared pieces.
+
+| AC | Still met by | Merge-specific check |
+|---|---|---|
+| 1 Changed feature updates its section; output names it | runner guide handler + `GuideStepOutput` | output stored through `storedStepOutput`'s 64 KB branch and shown when `!= null` |
+| 2 New feature gets a consistently numbered section | `applyGuideEdits` (shared, untouched by the merge) | none |
+| 3 Headings, numbers, links resolve | `checkGuideUpdate`, TOC parity on the real guide | parity test passes on the merged 4.28 text; `guide.html` re-assembled |
+| 4 Repo without a guide: skipped, step passes | runner handler | none |
+| 5 PDF regenerated and committed with the text | runner handler (exec faked in tests) | none |
+| 6 Step disabled: no guide change | shared + runner tests | defaults list now includes `changelog`; the unticked-guide test keeps `guide` out |
