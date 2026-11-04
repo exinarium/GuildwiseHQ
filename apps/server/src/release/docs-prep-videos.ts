@@ -26,7 +26,11 @@ async function stepReport(tx: Queryable, runId: string, repoId: string, phase: s
  * screen needs its video script written by an agent; until that shift exists on this server, the phase fails naming
  * each new video, so nothing half-done is rendered or committed.
  */
-export async function runVideosAuthorPhase(tx: Queryable, runId: string, repoId: string): Promise<ServerPhaseOutcome> {
+export async function runVideosAuthorPhase(
+  tx: Queryable,
+  runId: string,
+  repoId: string,
+): Promise<ServerPhaseOutcome> {
   const parsed = VideoStepReportSchema.safeParse(await stepReport(tx, runId, repoId, 'plan'));
   if (!parsed.success) return { state: 'failed', error: 'the videos plan of this repository has no report' };
   const needs = parsed.data.needsAuthoring ?? [];
@@ -34,7 +38,10 @@ export async function runVideosAuthorPhase(tx: Queryable, runId: string, repoId:
   return {
     state: 'failed',
     error: `${needs.length} new video(s) need a script: ${needs
-      .map((n) => `${n.slug}: could not write the video script: no agent can be given this task on this server yet`)
+      .map(
+        (n) =>
+          `${n.slug}: could not write the video script: no agent can be given this task on this server yet`,
+      )
       .join('; ')}`,
     report: { authored: [], needed: needs.map((n) => n.slug) },
   };
@@ -53,8 +60,10 @@ export async function videosRenderInput(
 }
 
 /** Server phases by step and phase. */
-export const SERVER_PHASES: Record<string, (tx: Queryable, runId: string, repoId: string) => Promise<ServerPhaseOutcome>> =
-  { 'videos/author': runVideosAuthorPhase };
+export const SERVER_PHASES: Record<
+  string,
+  (tx: Queryable, runId: string, repoId: string) => Promise<ServerPhaseOutcome>
+> = { 'videos/author': runVideosAuthorPhase };
 
 /** Inputs of runner phases that need an earlier phase's report. */
 export const PHASE_INPUTS: Record<

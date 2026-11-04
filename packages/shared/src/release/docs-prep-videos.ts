@@ -43,7 +43,9 @@ export const VideoScreenMapSchema = z.object({
   exclude: Globs,
   videos: z.record(
     z.string(),
-    z.object({ screens: z.array(z.object({ name: z.string().min(1), files: z.array(z.string().min(1)).min(1) })) }),
+    z.object({
+      screens: z.array(z.object({ name: z.string().min(1), files: z.array(z.string().min(1)).min(1) })),
+    }),
   ),
   /** Registered screens that still need a first video. */
   planned: z
@@ -107,7 +109,8 @@ const compile = (globs: readonly string[]) => globs.map(globToRegExp);
 const matches = (res: RegExp[], path: string) => res.some((re) => re.test(path));
 
 /** Whether a path matches any of the screen map's globs (`**`, `*`, `?`). */
-export const videoGlobMatches = (globs: readonly string[], path: string): boolean => matches(compile(globs), path);
+export const videoGlobMatches = (globs: readonly string[], path: string): boolean =>
+  matches(compile(globs), path);
 
 /** `JourneyDesigner.tsx` -> `journey-designer`. */
 export const kebabOfStem = (path: string): string => {
@@ -224,7 +227,8 @@ export function mapChangesToVideos(input: VideoMappingInput): VideoMapping {
   const selected: VideoSelection[] = [...slugs].sort().map((slug) => {
     const reasons: string[] = [];
     for (const p of scripts.get(slug) ?? []) reasons.push(`script changed: ${p}`);
-    for (const [name, ps] of screenHits.get(slug) ?? []) reasons.push(summarise(`screen ${name} changed`, ps, cardsByPath));
+    for (const [name, ps] of screenHits.get(slug) ?? [])
+      reasons.push(summarise(`screen ${name} changed`, ps, cardsByPath));
     const missing = !specs.has(slug);
     if (missing) reasons.push('spec missing');
     return { slug, reasons, ...(missing ? { specMissing: true } : {}) };
@@ -248,7 +252,10 @@ export function libraryVoiceLabel(sidecars: { voice?: unknown }[]): LibraryVoice
   const labels = [...new Set(sidecars.map((s) => (typeof s.voice === 'string' ? s.voice : '(none)')))].sort();
   if (labels.length === 0) return { ok: true, label: null };
   if (labels.length > 1)
-    return { ok: false, error: `voice unavailable: the existing videos use different voices (${labels.join(', ')})` };
+    return {
+      ok: false,
+      error: `voice unavailable: the existing videos use different voices (${labels.join(', ')})`,
+    };
   return { ok: true, label: labels[0] as string };
 }
 
@@ -258,7 +265,11 @@ export interface VoiceProbe {
 }
 
 /** The preflight rule: the voice must be installed and be exactly the voice of the existing videos. */
-export function checkVideoVoice(probe: VoiceProbe, library: LibraryVoice, workstation: string): string | null {
+export function checkVideoVoice(
+  probe: VoiceProbe,
+  library: LibraryVoice,
+  workstation: string,
+): string | null {
   if (!library.ok) return library.error;
   if (!probe.available)
     return `voice unavailable: ${probe.label} is not installed on ${workstation} (run e2e/video/setup-voice.sh; ask DevOps)`;
@@ -294,7 +305,14 @@ export const VideoStepReportSchema = z.object({
   unmapped: z.array(z.string()).default([]),
   ignoredCount: z.number().default(0),
   needsAuthoring: z
-    .array(z.object({ slug: z.string(), title: z.string(), pages: z.array(z.string()), reasons: z.array(z.string()) }))
+    .array(
+      z.object({
+        slug: z.string(),
+        title: z.string(),
+        pages: z.array(z.string()),
+        reasons: z.array(z.string()),
+      }),
+    )
     .optional(),
   /** How many shared or unmapped paths were cut from the lists. */
   more: z.object({ shared: z.number(), unmapped: z.number() }).optional(),

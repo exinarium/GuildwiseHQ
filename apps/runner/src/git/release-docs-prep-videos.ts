@@ -29,7 +29,11 @@ import {
   videoGlobMatches,
 } from '@aom/shared';
 import { git } from './git.ts';
-import type { DocsPrepStepContext, DocsPrepStepOutcome, DocsPrepStepSpec } from './release-docs-prep-steps.ts';
+import type {
+  DocsPrepStepContext,
+  DocsPrepStepOutcome,
+  DocsPrepStepSpec,
+} from './release-docs-prep-steps.ts';
 
 /**
  * Release prep 'Generate videos'. `plan` (under the repository lock, short): the voice and ffmpeg preflight, the mapping
@@ -73,9 +77,17 @@ interface Ran {
 }
 
 /** Runs a command with a time limit, keeping the combined output (its tail is what a failure reports). */
-function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs: number }): Promise<Ran> {
+function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+): Promise<Ran> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let out = '';
     const keep = (d: Buffer) => {
       out = (out + d.toString()).slice(-200_000);
@@ -97,7 +109,8 @@ function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.Proc
   });
 }
 
-export const tailOf = (out: string): string => out.trim().split('\n').slice(-TAIL_LINES).join('\n').slice(-TAIL_CHARS);
+export const tailOf = (out: string): string =>
+  out.trim().split('\n').slice(-TAIL_LINES).join('\n').slice(-TAIL_CHARS);
 
 async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, 'utf8'));
@@ -120,7 +133,9 @@ async function rendersOf(wt: string): Promise<VideoRenders> {
 async function sidecars(wt: string): Promise<{ voice?: unknown }[]> {
   const dir = join(wt, VIDEO_OUT_DIR);
   if (!existsSync(dir)) return [];
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.json') && f !== 'manifest.json' && !f.startsWith('.'));
+  const files = (await readdir(dir)).filter(
+    (f) => f.endsWith('.json') && f !== 'manifest.json' && !f.startsWith('.'),
+  );
   const out: { voice?: unknown }[] = [];
   for (const f of files) {
     const j = await readJson(join(dir, f)).catch(() => null);
@@ -142,8 +157,12 @@ async function probe(wt: string): Promise<VoiceProbe & { ffmpeg: string | null }
     `let ff = null; try { const f = await import(${JSON.stringify(`file://${ffmpeg}`)}); await f.findFfmpeg(); } catch (e) { ff = String(e && e.message || e); }`,
     'process.stdout.write(JSON.stringify({ available: !!(await v.voiceAvailable()), label: v.VOICE_LABEL, ffmpeg: ff }));',
   ].join('\n');
-  const r = await run(process.execPath, ['--input-type=module', '-e', script], { cwd: wt, timeoutMs: 60_000 });
-  if (r.code !== 0) return { available: false, label: '(unknown voice)', ffmpeg: null, ...{ probeError: tailOf(r.out) } };
+  const r = await run(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: wt,
+    timeoutMs: 60_000,
+  });
+  if (r.code !== 0)
+    return { available: false, label: '(unknown voice)', ffmpeg: null, ...{ probeError: tailOf(r.out) } };
   const last = r.out.trim().split('\n').pop() ?? '{}';
   return JSON.parse(last);
 }
@@ -169,7 +188,10 @@ async function changesOf(repoPath: string, base: string, head: string): Promise<
       out.push({ path: t[i + 2] as string, oldPath: t[i + 1] as string, status: 'R' });
       i += 3;
     } else {
-      out.push({ path: t[i + 1] as string, status: (code === 'A' || code === 'D' ? code : 'M') as VideoChange['status'] });
+      out.push({
+        path: t[i + 1] as string,
+        status: (code === 'A' || code === 'D' ? code : 'M') as VideoChange['status'],
+      });
       i += 2;
     }
   }
@@ -185,7 +207,10 @@ async function cardsByPath(repoPath: string, base: string, head: string): Promis
     const [body = '', names = ''] = entry.split('\x1f');
     const keys = body.match(KEY_RE) ?? [];
     if (keys.length === 0) continue;
-    for (const path of names.split('\n').map((s) => s.trim()).filter(Boolean)) {
+    for (const path of names
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)) {
       const set = out[path] ?? new Set<string>();
       for (const k of keys) set.add(k);
       out[path] = set;
@@ -211,7 +236,9 @@ export async function inputsHash(
     });
   const globs = (map.videos[slug]?.screens ?? []).flatMap((s) => s.files);
   const own = new Set([`e2e/video/${slug}.spec.ts`, `e2e/video/narration/${slug}.ts`, ...HARNESS_FILES]);
-  const picked = tree.filter(([path]) => own.has(path) || videoGlobMatches(globs, path)).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const picked = tree
+    .filter(([path]) => own.has(path) || videoGlobMatches(globs, path))
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
   const h = createHash('sha256');
   for (const [path, blob] of picked) h.update(`${path} ${blob}\n`);
   h.update(`voice ${voice}\n`);
@@ -235,7 +262,8 @@ const noHarness = (): DocsPrepStepOutcome => ({
   report: { harness: false, videos: [], shared: [], unmapped: [], ignoredCount: 0 },
 });
 
-const report = (r: VideoStepReport): Record<string, unknown> => capVideoReport(r) as unknown as Record<string, unknown>;
+const report = (r: VideoStepReport): Record<string, unknown> =>
+  capVideoReport(r) as unknown as Record<string, unknown>;
 
 // ------------------------------------------------------------------------------------------------------------- plan
 
@@ -275,7 +303,13 @@ async function plan(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
   const videos: VideoReportEntry[] = [];
   for (const s of mapping.selected) {
     if (s.specMissing) {
-      videos.push({ slug: s.slug, action: 'regenerate', reasons: s.reasons, state: 'failed', error: 'spec missing' });
+      videos.push({
+        slug: s.slug,
+        action: 'regenerate',
+        reasons: s.reasons,
+        state: 'failed',
+        error: 'spec missing',
+      });
       continue;
     }
     const inputs = await inputsHash(ctx.repoPath, head, map, s.slug, pre.voice);
@@ -284,7 +318,10 @@ async function plan(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
       videos.push({
         slug: s.slug,
         action: 'up_to_date',
-        reasons: [...s.reasons, `already rendered for this release (inputs unchanged since ${done.sourceSha.slice(0, 12)})`],
+        reasons: [
+          ...s.reasons,
+          `already rendered for this release (inputs unchanged since ${done.sourceSha.slice(0, 12)})`,
+        ],
         state: 'skipped',
       });
     else videos.push({ slug: s.slug, action: 'regenerate', reasons: s.reasons, state: 'pending' });
@@ -378,7 +415,8 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
 
   // A new video is rendered only once its spec was written by the author phase.
   const todo = videos.filter(
-    (v) => v.state === 'pending' && (v.action === 'regenerate' || (v.action === 'create' && authored.has(v.slug))),
+    (v) =>
+      v.state === 'pending' && (v.action === 'regenerate' || (v.action === 'create' && authored.has(v.slug))),
   );
   for (const v of videos)
     if (v.state === 'pending' && v.action === 'create' && !authored.has(v.slug)) {
@@ -399,7 +437,10 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
     }
   }
 
-  const stageRoot = join(tmpdir(), `aom-prep-video-${ctx.payload.runId.slice(0, 8)}-${ctx.payload.repoId.slice(0, 8)}`);
+  const stageRoot = join(
+    tmpdir(),
+    `aom-prep-video-${ctx.payload.runId.slice(0, 8)}-${ctx.payload.repoId.slice(0, 8)}`,
+  );
   const db = `aom_prep_video_${ctx.payload.runId.replace(/-/g, '').slice(0, 8)}`;
   const renders = await rendersOf(ctx.worktree);
   const files: string[] = [];

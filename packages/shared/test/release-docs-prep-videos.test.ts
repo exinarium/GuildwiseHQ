@@ -8,8 +8,8 @@ import {
   libraryVoiceLabel,
   mapChangesToVideos,
   nextReleaseDocsPrepAction,
-  stepPhaseIndex,
   releaseDocsPrepSteps,
+  stepPhaseIndex,
   stepPhases,
   type VideoChange,
   type VideoScreenMap,
@@ -24,11 +24,16 @@ const map: VideoScreenMap = VideoScreenMapSchema.parse({
   exclude: ['apps/web/src/pages/Login.tsx'],
   videos: {
     backlog: {
-      screens: [{ name: 'Backlog', files: ['apps/web/src/pages/Backlog.tsx', 'apps/web/src/components/backlog/**'] }],
+      screens: [
+        { name: 'Backlog', files: ['apps/web/src/pages/Backlog.tsx', 'apps/web/src/components/backlog/**'] },
+      ],
     },
     releases: {
       screens: [
-        { name: 'Releases', files: ['apps/web/src/pages/Releases.tsx', 'apps/web/src/components/delivery/**'] },
+        {
+          name: 'Releases',
+          files: ['apps/web/src/pages/Releases.tsx', 'apps/web/src/components/delivery/**'],
+        },
       ],
     },
     overview: {
@@ -83,7 +88,9 @@ describe('planner with phases', () => {
     const r = nextReleaseDocsPrepAction({
       status: 'running',
       steps,
-      repos: [{ repoId: 'a', state: 'running', steps: [done, { step: 'videos', phase: 'plan', state: 'passed' }] }],
+      repos: [
+        { repoId: 'a', state: 'running', steps: [done, { step: 'videos', phase: 'plan', state: 'passed' }] },
+      ],
     });
     expect(r).toEqual({ kind: 'dispatch', step: 'videos', phase: 'author', repoIds: ['a'], by: 'server' });
   });
@@ -149,7 +156,13 @@ describe('planner with phases', () => {
         },
       ],
     });
-    expect(r).toEqual({ kind: 'finish', status: 'failed', step: 'videos', repoId: 'a', error: 'voice unavailable: x' });
+    expect(r).toEqual({
+      kind: 'finish',
+      status: 'failed',
+      step: 'videos',
+      repoId: 'a',
+      error: 'voice unavailable: x',
+    });
   });
 });
 
@@ -157,13 +170,15 @@ describe('mapChangesToVideos', () => {
   it('a changed screen selects every video that lists it, with the reason and card keys', () => {
     const r = run([M('apps/web/src/pages/Backlog.tsx')], { 'apps/web/src/pages/Backlog.tsx': ['GWP-12'] });
     expect(r.selected.map((s) => s.slug)).toEqual(['backlog', 'overview']);
-    expect(r.selected[0]?.reasons).toEqual(['screen Backlog changed: apps/web/src/pages/Backlog.tsx (GWP-12)']);
+    expect(r.selected[0]?.reasons).toEqual([
+      'screen Backlog changed: apps/web/src/pages/Backlog.tsx (GWP-12)',
+    ]);
     expect(r.newVideos).toEqual([]);
   });
   it('a component folder of a screen selects its video only', () => {
-    expect(run([M('apps/web/src/components/delivery/ReleaseDocsPrepTab.tsx')]).selected.map((s) => s.slug)).toEqual([
-      'releases',
-    ]);
+    expect(
+      run([M('apps/web/src/components/delivery/ReleaseDocsPrepTab.tsx')]).selected.map((s) => s.slug),
+    ).toEqual(['releases']);
   });
   it('a server or docs change selects nothing and is only counted', () => {
     const r = run([M('apps/server/src/app.ts'), M('docs/USER-GUIDE.md')]);
@@ -173,7 +188,10 @@ describe('mapChangesToVideos', () => {
   it('shared UI selects nothing and is listed', () => {
     const r = run([M('apps/web/src/components/shell/Sidebar.tsx'), M('apps/web/src/pages/Backlog.test.tsx')]);
     expect(r.selected).toEqual([]);
-    expect(r.shared).toEqual(['apps/web/src/components/shell/Sidebar.tsx', 'apps/web/src/pages/Backlog.test.tsx']);
+    expect(r.shared).toEqual([
+      'apps/web/src/components/shell/Sidebar.tsx',
+      'apps/web/src/pages/Backlog.test.tsx',
+    ]);
   });
   it('a changed spec or narration selects its slug', () => {
     const r = run([M('e2e/video/narration/releases.ts'), M('e2e/video/backlog.spec.ts')]);
@@ -208,7 +226,11 @@ describe('mapChangesToVideos', () => {
     expect(run(paths).selected[0]?.reasons[0]).toMatch(/and 2 more$/);
   });
   it('a selected video without its spec is marked missing', () => {
-    const r = mapChangesToVideos({ changes: [M('apps/web/src/pages/Releases.tsx')], map, specs: ['backlog'] });
+    const r = mapChangesToVideos({
+      changes: [M('apps/web/src/pages/Releases.tsx')],
+      map,
+      specs: ['backlog'],
+    });
     expect(r.selected[0]).toMatchObject({ slug: 'releases', specMissing: true });
   });
   it('kebab-cases a file stem', () => {
@@ -226,7 +248,9 @@ describe('the voice check', () => {
   it('fails when the existing videos disagree', () => {
     const l = libraryVoiceLabel([{ voice: 'Kokoro af_heart' }, { voice: 'Piper en_GB-cori-high' }]);
     expect(l.ok).toBe(false);
-    expect(checkVideoVoice({ available: true, label: 'Kokoro af_heart' }, l, 'ws')).toMatch(/^voice unavailable: /);
+    expect(checkVideoVoice({ available: true, label: 'Kokoro af_heart' }, l, 'ws')).toMatch(
+      /^voice unavailable: /,
+    );
   });
   it('fails when the voice is not installed', () => {
     expect(checkVideoVoice({ available: false, label: 'Kokoro af_heart' }, lib, 'ws1')).toBe(

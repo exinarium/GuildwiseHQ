@@ -414,7 +414,12 @@ async function finishInline(
   const base = { runId: run.id as string, repoId, step, ...(phase ? { phase } : {}) };
   await ctx.store.append(
     [
-      { streamId: streamId.releaseDocsPrep(run.id), event: { type: 'ReleaseDocsPrepStepStarted', payload: base }, actor, scope },
+      {
+        streamId: streamId.releaseDocsPrep(run.id),
+        event: { type: 'ReleaseDocsPrepStepStarted', payload: base },
+        actor,
+        scope,
+      },
       {
         streamId: streamId.releaseDocsPrep(run.id),
         event: {

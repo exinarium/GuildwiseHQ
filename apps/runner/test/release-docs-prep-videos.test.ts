@@ -89,7 +89,8 @@ const run = (s: Setup, over: Partial<ReleaseDocsPrepPayload> = {}): Promise<Rele
   });
 
 type Videos = { slug: string; action: string; state: string; reasons: string[]; error?: string }[];
-const videosOf = (r: ReleaseDocsPrepResult): Videos => (r.report as { videos: Videos } | undefined)?.videos ?? [];
+const videosOf = (r: ReleaseDocsPrepResult): Videos =>
+  (r.report as { videos: Videos } | undefined)?.videos ?? [];
 
 /** A fake recorder: writes the four files into AOM_VIDEO_OUT (voice from FAKE_VOICE), fails for FAKE_FAIL, counts runs. */
 function fakeRecorder(dir: string): { cmd: string; count: string } {
@@ -131,7 +132,9 @@ async function planAndRender(s: Setup, authored: string[] = []) {
   return { plan, render };
 }
 const workTree = (s: Setup) =>
-  sh(s.repo.clone, 'git', ['ls-tree', '-r', '--name-only', `refs/guildwise/docs-prep/${RUN}/work`]).split('\n');
+  sh(s.repo.clone, 'git', ['ls-tree', '-r', '--name-only', `refs/guildwise/docs-prep/${RUN}/work`]).split(
+    '\n',
+  );
 
 describe('release.docs_prep videos: plan', () => {
   it('selects exactly the videos that show a changed screen, with the reason and card key', async () => {
@@ -139,7 +142,9 @@ describe('release.docs_prep videos: plan', () => {
     const r = await run(s);
     expect(r.state).toBe('passed');
     expect(videosOf(r).map((v) => [v.slug, v.action])).toEqual([['backlog', 'regenerate']]);
-    expect(videosOf(r)[0]?.reasons.join(' ')).toContain('screen Backlog changed: apps/web/src/pages/Backlog.tsx (GWP-12)');
+    expect(videosOf(r)[0]?.reasons.join(' ')).toContain(
+      'screen Backlog changed: apps/web/src/pages/Backlog.tsx (GWP-12)',
+    );
     expect((r.report as { rule?: string }).rule).toBeTruthy();
     expect((r.report as { voice?: string }).voice).toBe(VOICE);
   });
@@ -179,7 +184,11 @@ describe('release.docs_prep videos: plan', () => {
   });
 
   it("fails with 'voice unavailable' when the workstation selects another voice", async () => {
-    process.env.AOM_PREP_VIDEO_PROBE = JSON.stringify({ available: true, label: 'Piper en_GB-cori-high', ffmpeg: null });
+    process.env.AOM_PREP_VIDEO_PROBE = JSON.stringify({
+      available: true,
+      label: 'Piper en_GB-cori-high',
+      ffmpeg: null,
+    });
     const s = setup({ 'apps/web/src/pages/Backlog.tsx': 'v2\n' });
     const r = await run(s);
     expect(r.state).toBe('failed');
@@ -187,7 +196,11 @@ describe('release.docs_prep videos: plan', () => {
   });
 
   it('fails when ffmpeg is missing', async () => {
-    process.env.AOM_PREP_VIDEO_PROBE = JSON.stringify({ available: true, label: VOICE, ffmpeg: 'no ffmpeg found' });
+    process.env.AOM_PREP_VIDEO_PROBE = JSON.stringify({
+      available: true,
+      label: VOICE,
+      ffmpeg: 'no ffmpeg found',
+    });
     const s = setup({ 'apps/web/src/pages/Backlog.tsx': 'v2\n' });
     const r = await run(s);
     expect(r.error).toBe('ffmpeg unavailable: no ffmpeg found');
@@ -215,7 +228,9 @@ describe('release.docs_prep videos: render', () => {
     expect(tree).toContain('e2e/video/renders.json');
     expect(tree).not.toContain('media/videos/releases.webm');
     // nothing pushed
-    expect(sh(s.repo.origin, 'git', ['ls-tree', '-r', '--name-only', 'release/1.4.0'])).not.toContain('backlog.webm');
+    expect(sh(s.repo.origin, 'git', ['ls-tree', '-r', '--name-only', 'release/1.4.0'])).not.toContain(
+      'backlog.webm',
+    );
     // the render worktree is gone
     expect(sh(s.repo.clone, 'git', ['worktree', 'list'])).not.toContain('docs-prep-');
   });
@@ -270,7 +285,11 @@ describe('release.docs_prep videos: render', () => {
     const s = setup({ 'apps/web/src/pages/Backlog.tsx': 'v2\n' });
     const plan = await run(s);
     await run(s, { phase: 'render', input: { plan: plan.report, authored: [] } });
-    const again = await run(s, { runId: '019e3f6a-7b1c-7a2d-8c3e-0123456789e2', phase: 'render', input: { plan: plan.report, authored: [] } });
+    const again = await run(s, {
+      runId: '019e3f6a-7b1c-7a2d-8c3e-0123456789e2',
+      phase: 'render',
+      input: { plan: plan.report, authored: [] },
+    });
     expect(again.state).toBe('passed');
     expect(runs(f.count)).toEqual(['backlog']);
     expect(videosOf(again)[0]?.action).toBe('reused');

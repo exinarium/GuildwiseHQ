@@ -172,9 +172,9 @@ describe('Release prep (docs and videos) settings', () => {
         })
       ).status,
     ).toBe(404);
-    expect(
-      (await owner('PUT', `${base()}/settings`, { enabled: true, steps: { nope: true } })).status,
-    ).toBe(400);
+    expect((await owner('PUT', `${base()}/settings`, { enabled: true, steps: { nope: true } })).status).toBe(
+      400,
+    );
     const before = await events('ReleaseDocsPrepSettingsSet');
     expect((await enable({ analyse: false })).status).toBe(200);
     expect(await events('ReleaseDocsPrepSettingsSet')).toBe(before + 1);
@@ -535,11 +535,26 @@ describe('Generate videos step', () => {
     state: 'passed',
     files: [],
     notices: [],
-    report: { harness: true, rule: 'rule', voice: 'Kokoro af_heart', videos, shared: [], unmapped: [], ignoredCount: 0, needsAuthoring },
+    report: {
+      harness: true,
+      rule: 'rule',
+      voice: 'Kokoro af_heart',
+      videos,
+      shared: [],
+      unmapped: [],
+      ignoredCount: 0,
+      needsAuthoring,
+    },
   });
-  const regen = { slug: 'backlog', action: 'regenerate', reasons: ['screen Backlog changed: x'], state: 'pending' };
+  const regen = {
+    slug: 'backlog',
+    action: 'regenerate',
+    reasons: ['screen Backlog changed: x'],
+    state: 'pending',
+  };
   const tag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
-  const stepRows = () => q2(`SELECT step, phase, state, error, report FROM release_docs_prep_steps ORDER BY step, phase`);
+  const stepRows = () =>
+    q2(`SELECT step, phase, state, error, report FROM release_docs_prep_steps ORDER BY step, phase`);
 
   it('is off by default even with prep on', async () => {
     await enable();
@@ -585,7 +600,14 @@ describe('Generate videos step', () => {
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
-    await answer({ ok: true, state: 'skipped', error: 'skipped: no videos', files: [], notices: [], report: { harness: false } });
+    await answer({
+      ok: true,
+      state: 'skipped',
+      error: 'skipped: no videos',
+      files: [],
+      notices: [],
+      report: { harness: false },
+    });
     expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan', 'commit:prepare']);
     const rows = (await stepRows()).filter((r: any) => r.step === 'videos');
     expect(rows.map((r: any) => [r.phase, r.state, r.error])).toEqual([
