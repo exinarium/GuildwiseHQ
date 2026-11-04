@@ -8,7 +8,13 @@ import { declaredServices, TEST_SERVICES_SETTING } from './test-services.ts';
 
 export type CheckResult = { ok: boolean; skipped?: string; detail: string; fix?: string };
 export type Check = { name: string; target: string; run: () => Promise<CheckResult> };
-export type Line = { name: string; target: string; status: 'ready' | 'NOT READY' | 'skipped'; detail: string; fix?: string };
+export type Line = {
+  name: string;
+  target: string;
+  status: 'ready' | 'NOT READY' | 'skipped';
+  detail: string;
+  fix?: string;
+};
 
 const withTimeout = <T>(p: Promise<T>, ms = 3000): Promise<T> =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timed out')), ms))]);
@@ -46,7 +52,8 @@ const devops = 'ask DevOps (aom devops "<what is down>")';
 
 export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {}): Check[] {
   const hostedPort = Number(new URL(HOSTED_URL).port || 80);
-  const hostedHost = new URL(HOSTED_URL).hostname === 'localhost' ? '127.0.0.1' : new URL(HOSTED_URL).hostname;
+  const hostedHost =
+    new URL(HOSTED_URL).hostname === 'localhost' ? '127.0.0.1' : new URL(HOSTED_URL).hostname;
   const need = [5433, 8025, 1025, ...(opts.noHosted ? [] : [hostedPort])];
   const checks: Check[] = [
     {
@@ -64,7 +71,10 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
       run: async () => {
         const missing = ['@playwright/test', 'pg'].filter((m) => {
           try {
-            execFileSync('node', ['-e', `require.resolve('${m}')`], { cwd: join(ROOT, 'e2e'), stdio: 'ignore' });
+            execFileSync('node', ['-e', `require.resolve('${m}')`], {
+              cwd: join(ROOT, 'e2e'),
+              stdio: 'ignore',
+            });
             return false;
           } catch {
             return true;
@@ -81,9 +91,11 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
       name: 'build',
       target: 'server, runner, web dist',
       run: async () => {
-        const missing = ['apps/server/dist/main.mjs', 'apps/runner/dist/aom-runner.mjs', 'apps/web/dist/index.html'].filter(
-          (f) => !existsSync(join(ROOT, f)),
-        );
+        const missing = [
+          'apps/server/dist/main.mjs',
+          'apps/runner/dist/aom-runner.mjs',
+          'apps/web/dist/index.html',
+        ].filter((f) => !existsSync(join(ROOT, f)));
         return {
           ok: missing.length === 0,
           detail: missing.length ? `missing: ${missing.join(', ')}` : 'built',
@@ -95,7 +107,11 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
       name: 'scratch',
       target: `${E2E_DIR}, ${RESULTS_DIR}`,
       run: async () => {
-        const dirs = [E2E_DIR, RESULTS_DIR, ...(process.env.AOM_AGENT_TMP_ROOT ? [process.env.AOM_AGENT_TMP_ROOT] : [])];
+        const dirs = [
+          E2E_DIR,
+          RESULTS_DIR,
+          ...(process.env.AOM_AGENT_TMP_ROOT ? [process.env.AOM_AGENT_TMP_ROOT] : []),
+        ];
         const bad: string[] = [];
         for (const d of dirs) {
           try {
@@ -143,7 +159,11 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
           await c.query('SELECT 1');
           return { ok: true, detail: 'SELECT 1 answered' };
         } catch (e) {
-          return { ok: false, detail: String((e as Error).message), fix: `${devops} to start the dev Postgres on 5433` };
+          return {
+            ok: false,
+            detail: String((e as Error).message),
+            fix: `${devops} to start the dev Postgres on 5433`,
+          };
         } finally {
           await c.end().catch(() => {});
         }
@@ -194,7 +214,11 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
           }),
         },
     opts.noHosted
-      ? { name: 'tls proxy', target: `127.0.0.1:${TLS_PORT}`, run: async () => ({ ok: true, skipped: '--no-hosted', detail: 'skipped' }) }
+      ? {
+          name: 'tls proxy',
+          target: `127.0.0.1:${TLS_PORT}`,
+          run: async () => ({ ok: true, skipped: '--no-hosted', detail: 'skipped' }),
+        }
       : {
           name: 'tls proxy',
           target: `127.0.0.1:${TLS_PORT}`,
@@ -214,12 +238,20 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
                       .on('error', () => resolve(false));
                   });
                 });
-                return { ok, detail: `https://localhost:${TLS_PORT}/api/health over TLS`, fix: `needs the hosted build up (${devops}) and openssl` };
+                return {
+                  ok,
+                  detail: `https://localhost:${TLS_PORT}/api/health over TLS`,
+                  fix: `needs the hosted build up (${devops}) and openssl`,
+                };
               } finally {
                 await p.close();
               }
             } catch (e) {
-              return { ok: false, detail: (e as Error).message, fix: `port ${TLS_PORT} must be free and not declared; openssl must be installed` };
+              return {
+                ok: false,
+                detail: (e as Error).message,
+                fix: `port ${TLS_PORT} must be free and not declared; openssl must be installed`,
+              };
             }
           },
         },
@@ -238,17 +270,29 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
           target: 'docker daemon, registry:2, alpine:3.20',
           run: async () => {
             try {
-              execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: 'ignore', timeout: 5000 });
-              const imgs = execFileSync('docker', ['image', 'ls', '--format', '{{.Repository}}:{{.Tag}}'], { encoding: 'utf8' });
+              execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+                stdio: 'ignore',
+                timeout: 5000,
+              });
+              const imgs = execFileSync('docker', ['image', 'ls', '--format', '{{.Repository}}:{{.Tag}}'], {
+                encoding: 'utf8',
+              });
               const miss = ['registry:2'].filter((i) => !imgs.includes(i));
-              if (!imgs.includes('alpine:3.20') && !imgs.includes('aom-test-sshd:1')) miss.push('alpine:3.20');
+              if (!imgs.includes('alpine:3.20') && !imgs.includes('aom-test-sshd:1'))
+                miss.push('alpine:3.20');
               return {
                 ok: miss.length === 0,
-                detail: miss.length ? `images missing: ${miss.join(', ')}` : 'daemon reachable, images present',
+                detail: miss.length
+                  ? `images missing: ${miss.join(', ')}`
+                  : 'daemon reachable, images present',
                 fix: `${devops} to pull the missing images`,
               };
             } catch {
-              return { ok: false, detail: 'docker daemon not reachable', fix: `${devops} to run pnpm -C e2e docker outside the sandbox` };
+              return {
+                ok: false,
+                detail: 'docker daemon not reachable',
+                fix: `${devops} to run pnpm -C e2e docker outside the sandbox`,
+              };
             }
           },
         },
@@ -257,6 +301,7 @@ export function buildChecks(opts: { noDocker?: boolean; noHosted?: boolean } = {
 }
 
 import { readFileSync } from 'node:fs';
+
 const readCa = (p: string) => readFileSync(p);
 
 export async function runChecks(checks: Check[]): Promise<Line[]> {
@@ -294,7 +339,10 @@ export const exitCodeOf = (lines: Line[]): number => (lines.some((l) => l.status
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const lines = await runChecks(
-    buildChecks({ noDocker: process.argv.includes('--no-docker'), noHosted: process.argv.includes('--no-hosted') }),
+    buildChecks({
+      noDocker: process.argv.includes('--no-docker'),
+      noHosted: process.argv.includes('--no-hosted'),
+    }),
   );
   if (process.argv.includes('--json')) console.log(JSON.stringify(lines, null, 2));
   else console.log(formatReport(lines));

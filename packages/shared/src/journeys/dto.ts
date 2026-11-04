@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { JourneyDefinitionSchema } from './schema.ts';
 import { JourneyRecordInputSchema, JourneyReferenceInputSchema } from './record.ts';
+import { JourneyDefinitionSchema } from './schema.ts';
 
 export const JOURNEY_INSTANCE_STATUSES = ['running', 'waiting', 'stuck', 'completed', 'cancelled'] as const;
 export const JourneyInstanceStatusSchema = z.enum(JOURNEY_INSTANCE_STATUSES);

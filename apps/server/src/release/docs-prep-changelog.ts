@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   checkChangelog,
   RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
@@ -8,7 +9,6 @@ import {
   ReleasePrepChangelogPayloadSchema,
   streamId,
 } from '@aom/shared';
-import { randomUUID } from 'node:crypto';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';

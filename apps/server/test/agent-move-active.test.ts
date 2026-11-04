@@ -269,9 +269,8 @@ describe('held claims on the paths that release nothing', () => {
     await expect(
       checkAgentMove(ctx, ctx.pool, { userId: w.owner.id }, row, rq, { releaseHeldClaims: true }),
     ).resolves.toBeTruthy();
-    await q(
-      `UPDATE cards SET claim_id=NULL, claimed_by_agent_id=NULL, status='queued' WHERE id=$1`,
-      [card.id],
-    );
+    await q(`UPDATE cards SET claim_id=NULL, claimed_by_agent_id=NULL, status='queued' WHERE id=$1`, [
+      card.id,
+    ]);
   });
 });

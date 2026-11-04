@@ -32,13 +32,24 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
     return (
       <div className="mt-2 flex flex-col gap-3" data-testid="journey-gate-desk-item">
         {link && <p className="text-sm text-muted">{link} to look at the record first, or decide here.</p>}
-        <TextArea label="Note (required to reject)" rows={2} value={note} onChange={(e) => setNote(e.target.value)} data-testid="journey-gate-note" />
+        <TextArea
+          label="Note (required to reject)"
+          rows={2}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          data-testid="journey-gate-note"
+        />
         <div className="sticky-actions flex flex-wrap gap-2 max-md:[&>button]:flex-1">
           <Button
             loading={decide.isPending}
             disabled={busy}
             data-testid="journey-gate-approve"
-            onClick={() => decide.mutate({ waitId, decision: 'approved', ...(note.trim() ? { note: note.trim() } : {}) }, { onError: fail })}
+            onClick={() =>
+              decide.mutate(
+                { waitId, decision: 'approved', ...(note.trim() ? { note: note.trim() } : {}) },
+                { onError: fail },
+              )
+            }
           >
             Approve
           </Button>
@@ -46,7 +57,9 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
             variant="danger"
             disabled={busy || !note.trim()}
             data-testid="journey-gate-reject"
-            onClick={() => decide.mutate({ waitId, decision: 'rejected', note: note.trim() }, { onError: fail })}
+            onClick={() =>
+              decide.mutate({ waitId, decision: 'rejected', note: note.trim() }, { onError: fail })
+            }
           >
             Reject
           </Button>
@@ -63,16 +76,30 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
             variant="secondary"
             disabled={busy}
             data-testid="journey-wait-extend"
-            onClick={() => act.mutate({ waitId, action: 'extend', body: { duration: { amount: 1, unit: 'days' } } }, { onError: fail })}
+            onClick={() =>
+              act.mutate(
+                { waitId, action: 'extend', body: { duration: { amount: 1, unit: 'days' } } },
+                { onError: fail },
+              )
+            }
           >
             Wait 1 more day
           </Button>
           {data.waitKind !== 'gate' && (
-            <Button disabled={busy} data-testid="journey-wait-continue" onClick={() => act.mutate({ waitId, action: 'continue' }, { onError: fail })}>
+            <Button
+              disabled={busy}
+              data-testid="journey-wait-continue"
+              onClick={() => act.mutate({ waitId, action: 'continue' }, { onError: fail })}
+            >
               Continue the journey
             </Button>
           )}
-          <Button variant="danger" disabled={busy} data-testid="journey-wait-cancel" onClick={() => act.mutate({ waitId, action: 'cancel' }, { onError: fail })}>
+          <Button
+            variant="danger"
+            disabled={busy}
+            data-testid="journey-wait-cancel"
+            onClick={() => act.mutate({ waitId, action: 'cancel' }, { onError: fail })}
+          >
             Cancel the journey
           </Button>
         </div>
@@ -83,7 +110,12 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
     <div className="mt-2 flex flex-col gap-3" data-testid="journey-link-desk-item">
       {link && <p className="text-sm text-muted">{link} to copy the client's personal link.</p>}
       <div className="sticky-actions flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-        <Button variant="secondary" disabled={busy} data-testid="journey-link-resend" onClick={() => act.mutate({ waitId, action: 'resend-link' }, { onError: fail })}>
+        <Button
+          variant="secondary"
+          disabled={busy}
+          data-testid="journey-link-resend"
+          onClick={() => act.mutate({ waitId, action: 'resend-link' }, { onError: fail })}
+        >
           Make a new link
         </Button>
       </div>

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CreateJourneyBody,
-  getJourneyTemplate,
   getJourneyStep,
+  getJourneyTemplate,
   type JourneyDefinition,
   JourneyDefinitionSchema,
   type JourneyReferenceInput,
@@ -42,10 +42,15 @@ async function validationFor(db: Queryable, project: Row, def: JourneyDefinition
 }
 
 function assertAuthor(project: Row): void {
-  if (project.my_role !== 'owner') throw forbidden('only the project owner and the organization Owner and Admins can edit journeys');
+  if (project.my_role !== 'owner')
+    throw forbidden('only the project owner and the organization Owner and Admins can edit journeys');
 }
 
-async function loadJourney(db: Queryable, userId: string, id: string): Promise<{ journey: Row; project: Row }> {
+async function loadJourney(
+  db: Queryable,
+  userId: string,
+  id: string,
+): Promise<{ journey: Row; project: Row }> {
   const journey = await one(db, 'SELECT * FROM journeys WHERE id=$1', [id]);
   if (!journey) throw notFound('journey not found');
   const project = await loadVisibleProject(db, userId, journey.project_id);
@@ -107,14 +112,29 @@ export async function createJourney(ctx: Ctx, who: Who, body: CreateJourneyBody)
   return { id, version: 1, validation: await validationFor(ctx.pool, project, def) };
 }
 
-const savedEvent = (id: string, project: Row, def: JourneyDefinition, version: number, by: string): AppendInput => ({
+const savedEvent = (
+  id: string,
+  project: Row,
+  def: JourneyDefinition,
+  version: number,
+  by: string,
+): AppendInput => ({
   streamId: streamId.journey(id),
-  event: { type: 'JourneySaved', payload: { journeyId: id, orgId: project.org_id, projectId: project.id, version, definition: def, by } },
+  event: {
+    type: 'JourneySaved',
+    payload: { journeyId: id, orgId: project.org_id, projectId: project.id, version, definition: def, by },
+  },
   actor: userActor(by),
   scope: projectScope(project.org_id, project.id),
 });
 
-export async function saveJourney(ctx: Ctx, who: Who, id: string, definition: JourneyDefinition, baseVersion: number) {
+export async function saveJourney(
+  ctx: Ctx,
+  who: Who,
+  id: string,
+  definition: JourneyDefinition,
+  baseVersion: number,
+) {
   return withAppendTx(ctx.pool, async (tx) => {
     const { journey, project } = await loadJourney(tx, who.userId, id);
     assertAuthor(project);
@@ -122,9 +142,15 @@ export async function saveJourney(ctx: Ctx, who: Who, id: string, definition: Jo
     const cur = (await one(tx, 'SELECT current_version, status FROM journeys WHERE id=$1', [id])) as Row;
     if (cur.status !== 'active') throw conflict('journey_archived', 'the journey is archived');
     if (cur.current_version !== baseVersion)
-      throw conflict('stale_version', 'the journey was saved by someone else: reload it first', { currentVersion: cur.current_version });
+      throw conflict('stale_version', 'the journey was saved by someone else: reload it first', {
+        currentVersion: cur.current_version,
+      });
     if (definition.recordType !== journey.record_type) {
-      const running = await one(tx, `SELECT 1 FROM journey_instances WHERE journey_id=$1 AND status IN ('running','waiting','stuck') LIMIT 1`, [id]);
+      const running = await one(
+        tx,
+        `SELECT 1 FROM journey_instances WHERE journey_id=$1 AND status IN ('running','waiting','stuck') LIMIT 1`,
+        [id],
+      );
       if (running) throw conflict('instances_running', 'the record type cannot change while instances run');
     }
     const version = cur.current_version + 1;
@@ -162,7 +188,12 @@ export function recordDto(r: Row, refs: Row[]) {
     currentStepId: r.current_step_id ?? null,
     createdAt: iso(r.created_at) as string,
     updatedAt: iso(r.updated_at) as string,
-    references: refs.map((x) => ({ kind: x.kind, ref: x.ref, label: x.label ?? null, addedAt: iso(x.added_at) as string })),
+    references: refs.map((x) => ({
+      kind: x.kind,
+      ref: x.ref,
+      label: x.label ?? null,
+      addedAt: iso(x.added_at) as string,
+    })),
   };
 }
 
@@ -170,7 +201,11 @@ export async function getRecord(ctx: Ctx, who: Who, id: string) {
   const r = await one(ctx.pool, 'SELECT * FROM journey_records WHERE id=$1', [id]);
   if (!r) throw notFound('record not found');
   await loadVisibleProject(ctx.pool, who.userId, r.project_id);
-  const refs = await rows(ctx.pool, 'SELECT * FROM journey_record_refs WHERE record_id=$1 ORDER BY added_at, ref', [id]);
+  const refs = await rows(
+    ctx.pool,
+    'SELECT * FROM journey_record_refs WHERE record_id=$1 ORDER BY added_at, ref',
+    [id],
+  );
   return recordDto(r, refs);
 }
 
@@ -181,7 +216,10 @@ export async function addReference(ctx: Ctx, who: Who, recordId: string, ref: Jo
   await ctx.store.append([
     {
       streamId: streamId.journeyRecord(recordId),
-      event: { type: 'JourneyRecordReferenceAdded', payload: { recordId, kind: ref.kind, ref: ref.ref, ...(ref.label ? { label: ref.label } : {}) } },
+      event: {
+        type: 'JourneyRecordReferenceAdded',
+        payload: { recordId, kind: ref.kind, ref: ref.ref, ...(ref.label ? { label: ref.label } : {}) },
+      },
       actor: userActor(who.userId),
       scope: projectScope(project.org_id, project.id),
     },
@@ -216,7 +254,9 @@ export async function startInstanceIn(
     project: Row;
     journey: Row;
     def: JourneyDefinition;
-    record: { recordId: string } | { create: { type: string; displayName: string; externalId?: string | undefined } };
+    record:
+      | { recordId: string }
+      | { create: { type: string; displayName: string; externalId?: string | undefined } };
     startedBy: string;
     actor: AppendInput['actor'];
     /** Events appended after the instance's own (the hook's `JourneyStartedByHook`). */
@@ -233,13 +273,15 @@ export async function startInstanceIn(
   if ('recordId' in a.record) {
     const rec = await one(tx, 'SELECT * FROM journey_records WHERE id=$1 FOR UPDATE', [a.record.recordId]);
     if (!rec || rec.project_id !== project.id) throw notFound('record not found');
-    if (rec.record_type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
+    if (rec.record_type !== def.recordType)
+      throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
     if (rec.status !== 'active') throw conflict('record_closed', 'the record is closed');
     if (rec.current_instance_id) throw conflict('record_busy', 'a journey is already running on this record');
     recordId = rec.id;
   } else {
     const c = a.record.create;
-    if (c.type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
+    if (c.type !== def.recordType)
+      throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
     recordId = randomUUID();
     events.push({
       streamId: streamId.journeyRecord(recordId),
@@ -283,7 +325,10 @@ export async function startInstanceIn(
     },
     {
       streamId: stream,
-      event: { type: 'JourneyStepEntered', payload: { instanceId, visit: 1, stepId: first.id, kind: first.kind } },
+      event: {
+        type: 'JourneyStepEntered',
+        payload: { instanceId, visit: 1, stepId: first.id, kind: first.kind },
+      },
       actor: a.actor,
       scope,
     },
@@ -325,7 +370,8 @@ export async function listInstances(ctx: Ctx, who: Who, f: InstanceFilters) {
       recordType: i.record_type,
       status: i.status,
       stepId: i.current_step_id,
-      stepLabel: (i.definition.steps ?? []).find((s: Row) => s.id === i.current_step_id)?.label ?? i.current_step_id,
+      stepLabel:
+        (i.definition.steps ?? []).find((s: Row) => s.id === i.current_step_id)?.label ?? i.current_step_id,
       startedAt: iso(i.started_at),
       updatedAt: iso(i.updated_at),
       endedAt: iso(i.ended_at),
@@ -396,13 +442,20 @@ export async function cancelInstance(ctx: Ctx, who: Who, id: string) {
 /** Starts the step's playbook through the playbook feature, unchanged, and keeps the session as a reference. */
 export async function runStepPlaybook(ctx: Ctx, who: Who, id: string, visit: number, workstationId?: string) {
   const { inst } = await loadInstance(ctx.pool, who.userId, id);
-  if (inst.status === 'completed' || inst.status === 'cancelled') throw conflict('instance_ended', 'the instance has ended');
-  const run = await one(ctx.pool, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [id, visit]);
+  if (inst.status === 'completed' || inst.status === 'cancelled')
+    throw conflict('instance_ended', 'the instance has ended');
+  const run = await one(ctx.pool, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [
+    id,
+    visit,
+  ]);
   if (!run) throw notFound('step not found');
   const def = await loadDefinition(ctx.pool, inst.journey_id, inst.journey_version);
   const step = getJourneyStep(def, run.step_id);
-  if (!step || step.kind !== 'workflow' || !step.playbook) throw badRequest('no_playbook', 'this step has no playbook');
-  const record = (await one(ctx.pool, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+  if (!step || step.kind !== 'workflow' || !step.playbook)
+    throw badRequest('no_playbook', 'this step has no playbook');
+  const record = (await one(ctx.pool, 'SELECT display_name FROM journey_records WHERE id=$1', [
+    inst.record_id,
+  ])) as Row;
   const started = await runPlaybookSession(ctx, who, {
     key: step.playbook.key,
     title: `${step.label}: ${record.display_name}`.slice(0, 200),
@@ -413,7 +466,10 @@ export async function runStepPlaybook(ctx: Ctx, who: Who, id: string, visit: num
   await ctx.store.append([
     {
       streamId: streamId.journeyInstance(id),
-      event: { type: 'JourneyStepPlaybookStarted', payload: { instanceId: id, visit, playbookKey: step.playbook.key, threadId: started.threadId } },
+      event: {
+        type: 'JourneyStepPlaybookStarted',
+        payload: { instanceId: id, visit, playbookKey: step.playbook.key, threadId: started.threadId },
+      },
       actor: userActor(who.userId),
       scope: projectScope(inst.org_id, inst.project_id),
     },

@@ -79,9 +79,10 @@ describe('CEO action move-workstation', () => {
     const res = await move(a.name, second);
     expect(res.status).toBe('executed');
     expect(await homeOf(a.id)).toBe(second);
-    const ev = await q(`SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed'`, [
-      `agent-${a.id}`,
-    ]);
+    const ev = await q(
+      `SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed'`,
+      [`agent-${a.id}`],
+    );
     expect(ev).toHaveLength(1);
     expect(ev[0]!.actor_kind).toBe('agent');
     expect(ev[0]!.payload).toMatchObject({ fromWorkstationId: w.workstationId, workstationId: second });

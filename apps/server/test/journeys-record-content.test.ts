@@ -10,13 +10,18 @@ const post = (url: string, body: unknown) => w.t.req('POST', url, { cookie: w.ow
 
 beforeAll(async () => {
   w = await createWorld();
-  const wf = (await q('SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND is_primary', [w.projectId]))[0]!.workflow_key;
+  const wf = (
+    await q('SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND is_primary', [w.projectId])
+  )[0]!.workflow_key;
   const res = await ok<any>(
     post('/api/journeys', {
       projectId: w.projectId,
       definition: {
-        name: 'J', recordType: 'client', firstStepId: 'a',
-        steps: [{ kind: 'workflow', id: 'a', label: 'A', workflowKey: wf }], handoffs: [],
+        name: 'J',
+        recordType: 'client',
+        firstStepId: 'a',
+        steps: [{ kind: 'workflow', id: 'a', label: 'A', workflowKey: wf }],
+        handoffs: [],
       },
     }),
     201,
@@ -42,27 +47,71 @@ describe('the shared record holds no content', () => {
   it('refuses answers and document content when starting on a record', async () => {
     const base = { journeyId, record: { type: 'client', displayName: 'Ann' } };
     expect((await post('/api/journey-instances', { ...base, answers: { q: 'a' } })).status).toBe(400);
-    expect((await post('/api/journey-instances', { ...base, record: { ...base.record, answers: { q: 'a' } } })).status).toBe(400);
-    expect((await post('/api/journey-instances', { ...base, record: { ...base.record, documents: [{ content: 'x' }] } })).status).toBe(400);
+    expect(
+      (await post('/api/journey-instances', { ...base, record: { ...base.record, answers: { q: 'a' } } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await post('/api/journey-instances', {
+          ...base,
+          record: { ...base.record, documents: [{ content: 'x' }] },
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it('accepts references and refuses content in them', async () => {
-    const { recordId } = await ok<any>(post('/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Bo' } }), 201);
+    const { recordId } = await ok<any>(
+      post('/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Bo' } }),
+      201,
+    );
     const url = `/api/journey-records/${recordId}/references`;
-    const good = await ok<any>(post(url, { kind: 'document', ref: 's3://firm-bucket/clients/bo/id.pdf', label: 'ID' }));
+    const good = await ok<any>(
+      post(url, { kind: 'document', ref: 's3://firm-bucket/clients/bo/id.pdf', label: 'ID' }),
+    );
     expect(good.references.some((r: any) => r.ref.startsWith('s3://'))).toBe(true);
     expect((await post(url, { kind: 'document', ref: 'x', content: 'secret text' })).status).toBe(400);
     expect((await post(url, { kind: 'document', ref: 'data:text/plain;base64,AAAA' })).status).toBe(400);
-    expect((await post(url, { kind: 'form_submission', ref: 'free text answers with spaces' })).status).toBe(400);
+    expect((await post(url, { kind: 'form_submission', ref: 'free text answers with spaces' })).status).toBe(
+      400,
+    );
     const rec = await ok<any>(w.t.req('GET', `/api/journey-records/${recordId}`, { cookie: w.owner.cookie }));
     expect(Object.keys(rec).sort()).toEqual(
-      ['createdAt','currentInstanceId','currentStepId','displayName','externalId','id','orgId','projectId','references','status','type','updatedAt'].sort(),
+      [
+        'createdAt',
+        'currentInstanceId',
+        'currentStepId',
+        'displayName',
+        'externalId',
+        'id',
+        'orgId',
+        'projectId',
+        'references',
+        'status',
+        'type',
+        'updatedAt',
+      ].sort(),
     );
   });
 
   it('a journey event never carries a form answer: the stored payloads only have ids, keys and labels', async () => {
     const rows = (await q(`SELECT payload FROM events WHERE type LIKE 'JourneyRecord%'`)) as any[];
     for (const r of rows)
-      expect(Object.keys(r.payload).every((k) => ['recordId','orgId','projectId','recordType','externalId','displayName','kind','ref','label'].includes(k))).toBe(true);
+      expect(
+        Object.keys(r.payload).every((k) =>
+          [
+            'recordId',
+            'orgId',
+            'projectId',
+            'recordType',
+            'externalId',
+            'displayName',
+            'kind',
+            'ref',
+            'label',
+          ].includes(k),
+        ),
+      ).toBe(true);
   });
 });

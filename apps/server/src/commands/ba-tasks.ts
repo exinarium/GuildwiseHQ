@@ -21,15 +21,15 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import {
+  applyReleaseChangelogReport,
+  runReleaseChangelogFallback,
+} from '../release/docs-prep-changelog-task.ts';
 import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { intakeRpc } from './intake.ts';
 import { applyBatchReport, batchRpcGuard } from './intake-batch.ts';
 import { applyMailDraftReport, runMailDraftFallback } from './mail-draft.ts';
-import {
-  applyReleaseChangelogReport,
-  runReleaseChangelogFallback,
-} from '../release/docs-prep-changelog-task.ts';
 import {
   actorOf,
   agentBy,

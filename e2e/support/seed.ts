@@ -30,7 +30,9 @@ export function planSeed(existing: Record<string, Existing>, accounts: SeedAccou
       );
     }
     if (a.role === 'platform' && e.kind !== 'super_admin') {
-      throw new Error(`${a.email} exists but is not a platform account (kind '${e.kind}'): recreate the database`);
+      throw new Error(
+        `${a.email} exists but is not a platform account (kind '${e.kind}'): recreate the database`,
+      );
     }
     return { email: a.email, action: 'skip' as const };
   });
@@ -84,7 +86,13 @@ export function cliRunner(opts: { databaseUrl: string; appDir?: string; env?: No
     if (a.role === 'owner' && a.org) flags.push('--org', a.org);
     // the password goes through the child environment, not argv
     // pnpm must not try to (re)install before running the script: the dependencies are copied from the cache
-    const env = { pnpm_config_verify_deps_before_run: 'false', ...process.env, ...opts.env, DATABASE_URL: opts.databaseUrl, AOM_ADMIN_PASSWORD: a.password };
+    const env = {
+      pnpm_config_verify_deps_before_run: 'false',
+      ...process.env,
+      ...opts.env,
+      DATABASE_URL: opts.databaseUrl,
+      AOM_ADMIN_PASSWORD: a.password,
+    };
     if (opts.appDir) {
       const file = a.role === 'owner' ? 'admin-create.mjs' : 'superadmin-create.mjs';
       execFileSync('node', [join(opts.appDir, 'server/dist', file), ...flags], {

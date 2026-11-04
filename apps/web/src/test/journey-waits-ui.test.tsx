@@ -4,9 +4,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { InstanceWaitPanel } from '../components/journeys/InstanceWaitPanel.tsx';
 import { StepSettings } from '../components/journeys/StepSettings.tsx';
-import { JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { ToastProvider } from '../components/ui.tsx';
 import { addStep, durationError, relativeTime, timeoutOf, waitForOf } from '../lib/journeys.ts';
 
@@ -29,7 +29,8 @@ beforeEach(() => {
         return json({ ok: true });
       }
       if (url.endsWith('/waits')) return json(waits);
-      if (url.startsWith('/api/forms')) return json({ forms: [{ id: '0192f3a0-0000-7000-8000-0000000000f1', title: 'Rental application' }] });
+      if (url.startsWith('/api/forms'))
+        return json({ forms: [{ id: '0192f3a0-0000-7000-8000-0000000000f1', title: 'Rental application' }] });
       if (url.startsWith('/api/workstations')) return json({ workstations: [] });
       return json({});
     }),
@@ -49,7 +50,14 @@ function wrap(ui: React.ReactNode) {
 }
 
 const desk = (subkind: string): DeskItemDto =>
-  ({ id: 'd1', kind: 'question', subkind, status: 'open', canAnswer: true, data: { waitId: W1, instanceId: I1 } }) as unknown as DeskItemDto;
+  ({
+    id: 'd1',
+    kind: 'question',
+    subkind,
+    status: 'open',
+    canAnswer: true,
+    data: { waitId: W1, instanceId: I1 },
+  }) as unknown as DeskItemDto;
 
 const def = (): JourneyDefinition =>
   ({
@@ -103,9 +111,21 @@ describe('journey desk items', () => {
 
 describe('instance wait panel', () => {
   const wait = (over: Record<string, unknown> = {}) => ({
-    id: W1, visit: 1, stepId: 'w', kind: 'form', status: 'open', startedAt: '2026-11-01T09:00:00Z',
-    deadlineAt: '2099-11-04T09:00:00Z', nextFireAt: null, remindersSent: 1, remindersMax: 3,
-    linkUrl: 'https://x.test/f/abc', linkExpiresAt: null, fellBack: false, resolution: null, resolvedAt: null,
+    id: W1,
+    visit: 1,
+    stepId: 'w',
+    kind: 'form',
+    status: 'open',
+    startedAt: '2026-11-01T09:00:00Z',
+    deadlineAt: '2099-11-04T09:00:00Z',
+    nextFireAt: null,
+    remindersSent: 1,
+    remindersMax: 3,
+    linkUrl: 'https://x.test/f/abc',
+    linkExpiresAt: null,
+    fellBack: false,
+    resolution: null,
+    resolvedAt: null,
     events: [{ at: '2026-11-02T09:00:00Z', type: 'JourneyWaitReminded', text: 'Reminder 1 of 3 recorded.' }],
     ...over,
   });
@@ -120,7 +140,19 @@ describe('instance wait panel', () => {
   it('shows a timed out wait without actions and a failed call with its error', async () => {
     waits = {
       waits: [wait({ status: 'timed_out', linkUrl: null })],
-      calls: [{ id: 'c1', visit: 2, stepId: 'g', status: 'failed', attempts: 5, nextAttemptAt: null, lastHttpStatus: 500, lastError: 'Server answered 500', finishedAt: '2026-11-03T09:00:00Z' }],
+      calls: [
+        {
+          id: 'c1',
+          visit: 2,
+          stepId: 'g',
+          status: 'failed',
+          attempts: 5,
+          nextAttemptAt: null,
+          lastHttpStatus: 500,
+          lastError: 'Server answered 500',
+          finishedAt: '2026-11-03T09:00:00Z',
+        },
+      ],
     };
     wrap(<InstanceWaitPanel instanceId={I1} def={def()} active />);
     expect(await screen.findByText('Timed out')).toBeInTheDocument();

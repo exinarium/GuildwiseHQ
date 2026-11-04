@@ -35,14 +35,17 @@ export function journeyRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
     const Id = z.object({ id: z.uuid() });
-    const member = async (req: Parameters<typeof requireOrg>[1]) => whoOf(await requireOrg(ctx, req, { min: 'member' }));
+    const member = async (req: Parameters<typeof requireOrg>[1]) =>
+      whoOf(await requireOrg(ctx, req, { min: 'member' }));
 
     app.get('/api/journey-templates', async (req) => {
       await member(req);
       return { items: JOURNEY_TEMPLATES };
     });
-    app.get('/api/journeys', { schema: { querystring: z.object({ projectId: z.uuid().optional() }) } }, async (req) =>
-      listJourneys(ctx, await member(req), req.query.projectId),
+    app.get(
+      '/api/journeys',
+      { schema: { querystring: z.object({ projectId: z.uuid().optional() }) } },
+      async (req) => listJourneys(ctx, await member(req), req.query.projectId),
     );
     app.post('/api/journeys', { schema: { body: CreateJourneyBodySchema } }, async (req, reply) => {
       const out = await createJourney(ctx, await member(req), req.body);
@@ -51,7 +54,9 @@ export function journeyRoutes(ctx: Ctx) {
     });
     app.get(
       '/api/journeys/:id',
-      { schema: { params: Id, querystring: z.object({ version: z.coerce.number().int().min(1).optional() }) } },
+      {
+        schema: { params: Id, querystring: z.object({ version: z.coerce.number().int().min(1).optional() }) },
+      },
       async (req) => getJourney(ctx, await member(req), req.params.id, req.query.version),
     );
     app.put('/api/journeys/:id', { schema: { params: Id, body: SaveJourneyBodySchema } }, async (req) =>
@@ -72,23 +77,37 @@ export function journeyRoutes(ctx: Ctx) {
     app.get('/api/journey-instances/:id', { schema: { params: Id } }, async (req) =>
       getInstance(ctx, await member(req), req.params.id),
     );
-    app.post('/api/journey-instances/:id/continue', { schema: { params: Id, body: ContinueBodySchema } }, async (req) =>
-      continueStep(ctx, await member(req), req.params.id, req.body.visit),
+    app.post(
+      '/api/journey-instances/:id/continue',
+      { schema: { params: Id, body: ContinueBodySchema } },
+      async (req) => continueStep(ctx, await member(req), req.params.id, req.body.visit),
     );
     app.post('/api/journey-instances/:id/cancel', { schema: { params: Id } }, async (req) =>
       cancelInstance(ctx, await member(req), req.params.id),
     );
-    app.post('/api/journey-instances/:id/playbook', { schema: { params: Id, body: PlaybookBodySchema } }, async (req, reply) => {
-      const out = await runStepPlaybook(ctx, await member(req), req.params.id, req.body.visit, req.body.workstationId);
-      reply.code(201);
-      return out;
-    });
+    app.post(
+      '/api/journey-instances/:id/playbook',
+      { schema: { params: Id, body: PlaybookBodySchema } },
+      async (req, reply) => {
+        const out = await runStepPlaybook(
+          ctx,
+          await member(req),
+          req.params.id,
+          req.body.visit,
+          req.body.workstationId,
+        );
+        reply.code(201);
+        return out;
+      },
+    );
 
     app.get('/api/journey-records/:id', { schema: { params: Id } }, async (req) =>
       getRecord(ctx, await member(req), req.params.id),
     );
-    app.post('/api/journey-records/:id/references', { schema: { params: Id, body: AddReferenceBodySchema } }, async (req) =>
-      addReference(ctx, await member(req), req.params.id, req.body),
+    app.post(
+      '/api/journey-records/:id/references',
+      { schema: { params: Id, body: AddReferenceBodySchema } },
+      async (req) => addReference(ctx, await member(req), req.params.id, req.body),
     );
   };
 }

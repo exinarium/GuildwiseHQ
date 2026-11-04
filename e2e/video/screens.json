@@ -30,7 +30,11 @@
       "screens": [
         {
           "name": "Agents",
-          "files": ["apps/web/src/pages/Agents.tsx", "apps/web/src/components/agents/**", "apps/web/src/components/hr/**"]
+          "files": [
+            "apps/web/src/pages/Agents.tsx",
+            "apps/web/src/components/agents/**",
+            "apps/web/src/components/hr/**"
+          ]
         }
       ]
     },
@@ -101,7 +105,11 @@
       "screens": [
         {
           "name": "CEO",
-          "files": ["apps/web/src/pages/Ceo.tsx", "apps/web/src/pages/CeoChat.tsx", "apps/web/src/components/ceo/**"]
+          "files": [
+            "apps/web/src/pages/Ceo.tsx",
+            "apps/web/src/pages/CeoChat.tsx",
+            "apps/web/src/components/ceo/**"
+          ]
         }
       ]
     },
@@ -165,12 +173,18 @@
       "screens": [
         {
           "name": "Help",
-          "files": ["apps/web/src/pages/Help.tsx", "apps/web/src/components/help/**", "apps/web/src/components/video/**"]
+          "files": [
+            "apps/web/src/pages/Help.tsx",
+            "apps/web/src/components/help/**",
+            "apps/web/src/components/video/**"
+          ]
         }
       ]
     },
     "intake": {
-      "screens": [{ "name": "Intake", "files": ["apps/web/src/pages/Intake.tsx", "apps/web/src/pages/IntakeBatch.tsx"] }]
+      "screens": [
+        { "name": "Intake", "files": ["apps/web/src/pages/Intake.tsx", "apps/web/src/pages/IntakeBatch.tsx"] }
+      ]
     },
     "integrations": {
       "screens": [
@@ -200,7 +214,10 @@
     },
     "org-chart": {
       "screens": [
-        { "name": "Org chart", "files": ["apps/web/src/pages/OrgChart.tsx", "apps/web/src/components/orgchart/**"] }
+        {
+          "name": "Org chart",
+          "files": ["apps/web/src/pages/OrgChart.tsx", "apps/web/src/components/orgchart/**"]
+        }
       ]
     },
     "organization": {
@@ -234,12 +251,18 @@
     },
     "projects": {
       "screens": [
-        { "name": "Projects", "files": ["apps/web/src/pages/Projects.tsx", "apps/web/src/pages/ProjectSettings.tsx"] }
+        {
+          "name": "Projects",
+          "files": ["apps/web/src/pages/Projects.tsx", "apps/web/src/pages/ProjectSettings.tsx"]
+        }
       ]
     },
     "releases": {
       "screens": [
-        { "name": "Releases", "files": ["apps/web/src/pages/Releases.tsx", "apps/web/src/components/delivery/**"] }
+        {
+          "name": "Releases",
+          "files": ["apps/web/src/pages/Releases.tsx", "apps/web/src/components/delivery/**"]
+        }
       ]
     },
     "research": {

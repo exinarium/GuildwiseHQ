@@ -26,8 +26,12 @@ const create = async (steps: unknown[], handoffs: unknown[], first: string) =>
     )
   ).id as string;
 const start = async (journeyId: string) =>
-  (await ok<any>(pf.api('POST', '/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Ann' } }), 201))
-    .id as string;
+  (
+    await ok<any>(
+      pf.api('POST', '/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Ann' } }),
+      201,
+    )
+  ).id as string;
 const waitRow = async (id: string, visit = 1) =>
   (await q('SELECT * FROM journey_waits WHERE instance_id=$1 AND visit=$2', [id, visit]))[0] as any;
 const inst = async (id: string) => (await q('SELECT * FROM journey_instances WHERE id=$1', [id]))[0] as any;
@@ -69,14 +73,22 @@ describe('wait-for-form (AC3)', () => {
     expect((await inst(id)).current_step_id).toBe('docs');
 
     const token = /#c=(.+)$/.exec(url)?.[1] as string;
-    const s = await pf.submit(publicId, { full_name: 'Ann Client' }, [{ field: 'id_copy', name: 'id.png', bytes: PNG }], token);
+    const s = await pf.submit(
+      publicId,
+      { full_name: 'Ann Client' },
+      [{ field: 'id_copy', name: 'id.png', bytes: PNG }],
+      token,
+    );
     expect(s.complete?.status).toBe(200);
     expect(pf.stub.files().length).toBeGreaterThan(0);
 
     await tick();
     expect(await waitRow(id)).toMatchObject({ status: 'resolved', resolution: 'form_submitted' });
     expect((await inst(id)).current_step_id).toBe('screening');
-    const refs = await q(`SELECT ref FROM journey_record_refs WHERE record_id=$1 AND kind='form_submission'`, [(await inst(id)).record_id]);
+    const refs = await q(
+      `SELECT ref FROM journey_record_refs WHERE record_id=$1 AND kind='form_submission'`,
+      [(await inst(id)).record_id],
+    );
     expect(refs.map((r: any) => r.ref)).toContain(s.sid);
   });
 });
@@ -126,7 +138,10 @@ describe('gate reminders are visible on the desk', () => {
           label: 'Approval',
           approver: { kind: 'project_owner' },
           question: 'Approve the lease?',
-          deadline: { duration: { amount: 10, unit: 'minutes' }, onTimeout: { action: 'remind', maxReminders: 2, afterLast: 'escalate' } },
+          deadline: {
+            duration: { amount: 10, unit: 'minutes' },
+            onTimeout: { action: 'remind', maxReminders: 2, afterLast: 'escalate' },
+          },
         },
         manual('yes'),
       ],
@@ -141,16 +156,19 @@ describe('gate reminders are visible on the desk', () => {
     const row = await waitRow(id);
     expect(row.reminders_sent).toBe(1);
     expect(row.desk_item_id).not.toBe(first);
-    const fresh = (await q('SELECT subkind, status FROM desk_items WHERE id=$1', [row.desk_item_id]))[0] as any;
+    const fresh = (
+      await q('SELECT subkind, status FROM desk_items WHERE id=$1', [row.desk_item_id])
+    )[0] as any;
     expect(fresh).toMatchObject({ subkind: 'journey_gate', status: 'open' });
     expect((await q('SELECT status FROM desk_items WHERE id=$1', [first]))[0]!.status).not.toBe('open');
 
     await ok(pf.api('POST', `/api/journey-gates/${row.id}/decide`, { decision: 'approved' }));
     expect((await inst(id)).current_step_id).toBe('yes');
-    expect((await q('SELECT status FROM desk_items WHERE id=$1', [row.desk_item_id]))[0]!.status).not.toBe('open');
+    expect((await q('SELECT status FROM desk_items WHERE id=$1', [row.desk_item_id]))[0]!.status).not.toBe(
+      'open',
+    );
   });
 });
-
 
 describe('a gate that escalated can still be decided', () => {
   it('approves after the deadline escalated, follows the approved handoff and leaves no desk item of the wait open', async () => {

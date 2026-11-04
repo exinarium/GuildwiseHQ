@@ -252,9 +252,7 @@ export async function withReachability(
 ): Promise<TestServiceDecision[]> {
   return Promise.all(
     d.map(async (x) =>
-      x.state === 'allowed'
-        ? { ...x, answering: await probe(x.host, x.port).catch(() => false) }
-        : x,
+      x.state === 'allowed' ? { ...x, answering: await probe(x.host, x.port).catch(() => false) } : x,
     ),
   );
 }

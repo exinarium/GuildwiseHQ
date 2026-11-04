@@ -1,6 +1,6 @@
-import type { JourneyIssue } from './validate.ts';
 import type { JourneyDefinition, JourneyStep } from './schema.ts';
 import { unknownBodyTokens } from './steps-wait.ts';
+import type { JourneyIssue } from './validate.ts';
 
 export interface WaitValidateOptions {
   /** Ids of published forms. Omitted: not checked. */
@@ -36,7 +36,8 @@ export function validateJourneyWaitsAndGates(
   const warnings: JourneyIssue[] = [];
   const ids = new Set(def.steps.map((s) => s.id));
   const kinds = new Map(def.steps.map((s) => [s.id, s.kind] as const));
-  const err = (code: string, message: string, stepId: string): void => void errors.push({ code, message, stepId });
+  const err = (code: string, message: string, stepId: string): void =>
+    void errors.push({ code, message, stepId });
 
   for (const h of def.handoffs) {
     const k = kinds.get(h.from);
@@ -51,7 +52,11 @@ export function validateJourneyWaitsAndGates(
   const checkTimeout = (s: JourneyStep, t: { action: string; stepId?: string } | undefined): void => {
     if (t?.action === 'goto') {
       if (!t.stepId || !ids.has(t.stepId) || t.stepId === s.id)
-        err('goto_target', `Step "${s.label}": the step to go to on timeout must be another existing step.`, s.id);
+        err(
+          'goto_target',
+          `Step "${s.label}": the step to go to on timeout must be another existing step.`,
+          s.id,
+        );
     }
   };
 
@@ -68,17 +73,23 @@ export function validateJourneyWaitsAndGates(
           stepId: s.id,
         });
       } else {
-        if (w.kind !== 'date' && !s.duration) err('no_wait_config', `Step "${s.label}" needs a duration.`, s.id);
+        if (w.kind !== 'date' && !s.duration)
+          err('no_wait_config', `Step "${s.label}" needs a duration.`, s.id);
         if (w.kind === 'form') {
           if (!w.formId) err('no_form', `Step "${s.label}" needs a form.`, s.id);
           else if (opts.publishedFormIds && !has(opts.publishedFormIds, w.formId))
-            warnings.push({ code: 'form_not_published', message: `The form of step "${s.label}" is not published.`, stepId: s.id });
+            warnings.push({
+              code: 'form_not_published',
+              message: `The form of step "${s.label}" is not published.`,
+              stepId: s.id,
+            });
           if (w.send.via === 'webhook') formWaitWithWebhookSend.add(s.id);
         }
         if (w.kind === 'webhook' && !w.triggerId)
           err('no_trigger', `Step "${s.label}" needs a webhook trigger.`, s.id);
         const needsTimeout = w.kind === 'form' || w.kind === 'webhook';
-        if (needsTimeout && !s.onTimeout) err('no_timeout_action', `Step "${s.label}" needs a timeout action.`, s.id);
+        if (needsTimeout && !s.onTimeout)
+          err('no_timeout_action', `Step "${s.label}" needs a timeout action.`, s.id);
         if (!needsTimeout && s.onTimeout)
           err('timeout_not_allowed', `Step "${s.label}" ends by itself; remove the timeout action.`, s.id);
         checkTimeout(s, s.onTimeout);
@@ -94,7 +105,8 @@ export function validateJourneyWaitsAndGates(
         });
         continue;
       }
-      if (!s.question?.trim()) err('no_question', `Step "${s.label}" needs a question for the approver.`, s.id);
+      if (!s.question?.trim())
+        err('no_question', `Step "${s.label}" needs a question for the approver.`, s.id);
       if (s.deadline) checkTimeout(s, s.deadline.onTimeout);
       if (!leaving.some((h) => matchesApprove(h.on)) && leaving.length > 0)
         err('no_approve_handoff', `Gate "${s.label}" needs a handoff for approve.`, s.id);
@@ -107,8 +119,13 @@ export function validateJourneyWaitsAndGates(
     } else if (s.kind === 'webhook_call') {
       if (!s.url.trim()) err('no_url', `Step "${s.label}" needs a URL.`, s.id);
       else if (!/^https?:\/\/[^/\s@]+(\/|$|\?)/i.test(s.url))
-        err('url_invalid', `Step "${s.label}": the URL must start with http:// or https:// and carry no user name or password.`, s.id);
-      if (!s.workstationId) err('no_workstation', `Step "${s.label}" needs the workstation that sends it.`, s.id);
+        err(
+          'url_invalid',
+          `Step "${s.label}": the URL must start with http:// or https:// and carry no user name or password.`,
+          s.id,
+        );
+      if (!s.workstationId)
+        err('no_workstation', `Step "${s.label}" needs the workstation that sends it.`, s.id);
       for (const t of unknownBodyTokens(s.body))
         err('unknown_token', `Step "${s.label}": {${t}} is not a known value.`, s.id);
       if (!leaving.some((h) => h.on === 'done' || h.on === 'any') && leaving.length > 0)
@@ -139,7 +156,11 @@ export function validateJourneyWaitsAndGates(
         }
     }
     if (!ok)
-      err('wait_link_unavailable', `Step "${s.label}" uses {wait.link} but no earlier form wait sends its link by webhook.`, s.id);
+      err(
+        'wait_link_unavailable',
+        `Step "${s.label}" uses {wait.link} but no earlier form wait sends its link by webhook.`,
+        s.id,
+      );
   }
   return { errors, warnings };
 }

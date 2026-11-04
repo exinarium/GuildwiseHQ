@@ -51,8 +51,14 @@ export function verifyHookSignature(
   return Math.abs(nowSec - Number(ts)) > toleranceSec ? 'stale' : 'ok';
 }
 
-export function signHook(scheme: HookScheme, secret: string, raw: Buffer, tsSec: number): Record<string, string> {
-  if (scheme === 'body_sha256') return { 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}` };
+export function signHook(
+  scheme: HookScheme,
+  secret: string,
+  raw: Buffer,
+  tsSec: number,
+): Record<string, string> {
+  if (scheme === 'body_sha256')
+    return { 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}` };
   return {
     'x-guildwise-timestamp': String(tsSec),
     'x-guildwise-signature': `sha256=${createHmac('sha256', secret).update(`${tsSec}.`).update(raw).digest('hex')}`,

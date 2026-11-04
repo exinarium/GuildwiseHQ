@@ -302,7 +302,9 @@ describe('the guide step in the registry', () => {
       requires: 'analyse',
       message: 'Update user guide needs Analyse changes. Turn it on in the project settings.',
     });
-    expect(missingReleaseDocsPrepRequirement([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit])).toBeNull();
+    expect(
+      missingReleaseDocsPrepRequirement([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit]),
+    ).toBeNull();
   });
   it('collects the covered sources of an output and ignores bad data', () => {
     expect(

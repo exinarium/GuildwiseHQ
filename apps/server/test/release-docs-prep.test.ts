@@ -6,6 +6,7 @@ import {
   ReleaseFactsSchema,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { withAppendTx } from '../src/db/tx.ts';
 import {
   applyReleaseDocsPrepResult,
   releaseDocsPrepSweep,
@@ -16,7 +17,6 @@ import {
   endReleasePrepShift,
   releasePrepTaskPass,
 } from '../src/release/docs-prep-tasks.ts';
-import { withAppendTx } from '../src/db/tx.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
@@ -641,7 +641,12 @@ describe('Generate videos step', () => {
     expect((await approveShip()).status).toBe(409);
   });
 
-  const created = { slug: 'forms', action: 'create', reasons: ['new screen Forms (GWP-200)'], state: 'pending' };
+  const created = {
+    slug: 'forms',
+    action: 'create',
+    reasons: ['new screen Forms (GWP-200)'],
+    state: 'pending',
+  };
   const newForms = () =>
     plan(
       [created],
@@ -658,8 +663,16 @@ describe('Generate videos step', () => {
   const SHA = 'c'.repeat(40);
   /** Gives the newest queued task to a builder (as the dispatcher pass does) and returns the shift row. */
   async function dispatchTask() {
-    const agent = (await q2(`SELECT id FROM agents WHERE role_key='builder' AND workstation_id=$1 LIMIT 1`, [w.workstationId]))[0];
-    const t = (await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`))[0];
+    const agent = (
+      await q2(`SELECT id FROM agents WHERE role_key='builder' AND workstation_id=$1 LIMIT 1`, [
+        w.workstationId,
+      ])
+    )[0];
+    const t = (
+      await q2(
+        `SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`,
+      )
+    )[0];
     const shiftId = crypto.randomUUID();
     await withAppendTx(w.t.app.ctx.pool, (tx) =>
       w.t.app.ctx.store.append(
@@ -681,7 +694,12 @@ describe('Generate videos step', () => {
   }
   const prepReport = (shift: any, outcomeId: string, note: string, data: Record<string, unknown> = {}) =>
     withAppendTx(w.t.app.ctx.pool, (tx) =>
-      applyReleasePrepReport(w.t.app.ctx, tx, { report: { kind: 'outcome', outcomeId, note, data } } as never, shift),
+      applyReleasePrepReport(
+        w.t.app.ctx,
+        tx,
+        { report: { kind: 'outcome', outcomeId, note, data } } as never,
+        shift,
+      ),
     );
   const renderFailed = () =>
     answer({
@@ -690,7 +708,10 @@ describe('Generate videos step', () => {
       error: '1 video(s) failed: forms: locator not found',
       files: [],
       notices: [],
-      report: { harness: true, videos: [{ ...created, state: 'failed', error: 'locator not found\nat forms.spec.ts:12' }] },
+      report: {
+        harness: true,
+        videos: [{ ...created, state: 'failed', error: 'locator not found\nat forms.spec.ts:12' }],
+      },
     });
 
   it('queues one release prep task per new video and waits for it (no render yet)', async () => {
@@ -715,9 +736,9 @@ describe('Generate videos step', () => {
   });
 
   it('with no builder on the workstation the author phase fails naming the video', async () => {
-    await q(`UPDATE agents SET status='retired' WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]).catch(
-      () => q(`DELETE FROM agents WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]),
-    );
+    await q(`UPDATE agents SET status='retired' WHERE role_key='builder' AND workstation_id=$1`, [
+      w.workstationId,
+    ]).catch(() => q(`DELETE FROM agents WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]));
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -738,7 +759,12 @@ describe('Generate videos step', () => {
     const shift = await dispatchTask();
     expect(shift.kind).toBe('release_prep');
     expect((await tasks())[0].status).toBe('running');
-    expect(await prepReport(shift, 'prep_done', 'wrote forms', { commit: SHA, files: ['e2e/video/forms.spec.ts'] })).toEqual({
+    expect(
+      await prepReport(shift, 'prep_done', 'wrote forms', {
+        commit: SHA,
+        files: ['e2e/video/forms.spec.ts'],
+      }),
+    ).toEqual({
       accepted: true,
     });
     const author = (await stepRows()).find((r: any) => r.phase === 'author');
@@ -766,7 +792,9 @@ describe('Generate videos step', () => {
     await prepReport(shift, 'prep_failed', 'changed files outside the task: apps/server/x.ts');
     const run = await latest();
     expect(run.status).toBe('failed');
-    expect(run.failed.error).toContain('forms: could not write the video script: changed files outside the task');
+    expect(run.failed.error).toContain(
+      'forms: could not write the video script: changed files outside the task',
+    );
   });
 
   it('a failed render of a new video gets one repair round; a second failure fails naming the video', async () => {

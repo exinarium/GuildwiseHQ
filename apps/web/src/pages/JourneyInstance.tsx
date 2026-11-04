@@ -1,5 +1,4 @@
-import { useParams } from 'react-router';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { errorMessage } from '../api/client.ts';
 import {
   useCancelJourneyInstance,
@@ -7,11 +6,26 @@ import {
   useJourneyInstance,
   useRunJourneyPlaybook,
 } from '../api/queries/journeys.ts';
-import { InstanceWaitPanel } from '../components/journeys/InstanceWaitPanel.tsx';
 import { InstanceHistory } from '../components/journeys/InstanceHistory.tsx';
-import { Badge, Button, Callout, ErrorBox, PageHeader, PageSkeleton, Panel, useToast } from '../components/ui.tsx';
+import { InstanceWaitPanel } from '../components/journeys/InstanceWaitPanel.tsx';
+import {
+  Badge,
+  Button,
+  Callout,
+  ErrorBox,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  useToast,
+} from '../components/ui.tsx';
 
-const STATUS_TONE = { running: 'info', waiting: 'warning', stuck: 'danger', completed: 'success', cancelled: 'neutral' } as const;
+const STATUS_TONE = {
+  running: 'info',
+  waiting: 'warning',
+  stuck: 'danger',
+  completed: 'success',
+  cancelled: 'neutral',
+} as const;
 
 /** One running (or finished) journey on a record: where it is, what can be done, and the history. */
 export function JourneyInstance() {
@@ -48,13 +62,17 @@ export function JourneyInstance() {
       />
       {v.status === 'stuck' && (
         <Callout tone="danger" title="This journey is stuck" className="mb-4" role="alert">
-          A step could not start or no handoff matched. A notice is on the desk. Fix the cause, or cancel the instance.
+          A step could not start or no handoff matched. A notice is on the desk. Fix the cause, or cancel the
+          instance.
         </Callout>
       )}
       <Panel title={active ? `Now: ${step?.label ?? v.currentStepId}` : 'Finished'} className="mb-4">
         <div className="flex flex-wrap gap-2">
           {active && step && step.kind !== 'workflow' && run?.status === 'waiting' && (
-            <Button loading={cont.isPending} onClick={() => cont.mutate({ visit: v.currentVisit }, { onError: fail })}>
+            <Button
+              loading={cont.isPending}
+              onClick={() => cont.mutate({ visit: v.currentVisit }, { onError: fail })}
+            >
               Continue past this step
             </Button>
           )}
@@ -63,17 +81,18 @@ export function JourneyInstance() {
               variant="secondary"
               loading={playbook.isPending}
               onClick={() =>
-                playbook.mutate(
-                  { visit: v.currentVisit },
-                  { onSuccess: (r) => nav(r.path), onError: fail },
-                )
+                playbook.mutate({ visit: v.currentVisit }, { onSuccess: (r) => nav(r.path), onError: fail })
               }
             >
               Run playbook: {step.playbook.name || step.playbook.key}
             </Button>
           )}
           {active && (
-            <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate(undefined, { onError: fail })}>
+            <Button
+              variant="danger"
+              loading={cancel.isPending}
+              onClick={() => cancel.mutate(undefined, { onError: fail })}
+            >
               Cancel journey
             </Button>
           )}
@@ -81,7 +100,9 @@ export function JourneyInstance() {
       </Panel>
       <Panel title="Waits, approvals and calls" className="mb-4">
         <InstanceWaitPanel instanceId={v.id} def={v.definition} active={active} />
-        <p className="text-sm text-muted empty:hidden">Every wait shows its deadline here, and every timeout leaves a line.</p>
+        <p className="text-sm text-muted empty:hidden">
+          Every wait shows its deadline here, and every timeout leaves a line.
+        </p>
       </Panel>
       <Panel title="History" className="mb-4">
         <InstanceHistory history={v.history} />
@@ -93,7 +114,8 @@ export function JourneyInstance() {
           <ul className="flex flex-col gap-1 text-sm">
             {v.record.references.map((r) => (
               <li key={`${r.kind}-${r.ref}`} className="[overflow-wrap:anywhere]">
-                <Badge tone="neutral">{r.kind.replace('_', ' ')}</Badge> {r.label ?? ''} <span className="text-muted">{r.ref}</span>
+                <Badge tone="neutral">{r.kind.replace('_', ' ')}</Badge> {r.label ?? ''}{' '}
+                <span className="text-muted">{r.ref}</span>
               </li>
             ))}
           </ul>

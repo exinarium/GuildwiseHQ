@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   DESK_SUBKIND,
+  type EventOf,
   expandRecordTemplate,
   fieldCatalogue,
   getJourneyStep,
@@ -10,7 +11,6 @@ import {
   MAX_STEP_VISITS,
   nextMove,
   streamId,
-  type EventOf,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
@@ -20,9 +20,9 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { createCardIn, workflowView } from './cards.ts';
-import { endWaitSideEffects } from '../journeys/wait-effects.ts';
 import { cancelWaitsIn } from '../journeys/cancel-waits.ts';
+import { endWaitSideEffects } from '../journeys/wait-effects.ts';
+import { createCardIn, workflowView } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
@@ -51,7 +51,11 @@ export const REASON: Record<Refusal, string> = {
   not_published: 'the form of the step is not published',
 };
 
-export async function loadDefinition(db: Queryable, journeyId: string, version: number): Promise<JourneyDefinition> {
+export async function loadDefinition(
+  db: Queryable,
+  journeyId: string,
+  version: number,
+): Promise<JourneyDefinition> {
   const r = await one(db, 'SELECT definition FROM journey_versions WHERE journey_id=$1 AND version=$2', [
     journeyId,
     version,
@@ -60,14 +64,12 @@ export async function loadDefinition(db: Queryable, journeyId: string, version: 
   return JourneyDefinitionSchema.parse(r.definition);
 }
 
-export const kindOf = (def: JourneyDefinition, stepId: string): 'workflow' | 'wait' | 'gate' | 'webhook_call' =>
-  getJourneyStep(def, stepId)?.kind ?? 'workflow';
+export const kindOf = (
+  def: JourneyDefinition,
+  stepId: string,
+): 'workflow' | 'wait' | 'gate' | 'webhook_call' => getJourneyStep(def, stepId)?.kind ?? 'workflow';
 
-export function alert(
-  inst: Row,
-  title: string,
-  body: string,
-): { deskItemId: string; event: AppendInput } {
+export function alert(inst: Row, title: string, body: string): { deskItemId: string; event: AppendInput } {
   const deskItemId = randomUUID();
   return {
     deskItemId,
@@ -103,7 +105,12 @@ export const ev = (inst: Row, event: AppendInput['event']): AppendInput => ({
 });
 
 /** Locks the instance and checks it is still where the caller expects. */
-export async function lockInstance(tx: Tx, instanceId: string, visit: number, status: string): Promise<Row | null> {
+export async function lockInstance(
+  tx: Tx,
+  instanceId: string,
+  visit: number,
+  status: string,
+): Promise<Row | null> {
   const inst = await one(tx, 'SELECT * FROM journey_instances WHERE id=$1 FOR UPDATE', [instanceId]);
   if (!inst || inst.status !== status || inst.current_visit !== visit) return null;
   return inst;
@@ -166,7 +173,9 @@ export async function advanceIn(
       }),
     );
   } else if (move.kind === 'end') {
-    events.push(ev(inst, { type: 'JourneyInstanceCompleted', payload: { instanceId: inst.id, visit: run.visit } }));
+    events.push(
+      ev(inst, { type: 'JourneyInstanceCompleted', payload: { instanceId: inst.id, visit: run.visit } }),
+    );
   } else {
     const a = alert(
       inst,
@@ -216,7 +225,9 @@ export async function startStep(ctx: Ctx, instanceId: string, visit: number): Pr
       );
     } catch (err) {
       if (!(err instanceof Refused)) throw err;
-      const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+      const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [
+        inst.record_id,
+      ])) as Row;
       const a = alert(
         inst,
         `Journey for ${record.display_name}: step "${run.step_id}" could not start`,
@@ -226,11 +237,21 @@ export async function startStep(ctx: Ctx, instanceId: string, visit: number): Pr
         [
           ev(inst, {
             type: 'JourneyStepRefused',
-            payload: { instanceId, visit, reason: err.reason, detail: err.detail.slice(0, 1000), deskItemId: a.deskItemId },
+            payload: {
+              instanceId,
+              visit,
+              reason: err.reason,
+              detail: err.detail.slice(0, 1000),
+              deskItemId: a.deskItemId,
+            },
           }),
           ev(inst, {
             type: 'JourneyInstanceStuck',
-            payload: { instanceId, visit, reason: `Step "${run.step_id}" could not start: ${err.detail}`.slice(0, 1000) },
+            payload: {
+              instanceId,
+              visit,
+              reason: `Step "${run.step_id}" could not start: ${err.detail}`.slice(0, 1000),
+            },
           }),
           a.event,
         ],
@@ -260,9 +281,13 @@ async function createStepCard(
     )?.n ?? 1,
   );
   if (stepVisits > MAX_STEP_VISITS || run.visit > MAX_INSTANCE_VISITS)
-    throw new Refused('visit_limit', `The limit is ${MAX_STEP_VISITS} visits of one step and ${MAX_INSTANCE_VISITS} in all.`);
+    throw new Refused(
+      'visit_limit',
+      `The limit is ${MAX_STEP_VISITS} visits of one step and ${MAX_INSTANCE_VISITS} in all.`,
+    );
   const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [inst.project_id]);
-  if (!project || project.status !== 'active') throw new Refused('not_found', 'The project is archived or gone.');
+  if (!project || project.status !== 'active')
+    throw new Refused('not_found', 'The project is archived or gone.');
   if (
     !(await one(tx, `SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`, [
       inst.project_id,
@@ -310,7 +335,11 @@ async function createStepCard(
   } catch (err) {
     if (!(err instanceof HttpError)) throw err;
     throw new Refused(
-      err.code === 'workflow_not_enabled' ? 'not_enabled' : err.status === 404 ? 'not_member' : 'invalid_mapping',
+      err.code === 'workflow_not_enabled'
+        ? 'not_enabled'
+        : err.status === 404
+          ? 'not_member'
+          : 'invalid_mapping',
       err.message,
     );
   }
@@ -357,12 +386,15 @@ export async function continuePlaceholder(
     if (!run || run.status !== 'waiting') return false;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
     const kind = kindOf(def, run.step_id);
-    if (kind === 'webhook_call') throw conflict('call_running', 'This step is a webhook call that is still running.');
-    const wait = await one(tx, `SELECT id, kind FROM journey_waits WHERE instance_id=$1 AND visit=$2 AND status IN ('open','escalated')`, [
-      instanceId,
-      visit,
-    ]);
-    if (wait?.kind === 'gate') throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
+    if (kind === 'webhook_call')
+      throw conflict('call_running', 'This step is a webhook call that is still running.');
+    const wait = await one(
+      tx,
+      `SELECT id, kind FROM journey_waits WHERE instance_id=$1 AND visit=$2 AND status IN ('open','escalated')`,
+      [instanceId, visit],
+    );
+    if (wait?.kind === 'gate')
+      throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
     if (wait) {
       await ctx.store.append(
         [
@@ -432,7 +464,8 @@ export async function sweepJourneys(ctx: Ctx): Promise<number> {
     `SELECT r.instance_id, r.visit FROM journey_step_runs r JOIN journey_instances i ON i.id = r.instance_id
       WHERE r.status='pending' AND i.status='running' AND i.current_visit = r.visit ORDER BY r.entered_at LIMIT 100`,
   );
-  for (const r of pending) await attempt(`s:${r.instance_id}:${r.visit}`, () => startStep(ctx, r.instance_id, r.visit));
+  for (const r of pending)
+    await attempt(`s:${r.instance_id}:${r.visit}`, () => startStep(ctx, r.instance_id, r.visit));
   const ended = await rows(
     ctx.pool,
     `SELECT r.instance_id, r.visit FROM journey_step_runs r JOIN cards c ON c.id = r.card_id
@@ -440,14 +473,16 @@ export async function sweepJourneys(ctx: Ctx): Promise<number> {
       WHERE r.status='open' AND c.status IN ('done','cancelled') AND i.status='running' AND i.current_visit = r.visit
       ORDER BY r.entered_at LIMIT 100`,
   );
-  for (const r of ended) await attempt(`c:${r.instance_id}:${r.visit}`, () => completeStep(ctx, r.instance_id, r.visit));
+  for (const r of ended)
+    await attempt(`c:${r.instance_id}:${r.visit}`, () => completeStep(ctx, r.instance_id, r.visit));
   const retry = await rows(
     ctx.pool,
     `SELECT r.instance_id, r.visit FROM journey_step_runs r JOIN journey_instances i ON i.id = r.instance_id
        JOIN desk_items d ON d.id = r.desk_item_id
       WHERE r.status='refused' AND i.status='stuck' AND i.current_visit = r.visit AND d.status <> 'open' LIMIT 100`,
   );
-  for (const r of retry) await attempt(`r:${r.instance_id}:${r.visit}`, () => retryRefused(ctx, r.instance_id, r.visit));
+  for (const r of retry)
+    await attempt(`r:${r.instance_id}:${r.visit}`, () => retryRefused(ctx, r.instance_id, r.visit));
   return n;
 }
 
@@ -473,7 +508,10 @@ export async function cancelInstanceIn(
   const events: AppendInput[] = [
     {
       streamId: streamId.journeyInstance(inst.id),
-      event: { type: 'JourneyInstanceCancelled', payload: { instanceId: inst.id, ...(by ? { by } : {}), reason } },
+      event: {
+        type: 'JourneyInstanceCancelled',
+        payload: { instanceId: inst.id, ...(by ? { by } : {}), reason },
+      },
       actor: by ? userActor(by) : SYSTEM_ACTOR,
       scope: projectScope(inst.org_id, inst.project_id),
     },
@@ -486,7 +524,12 @@ export async function cancelInstanceIn(
   );
   if (open)
     events.push(
-      cardMessage(open, { kind: 'system' }, 'system', 'The journey this card belongs to was cancelled. The card itself is unchanged.'),
+      cardMessage(
+        open,
+        { kind: 'system' },
+        'system',
+        'The journey this card belongs to was cancelled. The card itself is unchanged.',
+      ),
     );
   await ctx.store.append(events, { tx });
   return true;

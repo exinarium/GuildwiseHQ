@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DomainEventSchema } from '../src/events/index.ts';
 import {
   CALL_BACKOFF_MINUTES,
   callBackoffMs,
@@ -16,7 +17,6 @@ import {
   validateJourney,
   type WaitView,
 } from '../src/journeys/index.ts';
-import { DomainEventSchema } from '../src/events/index.ts';
 
 const U = '0190c1a2-0000-7000-8000-000000000001';
 const base = (steps: unknown[], handoffs: unknown[], first = 'a') =>
@@ -25,7 +25,13 @@ const wf = (id: string) => ({ kind: 'workflow', id, label: id, workflowKey: 'w' 
 
 describe('step schemas', () => {
   it('an old unconfigured placeholder wait and gate still parse', () => {
-    const d = base([{ kind: 'wait', id: 'a', label: 'A' }, { kind: 'gate', id: 'b', label: 'B' }], []);
+    const d = base(
+      [
+        { kind: 'wait', id: 'a', label: 'A' },
+        { kind: 'gate', id: 'b', label: 'B' },
+      ],
+      [],
+    );
     expect(d.steps).toHaveLength(2);
   });
   it('rejects a duration under 5 minutes or over 365 days', () => {
@@ -43,7 +49,11 @@ describe('validation', () => {
   const codes = (d: ReturnType<typeof base>, o = {}) => validateJourney(d, o).errors.map((e) => e.code);
   it('an unconfigured wait or gate is a warning (it waits for Continue); an unconfigured call is an error', () => {
     const d = base(
-      [{ kind: 'wait', id: 'a', label: 'A' }, { kind: 'gate', id: 'b', label: 'B' }, { kind: 'webhook_call', id: 'c', label: 'C' }],
+      [
+        { kind: 'wait', id: 'a', label: 'A' },
+        { kind: 'gate', id: 'b', label: 'B' },
+        { kind: 'webhook_call', id: 'c', label: 'C' },
+      ],
       [],
     );
     const c = codes(d);
@@ -51,13 +61,28 @@ describe('validation', () => {
     expect(c).not.toContain('no_approver');
     expect(c).toContain('no_url');
     expect(c).toContain('no_workstation');
-    expect(validateJourney(d).warnings.map((x) => x.code)).toEqual(expect.arrayContaining(['no_wait_config', 'no_approver']));
+    expect(validateJourney(d).warnings.map((x) => x.code)).toEqual(
+      expect.arrayContaining(['no_wait_config', 'no_approver']),
+    );
   });
   it('a form wait needs a form and a timeout action; a duration wait refuses one', () => {
     const d = base(
       [
-        { kind: 'wait', id: 'a', label: 'A', waitFor: { kind: 'form', formId: null }, duration: { amount: 1, unit: 'days' } },
-        { kind: 'wait', id: 'b', label: 'B', waitFor: { kind: 'duration' }, duration: { amount: 1, unit: 'days' }, onTimeout: { action: 'cancel' } },
+        {
+          kind: 'wait',
+          id: 'a',
+          label: 'A',
+          waitFor: { kind: 'form', formId: null },
+          duration: { amount: 1, unit: 'days' },
+        },
+        {
+          kind: 'wait',
+          id: 'b',
+          label: 'B',
+          waitFor: { kind: 'duration' },
+          duration: { amount: 1, unit: 'days' },
+          onTimeout: { action: 'cancel' },
+        },
       ],
       [],
     );
@@ -68,7 +93,16 @@ describe('validation', () => {
   });
   it('goto must target another existing step', () => {
     const d = base(
-      [{ kind: 'wait', id: 'a', label: 'A', waitFor: { kind: 'webhook', triggerId: U }, duration: { amount: 1, unit: 'days' }, onTimeout: { action: 'goto', stepId: 'a' } }],
+      [
+        {
+          kind: 'wait',
+          id: 'a',
+          label: 'A',
+          waitFor: { kind: 'webhook', triggerId: U },
+          duration: { amount: 1, unit: 'days' },
+          onTimeout: { action: 'goto', stepId: 'a' },
+        },
+      ],
       [],
     );
     expect(codes(d)).toContain('goto_target');
@@ -86,19 +120,55 @@ describe('validation', () => {
     expect(v.warnings.map((e) => e.code)).toContain('no_reject_handoff');
   });
   it('a loop of calls only is an error, a loop with a wait is not', () => {
-    const call = (id: string) => ({ kind: 'webhook_call', id, label: id, url: 'https://x.test/h', workstationId: U });
-    const bad = base([call('a'), call('b')], [{ id: 'h1', from: 'a', to: 'b' }, { id: 'h2', from: 'b', to: 'a' }]);
+    const call = (id: string) => ({
+      kind: 'webhook_call',
+      id,
+      label: id,
+      url: 'https://x.test/h',
+      workstationId: U,
+    });
+    const bad = base(
+      [call('a'), call('b')],
+      [
+        { id: 'h1', from: 'a', to: 'b' },
+        { id: 'h2', from: 'b', to: 'a' },
+      ],
+    );
     expect(codes(bad)).toContain('server_step_cycle');
     const ok = base(
-      [call('a'), { kind: 'wait', id: 'b', label: 'b', waitFor: { kind: 'duration' }, duration: { amount: 1, unit: 'days' } }],
-      [{ id: 'h1', from: 'a', to: 'b' }, { id: 'h2', from: 'b', to: 'a' }],
+      [
+        call('a'),
+        {
+          kind: 'wait',
+          id: 'b',
+          label: 'b',
+          waitFor: { kind: 'duration' },
+          duration: { amount: 1, unit: 'days' },
+        },
+      ],
+      [
+        { id: 'h1', from: 'a', to: 'b' },
+        { id: 'h2', from: 'b', to: 'a' },
+      ],
     );
     expect(codes(ok)).not.toContain('server_step_cycle');
   });
   it('{wait.link} needs an earlier form wait that sends by webhook', () => {
-    const call = { kind: 'webhook_call', id: 'c', label: 'c', url: 'https://x.test/h', workstationId: U, body: '{"l":"{wait.link}"}' };
+    const call = {
+      kind: 'webhook_call',
+      id: 'c',
+      label: 'c',
+      url: 'https://x.test/h',
+      workstationId: U,
+      body: '{"l":"{wait.link}"}',
+    };
     const wait = (via: string) => ({
-      kind: 'wait', id: 'a', label: 'a', waitFor: { kind: 'form', formId: U, send: { via } }, duration: { amount: 1, unit: 'days' }, onTimeout: { action: 'cancel' },
+      kind: 'wait',
+      id: 'a',
+      label: 'a',
+      waitFor: { kind: 'form', formId: U, send: { via } },
+      duration: { amount: 1, unit: 'days' },
+      onTimeout: { action: 'cancel' },
     });
     const h = [{ id: 'h1', from: 'a', to: 'c' }];
     expect(codes(base([wait('desk'), call], h))).toContain('wait_link_unavailable');
@@ -126,7 +196,11 @@ describe('handoffs with an outcome', () => {
     expect(resolveHandoff(d, 'g', { ...ctx, result: 'done', outcome: 'approved' })?.to).toBe('n');
   });
   it('legacy cancelled handoff is read as reject; no match is stuck', () => {
-    const l = base([{ kind: 'gate', id: 'g', label: 'G' }, wf('x')], [{ id: 'h', from: 'g', on: 'cancelled', to: 'x' }], 'g');
+    const l = base(
+      [{ kind: 'gate', id: 'g', label: 'G' }, wf('x')],
+      [{ id: 'h', from: 'g', on: 'cancelled', to: 'x' }],
+      'g',
+    );
     expect(resolveHandoff(l, 'g', { ...ctx, result: 'cancelled', outcome: 'rejected' })?.to).toBe('x');
     expect(nextMove(l, 'g', { ...ctx, result: 'done', outcome: 'approved' }).kind).toBe('stuck');
   });
@@ -135,7 +209,13 @@ describe('handoffs with an outcome', () => {
 describe('timers', () => {
   const t0 = new Date('2026-11-04T08:00:00Z');
   const view = (over: Partial<WaitView>): WaitView => ({
-    kind: 'form', status: 'open', startedAt: t0, deadlineAt: new Date(t0.getTime() + 5 * 86_400_000), nextFireAt: null, remindersSent: 0, ...over,
+    kind: 'form',
+    status: 'open',
+    startedAt: t0,
+    deadlineAt: new Date(t0.getTime() + 5 * 86_400_000),
+    nextFireAt: null,
+    remindersSent: 0,
+    ...over,
   });
   it('deadlineOf adds the duration', () => {
     expect(deadlineOf(t0, { amount: 2, unit: 'hours' }).toISOString()).toBe('2026-11-04T10:00:00.000Z');
@@ -152,10 +232,15 @@ describe('timers', () => {
     // five day cadence from now, never a burst after downtime
     expect((r1 as { nextFireAt: Date }).nextFireAt.getTime()).toBe(now.getTime() + 5 * 86_400_000);
     expect(timeoutDecision(view({ onTimeout: o, remindersSent: 2 }), now).kind).toBe('cancel');
-    expect(timeoutDecision(view({ onTimeout: { ...o, afterLast: 'escalate' }, remindersSent: 2 }), now).kind).toBe('escalate');
+    expect(
+      timeoutDecision(view({ onTimeout: { ...o, afterLast: 'escalate' }, remindersSent: 2 }), now).kind,
+    ).toBe('escalate');
   });
   it('goto, escalate and cancel', () => {
-    expect(timeoutDecision(view({ onTimeout: { action: 'goto', stepId: 'z' } }), t0)).toEqual({ kind: 'goto', stepId: 'z' });
+    expect(timeoutDecision(view({ onTimeout: { action: 'goto', stepId: 'z' } }), t0)).toEqual({
+      kind: 'goto',
+      stepId: 'z',
+    });
     expect(timeoutDecision(view({ onTimeout: { action: 'escalate' } }), t0).kind).toBe('escalate');
     expect(timeoutDecision(view({ onTimeout: { action: 'cancel' } }), t0).kind).toBe('cancel');
   });
@@ -163,11 +248,21 @@ describe('timers', () => {
     expect(timeoutDecision(view({}), t0).kind).toBe('escalate');
   });
   it('date waits: day uses the time of day in the zone, across DST, and invalid values give null', () => {
-    expect(dateWaitFireAt('2026-07-01', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe('2026-07-01T07:00:00.000Z');
-    expect(dateWaitFireAt('2026-12-01', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe('2026-12-01T08:00:00.000Z');
-    expect(dateWaitFireAt('2026-03-29', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe('2026-03-29T07:00:00.000Z');
-    expect(dateWaitFireAt('2026-12-01', { amount: -1, unit: 'days' }, '09:00', 'UTC')?.toISOString()).toBe('2026-11-30T09:00:00.000Z');
-    expect(dateWaitFireAt('2026-12-01T10:30:00Z', undefined, '09:00')?.toISOString()).toBe('2026-12-01T10:30:00.000Z');
+    expect(dateWaitFireAt('2026-07-01', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe(
+      '2026-07-01T07:00:00.000Z',
+    );
+    expect(dateWaitFireAt('2026-12-01', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe(
+      '2026-12-01T08:00:00.000Z',
+    );
+    expect(dateWaitFireAt('2026-03-29', undefined, '09:00', 'Europe/Amsterdam')?.toISOString()).toBe(
+      '2026-03-29T07:00:00.000Z',
+    );
+    expect(dateWaitFireAt('2026-12-01', { amount: -1, unit: 'days' }, '09:00', 'UTC')?.toISOString()).toBe(
+      '2026-11-30T09:00:00.000Z',
+    );
+    expect(dateWaitFireAt('2026-12-01T10:30:00Z', undefined, '09:00')?.toISOString()).toBe(
+      '2026-12-01T10:30:00.000Z',
+    );
     expect(dateWaitFireAt('2026-02-31', undefined, '09:00')).toBeNull();
     expect(dateWaitFireAt('soon', undefined, '09:00')).toBeNull();
     expect(dateWaitFireAt(undefined, undefined, '09:00')).toBeNull();
@@ -182,8 +277,12 @@ describe('timers', () => {
 
 describe('body templates and hook mapping', () => {
   it('escapes for JSON and URL forms and refuses unknown tokens', () => {
-    expect(renderBodyTemplate('{"n":"{record.name}"}', { 'record.name': 'A "B"\n' }, 'application/json')).toBe('{"n":"A \\"B\\"\\n"}');
-    expect(renderBodyTemplate('n={record.name}', { 'record.name': 'A&B' }, 'application/x-www-form-urlencoded')).toBe('n=A%26B');
+    expect(
+      renderBodyTemplate('{"n":"{record.name}"}', { 'record.name': 'A "B"\n' }, 'application/json'),
+    ).toBe('{"n":"A \\"B\\"\\n"}');
+    expect(
+      renderBodyTemplate('n={record.name}', { 'record.name': 'A&B' }, 'application/x-www-form-urlencoded'),
+    ).toBe('n=A%26B');
     expect(() => renderBodyTemplate('{nope}', {}, 'text/plain')).toThrow();
   });
   it('reads JSON pointers', () => {
@@ -194,7 +293,10 @@ describe('body templates and hook mapping', () => {
   });
   it('maps only the external id and display name', () => {
     const m = { externalId: '/id', displayName: '/who/name' };
-    expect(mapHookPayload(m, { id: 77, who: { name: ' Ann ' }, secret: 'S' })).toEqual({ externalId: '77', displayName: 'Ann' });
+    expect(mapHookPayload(m, { id: 77, who: { name: ' Ann ' }, secret: 'S' })).toEqual({
+      externalId: '77',
+      displayName: 'Ann',
+    });
     expect(mapHookPayload(m, { who: {} })).toEqual({ error: 'missing_match' });
     expect(mapHookPayload(m, { id: { x: 1 } })).toEqual({ error: 'not_scalar' });
     expect(mapHookPayload(m, { id: 'x'.repeat(121) })).toEqual({ error: 'value_too_long' });

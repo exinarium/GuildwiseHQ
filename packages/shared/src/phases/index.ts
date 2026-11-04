@@ -5,8 +5,8 @@ import { EnvNameSchema } from '../delivery/gate.ts';
 import { RegressionPlatform } from '../events/testing.ts';
 import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
 import { SpecCardTaskSchema, specCardBriefOutcomes } from '../intake/spec-card.ts';
-import { ReleaseChangelogTaskSchema, releaseChangelogBriefOutcomes } from '../release/changelog-task.ts';
 import { MailDraftTaskSchema, mailDraftBriefOutcomes } from '../mail/draft.ts';
+import { ReleaseChangelogTaskSchema, releaseChangelogBriefOutcomes } from '../release/changelog-task.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 

@@ -11,7 +11,10 @@ import { createWorld, ok, type World } from './helpers/world.ts';
 let w: World;
 const ctx = () => w.t.app.ctx;
 const asOwner = (method: string, url: string, body?: unknown, expected = 200) =>
-  ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), expected);
+  ok<any>(
+    w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }),
+    expected,
+  );
 const tick = async (n = 3) => {
   for (let i = 0; i < n; i++) await journeyTick(ctx(), { projectId: w.projectId });
 };
@@ -48,7 +51,14 @@ const create = async (steps: unknown[], handoffs: unknown[], first = 'a') =>
     )
   ).id as string;
 const start = async (journeyId: string) =>
-  (await asOwner('POST', '/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Ann' } }, 201)).id as string;
+  (
+    await asOwner(
+      'POST',
+      '/api/journey-instances',
+      { journeyId, record: { type: 'client', displayName: 'Ann' } },
+      201,
+    )
+  ).id as string;
 const inst = async (id: string) => (await q('SELECT * FROM journey_instances WHERE id=$1', [id]))[0] as any;
 const waitRow = async (id: string, visit = 1) =>
   (await q('SELECT * FROM journey_waits WHERE instance_id=$1 AND visit=$2', [id, visit]))[0] as any;
@@ -132,7 +142,10 @@ describe('timeout actions: every one leaves an event, none ends silently', () =>
   });
 
   it('cancel cancels the journey with an event on the wait', async () => {
-    const j = await create([hookWait('a', { action: 'cancel' }), manual('after')], [{ id: 'h1', from: 'a', on: 'done', to: 'after' }]);
+    const j = await create(
+      [hookWait('a', { action: 'cancel' }), manual('after')],
+      [{ id: 'h1', from: 'a', on: 'done', to: 'after' }],
+    );
     const id = await start(j);
     await tick();
     w.t.clock.advance(11 * MIN);
@@ -144,7 +157,10 @@ describe('timeout actions: every one leaves an event, none ends silently', () =>
   });
 
   it('escalate keeps the wait, asks the project owner, and Extend reopens it with a new deadline', async () => {
-    const j = await create([hookWait('a', { action: 'escalate' }), manual('after')], [{ id: 'h1', from: 'a', on: 'done', to: 'after' }]);
+    const j = await create(
+      [hookWait('a', { action: 'escalate' }), manual('after')],
+      [{ id: 'h1', from: 'a', on: 'done', to: 'after' }],
+    );
     const id = await start(j);
     await tick();
     w.t.clock.advance(11 * MIN);
@@ -161,7 +177,13 @@ describe('timeout actions: every one leaves an event, none ends silently', () =>
 describe('date waits', () => {
   it('a missing date escalates at once', async () => {
     const j = await create(
-      [wait('a', { waitFor: { kind: 'date', dateFrom: { field: 'dueDate' }, atTime: '09:00' }, duration: undefined }), manual('after')],
+      [
+        wait('a', {
+          waitFor: { kind: 'date', dateFrom: { field: 'dueDate' }, atTime: '09:00' },
+          duration: undefined,
+        }),
+        manual('after'),
+      ],
       [{ id: 'h1', from: 'a', on: 'done', to: 'after' }],
     );
     const id = await start(j);
@@ -181,7 +203,10 @@ describe('timers fire once', () => {
     const id = await start(j);
     await tick();
     w.t.clock.advance(11 * MIN);
-    await Promise.all([journeyTick(ctx(), { projectId: w.projectId }), journeyTick(ctx(), { projectId: w.projectId })]);
+    await Promise.all([
+      journeyTick(ctx(), { projectId: w.projectId }),
+      journeyTick(ctx(), { projectId: w.projectId }),
+    ]);
     await tick();
     const row = await waitRow(id);
     expect(row.reminders_sent).toBe(1);
@@ -206,7 +231,10 @@ describe('timers fire once', () => {
 
 describe('manual placeholders keep working', () => {
   it('an unconfigured wait waits for Continue, which writes a wait event', async () => {
-    const j = await create([manual('a'), manual('after')], [{ id: 'h1', from: 'a', on: 'done', to: 'after' }]);
+    const j = await create(
+      [manual('a'), manual('after')],
+      [{ id: 'h1', from: 'a', on: 'done', to: 'after' }],
+    );
     const id = await start(j);
     await tick();
     expect((await waitRow(id)).kind).toBe('manual');
@@ -218,7 +246,13 @@ describe('manual placeholders keep working', () => {
 });
 
 describe('approval gates', () => {
-  const gate = { kind: 'gate', id: 'g', label: 'Approval', approver: { kind: 'project_owner' }, question: 'Approve?' };
+  const gate = {
+    kind: 'gate',
+    id: 'g',
+    label: 'Approval',
+    approver: { kind: 'project_owner' },
+    question: 'Approve?',
+  };
   const handoffs = [
     { id: 'h1', from: 'g', on: 'approved', to: 'yes' },
     { id: 'h2', from: 'g', on: 'rejected', to: 'end' },
@@ -234,8 +268,13 @@ describe('approval gates', () => {
     expect(desk.status).toBe('open');
     await asOwner('POST', `/api/journey-gates/${row.id}/decide`, { decision: 'approved' });
     expect((await inst(id)).current_step_id).toBe('yes');
-    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [row.desk_item_id]))[0]!.status).not.toBe('open');
-    const events = (await q(`SELECT payload FROM events WHERE type='JourneyStepCompleted' AND payload->>'instanceId'=$1`, [id])) as any[];
+    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [row.desk_item_id]))[0]!.status).not.toBe(
+      'open',
+    );
+    const events = (await q(
+      `SELECT payload FROM events WHERE type='JourneyStepCompleted' AND payload->>'instanceId'=$1`,
+      [id],
+    )) as any[];
     expect(events[0].payload.outcome).toBe('approved');
   });
 
@@ -244,9 +283,15 @@ describe('approval gates', () => {
     const id = await start(j);
     await tick();
     const row = await waitRow(id);
-    const no = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, { cookie: w.owner.cookie, body: { decision: 'rejected' } });
+    const no = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, {
+      cookie: w.owner.cookie,
+      body: { decision: 'rejected' },
+    });
     expect(no.status).toBe(400);
-    await asOwner('POST', `/api/journey-gates/${row.id}/decide`, { decision: 'rejected', note: 'Incomplete' });
+    await asOwner('POST', `/api/journey-gates/${row.id}/decide`, {
+      decision: 'rejected',
+      note: 'Incomplete',
+    });
     expect((await inst(id)).status).toBe('completed');
   });
 
@@ -255,10 +300,16 @@ describe('approval gates', () => {
     const id = await start(j);
     await tick();
     const row = await waitRow(id);
-    const c = await w.t.req('POST', `/api/journey-instances/${id}/continue`, { cookie: w.owner.cookie, body: { visit: 1 } });
+    const c = await w.t.req('POST', `/api/journey-instances/${id}/continue`, {
+      cookie: w.owner.cookie,
+      body: { visit: 1 },
+    });
     expect(c.status).toBe(409);
     await asOwner('POST', `/api/journey-gates/${row.id}/decide`, { decision: 'approved' });
-    const again = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, { cookie: w.owner.cookie, body: { decision: 'approved' } });
+    const again = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, {
+      cookie: w.owner.cookie,
+      body: { decision: 'approved' },
+    });
     expect(again.status).toBe(409);
   });
 
@@ -268,7 +319,10 @@ describe('approval gates', () => {
     await tick();
     const row = await waitRow(id);
     const other = await w.t.userSession(`outsider-${randomUUID()}@example.com`);
-    const r = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, { cookie: other.cookie, body: { decision: 'approved' } });
+    const r = await w.t.req('POST', `/api/journey-gates/${row.id}/decide`, {
+      cookie: other.cookie,
+      body: { decision: 'approved' },
+    });
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect((await waitRow(id)).status).toBe('open');
   });

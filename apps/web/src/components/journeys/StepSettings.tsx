@@ -2,11 +2,24 @@ import type { JourneyDefinition, JourneyStep } from '@aom/shared';
 import { Plus, Trash2 } from 'lucide-react';
 import { useForms } from '../../api/queries/forms.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
-import { DURATION_UNITS, durationError, timeoutOf, type TimeoutKind, type WaitKind, waitForOf } from '../../lib/journeys.ts';
+import {
+  DURATION_UNITS,
+  durationError,
+  type TimeoutKind,
+  timeoutOf,
+  type WaitKind,
+  waitForOf,
+} from '../../lib/journeys.ts';
 import { Button, Select, TextArea, TextInput } from '../ui.tsx';
 
 type Duration = { amount: number; unit: (typeof DURATION_UNITS)[number] };
-type Timeout = { action: TimeoutKind; stepId?: string; maxReminders?: number; afterLast?: string; every?: Duration };
+type Timeout = {
+  action: TimeoutKind;
+  stepId?: string;
+  maxReminders?: number;
+  afterLast?: string;
+  every?: Duration;
+};
 
 /** Amount and unit; the soft keyboard opens as a number pad. */
 function DurationField({
@@ -31,7 +44,9 @@ function DurationField({
         disabled={disabled}
         value={value ? String(value.amount) : ''}
         error={value && err ? err : undefined}
-        onChange={(e) => onChange({ amount: Number(e.target.value.replace(/\D/g, '')) || 0, unit: value?.unit ?? 'days' })}
+        onChange={(e) =>
+          onChange({ amount: Number(e.target.value.replace(/\D/g, '')) || 0, unit: value?.unit ?? 'days' })
+        }
       />
       <Select
         label="Unit"
@@ -80,7 +95,12 @@ function TimeoutEditor({
         <option value="cancel">Cancel the journey</option>
       </Select>
       {value?.action === 'goto' && (
-        <Select label="Step to move to" disabled={disabled} value={value.stepId ?? ''} onChange={(e) => onChange({ ...value, stepId: e.target.value })}>
+        <Select
+          label="Step to move to"
+          disabled={disabled}
+          value={value.stepId ?? ''}
+          onChange={(e) => onChange({ ...value, stepId: e.target.value })}
+        >
           {others.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
@@ -96,7 +116,12 @@ function TimeoutEditor({
             enterKeyHint="done"
             disabled={disabled}
             value={String(value.maxReminders ?? 3)}
-            onChange={(e) => onChange({ ...value, maxReminders: Math.min(10, Math.max(1, Number(e.target.value.replace(/\D/g, '')) || 1)) })}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                maxReminders: Math.min(10, Math.max(1, Number(e.target.value.replace(/\D/g, '')) || 1)),
+              })
+            }
           />
           <Select
             label="After the last reminder"
@@ -224,10 +249,16 @@ function WaitSettings({
       )}
       {w?.kind === 'webhook' && (
         <p className="text-sm text-muted">
-          The wait ends when a hook of this journey that resumes it is called. Add the hook under "Webhooks" below the steps.
+          The wait ends when a hook of this journey that resumes it is called. Add the hook under "Webhooks"
+          below the steps.
         </p>
       )}
-      <DurationField label="Wait at most" value={step.duration} disabled={disabled} onChange={(d) => onStep({ duration: d })} />
+      <DurationField
+        label="Wait at most"
+        value={step.duration}
+        disabled={disabled}
+        onChange={(d) => onStep({ duration: d })}
+      />
       <TimeoutEditor
         def={def}
         stepId={step.id}
@@ -280,7 +311,8 @@ function GateSettings({
         onChange={(e) => onStep({ question: e.target.value || undefined })}
       />
       <p className="text-sm text-muted">
-        Approve follows the handoff "approved" (or "done"); reject follows the handoff "rejected". Add both under "What happens next".
+        Approve follows the handoff "approved" (or "done"); reject follows the handoff "rejected". Add both
+        under "What happens next".
       </p>
       {dl ? (
         <>
@@ -290,10 +322,21 @@ function GateSettings({
             disabled={disabled}
             onChange={(d) => onStep({ deadline: { ...dl, duration: d } })}
           />
-          <TimeoutEditor def={def} stepId={step.id} value={dl.onTimeout} disabled={disabled} onChange={(t) => onStep({ deadline: { ...dl, onTimeout: t } })} />
+          <TimeoutEditor
+            def={def}
+            stepId={step.id}
+            value={dl.onTimeout}
+            disabled={disabled}
+            onChange={(t) => onStep({ deadline: { ...dl, onTimeout: t } })}
+          />
           {!disabled && (
             <div>
-              <Button variant="secondary" size="sm" type="button" onClick={() => onStep({ deadline: undefined })}>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={() => onStep({ deadline: undefined })}
+              >
                 No deadline
               </Button>
             </div>
@@ -306,7 +349,11 @@ function GateSettings({
               variant="secondary"
               size="sm"
               type="button"
-              onClick={() => onStep({ deadline: { duration: { amount: 2, unit: 'days' }, onTimeout: timeoutOf('remind') } })}
+              onClick={() =>
+                onStep({
+                  deadline: { duration: { amount: 2, unit: 'days' }, onTimeout: timeoutOf('remind') },
+                })
+              }
             >
               Add a deadline
             </Button>
@@ -346,7 +393,12 @@ function CallSettings({
           </option>
         ))}
       </Select>
-      <Select label="Method" disabled={disabled} value={step.method} onChange={(e) => onStep({ method: e.target.value })}>
+      <Select
+        label="Method"
+        disabled={disabled}
+        value={step.method}
+        onChange={(e) => onStep({ method: e.target.value })}
+      >
         {['POST', 'PUT', 'PATCH', 'GET', 'DELETE'].map((m) => (
           <option key={m}>{m}</option>
         ))}
@@ -368,10 +420,28 @@ function CallSettings({
         <span className="text-sm font-medium text-fg">Headers</span>
         {headers.map((h, i) => (
           <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-            <TextInput label="Name" autoCapitalize="none" disabled={disabled} value={h.name} onChange={(e) => setHeader(i, { name: e.target.value })} />
-            <TextInput label="Value" autoCapitalize="none" disabled={disabled} value={h.value} onChange={(e) => setHeader(i, { value: e.target.value })} />
+            <TextInput
+              label="Name"
+              autoCapitalize="none"
+              disabled={disabled}
+              value={h.name}
+              onChange={(e) => setHeader(i, { name: e.target.value })}
+            />
+            <TextInput
+              label="Value"
+              autoCapitalize="none"
+              disabled={disabled}
+              value={h.value}
+              onChange={(e) => setHeader(i, { value: e.target.value })}
+            />
             {!disabled && (
-              <Button variant="danger" size="sm" type="button" aria-label="Remove header" onClick={() => onStep({ headers: headers.filter((_, k) => k !== i) })}>
+              <Button
+                variant="danger"
+                size="sm"
+                type="button"
+                aria-label="Remove header"
+                onClick={() => onStep({ headers: headers.filter((_, k) => k !== i) })}
+              >
                 <Trash2 aria-hidden="true" className="size-4" />
               </Button>
             )}
@@ -379,13 +449,19 @@ function CallSettings({
         ))}
         {!disabled && (
           <div>
-            <Button variant="secondary" size="sm" type="button" onClick={() => onStep({ headers: [...headers, { name: '', value: '' }] })}>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => onStep({ headers: [...headers, { name: '', value: '' }] })}
+            >
               <Plus aria-hidden="true" className="size-4" /> Add a header
             </Button>
           </div>
         )}
         <p className="text-sm text-muted">
-          Secrets (tokens, a signing key) are not typed here: they are kept on the sending computer and only named on this step.
+          Secrets (tokens, a signing key) are not typed here: they are kept on the sending computer and only
+          named on this step.
         </p>
       </div>
       <TextInput
@@ -396,7 +472,12 @@ function CallSettings({
         value={step.signWith ?? ''}
         onChange={(e) => onStep({ signWith: e.target.value || undefined })}
       />
-      <Select label="Content type" disabled={disabled} value={step.contentType} onChange={(e) => onStep({ contentType: e.target.value })}>
+      <Select
+        label="Content type"
+        disabled={disabled}
+        value={step.contentType}
+        onChange={(e) => onStep({ contentType: e.target.value })}
+      >
         <option value="application/json">JSON</option>
         <option value="application/x-www-form-urlencoded">Form fields</option>
         <option value="text/plain">Plain text</option>

@@ -52,7 +52,12 @@ export class JourneyWebhookCaller {
     for (const h of p.headers) headers[h.name.toLowerCase()] = h.value;
     for (const c of p.credentialHeaders) {
       const cred = store?.credentials[c.credential];
-      if (!cred) return { ok: false, error: `the credential "${c.credential}" is not stored on this workstation`, retryable: false };
+      if (!cred)
+        return {
+          ok: false,
+          error: `the credential "${c.credential}" is not stored on this workstation`,
+          retryable: false,
+        };
       headers[c.name.toLowerCase()] = cred.value;
     }
     const ts = String(Math.floor((this.deps.now?.() ?? Date.now()) / 1000));
@@ -63,8 +68,15 @@ export class JourneyWebhookCaller {
     if (hasBody) headers['content-type'] = p.contentType;
     if (p.signWith) {
       const key = store?.credentials[p.signWith];
-      if (!key) return { ok: false, error: `the signing secret "${p.signWith}" is not stored on this workstation`, retryable: false };
-      headers['x-guildwise-signature'] = `sha256=${createHmac('sha256', key.value).update(`${ts}.${hasBody ? p.body : ''}`).digest('hex')}`;
+      if (!key)
+        return {
+          ok: false,
+          error: `the signing secret "${p.signWith}" is not stored on this workstation`,
+          retryable: false,
+        };
+      headers['x-guildwise-signature'] = `sha256=${createHmac('sha256', key.value)
+        .update(`${ts}.${hasBody ? p.body : ''}`)
+        .digest('hex')}`;
     }
     const f = this.deps.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
     const t0 = Date.now();
@@ -81,12 +93,19 @@ export class JourneyWebhookCaller {
       return {
         ok: false,
         httpStatus: res.status,
-        error: res.status >= 300 && res.status < 400 ? `the address answered with a redirect (${res.status}), which is not followed` : `the address answered ${res.status}`,
+        error:
+          res.status >= 300 && res.status < 400
+            ? `the address answered with a redirect (${res.status}), which is not followed`
+            : `the address answered ${res.status}`,
         retryable: retryable(res.status),
       };
     } catch (err) {
       const timedOut = (err as Error).name === 'TimeoutError' || Date.now() - t0 >= TIMEOUT_MS;
-      return { ok: false, error: timedOut ? 'the address did not answer in time' : 'the address could not be reached', retryable: true };
+      return {
+        ok: false,
+        error: timedOut ? 'the address did not answer in time' : 'the address could not be reached',
+        retryable: true,
+      };
     }
   }
 }

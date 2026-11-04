@@ -1,7 +1,7 @@
 import type { JourneyApprover } from '@aom/shared';
 import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
 import { resolveApprover } from '../commands/approval.ts';
-import { rows, type Queryable, type Row } from '../db/sql.ts';
+import { type Queryable, type Row, rows } from '../db/sql.ts';
 
 export interface ResolvedApprover {
   userIds: string[];
@@ -20,7 +20,8 @@ export async function resolveJourneyApprover(
   a: JourneyApprover,
 ): Promise<ResolvedApprover> {
   if (a.kind === 'org_role') {
-    if (a.role === 'owner') return { userIds: [await orgOwnerId(db, inst.org_id)], role: 'owner', fellBack: false };
+    if (a.role === 'owner')
+      return { userIds: [await orgOwnerId(db, inst.org_id)], role: 'owner', fellBack: false };
     const admins = await rows(
       db,
       `SELECT om.user_id FROM org_members om JOIN users u ON u.id = om.user_id
@@ -32,7 +33,11 @@ export async function resolveJourneyApprover(
       ? { userIds: ids, role: 'admin', fellBack: false }
       : { userIds: [await orgOwnerId(db, inst.org_id)], role: 'admin', fellBack: true };
   }
-  const r = await resolveApprover(db, inst as Row, a.kind === 'member' ? { kind: 'member', userId: a.userId } : ({ kind: a.kind } as never));
+  const r = await resolveApprover(
+    db,
+    inst as Row,
+    a.kind === 'member' ? { kind: 'member', userId: a.userId } : ({ kind: a.kind } as never),
+  );
   return { userIds: [r.userId], fellBack: r.fellBack };
 }
 

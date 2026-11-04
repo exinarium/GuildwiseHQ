@@ -385,7 +385,7 @@ describe('guard: commits_on_other_branch attribution by card', () => {
     sh(u.repo.clone, 'git', ['branch', 'aom/toy-2-old', 'main']);
     u.commit(u.path, 'a1.txt');
     sh(u.path, 'git', ['branch', '-f', 'aom/toy-2-old', 'HEAD']);
-    expect((await u.guard())).toHaveLength(1);
+    expect(await u.guard()).toHaveLength(1);
   });
 
   it('without a HEAD reflog a foreign branch move is refused as provenance unknown', async () => {

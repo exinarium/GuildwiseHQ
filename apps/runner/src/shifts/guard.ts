@@ -1,4 +1,9 @@
-import { type AgentPermissions, type GuardViolation, CARD_BRANCH_PREFIXES, isRunnerOwnedBranch } from '@aom/shared';
+import {
+  type AgentPermissions,
+  CARD_BRANCH_PREFIXES,
+  type GuardViolation,
+  isRunnerOwnedBranch,
+} from '@aom/shared';
 import picomatch from 'picomatch';
 import {
   statusLinesWithoutStubs,
@@ -587,7 +592,8 @@ export async function otherBranchViolation(input: GuardInput): Promise<GuardViol
   const protectedSet = new Set(input.protectedBranches ?? []);
   if (input.baseBranch) protectedSet.add(input.baseBranch);
   const head = await git(input.worktree, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
-  if (head.exitCode === 0 && head.stdout.trim()) protectedSet.add(head.stdout.trim().replace(/^origin\//, ''));
+  if (head.exitCode === 0 && head.stdout.trim())
+    protectedSet.add(head.stdout.trim().replace(/^origin\//, ''));
   const ownRef = input.cardRef?.toUpperCase();
   let shas: Set<string> | null | undefined;
   const moved: string[] = [];
@@ -611,7 +617,8 @@ export async function otherBranchViolation(input: GuardInput): Promise<GuardViol
     }
     if (shas === undefined) shas = await shiftHeadShas(input);
     if (shas === null) moved.push(`${b} (provenance unknown: this worktree keeps no HEAD reflog)`);
-    else if (await madeByThisShift(input, tip, before, shas)) moved.push(`${b} (commits made in this worktree)`);
+    else if (await madeByThisShift(input, tip, before, shas))
+      moved.push(`${b} (commits made in this worktree)`);
   }
   if (moved.length === 0) return null;
   return {

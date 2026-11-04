@@ -145,13 +145,13 @@ import {
 import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
 import {
   decideTestServices,
+  isTesterShift,
   noTestServicesNote,
   notAnsweringLine,
   refusedProgress,
   TEST_SERVICE_ROLES,
   type TestServiceDecision,
   type TestServicesSeen,
-  isTesterShift,
   testerScratchNote,
   testerShiftEnv,
   testServiceDomains,

@@ -90,7 +90,10 @@ async function writerInput(db: Queryable, run: Row, repo: Row, summary: ReleaseD
 }
 
 /** The brief of a `release_changelog` shift. Null when the run or repository is gone. */
-export async function buildReleaseChangelogTask(db: Queryable, task: Row): Promise<ReleaseChangelogTask | null> {
+export async function buildReleaseChangelogTask(
+  db: Queryable,
+  task: Row,
+): Promise<ReleaseChangelogTask | null> {
   const found = await prepRepoOf(db, task);
   if (!found) return null;
   const { run, repo } = found;
@@ -184,7 +187,9 @@ export async function applyReleaseChangelogReport(
         'there are no questions in a background task: write the entries from what the prompt says, or report that none can be written',
     };
   const found = await prepRepoOf(tx, task);
-  const run = found ? await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1 FOR UPDATE', [found.run.id]) : null;
+  const run = found
+    ? await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1 FOR UPDATE', [found.run.id])
+    : null;
   const step =
     found && run
       ? await one(
@@ -194,13 +199,16 @@ export async function applyReleaseChangelogReport(
         )
       : null;
   if (!found || !run || run.status !== 'running' || step?.state !== 'running') {
-    await ctx.store.append([taskDone(task, 'cancelled', 'the release prep run is no longer running')], { tx });
+    await ctx.store.append([taskDone(task, 'cancelled', 'the release prep run is no longer running')], {
+      tx,
+    });
     return { accepted: true, message: 'The release prep run is no longer running; nothing is written.' };
   }
   const { repo } = found;
   if (report.outcomeId === RELEASE_CHANGELOG_OUTCOME.fail) {
     const why =
-      (report.note ?? '').trim().slice(0, 500) || 'The changelog writer could not write entries for these changes.';
+      (report.note ?? '').trim().slice(0, 500) ||
+      'The changelog writer could not write entries for these changes.';
     await ctx.store.append([taskDone(task, 'done', why)], { tx });
     deliverLater(ctx, await failStep(ctx, tx, run, repo.repo_id, `Write changelog: ${why}`));
     return { accepted: true };

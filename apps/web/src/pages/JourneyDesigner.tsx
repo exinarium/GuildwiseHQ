@@ -55,11 +55,15 @@ export function JourneyDesigner() {
     [wfs.data],
   );
   const playbooks = useMemo(
-    () => (slash.data?.items ?? []).filter((s) => s.kind === 'playbook').map((s) => ({ key: s.key, name: s.name })),
+    () =>
+      (slash.data?.items ?? [])
+        .filter((s) => s.kind === 'playbook')
+        .map((s) => ({ key: s.key, name: s.name })),
     [slash.data],
   );
   const issues = useMemo(
-    () => (def ? validateJourney(def, wfs.data ? { enabledWorkflowKeys: workflows.map((w) => w.key) } : {}) : null),
+    () =>
+      def ? validateJourney(def, wfs.data ? { enabledWorkflowKeys: workflows.map((w) => w.key) } : {}) : null,
     [def, wfs.data, workflows],
   );
 
@@ -78,7 +82,11 @@ export function JourneyDesigner() {
           toast.success('Journey saved');
         },
         onError: (e) =>
-          toast.error(e instanceof ApiError && e.status === 409 ? 'Someone else saved this journey: reload it first.' : errorMessage(e)),
+          toast.error(
+            e instanceof ApiError && e.status === 409
+              ? 'Someone else saved this journey: reload it first.'
+              : errorMessage(e),
+          ),
       },
     );
 
@@ -95,7 +103,11 @@ export function JourneyDesigner() {
                 Save
               </Button>
             )}
-            <Button variant="secondary" onClick={() => setStarting(true)} disabled={dirty || (issues?.errors.length ?? 0) > 0}>
+            <Button
+              variant="secondary"
+              onClick={() => setStarting(true)}
+              disabled={dirty || (issues?.errors.length ?? 0) > 0}
+            >
               Start on a {def.recordType}
             </Button>
           </>
@@ -107,7 +119,12 @@ export function JourneyDesigner() {
         </Callout>
       )}
       {issues && (issues.errors.length > 0 || issues.warnings.length > 0) && (
-        <Callout tone={issues.errors.length ? 'warning' : 'info'} title="Before you can start this journey" className="mb-4" role="status">
+        <Callout
+          tone={issues.errors.length ? 'warning' : 'info'}
+          title="Before you can start this journey"
+          className="mb-4"
+          role="status"
+        >
           <ul className="list-disc pl-5">
             {[...issues.errors, ...issues.warnings].map((i, n) => (
               <li key={`${i.code}-${n}`}>{i.message}</li>
@@ -116,7 +133,12 @@ export function JourneyDesigner() {
         </Callout>
       )}
       <div className="mb-6 grid gap-3 sm:grid-cols-2">
-        <TextInput label="Name" value={def.name} disabled={!canEdit} onChange={(e) => edit({ ...def, name: e.target.value })} />
+        <TextInput
+          label="Name"
+          value={def.name}
+          disabled={!canEdit}
+          onChange={(e) => edit({ ...def, name: e.target.value })}
+        />
         <Select
           label="Works on a"
           value={def.recordType}
@@ -130,7 +152,12 @@ export function JourneyDesigner() {
           ))}
         </Select>
         <div className="sm:col-span-2">
-          <TextArea label="Description" value={def.description} disabled={!canEdit} onChange={(e) => edit({ ...def, description: e.target.value })} />
+          <TextArea
+            label="Description"
+            value={def.description}
+            disabled={!canEdit}
+            onChange={(e) => edit({ ...def, description: e.target.value })}
+          />
         </div>
       </div>
       <ol className="flex flex-col gap-4" data-testid="journey-steps">
@@ -178,7 +205,10 @@ export function JourneyDesigner() {
         busy={start.isPending}
         error={start.error}
         onStart={(record) =>
-          start.mutate({ journeyId: id ?? '', record }, { onSuccess: (r) => nav(`/journeys/instances/${r.id}`) })
+          start.mutate(
+            { journeyId: id ?? '', record },
+            { onSuccess: (r) => nav(`/journeys/instances/${r.id}`) },
+          )
         }
       />
     </div>

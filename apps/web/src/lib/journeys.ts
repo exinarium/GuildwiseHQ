@@ -2,7 +2,11 @@ import type { JourneyDefinition, JourneyHandoff, JourneyStep } from '@aom/shared
 
 /** Pure edits of a journey definition for the designer (testable without React). */
 
-const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const slug = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 
 /** A step id that is free in the definition: `step_2`, `step_3`, ... */
 export function freeId(taken: Iterable<string>, base = 'step'): string {
@@ -13,7 +17,10 @@ export function freeId(taken: Iterable<string>, base = 'step'): string {
 }
 
 export function addStep(def: JourneyDefinition, kind: JourneyStep['kind'], label: string): JourneyDefinition {
-  const id = freeId(def.steps.map((s) => s.id), label);
+  const id = freeId(
+    def.steps.map((s) => s.id),
+    label,
+  );
   const step: JourneyStep =
     kind === 'workflow'
       ? { kind, id, label, workflowKey: null, fieldsIn: [] }
@@ -44,7 +51,11 @@ export function moveStep(def: JourneyDefinition, id: string, delta: -1 | 1): Jou
   return { ...def, steps };
 }
 
-export function updateStep(def: JourneyDefinition, id: string, patch: Record<string, unknown>): JourneyDefinition {
+export function updateStep(
+  def: JourneyDefinition,
+  id: string,
+  patch: Record<string, unknown>,
+): JourneyDefinition {
   return { ...def, steps: def.steps.map((s) => (s.id === id ? ({ ...s, ...patch } as JourneyStep) : s)) };
 }
 
@@ -60,12 +71,19 @@ export function removeStep(def: JourneyDefinition, id: string): JourneyDefinitio
 }
 
 export function addHandoff(def: JourneyDefinition, from: string, to: string): JourneyDefinition {
-  const id = freeId(def.handoffs.map((h) => h.id), 'handoff');
+  const id = freeId(
+    def.handoffs.map((h) => h.id),
+    'handoff',
+  );
   const h: JourneyHandoff = { id, from, on: 'done', to };
   return { ...def, handoffs: [...def.handoffs, h] };
 }
 
-export function updateHandoff(def: JourneyDefinition, id: string, patch: Partial<JourneyHandoff>): JourneyDefinition {
+export function updateHandoff(
+  def: JourneyDefinition,
+  id: string,
+  patch: Partial<JourneyHandoff>,
+): JourneyDefinition {
   return { ...def, handoffs: def.handoffs.map((h) => (h.id === id ? { ...h, ...patch } : h)) };
 }
 
@@ -124,7 +142,8 @@ const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000, weeks: 60
 export function durationError(d: { amount: number; unit: keyof typeof UNIT_MS } | undefined): string | null {
   if (!d) return 'Pick how long to wait.';
   const ms = d.amount * UNIT_MS[d.unit];
-  if (!Number.isInteger(d.amount) || ms < 5 * 60_000 || ms > 365 * 86_400_000) return 'Between 5 minutes and 365 days.';
+  if (!Number.isInteger(d.amount) || ms < 5 * 60_000 || ms > 365 * 86_400_000)
+    return 'Between 5 minutes and 365 days.';
   return null;
 }
 
@@ -144,7 +163,10 @@ export function relativeTime(iso: string | null, now: Date = new Date()): string
 }
 
 /** Plain words for what a wait does when it times out. */
-export function timeoutSummary(a: { action: string; maxReminders?: number; stepId?: string } | undefined, label?: (id: string) => string): string {
+export function timeoutSummary(
+  a: { action: string; maxReminders?: number; stepId?: string } | undefined,
+  label?: (id: string) => string,
+): string {
   if (!a) return 'not set';
   if (a.action === 'remind') return `send up to ${a.maxReminders ?? 3} reminders, then ask the desk`;
   if (a.action === 'goto') return `go to "${label?.(a.stepId ?? '') ?? a.stepId}"`;

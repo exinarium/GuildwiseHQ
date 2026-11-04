@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baTaskBriefOutcomes, BaTaskKind } from '../src/phases/index.ts';
+import { BaTaskKind, baTaskBriefOutcomes } from '../src/phases/index.ts';
 import { commandForOutcome } from '../src/prompt/commands.ts';
 import {
   checkChangelogProposal,
@@ -31,7 +31,11 @@ const good = {
 describe('checkChangelogProposal', () => {
   it('accepts a proposal that accounts for every change and normalises the heading', () => {
     const r = checkChangelogProposal(
-      { entries: [good], covered: [{ source: B, existing: 2 }], skipped: [{ source: C, reason: 'internal' }] },
+      {
+        entries: [good],
+        covered: [{ source: B, existing: 2 }],
+        skipped: [{ source: C, reason: 'internal' }],
+      },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -45,7 +49,11 @@ describe('checkChangelogProposal', () => {
       {
         entries: [
           { ...good, text: `${good.text} See #12.` },
-          { heading: 'Fixed', text: 'The import no longer fails for GWP-74 on a slow disk at all.', sources: [B] },
+          {
+            heading: 'Fixed',
+            text: 'The import no longer fails for GWP-74 on a slow disk at all.',
+            sources: [B],
+          },
           { heading: 'Highlights', text: 'A heading the release page does not read at all.', sources: [C] },
         ],
       },
@@ -61,7 +69,9 @@ describe('checkChangelogProposal', () => {
   it('never repeats a deny-list term in the refusal', () => {
     const r = checkChangelogProposal(
       {
-        entries: [{ ...good, text: 'Faster exports. Katherine made the export of large boards much faster now.' }],
+        entries: [
+          { ...good, text: 'Faster exports. Katherine made the export of large boards much faster now.' },
+        ],
         skipped: [
           { source: B, reason: 'internal' },
           { source: C, reason: 'internal' },
@@ -97,7 +107,14 @@ describe('checkChangelogProposal', () => {
   it('allows several entries to share a change', () => {
     const r = checkChangelogProposal(
       {
-        entries: [good, { heading: 'Fixed', text: 'Prep runs no longer stop when a step has nothing to do.', sources: [A, B, C] }],
+        entries: [
+          good,
+          {
+            heading: 'Fixed',
+            text: 'Prep runs no longer stop when a step has nothing to do.',
+            sources: [A, B, C],
+          },
+        ],
       },
       ctx,
     );
@@ -116,7 +133,10 @@ describe('release_changelog task kind', () => {
   it('is a BA task kind with a done and a fail outcome and their aom commands', () => {
     expect(BaTaskKind.parse('release_changelog')).toBe('release_changelog');
     const outcomes = baTaskBriefOutcomes('release_changelog');
-    expect(outcomes.map((o) => o.id)).toEqual([RELEASE_CHANGELOG_OUTCOME.done, RELEASE_CHANGELOG_OUTCOME.fail]);
+    expect(outcomes.map((o) => o.id)).toEqual([
+      RELEASE_CHANGELOG_OUTCOME.done,
+      RELEASE_CHANGELOG_OUTCOME.fail,
+    ]);
     expect(commandForOutcome(outcomes[0] as never)).toContain('aom report release-changelog --file');
     expect(commandForOutcome(outcomes[1] as never)).toContain('aom report release-changelog-fail --note');
   });
@@ -127,7 +147,9 @@ describe('release_changelog task kind', () => {
     projectName: 'Toy',
     repoName: 'toy-repo',
     releaseBranch: 'release/1.5.0',
-    changes: [{ source: A, subject: 'Add the export button', cards: [{ key: 'TOY-1', title: 'Export' }], areas: [] }],
+    changes: [
+      { source: A, subject: 'Add the export button', cards: [{ key: 'TOY-1', title: 'Export' }], areas: [] },
+    ],
     existing: [{ heading: 'Added', text: 'Retire a workstation.' }],
   };
 

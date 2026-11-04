@@ -1,12 +1,5 @@
 import type { JourneyDefinition } from '@aom/shared';
-import {
-  alert,
-  ev,
-  loadDefinition,
-  lockInstance,
-  Refused,
-  REASON,
-} from '../commands/journey-runtime.ts';
+import { alert, ev, loadDefinition, lockInstance, REASON, Refused } from '../commands/journey-runtime.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -30,11 +23,20 @@ export async function enterServerStep(ctx: Ctx, instanceId: string, visit: numbe
   return withAppendTx(ctx.pool, async (tx) => {
     const inst = await lockInstance(tx, instanceId, visit, 'waiting');
     if (!inst) return false;
-    const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [instanceId, visit]);
+    const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [
+      instanceId,
+      visit,
+    ]);
     if (!run || run.status !== 'waiting') return false;
     const has =
-      (await one(tx, 'SELECT 1 AS x FROM journey_waits WHERE instance_id=$1 AND visit=$2', [instanceId, visit])) ||
-      (await one(tx, 'SELECT 1 AS x FROM journey_webhook_calls WHERE instance_id=$1 AND visit=$2', [instanceId, visit]));
+      (await one(tx, 'SELECT 1 AS x FROM journey_waits WHERE instance_id=$1 AND visit=$2', [
+        instanceId,
+        visit,
+      ])) ||
+      (await one(tx, 'SELECT 1 AS x FROM journey_webhook_calls WHERE instance_id=$1 AND visit=$2', [
+        instanceId,
+        visit,
+      ]));
     if (has) return false;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
     const step = def.steps.find((s) => s.id === run.step_id);
@@ -52,8 +54,16 @@ export async function enterServerStep(ctx: Ctx, instanceId: string, visit: numbe
   });
 }
 
-async function refuse(ctx: Ctx, tx: Parameters<Parameters<typeof withAppendTx>[1]>[0], inst: Row, run: Row, err: Refused) {
-  const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+async function refuse(
+  ctx: Ctx,
+  tx: Parameters<Parameters<typeof withAppendTx>[1]>[0],
+  inst: Row,
+  run: Row,
+  err: Refused,
+) {
+  const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [
+    inst.record_id,
+  ])) as Row;
   const a = alert(
     inst,
     `Journey for ${record.display_name}: step "${run.step_id}" could not start`,
@@ -63,11 +73,21 @@ async function refuse(ctx: Ctx, tx: Parameters<Parameters<typeof withAppendTx>[1
     [
       ev(inst, {
         type: 'JourneyStepRefused',
-        payload: { instanceId: inst.id, visit: run.visit, reason: err.reason, detail: err.detail.slice(0, 1000), deskItemId: a.deskItemId },
+        payload: {
+          instanceId: inst.id,
+          visit: run.visit,
+          reason: err.reason,
+          detail: err.detail.slice(0, 1000),
+          deskItemId: a.deskItemId,
+        },
       }),
       ev(inst, {
         type: 'JourneyInstanceStuck',
-        payload: { instanceId: inst.id, visit: run.visit, reason: `Step "${run.step_id}" could not start: ${err.detail}`.slice(0, 1000) },
+        payload: {
+          instanceId: inst.id,
+          visit: run.visit,
+          reason: `Step "${run.step_id}" could not start: ${err.detail}`.slice(0, 1000),
+        },
       }),
       a.event,
     ],

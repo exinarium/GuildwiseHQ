@@ -21,7 +21,11 @@ export type JourneyState = {
 export type DockerFn = (...args: string[]) => string;
 
 export const realDocker: DockerFn = (...args) =>
-  execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 }).trim();
+  execFileSync('docker', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 600_000,
+  }).trim();
 
 export const NO_DOCKER_MESSAGE =
   'Docker is not reachable here. Tester shifts have no Docker: DevOps runs the Docker projects (README "Docker projects")';
@@ -30,32 +34,53 @@ export const NO_DOCKER_MESSAGE =
 // bridge (which differs between computers) is needed.
 export function registryArgs(name: string, regPort: number, network?: string): string[] {
   return [
-    'run', '-d', '--rm', '--name', name,
+    'run',
+    '-d',
+    '--rm',
+    '--name',
+    name,
     ...(network ? ['--network', network] : []),
-    '-p', `127.0.0.1:${regPort}:5000`,
+    '-p',
+    `127.0.0.1:${regPort}:5000`,
     'registry:2',
   ];
 }
 
-export function boxArgs(name: string, p: { sshPort: number; httpPort: number; shopPort: number }, network?: string): string[] {
+export function boxArgs(
+  name: string,
+  p: { sshPort: number; httpPort: number; shopPort: number },
+  network?: string,
+): string[] {
   return [
-    'run', '-d', '--rm', '--name', name,
+    'run',
+    '-d',
+    '--rm',
+    '--name',
+    name,
     ...(network ? ['--network', network] : []),
-    '-p', `127.0.0.1:${p.sshPort}:22`,
-    '-p', `127.0.0.1:${p.httpPort}:5500`,
-    '-p', `127.0.0.1:${p.shopPort}:8090`,
+    '-p',
+    `127.0.0.1:${p.sshPort}:22`,
+    '-p',
+    `127.0.0.1:${p.httpPort}:5500`,
+    '-p',
+    `127.0.0.1:${p.shopPort}:8090`,
     JOURNEY_IMAGE,
   ];
 }
 
-export function startJourneyContainers(docker: DockerFn = realDocker, stateFile = JOURNEY_STATE): JourneyState {
+export function startJourneyContainers(
+  docker: DockerFn = realDocker,
+  stateFile = JOURNEY_STATE,
+): JourneyState {
   try {
     execDockerVersion(docker);
   } catch {
     throw new Error(NO_DOCKER_MESSAGE);
   }
   // leftovers of an earlier run with the same name prefix
-  for (const n of docker('ps', '-a', '--filter', `name=${NAME_PREFIX}`, '--format', '{{.Names}}').split('\n')) {
+  for (const n of docker('ps', '-a', '--filter', `name=${NAME_PREFIX}`, '--format', '{{.Names}}').split(
+    '\n',
+  )) {
     if (n.trim()) docker('rm', '-f', n.trim());
   }
   const id = `${process.pid}`;

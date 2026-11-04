@@ -36,7 +36,11 @@ export function StartInstanceDialog({
             loading={busy}
             disabled={!name.trim()}
             onClick={() =>
-              onStart({ type: recordType, displayName: name.trim(), ...(ext.trim() ? { externalId: ext.trim() } : {}) })
+              onStart({
+                type: recordType,
+                displayName: name.trim(),
+                ...(ext.trim() ? { externalId: ext.trim() } : {}),
+              })
             }
           >
             Start journey
@@ -45,7 +49,13 @@ export function StartInstanceDialog({
       }
     >
       <div className="flex flex-col gap-3">
-        <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} enterKeyHint="next" autoComplete="off" />
+        <TextInput
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          enterKeyHint="next"
+          autoComplete="off"
+        />
         <TextInput
           label="Your own id (optional)"
           value={ext}

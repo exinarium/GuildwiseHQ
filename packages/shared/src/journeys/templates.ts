@@ -7,7 +7,13 @@ export interface JourneyTemplate {
   definition: JourneyDefinition;
 }
 
-type Spec = [id: string, label: string, kind: 'workflow' | 'wait' | 'gate', workflowKey?: string, config?: Record<string, unknown>];
+type Spec = [
+  id: string,
+  label: string,
+  kind: 'workflow' | 'wait' | 'gate',
+  workflowKey?: string,
+  config?: Record<string, unknown>,
+];
 
 function build(
   name: string,
@@ -71,7 +77,13 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
           },
         ],
         ['screening', 'Screening', 'workflow', 'business-report'],
-        ['approval', 'Approval', 'gate', undefined, { approver: { kind: 'project_owner' }, question: 'Approve this application?' }],
+        [
+          'approval',
+          'Approval',
+          'gate',
+          undefined,
+          { approver: { kind: 'project_owner' }, question: 'Approve this application?' },
+        ],
         ['lease_signed', 'Lease signed', 'workflow', 'business-document-request'],
         ['deposit_invoice', 'Deposit and first-rent invoice', 'workflow', 'business-quote'],
         ['move_in', 'Move-in', 'workflow', 'business-follow-up'],

@@ -54,7 +54,8 @@ describe('deleting a project that uses journeys', () => {
       label: 'ID',
     });
     expect(
-      (await q(`SELECT 1 FROM journey_record_refs WHERE record_id=$1 AND kind='document'`, [inst.recordId])).length,
+      (await q(`SELECT 1 FROM journey_record_refs WHERE record_id=$1 AND kind='document'`, [inst.recordId]))
+        .length,
     ).toBe(1);
 
     const key = (await q('SELECT key FROM projects WHERE id=$1', [w.projectId]))[0]!.key as string;

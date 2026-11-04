@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { applyJourneyWebhookResult } from '../src/journeys/webhook-calls.ts';
 import { journeyTick } from '../src/journeys/tick.ts';
+import { applyJourneyWebhookResult } from '../src/journeys/webhook-calls.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
@@ -12,7 +12,10 @@ let w: World;
 const ctx = () => w.t.app.ctx;
 const MIN = 60_000;
 const asOwner = (method: string, url: string, body?: unknown, expected = 200) =>
-  ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), expected);
+  ok<any>(
+    w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }),
+    expected,
+  );
 const tick = async (n = 2) => {
   for (let i = 0; i < n; i++) await journeyTick(ctx(), { projectId: w.projectId });
 };
@@ -36,16 +39,31 @@ const create = async (steps: unknown[], handoffs: unknown[]) =>
     await asOwner(
       'POST',
       '/api/journeys',
-      { projectId: w.projectId, definition: { name: 'Notify', recordType: 'client', firstStepId: 'c', steps, handoffs } },
+      {
+        projectId: w.projectId,
+        definition: { name: 'Notify', recordType: 'client', firstStepId: 'c', steps, handoffs },
+      },
       201,
     )
   ).id as string;
 const start = async (journeyId: string) =>
-  (await asOwner('POST', '/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Ann "A"' } }, 201)).id as string;
-const callRow = async (id: string) => (await q('SELECT * FROM journey_webhook_calls WHERE instance_id=$1', [id]))[0] as any;
+  (
+    await asOwner(
+      'POST',
+      '/api/journey-instances',
+      { journeyId, record: { type: 'client', displayName: 'Ann "A"' } },
+      201,
+    )
+  ).id as string;
+const callRow = async (id: string) =>
+  (await q('SELECT * FROM journey_webhook_calls WHERE instance_id=$1', [id]))[0] as any;
 const inst = async (id: string) => (await q('SELECT * FROM journey_instances WHERE id=$1', [id]))[0] as any;
 const command = async (callId: string) =>
-  (await q(`SELECT * FROM runner_commands WHERE type='journey.webhook.call' AND payload->>'callId'=$1`, [callId]))[0] as any;
+  (
+    await q(`SELECT * FROM runner_commands WHERE type='journey.webhook.call' AND payload->>'callId'=$1`, [
+      callId,
+    ])
+  )[0] as any;
 const answer = (callId: string, attempt: number, result: unknown, okFlag = true, error?: string) =>
   applyJourneyWebhookResult(ctx(), { callId, attempt }, okFlag, result, error);
 
@@ -103,7 +121,10 @@ describe('outbound webhook step', () => {
     }
     expect(delays).toEqual([1, 5, 30, 120]);
     expect((await inst(id)).current_step_id).toBe('failed');
-    const completed = (await q(`SELECT payload FROM events WHERE type='JourneyStepCompleted' AND payload->>'instanceId'=$1`, [id])) as any[];
+    const completed = (await q(
+      `SELECT payload FROM events WHERE type='JourneyStepCompleted' AND payload->>'instanceId'=$1`,
+      [id],
+    )) as any[];
     expect(completed[0].payload).toMatchObject({ result: 'cancelled', outcome: 'failed' });
   });
 
@@ -126,19 +147,25 @@ describe('outbound webhook step', () => {
     const r = await callRow(id);
     expect(r).toMatchObject({ status: 'pending', attempts: 1 });
     expect(r.last_error).toContain('did not answer');
-    expect(((await q('SELECT payload FROM runner_commands WHERE id=$1', [commandId]))[0] as any).payload).toEqual({});
+    expect(
+      ((await q('SELECT payload FROM runner_commands WHERE id=$1', [commandId]))[0] as any).payload,
+    ).toEqual({});
     w.t.clock.advance(2 * MIN);
     await tick();
     expect((await callRow(id)).attempts).toBe(2);
   });
 
   it('a failed call without a failed handoff leaves the journey stuck with an alert', async () => {
-    const id = await start(await create([call(), manual('after')], [{ id: 'h1', from: 'c', on: 'done', to: 'after' }]));
+    const id = await start(
+      await create([call(), manual('after')], [{ id: 'h1', from: 'c', on: 'done', to: 'after' }]),
+    );
     await tick();
     const row = await callRow(id);
     await answer(row.id, 1, { ok: false, httpStatus: 400, retryable: false });
     expect((await inst(id)).status).toBe('stuck');
-    expect((await q(`SELECT 1 FROM desk_items WHERE subkind='journey_step_refused' AND body LIKE '%"c"%'`)).length).toBeGreaterThan(0);
+    expect(
+      (await q(`SELECT 1 FROM desk_items WHERE subkind='journey_step_refused' AND body LIKE '%"c"%'`)).length,
+    ).toBeGreaterThan(0);
   });
 
   it('an unknown token in the body is refused when the journey is started', async () => {

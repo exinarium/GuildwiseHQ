@@ -6,12 +6,12 @@ export type JourneyRecordType = z.infer<typeof JourneyRecordTypeSchema>;
 
 import { Position, StepIdSchema } from './step-base.ts';
 import {
-  JourneyGateStepSchema,
-  JourneyWaitStepSchema,
-  JourneyWebhookCallStepSchema,
   type JourneyGateStep,
+  JourneyGateStepSchema,
   type JourneyWaitStep,
+  JourneyWaitStepSchema,
   type JourneyWebhookCallStep,
+  JourneyWebhookCallStepSchema,
 } from './steps-wait.ts';
 
 export { Position, StepIdSchema };
@@ -24,7 +24,6 @@ export const JourneyConditionSchema = z.object({
   value: z.union([z.string().max(200), z.number(), z.boolean()]).optional(),
 });
 export type JourneyCondition = z.infer<typeof JourneyConditionSchema>;
-
 
 export const WorkflowStepSchema = z.object({
   kind: z.literal('workflow'),

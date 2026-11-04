@@ -21,7 +21,9 @@ const lines: string[] = [];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'gw-jwh-'));
-  webhookStore(dir, keyOf).save({ credentials: { crm: { value: `Bearer ${SECRET}` }, sign: { value: SIGN } } });
+  webhookStore(dir, keyOf).save({
+    credentials: { crm: { value: `Bearer ${SECRET}` }, sign: { value: SIGN } },
+  });
   answers = [];
   seen = [];
   lines.length = 0;
@@ -40,7 +42,13 @@ beforeEach(async () => {
 });
 afterEach(() => new Promise<void>((r) => server.close(() => r())));
 
-const caller = () => new JourneyWebhookCaller({ secretsDir: dir, keyOf, now: () => 1_800_000_000_000, log: (l) => lines.push(l) });
+const caller = () =>
+  new JourneyWebhookCaller({
+    secretsDir: dir,
+    keyOf,
+    now: () => 1_800_000_000_000,
+    log: (l) => lines.push(l),
+  });
 const payload = (over: Record<string, unknown> = {}) => ({
   callId: '0198f2a0-0000-7000-8000-0000000000aa',
   attempt: 1,
@@ -101,7 +109,9 @@ describe('journey.webhook.call', () => {
   });
 
   it('a credential that is not stored is a final failure that names the credential, never its value', async () => {
-    const r = await caller().run(payload({ credentialHeaders: [{ name: 'Authorization', credential: 'missing' }] }));
+    const r = await caller().run(
+      payload({ credentialHeaders: [{ name: 'Authorization', credential: 'missing' }] }),
+    );
     expect(r).toMatchObject({ ok: false, retryable: false });
     expect(r.error).toContain('missing');
     expect(seen).toHaveLength(0);

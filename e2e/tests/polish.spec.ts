@@ -242,7 +242,14 @@ test('Unpair: asks first, then the workstation is gone, its runner stops by itse
 });
 
 test('after Unpair: its DevOps engineers are retired with an audit entry, other agents stay active and are flagged', async () => {
-  type A = { id: string; name: string; isDevops: boolean; status: string; workstationId: string; workstationRemoved?: boolean };
+  type A = {
+    id: string;
+    name: string;
+    isDevops: boolean;
+    status: string;
+    workstationId: string;
+    workstationRemoved?: boolean;
+  };
   const agents = (await (await api.get('/api/agents')).json()).agents as A[];
   const onBox = agents.filter((a) => a.workstationId === workstationId);
   const devops = onBox.filter((a) => a.isDevops);

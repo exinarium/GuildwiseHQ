@@ -2,9 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { formatSummary, summarize } from './summary.ts';
 
-const t = (projectName: string, ...statuses: string[]) => ({ projectName, results: statuses.map((status) => ({ status })) });
+const t = (projectName: string, ...statuses: string[]) => ({
+  projectName,
+  results: statuses.map((status) => ({ status })),
+});
 const report = {
-  config: { metadata: { excludedProjects: [{ name: 'deploy-move', reason: 'Docker is not available in tester shifts: run by DevOps' }] } },
+  config: {
+    metadata: {
+      excludedProjects: [
+        { name: 'deploy-move', reason: 'Docker is not available in tester shifts: run by DevOps' },
+      ],
+    },
+  },
   stats: { duration: 792000 },
   suites: [
     {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { planSeed, type Existing, type SeedAccount, seedE2eAccounts } from './seed.ts';
+import { type Existing, planSeed, type SeedAccount, seedE2eAccounts } from './seed.ts';
 
 const accounts: SeedAccount[] = [
   { email: 'admin@e2e.test', name: 'A', password: 'x'.repeat(12), role: 'owner' },
@@ -8,7 +8,10 @@ const accounts: SeedAccount[] = [
 ];
 
 test('planSeed creates both on an empty database', () => {
-  assert.deepEqual(planSeed({}, accounts).map((a) => a.action), ['create', 'create']);
+  assert.deepEqual(
+    planSeed({}, accounts).map((a) => a.action),
+    ['create', 'create'],
+  );
 });
 
 test('planSeed skips accounts that are right', () => {
@@ -16,12 +19,24 @@ test('planSeed skips accounts that are right', () => {
     'admin@e2e.test': { exists: true, kind: 'user', owns: true },
     'platform@e2e.test': { exists: true, kind: 'super_admin', owns: false },
   };
-  assert.deepEqual(planSeed(ex, accounts).map((a) => a.action), ['skip', 'skip']);
+  assert.deepEqual(
+    planSeed(ex, accounts).map((a) => a.action),
+    ['skip', 'skip'],
+  );
 });
 
 test('planSeed refuses an owner without an organization and a non-platform account', () => {
-  assert.throws(() => planSeed({ 'admin@e2e.test': { exists: true, kind: 'user', owns: false } }, accounts), /owns no organization/);
-  assert.throws(() => planSeed({ 'platform@e2e.test': { exists: true, kind: 'user', owns: false } }, [accounts[1] as SeedAccount]), /not a platform account/);
+  assert.throws(
+    () => planSeed({ 'admin@e2e.test': { exists: true, kind: 'user', owns: false } }, accounts),
+    /owns no organization/,
+  );
+  assert.throws(
+    () =>
+      planSeed({ 'platform@e2e.test': { exists: true, kind: 'user', owns: false } }, [
+        accounts[1] as SeedAccount,
+      ]),
+    /not a platform account/,
+  );
 });
 
 test('seeding twice runs each CLI once (idempotent)', async () => {
@@ -32,7 +47,11 @@ test('seeding twice runs each CLI once (idempotent)', async () => {
     query: async () => ({ ...store }),
     run: (a: SeedAccount) => {
       created.push(a.email);
-      store[a.email.toLowerCase()] = { exists: true, kind: a.role === 'platform' ? 'super_admin' : 'user', owns: a.role === 'owner' };
+      store[a.email.toLowerCase()] = {
+        exists: true,
+        kind: a.role === 'platform' ? 'super_admin' : 'user',
+        owns: a.role === 'owner',
+      };
     },
   };
   await seedE2eAccounts(accounts, deps);

@@ -7,8 +7,8 @@ import { directEnv, localAdoptEnv, type ProbeReport, sshShipEnv } from '../../pa
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, E2E_DIR, JOURNEYER, paths, ROOT } from '../support/env.ts';
-import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 import { readJourneyState } from '../support/journey-containers.ts';
+import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 import { git } from '../support/vault.ts';
 
 /**

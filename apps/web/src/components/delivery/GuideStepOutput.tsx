@@ -49,7 +49,8 @@ export function GuideStepOutput({ output }: { output: unknown }) {
       {(o.changed.length > 0 || o.added.length > 0) && <p className="text-subtle">{PDF[o.pdf]}.</p>}
       {o.skippedChanges.length > 0 && (
         <p className="text-subtle">
-          {o.skippedChanges.length} {o.skippedChanges.length === 1 ? 'change is' : 'changes are'} not user-visible.
+          {o.skippedChanges.length} {o.skippedChanges.length === 1 ? 'change is' : 'changes are'} not
+          user-visible.
         </p>
       )}
       {[...o.errors, ...o.warnings, ...o.notes].length > 0 && (

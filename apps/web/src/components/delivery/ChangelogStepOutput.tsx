@@ -1,17 +1,15 @@
 import { CHANGELOG_HEADINGS, ReleaseChangelogOutputSchema } from '@aom/shared';
 
 /** One-line summary of the 'Write changelog' step output for a repository ("3 entries added (Added 1, Fixed 2)"). */
-export function changelogSummary(
-  repoName: string,
-  state: string,
-  output: unknown,
-): string | null {
+export function changelogSummary(repoName: string, state: string, output: unknown): string | null {
   if (state === 'running') return 'Writing entries…';
   const o = ReleaseChangelogOutputSchema.safeParse(output ?? undefined);
   if (!o.success || output == null) return null;
   const n = o.data.added.length;
   if (n === 0) return `${repoName}: no new changes`;
-  const counts = CHANGELOG_HEADINGS.map((h) => [h, o.data.added.filter((e) => e.heading === h).length] as const)
+  const counts = CHANGELOG_HEADINGS.map(
+    (h) => [h, o.data.added.filter((e) => e.heading === h).length] as const,
+  )
     .filter(([, c]) => c > 0)
     .map(([h, c]) => `${h} ${c}`)
     .join(', ');

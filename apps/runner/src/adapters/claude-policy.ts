@@ -3,7 +3,11 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { type AgentPermissions, testServiceDomain } from '@aom/shared';
 import { protectedGitPaths } from '../git/harden.ts';
-import { TEST_SERVICE_ROLES, TEST_SERVICES_SETTING, type TestServicesSeen } from '../sandbox/test-services.ts';
+import {
+  TEST_SERVICE_ROLES,
+  TEST_SERVICES_SETTING,
+  type TestServicesSeen,
+} from '../sandbox/test-services.ts';
 import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**

@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { RESULTS_DIR } from './env.ts';
 
 type Suite = { specs?: Spec[]; suites?: Suite[] };
-type Spec = { title: string; file: string; line: number; tests: { projectName: string; results: { status: string }[] }[] };
+type Spec = {
+  title: string;
+  file: string;
+  line: number;
+  tests: { projectName: string; results: { status: string }[] }[];
+};
 type Report = {
   config?: { metadata?: { excludedProjects?: { name: string; reason: string }[] } };
   suites?: Suite[];
@@ -24,9 +29,15 @@ export type Summary = {
 
 export function summarize(report: Report): Summary {
   const s: Summary = {
-    passed: 0, failed: 0, flaky: 0, skipped: 0, didNotRun: 0,
+    passed: 0,
+    failed: 0,
+    flaky: 0,
+    skipped: 0,
+    didNotRun: 0,
     durationMin: Math.round(((report.stats?.duration ?? 0) / 60000) * 10) / 10,
-    failedTitles: [], didNotRunByProject: {}, notRunHere: [],
+    failedTitles: [],
+    didNotRunByProject: {},
+    notRunHere: [],
   };
   const walk = (suite: Suite) => {
     for (const spec of suite.specs ?? []) {
@@ -66,7 +77,9 @@ export function formatSummary(s: Summary): string {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const file = process.argv.find((a) => a.endsWith('.json') && !a.endsWith('summary.json')) ?? join(RESULTS_DIR, 'results.json');
+  const file =
+    process.argv.find((a) => a.endsWith('.json') && !a.endsWith('summary.json')) ??
+    join(RESULTS_DIR, 'results.json');
   const s = summarize(JSON.parse(readFileSync(file, 'utf8')) as Report);
   console.log(process.argv.includes('--json') ? JSON.stringify(s, null, 2) : formatSummary(s));
 }

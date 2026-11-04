@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rebuildProjections, unsavedCascadeTargets } from '../src/projections/rebuild.ts';
-import { PNG, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { q } from './helpers/db.ts';
+import { PNG, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { ok } from './helpers/world.ts';
 
 const pf = usePublicFormsWorld();

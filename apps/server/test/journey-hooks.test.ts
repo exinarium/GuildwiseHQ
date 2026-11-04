@@ -14,15 +14,23 @@ const logStream = { write: (line: string) => void lines.push(line) };
 let w: World;
 let journeyId = '';
 const asOwner = (method: string, url: string, body?: unknown, expected = 200) =>
-  ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), expected);
+  ok<any>(
+    w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }),
+    expected,
+  );
 
-const S = { body: 'SENTINEL_BODY_41c7aa09', header: 'SENTINEL_HEADER_9d02e5b7', other: 'SENTINEL_OTHER_6a1f3c88' };
+const S = {
+  body: 'SENTINEL_BODY_41c7aa09',
+  header: 'SENTINEL_HEADER_9d02e5b7',
+  other: 'SENTINEL_OTHER_6a1f3c88',
+};
 const dump = async (): Promise<string> => {
   const tables = await q<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'`,
   );
   const parts: string[] = [];
-  for (const { table_name } of tables) parts.push(JSON.stringify(await q(`SELECT t::text AS r FROM "${table_name}" t`)));
+  for (const { table_name } of tables)
+    parts.push(JSON.stringify(await q(`SELECT t::text AS r FROM "${table_name}" t`)));
   return parts.join('\n');
 };
 
@@ -37,10 +45,26 @@ const tokenOf = (url: string) => url.slice(url.lastIndexOf('/') + 1);
 const post = (
   h: { url: string; secret: string },
   payload: unknown,
-  opts: { scheme?: 'guildwise' | 'body_sha256'; ts?: number; headers?: Record<string, string>; sign?: boolean; type?: string } = {},
+  opts: {
+    scheme?: 'guildwise' | 'body_sha256';
+    ts?: number;
+    headers?: Record<string, string>;
+    sign?: boolean;
+    type?: string;
+  } = {},
 ) => {
-  const raw = Buffer.isBuffer(payload) ? payload : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));
-  const sig = opts.sign === false ? {} : signHook(opts.scheme ?? 'guildwise', h.secret, raw, opts.ts ?? Math.floor(w.t.clock.now().getTime() / 1000));
+  const raw = Buffer.isBuffer(payload)
+    ? payload
+    : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));
+  const sig =
+    opts.sign === false
+      ? {}
+      : signHook(
+          opts.scheme ?? 'guildwise',
+          h.secret,
+          raw,
+          opts.ts ?? Math.floor(w.t.clock.now().getTime() / 1000),
+        );
   return w.t.app.inject({
     method: 'POST',
     url: `/hooks/in/${tokenOf(h.url)}`,
@@ -48,7 +72,8 @@ const post = (
     headers: { 'content-type': opts.type ?? 'application/json', ...sig, ...(opts.headers ?? {}) },
   });
 };
-const calls = async (hookId: string) => (await q('SELECT * FROM journey_hook_calls WHERE trigger_id=$1 ORDER BY at, id', [hookId])) as any[];
+const calls = async (hookId: string) =>
+  (await q('SELECT * FROM journey_hook_calls WHERE trigger_id=$1 ORDER BY at, id', [hookId])) as any[];
 
 beforeAll(async () => {
   process.env.AOM_JOURNEY_HOOK_BURST = '6';
@@ -100,7 +125,21 @@ describe('inbound hook start', () => {
   });
 
   it('matches an existing record by external id', async () => {
-    await asOwner('POST', '/api/journeys', { projectId: w.projectId, definition: { name: 'T', recordType: 'client', firstStepId: 'a', steps: [{ kind: 'wait', id: 'a', label: 'A' }], handoffs: [] } }, 201);
+    await asOwner(
+      'POST',
+      '/api/journeys',
+      {
+        projectId: w.projectId,
+        definition: {
+          name: 'T',
+          recordType: 'client',
+          firstStepId: 'a',
+          steps: [{ kind: 'wait', id: 'a', label: 'A' }],
+          handoffs: [],
+        },
+      },
+      201,
+    );
     const rec = await ok<any>(
       w.t.req('POST', '/api/journey-instances', {
         cookie: w.owner.cookie,
@@ -117,7 +156,13 @@ describe('inbound hook start', () => {
 
   it('two records with the same external id are 422 ambiguous_record', async () => {
     for (let i = 0; i < 2; i++)
-      await ok(w.t.req('POST', '/api/journey-instances', { cookie: w.owner.cookie, body: { journeyId, record: { type: 'client', displayName: `D${i}`, externalId: 'DUP' } } }), 201);
+      await ok(
+        w.t.req('POST', '/api/journey-instances', {
+          cookie: w.owner.cookie,
+          body: { journeyId, record: { type: 'client', displayName: `D${i}`, externalId: 'DUP' } },
+        }),
+        201,
+      );
     const r = await post(await newHook(), { id: 'DUP' });
     expect(r.statusCode).toBe(422);
     expect(r.json().error).toBe('ambiguous_record');
@@ -151,10 +196,18 @@ describe('refusals', () => {
     const h = await newHook();
     const bad = await post({ ...h, secret: 'jhsec_wrong' }, { id: 'X-1', extra: S.body });
     const none = await post(h, { id: 'X-2', extra: S.body }, { sign: false });
-    const stale = await post(h, { id: 'X-3', extra: S.body }, { ts: Math.floor(w.t.clock.now().getTime() / 1000) - 3600 });
+    const stale = await post(
+      h,
+      { id: 'X-3', extra: S.body },
+      { ts: Math.floor(w.t.clock.now().getTime() / 1000) - 3600 },
+    );
     expect([bad.statusCode, none.statusCode, stale.statusCode]).toEqual([401, 401, 401]);
     expect(bad.body).toBe('');
-    expect((await calls(h.id)).map((c) => c.outcome)).toEqual(['bad_signature', 'bad_signature', 'stale_timestamp']);
+    expect((await calls(h.id)).map((c) => c.outcome)).toEqual([
+      'bad_signature',
+      'bad_signature',
+      'stale_timestamp',
+    ]);
     expect((await q(`SELECT 1 FROM journey_records WHERE external_id LIKE 'X-%'`)).length).toBe(0);
   });
 
@@ -163,9 +216,23 @@ describe('refusals', () => {
     expect((await post(h, '{}', { type: 'text/plain' })).statusCode).toBe(415);
     expect((await post(h, '{not json')).statusCode).toBe(400);
     expect((await post(h, { other: 1 })).statusCode).toBe(422);
-    const unknown = await w.t.app.inject({ method: 'POST', url: `/hooks/in/${'A'.repeat(32)}`, payload: '{}', headers: { 'content-type': 'application/json' } });
+    const unknown = await w.t.app.inject({
+      method: 'POST',
+      url: `/hooks/in/${'A'.repeat(32)}`,
+      payload: '{}',
+      headers: { 'content-type': 'application/json' },
+    });
     expect(unknown.statusCode).toBe(404);
-    expect((await w.t.app.inject({ method: 'POST', url: '/hooks/in/short', payload: '{}', headers: { 'content-type': 'application/json' } })).statusCode).toBe(404);
+    expect(
+      (
+        await w.t.app.inject({
+          method: 'POST',
+          url: '/hooks/in/short',
+          payload: '{}',
+          headers: { 'content-type': 'application/json' },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
   it('a body over the limit is 413', async () => {
@@ -211,7 +278,14 @@ describe('webhook waits resume', () => {
           recordType: 'client',
           firstStepId: 'a',
           steps: [
-            { kind: 'wait', id: 'a', label: 'A', waitFor: { kind: 'webhook', triggerId: resume.id }, duration: { amount: 1, unit: 'days' }, onTimeout: { action: 'cancel' } },
+            {
+              kind: 'wait',
+              id: 'a',
+              label: 'A',
+              waitFor: { kind: 'webhook', triggerId: resume.id },
+              duration: { amount: 1, unit: 'days' },
+              onTimeout: { action: 'cancel' },
+            },
             { kind: 'wait', id: 'after', label: 'After' },
           ],
           handoffs: [{ id: 'h1', from: 'a', on: 'done', to: 'after' }],
@@ -234,7 +308,9 @@ describe('webhook waits resume', () => {
     expect(r.json()).toEqual({ resumed: 1 });
     const wait = (await q('SELECT * FROM journey_waits WHERE instance_id=$1', [inst.id]))[0] as any;
     expect(wait).toMatchObject({ status: 'resolved', resolution: 'webhook_received' });
-    expect(((await q('SELECT * FROM journey_instances WHERE id=$1', [inst.id]))[0] as any).current_step_id).toBe('after');
+    expect(
+      ((await q('SELECT * FROM journey_instances WHERE id=$1', [inst.id]))[0] as any).current_step_id,
+    ).toBe('after');
     const again = await post(resume, { id: 'RES-1' });
     expect(again.json()).toEqual({ resumed: 0 });
   });
@@ -244,9 +320,17 @@ describe('no content in the database or the logs', () => {
   it('keeps none of the sentinels except the values the mapping picked', async () => {
     const h = await newHook();
     const send = (id: string, name: string, over: Record<string, unknown> = {}) =>
-      post(h, { id, name, secretField: S.body, nested: { deep: S.other } }, { headers: { 'x-secret-header': S.header, authorization: `Bearer ${S.header}`, ...over } });
+      post(
+        h,
+        { id, name, secretField: S.body, nested: { deep: S.other } },
+        { headers: { 'x-secret-header': S.header, authorization: `Bearer ${S.header}`, ...over } },
+      );
     await send('SC-1', 'Sam');
-    await post({ ...h, secret: 'jhsec_wrong' }, { id: 'SC-2', secretField: S.body }, { headers: { 'x-secret-header': S.header } });
+    await post(
+      { ...h, secret: 'jhsec_wrong' },
+      { id: 'SC-2', secretField: S.body },
+      { headers: { 'x-secret-header': S.header } },
+    );
     await post(h, { secretField: S.body }, { headers: { 'x-secret-header': S.header } });
     await post(h, `{${S.body}`, { headers: { 'x-secret-header': S.header } });
     await w.t.app.ctx.notifier.flush();

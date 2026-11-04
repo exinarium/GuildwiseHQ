@@ -1,10 +1,9 @@
 import { streamId } from '@aom/shared';
-import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
-import type { Tx } from '../db/tx.ts';
 import { revokeClientLinkIn } from '../commands/public-forms.ts';
+import type { Ctx } from '../context.ts';
+import { one, type Row, rows } from '../db/sql.ts';
+import type { Tx } from '../db/tx.ts';
 import { resolveDeskEvent } from './desk.ts';
-import { rows } from '../db/sql.ts';
 
 /** Closes every open desk item that belongs to a wait (the original question, a reminder, an escalation, a link task). */
 export async function closeWaitDeskItems(
@@ -16,9 +15,16 @@ export async function closeWaitDeskItems(
   note: string,
   exceptId?: string | null,
 ): Promise<void> {
-  const open = await rows(tx, `SELECT id FROM desk_items WHERE status='open' AND data->>'waitId'=$1 AND id::text<>$2`, [waitId, exceptId ?? '']);
+  const open = await rows(
+    tx,
+    `SELECT id FROM desk_items WHERE status='open' AND data->>'waitId'=$1 AND id::text<>$2`,
+    [waitId, exceptId ?? ''],
+  );
   if (open.length)
-    await ctx.store.append(open.map((d) => resolveDeskEvent(inst, d.id as string, resolution, note)), { tx });
+    await ctx.store.append(
+      open.map((d) => resolveDeskEvent(inst, d.id as string, resolution, note)),
+      { tx },
+    );
 }
 
 /**

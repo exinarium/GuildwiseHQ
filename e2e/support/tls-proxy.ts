@@ -1,8 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import { join } from 'node:path';
 import { requireBindable, requireDeclared } from './test-services.ts';
@@ -19,9 +18,21 @@ export function makeCert(dir: string): { certPath: string; keyPath: string } {
   execFileSync(
     'openssl',
     [
-      'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=localhost',
-      '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1',
-      '-keyout', keyPath, '-out', certPath,
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-days',
+      '2',
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
     ],
     { stdio: 'ignore' },
   );
@@ -58,7 +69,13 @@ export async function startTlsProxy(opts: {
     { cert: readFileSync(certPath), key: readFileSync(keyPath) },
     (req, res) => {
       const up = http.request(
-        { host: target.hostname, port: targetPort, method: req.method, path: req.url, headers: forwarded(req) },
+        {
+          host: target.hostname,
+          port: targetPort,
+          method: req.method,
+          path: req.url,
+          headers: forwarded(req),
+        },
         (r) => {
           // status and headers are copied exactly as the upstream sent them
           res.writeHead(r.statusCode ?? 502, r.statusMessage, r.rawHeaders as unknown as string[]);

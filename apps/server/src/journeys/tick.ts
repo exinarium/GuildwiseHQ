@@ -1,8 +1,8 @@
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
-import { callDue } from './webhook-calls.ts';
 import { enterServerStep } from './enter.ts';
 import { fireDueWaits, resolveFormWait } from './waits.ts';
+import { callDue } from './webhook-calls.ts';
 
 /**
  * The journey timers and server-run steps, one pass: enter steps that have no wait or call yet, resolve form waits whose
@@ -29,7 +29,8 @@ export async function journeyTick(ctx: Ctx, only?: { projectId: string }): Promi
       ORDER BY r.entered_at LIMIT 100`,
     [pid],
   );
-  for (const r of enter) await attempt(`enter:${r.instance_id}:${r.visit}`, () => enterServerStep(ctx, r.instance_id, r.visit));
+  for (const r of enter)
+    await attempt(`enter:${r.instance_id}:${r.visit}`, () => enterServerStep(ctx, r.instance_id, r.visit));
   const forms = await rows(
     ctx.pool,
     `SELECT w.id FROM journey_waits w JOIN form_client_links l ON l.id = w.link_id

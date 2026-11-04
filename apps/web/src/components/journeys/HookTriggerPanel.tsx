@@ -19,13 +19,22 @@ export function HookTriggerPanel({ journeyId, canEdit }: { journeyId: string; ca
   return (
     <Panel title="Webhooks" className="mt-6">
       <p className="mb-3 text-sm text-muted">
-        An outside system can start this journey (or end a webhook wait) by calling a private address with a signed message. The
-        message is read once to find the record; it is not stored.
+        An outside system can start this journey (or end a webhook wait) by calling a private address with a
+        signed message. The message is read once to find the record; it is not stored.
       </p>
       {shown && (
-        <Callout tone="warning" title="Copy these now: the secret is not shown again" className="mb-3" role="status">
-          <p className="[overflow-wrap:anywhere]" data-testid="hook-url">Address: {shown.url}</p>
-          <p className="[overflow-wrap:anywhere]" data-testid="hook-secret">Secret: {shown.secret}</p>
+        <Callout
+          tone="warning"
+          title="Copy these now: the secret is not shown again"
+          className="mb-3"
+          role="status"
+        >
+          <p className="[overflow-wrap:anywhere]" data-testid="hook-url">
+            Address: {shown.url}
+          </p>
+          <p className="[overflow-wrap:anywhere]" data-testid="hook-secret">
+            Secret: {shown.secret}
+          </p>
         </Callout>
       )}
       <ul className="mb-3 flex flex-col gap-2" data-testid="hook-list">
@@ -38,7 +47,9 @@ export function HookTriggerPanel({ journeyId, canEdit }: { journeyId: string; ca
             </div>
             <p className="mt-1 text-sm text-muted">
               Record id from {h.mapping.externalId}
-              {h.recentCalls[0] ? ` · last call ${new Date(h.recentCalls[0].at).toLocaleString()}: ${h.recentCalls[0].outcome ?? h.recentCalls[0].status}` : ' · never called'}
+              {h.recentCalls[0]
+                ? ` · last call ${new Date(h.recentCalls[0].at).toLocaleString()}: ${h.recentCalls[0].outcome ?? h.recentCalls[0].status}`
+                : ' · never called'}
             </p>
             {canEdit && h.enabled && (
               <Button
@@ -57,8 +68,17 @@ export function HookTriggerPanel({ journeyId, canEdit }: { journeyId: string; ca
       </ul>
       {canEdit && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <TextInput label="Name" value={name} enterKeyHint="next" onChange={(e) => setName(e.target.value)} />
-          <Select label="What it does" value={purpose} onChange={(e) => setPurpose(e.target.value as 'start' | 'resume')}>
+          <TextInput
+            label="Name"
+            value={name}
+            enterKeyHint="next"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Select
+            label="What it does"
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value as 'start' | 'resume')}
+          >
             <option value="start">Starts a journey</option>
             <option value="resume">Ends a webhook wait</option>
           </Select>
@@ -84,7 +104,14 @@ export function HookTriggerPanel({ journeyId, canEdit }: { journeyId: string; ca
               loading={create.isPending}
               onClick={() =>
                 create.mutate(
-                  { name: name.trim(), purpose, mapping: { externalId: externalId.trim(), ...(displayName.trim() ? { displayName: displayName.trim() } : {}) } },
+                  {
+                    name: name.trim(),
+                    purpose,
+                    mapping: {
+                      externalId: externalId.trim(),
+                      ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+                    },
+                  },
                   {
                     onSuccess: (r) => {
                       setShown(r);

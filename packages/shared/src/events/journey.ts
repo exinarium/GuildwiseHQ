@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { JourneyDefinitionSchema, JourneyRecordTypeSchema } from '../journeys/schema.ts';
 import { JourneyReferenceKindSchema } from '../journeys/record.ts';
+import { JourneyDefinitionSchema, JourneyRecordTypeSchema } from '../journeys/schema.ts';
 import { defineEvent, Id } from './define.ts';
 
 const Visit = z.number().int().min(1);
@@ -83,7 +83,14 @@ export const journeyEvents = [
     z.object({
       instanceId: Id,
       visit: Visit,
-      reason: z.enum(['not_enabled', 'not_found', 'not_member', 'invalid_mapping', 'visit_limit', 'not_published']),
+      reason: z.enum([
+        'not_enabled',
+        'not_found',
+        'not_member',
+        'invalid_mapping',
+        'visit_limit',
+        'not_published',
+      ]),
       detail: z.string().max(1000),
       deskItemId: Id.optional(),
     }),

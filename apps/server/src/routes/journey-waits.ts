@@ -22,7 +22,8 @@ export function journeyWaitRoutes(ctx: Ctx) {
     const app = typed(fastify);
     const Id = z.object({ id: z.uuid() });
     const WaitId = z.object({ waitId: z.uuid() });
-    const member = async (req: Parameters<typeof requireOrg>[1]) => whoOf(await requireOrg(ctx, req, { min: 'member' }));
+    const member = async (req: Parameters<typeof requireOrg>[1]) =>
+      whoOf(await requireOrg(ctx, req, { min: 'member' }));
 
     app.get('/api/journey-instances/:id/waits', { schema: { params: Id } }, async (req) =>
       listInstanceWaits(ctx, await member(req), req.params.id),
@@ -60,7 +61,9 @@ export function journeyWaitRoutes(ctx: Ctx) {
       {
         schema: {
           params: WaitId,
-          body: z.object({ decision: z.enum(['approved', 'rejected']), note: z.string().max(2000).optional() }).strict(),
+          body: z
+            .object({ decision: z.enum(['approved', 'rejected']), note: z.string().max(2000).optional() })
+            .strict(),
         },
       },
       async (req) => {

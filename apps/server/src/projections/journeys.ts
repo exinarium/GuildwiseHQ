@@ -153,20 +153,21 @@ export const journeyProjectors: Record<string, Projector> = {
 
   JourneyStepCompleted: async (tx, e) => {
     const p = ev<'JourneyStepCompleted'>(e).payload;
-    await exec(
-      tx,
-      `UPDATE journey_step_runs SET status=$3, ended_at=$4 WHERE instance_id=$1 AND visit=$2`,
-      [p.instanceId, p.visit, p.result, e.createdAt],
-    );
+    await exec(tx, `UPDATE journey_step_runs SET status=$3, ended_at=$4 WHERE instance_id=$1 AND visit=$2`, [
+      p.instanceId,
+      p.visit,
+      p.result,
+      e.createdAt,
+    ]);
   },
 
   JourneyStepPlaybookStarted: async (tx, e) => {
     const p = ev<'JourneyStepPlaybookStarted'>(e).payload;
-    await exec(
-      tx,
-      `UPDATE journey_step_runs SET playbook_thread_id=$3 WHERE instance_id=$1 AND visit=$2`,
-      [p.instanceId, p.visit, p.threadId],
-    );
+    await exec(tx, `UPDATE journey_step_runs SET playbook_thread_id=$3 WHERE instance_id=$1 AND visit=$2`, [
+      p.instanceId,
+      p.visit,
+      p.threadId,
+    ]);
     await exec(
       tx,
       `INSERT INTO journey_record_refs (record_id, kind, ref, label, added_at)

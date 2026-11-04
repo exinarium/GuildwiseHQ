@@ -75,13 +75,7 @@ export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
 };
 
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [
-  ANALYSE_STEP,
-  CHANGELOG_STEP,
-  GUIDE_STEP,
-  VIDEOS_STEP,
-  COMMIT_STEP,
-];
+const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, VIDEOS_STEP, COMMIT_STEP];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {

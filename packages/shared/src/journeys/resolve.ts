@@ -85,7 +85,8 @@ export function nextMove(
   const leaving = def.handoffs.filter((h) => h.from === stepId);
   if (leaving.length === 0) return { kind: 'end' };
   const h = resolveHandoff(def, stepId, ctx);
-  if (!h) return { kind: 'stuck', reason: `No handoff from "${stepId}" matches a step that ended ${ctx.result}.` };
+  if (!h)
+    return { kind: 'stuck', reason: `No handoff from "${stepId}" matches a step that ended ${ctx.result}.` };
   if (h.to === 'end') return { kind: 'end' };
   return { kind: 'next', handoff: h };
 }

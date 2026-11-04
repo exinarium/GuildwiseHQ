@@ -50,7 +50,12 @@ export const PREP_OUTCOME = { done: 'prep_done', failed: 'prep_failed' } as cons
 export function releasePrepBriefOutcomes() {
   return [
     { id: PREP_OUTCOME.done, label: 'The files are written', kind: 'success' as const, data: 'prepDone' },
-    { id: PREP_OUTCOME.failed, label: 'The files could not be written', kind: 'failure' as const, data: 'prepFailed' },
+    {
+      id: PREP_OUTCOME.failed,
+      label: 'The files could not be written',
+      kind: 'failure' as const,
+      data: 'prepFailed',
+    },
   ];
 }
 
@@ -68,7 +73,10 @@ export const ReleasePrepTaskResultSchema = z.object({
   /** The agent's summary (done) or reason (fail), or the runner's own refusal. */
   note: z.string().max(4000),
   /** The commit on the work ref (done and committed). */
-  commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  commit: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
   files: z.array(z.string().max(400)).max(50).default([]),
 });
 export type ReleasePrepTaskResult = z.infer<typeof ReleasePrepTaskResultSchema>;
@@ -97,7 +105,9 @@ export function filesOutsideWritable(changed: readonly string[], writable: reado
 /** What a new_video task must have produced to count as done: the spec and its narration. */
 export function missingNewVideoFiles(task: NewVideoTask, changed: readonly string[]): string[] {
   const have = new Set(changed);
-  return [`e2e/video/${task.slug}.spec.ts`, `e2e/video/narration/${task.slug}.ts`].filter((p) => !have.has(p));
+  return [`e2e/video/${task.slug}.spec.ts`, `e2e/video/narration/${task.slug}.ts`].filter(
+    (p) => !have.has(p),
+  );
 }
 
 /** The instructions of a release_prep shift (the role's own text is not used: the task is self-contained). */
@@ -138,7 +148,9 @@ export function renderReleasePrepPrompt(rp: ReleasePrepShift): string {
     `Write the script of a new help video: "${t.title}" (slug \`${t.slug}\`).`,
     '',
     'The new screen:',
-    ...(t.pages.length ? t.pages.map((p) => `- ${p}`) : ['- (no page file named; find the screen from the slug)']),
+    ...(t.pages.length
+      ? t.pages.map((p) => `- ${p}`)
+      : ['- (no page file named; find the screen from the slug)']),
     ...(t.cards.length ? ['', `Changed by: ${t.cards.join(', ')}.`] : []),
     '',
     'Steps:',

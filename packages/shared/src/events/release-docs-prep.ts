@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { ReleasePrepTaskSchema } from '../release/docs-prep-task.ts';
 import { ReleaseDocsPrepSummarySchema } from '../release/docs-prep-dto.ts';
+import { ReleasePrepTaskSchema } from '../release/docs-prep-task.ts';
 import { defineEvent, Id } from './define.ts';
 
 const StepState = z.enum(['passed', 'failed', 'skipped']);

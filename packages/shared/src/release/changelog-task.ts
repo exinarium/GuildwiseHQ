@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { renderUntrusted } from '../prompt/untrusted.ts';
-import { type ChangelogEntry, changelogHeadingOf } from './changelog-rewrite.ts';
 import {
   type ChangelogProposal,
   ChangelogProposalSchema,
   describeEntryFinding,
   scrubChangelogEntry,
 } from './changelog-entries.ts';
+import { type ChangelogEntry, changelogHeadingOf } from './changelog-rewrite.ts';
 
 /**
  * The model half of the release prep step 'Write changelog': a `release_changelog` BA task (a background shift, no card,
@@ -120,7 +120,9 @@ export function checkChangelogProposal(
     (s) => wanted.has(s) && listed.filter((x) => x === s).length + (inEntries.has(s) ? 1 : 0) > 1,
   );
   if (conflict.length)
-    errors.push(`changes listed more than once (entries, covered or skipped): ${conflict.slice(0, 10).join(', ')}`);
+    errors.push(
+      `changes listed more than once (entries, covered or skipped): ${conflict.slice(0, 10).join(', ')}`,
+    );
   const missing = ctx.uncovered.filter((s) => !seen.has(s));
   if (missing.length)
     errors.push(

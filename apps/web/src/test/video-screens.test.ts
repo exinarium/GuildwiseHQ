@@ -9,7 +9,9 @@ import { SECTION_VIDEOS } from '../lib/videos.ts';
  * complete: a feature that adds a page fails here until the page is mapped to a video, planned or excluded.
  */
 const ROOT = join(__dirname, '../../../..');
-const map = VideoScreenMapSchema.parse(JSON.parse(readFileSync(join(ROOT, 'e2e/video/screens.json'), 'utf8')));
+const map = VideoScreenMapSchema.parse(
+  JSON.parse(readFileSync(join(ROOT, 'e2e/video/screens.json'), 'utf8')),
+);
 
 const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -41,7 +43,11 @@ describe('e2e/video/screens.json', () => {
       ...Object.values(map.videos).flatMap((v) => v.screens.flatMap((s) => s.files)),
       ...Object.values(map.planned).flatMap((p) => p.pages),
     ];
-    for (const g of globs) expect(webFiles.some((f) => videoGlobMatches([g], f)), g).toBe(true);
+    for (const g of globs)
+      expect(
+        webFiles.some((f) => videoGlobMatches([g], f)),
+        g,
+      ).toBe(true);
   });
 
   it('puts every page in a video, in planned or in exclude', () => {

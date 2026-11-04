@@ -3,14 +3,16 @@ import { JOURNEY_INSTANCE_STATUSES } from '@aom/shared';
 import { Plus, Route } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useProjects } from '../api/queries/projects.ts';
+import { errorMessage } from '../api/client.ts';
 import {
   useCreateJourney,
   useJourneyInstances,
   useJourneys,
   useJourneyTemplates,
 } from '../api/queries/journeys.ts';
+import { useProjects } from '../api/queries/projects.ts';
 import { JourneyTemplateGallery } from '../components/journeys/JourneyTemplateGallery.tsx';
+import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
   Button,
@@ -23,10 +25,14 @@ import {
   Tabs,
   useToast,
 } from '../components/ui.tsx';
-import { panelId, tabId } from '../components/ui/Tabs.tsx';
-import { errorMessage } from '../api/client.ts';
 
-const STATUS_TONE = { running: 'info', waiting: 'warning', stuck: 'danger', completed: 'success', cancelled: 'neutral' } as const;
+const STATUS_TONE = {
+  running: 'info',
+  waiting: 'warning',
+  stuck: 'danger',
+  completed: 'success',
+  cancelled: 'neutral',
+} as const;
 const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—');
 
 /** Journeys: the processes (workflows linked by handoffs on one record) and the instances running on records. */
@@ -51,13 +57,10 @@ export function Journeys() {
   const create = useCreateJourney();
   const target = projectId || projects.data?.[0]?.id || '';
   const pickTemplate = (t: JourneyTemplate | null) =>
-    create.mutate(
-      t ? { projectId: target, templateId: t.id } : { projectId: target, definition: blank() },
-      {
-        onSuccess: (r) => nav(`/journeys/${r.id}`),
-        onError: (e) => toast.error(errorMessage(e)),
-      },
-    );
+    create.mutate(t ? { projectId: target, templateId: t.id } : { projectId: target, definition: blank() }, {
+      onSuccess: (r) => nav(`/journeys/${r.id}`),
+      onError: (e) => toast.error(errorMessage(e)),
+    });
   const steps = [...new Map((instances.data ?? []).map((i) => [i.stepId, i.stepLabel])).entries()];
 
   return (
@@ -93,18 +96,29 @@ export function Journeys() {
         className="mb-4"
       />
       {tab === 'journeys' ? (
-        <div role="tabpanel" id={panelId('journeys', 'journeys')} aria-labelledby={tabId('journeys', 'journeys')}>
+        <div
+          role="tabpanel"
+          id={panelId('journeys', 'journeys')}
+          aria-labelledby={tabId('journeys', 'journeys')}
+        >
           {list.isLoading ? (
             <ListSkeleton />
           ) : list.error ? (
             <ErrorBox error={list.error} onRetry={() => void list.refetch()} />
           ) : (list.data ?? []).length === 0 ? (
-            <EmptyState icon={Route} title="No journeys yet" description="Start from the rentals template or build your own." />
+            <EmptyState
+              icon={Route}
+              title="No journeys yet"
+              description="Start from the rentals template or build your own."
+            />
           ) : (
             <ul className="grid gap-3 sm:grid-cols-2" data-testid="journey-list">
               {list.data?.map((j) => (
                 <li key={j.id} className="rounded-card border border-line bg-surface p-4">
-                  <Link to={`/journeys/${j.id}`} className="text-lg font-semibold text-fg underline-offset-2 hover:underline">
+                  <Link
+                    to={`/journeys/${j.id}`}
+                    className="text-lg font-semibold text-fg underline-offset-2 hover:underline"
+                  >
                     {j.name}
                   </Link>
                   <p className="mt-1 text-sm text-muted">
@@ -117,7 +131,11 @@ export function Journeys() {
           )}
         </div>
       ) : (
-        <div role="tabpanel" id={panelId('journeys', 'running')} aria-labelledby={tabId('journeys', 'running')}>
+        <div
+          role="tabpanel"
+          id={panelId('journeys', 'running')}
+          aria-labelledby={tabId('journeys', 'running')}
+        >
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <Select label="Journey" value={journeyId} onChange={(e) => setJourneyId(e.target.value)}>
               <option value="">All journeys</option>
@@ -149,13 +167,20 @@ export function Journeys() {
           ) : instances.error ? (
             <ErrorBox error={instances.error} onRetry={() => void instances.refetch()} />
           ) : (instances.data ?? []).length === 0 ? (
-            <EmptyState icon={Route} title="Nothing running" description="Open a journey and start it on a client, matter or deal." />
+            <EmptyState
+              icon={Route}
+              title="Nothing running"
+              description="Open a journey and start it on a client, matter or deal."
+            />
           ) : (
             <ul className="flex flex-col gap-2" data-testid="instance-list">
               {instances.data?.map((i) => (
                 <li key={i.id} className="rounded-control border border-line bg-surface p-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link to={`/journeys/instances/${i.id}`} className="font-medium text-fg underline-offset-2 hover:underline">
+                    <Link
+                      to={`/journeys/instances/${i.id}`}
+                      className="font-medium text-fg underline-offset-2 hover:underline"
+                    >
                       {i.recordName}
                     </Link>
                     <span className="text-sm text-muted">{i.journeyName}</span>
@@ -170,8 +195,18 @@ export function Journeys() {
           )}
         </div>
       )}
-      <Dialog open={gallery} onOpenChange={setGallery} size="xl" title="New journey" description="Start from a template or from nothing.">
-        <JourneyTemplateGallery templates={templates.data ?? []} busy={create.isPending} onPick={pickTemplate} />
+      <Dialog
+        open={gallery}
+        onOpenChange={setGallery}
+        size="xl"
+        title="New journey"
+        description="Start from a template or from nothing."
+      >
+        <JourneyTemplateGallery
+          templates={templates.data ?? []}
+          busy={create.isPending}
+          onPick={pickTemplate}
+        />
         <div className="mt-4">
           <Button variant="secondary" loading={create.isPending} onClick={() => pickTemplate(null)}>
             Start with an empty journey

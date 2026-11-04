@@ -1,16 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import {
+  dateWaitFireAt,
+  deadlineOf,
+  durationMs,
   type JourneyApprover,
   type JourneyDefinition,
   type JourneyWaitStep,
   type TimeoutAction,
-  dateWaitFireAt,
-  deadlineOf,
-  durationMs,
   timeoutDecision,
   type WaitView,
 } from '@aom/shared';
-import { advanceIn, cancelInstanceIn, ev, kindOf, lockInstance, loadDefinition, Refused } from '../commands/journey-runtime.ts';
+import {
+  advanceIn,
+  cancelInstanceIn,
+  ev,
+  kindOf,
+  loadDefinition,
+  lockInstance,
+  Refused,
+} from '../commands/journey-runtime.ts';
 import { createClientLinkIn, revokeClientLinkIn } from '../commands/public-forms.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -39,7 +47,11 @@ export async function defaultAddressee(db: Tx, inst: Row, to?: JourneyApprover):
 
 const GATE_REMINDER_OPTIONS = [
   { id: 'approve', label: 'Approve', description: 'Let the journey go on.' },
-  { id: 'reject', label: 'Reject', description: 'Stop here: the journey follows its reject handoff. A note is required.' },
+  {
+    id: 'reject',
+    label: 'Reject',
+    description: 'Stop here: the journey follows its reject handoff. A note is required.',
+  },
 ];
 
 /** The longest time a wait with reminders can last, for the link's expiry. */
@@ -74,11 +86,23 @@ function escalationEvents(
           : `"${w.step_id}" for ${recordName} timed out. What should happen?`,
       options: ESCALATION_OPTIONS,
       addresseeUserId: addressee,
-      data: { waitId: w.id, instanceId: inst.id, recordId: inst.record_id, stepId: w.step_id, ...(w.kind ? { waitKind: w.kind } : {}) },
+      data: {
+        waitId: w.id,
+        instanceId: inst.id,
+        recordId: inst.record_id,
+        stepId: w.step_id,
+        ...(w.kind ? { waitKind: w.kind } : {}),
+      },
     }),
     ev(inst, {
       type: 'JourneyWaitEscalated',
-      payload: { waitId: w.id, ...(firedFor ? { firedFor } : {}), deskItemId, addresseeUserId: addressee, reason },
+      payload: {
+        waitId: w.id,
+        ...(firedFor ? { firedFor } : {}),
+        deskItemId,
+        addresseeUserId: addressee,
+        reason,
+      },
     }),
   ];
 }
@@ -99,7 +123,14 @@ export async function enterWaitStep(
   const waitId = randomUUID();
   const record = (await one(tx, 'SELECT * FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
   const config = { waitFor, duration: step.duration, onTimeout: step.onTimeout } as Record<string, unknown>;
-  const base = { waitId, instanceId: inst.id, visit: run.visit, stepId: run.step_id, startedAt: iso(now), config };
+  const base = {
+    waitId,
+    instanceId: inst.id,
+    visit: run.visit,
+    stepId: run.step_id,
+    startedAt: iso(now),
+    config,
+  };
 
   if (!waitFor) return manualWait(inst, run, now);
 
@@ -111,13 +142,25 @@ export async function enterWaitStep(
       [inst.id],
     );
     const field = waitFor.dateFrom.field;
-    const raw = card ? (field in card ? card[field] : (card.fields as Record<string, unknown> | null)?.[field]) : undefined;
+    const raw = card
+      ? field in card
+        ? card[field]
+        : (card.fields as Record<string, unknown> | null)?.[field]
+      : undefined;
     const fireAt = dateWaitFireAt(raw, waitFor.offset, waitFor.atTime, 'UTC');
     if (!fireAt) {
       const addressee = await defaultAddressee(tx, inst);
       return [
         ev(inst, { type: 'JourneyWaitStarted', payload: { ...base, kind: 'date' } }),
-        ...escalationEvents(ctx, inst, { id: waitId, step_id: run.step_id }, addressee, 'date_missing', undefined, record.display_name),
+        ...escalationEvents(
+          ctx,
+          inst,
+          { id: waitId, step_id: run.step_id },
+          addressee,
+          'date_missing',
+          undefined,
+          record.display_name,
+        ),
       ];
     }
     return [
@@ -132,13 +175,19 @@ export async function enterWaitStep(
   const deadline = deadlineOf(now, step.duration);
   const timing = { deadlineAt: iso(deadline), nextFireAt: iso(deadline) };
 
-  if (waitFor.kind === 'duration') return [ev(inst, { type: 'JourneyWaitStarted', payload: { ...base, kind: 'duration', ...timing } })];
+  if (waitFor.kind === 'duration')
+    return [ev(inst, { type: 'JourneyWaitStarted', payload: { ...base, kind: 'duration', ...timing } })];
 
   if (waitFor.kind === 'webhook')
     return [
       ev(inst, {
         type: 'JourneyWaitStarted',
-        payload: { ...base, kind: 'webhook', ...timing, ...(waitFor.triggerId ? { triggerId: waitFor.triggerId } : {}) },
+        payload: {
+          ...base,
+          kind: 'webhook',
+          ...timing,
+          ...(waitFor.triggerId ? { triggerId: waitFor.triggerId } : {}),
+        },
       }),
     ];
 
@@ -168,7 +217,18 @@ export async function enterWaitStep(
       payload: { ...base, kind: 'form', ...timing, linkId: link.linkId, linkExpiresAt: iso(link.expiresAt) },
     }),
   ];
-  out.push(...(await linkDelivery(tx, inst, waitId, link.linkId, link.expiresAt, waitFor.send.via, record.display_name, run.step_id)));
+  out.push(
+    ...(await linkDelivery(
+      tx,
+      inst,
+      waitId,
+      link.linkId,
+      link.expiresAt,
+      waitFor.send.via,
+      record.display_name,
+      run.step_id,
+    )),
+  );
   return out;
 }
 
@@ -183,7 +243,9 @@ async function linkDelivery(
   stepId: string,
 ): Promise<AppendInput[]> {
   if (via === 'webhook')
-    return [ev(inst, { type: 'JourneyWaitLinkSent', payload: { waitId, linkId, via, expiresAt: iso(expiresAt) } })];
+    return [
+      ev(inst, { type: 'JourneyWaitLinkSent', payload: { waitId, linkId, via, expiresAt: iso(expiresAt) } }),
+    ];
   const deskItemId = randomUUID();
   const addressee = await defaultAddressee(tx, inst);
   return [
@@ -196,7 +258,10 @@ async function linkDelivery(
       addresseeUserId: addressee,
       data: { waitId, instanceId: inst.id, recordId: inst.record_id, linkId },
     }),
-    ev(inst, { type: 'JourneyWaitLinkSent', payload: { waitId, linkId, via, expiresAt: iso(expiresAt), deskItemId } }),
+    ev(inst, {
+      type: 'JourneyWaitLinkSent',
+      payload: { waitId, linkId, via, expiresAt: iso(expiresAt), deskItemId },
+    }),
   ];
 }
 
@@ -216,6 +281,7 @@ function manualWait(inst: Row, run: Row, now: Date): AppendInput[] {
     }),
   ];
 }
+
 export { manualWait };
 
 // ------------------------------------------------------------------------------------------------ resolving
@@ -231,7 +297,10 @@ async function resolveAndAdvance(
   preEvents: AppendInput[] = [],
 ): Promise<void> {
   const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
-  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [inst.id, w.visit]);
+  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [
+    inst.id,
+    w.visit,
+  ]);
   if (!run || run.status !== 'waiting') return;
   await ctx.store.append(
     [
@@ -256,7 +325,11 @@ async function resolveAndAdvance(
 /** Wait-for-form: a submission was stored through the wait's link. True when something moved. */
 export async function resolveFormWait(ctx: Ctx, waitId: string): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w || !w.link_id) return false;
     const link = await one(tx, 'SELECT used_by_submission FROM form_client_links WHERE id=$1', [w.link_id]);
     if (!link?.used_by_submission) return false;
@@ -266,7 +339,12 @@ export async function resolveFormWait(ctx: Ctx, waitId: string): Promise<boolean
     await resolveAndAdvance(ctx, tx, inst, w, 'form_submitted', { submissionId }, [
       ev(inst, {
         type: 'JourneyRecordReferenceAdded',
-        payload: { recordId: inst.record_id, kind: 'form_submission', ref: submissionId, label: 'Form submission' },
+        payload: {
+          recordId: inst.record_id,
+          kind: 'form_submission',
+          ref: submissionId,
+          label: 'Form submission',
+        },
       }),
     ]);
     return true;
@@ -276,9 +354,14 @@ export async function resolveFormWait(ctx: Ctx, waitId: string): Promise<boolean
 /** A person ends a wait (desk answer or the Continue button). */
 export async function continueWait(ctx: Ctx, waitId: string, byUserId: string): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w) return false;
-    if (w.kind === 'gate') throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
+    if (w.kind === 'gate')
+      throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
     const inst = await lockInstance(tx, w.instance_id, w.visit, 'waiting');
     if (!inst) return false;
     await resolveAndAdvance(ctx, tx, inst, w, 'continued', { by: byUserId });
@@ -288,17 +371,25 @@ export async function continueWait(ctx: Ctx, waitId: string, byUserId: string): 
 
 export async function extendWait(ctx: Ctx, waitId: string, byUserId: string, ms: number): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w || w.kind === 'manual') return false;
     const inst = await lockInstance(tx, w.instance_id, w.visit, 'waiting');
     if (!inst) return false;
     const deadlineAt = new Date(ctx.clock.now().getTime() + ms);
     const out: AppendInput[] = [
-      ev(inst, { type: 'JourneyWaitExtended', payload: { waitId, by: byUserId, deadlineAt: iso(deadlineAt) } }),
+      ev(inst, {
+        type: 'JourneyWaitExtended',
+        payload: { waitId, by: byUserId, deadlineAt: iso(deadlineAt) },
+      }),
     ];
     if (w.desk_item_id && w.status === 'escalated') {
       const d = await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [w.desk_item_id]);
-      if (d?.status === 'open') out.push(resolveDeskEvent(inst, w.desk_item_id, 'acknowledged', 'Extended.', byUserId));
+      if (d?.status === 'open')
+        out.push(resolveDeskEvent(inst, w.desk_item_id, 'acknowledged', 'Extended.', byUserId));
     }
     await ctx.store.append(out, { tx });
     return true;
@@ -316,19 +407,36 @@ export async function gotoIn(
   pre: AppendInput[] = [],
 ): Promise<void> {
   const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
-  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [inst.id, w.visit]);
+  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [
+    inst.id,
+    w.visit,
+  ]);
   if (!run || run.status !== 'waiting' || !def.steps.some((s) => s.id === stepId)) return;
   await ctx.store.append(
     [
       ...pre,
       ev(inst, {
         type: 'JourneyWaitResolved',
-        payload: { waitId: w.id, reason: 'goto', ...(extra.by ? { by: extra.by } : {}), ...(extra.firedFor ? { firedFor: extra.firedFor } : {}) },
+        payload: {
+          waitId: w.id,
+          reason: 'goto',
+          ...(extra.by ? { by: extra.by } : {}),
+          ...(extra.firedFor ? { firedFor: extra.firedFor } : {}),
+        },
       }),
-      ev(inst, { type: 'JourneyStepCompleted', payload: { instanceId: inst.id, visit: run.visit, result: 'skipped' } }),
+      ev(inst, {
+        type: 'JourneyStepCompleted',
+        payload: { instanceId: inst.id, visit: run.visit, result: 'skipped' },
+      }),
       ev(inst, {
         type: 'JourneyStepEntered',
-        payload: { instanceId: inst.id, visit: run.visit + 1, stepId, kind: kindOf(def, stepId), fromVisit: run.visit },
+        payload: {
+          instanceId: inst.id,
+          visit: run.visit + 1,
+          stepId,
+          kind: kindOf(def, stepId),
+          fromVisit: run.visit,
+        },
       }),
     ],
     { tx },
@@ -336,9 +444,18 @@ export async function gotoIn(
   await endWaitSideEffects(ctx, tx, inst, w.id);
 }
 
-export async function gotoFromWait(ctx: Ctx, waitId: string, byUserId: string, stepId: string): Promise<boolean> {
+export async function gotoFromWait(
+  ctx: Ctx,
+  waitId: string,
+  byUserId: string,
+  stepId: string,
+): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w || w.kind === 'gate') return false;
     const inst = await lockInstance(tx, w.instance_id, w.visit, 'waiting');
     if (!inst) return false;
@@ -349,7 +466,11 @@ export async function gotoFromWait(ctx: Ctx, waitId: string, byUserId: string, s
 
 export async function cancelFromWait(ctx: Ctx, waitId: string, byUserId: string): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w) return false;
     const inst = await one(tx, 'SELECT * FROM journey_instances WHERE id=$1 FOR UPDATE', [w.instance_id]);
     if (!inst) return false;
@@ -360,7 +481,11 @@ export async function cancelFromWait(ctx: Ctx, waitId: string, byUserId: string)
 /** Issues a new link (the old one is revoked) and shows or passes it on again. */
 export async function resendLink(ctx: Ctx, waitId: string): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
-    const w = await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [waitId]);
+    const w = await one(
+      tx,
+      `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+      [waitId],
+    );
     if (!w || w.kind !== 'form') return false;
     const inst = await lockInstance(tx, w.instance_id, w.visit, 'waiting');
     if (!inst) return false;
@@ -375,11 +500,18 @@ async function refreshLink(ctx: Ctx, tx: Tx, inst: Row, w: Row, force = false): 
   const record = (await one(tx, 'SELECT * FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
   const cur = w.link_id ? await one(tx, 'SELECT * FROM form_client_links WHERE id=$1', [w.link_id]) : null;
   const now = ctx.clock.now();
-  const usable = cur && !cur.revoked_at && !cur.used_at && new Date(cur.expires_at).getTime() > now.getTime() + DAY / 2;
+  const usable =
+    cur && !cur.revoked_at && !cur.used_at && new Date(cur.expires_at).getTime() > now.getTime() + DAY / 2;
   let linkId = w.link_id as string;
   let expiresAt = new Date(w.link_expires_at ?? cur?.expires_at ?? now);
   if (force || !usable) {
-    if (cur) await revokeClientLinkIn(tx, ctx, { orgId: inst.org_id, formId: cfg.waitFor.formId, linkId: cur.id, by: inst.started_by });
+    if (cur)
+      await revokeClientLinkIn(tx, ctx, {
+        orgId: inst.org_id,
+        formId: cfg.waitFor.formId,
+        linkId: cur.id,
+        by: inst.started_by,
+      });
     expiresAt = new Date(now.getTime() + Math.min(90, 14) * DAY);
     const l = await createClientLinkIn(tx, ctx, {
       orgId: inst.org_id,
@@ -392,7 +524,16 @@ async function refreshLink(ctx: Ctx, tx: Tx, inst: Row, w: Row, force = false): 
     });
     linkId = l.linkId;
   }
-  return linkDelivery(tx, inst, w.id, linkId, expiresAt, cfg.waitFor.send.via, record.display_name, w.step_id);
+  return linkDelivery(
+    tx,
+    inst,
+    w.id,
+    linkId,
+    expiresAt,
+    cfg.waitFor.send.via,
+    record.display_name,
+    w.step_id,
+  );
 }
 
 // ------------------------------------------------------------------------------------------------ timers
@@ -446,10 +587,14 @@ async function fireOne(ctx: Ctx, waitId: string): Promise<boolean> {
     const d = timeoutDecision(viewOf(w), now);
     switch (d.kind) {
       case 'elapsed':
-        await resolveAndAdvance(ctx, tx, inst, w, w.kind === 'date' ? 'date_reached' : 'elapsed', { firedFor });
+        await resolveAndAdvance(ctx, tx, inst, w, w.kind === 'date' ? 'date_reached' : 'elapsed', {
+          firedFor,
+        });
         return true;
       case 'remind': {
-        const out: AppendInput[] = [ev(inst, { type: 'JourneyWaitTimedOut', payload: { waitId, firedFor, action: 'remind', n: d.n } })];
+        const out: AppendInput[] = [
+          ev(inst, { type: 'JourneyWaitTimedOut', payload: { waitId, firedFor, action: 'remind', n: d.n } }),
+        ];
         let linkId: string | undefined;
         if (w.kind === 'form') {
           const l = await refreshLink(ctx, tx, inst, w);
@@ -463,10 +608,15 @@ async function fireOne(ctx: Ctx, waitId: string): Promise<boolean> {
           const approver = (w.config as { approver?: Parameters<typeof resolveJourneyApprover>[2] }).approver;
           if (approver) {
             const r = await resolveJourneyApprover(tx, inst, approver);
-            const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+            const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [
+              inst.record_id,
+            ])) as Row;
             const cfg = w.config as { question?: string };
             deskItemId = randomUUID();
-            if (w.desk_item_id) out.push(resolveDeskEvent(inst, w.desk_item_id, 'dismissed', `Reminder ${d.n} of ${d.of} sent.`));
+            if (w.desk_item_id)
+              out.push(
+                resolveDeskEvent(inst, w.desk_item_id, 'dismissed', `Reminder ${d.n} of ${d.of} sent.`),
+              );
             out.push(
               deskQuestion(inst, {
                 deskItemId,
@@ -475,7 +625,13 @@ async function fireOne(ctx: Ctx, waitId: string): Promise<boolean> {
                 question: cfg.question ?? `Approve "${w.step_id}" for ${record.display_name}?`,
                 options: GATE_REMINDER_OPTIONS,
                 addresseeUserId: r.userIds[0] as string,
-                data: { waitId, instanceId: inst.id, recordId: inst.record_id, stepId: w.step_id, ...(r.role ? { role: r.role } : {}) },
+                data: {
+                  waitId,
+                  instanceId: inst.id,
+                  recordId: inst.record_id,
+                  stepId: w.step_id,
+                  ...(r.role ? { role: r.role } : {}),
+                },
               }),
             );
           }
@@ -503,11 +659,16 @@ async function fireOne(ctx: Ctx, waitId: string): Promise<boolean> {
         ]);
         return true;
       case 'cancel':
-        await ctx.store.append([ev(inst, { type: 'JourneyWaitTimedOut', payload: { waitId, firedFor, action: 'cancel' } })], { tx });
+        await ctx.store.append(
+          [ev(inst, { type: 'JourneyWaitTimedOut', payload: { waitId, firedFor, action: 'cancel' } })],
+          { tx },
+        );
         await cancelInstanceIn(tx, ctx, inst, null, w.kind === 'gate' ? 'gate_timeout' : 'wait_timeout');
         return true;
       case 'escalate': {
-        const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+        const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [
+          inst.record_id,
+        ])) as Row;
         const addressee = await defaultAddressee(tx, inst, d.to);
         await ctx.store.append(
           [

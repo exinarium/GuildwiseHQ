@@ -4,7 +4,13 @@ import { test } from 'node:test';
 import { canBind, exitCodeOf, formatReport, type Line, tcpReady } from './preflight.ts';
 
 const ready: Line = { name: 'postgres', target: 'x', status: 'ready', detail: '' };
-const bad: Line = { name: 'hosted build', target: 'http://localhost:4710', status: 'NOT READY', detail: 'refused', fix: 'ask DevOps' };
+const bad: Line = {
+  name: 'hosted build',
+  target: 'http://localhost:4710',
+  status: 'NOT READY',
+  detail: 'refused',
+  fix: 'ask DevOps',
+};
 const skip: Line = { name: 'docker', target: 'd', status: 'skipped', detail: 'skipped (--no-docker)' };
 
 test('exit code is 0 when all ready or skipped, 1 when any is not ready', () => {

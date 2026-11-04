@@ -29,7 +29,11 @@ export default async function hostedGlobalSetup(): Promise<() => Promise<void>> 
   } else {
     console.log('hosted setup: AOM_E2E_HOSTED_APP / DATABASE_URL not set, accounts are not seeded');
   }
-  const proxy = await startTlsProxy({ target: HOSTED_URL, port: TLS_PORT, certDir: join(E2E_DIR, 'hosted-tls') });
+  const proxy = await startTlsProxy({
+    target: HOSTED_URL,
+    port: TLS_PORT,
+    certDir: join(E2E_DIR, 'hosted-tls'),
+  });
   process.env.NODE_EXTRA_CA_CERTS = proxy.caPath;
   process.env.HOSTED_TLS_URL = proxy.url;
   return () => proxy.close();

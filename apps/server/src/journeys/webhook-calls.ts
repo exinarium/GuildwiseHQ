@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type BodyToken,
   CALL_MAX_ATTEMPTS,
   callBackoffMs,
-  type BodyToken,
   DeliverySendResultSchema,
   isRetryableHttpStatus,
   type JourneyDefinition,
@@ -92,7 +92,8 @@ async function varsFor(ctx: Ctx, tx: Tx, inst: Row, def: JourneyDefinition, step
     [inst.id],
   );
   if (w?.submission_id) vars['submission.id'] = String(w.submission_id);
-  const formId = (w?.config as { waitFor?: { formId?: string; send?: { via?: string } } } | undefined)?.waitFor;
+  const formId = (w?.config as { waitFor?: { formId?: string; send?: { via?: string } } } | undefined)
+    ?.waitFor;
   if (w?.link_id && formId?.formId && formId.send?.via === 'webhook') {
     const url = await clientLinkUrl(ctx, inst.org_id, formId.formId, w.link_id);
     if (url) vars['wait.link'] = url;
@@ -117,10 +118,10 @@ async function tryOnce(ctx: Ctx, callId: string): Promise<boolean> {
     if (call.status === 'dispatched') {
       // The try was never answered: close the command, empty its body, count a failed retryable try.
       if (call.command_id)
-        await tx.query(`UPDATE runner_commands SET status='failed', payload='{}'::jsonb, last_error='no answer', done_at=$2 WHERE id=$1`, [
-          call.command_id,
-          now,
-        ]);
+        await tx.query(
+          `UPDATE runner_commands SET status='failed', payload='{}'::jsonb, last_error='no answer', done_at=$2 WHERE id=$1`,
+          [call.command_id, now],
+        );
       await recordAttempt(ctx, tx, inst, def, call, call.attempts, {
         ok: false,
         error: 'the workstation did not answer (offline?)',
@@ -164,9 +165,20 @@ async function tryOnce(ctx: Ctx, callId: string): Promise<boolean> {
       body,
     };
     const deadline = new Date(now.getTime() + CALL_DISPATCH_MS);
-    const commandId = await enqueueRunnerCommand(ctx.pool, call.workstation_id, 'journey.webhook.call', payload, deadline);
+    const commandId = await enqueueRunnerCommand(
+      ctx.pool,
+      call.workstation_id,
+      'journey.webhook.call',
+      payload,
+      deadline,
+    );
     await ctx.store.append(
-      [ev(inst, { type: 'JourneyWebhookCallDispatched', payload: { callId, attempt, commandId, deadline: deadline.toISOString() } })],
+      [
+        ev(inst, {
+          type: 'JourneyWebhookCallDispatched',
+          payload: { callId, attempt, commandId, deadline: deadline.toISOString() },
+        }),
+      ],
       { tx },
     );
     return true;
@@ -206,11 +218,19 @@ async function recordAttempt(
   events.push(
     ev(inst, {
       type: 'JourneyWebhookCallFinished',
-      payload: { callId: call.id, ok: r.ok, attempts: attempt, ...(r.httpStatus ? { httpStatus: r.httpStatus } : {}) },
+      payload: {
+        callId: call.id,
+        ok: r.ok,
+        attempts: attempt,
+        ...(r.httpStatus ? { httpStatus: r.httpStatus } : {}),
+      },
     }),
   );
   await ctx.store.append(events, { tx });
-  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [inst.id, call.visit]);
+  const run = await one(tx, 'SELECT * FROM journey_step_runs WHERE instance_id=$1 AND visit=$2', [
+    inst.id,
+    call.visit,
+  ]);
   if (!run || run.status !== 'waiting') return;
   if (r.ok) await advanceIn(ctx, tx, inst, def, run, 'done', null);
   else await advanceIn(ctx, tx, inst, def, run, 'cancelled', null, 'failed');
@@ -226,22 +246,38 @@ export async function applyJourneyWebhookResult(
 ): Promise<void> {
   if (!payload.callId || !payload.attempt) return;
   await withAppendTx(ctx.pool, async (tx) => {
-    const call = await one(tx, `SELECT * FROM journey_webhook_calls WHERE id=$1 AND status='dispatched' FOR UPDATE`, [payload.callId]);
+    const call = await one(
+      tx,
+      `SELECT * FROM journey_webhook_calls WHERE id=$1 AND status='dispatched' FOR UPDATE`,
+      [payload.callId],
+    );
     if (!call || Number(call.attempts) !== payload.attempt) return;
     const inst = await lockInstance(tx, call.instance_id, call.visit, 'waiting');
     if (!inst) return;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
     const parsed = DeliverySendResultSchema.safeParse(result);
     const out: Result = !ok
-      ? { ok: false, error: (error ?? 'the workstation could not send').slice(0, 500), retryable: true, durationMs: 0 }
+      ? {
+          ok: false,
+          error: (error ?? 'the workstation could not send').slice(0, 500),
+          retryable: true,
+          durationMs: 0,
+        }
       : !parsed.success
-        ? { ok: false, error: 'the workstation answered something unexpected', retryable: true, durationMs: 0 }
+        ? {
+            ok: false,
+            error: 'the workstation answered something unexpected',
+            retryable: true,
+            durationMs: 0,
+          }
         : {
             ok: parsed.data.ok,
             ...(parsed.data.httpStatus ? { httpStatus: parsed.data.httpStatus } : {}),
             ...(parsed.data.error ? { error: parsed.data.error } : {}),
             durationMs: 0,
-            retryable: parsed.data.retryable || (parsed.data.httpStatus ? isRetryableHttpStatus(parsed.data.httpStatus) : false),
+            retryable:
+              parsed.data.retryable ||
+              (parsed.data.httpStatus ? isRetryableHttpStatus(parsed.data.httpStatus) : false),
           };
     await recordAttempt(ctx, tx, inst, def, call, payload.attempt as number, out);
   });

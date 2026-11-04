@@ -1,4 +1,6 @@
+export * from './changelog-entries.ts';
 export * from './changelog-rewrite.ts';
+export * from './changelog-task.ts';
 export * from './commits.ts';
 export * from './components.ts';
 export * from './docs-prep.ts';
@@ -11,5 +13,3 @@ export * from './recommend.ts';
 export * from './tags.ts';
 export * from './user-guide.ts';
 export * from './validate.ts';
-export * from './changelog-entries.ts';
-export * from './changelog-task.ts';

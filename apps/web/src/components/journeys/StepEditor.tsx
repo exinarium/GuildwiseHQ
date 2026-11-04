@@ -1,7 +1,7 @@
 import type { JourneyCondition, JourneyDefinition, JourneyHandoff, JourneyStep } from '@aom/shared';
 import { ArrowDown, ArrowUp, Plus, Repeat, Trash2 } from 'lucide-react';
-import { Badge, Button, Select, TextInput } from '../ui.tsx';
 import { isLoop } from '../../lib/journeys.ts';
+import { Badge, Button, Select, TextInput } from '../ui.tsx';
 import { StepSettings } from './StepSettings.tsx';
 
 export interface WorkflowOption {
@@ -105,9 +105,16 @@ function HandoffRow({
 }) {
   const loop = isLoop(def, h);
   return (
-    <li className="flex flex-col gap-2 rounded-control border border-line bg-sunken/40 p-3" data-testid={`handoff-${h.id}`}>
+    <li
+      className="flex flex-col gap-2 rounded-control border border-line bg-sunken/40 p-3"
+      data-testid={`handoff-${h.id}`}
+    >
       <div className="grid gap-2 sm:grid-cols-2">
-        <Select label="When this step is" value={h.on} onChange={(e) => onUpdate({ on: e.target.value as JourneyHandoff['on'] })}>
+        <Select
+          label="When this step is"
+          value={h.on}
+          onChange={(e) => onUpdate({ on: e.target.value as JourneyHandoff['on'] })}
+        >
           <option value="done">done</option>
           <option value="cancelled">cancelled</option>
           <option value="any">either</option>
@@ -117,7 +124,9 @@ function HandoffRow({
               <option value="rejected">rejected</option>
             </>
           )}
-          {def.steps.find((x) => x.id === h.from)?.kind === 'webhook_call' && <option value="failed">failed</option>}
+          {def.steps.find((x) => x.id === h.from)?.kind === 'webhook_call' && (
+            <option value="failed">failed</option>
+          )}
         </Select>
         <Select label="Go to" value={h.to} onChange={(e) => onUpdate({ to: e.target.value })}>
           {def.steps.map((s) => (
@@ -145,17 +154,33 @@ function HandoffRow({
           </Button>
         </div>
       )}
-      <TextInput label="Label (optional)" value={h.label ?? ''} onChange={(e) => onUpdate({ label: e.target.value })} />
+      <TextInput
+        label="Label (optional)"
+        value={h.label ?? ''}
+        onChange={(e) => onUpdate({ label: e.target.value })}
+      />
       <div className="flex flex-wrap items-center gap-2">
         {loop && (
           <Badge tone="info" icon={<Repeat aria-hidden="true" className="size-3" />}>
             Loop
           </Badge>
         )}
-        <Button variant="secondary" size="sm" type="button" onClick={() => onMove(-1)} aria-label="Check this handoff earlier">
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          onClick={() => onMove(-1)}
+          aria-label="Check this handoff earlier"
+        >
           <ArrowUp aria-hidden="true" className="size-4" /> Earlier
         </Button>
-        <Button variant="secondary" size="sm" type="button" onClick={() => onMove(1)} aria-label="Check this handoff later">
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          onClick={() => onMove(1)}
+          aria-label="Check this handoff later"
+        >
           <ArrowDown aria-hidden="true" className="size-4" /> Later
         </Button>
         <Button variant="danger" size="sm" type="button" onClick={onRemove}>
@@ -205,12 +230,23 @@ export function StepEditor({
           {index + 1}
         </span>
         <Badge tone={step.kind === 'workflow' ? 'brand' : 'warning'}>
-          {step.kind === 'workflow' ? 'Workflow' : step.kind === 'wait' ? 'Wait' : step.kind === 'gate' ? 'Approval gate' : 'Webhook call'}
+          {step.kind === 'workflow'
+            ? 'Workflow'
+            : step.kind === 'wait'
+              ? 'Wait'
+              : step.kind === 'gate'
+                ? 'Approval gate'
+                : 'Webhook call'}
         </Badge>
         {def.firstStepId === step.id && <Badge tone="success">Starts here</Badge>}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <TextInput label="Step name" value={step.label} disabled={disabled} onChange={(e) => onStep({ label: e.target.value })} />
+        <TextInput
+          label="Step name"
+          value={step.label}
+          disabled={disabled}
+          onChange={(e) => onStep({ label: e.target.value })}
+        />
         {step.kind === 'workflow' && (
           <Select
             label="Workflow"
@@ -254,10 +290,22 @@ export function StepEditor({
       <StepSettings def={def} step={step} disabled={disabled} onStep={onStep} />
       {!disabled && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" type="button" onClick={() => onMove(-1)} disabled={index === 0}>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+          >
             <ArrowUp aria-hidden="true" className="size-4" /> Move up
           </Button>
-          <Button variant="secondary" size="sm" type="button" onClick={() => onMove(1)} disabled={index === def.steps.length - 1}>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={() => onMove(1)}
+            disabled={index === def.steps.length - 1}
+          >
             <ArrowDown aria-hidden="true" className="size-4" /> Move down
           </Button>
           {def.firstStepId !== step.id && (
@@ -273,7 +321,9 @@ export function StepEditor({
       <div className="mt-4 border-t border-line pt-3">
         <h3 className="mb-2 text-sm font-semibold text-fg">What happens next</h3>
         {out.length === 0 ? (
-          <p className="mb-2 text-sm text-muted">No handoff leaves this step: the journey ends when it does.</p>
+          <p className="mb-2 text-sm text-muted">
+            No handoff leaves this step: the journey ends when it does.
+          </p>
         ) : (
           <ul className="mb-2 flex flex-col gap-2">
             {out.map((h) => (

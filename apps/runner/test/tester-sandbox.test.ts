@@ -4,7 +4,11 @@ import net from 'node:net';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, type LocalTestService } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildShiftSettings, REGISTRY_DOMAINS, testServiceDoctorLines } from '../src/adapters/claude-policy.ts';
+import {
+  buildShiftSettings,
+  REGISTRY_DOMAINS,
+  testServiceDoctorLines,
+} from '../src/adapters/claude-policy.ts';
 import {
   decideTestServices,
   isTesterShift,
@@ -66,7 +70,9 @@ describe('tester shift: test-services setting -> opened ports', () => {
     );
     const domains = s.sandbox?.network.allowedDomains ?? [];
     expect(domains).toEqual([...REGISTRY_DOMAINS, '127.0.0.1:4710', '127.0.0.1:5433']);
-    expect(domains.some((x) => x.startsWith('127.0.0.1') && !/^127\.0\.0\.1:(4710|5433)$/.test(x))).toBe(false);
+    expect(domains.some((x) => x.startsWith('127.0.0.1') && !/^127\.0\.0\.1:(4710|5433)$/.test(x))).toBe(
+      false,
+    );
     expect(domains).not.toContain('127.0.0.1:5999');
   });
 
@@ -79,7 +85,12 @@ describe('tester shift: test-services setting -> opened ports', () => {
 
 describe('tester shift env (BASH_ENV, E2E scratch, nested runner tmp root)', () => {
   it('a tester with opened services gets the bridges as BASH_ENV and the scratch under its TMPDIR', () => {
-    const env = testerShiftEnv({ isTester: true, autoBridged: true, tmp: '/tmp/aom-0123456789', binDir: '/r/bin' });
+    const env = testerShiftEnv({
+      isTester: true,
+      autoBridged: true,
+      tmp: '/tmp/aom-0123456789',
+      binDir: '/r/bin',
+    });
     expect(env).toEqual({
       BASH_ENV: join('/r/bin', AOM_BRIDGES_FILE),
       SHLVL: '1',
@@ -93,14 +104,17 @@ describe('tester shift env (BASH_ENV, E2E scratch, nested runner tmp root)', () 
     const env = testerShiftEnv({ isTester: true, autoBridged: false, tmp: '/t/aom-x', binDir: '/r/bin' });
     expect(env.BASH_ENV).toBeUndefined();
     expect(env.AOM_E2E_DIR).toBe('/t/aom-x/e2e');
-    expect(testerShiftEnv({ isTester: false, autoBridged: true, tmp: '/t/aom-x', binDir: '/r/bin' })).toEqual({});
+    expect(testerShiftEnv({ isTester: false, autoBridged: true, tmp: '/t/aom-x', binDir: '/r/bin' })).toEqual(
+      {},
+    );
   });
 
   it('only a tester card shift is a tester shift', () => {
     expect(isTesterShift('card', 'tester', false)).toBe(true);
     expect(isTesterShift('card', 'tester', true)).toBe(false);
     expect(isTesterShift('devops', 'tester', false)).toBe(false);
-    for (const r of ['builder', 'reviewer', 'ba', 'ceo', 'devops']) expect(isTesterShift('card', r, false)).toBe(false);
+    for (const r of ['builder', 'reviewer', 'ba', 'ceo', 'devops'])
+      expect(isTesterShift('card', r, false)).toBe(false);
   });
 });
 
@@ -268,14 +282,20 @@ describe('bin/aom-bridges.sh (BASH_ENV): every bash reaches the declared ports w
     await new Promise<void>((r) => service.listen(0, '127.0.0.1', r));
     closers.push(() => service.close());
     const declared = await freePort();
-    const { proxy, connects, port } = await startProxy(`127.0.0.1:${declared}`, (service.address() as net.AddressInfo).port);
+    const { proxy, connects, port } = await startProxy(
+      `127.0.0.1:${declared}`,
+      (service.address() as net.AddressInfo).port,
+    );
     closers.push(() => proxy.close());
     const env = {
       BASH_ENV: join(dir, AOM_BRIDGES_FILE),
       AOM_TEST_SERVICES: `127.0.0.1:${declared}`,
       HTTPS_PROXY: `http://srt.user:s3cret@127.0.0.1:${port}`,
     };
-    const r = await bash(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(declared))}`, env);
+    const r = await bash(
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(declared))}`,
+      env,
+    );
     expect(r.stdout).toBe('pg-hello');
     expect(r.stderr).toBe('');
     expect(connects).toEqual([`127.0.0.1:${declared}`]);
@@ -299,7 +319,10 @@ describe('bin/aom-bridges.sh (BASH_ENV): every bash reaches the declared ports w
     await new Promise<void>((r) => service.listen(0, '127.0.0.1', r));
     closers.push(() => service.close());
     const declared = await freePort();
-    const { proxy, port } = await startProxy(`127.0.0.1:${declared}`, (service.address() as net.AddressInfo).port);
+    const { proxy, port } = await startProxy(
+      `127.0.0.1:${declared}`,
+      (service.address() as net.AddressInfo).port,
+    );
     closers.push(() => proxy.close());
     const r = await bash(
       `${JSON.stringify(join(dir, 'aom-env'))} --timeout 1 -- ${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(declared))}`,
@@ -322,23 +345,32 @@ describe('bin/aom-bridges.sh (BASH_ENV): every bash reaches the declared ports w
     closers.push(() => service.close());
     const declared = await freePort();
     const undeclared = await freePort();
-    const { proxy, connects, port } = await startProxy(`127.0.0.1:${declared}`, (service.address() as net.AddressInfo).port);
+    const { proxy, connects, port } = await startProxy(
+      `127.0.0.1:${declared}`,
+      (service.address() as net.AddressInfo).port,
+    );
     closers.push(() => proxy.close());
     const env = {
       BASH_ENV: join(dir, AOM_BRIDGES_FILE),
       HTTPS_PROXY: `http://u:p@127.0.0.1:${port}`,
     };
     // not in the list: nothing listens
-    const plain = await bash(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(undeclared))}`, {
-      ...env,
-      AOM_TEST_SERVICES: `127.0.0.1:${declared}`,
-    });
+    const plain = await bash(
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(undeclared))}`,
+      {
+        ...env,
+        AOM_TEST_SERVICES: `127.0.0.1:${declared}`,
+      },
+    );
     expect(plain.stdout).toContain('ERR ECONNREFUSED');
     // put into the list by hand: a listener starts, but the proxy refuses the tunnel
-    const widened = await bash(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(undeclared))}`, {
-      ...env,
-      AOM_TEST_SERVICES: `127.0.0.1:${undeclared}`,
-    });
+    const widened = await bash(
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(NODE_PROBE(undeclared))}`,
+      {
+        ...env,
+        AOM_TEST_SERVICES: `127.0.0.1:${undeclared}`,
+      },
+    );
     expect(widened.stdout).not.toContain('secret-service');
     expect(connects).toContain(`127.0.0.1:${undeclared}`);
   });

@@ -70,7 +70,8 @@ async function setFacts(changelog: string) {
   );
 }
 
-const GOOD_MD = '## [Unreleased]\n\n### Added\n\n- Retire a workstation with agent handover.\n\n## [1.3.0] - 2026-10-20\n';
+const GOOD_MD =
+  '## [Unreleased]\n\n### Added\n\n- Retire a workstation with agent handover.\n\n## [1.3.0] - 2026-10-20\n';
 
 beforeEach(async () => {
   await freshState();
@@ -117,7 +118,8 @@ const analysed = {
   },
 };
 
-const ENTRY = 'Export a board. Download every card of a board as a spreadsheet to share it with people outside the team.';
+const ENTRY =
+  'Export a board. Download every card of a board as a spreadsheet to share it with people outside the team.';
 const report = (outcomeId: string, data: unknown = {}, note?: string) =>
   ({ report: { kind: 'outcome', outcomeId, data, ...(note ? { note } : {}) } }) as any;
 
@@ -143,7 +145,9 @@ describe('Write changelog: dispatch', () => {
     expect(run.repos[0].steps.find((s: any) => s.step === 'changelog').state).toBe('running');
     const brief = await buildReleaseChangelogTask(w.t.app.ctx.pool, t[0]);
     expect(brief?.changes.map((c) => c.source)).toEqual([FEAT, CHORE]);
-    expect(brief?.existing).toEqual([{ heading: 'Added', text: 'Retire a workstation with agent handover.' }]);
+    expect(brief?.existing).toEqual([
+      { heading: 'Added', text: 'Retire a workstation with agent handover.' },
+    ]);
   });
 
   it('fails the step before any task when the facts at the analysed head are malformed', async () => {
@@ -196,7 +200,12 @@ describe('Write changelog: the report', () => {
       state: 'passed',
       files: ['CHANGELOG.md'],
       notices: [],
-      output: { created: false, added: [{ heading: 'Added', text: ENTRY, sources: [FEAT] }], duplicates: [], warnings: [] },
+      output: {
+        created: false,
+        added: [{ heading: 'Added', text: ENTRY, sources: [FEAT] }],
+        duplicates: [],
+        warnings: [],
+      },
     });
     const row = (await q2(`SELECT output FROM release_docs_prep_steps WHERE step='changelog'`))[0];
     expect(row.output.added[0].text).toBe(ENTRY);

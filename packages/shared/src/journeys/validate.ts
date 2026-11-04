@@ -34,23 +34,42 @@ export function validateJourney(def: JourneyDefinition, opts: ValidateOptions = 
   const ids = new Set<string>();
   for (const s of def.steps) {
     if (s.id === 'end')
-      errors.push({ code: 'reserved_id', message: '"end" is reserved and cannot be a step id.', stepId: s.id });
+      errors.push({
+        code: 'reserved_id',
+        message: '"end" is reserved and cannot be a step id.',
+        stepId: s.id,
+      });
     if (ids.has(s.id))
       errors.push({ code: 'duplicate_step', message: `Step id "${s.id}" is used twice.`, stepId: s.id });
     ids.add(s.id);
   }
   if (!ids.has(def.firstStepId))
-    errors.push({ code: 'unknown_first_step', message: `The first step "${def.firstStepId}" does not exist.` });
+    errors.push({
+      code: 'unknown_first_step',
+      message: `The first step "${def.firstStepId}" does not exist.`,
+    });
 
   const hids = new Set<string>();
   for (const h of def.handoffs) {
     if (hids.has(h.id))
-      errors.push({ code: 'duplicate_handoff', message: `Handoff id "${h.id}" is used twice.`, handoffId: h.id });
+      errors.push({
+        code: 'duplicate_handoff',
+        message: `Handoff id "${h.id}" is used twice.`,
+        handoffId: h.id,
+      });
     hids.add(h.id);
     if (!ids.has(h.from))
-      errors.push({ code: 'unknown_from', message: `Handoff "${h.id}" leaves unknown step "${h.from}".`, handoffId: h.id });
+      errors.push({
+        code: 'unknown_from',
+        message: `Handoff "${h.id}" leaves unknown step "${h.from}".`,
+        handoffId: h.id,
+      });
     if (h.to !== 'end' && !ids.has(h.to))
-      errors.push({ code: 'unknown_to', message: `Handoff "${h.id}" goes to unknown step "${h.to}".`, handoffId: h.id });
+      errors.push({
+        code: 'unknown_to',
+        message: `Handoff "${h.id}" goes to unknown step "${h.to}".`,
+        handoffId: h.id,
+      });
     const c = h.condition;
     if (c) {
       if (c.source === 'record' && !RECORD_FIELDS.has(c.field))
@@ -60,9 +79,17 @@ export function validateJourney(def: JourneyDefinition, opts: ValidateOptions = 
           handoffId: h.id,
         });
       if ((c.op === 'lt' || c.op === 'gte') && typeof c.value !== 'number')
-        errors.push({ code: 'condition_value', message: `Handoff "${h.id}": "${c.op}" needs a number.`, handoffId: h.id });
+        errors.push({
+          code: 'condition_value',
+          message: `Handoff "${h.id}": "${c.op}" needs a number.`,
+          handoffId: h.id,
+        });
       if ((c.op === 'equals' || c.op === 'not_equals') && c.value === undefined)
-        errors.push({ code: 'condition_value', message: `Handoff "${h.id}": "${c.op}" needs a value.`, handoffId: h.id });
+        errors.push({
+          code: 'condition_value',
+          message: `Handoff "${h.id}": "${c.op}" needs a value.`,
+          handoffId: h.id,
+        });
     }
   }
 

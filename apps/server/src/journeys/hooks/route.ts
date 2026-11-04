@@ -1,17 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isOrgOperational, mapHookPayload, streamId } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { SYSTEM_ACTOR, projectScope } from '../../commands/common.ts';
-import { startInstanceIn } from '../../commands/journeys.ts';
+import { projectScope, SYSTEM_ACTOR } from '../../commands/common.ts';
 import { loadDefinition, lockInstance } from '../../commands/journey-runtime.ts';
+import { startInstanceIn } from '../../commands/journeys.ts';
 import type { Ctx } from '../../context.ts';
 import { one, type Row, rows } from '../../db/sql.ts';
 import { withAppendTx } from '../../db/tx.ts';
 import { HttpError } from '../../errors.ts';
 import { clientKey, KeyedBuckets } from '../../public-forms/limits.ts';
 import { resolveAndAdvance } from '../waits.ts';
-import { HOOK_TOKEN_RE, hashHookToken, secretOf } from './triggers.ts';
 import { verifyHookSignature } from './signature.ts';
+import { HOOK_TOKEN_RE, hashHookToken, secretOf } from './triggers.ts';
 
 const envInt = (name: string, d: number): number => {
   const n = Number(process.env[name]);
@@ -56,7 +56,10 @@ export function journeyHookRoutes(ctx: Ctx) {
   const maxBytes = envInt('AOM_JOURNEY_HOOK_MAX_BYTES', 65_536);
   const tolerance = envInt('AOM_JOURNEY_HOOK_TOLERANCE_SEC', 300);
   const perIp = new KeyedBuckets(120, 60);
-  const perHook = new KeyedBuckets(envInt('AOM_JOURNEY_HOOK_PER_MIN', 60), envInt('AOM_JOURNEY_HOOK_BURST', 30));
+  const perHook = new KeyedBuckets(
+    envInt('AOM_JOURNEY_HOOK_PER_MIN', 60),
+    envInt('AOM_JOURNEY_HOOK_BURST', 30),
+  );
   return async (fastify: FastifyInstance) => {
     fastify.decorateRequest('hook', null);
     fastify.removeAllContentTypeParsers();
@@ -75,7 +78,18 @@ export function journeyHookRoutes(ctx: Ctx) {
         .query(
           `INSERT INTO journey_hook_calls (id, trigger_id, org_id, at, status, outcome, size_bytes, latency_ms, instance_id, idempotency_hash)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
-          [randomUUID(), h.trigger.id, h.trigger.org_id, ctx.clock.now(), status, outcome, size, elapsedMs(h.startedAt), extra.instanceId ?? null, extra.idem ?? null],
+          [
+            randomUUID(),
+            h.trigger.id,
+            h.trigger.org_id,
+            ctx.clock.now(),
+            status,
+            outcome,
+            size,
+            elapsedMs(h.startedAt),
+            extra.instanceId ?? null,
+            extra.idem ?? null,
+          ],
         )
         .catch(() => undefined);
     };
@@ -84,13 +98,18 @@ export function journeyHookRoutes(ctx: Ctx) {
       return Number.isFinite(n) && n > 0 ? n : 0;
     };
 
-    fastify.setErrorHandler(async (err: { statusCode?: number; status?: number; name?: string }, req, reply) => {
-      const given = err.statusCode ?? err.status;
-      const status = typeof given === 'number' && given >= 400 && given < 500 ? given : 500;
-      ctx.log.warn({ hook: { triggerId: req.hook?.trigger.id ?? null, status, errName: err.name } }, 'hook error');
-      await record(req, status, status === 413 ? 'too_large' : 'invalid_payload', sizeOf(req));
-      return reply.code(status).send();
-    });
+    fastify.setErrorHandler(
+      async (err: { statusCode?: number; status?: number; name?: string }, req, reply) => {
+        const given = err.statusCode ?? err.status;
+        const status = typeof given === 'number' && given >= 400 && given < 500 ? given : 500;
+        ctx.log.warn(
+          { hook: { triggerId: req.hook?.trigger.id ?? null, status, errName: err.name } },
+          'hook error',
+        );
+        await record(req, status, status === 413 ? 'too_large' : 'invalid_payload', sizeOf(req));
+        return reply.code(status).send();
+      },
+    );
 
     const lookup = async (req: FastifyRequest, reply: FastifyReply) => {
       const startedAt = process.hrtime.bigint();
@@ -114,7 +133,11 @@ export function journeyHookRoutes(ctx: Ctx) {
         await record(req, 429, 'rate_limited', sizeOf(req));
         return reply.code(429).header('retry-after', String(hk.retryAfterSec)).send();
       }
-      if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+      if (
+        !String(req.headers['content-type'] ?? '')
+          .toLowerCase()
+          .startsWith('application/json')
+      ) {
         await record(req, 415, 'unsupported_type', sizeOf(req));
         return reply.code(415).send();
       }
@@ -126,7 +149,14 @@ export function journeyHookRoutes(ctx: Ctx) {
       const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       // 2. The signature, over the raw bytes, before anything is parsed.
       const secret = await secretOf(ctx, t.secret_enc);
-      const sig = verifyHookSignature(t.scheme, secret, req.headers, raw, Math.floor(ctx.clock.now().getTime() / 1000), tolerance);
+      const sig = verifyHookSignature(
+        t.scheme,
+        secret,
+        req.headers,
+        raw,
+        Math.floor(ctx.clock.now().getTime() / 1000),
+        tolerance,
+      );
       if (sig !== 'ok') {
         const outcome: Outcome = sig === 'stale' ? 'stale_timestamp' : 'bad_signature';
         ctx.log.warn({ hook: { triggerId: t.id, outcome } }, 'hook refused');
@@ -134,13 +164,21 @@ export function journeyHookRoutes(ctx: Ctx) {
         return reply.code(401).send();
       }
       // 3. Idempotency.
-      const idemRaw = String(req.headers['idempotency-key'] ?? req.headers['x-guildwise-delivery'] ?? '').slice(0, 100);
+      const idemRaw = String(
+        req.headers['idempotency-key'] ?? req.headers['x-guildwise-delivery'] ?? '',
+      ).slice(0, 100);
       const idem = idemRaw ? createHash('sha256').update(idemRaw).digest('hex') : undefined;
       if (idem) {
-        const prior = await one(ctx.pool, 'SELECT instance_id, outcome FROM journey_hook_calls WHERE trigger_id=$1 AND idempotency_hash=$2', [t.id, idem]);
+        const prior = await one(
+          ctx.pool,
+          'SELECT instance_id, outcome FROM journey_hook_calls WHERE trigger_id=$1 AND idempotency_hash=$2',
+          [t.id, idem],
+        );
         if (prior) {
           await record(req, 200, 'duplicate', raw.length);
-          return reply.code(200).send({ duplicate: true, ...(prior.instance_id ? { instanceId: prior.instance_id } : {}) });
+          return reply
+            .code(200)
+            .send({ duplicate: true, ...(prior.instance_id ? { instanceId: prior.instance_id } : {}) });
         }
       }
       // 4. Parse and map. The parsed object lives only inside this function.
@@ -159,7 +197,8 @@ export function journeyHookRoutes(ctx: Ctx) {
       try {
         const out = await withAppendTx(ctx.pool, async (tx) => {
           const journey = await one(tx, 'SELECT * FROM journeys WHERE id=$1', [t.journey_id]);
-          if (!journey || journey.status !== 'active') return { code: 404, outcome: 'disabled' as Outcome, body: undefined };
+          if (!journey || journey.status !== 'active')
+            return { code: 404, outcome: 'disabled' as Outcome, body: undefined };
           const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [journey.project_id]);
           if (!project) return { code: 404, outcome: 'disabled' as Outcome, body: undefined };
           const def = await loadDefinition(tx, journey.id, journey.current_version);
@@ -168,7 +207,8 @@ export function journeyHookRoutes(ctx: Ctx) {
             `SELECT * FROM journey_records WHERE project_id=$1 AND record_type=$2 AND external_id=$3 AND status='active' FOR UPDATE`,
             [project.id, def.recordType, mapped.externalId],
           );
-          if (matches.length > 1) return { code: 422, outcome: 'ambiguous_record' as Outcome, body: { error: 'ambiguous_record' } };
+          if (matches.length > 1)
+            return { code: 422, outcome: 'ambiguous_record' as Outcome, body: { error: 'ambiguous_record' } };
 
           if (t.purpose === 'resume') {
             const rec = matches[0];
@@ -191,8 +231,10 @@ export function journeyHookRoutes(ctx: Ctx) {
           }
 
           const rec = matches[0];
-          if (rec?.current_instance_id) return { code: 409, outcome: 'record_busy' as Outcome, body: { error: 'record_busy' } };
-          if (!rec && t.on_no_match === 'refuse') return { code: 422, outcome: 'no_record' as Outcome, body: { error: 'no_record' } };
+          if (rec?.current_instance_id)
+            return { code: 409, outcome: 'record_busy' as Outcome, body: { error: 'record_busy' } };
+          if (!rec && t.on_no_match === 'refuse')
+            return { code: 422, outcome: 'no_record' as Outcome, body: { error: 'no_record' } };
           let started: { id: string; recordId: string };
           try {
             started = await startInstanceIn(tx, ctx, {
@@ -201,13 +243,22 @@ export function journeyHookRoutes(ctx: Ctx) {
               def,
               record: rec
                 ? { recordId: rec.id }
-                : { create: { type: def.recordType, displayName: mapped.displayName ?? mapped.externalId, externalId: mapped.externalId } },
+                : {
+                    create: {
+                      type: def.recordType,
+                      displayName: mapped.displayName ?? mapped.externalId,
+                      externalId: mapped.externalId,
+                    },
+                  },
               startedBy: t.created_by,
               actor: SYSTEM_ACTOR,
               after: ({ instanceId, recordId, matched }) => [
                 {
                   streamId: streamId.journeyInstance(instanceId),
-                  event: { type: 'JourneyStartedByHook', payload: { triggerId: t.id, instanceId, recordId, recordMatched: matched } },
+                  event: {
+                    type: 'JourneyStartedByHook',
+                    payload: { triggerId: t.id, instanceId, recordId, recordMatched: matched },
+                  },
                   actor: SYSTEM_ACTOR,
                   scope: projectScope(project.org_id, project.id),
                 },

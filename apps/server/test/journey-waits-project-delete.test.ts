@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { journeyTick } from '../src/journeys/tick.ts';
 import { fireDueWaits } from '../src/journeys/waits.ts';
 import { callDue } from '../src/journeys/webhook-calls.ts';
-import { journeyTick } from '../src/journeys/tick.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
@@ -14,7 +14,10 @@ let w: World;
 const ctx = () => w.t.app.ctx;
 const MIN = 60_000;
 const asOwner = (method: string, url: string, body?: unknown, expected = 200) =>
-  ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), expected);
+  ok<any>(
+    w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }),
+    expected,
+  );
 const create = async (projectId: string, onTimeout: unknown) =>
   (
     await asOwner(
@@ -44,9 +47,16 @@ const create = async (projectId: string, onTimeout: unknown) =>
     )
   ).id as string;
 const start = async (journeyId: string) =>
-  (await asOwner('POST', '/api/journey-instances', { journeyId, record: { type: 'client', displayName: 'Ann' } }, 201))
-    .id as string;
-const waitRow = async (id: string) => (await q('SELECT * FROM journey_waits WHERE instance_id=$1', [id]))[0] as any;
+  (
+    await asOwner(
+      'POST',
+      '/api/journey-instances',
+      { journeyId, record: { type: 'client', displayName: 'Ann' } },
+      201,
+    )
+  ).id as string;
+const waitRow = async (id: string) =>
+  (await q('SELECT * FROM journey_waits WHERE instance_id=$1', [id]))[0] as any;
 
 beforeAll(async () => {
   w = await createWorld();

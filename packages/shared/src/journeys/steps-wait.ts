@@ -27,8 +27,10 @@ export const JourneySignedDurationSchema = z.object({
 });
 export type JourneySignedDuration = z.infer<typeof JourneySignedDurationSchema>;
 
-export const durationMs = (d: { amount: number; unit: keyof typeof UNIT_MS }): number => d.amount * UNIT_MS[d.unit];
-export const deadlineOf = (startedAt: Date, d: JourneyDuration): Date => new Date(startedAt.getTime() + durationMs(d));
+export const durationMs = (d: { amount: number; unit: keyof typeof UNIT_MS }): number =>
+  d.amount * UNIT_MS[d.unit];
+export const deadlineOf = (startedAt: Date, d: JourneyDuration): Date =>
+  new Date(startedAt.getTime() + durationMs(d));
 
 // ----------------------------------------------------------------------------------------------------- approvers
 
@@ -107,10 +109,18 @@ export const JourneyWebhookCallStepSchema = z.object({
   workstationId: z.string().uuid().nullable().default(null),
   url: z.string().max(2000).default(''),
   method: z.enum(['POST', 'PUT', 'PATCH', 'GET', 'DELETE']).default('POST'),
-  headers: z.array(z.object({ name: HeaderName, value: z.string().max(1000) })).max(20).default([]),
-  credentialHeaders: z.array(z.object({ name: HeaderName, credential: CredName })).max(5).default([]),
+  headers: z
+    .array(z.object({ name: HeaderName, value: z.string().max(1000) }))
+    .max(20)
+    .default([]),
+  credentialHeaders: z
+    .array(z.object({ name: HeaderName, credential: CredName }))
+    .max(5)
+    .default([]),
   signWith: CredName.optional(),
-  contentType: z.enum(['application/json', 'application/x-www-form-urlencoded', 'text/plain']).default('application/json'),
+  contentType: z
+    .enum(['application/json', 'application/x-www-form-urlencoded', 'text/plain'])
+    .default('application/json'),
   body: z.string().max(20_000).default(''),
 });
 export type JourneyWebhookCallStep = z.infer<typeof JourneyWebhookCallStepSchema>;
@@ -129,8 +139,11 @@ function zoneOffsetMs(utc: number, timeZone: string): number {
     second: 'numeric',
   });
   const p: Record<string, number> = {};
-  for (const part of f.formatToParts(new Date(utc))) if (part.type !== 'literal') p[part.type] = Number(part.value);
-  return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - Math.floor(utc / 1000) * 1000;
+  for (const part of f.formatToParts(new Date(utc)))
+    if (part.type !== 'literal') p[part.type] = Number(part.value);
+  return (
+    Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - Math.floor(utc / 1000) * 1000
+  );
 }
 
 /**
@@ -220,7 +233,12 @@ export function timeoutDecision(w: WaitView, now: Date): TimeoutDecision {
       const every = t.every
         ? durationMs(t.every)
         : Math.max(MIN_MS, (w.deadlineAt ?? now).getTime() - w.startedAt.getTime());
-      return { kind: 'remind', n: w.remindersSent + 1, of: t.maxReminders, nextFireAt: new Date(now.getTime() + every) };
+      return {
+        kind: 'remind',
+        n: w.remindersSent + 1,
+        of: t.maxReminders,
+        nextFireAt: new Date(now.getTime() + every),
+      };
     }
   }
 }
@@ -246,7 +264,9 @@ export function templateTokens(template: string): string[] {
 }
 
 export function unknownBodyTokens(template: string): string[] {
-  return [...new Set(templateTokens(template).filter((t) => !(BODY_TOKENS as readonly string[]).includes(t)))];
+  return [
+    ...new Set(templateTokens(template).filter((t) => !(BODY_TOKENS as readonly string[]).includes(t))),
+  ];
 }
 
 /** Fills `{token}` values. JSON bodies get JSON-string-escaped values, form bodies get URL-encoded values. */

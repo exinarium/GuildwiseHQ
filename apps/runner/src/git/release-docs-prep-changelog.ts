@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import {
   changelogSkeleton,
   checkChangelog,
+  mergeUnreleased,
   type ReleaseChangelogOutput,
   ReleasePrepChangelogPayloadSchema,
-  mergeUnreleased,
 } from '@aom/shared';
 import type { DocsPrepStepHandler } from './release-docs-prep-steps.ts';
 

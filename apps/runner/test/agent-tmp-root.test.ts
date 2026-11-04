@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
-import { agentTmpDir, agentTmpRoot, cleanAgentTmp, ensureSandbox, wipeAgent } from '../src/sandbox/sandbox.ts';
+import {
+  agentTmpDir,
+  agentTmpRoot,
+  cleanAgentTmp,
+  ensureSandbox,
+  wipeAgent,
+} from '../src/sandbox/sandbox.ts';
 import { testerShiftEnv } from '../src/sandbox/test-services.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
@@ -31,15 +37,18 @@ describe('agentTmpRoot (a runner started inside a tester shift)', () => {
     expect(agentTmpRoot({ AOM_AGENT_TMP_ROOT: '/x/y//' })).toBe('/x/y');
   });
 
-  it.runIf(posix)('production keeps /tmp/aom-<10 hex>; the override only moves the root, not the name', () => {
-    const paths = runnerPaths(tmp());
-    delete process.env.AOM_AGENT_TMP_ROOT;
-    const plain = agentTmpDir(paths, A);
-    expect(plain).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
-    const root = tmp();
-    process.env.AOM_AGENT_TMP_ROOT = root;
-    expect(agentTmpDir(paths, A)).toBe(join(root, plain.slice('/tmp/'.length)));
-  });
+  it.runIf(posix)(
+    'production keeps /tmp/aom-<10 hex>; the override only moves the root, not the name',
+    () => {
+      const paths = runnerPaths(tmp());
+      delete process.env.AOM_AGENT_TMP_ROOT;
+      const plain = agentTmpDir(paths, A);
+      expect(plain).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
+      const root = tmp();
+      process.env.AOM_AGENT_TMP_ROOT = root;
+      expect(agentTmpDir(paths, A)).toBe(join(root, plain.slice('/tmp/'.length)));
+    },
+  );
 
   it.runIf(posix)('ensureSandbox creates the agent TMPDIR under the root and wipe removes it', async () => {
     const root = tmp();

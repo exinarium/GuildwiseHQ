@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type HookMapping, streamId } from '@aom/shared';
-import { loadVisibleProject } from '../../authz/scope.ts';
-import { decryptSecret, encryptSecret } from '../../auth/secrets.ts';
 import type { Who } from '../../auth/org-context.ts';
+import { decryptSecret, encryptSecret } from '../../auth/secrets.ts';
+import { loadVisibleProject } from '../../authz/scope.ts';
 import { projectScope, userActor } from '../../commands/common.ts';
 import type { Ctx } from '../../context.ts';
 import { one, rows } from '../../db/sql.ts';
@@ -14,7 +14,8 @@ export const HOOK_TOKEN_RE = /^[A-Za-z0-9_-]{32}$/;
 export const hashHookToken = (t: string): string => createHash('sha256').update(t).digest('hex');
 const newToken = (): string => randomBytes(24).toString('base64url');
 const newSecret = (): string => `jhsec_${randomBytes(32).toString('base64url')}`;
-export const hookUrl = (ctx: Ctx, token: string): string => `${ctx.config.publicOrigin.replace(/\/$/, '')}/hooks/in/${token}`;
+export const hookUrl = (ctx: Ctx, token: string): string =>
+  `${ctx.config.publicOrigin.replace(/\/$/, '')}/hooks/in/${token}`;
 
 export interface CreateTriggerBody {
   name: string;
@@ -36,7 +37,8 @@ async function author(ctx: Ctx, who: Who, journeyId: string) {
 /** Creates a trigger. The URL and the secret are returned ONCE; the list never returns them. */
 export async function createTrigger(ctx: Ctx, who: Who, journeyId: string, body: CreateTriggerBody) {
   const { journey, project } = await author(ctx, who, journeyId);
-  if (!body.mapping.externalId.startsWith('/')) throw badRequest('invalid_mapping', 'The mapping is a JSON pointer such as /client/id.');
+  if (!body.mapping.externalId.startsWith('/'))
+    throw badRequest('invalid_mapping', 'The mapping is a JSON pointer such as /client/id.');
   const token = newToken();
   const secret = newSecret();
   const triggerId = randomUUID();
@@ -69,14 +71,20 @@ export async function createTrigger(ctx: Ctx, who: Who, journeyId: string, body:
 
 export async function rotateTrigger(ctx: Ctx, who: Who, journeyId: string, triggerId: string) {
   const { journey, project } = await author(ctx, who, journeyId);
-  const t = await one(ctx.pool, 'SELECT id FROM journey_hook_triggers WHERE id=$1 AND journey_id=$2', [triggerId, journey.id]);
+  const t = await one(ctx.pool, 'SELECT id FROM journey_hook_triggers WHERE id=$1 AND journey_id=$2', [
+    triggerId,
+    journey.id,
+  ]);
   if (!t) throw notFound('trigger not found');
   const token = newToken();
   const secret = newSecret();
   await ctx.store.append([
     {
       streamId: streamId.journey(journey.id),
-      event: { type: 'JourneyHookTriggerRotated', payload: { triggerId, tokenHash: hashHookToken(token), secretEnc: await encryptSecret(ctx, secret) } },
+      event: {
+        type: 'JourneyHookTriggerRotated',
+        payload: { triggerId, tokenHash: hashHookToken(token), secretEnc: await encryptSecret(ctx, secret) },
+      },
       actor: userActor(who.userId),
       scope: projectScope(project.org_id, project.id),
     },
@@ -89,10 +97,19 @@ export async function updateTrigger(
   who: Who,
   journeyId: string,
   triggerId: string,
-  body: { name?: string; scheme?: 'guildwise' | 'body_sha256'; mapping?: HookMapping; onNoMatch?: 'create' | 'refuse'; enabled?: boolean },
+  body: {
+    name?: string;
+    scheme?: 'guildwise' | 'body_sha256';
+    mapping?: HookMapping;
+    onNoMatch?: 'create' | 'refuse';
+    enabled?: boolean;
+  },
 ) {
   const { journey, project } = await author(ctx, who, journeyId);
-  const t = await one(ctx.pool, 'SELECT id FROM journey_hook_triggers WHERE id=$1 AND journey_id=$2', [triggerId, journey.id]);
+  const t = await one(ctx.pool, 'SELECT id FROM journey_hook_triggers WHERE id=$1 AND journey_id=$2', [
+    triggerId,
+    journey.id,
+  ]);
   if (!t) throw notFound('trigger not found');
   const scope = projectScope(project.org_id, project.id);
   const events: AppendInput[] = [];
@@ -142,7 +159,12 @@ export async function listTriggers(ctx: Ctx, who: Who, journeyId: string) {
     createdAt: new Date(t.created_at).toISOString(),
     recentCalls: calls
       .filter((c) => c.trigger_id === t.id)
-      .map((c) => ({ at: new Date(c.at).toISOString(), status: c.status, outcome: c.outcome, sizeBytes: c.size_bytes })),
+      .map((c) => ({
+        at: new Date(c.at).toISOString(),
+        status: c.status,
+        outcome: c.outcome,
+        sizeBytes: c.size_bytes,
+      })),
   }));
 }
 

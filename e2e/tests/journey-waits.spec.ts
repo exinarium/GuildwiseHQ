@@ -32,7 +32,13 @@ const received: Array<{ path: string; body: string; headers: Record<string, unkn
 let flakyLeft = 1;
 
 type Run = { visit: number; stepId: string; status: string; cardId: string | null };
-type Instance = { status: string; currentStepId: string; currentVisit: number; record: { id: string }; history: Run[] };
+type Instance = {
+  status: string;
+  currentStepId: string;
+  currentVisit: number;
+  record: { id: string };
+  history: Run[];
+};
 type Wait = {
   id: string;
   stepId: string;
@@ -43,7 +49,13 @@ type Wait = {
   resolution: string | null;
   events: Array<{ type: string; text: string }>;
 };
-type Call = { id: string; status: string; attempts: number; lastHttpStatus: number | null; nextAttemptAt: string | null };
+type Call = {
+  id: string;
+  status: string;
+  attempts: number;
+  lastHttpStatus: number | null;
+  nextAttemptAt: string | null;
+};
 
 const getInstance = async (id: string): Promise<Instance> => {
   const r = await api.get(`/api/journey-instances/${id}`);
@@ -187,7 +199,13 @@ test('a timed wait shows its deadline on the instance and moves on with a visibl
     recordType: 'client',
     firstStepId: 'cool',
     steps: [
-      { kind: 'wait', id: 'cool', label: 'Cooling off', waitFor: { kind: 'duration' }, duration: { amount: 10, unit: 'minutes' } },
+      {
+        kind: 'wait',
+        id: 'cool',
+        label: 'Cooling off',
+        waitFor: { kind: 'duration' },
+        duration: { amount: 10, unit: 'minutes' },
+      },
       wf('next', 'Next'),
     ],
     handoffs: [{ id: 'h1', from: 'cool', on: 'done', to: 'next' }],
@@ -270,7 +288,11 @@ test('timeouts: escalate asks the desk, remind sends a reminder then cancels, go
   await page.goto(`/journeys/instances/${esc}`);
   await page.getByTestId(`wait-${escWait.id}`).getByRole('button', { name: 'Continue now' }).click();
   await instanceAt(esc, 'screening', 'open');
-  await waitFor('no open desk item of the wait', () => openDeskItems(esc), (d) => d.length === 0);
+  await waitFor(
+    'no open desk item of the wait',
+    () => openDeskItems(esc),
+    (d) => d.length === 0,
+  );
 
   // remind: one reminder, then (after the last) the journey is cancelled; each step leaves a line
   await saveJourney(id, def({ action: 'remind', maxReminders: 1, afterLast: 'cancel' }));
@@ -290,7 +312,11 @@ test('timeouts: escalate asks the desk, remind sends a reminder then cancels, go
     'Reminders 1 of 1',
   );
   await advance(11 * MIN);
-  await waitFor('the journey to be cancelled', () => getInstance(rem), (v) => v.status === 'cancelled');
+  await waitFor(
+    'the journey to be cancelled',
+    () => getInstance(rem),
+    (v) => v.status === 'cancelled',
+  );
   const remDone = (await waitsOf(rem)).waits[0] as Wait;
   expect(remDone.status).not.toBe('open');
   expect(remDone.events.length).toBeGreaterThanOrEqual(2);
@@ -308,7 +334,8 @@ test('timeouts: escalate asks the desk, remind sends a reminder then cancels, go
 
   // no wait of this journey ended without a line
   for (const inst of [esc, rem, gto])
-    for (const w of (await waitsOf(inst)).waits) expect(w.events.length, `events of ${w.stepId}`).toBeGreaterThan(0);
+    for (const w of (await waitsOf(inst)).waits)
+      expect(w.events.length, `events of ${w.stepId}`).toBeGreaterThan(0);
 });
 
 const gateDef = (deadline?: Record<string, unknown>) => ({
@@ -348,7 +375,11 @@ test('a gate shows on the desk: approve follows the approved handoff, reject (wi
   await page.goto(`/journeys/instances/${yes}`);
   await page.getByTestId('instance-waits').getByRole('button', { name: 'Approve' }).click();
   await instanceAt(yes, 'lease', 'open');
-  await waitFor('the approve desk item to close', () => openDeskItems(yes), (d) => d.length === 0);
+  await waitFor(
+    'the approve desk item to close',
+    () => openDeskItems(yes),
+    (d) => d.length === 0,
+  );
 
   // reject on the instance page: the button waits for a note
   await page.goto(`/journeys/instances/${no}`);
@@ -357,7 +388,11 @@ test('a gate shows on the desk: approve follows the approved handoff, reject (wi
   await panel.getByLabel('Note (required to reject)').fill('Income too low');
   await panel.getByRole('button', { name: 'Reject' }).click();
   await instanceAt(no, 'declined', 'open');
-  await waitFor('the reject desk item to close', () => openDeskItems(no), (d) => d.length === 0);
+  await waitFor(
+    'the reject desk item to close',
+    () => openDeskItems(no),
+    (d) => d.length === 0,
+  );
   const decided = (await waitsOf(no)).waits[0] as Wait;
   expect(decided.resolution).toBe('rejected');
 
@@ -386,7 +421,9 @@ test('a gate whose deadline passed is escalated and can still be decided; no des
   await page.goto('/desk');
   const esc = page.getByTestId('journey-escalation-desk-item');
   await expect(esc).toHaveCount(1);
-  const ext = await api.post(`/api/journey-waits/${w.id}/extend`, { data: { duration: { amount: 1, unit: 'days' } } });
+  const ext = await api.post(`/api/journey-waits/${w.id}/extend`, {
+    data: { duration: { amount: 1, unit: 'days' } },
+  });
   expect(ext.ok(), await ext.text()).toBeTruthy();
   await waitFor(
     'the deadline to be extended',
@@ -396,7 +433,11 @@ test('a gate whose deadline passed is escalated and can still be decided; no des
   await page.goto(`/journeys/instances/${inst}`);
   await page.getByTestId('instance-waits').getByRole('button', { name: 'Approve' }).click();
   await instanceAt(inst, 'lease', 'open');
-  await waitFor('every desk item of the gate to close', () => openDeskItems(inst), (d) => d.length === 0);
+  await waitFor(
+    'every desk item of the gate to close',
+    () => openDeskItems(inst),
+    (d) => d.length === 0,
+  );
 });
 
 test('inbound webhook: a bad signature is refused with 401 and nothing of the payload is kept; a signed call starts a journey on a new and then a matched record', async () => {
@@ -416,7 +457,9 @@ test('inbound webhook: a bad signature is refused with 401 and nothing of the pa
   await page.getByLabel('Where the name is (optional)').fill('/client/name');
   await page.getByRole('button', { name: 'Add a webhook', exact: true }).click();
   const url = ((await page.getByTestId('hook-url').textContent()) ?? '').replace(/^Address:\s*/, '').trim();
-  const secret = ((await page.getByTestId('hook-secret').textContent()) ?? '').replace(/^Secret:\s*/, '').trim();
+  const secret = ((await page.getByTestId('hook-secret').textContent()) ?? '')
+    .replace(/^Secret:\s*/, '')
+    .trim();
   expect(url).toMatch(/\/hooks\/in\/[A-Za-z0-9_-]{32}$/);
   expect(secret).toMatch(/^jhsec_/);
   const path = new URL(url).pathname;
@@ -430,7 +473,9 @@ test('inbound webhook: a bad signature is refused with 401 and nothing of the pa
   const post = (body: string, sig: Record<string, string>) =>
     api.post(path, { headers: { 'content-type': 'application/json', ...sig }, data: Buffer.from(body) });
   // the server's clock may be pinned ahead of real time: the timestamp is checked against it
-  const serverNow = Date.parse((await (await api.post('/api/test/clock', { data: { advanceMs: 0 } })).json()).now);
+  const serverNow = Date.parse(
+    (await (await api.post('/api/test/clock', { data: { advanceMs: 0 } })).json()).now,
+  );
   const signAt = (body: string) => {
     const ts = String(Math.floor(serverNow / 1000));
     return {
@@ -444,7 +489,9 @@ test('inbound webhook: a bad signature is refused with 401 and nothing of the pa
   expect(refused.status()).toBe(401);
   const unsigned = await post(bad, {});
   expect(unsigned.status()).toBe(401);
-  const calls = await q<Record<string, unknown>>('SELECT * FROM journey_hook_calls WHERE trigger_id=$1', [trigger?.id]);
+  const calls = await q<Record<string, unknown>>('SELECT * FROM journey_hook_calls WHERE trigger_id=$1', [
+    trigger?.id,
+  ]);
   expect(calls.length).toBe(2);
   expect(calls.every((c) => c.status === 401 && c.outcome === 'bad_signature')).toBe(true);
   expect(JSON.stringify(calls)).not.toContain(marker);
@@ -485,12 +532,17 @@ test('inbound webhook: a bad signature is refused with 401 and nothing of the pa
 });
 
 test('setup: a paired mock workstation sends outbound calls', async () => {
-  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
+  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
+    .code as string;
   pairRunner(BASE_URL, code, 'Office PC', HOME);
   startRunner({ NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }, HOME);
   const ws = await waitFor(
     'runner connected',
-    async () => (await (await api.get('/api/workstations')).json()).workstations as Array<{ id: string; connected: boolean }>,
+    async () =>
+      (await (await api.get('/api/workstations')).json()).workstations as Array<{
+        id: string;
+        connected: boolean;
+      }>,
     (w) => w[0]?.connected === true,
     30_000,
   );
@@ -599,21 +651,30 @@ test('deleting a project with open waits does not stop the waits of another proj
   expect(other.status(), await other.text()).toBe(201);
   const otherId = (await other.json()).project.id as string;
   const otherWf = (
-    await q<{ workflow_key: string }>('SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND is_primary', [
-      otherId,
-    ])
+    await q<{ workflow_key: string }>(
+      'SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND is_primary',
+      [otherId],
+    )
   )[0]?.workflow_key as string;
   const cooling = (wfKey: string) => ({
     name: 'Cooling',
     recordType: 'client',
     firstStepId: 'cool',
     steps: [
-      { kind: 'wait', id: 'cool', label: 'Cooling off', waitFor: { kind: 'duration' }, duration: { amount: 10, unit: 'minutes' } },
+      {
+        kind: 'wait',
+        id: 'cool',
+        label: 'Cooling off',
+        waitFor: { kind: 'duration' },
+        duration: { amount: 10, unit: 'minutes' },
+      },
       { kind: 'workflow', id: 'next', label: 'Next', workflowKey: wfKey },
     ],
     handoffs: [{ id: 'h1', from: 'cool', on: 'done', to: 'next' }],
   });
-  const ghostJourney = await api.post('/api/journeys', { data: { projectId: otherId, definition: cooling(otherWf) } });
+  const ghostJourney = await api.post('/api/journeys', {
+    data: { projectId: otherId, definition: cooling(otherWf) },
+  });
   expect(ghostJourney.status(), await ghostJourney.text()).toBe(201);
   const ghost = await api.post('/api/journey-instances', {
     data: { journeyId: (await ghostJourney.json()).id, record: { type: 'client', displayName: 'Ghost' } },
@@ -646,14 +707,18 @@ test('the desk buttons of a gate and of an escalated wait act on the journey', a
   await tick();
   await instanceAt(inst, 'approval', 'waiting');
   const gate = (await waitsOf(inst)).waits[0] as Wait;
-  const desk = (await (await api.get('/api/desk')).json()) as { items: Array<{ subkind: string | null; data?: unknown }> };
+  const desk = (await (await api.get('/api/desk')).json()) as {
+    items: Array<{ subkind: string | null; data?: unknown }>;
+  };
   const gateItems = desk.items.filter((i) => i.subkind === 'journey_gate');
   expect(gateItems, 'one open gate on the desk').toHaveLength(1);
   const item = gateItems[0];
-  expect.soft(item?.data ?? null, 'the desk item of the gate carries its waitId and instanceId').toMatchObject({
-    waitId: gate.id,
-    instanceId: inst,
-  });
+  expect
+    .soft(item?.data ?? null, 'the desk item of the gate carries its waitId and instanceId')
+    .toMatchObject({
+      waitId: gate.id,
+      instanceId: inst,
+    });
 
   await page.goto('/desk');
   const card = page.getByTestId('journey-gate-desk-item');
@@ -665,13 +730,19 @@ test('the desk buttons of a gate and of an escalated wait act on the journey', a
 
   // an escalated gate offers extend and cancel on the desk, never "Continue the journey"
   const late = await start(
-    await createJourney(gateDef({ duration: { amount: 10, unit: 'minutes' }, onTimeout: { action: 'escalate' } })),
+    await createJourney(
+      gateDef({ duration: { amount: 10, unit: 'minutes' }, onTimeout: { action: 'escalate' } }),
+    ),
     'Desk Late',
   );
   await tick();
   await instanceAt(late, 'approval', 'waiting');
   await advance(11 * MIN);
-  await waitFor('the gate to be escalated', async () => (await waitsOf(late)).waits[0] as Wait, (x) => x?.status === 'escalated');
+  await waitFor(
+    'the gate to be escalated',
+    async () => (await waitsOf(late)).waits[0] as Wait,
+    (x) => x?.status === 'escalated',
+  );
   await page.goto('/desk');
   const esc = page.getByTestId('journey-escalation-desk-item');
   await expect(esc).toHaveCount(1);

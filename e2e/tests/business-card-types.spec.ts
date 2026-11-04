@@ -27,7 +27,7 @@ const BUSINESS_KEYS = [
   'business-quote',
 ];
 
-const cardRow =(ref: string) =>
+const cardRow = (ref: string) =>
   q<{ stage: string; status: string; repo_id: string | null; branch_name: string | null; card_type: string }>(
     'SELECT stage, status, repo_id, branch_name, card_type FROM cards WHERE ref=$1',
     [ref],
