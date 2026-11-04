@@ -72,6 +72,7 @@ export function PersonaChat() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col" data-testid="persona-chat">
       <PageHeader
+        className="kbd-hide"
         title={s.title}
         documentTitle={s.title}
         back={{ to: '/settings/capabilities', label: 'Capabilities' }}
@@ -91,7 +92,7 @@ export function PersonaChat() {
         }
       />
       {(s.cost.exceeded || (timeLeft !== null && timeLeft <= 0)) && (
-        <Callout tone="warning" role="status" className="mb-2" data-testid="chat-limit-reached">
+        <Callout tone="warning" role="status" className="kbd-hide mb-2" data-testid="chat-limit-reached">
           {s.cost.exceeded
             ? `This chat has used its budget of $${s.cost.budgetUsd?.toFixed(2)}.`
             : `This chat has reached its time limit of ${limitMinutes} minutes.`}{' '}
@@ -105,11 +106,11 @@ export function PersonaChat() {
         minutes={limitMinutes}
       />
       {!s.workstationOnline && (
-        <Callout tone="warning" role="status" className="mb-2">
+        <Callout tone="warning" role="status" className="kbd-hide mb-2">
           Your workstation is offline. Messages wait for it and nothing is lost.
         </Callout>
       )}
-      <div className="flex h-[calc(100dvh-16rem)] min-h-[20rem] flex-col gap-3">
+      <div className="flex h-[calc(100dvh-16rem)] min-h-[20rem] flex-col gap-3 max-md:h-[calc(var(--app-content-h,100dvh)-2.5rem)] max-md:min-h-0">
         <div
           className="min-h-0 flex-1 overflow-y-auto pr-1"
           role="log"
@@ -178,7 +179,7 @@ function LimitsForm({
   const [b, setB] = useState(budgetUsd ? String(budgetUsd) : '');
   const [m, setM] = useState(minutes ? String(minutes) : '');
   return (
-    <Disclosure summary="Limits" className="mb-2" data-testid="chat-limits">
+    <Disclosure summary="Limits" className="kbd-hide mb-2" data-testid="chat-limits">
       <form
         className="flex flex-wrap items-end gap-3"
         onSubmit={(e) => {

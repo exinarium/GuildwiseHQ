@@ -374,6 +374,7 @@ export function PageHeader({
   back,
   eyebrow,
   documentTitle,
+  className,
 }: {
   title: string;
   sub?: ReactNode;
@@ -383,10 +384,11 @@ export function PageHeader({
   eyebrow?: ReactNode;
   /** Overrides the browser tab title (default: the page title). */
   documentTitle?: string;
+  className?: string;
 }) {
   usePageTitle(documentTitle ?? title);
   return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+    <div className={cx('mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-3', className)}>
       <div className="min-w-[min(100%,15rem)] flex-1">
         {back && (
           <Link
@@ -474,8 +476,8 @@ export function Dialog({
           onInteractOutside={dismissible ? undefined : (e) => e.preventDefault()}
           onEscapeKeyDown={dismissible ? undefined : (e) => e.preventDefault()}
           className={cx(
-            'fixed z-70 flex max-h-[92dvh] flex-col overflow-hidden border border-line bg-surface shadow-lg',
-            'max-sm:inset-x-0 max-sm:bottom-0 max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-[env(safe-area-inset-bottom)]',
+            'fixed z-70 flex max-h-[calc(var(--vvh,100dvh)*0.92)] flex-col overflow-hidden border border-line bg-surface shadow-lg',
+            'max-sm:inset-x-0 max-sm:bottom-[var(--kbd-gap,0px)] max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-[env(safe-area-inset-bottom)]',
             'sm:top-1/2 sm:left-1/2 sm:max-h-[90dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:animate-rise sm:rounded-dialog',
             dialogWidth[size],
           )}
