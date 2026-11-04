@@ -11,6 +11,12 @@ import {
   releaseDocsPrepSweep,
   releaseDocsPrepViewFor,
 } from '../src/release/docs-prep.ts';
+import {
+  applyReleasePrepReport,
+  endReleasePrepShift,
+  releasePrepTaskPass,
+} from '../src/release/docs-prep-tasks.ts';
+import { withAppendTx } from '../src/db/tx.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
@@ -635,20 +641,191 @@ describe('Generate videos step', () => {
     expect((await approveShip()).status).toBe(409);
   });
 
-  it('fails the author phase naming each new video that has no script writer yet', async () => {
+  const created = { slug: 'forms', action: 'create', reasons: ['new screen Forms (GWP-200)'], state: 'pending' };
+  const newForms = () =>
+    plan(
+      [created],
+      [
+        {
+          slug: 'forms',
+          title: 'Forms',
+          pages: ['apps/web/src/pages/Forms.tsx'],
+          reasons: ['new screen Forms (GWP-200)'],
+        },
+      ],
+    );
+  const tasks = () => q2(`SELECT * FROM release_docs_prep_tasks ORDER BY attempt, position`);
+  const SHA = 'c'.repeat(40);
+  /** Gives the newest queued task to a builder (as the dispatcher pass does) and returns the shift row. */
+  async function dispatchTask() {
+    const agent = (await q2(`SELECT id FROM agents WHERE role_key='builder' AND workstation_id=$1 LIMIT 1`, [w.workstationId]))[0];
+    const t = (await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`))[0];
+    const shiftId = crypto.randomUUID();
+    await withAppendTx(w.t.app.ctx.pool, (tx) =>
+      w.t.app.ctx.store.append(
+        [
+          {
+            streamId: `releasedocs-${t.run_id}`,
+            event: {
+              type: 'ReleaseDocsPrepTaskDispatched',
+              payload: { taskId: t.id, shiftId, agentId: agent.id, workstationId: w.workstationId },
+            },
+            actor: { kind: 'system' } as never,
+            scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' } as never,
+          },
+        ],
+        { tx },
+      ),
+    );
+    return (await q2(`SELECT * FROM shifts WHERE id=$1`, [shiftId]))[0];
+  }
+  const prepReport = (shift: any, outcomeId: string, note: string, data: Record<string, unknown> = {}) =>
+    withAppendTx(w.t.app.ctx.pool, (tx) =>
+      applyReleasePrepReport(w.t.app.ctx, tx, { report: { kind: 'outcome', outcomeId, note, data } } as never, shift),
+    );
+  const renderFailed = () =>
+    answer({
+      ok: true,
+      state: 'failed',
+      error: '1 video(s) failed: forms: locator not found',
+      files: [],
+      notices: [],
+      report: { harness: true, videos: [{ ...created, state: 'failed', error: 'locator not found\nat forms.spec.ts:12' }] },
+    });
+
+  it('queues one release prep task per new video and waits for it (no render yet)', async () => {
+    await w.hire('Bea', 'builder', 'junior');
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
-    await answer(
-      plan(
-        [{ slug: 'forms', action: 'create', reasons: ['new screen'], state: 'pending' }],
-        [{ slug: 'forms', title: 'Forms', pages: ['apps/web/src/pages/Forms.tsx'], reasons: ['new screen'] }],
-      ),
-    );
+    await answer(newForms());
     expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan']);
+    const author = (await stepRows()).find((r: any) => r.phase === 'author');
+    expect(author.state).toBe('running');
+    const [t] = await tasks();
+    expect(t.status).toBe('queued');
+    expect(t.task).toEqual({
+      kind: 'new_video',
+      slug: 'forms',
+      title: 'Forms',
+      pages: ['apps/web/src/pages/Forms.tsx'],
+      cards: ['GWP-200'],
+    });
+    expect((await latest()).status).toBe('running');
+  });
+
+  it('with no builder on the workstation the author phase fails naming the video', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]).catch(
+      () => q(`DELETE FROM agents WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]),
+    );
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(newForms());
+    await releasePrepTaskPass(w.t.app.ctx);
     const run = await latest();
     expect(run.status).toBe('failed');
-    expect(run.failed.error).toContain('forms: could not write the video script');
+    expect(run.failed.error).toContain('forms: could not write the video script: no builder agent on');
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan']);
+  });
+
+  it('an authored script is rendered and its video added, then committed', async () => {
+    await w.hire('Bea', 'builder', 'junior');
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(newForms());
+    const shift = await dispatchTask();
+    expect(shift.kind).toBe('release_prep');
+    expect((await tasks())[0].status).toBe('running');
+    expect(await prepReport(shift, 'prep_done', 'wrote forms', { commit: SHA, files: ['e2e/video/forms.spec.ts'] })).toEqual({
+      accepted: true,
+    });
+    const author = (await stepRows()).find((r: any) => r.phase === 'author');
+    expect([author.state, author.report.authored]).toEqual(['passed', ['forms']]);
+    const list = await cmds();
+    expect(list.map(tag)).toEqual(['analyse', 'videos:plan', 'videos:render']);
+    expect(list[2].payload.input.authored).toEqual(['forms']);
+    await answer({
+      ok: true,
+      state: 'passed',
+      files: ['media/videos/forms.webm', 'media/videos/forms.mp4', 'e2e/video/renders.json'],
+      notices: [],
+      report: { harness: true, videos: [{ ...created, state: 'rendered' }] },
+    });
+    expect((await cmds()).map(tag).slice(3)).toEqual(['commit:prepare']);
+  });
+
+  it('a refused or failed script fails the step naming the video', async () => {
+    await w.hire('Bea', 'builder', 'junior');
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(newForms());
+    const shift = await dispatchTask();
+    await prepReport(shift, 'prep_failed', 'changed files outside the task: apps/server/x.ts');
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('forms: could not write the video script: changed files outside the task');
+  });
+
+  it('a failed render of a new video gets one repair round; a second failure fails naming the video', async () => {
+    await w.hire('Bea', 'builder', 'junior');
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(newForms());
+    await prepReport(await dispatchTask(), 'prep_done', 'wrote forms', { commit: SHA });
+    await renderFailed();
+    // not failed: author and render run again, the repair task carries the render error
+    expect((await latest()).status).toBe('running');
+    const repair = (await tasks()).find((t: any) => t.attempt === 1);
+    expect(repair.status).toBe('queued');
+    expect(repair.task.repairOf.error).toContain('locator not found');
+    await prepReport(await dispatchTask(), 'prep_done', 'fixed the locator', { commit: SHA });
+    const list = await cmds();
+    expect(list.map(tag)).toEqual(['analyse', 'videos:plan', 'videos:render', 'videos:render']);
+    expect(list[3].payload.input.authored).toEqual(['forms']);
+    await renderFailed();
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('forms: locator not found');
+    expect((await tasks()).filter((t: any) => t.attempt === 1)).toHaveLength(1);
+    expect((await cmds()).map(tag)).not.toContain('commit:prepare');
+  });
+
+  it('a failed render of an existing video gets no repair round', async () => {
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(plan([regen]));
+    await answer({
+      ok: true,
+      state: 'failed',
+      error: '1 video(s) failed: backlog: x',
+      files: [],
+      notices: [],
+      report: { harness: true, videos: [{ ...regen, state: 'failed', error: 'x' }] },
+    });
+    expect((await latest()).status).toBe('failed');
+    expect(await tasks()).toHaveLength(0);
+  });
+
+  it('a shift that ends without a report is tried again once, then the task fails', async () => {
+    await w.hire('Bea', 'builder', 'junior');
+    await enable({ videos: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(newForms());
+    const end = (s: any) =>
+      withAppendTx(w.t.app.ctx.pool, async (tx) => endReleasePrepShift(w.t.app.ctx, tx, s, 'no_report'));
+    await end(await dispatchTask());
+    expect((await tasks())[0].status).toBe('queued');
+    expect((await latest()).status).toBe('running');
+    await end(await dispatchTask());
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('forms: could not write the video script: the agent ended without');
   });
 
   it('stores a failed render report naming the video and its error', async () => {
