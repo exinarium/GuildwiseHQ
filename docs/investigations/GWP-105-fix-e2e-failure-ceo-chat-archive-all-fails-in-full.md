@@ -144,6 +144,123 @@ Not allowed and not needed: `test.skip`, `fixme`, retries, `waitForTimeout`.
 | Product change needs an automated test | No product change. Not applicable. |
 | No other spec newly fails | Only ceo-chat.spec changes, and it creates no new agents (option 2 rejected for this reason). |
 
+## Reference change for `e2e/tests/ceo-chat.spec.ts`
+
+The spec is owned by the tester role, so the change is written out here to apply as it stands. Facts checked against
+the base commit `caa6a44f`:
+
+- `POST /api/chats` always creates a new thread (`createChat` uses `randomUUID()`) and answers **201** with
+  `{ chat: ChatDto }` (`apps/server/src/routes/chats.ts` l.30-33, `packages/shared/src/api/chats.ts`
+  `CreateChatResponseSchema`). `ChatDto` has `threadId`, `agentName`, `agentRole` and `archived`.
+- `POST /api/chats/archive-all` answers `{ archived: number }` (`ArchiveAllChatsResponseSchema`).
+- Drawer rows are `data-testid="chat-row-${agentName}"`, one per thread (`ChatDrawer.tsx` l.216-221). **Two open chats with
+  the same agent give two rows with the same test id.** chat.spec leaves a chat with Linus, so if Linus is a partner,
+  `chat-row-Linus` matches two rows before the archive and two in the Archived view after it. A strict
+  `toBeVisible()` on it would then fail. Use `.first()` for the "is shown" checks. The "is gone" checks
+  (`toHaveCount(0)`) are strict as they stand.
+- `archive-all-chats` is shown only in the Open view, with no search, when more than one non-CEO chat is open
+  (l.197). Two created chats guarantee that.
+- The view switch is `Segmented` (`components/ui/Chips.tsx`): a `radiogroup` labelled `Show chats` holding plain
+  buttons `Open` and `Archived (n)`. Locator:
+  `drawer.getByRole('radiogroup', { name: 'Show chats' }).getByRole('button', { name: /^Archived/ })`.
+
+### Header comment (l.7-9)
+
+```ts
+// The CEO chat page (/ceo-chat): the standing chat, New chat (reuses an empty one, else archives the old one and opens a
+// clean one), the earlier-chats list, and "Archive all" in the chat drawer (never touches the live CEO chat).
+// Runs after chat.spec, which leaves the runner online. Archive all chats with agents that are active when it runs:
+// core-loop fires one of the builders, and which one depends on the run.
+```
+
+### Third test, replaced as a whole
+
+```ts
+test('Archive all closes the other chats and leaves the live CEO chat open', async () => {
+  // the live CEO chat (test 2 shows there is exactly one open)
+  const liveCeo = (await ceoChats()).filter((c) => !c.archived);
+  expect(liveCeo, 'one open CEO chat').toHaveLength(1);
+  const ceoThreadId = liveCeo[0].threadId as string;
+  const ceoName = liveCeo[0].agentName as string;
+
+  // chat partners chosen by state, not by name: an earlier spec may have fired any one builder
+  const agents = (await (await api.get('/api/agents')).json()).agents as any[];
+  const partners: any[] = [];
+  for (const a of agents) {
+    if (a.status !== 'active' || a.isDevops || a.roleKey === 'ceo') continue;
+    if (partners.some((p) => p.name === a.name)) continue;
+    partners.push(a);
+    if (partners.length === 2) break;
+  }
+  expect(
+    partners.length,
+    `two active agents to chat with: ${agents.map((a) => `${a.name}:${a.status}`).join(', ')}`,
+  ).toBe(2);
+
+  const created: { threadId: string; agentName: string }[] = [];
+  for (const a of partners) {
+    const made = await api.post('/api/chats', { data: { agentId: a.id } });
+    expect(made.status(), await made.text()).toBe(201);
+    const { chat } = await made.json();
+    created.push({ threadId: chat.threadId, agentName: chat.agentName });
+  }
+
+  await page.goto('/desk');
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Chat' });
+  await expect(drawer.getByTestId('chat-list')).toBeVisible();
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`).first()).toBeVisible();
+
+  await drawer.getByTestId('archive-all-chats').click();
+  const archivedResponse = page.waitForResponse(
+    (r) => r.url().endsWith('/api/chats/archive-all') && r.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Archive all', exact: true }).last().click();
+  const res = await archivedResponse;
+  expect(res.status(), await res.text()).toBe(200);
+  // chats that earlier specs left in the admin's view are archived too
+  expect((await res.json()).archived).toBeGreaterThanOrEqual(created.length);
+
+  // the server: the created chats are archived (not deleted), and the only open chat is the live CEO chat
+  await expect
+    .poll(async () => {
+      const chats = (await (await api.get('/api/chats')).json()).chats as any[];
+      return {
+        created: created.map((c) => chats.find((x) => x.threadId === c.threadId)?.archived ?? 'missing'),
+        open: chats.filter((x) => !x.archived).map((x) => x.threadId),
+      };
+    })
+    .toEqual({ created: created.map(() => true), open: [ceoThreadId] });
+
+  // the drawer shows it without a reload
+  await expect(drawer.getByTestId('archive-all-chats')).toHaveCount(0);
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`)).toHaveCount(0);
+  await expect(drawer.getByTestId(`chat-row-${ceoName}`)).toBeVisible();
+  await drawer
+    .getByRole('radiogroup', { name: 'Show chats' })
+    .getByRole('button', { name: /^Archived/ })
+    .click();
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`).first()).toBeVisible();
+});
+```
+
+Notes for applying it:
+
+- `ceoName`: the CEO row in the Open view uses the CEO agent's name. If a partner happens to share the CEO's name,
+  the partner filter (`roleKey !== 'ceo'`) still keeps them apart on the server, but the row check would be
+  ambiguous. Names in the admin org are distinct today.
+- No new agents are hired, no `e2e/support` change, no product change, no skip, `fixme`, retry or `waitForTimeout`.
+- The same assertions are stronger than before: thread ids instead of roles, archived-not-deleted, the CEO row stays,
+  and the Archived view shows the chats.
+
+### Runs (DevOps, per standing order)
+
+1. `pnpm -C e2e exec playwright test --project=ceo-chat` once: green.
+2. The full suite on release/1.5.0 three times in a row: the Archive all test is green each time and no other spec
+   newly fails.
+3. Forced check: on the e2e database only, retire Grace before ceo-chat runs (statement below). The base commit fails
+   at the chat creation, and the change passes.
+
 ## Reproducing deterministically (for the tester)
 
 Before the fix, in a stack where ceo-chat's dependencies have run, retire Grace before ceo-chat starts (or let core-loop
