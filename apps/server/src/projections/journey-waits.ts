@@ -61,7 +61,22 @@ export const journeyWaitProjectors: Record<string, Projector> = {
       `UPDATE journey_waits SET link_id=$2, link_expires_at=$3, desk_item_id=COALESCE($4, desk_item_id) WHERE id=$1`,
       [p.waitId, p.linkId, p.expiresAt, p.deskItemId ?? null],
     );
-    await note(tx, p.waitId, e.createdAt, 'link', p.via === 'desk' ? 'Link shown on the desk' : 'Link passed to a webhook step');
+    await note(
+      tx,
+      p.waitId,
+      e.createdAt,
+      'link',
+      p.via === 'desk'
+        ? 'Link shown on the desk'
+        : p.via === 'offline_email'
+          ? 'Secure link emailed (runner back online)'
+          : 'Link passed to a webhook step',
+    );
+  },
+
+  JourneyWaitOfflinePending: async (tx, e) => {
+    const p = ev<'JourneyWaitOfflinePending'>(e).payload;
+    await note(tx, p.waitId, p.attemptedAt, 'offline_pending', 'Documents pending, runner offline');
   },
 
   JourneyWaitTimedOut: async (tx, e) => {

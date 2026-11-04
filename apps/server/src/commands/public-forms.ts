@@ -249,6 +249,8 @@ export async function createClientLinkIn(
     recordKind?: string | undefined;
     recordId?: string | undefined;
     expiresAt: Date;
+    purpose?: 'offline' | undefined;
+    offlineRequestId?: string | undefined;
   },
 ): Promise<{ linkId: string; expiresAt: Date }> {
   const p = await one(tx, 'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2', [a.formId, a.orgId]);
@@ -266,6 +268,8 @@ export async function createClientLinkIn(
       ...(a.recordId ? { recordId: a.recordId } : {}),
       expiresAt: a.expiresAt.toISOString(),
       by: a.by,
+      ...(a.purpose ? { purpose: a.purpose } : {}),
+      ...(a.offlineRequestId ? { offlineRequestId: a.offlineRequestId } : {}),
     },
   });
   return { linkId, expiresAt: a.expiresAt };
