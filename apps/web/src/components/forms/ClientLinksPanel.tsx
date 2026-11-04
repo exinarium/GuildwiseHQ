@@ -1,11 +1,7 @@
 import type { ClientLinkDto, ClientLinkState } from '@aom/shared';
 import { useState } from 'react';
 import { errorMessage } from '../../api/client.ts';
-import {
-  useClientLinks,
-  useCreateClientLink,
-  useRevokeClientLink,
-} from '../../api/queries/public-forms.ts';
+import { useClientLinks, useCreateClientLink, useRevokeClientLink } from '../../api/queries/public-forms.ts';
 import { copyText } from '../../lib/secure.ts';
 import { QrCode } from '../security/QrCode.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
@@ -20,7 +16,15 @@ const STATE_TEXT: Record<ClientLinkState, string> = {
 const DAYS = [7, 14, 30, 90];
 
 /** Personal links: one client or record each, signed, expiring and revocable. The link holds no personal data. */
-export function ClientLinksPanel({ formId, canEdit, published }: { formId: string; canEdit: boolean; published: boolean }) {
+export function ClientLinksPanel({
+  formId,
+  canEdit,
+  published,
+}: {
+  formId: string;
+  canEdit: boolean;
+  published: boolean;
+}) {
   const links = useClientLinks(formId);
   const create = useCreateClientLink(formId);
   const revoke = useRevokeClientLink(formId);
@@ -49,7 +53,12 @@ export function ClientLinksPanel({ formId, canEdit, published }: { formId: strin
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold text-fg">Personal links</h3>
         {canEdit && (
-          <Button variant="secondary" disabled={!published} onClick={() => setOpen(true)} data-testid="new-client-link">
+          <Button
+            variant="secondary"
+            disabled={!published}
+            onClick={() => setOpen(true)}
+            data-testid="new-client-link"
+          >
             New personal link
           </Button>
         )}
@@ -109,7 +118,12 @@ export function ClientLinksPanel({ formId, canEdit, published }: { formId: strin
             <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={create.isPending} disabled={!reference.trim()} onClick={submit}>
+            <Button
+              variant="primary"
+              loading={create.isPending}
+              disabled={!reference.trim()}
+              onClick={submit}
+            >
               Create link
             </Button>
           </>
@@ -160,7 +174,11 @@ export function ClientLinksPanel({ formId, canEdit, published }: { formId: strin
           })
         }
       />
-      <Dialog open={qr !== null} onOpenChange={(o) => !o && setQr(null)} title={`QR code for ${qr?.reference ?? ''}`}>
+      <Dialog
+        open={qr !== null}
+        onOpenChange={(o) => !o && setQr(null)}
+        title={`QR code for ${qr?.reference ?? ''}`}
+      >
         {qr?.url && (
           <div className="flex justify-center">
             <QrCode value={qr.url} label="QR code of the personal link" size={220} />

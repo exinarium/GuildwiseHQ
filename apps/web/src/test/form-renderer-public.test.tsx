@@ -6,7 +6,10 @@ import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 
 const field = (type: Parameters<typeof newFormField>[0], id: string, over: Record<string, unknown> = {}) =>
   ({ ...newFormField(type, id), ...over }) as FormField;
-const def = (...fields: FormField[]): FormDefinition => ({ ...newFormDefinition('Rental application'), fields });
+const def = (...fields: FormField[]): FormDefinition => ({
+  ...newFormDefinition('Rental application'),
+  fields,
+});
 const setup = () => userEvent.setup({ applyAccept: false });
 const NAME = field('short_text', 'f_name0001', { label: 'Full name', required: true });
 const FILE = field('file', 'f_file0001', {
@@ -43,7 +46,10 @@ describe('FormRenderer in public mode', () => {
       <FormRenderer
         definition={def(NAME, FILE)}
         mode="public"
-        initialAnswers={{ f_name0001: 'Ann', f_file0001: { name: 'id.pdf', size: 10, type: 'application/pdf' } }}
+        initialAnswers={{
+          f_name0001: 'Ann',
+          f_file0001: { name: 'id.pdf', size: 10, type: 'application/pdf' },
+        }}
         onAnswersChange={onChange}
       />,
     );
@@ -80,7 +86,9 @@ describe('FormRenderer in public mode', () => {
   });
 
   it('has no style attribute anywhere, so a policy without inline styles holds', () => {
-    const { container } = render(<FormRenderer definition={def(NAME, FILE)} logoUrl="/x.png" mode="public" />);
+    const { container } = render(
+      <FormRenderer definition={def(NAME, FILE)} logoUrl="/x.png" mode="public" />,
+    );
     expect(container.querySelector('[style]')).toBeNull();
   });
 

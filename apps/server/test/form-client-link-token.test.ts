@@ -14,7 +14,7 @@ import {
 
 const ctxWith = (secret: string, now: () => Date): Ctx =>
   ({ config: { secretKey: secret }, clock: { now } }) as unknown as Ctx;
-let clockNow = new Date('2026-11-04T10:00:00Z');
+const clockNow = new Date('2026-11-04T10:00:00Z');
 const ctx = ctxWith('test-secret-one', () => clockNow);
 const FORM = '5f0b6a6e-2f0e-4c3f-9d0e-0a8d1f7a1111';
 const OTHER = '5f0b6a6e-2f0e-4c3f-9d0e-0a8d1f7a2222';
@@ -78,7 +78,9 @@ describe('form session and proof of work', () => {
     const bits = 10;
     let nonce = '';
     for (let i = 0; ; i++) {
-      const h = createHash('sha256').update(`sess:${i.toString(36)}`).digest();
+      const h = createHash('sha256')
+        .update(`sess:${i.toString(36)}`)
+        .digest();
       if (h[0] === 0 && (h[1] as number) >> 6 === 0) {
         nonce = i.toString(36);
         break;

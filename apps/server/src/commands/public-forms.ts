@@ -4,13 +4,13 @@ import {
   type ClientLinkState,
   type CreateClientLink,
   type FormDefinition,
+  FormDefinitionSchema,
   type FormPublicationDto,
   type FormPublicationWarning,
   type FormSubmissionDto,
-  FormDefinitionSchema,
   publicFormPath,
-  streamId,
   type StorageReference,
+  streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
@@ -64,7 +64,12 @@ async function connectionsOf(ctx: Ctx, orgId: string, ids: string[]) {
       WHERE c.org_id=$1 AND c.status='active' AND c.id = ANY($2::uuid[])`,
     [orgId, ids],
   );
-  return new Map(r.map((x) => [x.id as string, { workstationId: x.workstation_id as string, state: x.state as string | null }]));
+  return new Map(
+    r.map((x) => [
+      x.id as string,
+      { workstationId: x.workstation_id as string, state: x.state as string | null },
+    ]),
+  );
 }
 
 /** Everything that stops a form taking submissions, or may: used by publish (blocking) and the panel (warnings). */
@@ -78,7 +83,12 @@ async function assess(ctx: Ctx, orgId: string, def: FormDefinition) {
   const missing = dest.filter((d) => !d.connectionId || !conns.has(d.connectionId)).map((d) => d.field);
   const offline = dest
     .filter((d) => d.connectionId && conns.has(d.connectionId))
-    .filter((d) => !ctx.services.runners.isOnline((conns.get(d.connectionId as string) as { workstationId: string }).workstationId))
+    .filter(
+      (d) =>
+        !ctx.services.runners.isOnline(
+          (conns.get(d.connectionId as string) as { workstationId: string }).workstationId,
+        ),
+    )
     .map((d) => d.field);
   const unhealthy = dest
     .filter((d) => d.connectionId && conns.has(d.connectionId))
@@ -99,7 +109,10 @@ async function assess(ctx: Ctx, orgId: string, def: FormDefinition) {
 
 export async function getPublication(ctx: Ctx, orgId: string, formId: string): Promise<FormPublicationDto> {
   const form = await latestDefinition(ctx, orgId, formId);
-  const p = await one(ctx.pool, 'SELECT * FROM form_publications WHERE form_id=$1 AND org_id=$2', [formId, orgId]);
+  const p = await one(ctx.pool, 'SELECT * FROM form_publications WHERE form_id=$1 AND org_id=$2', [
+    formId,
+    orgId,
+  ]);
   const a = await assess(ctx, orgId, form.definition);
   const warnings: FormPublicationDto['warnings'] = [];
   const add = (code: FormPublicationWarning, fields: string[]) => {
@@ -121,7 +134,13 @@ export async function getPublication(ctx: Ctx, orgId: string, formId: string): P
   };
 }
 
-const append = (ctx: Ctx, tx: Parameters<Parameters<typeof withAppendTx>[1]>[0], who: Who, formId: string, event: any) =>
+const append = (
+  ctx: Ctx,
+  tx: Parameters<Parameters<typeof withAppendTx>[1]>[0],
+  who: Who,
+  formId: string,
+  event: any,
+) =>
   ctx.store.append(
     [{ streamId: streamId.form(formId), event, actor: userActor(who.userId), scope: orgScope(who.orgId) }],
     { tx },
@@ -143,7 +162,9 @@ export async function publishForm(ctx: Ctx, who: Who, formId: string): Promise<F
       fields: a.unusable,
     });
   await withAppendTx(ctx.pool, async (tx) => {
-    const existing = await one(tx, 'SELECT public_id FROM form_publications WHERE form_id=$1 FOR UPDATE', [formId]);
+    const existing = await one(tx, 'SELECT public_id FROM form_publications WHERE form_id=$1 FOR UPDATE', [
+      formId,
+    ]);
     await append(ctx, tx, who, formId, {
       type: 'FormPublished',
       payload: {
@@ -161,10 +182,11 @@ export async function publishForm(ctx: Ctx, who: Who, formId: string): Promise<F
 export async function unpublishForm(ctx: Ctx, who: Who, formId: string): Promise<FormPublicationDto> {
   await latestDefinition(ctx, who.orgId, formId);
   await withAppendTx(ctx.pool, async (tx) => {
-    const p = await one(tx, 'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2 FOR UPDATE', [
-      formId,
-      who.orgId,
-    ]);
+    const p = await one(
+      tx,
+      'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2 FOR UPDATE',
+      [formId, who.orgId],
+    );
     if (!p || p.status !== 'published') return;
     await append(ctx, tx, who, formId, {
       type: 'FormUnpublished',
@@ -178,10 +200,11 @@ export async function unpublishForm(ctx: Ctx, who: Who, formId: string): Promise
 export async function resetPublicLink(ctx: Ctx, who: Who, formId: string): Promise<FormPublicationDto> {
   await latestDefinition(ctx, who.orgId, formId);
   await withAppendTx(ctx.pool, async (tx) => {
-    const p = await one(tx, 'SELECT 1 AS ok FROM form_publications WHERE form_id=$1 AND org_id=$2 FOR UPDATE', [
-      formId,
-      who.orgId,
-    ]);
+    const p = await one(
+      tx,
+      'SELECT 1 AS ok FROM form_publications WHERE form_id=$1 AND org_id=$2 FOR UPDATE',
+      [formId, who.orgId],
+    );
     if (!p) throw conflict('form_not_published', 'This form was never published.');
     await append(ctx, tx, who, formId, {
       type: 'FormPublicLinkReset',
@@ -193,7 +216,10 @@ export async function resetPublicLink(ctx: Ctx, who: Who, formId: string): Promi
 
 // ------------------------------------------------------------------------------------------- client links
 
-function linkState(r: { revoked_at: unknown; used_at: unknown; expires_at: Date }, now: Date): ClientLinkState {
+function linkState(
+  r: { revoked_at: unknown; used_at: unknown; expires_at: Date },
+  now: Date,
+): ClientLinkState {
   if (r.revoked_at) return 'revoked';
   if (r.used_at) return 'used';
   return new Date(r.expires_at).getTime() <= now.getTime() ? 'expired' : 'active';
@@ -219,10 +245,11 @@ export async function createClientLink(
   input: CreateClientLink,
 ): Promise<ClientLinkDto> {
   await latestDefinition(ctx, who.orgId, formId);
-  const p = await one(ctx.pool, 'SELECT public_id, status FROM form_publications WHERE form_id=$1 AND org_id=$2', [
-    formId,
-    who.orgId,
-  ]);
+  const p = await one(
+    ctx.pool,
+    'SELECT public_id, status FROM form_publications WHERE form_id=$1 AND org_id=$2',
+    [formId, who.orgId],
+  );
   if (!p || p.status !== 'published')
     throw conflict('form_not_published', 'Publish the form before creating personal links.');
   const linkId = newLinkId();
@@ -248,10 +275,11 @@ export async function createClientLink(
 
 export async function listClientLinks(ctx: Ctx, orgId: string, formId: string): Promise<ClientLinkDto[]> {
   await latestDefinition(ctx, orgId, formId);
-  const p = await one(ctx.pool, 'SELECT public_id, status FROM form_publications WHERE form_id=$1 AND org_id=$2', [
-    formId,
-    orgId,
-  ]);
+  const p = await one(
+    ctx.pool,
+    'SELECT public_id, status FROM form_publications WHERE form_id=$1 AND org_id=$2',
+    [formId, orgId],
+  );
   const r = await rows(
     ctx.pool,
     'SELECT * FROM form_client_links WHERE form_id=$1 AND org_id=$2 ORDER BY created_at DESC, id LIMIT 200',

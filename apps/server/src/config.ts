@@ -215,7 +215,11 @@ const EnvSchema = z.object({
   AOM_FORMS_SESSION_TTL_MIN: z.coerce.number().int().min(1).max(1440).default(240),
   AOM_FORMS_SUBMISSION_TTL_MIN: z.coerce.number().int().min(1).max(1440).default(120),
   AOM_FORMS_MAX_FILES: z.coerce.number().int().min(1).max(100).default(20),
-  AOM_FORMS_MAX_SUBMISSION_BYTES: z.coerce.number().int().min(1).default(100 * 1024 * 1024),
+  AOM_FORMS_MAX_SUBMISSION_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(100 * 1024 * 1024),
   AOM_FORMS_IP_PER_MIN: z.coerce.number().int().min(1).max(100000).default(120),
   AOM_FORMS_IP_BURST: z.coerce.number().int().min(1).max(100000).default(60),
   AOM_FORMS_IP_SUBMITS_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(10),

@@ -71,9 +71,15 @@ function server(opts: { putFails?: number; completeFails?: number } = {}) {
     const p = path(c);
     if (p === '' && c.method === 'GET') return json(dto());
     if (p === '/submissions' && c.method === 'POST')
-      return json({ submissionId: SID, uploadToken: 'u1.tok', parts: [{ field: 'id_copy', index: 0, needed: true }] }, 201);
+      return json(
+        { submissionId: SID, uploadToken: 'u1.tok', parts: [{ field: 'id_copy', index: 0, needed: true }] },
+        201,
+      );
     if (p === `/submissions/${SID}` && c.method === 'GET')
-      return json({ status: 'receiving', parts: [{ field: 'id_copy', index: 0, state: stored ? 'stored' : 'pending' }] });
+      return json({
+        status: 'receiving',
+        parts: [{ field: 'id_copy', index: 0, state: stored ? 'stored' : 'pending' }],
+      });
     if (p === `/submissions/${SID}/parts/0`) {
       if (putFails-- > 0) return err(502, 'storage_failed', { retryable: true });
       stored = true;
@@ -100,14 +106,21 @@ describe('the public form page', () => {
       session: expect.stringMatching(/^s1\./),
       website: '',
       answers: { full_name: 'Ann Example' },
-      files: [{ field: 'id_copy', name: 'id.pdf', size: 16, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }],
+      files: [
+        { field: 'id_copy', name: 'id.pdf', size: 16, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      ],
     });
     // the file is not among the text answers, and no credentials travel
     expect(start?.body.answers.id_copy).toBeUndefined();
     const put = calls.find((c) => c.method === 'PUT');
-    expect(put?.headers).toMatchObject({ 'x-upload-token': 'u1.tok', 'content-type': 'application/octet-stream' });
+    expect(put?.headers).toMatchObject({
+      'x-upload-token': 'u1.tok',
+      'content-type': 'application/octet-stream',
+    });
     expect(put?.headers['x-file-name']).toBe('id.pdf');
-    expect(vi.mocked(fetch).mock.calls.every(([, init]) => (init as RequestInit).credentials === 'omit')).toBe(true);
+    expect(
+      vi.mocked(fetch).mock.calls.every(([, init]) => (init as RequestInit).credentials === 'omit'),
+    ).toBe(true);
     // the saved answers are removed once the submission is complete
     expect(sessionStorage.getItem(`gwf:${PID}`)).toBeNull();
   });
@@ -210,7 +223,9 @@ describe('the public form page', () => {
     const u = setup();
     await fill(u);
     await u.click(screen.getByTestId('form-submit'));
-    expect(await screen.findByTestId('public-closed')).toHaveTextContent('We will email you a secure upload link.');
+    expect(await screen.findByTestId('public-closed')).toHaveTextContent(
+      'We will email you a secure upload link.',
+    );
   });
 
   it('keeps the typed answers in sessionStorage (never localStorage) and restores them after a reload', async () => {

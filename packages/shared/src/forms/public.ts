@@ -146,10 +146,7 @@ export function checkUploadHead(
   switch (e) {
     case 'heic':
     case 'heif':
-      good =
-        head.byteLength >= 12 &&
-        latin1(head, 4, 8) === 'ftyp' &&
-        HEIC_BRANDS.has(latin1(head, 8, 12));
+      good = head.byteLength >= 12 && latin1(head, 4, 8) === 'ftyp' && HEIC_BRANDS.has(latin1(head, 8, 12));
       break;
     case 'odt':
     case 'ods':
@@ -165,7 +162,8 @@ export function checkUploadHead(
   return good ? { ok: true, contentType: info.contentType } : { ok: false, code: 'content_mismatch' };
 }
 
-const latin1 = (b: Uint8Array, from: number, to: number): string => String.fromCharCode(...b.subarray(from, to));
+const latin1 = (b: Uint8Array, from: number, to: number): string =>
+  String.fromCharCode(...b.subarray(from, to));
 
 /** The head is cut at a byte count, so a multi-byte character at the end may be incomplete: only the start is judged. */
 function validUtf8Start(head: Uint8Array): boolean {
@@ -193,7 +191,11 @@ export interface UploadManifestEntry {
   sha256: string;
 }
 
-export type PublicAnswerErrorCode = FormFieldErrorCode | 'unknown_field' | 'file_missing' | 'file_not_expected';
+export type PublicAnswerErrorCode =
+  | FormFieldErrorCode
+  | 'unknown_field'
+  | 'file_missing'
+  | 'file_not_expected';
 export type PublicAnswersResult =
   | { ok: true }
   | { ok: false; errors: Array<{ field: string; code: PublicAnswerErrorCode }> };
@@ -294,7 +296,12 @@ export interface SubmissionCompleteDto {
 
 /** Body of an error answer of the public routes. */
 export interface PublicFormErrorBody {
-  error: { code: PublicFormErrorCode; message: string; retryable?: boolean; fields?: Array<{ field: string; code: string }> };
+  error: {
+    code: PublicFormErrorCode;
+    message: string;
+    retryable?: boolean;
+    fields?: Array<{ field: string; code: string }>;
+  };
 }
 
 // ------------------------------------------------------------------------------------------- authoring

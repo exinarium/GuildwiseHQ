@@ -12,7 +12,18 @@ const PDF = new TextEncoder().encode('%PDF-1.7\n1 0 obj');
 const ZIP = bytes(0x50, 0x4b, 3, 4, 0, 0, 0, 0);
 const MZ = bytes(0x4d, 0x5a, 0x90, 0, 3, 0, 0, 0);
 const heic = (brand: string) =>
-  new Uint8Array([0, 0, 0, 24, ...new TextEncoder().encode('ftyp'), ...new TextEncoder().encode(brand), 0, 0, 0, 0]);
+  new Uint8Array([
+    0,
+    0,
+    0,
+    24,
+    ...new TextEncoder().encode('ftyp'),
+    ...new TextEncoder().encode(brand),
+    0,
+    0,
+    0,
+    0,
+  ]);
 
 describe('upload types', () => {
   it('has no SVG and no macro-enabled formats', () => {
@@ -27,7 +38,9 @@ describe('upload types', () => {
     expect(image).not.toContain('pdf');
     expect(acceptedUploadExtensions(['image/png'])).toEqual(['png']);
     expect(acceptedUploadExtensions(['.PDF', '.pdf'])).toEqual(['pdf']);
-    expect(acceptedUploadExtensions(['.exe', '.docm', 'image/svg+xml', 'application/x-msdownload'])).toEqual([]);
+    expect(acceptedUploadExtensions(['.exe', '.docm', 'image/svg+xml', 'application/x-msdownload'])).toEqual(
+      [],
+    );
   });
 
   it('accepts a file whose first bytes match its extension', () => {
@@ -48,7 +61,10 @@ describe('upload types', () => {
   it('refuses a renamed executable by content, whatever the name says', () => {
     const all = Object.keys(FORM_UPLOAD_TYPES);
     expect(checkUploadHead('pdf', MZ, all)).toEqual({ ok: false, code: 'executable' });
-    expect(checkUploadHead('png', bytes(0x7f, 0x45, 0x4c, 0x46, 2, 1), all)).toEqual({ ok: false, code: 'executable' });
+    expect(checkUploadHead('png', bytes(0x7f, 0x45, 0x4c, 0x46, 2, 1), all)).toEqual({
+      ok: false,
+      code: 'executable',
+    });
     expect(checkUploadHead('txt', new TextEncoder().encode('#!/bin/sh\nrm -rf /'), all)).toEqual({
       ok: false,
       code: 'executable',
@@ -64,7 +80,10 @@ describe('upload types', () => {
     expect(checkUploadHead('pdf', PNG, ['pdf'])).toEqual({ ok: false, code: 'content_mismatch' });
     expect(checkUploadHead('png', PDF, ['png'])).toEqual({ ok: false, code: 'content_mismatch' });
     expect(checkUploadHead('heic', PNG, ['heic'])).toEqual({ ok: false, code: 'content_mismatch' });
-    expect(checkUploadHead('txt', bytes(0x61, 0, 0x62), ['txt'])).toEqual({ ok: false, code: 'content_mismatch' });
+    expect(checkUploadHead('txt', bytes(0x61, 0, 0x62), ['txt'])).toEqual({
+      ok: false,
+      code: 'content_mismatch',
+    });
     expect(checkUploadHead('png', PNG, ['pdf'])).toEqual({ ok: false, code: 'type_not_allowed' });
     expect(checkUploadHead('svg', new TextEncoder().encode('<svg/>'), ['svg'])).toEqual({
       ok: false,

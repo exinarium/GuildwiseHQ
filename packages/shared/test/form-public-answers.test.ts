@@ -37,7 +37,9 @@ const file = (over: Record<string, unknown> = {}) => ({
 
 describe('checkPublicAnswers', () => {
   it('accepts valid answers with a file of an accepted type', () => {
-    expect(checkPublicAnswers(def(), { full_name: 'Ann', email_addr: 'a@b.co' }, [file()])).toEqual({ ok: true });
+    expect(checkPublicAnswers(def(), { full_name: 'Ann', email_addr: 'a@b.co' }, [file()])).toEqual({
+      ok: true,
+    });
   });
 
   it('ignores the browser: only the extension we know decides, never a claimed content type', () => {
@@ -81,7 +83,11 @@ describe('checkPublicAnswers', () => {
   });
 
   it('a file answer smuggled in the text answers is ignored', () => {
-    const r = checkPublicAnswers(def(), { full_name: 'Ann', id_copy: { name: 'a.pdf', size: 1, type: 'application/pdf' } }, []);
+    const r = checkPublicAnswers(
+      def(),
+      { full_name: 'Ann', id_copy: { name: 'a.pdf', size: 1, type: 'application/pdf' } },
+      [],
+    );
     expect(r).toEqual({ ok: false, errors: [{ field: 'id_copy', code: 'required' }] });
   });
 

@@ -5,7 +5,11 @@ const d = (code: string, retryable = false, status = 400) => describePublicError
 
 describe('describePublicError', () => {
   it('closed forms and links are final and say what to do', () => {
-    expect(d('form_not_available')).toEqual({ text: 'This form is not available.', retry: false, closed: true });
+    expect(d('form_not_available')).toEqual({
+      text: 'This form is not available.',
+      retry: false,
+      closed: true,
+    });
     expect(d('link_expired').text).toMatch(/expired.*Ask the firm for a new one/);
     expect(d('link_revoked').text).toMatch(/no longer valid/);
     expect(d('link_used').text).toMatch(/already used/);

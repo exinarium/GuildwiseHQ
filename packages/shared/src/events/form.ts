@@ -50,7 +50,10 @@ export const formEvents = [
       by: Id,
     }),
   ),
-  defineEvent('FormClientLinkRevoked', z.object({ linkId: z.string().length(22), formId: Id, orgId: Id, by: Id })),
+  defineEvent(
+    'FormClientLinkRevoked',
+    z.object({ linkId: z.string().length(22), formId: Id, orgId: Id, by: Id }),
+  ),
   defineEvent(
     'FormClientLinkUsed',
     z.object({ linkId: z.string().length(22), formId: Id, orgId: Id, submissionId: Id }),

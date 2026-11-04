@@ -28,10 +28,16 @@ export function describePublicError(e: Pick<PublicApiError, 'code' | 'status' | 
     case 'rate_limited':
       return msg('Too many attempts. Please wait a minute and try again.', true);
     case 'runner_offline':
-      return msg("This form can't accept submissions right now. Please try again later. Your answers are still here.", true);
+      return msg(
+        "This form can't accept submissions right now. Please try again later. Your answers are still here.",
+        true,
+      );
     case 'storage_failed':
       return e.retryable
-        ? msg("We couldn't save your form to the firm's storage. Your answers are still here. Try again.", true)
+        ? msg(
+            "We couldn't save your form to the firm's storage. Your answers are still here. Try again.",
+            true,
+          )
         : msg("We couldn't save your form. Please contact the firm.", false, true);
     case 'file_too_large':
       return msg('A file is too large. Choose a smaller file and send again.');

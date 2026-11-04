@@ -24,7 +24,12 @@ export const newPublicId = (): string => randomBytes(16).toString('base64url');
 // ------------------------------------------------------------------------------------------- client link
 
 /** `v1.<linkId>.<exp base36>.<hmac over v1|formId|linkId|exp>`; bound to one form. */
-export async function signClientLink(ctx: Ctx, formId: string, linkId: string, expiresAt: Date): Promise<string> {
+export async function signClientLink(
+  ctx: Ctx,
+  formId: string,
+  linkId: string,
+  expiresAt: Date,
+): Promise<string> {
   const exp = Math.floor(expiresAt.getTime() / 1000).toString(36);
   const sig = await mac(ctx, 'form-client-link', `v1|${formId}|${linkId}|${exp}`);
   return `v1.${linkId}.${exp}.${sig}`;

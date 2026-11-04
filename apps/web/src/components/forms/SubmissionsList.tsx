@@ -22,7 +22,11 @@ export function SubmissionsList({ formId }: { formId: string }) {
       {q.error && <ErrorBox error={q.error} />}
       <ul className="flex flex-col gap-2">
         {q.data?.map((s) => (
-          <li key={s.id} className="rounded-control border border-line p-3" data-testid={`submission-${s.status}`}>
+          <li
+            key={s.id}
+            className="rounded-control border border-line p-3"
+            data-testid={`submission-${s.status}`}
+          >
             <p className="text-base font-medium text-fg">
               {LABEL[s.status] ?? s.status} · {new Date(s.createdAt).toLocaleString()}
             </p>

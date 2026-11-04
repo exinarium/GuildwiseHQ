@@ -3,24 +3,24 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   acceptedUploadExtensions,
+  CompleteSchema,
   checkPublicAnswers,
   checkUploadHead,
-  CompleteSchema,
-  type FormDefinition,
   FORM_UPLOAD_TYPES,
+  type FormDefinition,
   isOrgOperational,
   PUBLIC_FORM_ID_RE,
-  publicFormView,
   type PublicFormDto,
-  sanitiseUploadName,
-  type StorageReference,
+  publicFormView,
   STORAGE_RETRYABLE,
+  type StorageReference,
   type StorageWriteError,
-  streamId,
-  SubmissionStartSchema,
   type SubmissionCompleteDto,
   type SubmissionStartResultDto,
+  SubmissionStartSchema,
   type SubmissionStatusDto,
+  sanitiseUploadName,
+  streamId,
   UPLOAD_HEAD_BYTES,
   type UploadManifestEntry,
 } from '@aom/shared';
@@ -81,7 +81,8 @@ class PfError extends Error {
 
 const NOT_AVAILABLE = () => new PfError(404, 'form_not_available', 'This form is not available.');
 const OFFLINE_MSG = "This form can't accept submissions right now. Please try again later.";
-const STORAGE_MSG = "We couldn't save your form to the firm's storage. Your answers are still here: try again.";
+const STORAGE_MSG =
+  "We couldn't save your form to the firm's storage. Your answers are still here: try again.";
 
 type Part = {
   field: string;
@@ -164,7 +165,10 @@ export function publicFormRoutes(
           message = status === 403 ? 'This request was not allowed.' : 'The request could not be accepted.';
           if (status === 413) code = 'file_too_large';
         } else {
-          ctx.log.warn({ publicForm: { op: req.pf?.op ?? null, status, errName: err?.name } }, 'public form error');
+          ctx.log.warn(
+            { publicForm: { op: req.pf?.op ?? null, status, errName: err?.name } },
+            'public form error',
+          );
         }
       }
       if (req.pf) req.pf.outcome = code;
@@ -233,9 +237,15 @@ export function publicFormRoutes(
     };
 
     const tooMany = (retry: number) =>
-      new PfError(429, 'rate_limited', 'Too many attempts. Please wait a minute and try again.', {}, {
-        retryAfter: retry,
-      });
+      new PfError(
+        429,
+        'rate_limited',
+        'Too many attempts. Please wait a minute and try again.',
+        {},
+        {
+          retryAfter: retry,
+        },
+      );
 
     const onRequest = async (req: FastifyRequest) => {
       const params = req.params as { publicId?: string };
@@ -276,17 +286,25 @@ export function publicFormRoutes(
       const v = await verifyClientLink(ctx, pub.formId, token);
       if (!v.ok) {
         if (v.reason === 'expired')
-          throw new PfError(410, 'link_expired', 'This personal link has expired. Ask the firm for a new one.');
+          throw new PfError(
+            410,
+            'link_expired',
+            'This personal link has expired. Ask the firm for a new one.',
+          );
         throw new PfError(404, 'link_invalid', 'This personal link is not valid.');
       }
-      const row = await one(ctx.pool, 'SELECT * FROM form_client_links WHERE id=$1 AND form_id=$2 AND org_id=$3', [
-        v.linkId,
-        pub.formId,
-        pub.orgId,
-      ]);
+      const row = await one(
+        ctx.pool,
+        'SELECT * FROM form_client_links WHERE id=$1 AND form_id=$2 AND org_id=$3',
+        [v.linkId, pub.formId, pub.orgId],
+      );
       if (!row) throw new PfError(404, 'link_invalid', 'This personal link is not valid.');
       if (row.revoked_at)
-        throw new PfError(410, 'link_revoked', 'This personal link is no longer valid. Ask the firm for a new one.');
+        throw new PfError(
+          410,
+          'link_revoked',
+          'This personal link is no longer valid. Ask the firm for a new one.',
+        );
       if (row.used_at)
         throw new PfError(410, 'link_used', 'This personal link was already used to send this form.');
       if (new Date(row.expires_at).getTime() <= ctx.clock.now().getTime())
@@ -350,26 +368,40 @@ export function publicFormRoutes(
         if (req.pf) req.pf.outcome = 'link_later';
         return reply.code(a.status ?? 202).send({ status: 'link_later', message: a.message });
       }
-      throw new PfError(503, 'runner_offline', OFFLINE_MSG, { retryable: true }, { retryAfter: retryAfter() });
+      throw new PfError(
+        503,
+        'runner_offline',
+        OFFLINE_MSG,
+        { retryable: true },
+        { retryAfter: retryAfter() },
+      );
     };
 
     /** Maps a refused storage write to what the page is told. */
     const storageFailure = (e: StorageWriteError): PfError => {
       if (e.code === 'not_found')
-        return new PfError(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.", {
-          retryable: false,
-        });
+        return new PfError(
+          409,
+          'destination_missing',
+          "This form can't accept submissions. Please contact the firm.",
+          {
+            retryable: false,
+          },
+        );
       if (e.code === 'too_large') return new PfError(413, 'file_too_large', 'The file is too large.');
-      return new PfError(502, 'storage_failed', STORAGE_MSG, { retryable: STORAGE_RETRYABLE[e.code] ?? false });
+      return new PfError(502, 'storage_failed', STORAGE_MSG, {
+        retryable: STORAGE_RETRYABLE[e.code] ?? false,
+      });
     };
 
     const rowOf = async (pub: Pub, sid: string) => {
-      if (!/^[0-9a-f-]{36}$/.test(sid)) throw new PfError(404, 'submission_not_found', 'Submission not found.');
-      const r = await one(ctx.pool, 'SELECT * FROM form_submissions WHERE id=$1 AND form_id=$2 AND org_id=$3', [
-        sid,
-        pub.formId,
-        pub.orgId,
-      ]);
+      if (!/^[0-9a-f-]{36}$/.test(sid))
+        throw new PfError(404, 'submission_not_found', 'Submission not found.');
+      const r = await one(
+        ctx.pool,
+        'SELECT * FROM form_submissions WHERE id=$1 AND form_id=$2 AND org_id=$3',
+        [sid, pub.formId, pub.orgId],
+      );
       if (!r) throw new PfError(404, 'submission_not_found', 'Submission not found.');
       return r;
     };
@@ -437,7 +469,9 @@ export function publicFormRoutes(
         const body: PublicFormDto = {
           form: publicFormView(def),
           version: pub.version,
-          logo: def.settings.logo ? `/api/public/forms/${(req.params as { publicId: string }).publicId}/logo` : null,
+          logo: def.settings.logo
+            ? `/api/public/forms/${(req.params as { publicId: string }).publicId}/logo`
+            : null,
           session: await signSession(ctx, pub.formId, pub.version, ctx.clock.now()),
           powBits: cfg.powBits,
           minFillMs: cfg.minFillMs,
@@ -488,9 +522,21 @@ export function publicFormRoutes(
         if (!session || now.getTime() - session.issuedAt > cfg.sessionTtlMin * 60_000)
           throw new PfError(400, 'session_invalid', 'This page has been open too long. Please reload it.');
         if (session.version !== pub.version)
-          throw new PfError(409, 'form_changed', 'The form was updated. Please check your answers and send again.');
-        if (now.getTime() - session.issuedAt < cfg.minFillMs || body.website !== '' || !powValid(body.session, body.nonce, cfg.powBits))
-          throw new PfError(422, 'submission_refused', 'We could not accept this submission. Please try again.');
+          throw new PfError(
+            409,
+            'form_changed',
+            'The form was updated. Please check your answers and send again.',
+          );
+        if (
+          now.getTime() - session.issuedAt < cfg.minFillMs ||
+          body.website !== '' ||
+          !powValid(body.session, body.nonce, cfg.powBits)
+        )
+          throw new PfError(
+            422,
+            'submission_refused',
+            'We could not accept this submission. Please try again.',
+          );
 
         const link = body.link ? await checkLink(pub, body.link) : null;
         const def = await definitionOf(pub);
@@ -501,7 +547,9 @@ export function publicFormRoutes(
         let total = 0;
         for (const f of body.files) {
           if (f.size > ctx.config.storage.maxFileBytes)
-            throw new PfError(413, 'file_too_large', 'A file is too large.', { fields: [{ field: f.field, code: 'file_too_large' }] });
+            throw new PfError(413, 'file_too_large', 'A file is too large.', {
+              fields: [{ field: f.field, code: 'file_too_large' }],
+            });
           total += f.size;
         }
         if (total > cfg.maxSubmissionBytes)
@@ -510,7 +558,8 @@ export function publicFormRoutes(
         if (!checked.ok) {
           const has = (c: string) => checked.errors.some((e) => e.code === c);
           const status = has('file_type') ? 415 : has('file_too_large') ? 413 : 400;
-          const code = status === 415 ? 'file_type_refused' : status === 413 ? 'file_too_large' : 'invalid_answers';
+          const code =
+            status === 415 ? 'file_type_refused' : status === 413 ? 'file_too_large' : 'invalid_answers';
           throw new PfError(status, code, 'Some answers need attention.', { fields: checked.errors });
         }
 
@@ -518,14 +567,23 @@ export function publicFormRoutes(
         const wanted = new Set<string>();
         const fileFields = new Set(body.files.map((f) => f.field));
         let missing = false;
-        const add = (id: string | null) => (id ? wanted.add(id) : (missing = true));
+        const add = (id: string | null) => {
+          if (id) wanted.add(id);
+          else missing = true;
+        };
         add(def.settings.answersDestination.connectionId);
-        for (const f of def.fields) if (f.type === 'file' && fileFields.has(f.id)) add(f.destination.connectionId);
+        for (const f of def.fields)
+          if (f.type === 'file' && fileFields.has(f.id)) add(f.destination.connectionId);
         const conns = missing ? new Map<string, string>() : await connectionsOf(pub.orgId, [...wanted]);
         if (missing || [...wanted].some((id) => !conns.has(id)))
-          throw new PfError(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.", {
-            retryable: false,
-          });
+          throw new PfError(
+            409,
+            'destination_missing',
+            "This form can't accept submissions. Please contact the firm.",
+            {
+              retryable: false,
+            },
+          );
         if ([...conns.values()].some((ws) => !ctx.services.runners.isOnline(ws)))
           return offline(req, reply, 'start', pub, link?.id ?? null, null, [...wanted]);
 
@@ -543,7 +601,17 @@ export function publicFormRoutes(
           await ctx.pool.query(
             `INSERT INTO form_submissions (id, org_id, form_id, form_version, link_id, status, session_nonce, parts, created_at, updated_at, expires_at)
              VALUES ($1,$2,$3,$4,$5,'receiving',$6,$7::jsonb,$8,$8,$9)`,
-            [sid, pub.orgId, pub.formId, pub.version, link?.id ?? null, session.nonce, JSON.stringify(parts), now, expiresAt],
+            [
+              sid,
+              pub.orgId,
+              pub.formId,
+              pub.version,
+              link?.id ?? null,
+              session.nonce,
+              JSON.stringify(parts),
+              now,
+              expiresAt,
+            ],
           );
         } catch (err: any) {
           if (err?.code === '23505')
@@ -573,7 +641,13 @@ export function publicFormRoutes(
         const row = await authorise(req, pub, sid);
         const close = { close: true };
         if (new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() || row.status === 'expired')
-          throw new PfError(410, 'submission_expired', 'This submission timed out. Please send the form again.', {}, close);
+          throw new PfError(
+            410,
+            'submission_expired',
+            'This submission timed out. Please send the form again.',
+            {},
+            close,
+          );
         if (row.status === 'complete' || row.status === 'storing')
           throw new PfError(409, 'submission_busy', 'This submission is already being processed.', {}, close);
         const parts = row.parts as Part[];
@@ -592,7 +666,13 @@ export function publicFormRoutes(
         const def = await definitionOf(pub);
         const field = def.fields.find((f) => f.id === part.field);
         if (!field || field.type !== 'file' || !field.destination.connectionId)
-          throw new PfError(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.", {}, close);
+          throw new PfError(
+            409,
+            'destination_missing',
+            "This form can't accept submissions. Please contact the firm.",
+            {},
+            close,
+          );
         const accepted = acceptedUploadExtensions(field.allowedTypes);
 
         const fail = async (code: string) => {
@@ -604,7 +684,9 @@ export function publicFormRoutes(
         };
 
         // The body as a stream that does not destroy the request when it is left early.
-        const iterator = (req.raw as unknown as { iterator(o: { destroyOnReturn: boolean }): AsyncIterator<Buffer> }).iterator({
+        const iterator = (
+          req.raw as unknown as { iterator(o: { destroyOnReturn: boolean }): AsyncIterator<Buffer> }
+        ).iterator({
           destroyOnReturn: false,
         });
         const first: Buffer[] = [];
@@ -627,7 +709,13 @@ export function publicFormRoutes(
         const sniff = checkUploadHead(part.ext, head, accepted);
         if (!sniff.ok) {
           await fail('file_type_refused');
-          throw new PfError(415, 'file_type_refused', 'This file type is not accepted.', { retryable: false }, close);
+          throw new PfError(
+            415,
+            'file_type_refused',
+            'This file type is not accepted.',
+            { retryable: false },
+            close,
+          );
         }
 
         const ac = new AbortController();
@@ -654,7 +742,9 @@ export function publicFormRoutes(
         }
         const original = sanitiseUploadName(rawName || 'file').base || 'file';
         const linkRow = row.link_id
-          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [row.link_id])
+          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
+              row.link_id,
+            ])
           : undefined;
         const r = await ctx.services.storage.write({
           orgId: pub.orgId,
@@ -676,7 +766,9 @@ export function publicFormRoutes(
         }
         if (r.reference.sha256 !== part.sha256 || r.reference.size !== part.size) {
           await fail('invalid');
-          throw new PfError(400, 'invalid_answers', 'The file does not match what was announced.', { retryable: false });
+          throw new PfError(400, 'invalid_answers', 'The file does not match what was announced.', {
+            retryable: false,
+          });
         }
         parts[i] = { ...part, state: 'stored', reference: r.reference };
         await ctx.pool.query(`UPDATE form_submissions SET parts=$2::jsonb, updated_at=$3 WHERE id=$1`, [
@@ -698,7 +790,8 @@ export function publicFormRoutes(
       handler: async (req) => {
         const pub = pubOf(req);
         const row = await authorise(req, pub, (req.params as { sid: string }).sid);
-        const expired = new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() && row.status !== 'complete';
+        const expired =
+          new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() && row.status !== 'complete';
         const out: SubmissionStatusDto = {
           status: expired ? 'expired' : row.status,
           parts: (row.parts as Part[]).map((p) => ({ field: p.field, index: p.index, state: p.state })),
@@ -720,10 +813,17 @@ export function publicFormRoutes(
         const { sid } = req.params as { sid: string };
         const row = await authorise(req, pub, sid);
         const def = await definitionOf(pub);
-        const done = (): SubmissionCompleteDto => ({ status: 'complete', confirmation: def.settings.confirmationText });
+        const done = (): SubmissionCompleteDto => ({
+          status: 'complete',
+          confirmation: def.settings.confirmationText,
+        });
         if (row.status === 'complete') return done();
         if (row.status === 'expired' || new Date(row.expires_at).getTime() <= ctx.clock.now().getTime())
-          throw new PfError(410, 'submission_expired', 'This submission timed out. Please send the form again.');
+          throw new PfError(
+            410,
+            'submission_expired',
+            'This submission timed out. Please send the form again.',
+          );
         const parts = row.parts as Part[];
         const pending = parts.filter((p) => p.state !== 'stored');
         if (pending.length)
@@ -740,7 +840,10 @@ export function publicFormRoutes(
           sha256: p.sha256,
         }));
         const checked = checkPublicAnswers(def, body.data.answers, manifest);
-        if (!checked.ok) throw new PfError(400, 'invalid_answers', 'Some answers need attention.', { fields: checked.errors });
+        if (!checked.ok)
+          throw new PfError(400, 'invalid_answers', 'Some answers need attention.', {
+            fields: checked.errors,
+          });
 
         // Claim: one complete at a time.
         const claimed = await one(
@@ -755,19 +858,25 @@ export function publicFormRoutes(
         }
 
         const failWith = async (e: StorageWriteError) => {
-          await ctx.pool.query(`UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1`, [
-            sid,
-            e.code,
-            ctx.clock.now(),
-          ]);
+          await ctx.pool.query(
+            `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1`,
+            [sid, e.code, ctx.clock.now()],
+          );
         };
         const dest = def.settings.answersDestination;
         if (!dest.connectionId) {
           await failWith({ code: 'not_found', message: 'missing', retryable: false });
-          throw new PfError(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.", { retryable: false });
+          throw new PfError(
+            409,
+            'destination_missing',
+            "This form can't accept submissions. Please contact the firm.",
+            { retryable: false },
+          );
         }
         const linkRow = row.link_id
-          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [row.link_id])
+          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
+              row.link_id,
+            ])
           : undefined;
         const at = new Date(row.created_at);
         const files = parts.map((p) => {
@@ -787,7 +896,10 @@ export function publicFormRoutes(
           submissionId: sid,
           submittedAt: at,
           form: { id: pub.formId, title: def.settings.title, version: pub.version },
-          client: linkRow && row.link_id ? { reference: linkRow.reference as string, linkId: row.link_id as string } : null,
+          client:
+            linkRow && row.link_id
+              ? { reference: linkRow.reference as string, linkId: row.link_id as string }
+              : null,
           fields: def.fields,
           answers: body.data.answers,
           files,
@@ -818,11 +930,10 @@ export function publicFormRoutes(
             throw storageFailure(w.error);
           }
           refs[kind] = w.reference;
-          await ctx.pool.query(`UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`, [
-            sid,
-            JSON.stringify(refs),
-            ctx.clock.now(),
-          ]);
+          await ctx.pool.query(
+            `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
+            [sid, JSON.stringify(refs), ctx.clock.now()],
+          );
         }
 
         // Both documents have references: only now is the submission complete.

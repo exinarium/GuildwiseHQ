@@ -93,7 +93,11 @@ export function PublishPanel({
           )}
           {published && (
             <>
-              <Button variant="secondary" onClick={() => setConfirm('unpublish')} data-testid="unpublish-form">
+              <Button
+                variant="secondary"
+                onClick={() => setConfirm('unpublish')}
+                data-testid="unpublish-form"
+              >
                 Unpublish
               </Button>
               <Button variant="ghost" onClick={() => setConfirm('reset')} data-testid="reset-link">
@@ -107,7 +111,10 @@ export function PublishPanel({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <QrCode value={url} label="QR code of the public form address" size={176} />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <p className="break-all rounded-control border border-line bg-sunken px-3 py-2 text-base text-fg" data-testid="public-url">
+            <p
+              className="break-all rounded-control border border-line bg-sunken px-3 py-2 text-base text-fg"
+              data-testid="public-url"
+            >
               {url}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -115,7 +122,11 @@ export function PublishPanel({
                 size="sm"
                 variant="secondary"
                 data-testid="copy-url"
-                onClick={() => void copyText(url).then((ok) => (ok ? toast.success('Copied.') : toast.error('Copy failed.')))}
+                onClick={() =>
+                  void copyText(url).then((ok) =>
+                    ok ? toast.success('Copied.') : toast.error('Copy failed.'),
+                  )
+                }
               >
                 Copy link
               </Button>

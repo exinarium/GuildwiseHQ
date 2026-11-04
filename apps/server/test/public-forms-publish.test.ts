@@ -109,14 +109,20 @@ describe('publishing a form (AC1)', () => {
     const post = (url: string, body: object = {}) => pf.w.t.req('POST', url, { cookie, headers, body });
     expect((await post(`/api/forms/${formId}/unpublish`)).status).toBe(403);
     expect((await post(`/api/forms/${formId}/client-links`, { reference: 'X' })).status).toBe(403);
-    expect((await pf.w.t.req('GET', `/api/forms/${formId}/publication`, { cookie, headers })).status).toBe(200);
+    expect((await pf.w.t.req('GET', `/api/forms/${formId}/publication`, { cookie, headers })).status).toBe(
+      200,
+    );
   });
 
   it('a form of another organization is not found', async () => {
     const { formId } = await pf.published(pf.definition('Mine'));
     const other = await pf.w.t.userSession(uniqueEmail('other'));
-    expect((await pf.w.t.req('GET', `/api/forms/${formId}/publication`, { cookie: other.cookie })).status).toBe(404);
-    expect((await pf.w.t.req('POST', `/api/forms/${formId}/publish`, { cookie: other.cookie, body: {} })).status).toBe(404);
+    expect(
+      (await pf.w.t.req('GET', `/api/forms/${formId}/publication`, { cookie: other.cookie })).status,
+    ).toBe(404);
+    expect(
+      (await pf.w.t.req('POST', `/api/forms/${formId}/publish`, { cookie: other.cookie, body: {} })).status,
+    ).toBe(404);
   });
 });
 
@@ -202,7 +208,9 @@ describe('personal links (AC2)', () => {
     expect(expired.json.error.code).toBe('link_expired');
     pf.w.t.clock.advance(-2 * 86_400_000);
 
-    const states = (await ok<any>(pf.api('GET', `/api/forms/${formId}/client-links`))).links.map((l: any) => l.state);
+    const states = (await ok<any>(pf.api('GET', `/api/forms/${formId}/client-links`))).links.map(
+      (l: any) => l.state,
+    );
     expect(states).toEqual(expect.arrayContaining(['active', 'revoked', 'used']));
   });
 

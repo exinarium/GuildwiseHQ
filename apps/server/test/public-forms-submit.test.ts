@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { EXE, PDF, PNG, sha, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { q } from './helpers/db.ts';
+import { EXE, PDF, PNG, sha, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { ok } from './helpers/world.ts';
+
+/** The first row of a query (these queries always return one). */
+const one = async (sql: string, params?: unknown[]) => (await q(sql, params))[0] as Record<string, any>;
 
 const pf = usePublicFormsWorld({
   AOM_FORMS_IP_BURST: '100000',
@@ -34,7 +37,10 @@ describe('a valid submission (AC3)', () => {
     expect(s.start.status).toBe(201);
     expect(s.parts.map((p) => p.status)).toEqual([200, 200]);
     expect(s.complete?.status).toBe(200);
-    expect(s.complete?.json).toMatchObject({ status: 'complete', confirmation: expect.stringContaining('Thank you') });
+    expect(s.complete?.json).toMatchObject({
+      status: 'complete',
+      confirmation: expect.stringContaining('Thank you'),
+    });
 
     const sid8 = s.sid.slice(0, 8);
     const written = pf.stub.files();
@@ -54,16 +60,31 @@ describe('a valid submission (AC3)', () => {
     expect(doc.answers.find((a: any) => a.id === 'full_name').value).toBe(NAME);
     expect(doc.answers.find((a: any) => a.id === 'notes').value).toBe(NOTES);
     expect(doc.files.map((f: any) => f.id).sort()).toEqual(['id_copy', 'photo']);
-    expect(doc.files.find((f: any) => f.id === 'id_copy')).toMatchObject({ sha256: sha(PDF), size: PDF.length });
+    expect(doc.files.find((f: any) => f.id === 'id_copy')).toMatchObject({
+      sha256: sha(PDF),
+      size: PDF.length,
+    });
     expect(html?.bytes.toString('utf8')).toContain('&lt;b&gt;markup&lt;/b&gt;');
     expect(html?.bytes.toString('utf8')).not.toContain('<b>markup');
 
     // the stored row: status, timestamps and references, and nothing else
-    const [row] = await q('SELECT * FROM form_submissions WHERE id=$1', [s.sid]);
+    const row = await one('SELECT * FROM form_submissions WHERE id=$1', [s.sid]);
     expect(Object.keys(row).sort()).toEqual(
       [
-        'answers_refs', 'completed_at', 'created_at', 'error_code', 'expires_at', 'form_id', 'form_version', 'id',
-        'link_id', 'org_id', 'parts', 'session_nonce', 'status', 'updated_at',
+        'answers_refs',
+        'completed_at',
+        'created_at',
+        'error_code',
+        'expires_at',
+        'form_id',
+        'form_version',
+        'id',
+        'link_id',
+        'org_id',
+        'parts',
+        'session_nonce',
+        'status',
+        'updated_at',
       ].sort(),
     );
     expect(row).toMatchObject({ status: 'complete', form_version: 1, error_code: null });
@@ -74,7 +95,15 @@ describe('a valid submission (AC3)', () => {
     for (const p of row.parts) {
       expect(p.state).toBe('stored');
       expect(p.reference.connectionId).toBe(pf.connectionId);
-      expect(Object.keys(p).sort()).toEqual(['ext', 'field', 'index', 'reference', 'sha256', 'size', 'state']);
+      expect(Object.keys(p).sort()).toEqual([
+        'ext',
+        'field',
+        'index',
+        'reference',
+        'sha256',
+        'size',
+        'state',
+      ]);
     }
     expect(row.parts[0].sha256).toBe(sha(PDF));
 
@@ -90,12 +119,25 @@ describe('a valid submission (AC3)', () => {
       [`form-${formId}`],
     );
     expect(events.map((e: any) => e.type).sort()).toEqual(['FormClientLinkUsed', 'FormSubmitted']);
-    const [linkRow] = await q('SELECT used_at, used_by_submission FROM form_client_links WHERE form_id=$1', [formId]);
+    const linkRow = await one('SELECT used_at, used_by_submission FROM form_client_links WHERE form_id=$1', [
+      formId,
+    ]);
     expect(linkRow.used_by_submission).toBe(s.sid);
 
     // the logs: one metadata line per call, never an answer, file name, token or address
     const logs = pf.logs.slice(logFrom).join('\n');
-    for (const secret of [NAME, NOTES, EMAIL, 'FILE-CONTENT', 'My ID', 'me.png', token, s.token, publicId, '127.0.0.1'])
+    for (const secret of [
+      NAME,
+      NOTES,
+      EMAIL,
+      'FILE-CONTENT',
+      'My ID',
+      'me.png',
+      token,
+      s.token,
+      publicId,
+      '127.0.0.1',
+    ])
       expect(logs).not.toContain(secret);
     expect(logs).toContain('"publicForm"');
 
@@ -110,19 +152,49 @@ describe('a valid submission (AC3)', () => {
 
   it('the public address without a link has no client reference', async () => {
     const { publicId } = await pf.published(pf.definition('Anonymous'));
-    const s = await pf.submit(publicId, { full_name: 'Someone' }, [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }]);
+    const s = await pf.submit(publicId, { full_name: 'Someone' }, [
+      { field: 'id_copy', name: 'a.pdf', bytes: PDF },
+    ]);
     expect(s.complete?.status).toBe(200);
-    const json = pf.stub.files().find((f) => f.path.startsWith('Forms/Anonymous/') && f.path.endsWith('.json'));
+    const json = pf.stub
+      .files()
+      .find((f) => f.path.startsWith('Forms/Anonymous/') && f.path.endsWith('.json'));
     expect(JSON.parse(json?.bytes.toString('utf8') as string).client).toBeNull();
-    const [row] = await q('SELECT link_id FROM form_submissions WHERE id=$1', [s.sid]);
+    const row = await one('SELECT link_id FROM form_submissions WHERE id=$1', [s.sid]);
     expect(row.link_id).toBeNull();
+  });
+
+  it('streams a file larger than the default body limit through several relay chunks, byte for byte', async () => {
+    const d = pf.definition('Big file');
+    const photo = d.fields.find((f) => f.id === 'photo');
+    if (photo?.type === 'file') photo.maxSizeBytes = 5 * 1024 * 1024;
+    const { publicId } = await pf.published(d);
+    const big = Buffer.concat([
+      PNG.subarray(0, 8),
+      Buffer.from(Array.from({ length: 3 * 1024 * 1024 }, (_, i) => (i * 7 + (i >> 8)) & 0xff)),
+    ]);
+    const s = await pf.submit(publicId, { full_name: 'Big' }, [
+      { field: 'id_copy', name: 'a.pdf', bytes: PDF },
+      { field: 'photo', name: 'big.png', bytes: big },
+    ]);
+    expect(s.parts.map((p) => p.status)).toEqual([200, 200]);
+    expect(s.complete?.status).toBe(200);
+    const stored = pf.stub.files().find((f) => f.path.endsWith('photo-big.png'));
+    expect(stored?.bytes.length).toBe(big.length);
+    expect(stored?.bytes.equals(big)).toBe(true);
   });
 
   it('complete is idempotent: a second call answers the same and writes nothing more', async () => {
     const { publicId } = await pf.published(pf.definition('Idempotent'));
-    const s = await pf.submit(publicId, { full_name: 'Twice' }, [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }]);
+    const s = await pf.submit(publicId, { full_name: 'Twice' }, [
+      { field: 'id_copy', name: 'a.pdf', bytes: PDF },
+    ]);
     const before = pf.stub.opens();
-    const again = await pf.post(`/api/public/forms/${publicId}/submissions/${s.sid}/complete`, { answers: { full_name: 'Twice' } }, { 'x-upload-token': s.token });
+    const again = await pf.post(
+      `/api/public/forms/${publicId}/submissions/${s.sid}/complete`,
+      { answers: { full_name: 'Twice' } },
+      { 'x-upload-token': s.token },
+    );
     expect(again.status).toBe(200);
     expect(again.json.status).toBe('complete');
     expect(pf.stub.opens()).toBe(before);
@@ -132,34 +204,54 @@ describe('a valid submission (AC3)', () => {
 describe('when the storage write fails (AC5)', () => {
   it('a failing answers write gives a retry message, keeps nothing complete and recovers without re-uploading', async () => {
     const { formId, publicId } = await pf.published(pf.definition('Failing store'));
-    const link = await ok<any>(pf.api('POST', `/api/forms/${formId}/client-links`, { reference: 'R-1' }), 201);
+    const link = await ok<any>(
+      pf.api('POST', `/api/forms/${formId}/client-links`, { reference: 'R-1' }),
+      201,
+    );
     const token = /#c=(.+)$/.exec(link.url)?.[1] as string;
-    pf.stub.failWhen = (o) => (o.ext === 'json' ? { code: 'unavailable', message: 'the folder is gone', retryable: true } : null);
-    const s = await pf.submit(publicId, { full_name: 'Retry Person' }, [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }], token);
+    pf.stub.failWhen = (o) =>
+      o.ext === 'json' ? { code: 'unavailable', message: 'the folder is gone', retryable: true } : null;
+    const s = await pf.submit(
+      publicId,
+      { full_name: 'Retry Person' },
+      [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }],
+      token,
+    );
     expect(s.parts.map((p) => p.status)).toEqual([200]);
     expect(s.complete?.status).toBe(502);
     expect(s.complete?.json.error).toMatchObject({ code: 'storage_failed', retryable: true });
     expect(s.complete?.text).not.toContain('the folder is gone');
 
-    let [row] = await q('SELECT status, error_code FROM form_submissions WHERE id=$1', [s.sid]);
+    let row = await one('SELECT status, error_code FROM form_submissions WHERE id=$1', [s.sid]);
     expect(row).toEqual({ status: 'failed', error_code: 'unavailable' });
-    const events = await q(`SELECT type FROM events WHERE stream_id=$1 AND type IN ('FormSubmitted','FormClientLinkUsed')`, [`form-${formId}`]);
+    const events = await q(
+      `SELECT type FROM events WHERE stream_id=$1 AND type IN ('FormSubmitted','FormClientLinkUsed')`,
+      [`form-${formId}`],
+    );
     expect(events).toEqual([]);
     expect((await pf.load(publicId, token)).status).toBe(200); // the link is not used up
 
     // the status answer tells the page which parts still need sending (none: the file is stored)
-    const st = await pf.get(`/api/public/forms/${publicId}/submissions/${s.sid}`, { 'x-upload-token': s.token });
+    const st = await pf.get(`/api/public/forms/${publicId}/submissions/${s.sid}`, {
+      'x-upload-token': s.token,
+    });
     expect(st.json).toMatchObject({ status: 'failed', parts: [{ field: 'id_copy', state: 'stored' }] });
 
     // the storage comes back: complete again, without sending the file again
     pf.stub.failWhen = () => null;
     const opensBefore = pf.stub.opens();
-    const done = await pf.post(`/api/public/forms/${publicId}/submissions/${s.sid}/complete`, { answers: { full_name: 'Retry Person' } }, { 'x-upload-token': s.token });
+    const done = await pf.post(
+      `/api/public/forms/${publicId}/submissions/${s.sid}/complete`,
+      { answers: { full_name: 'Retry Person' } },
+      { 'x-upload-token': s.token },
+    );
     expect(done.status).toBe(200);
     expect(pf.stub.opens() - opensBefore).toBe(1); // only the JSON: the HTML already landed, and no file is sent again
-    [row] = await q('SELECT status, error_code FROM form_submissions WHERE id=$1', [s.sid]);
+    row = await one('SELECT status, error_code FROM form_submissions WHERE id=$1', [s.sid]);
     expect(row).toEqual({ status: 'complete', error_code: null });
-    const htmls = pf.stub.files().filter((f) => f.path.startsWith('Forms/Failing store/') && f.path.endsWith('.html'));
+    const htmls = pf.stub
+      .files()
+      .filter((f) => f.path.startsWith('Forms/Failing store/') && f.path.endsWith('.html'));
     expect(htmls).toHaveLength(1);
     expect((await pf.load(publicId, token)).json.error.code).toBe('link_used');
   });
@@ -170,7 +262,10 @@ describe('when the storage write fails (AC5)', () => {
     const start = await pf.start(publicId, dto, { full_name: 'P' }, files);
     const { submissionId: sid, uploadToken: token } = start.json;
     const put = (i: number, bytes: Buffer) =>
-      pf.put(`/api/public/forms/${publicId}/submissions/${sid}/parts/${i}`, bytes, { 'x-upload-token': token, 'x-file-name': 'f' });
+      pf.put(`/api/public/forms/${publicId}/submissions/${sid}/parts/${i}`, bytes, {
+        'x-upload-token': token,
+        'x-file-name': 'f',
+      });
     expect((await put(0, PDF)).status).toBe(200);
     pf.stub.failWhen = () => ({ code: 'quota', message: 'full', retryable: false });
     const bad = await put(1, PNG);
@@ -179,26 +274,41 @@ describe('when the storage write fails (AC5)', () => {
     pf.stub.failWhen = () => null;
     const st = await pf.get(`/api/public/forms/${publicId}/submissions/${sid}`, { 'x-upload-token': token });
     expect(st.json.parts.map((p: any) => p.state)).toEqual(['stored', 'failed']);
-    const early = await pf.post(`/api/public/forms/${publicId}/submissions/${sid}/complete`, { answers: { full_name: 'P' } }, { 'x-upload-token': token });
+    const early = await pf.post(
+      `/api/public/forms/${publicId}/submissions/${sid}/complete`,
+      { answers: { full_name: 'P' } },
+      { 'x-upload-token': token },
+    );
     expect(early.status).toBe(409);
     expect(early.json.error.code).toBe('parts_missing');
     const opens = pf.stub.opens();
     expect((await put(1, PNG)).status).toBe(200);
     expect(pf.stub.opens() - opens).toBe(1);
-    const done = await pf.post(`/api/public/forms/${publicId}/submissions/${sid}/complete`, { answers: { full_name: 'P' } }, { 'x-upload-token': token });
+    const done = await pf.post(
+      `/api/public/forms/${publicId}/submissions/${sid}/complete`,
+      { answers: { full_name: 'P' } },
+      { 'x-upload-token': token },
+    );
     expect(done.status).toBe(200);
   });
 });
 
 describe('rejected on the server even when the browser checks are bypassed (AC4)', () => {
-  const startWith = async (def: ReturnType<typeof pf.definition>, a: Record<string, unknown>, f: typeof files, extra = {}) => {
+  const startWith = async (
+    def: ReturnType<typeof pf.definition>,
+    a: Record<string, unknown>,
+    f: typeof files,
+    extra = {},
+  ) => {
     const { publicId } = await pf.published(def);
     const dto = (await pf.load(publicId)).json;
     return { publicId, dto, res: await pf.start(publicId, dto, a, f, extra) };
   };
 
   it('a missing required field and a bad email: 400 with field and code only', async () => {
-    const { res } = await startWith(pf.definition('Neg 1'), { email_addr: 'not-an-email', unexpected: 'x' }, [files[0] as (typeof files)[0]]);
+    const { res } = await startWith(pf.definition('Neg 1'), { email_addr: 'not-an-email', unexpected: 'x' }, [
+      files[0] as (typeof files)[0],
+    ]);
     expect(res.status).toBe(400);
     expect(res.json.error.code).toBe('invalid_answers');
     expect(res.json.error.fields).toEqual(
@@ -213,24 +323,34 @@ describe('rejected on the server even when the browser checks are bypassed (AC4)
   });
 
   it('an executable named like a document: refused in the manifest (415) and, if it slips through, by its bytes', async () => {
-    const { res } = await startWith(pf.definition('Neg 2'), { full_name: 'x' }, [{ field: 'id_copy', name: 'setup.exe', bytes: EXE }]);
+    const { res } = await startWith(pf.definition('Neg 2'), { full_name: 'x' }, [
+      { field: 'id_copy', name: 'setup.exe', bytes: EXE },
+    ]);
     expect(res.status).toBe(415);
     expect(res.json.error.code).toBe('file_type_refused');
 
     // renamed to .pdf: the manifest passes, the bytes do not
     const { publicId } = await pf.published(pf.definition('Neg 2b'));
     const dto = (await pf.load(publicId)).json;
-    const start = await pf.start(publicId, dto, { full_name: 'x' }, [{ field: 'id_copy', name: 'invoice.pdf', bytes: EXE }]);
+    const start = await pf.start(publicId, dto, { full_name: 'x' }, [
+      { field: 'id_copy', name: 'invoice.pdf', bytes: EXE },
+    ]);
     expect(start.status).toBe(201);
     const opens = pf.stub.opens();
-    const put = await pf.put(`/api/public/forms/${publicId}/submissions/${start.json.submissionId}/parts/0`, EXE, {
-      'x-upload-token': start.json.uploadToken,
-      'x-file-name': 'invoice.pdf',
-    });
+    const put = await pf.put(
+      `/api/public/forms/${publicId}/submissions/${start.json.submissionId}/parts/0`,
+      EXE,
+      {
+        'x-upload-token': start.json.uploadToken,
+        'x-file-name': 'invoice.pdf',
+      },
+    );
     expect(put.status).toBe(415);
     expect(put.json.error.code).toBe('file_type_refused');
     expect(pf.stub.opens()).toBe(opens); // nothing reached the runner
-    const [row] = await q('SELECT status, error_code FROM form_submissions WHERE id=$1', [start.json.submissionId]);
+    const row = await one('SELECT status, error_code FROM form_submissions WHERE id=$1', [
+      start.json.submissionId,
+    ]);
     expect(row).toEqual({ status: 'failed', error_code: 'file_type_refused' });
   });
 
@@ -241,7 +361,9 @@ describe('rejected on the server even when the browser checks are bypassed (AC4)
     ]);
     expect(png.res.status).toBe(415);
     const d = pf.definition('Neg 3b');
-    const big = await startWith(d, { full_name: 'x' }, [{ field: 'id_copy', name: 'big.pdf', bytes: Buffer.alloc(1024 * 1024 + 1, 0x41) }]);
+    const big = await startWith(d, { full_name: 'x' }, [
+      { field: 'id_copy', name: 'big.pdf', bytes: Buffer.alloc(1024 * 1024 + 1, 0x41) },
+    ]);
     expect(big.res.status).toBe(413);
     expect(big.res.json.error.code).toBe('file_too_large');
   });
@@ -249,7 +371,9 @@ describe('rejected on the server even when the browser checks are bypassed (AC4)
   it('the bytes of a part must match what was announced', async () => {
     const { publicId } = await pf.published(pf.definition('Neg 4'));
     const dto = (await pf.load(publicId)).json;
-    const start = await pf.start(publicId, dto, { full_name: 'x' }, [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }]);
+    const start = await pf.start(publicId, dto, { full_name: 'x' }, [
+      { field: 'id_copy', name: 'a.pdf', bytes: PDF },
+    ]);
     const url = `/api/public/forms/${publicId}/submissions/${start.json.submissionId}/parts/0`;
     const h = { 'x-upload-token': start.json.uploadToken, 'x-file-name': 'a.pdf' };
     const longer = await pf.put(url, Buffer.concat([PDF, Buffer.from('more')]), h);
@@ -285,7 +409,12 @@ describe('rejected on the server even when the browser checks are bypassed (AC4)
     expect(stale.json.error.code).toBe('session_invalid');
     pf.w.t.clock.advance(-5 * 3_600_000);
 
-    const forged = await pf.start(publicId, { session: `${old.session.slice(0, -3)}AAA` }, { full_name: 'x' }, f1);
+    const forged = await pf.start(
+      publicId,
+      { session: `${old.session.slice(0, -3)}AAA` },
+      { full_name: 'x' },
+      f1,
+    );
     expect(forged.json.error.code).toBe('session_invalid');
 
     const beforeChange = (await pf.load(publicId)).json;
@@ -306,20 +435,37 @@ describe('rejected on the server even when the browser checks are bypassed (AC4)
     expect((await pf.get(url, { 'x-upload-token': b.uploadToken })).status).toBe(404);
     expect((await pf.get(url)).status).toBe(404);
     expect((await pf.put(`${url}/parts/0`, PDF, { 'x-upload-token': b.uploadToken })).status).toBe(404);
-    expect((await pf.post(`${url}/complete`, { answers: {} }, { 'x-upload-token': b.uploadToken })).status).toBe(404);
+    expect(
+      (await pf.post(`${url}/complete`, { answers: {} }, { 'x-upload-token': b.uploadToken })).status,
+    ).toBe(404);
     // and another form's address cannot reach it either
     const other = await pf.published(pf.definition('Neg 6 other'));
-    expect((await pf.get(`/api/public/forms/${other.publicId}/submissions/${a.submissionId}`, { 'x-upload-token': a.uploadToken })).status).toBe(404);
+    expect(
+      (
+        await pf.get(`/api/public/forms/${other.publicId}/submissions/${a.submissionId}`, {
+          'x-upload-token': a.uploadToken,
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it('a form whose connection was removed cannot take submissions', async () => {
     const d = pf.definition('Neg 7');
-    const created = await ok<any>(pf.api('POST', '/api/org/storage/connections', { kind: 'local', label: 'Temp', workstationId: pf.w.workstationId }), 201);
+    const created = await ok<any>(
+      pf.api('POST', '/api/org/storage/connections', {
+        kind: 'local',
+        label: 'Temp',
+        workstationId: pf.w.workstationId,
+      }),
+      201,
+    );
     d.settings.answersDestination.connectionId = created.connection.id;
     const { publicId } = await pf.published(d);
     const dto = (await pf.load(publicId)).json;
     await ok(pf.api('DELETE', `/api/org/storage/connections/${created.connection.id}`), 204);
-    const res = await pf.start(publicId, dto, { full_name: 'x' }, [{ field: 'id_copy', name: 'a.pdf', bytes: PDF }]);
+    const res = await pf.start(publicId, dto, { full_name: 'x' }, [
+      { field: 'id_copy', name: 'a.pdf', bytes: PDF },
+    ]);
     expect(res.status).toBe(409);
     expect(res.json.error).toMatchObject({ code: 'destination_missing', retryable: false });
   });
@@ -329,7 +475,7 @@ describe('the firm workstation is offline (hook for the offline flow)', () => {
   it('answers 503 runner_offline with Retry-After and accepts nothing; the hook can answer instead', async () => {
     const { publicId } = await pf.published(pf.definition('Offline'));
     const dto = (await pf.load(publicId)).json;
-    const before = (await q('SELECT count(*)::int AS n FROM form_submissions'))[0].n;
+    const before = (await one('SELECT count(*)::int AS n FROM form_submissions')).n;
     pf.stub.stop();
     pf.r.ws.close();
     await new Promise((r) => setTimeout(r, 300));
@@ -338,7 +484,7 @@ describe('the firm workstation is offline (hook for the offline flow)', () => {
     expect(res.status).toBe(503);
     expect(res.json.error).toMatchObject({ code: 'runner_offline', retryable: true });
     expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
-    expect((await q('SELECT count(*)::int AS n FROM form_submissions'))[0].n).toBe(before);
+    expect((await one('SELECT count(*)::int AS n FROM form_submissions')).n).toBe(before);
 
     const calls: any[] = [];
     pf.w.t.app.ctx.services.publicFormsOffline = {

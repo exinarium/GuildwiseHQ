@@ -43,7 +43,13 @@ export function takeLinkToken(): string | undefined {
  * sends in three steps: start, one file at a time, complete. The answers and the chosen files stay in the page until the
  * submission is complete, so every retry resumes without retyping.
  */
-export function PublicFormPage({ publicId, linkToken }: { publicId: string; linkToken?: string | undefined }) {
+export function PublicFormPage({
+  publicId,
+  linkToken,
+}: {
+  publicId: string;
+  linkToken?: string | undefined;
+}) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -148,13 +154,19 @@ export function PublicFormPage({ publicId, linkToken }: { publicId: string; link
       website: honey,
       ...(link.current ? { link: link.current } : {}),
       answers: Object.fromEntries(
-        Object.entries(answers.current).filter(([k]) => !files.current.has(k) && !manifest.some((m) => m.field === k)),
+        Object.entries(answers.current).filter(
+          ([k]) => !files.current.has(k) && !manifest.some((m) => m.field === k),
+        ),
       ),
       files: manifest.map(({ pos: _p, ...m }) => m),
     };
     const r = await publicApi.start(publicId, body);
     laterOf(r);
-    return { id: r.submissionId, token: r.uploadToken, parts: r.parts.map((p, i) => ({ field: p.field, index: i })) };
+    return {
+      id: r.submissionId,
+      token: r.uploadToken,
+      parts: r.parts.map((p, i) => ({ field: p.field, index: i })),
+    };
   };
 
   const submit = async () => {
@@ -180,8 +192,13 @@ export function PublicFormPage({ publicId, linkToken }: { publicId: string; link
           if (e instanceof LinkLater) throw e;
           const err = e instanceof PublicApiError ? e : new PublicApiError(0, 'network', 'failed', true);
           // The submission ran out, or the page's session was used or is stale: start again with what is kept.
-          const again =
-            ['submission_expired', 'submission_not_found', 'session_used', 'session_invalid', 'form_changed'].includes(err.code);
+          const again = [
+            'submission_expired',
+            'submission_not_found',
+            'session_used',
+            'session_invalid',
+            'form_changed',
+          ].includes(err.code);
           if (!again || attempt === 2) throw err;
           sub.current = null;
           const fresh = await load();

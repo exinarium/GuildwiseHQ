@@ -55,6 +55,7 @@ import { registerMediaProxy } from './media-proxy.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
+import { publicFormRoutes } from './public-forms/routes.ts';
 import { registerPushNotifier } from './push/notifier.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentUxRoutes } from './routes/agent-ux.ts';
@@ -86,8 +87,6 @@ import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
 import { formRoutes } from './routes/forms.ts';
-import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
-import { publicFormRoutes } from './public-forms/routes.ts';
 import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
@@ -99,6 +98,7 @@ import { intakeRoutes } from './routes/intakes.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
+import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
@@ -109,11 +109,11 @@ import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
-import { journeyRoutes } from './routes/journeys.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
+import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
@@ -213,14 +213,16 @@ const DESK_LINK_TOKEN =
  * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
  */
 export function redactUrl(url: string): string {
-  return url
-    .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
-    // a published form's public id is a capability to an organization's form
-    .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
-    .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
-    .replace(DESK_LINK_TOKEN, '$1[redacted]')
-    .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
-    .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
+  return (
+    url
+      .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
+      // a published form's public id is a capability to an organization's form
+      .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(DESK_LINK_TOKEN, '$1[redacted]')
+      .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+  );
 }
 
 /** pino `req` serializer: the default one with the URL redacted. */

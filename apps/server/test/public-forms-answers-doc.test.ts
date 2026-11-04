@@ -53,11 +53,17 @@ describe('answers file', () => {
 
   it('HTML escapes every value, has no script and carries its own restrictive policy', () => {
     const html = buildAnswersHtml(
-      input({ full_name: '<script>alert("x")</script> & "q" \'s\'', notes: 'line1\nline2', pets: ['<img src=x onerror=1>'] }),
+      input({
+        full_name: '<script>alert("x")</script> & "q" \'s\'',
+        notes: 'line1\nline2',
+        pets: ['<img src=x onerror=1>'],
+      }),
     );
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<img');
-    expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &quot;q&quot; &#39;s&#39;');
+    expect(html).toContain(
+      '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &quot;q&quot; &#39;s&#39;',
+    );
     expect(html).toContain('line1<br>line2');
     expect(html).toContain('Rental &lt;application&gt;');
     expect(html).toContain('Notes &lt;b&gt;');

@@ -13,7 +13,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client.ts';
 import { useMe } from '../api/queries/auth.ts';
-import { usePublication } from '../api/queries/public-forms.ts';
 import {
   useCreateForm,
   useForm,
@@ -21,11 +20,12 @@ import {
   useSaveForm,
   useStorageConnections,
 } from '../api/queries/forms.ts';
+import { usePublication } from '../api/queries/public-forms.ts';
+import { ClientLinksPanel } from '../components/forms/ClientLinksPanel.tsx';
 import { FieldPalette } from '../components/forms/FieldPalette.tsx';
 import { FieldProperties } from '../components/forms/FieldProperties.tsx';
 import { FormCanvas } from '../components/forms/FormCanvas.tsx';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
-import { ClientLinksPanel } from '../components/forms/ClientLinksPanel.tsx';
 import { FormSettingsPanel } from '../components/forms/FormSettingsPanel.tsx';
 import { PublishPanel } from '../components/forms/PublishPanel.tsx';
 import { SubmissionsList } from '../components/forms/SubmissionsList.tsx';
@@ -341,9 +341,7 @@ export function FormBuilderPage() {
           </div>
         ) : tab === 'share' && !isNew ? (
           <div className="mx-auto flex max-w-3xl flex-col gap-8" data-testid="share-tab">
-            {dirty && (
-              <Callout tone="info">You have unsaved changes. Save them before publishing.</Callout>
-            )}
+            {dirty && <Callout tone="info">You have unsaved changes. Save them before publishing.</Callout>}
             {publication.isPending && <Spinner />}
             {publication.error && <ErrorBox error={publication.error} />}
             {publication.data && (

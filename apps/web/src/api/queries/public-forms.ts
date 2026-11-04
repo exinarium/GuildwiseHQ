@@ -1,9 +1,4 @@
-import type {
-  ClientLinkDto,
-  CreateClientLink,
-  FormPublicationDto,
-  FormSubmissionDto,
-} from '@aom/shared';
+import type { ClientLinkDto, CreateClientLink, FormPublicationDto, FormSubmissionDto } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../client.ts';
 

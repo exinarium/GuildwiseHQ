@@ -26,11 +26,10 @@ export const publicFormProjectors: Record<string, Projector> = {
   },
   FormUnpublished: async (tx, e) => {
     const p = ev<'FormUnpublished'>(e).payload;
-    await exec(
-      tx,
-      `UPDATE form_publications SET status='unpublished', unpublished_at=$2 WHERE form_id=$1`,
-      [p.formId, e.createdAt],
-    );
+    await exec(tx, `UPDATE form_publications SET status='unpublished', unpublished_at=$2 WHERE form_id=$1`, [
+      p.formId,
+      e.createdAt,
+    ]);
   },
   FormPublicLinkReset: async (tx, e) => {
     const p = ev<'FormPublicLinkReset'>(e).payload;

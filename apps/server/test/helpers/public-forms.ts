@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { renderStoragePath, type StorageReference, type StorageWriteError } from '@aom/shared';
-import type { FakeRunner } from './fake-runner.ts';
 import { ORIGIN } from './app.ts';
+import type { FakeRunner } from './fake-runner.ts';
 
 export const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 
@@ -13,7 +13,10 @@ export const PNG = Buffer.concat([
   Buffer.from('FILE-CONTENT-SENTINEL-png-91d0aa'),
 ]);
 export const PDF = Buffer.from('%PDF-1.7\nFILE-CONTENT-SENTINEL-pdf-4be2c1\n%%EOF');
-export const EXE = Buffer.concat([Buffer.from([0x4d, 0x5a, 0x90, 0x00]), Buffer.from('This program cannot be run')]);
+export const EXE = Buffer.concat([
+  Buffer.from([0x4d, 0x5a, 0x90, 0x00]),
+  Buffer.from('This program cannot be run'),
+]);
 
 export interface HttpResult {
   status: number;
@@ -31,7 +34,12 @@ export function call(
 ): Promise<HttpResult> {
   const u = new URL(baseUrl);
   const isJson = o.body !== undefined && !Buffer.isBuffer(o.body) && typeof o.body !== 'string';
-  const payload = o.body === undefined ? undefined : isJson ? Buffer.from(JSON.stringify(o.body)) : Buffer.from(o.body as Buffer | string);
+  const payload =
+    o.body === undefined
+      ? undefined
+      : isJson
+        ? Buffer.from(JSON.stringify(o.body))
+        : Buffer.from(o.body as Buffer | string);
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -179,7 +187,9 @@ export interface PfWorld {
   api(method: string, url: string, body?: unknown): ReturnType<World['t']['req']>;
   /** A form definition whose destinations are the local test folder. */
   definition(title?: string): FormDefinition;
-  createForm(def?: FormDefinition): Promise<{ id: string; latestVersion: number; definition: FormDefinition }>;
+  createForm(
+    def?: FormDefinition,
+  ): Promise<{ id: string; latestVersion: number; definition: FormDefinition }>;
   /** Creates and publishes a form; returns its id and the 22 character public id. */
   published(def?: FormDefinition): Promise<{ formId: string; publicId: string; url: string }>;
   get(path: string, headers?: Record<string, string>, ip?: string): Promise<HttpResult>;
@@ -202,7 +212,13 @@ export interface PfWorld {
     answers: Record<string, unknown>,
     files: Array<{ field: string; name: string; bytes: Buffer }>,
     link?: string,
-  ): Promise<{ start: HttpResult; parts: HttpResult[]; complete: HttpResult | null; sid: string; token: string }>;
+  ): Promise<{
+    start: HttpResult;
+    parts: HttpResult[];
+    complete: HttpResult | null;
+    sid: string;
+    token: string;
+  }>;
   /** Every row of every table, as text. */
   everything(): Promise<string>;
 }
@@ -213,10 +229,17 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
     self.logs = [];
     self.w = await createWorld({
       logStream: { write: (l: string) => void self.logs.push(l) },
-      env: { AOM_FIRST_RUN_HIRE_CAP: 'false', LOG_LEVEL: 'trace', AOM_FORMS_POW_BITS: '0', AOM_FORMS_MIN_FILL_MS: '0', ...env },
+      env: {
+        AOM_FIRST_RUN_HIRE_CAP: 'false',
+        LOG_LEVEL: 'trace',
+        AOM_FORMS_POW_BITS: '0',
+        AOM_FORMS_MIN_FILL_MS: '0',
+        ...env,
+      },
     });
     self.dir = mkdtempSync(join(tmpdir(), 'pf-store-'));
-    self.orgId = (await q('SELECT id FROM organizations WHERE owner_user_id=$1', [self.w.owner.id]))[0]?.id as string;
+    self.orgId = (await q('SELECT id FROM organizations WHERE owner_user_id=$1', [self.w.owner.id]))[0]
+      ?.id as string;
     self.r = await self.w.connectRunner({ capabilities: ['storage:1'] });
     self.api = (method, url, body) =>
       self.w.t.req(method, url, { cookie: self.w.owner.cookie, ...(body !== undefined ? { body } : {}) });
@@ -263,9 +286,14 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
     };
     const base = () => self.w.baseUrl;
     self.get = (path, headers = {}, ip) => call(base(), 'GET', path, { headers, ...(ip ? { ip } : {}) });
-    self.post = (path, body, headers = {}, ip) => call(base(), 'POST', path, { body: body as object, headers, ...(ip ? { ip } : {}) });
+    self.post = (path, body, headers = {}, ip) =>
+      call(base(), 'POST', path, { body: body as object, headers, ...(ip ? { ip } : {}) });
     self.put = (path, body, headers = {}, ip) =>
-      call(base(), 'PUT', path, { body, headers: { 'content-type': 'application/octet-stream', ...headers }, ...(ip ? { ip } : {}) });
+      call(base(), 'PUT', path, {
+        body,
+        headers: { 'content-type': 'application/octet-stream', ...headers },
+        ...(ip ? { ip } : {}),
+      });
     self.load = (publicId, link) =>
       self.get(`/api/public/forms/${publicId}`, link ? { 'x-form-link': link } : {});
     self.start = (publicId, dto, answers, files, extra = {}, ip) =>
@@ -276,7 +304,13 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
           nonce: '0',
           website: '',
           answers,
-          files: files.map((f) => ({ field: f.field, index: 0, name: f.name, size: f.bytes.length, sha256: sha(f.bytes) })),
+          files: files.map((f) => ({
+            field: f.field,
+            index: 0,
+            name: f.name,
+            size: f.bytes.length,
+            sha256: sha(f.bytes),
+          })),
           ...extra,
         },
         {},
@@ -298,12 +332,18 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
             }),
           );
         if (parts.every((p) => p.status === 200))
-          complete = await self.post(`/api/public/forms/${publicId}/submissions/${sid}/complete`, { answers }, { 'x-upload-token': token });
+          complete = await self.post(
+            `/api/public/forms/${publicId}/submissions/${sid}/complete`,
+            { answers },
+            { 'x-upload-token': token },
+          );
       }
       return { start, parts, complete, sid, token };
     };
     self.everything = async () => {
-      const tables = await q<{ tablename: string }>(`SELECT tablename FROM pg_tables WHERE schemaname='public'`);
+      const tables = await q<{ tablename: string }>(
+        `SELECT tablename FROM pg_tables WHERE schemaname='public'`,
+      );
       const out: string[] = [];
       for (const t of tables) {
         const rows = await q(`SELECT row_to_json(x)::text AS j FROM "${t.tablename}" x`);

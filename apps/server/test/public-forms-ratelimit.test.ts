@@ -16,7 +16,8 @@ describe('rate limiting (AC6)', () => {
   it('answers 429 with Retry-After after the per-IP threshold; another address is unaffected', async () => {
     const { publicId } = await pf.published(pf.definition('Rate IP'));
     const statuses: number[] = [];
-    for (let i = 0; i < 22; i++) statuses.push((await pf.get(`/api/public/forms/${publicId}`, {}, '203.0.113.7')).status);
+    for (let i = 0; i < 22; i++)
+      statuses.push((await pf.get(`/api/public/forms/${publicId}`, {}, '203.0.113.7')).status);
     expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
     const refused = await pf.get(`/api/public/forms/${publicId}`, {}, '203.0.113.7');
     expect(refused.status).toBe(429);
@@ -28,7 +29,11 @@ describe('rate limiting (AC6)', () => {
   });
 
   it('limits submission starts per address across forms', async () => {
-    const forms = [await pf.published(pf.definition('Rate A')), await pf.published(pf.definition('Rate B')), await pf.published(pf.definition('Rate C'))];
+    const forms = [
+      await pf.published(pf.definition('Rate A')),
+      await pf.published(pf.definition('Rate B')),
+      await pf.published(pf.definition('Rate C')),
+    ];
     const ip = '198.51.100.20';
     const codes: number[] = [];
     for (const f of forms) {
