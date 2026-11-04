@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "ui": ["apps/web/src/**"],
+  "pages": ["apps/web/src/pages/*.tsx", "apps/web/src/pages/platform/*.tsx"],
+  "shared": [
+    "apps/web/src/components/shell/**",
+    "apps/web/src/components/ui/**",
+    "apps/web/src/index.css",
+    "apps/web/src/tokens.css",
+    "apps/web/src/router.tsx",
+    "apps/web/src/main.tsx",
+    "apps/web/src/api/**",
+    "apps/web/src/hooks/**",
+    "apps/web/src/lib/**",
+    "apps/web/src/ws/**",
+    "apps/web/src/test/**",
+    "**/*.test.*"
+  ],
+  "exclude": [
+    "apps/web/src/pages/Login.tsx",
+    "apps/web/src/pages/ForgotPassword.tsx",
+    "apps/web/src/pages/ResetPassword.tsx",
+    "apps/web/src/pages/AcceptInvite.tsx",
+    "apps/web/src/pages/ChangePasswordRequired.tsx",
+    "apps/web/src/pages/SecuritySetup.tsx",
+    "apps/web/src/pages/DeskActionConfirm.tsx"
+  ],
+  "videos": {
+    "agents": {
+      "screens": [
+        {
+          "name": "Agents",
+          "files": ["apps/web/src/pages/Agents.tsx", "apps/web/src/components/agents/**", "apps/web/src/components/hr/**"]
+        }
+      ]
+    },
+    "ai-runtimes": {
+      "screens": [
+        {
+          "name": "AI runtimes",
+          "files": ["apps/web/src/pages/OrgProviders.tsx", "apps/web/src/components/providers/**"]
+        }
+      ]
+    },
+    "automations": {
+      "screens": [
+        {
+          "name": "Automations",
+          "files": [
+            "apps/web/src/pages/Automations.tsx",
+            "apps/web/src/components/schedules/**",
+            "apps/web/src/components/runs/**"
+          ]
+        }
+      ]
+    },
+    "backlog": {
+      "screens": [{ "name": "Backlog", "files": ["apps/web/src/pages/Backlog.tsx"] }]
+    },
+    "board": {
+      "screens": [
+        {
+          "name": "Board",
+          "files": [
+            "apps/web/src/pages/Board.tsx",
+            "apps/web/src/pages/Archive.tsx",
+            "apps/web/src/pages/Phase.tsx"
+          ]
+        },
+        {
+          "name": "Card",
+          "files": [
+            "apps/web/src/pages/CardDetail.tsx",
+            "apps/web/src/pages/CardNew.tsx",
+            "apps/web/src/components/cards/**"
+          ]
+        }
+      ]
+    },
+    "boardroom": {
+      "screens": [
+        {
+          "name": "Boardroom",
+          "files": [
+            "apps/web/src/pages/Boardroom.tsx",
+            "apps/web/src/pages/BoardroomSession.tsx",
+            "apps/web/src/components/boardroom/**"
+          ]
+        }
+      ]
+    },
+    "capabilities": {
+      "screens": [
+        {
+          "name": "Capabilities",
+          "files": ["apps/web/src/pages/Capabilities.tsx", "apps/web/src/components/capabilities/**"]
+        }
+      ]
+    },
+    "ceo": {
+      "screens": [
+        {
+          "name": "CEO",
+          "files": ["apps/web/src/pages/Ceo.tsx", "apps/web/src/pages/CeoChat.tsx", "apps/web/src/components/ceo/**"]
+        }
+      ]
+    },
+    "costs": {
+      "screens": [{ "name": "Costs", "files": ["apps/web/src/pages/Costs.tsx"] }]
+    },
+    "desk": {
+      "screens": [
+        { "name": "Desk", "files": ["apps/web/src/pages/Desk.tsx", "apps/web/src/components/delegation/**"] },
+        {
+          "name": "Chat",
+          "files": [
+            "apps/web/src/pages/Chat.tsx",
+            "apps/web/src/pages/PersonaChat.tsx",
+            "apps/web/src/components/chat/**",
+            "apps/web/src/components/chats/**"
+          ]
+        }
+      ]
+    },
+    "discovery": {
+      "screens": [
+        {
+          "name": "Discovery",
+          "files": [
+            "apps/web/src/pages/Discovery.tsx",
+            "apps/web/src/pages/DiscoverySession.tsx",
+            "apps/web/src/components/discovery/**"
+          ]
+        }
+      ]
+    },
+    "documents": {
+      "screens": [{ "name": "Documents", "files": ["apps/web/src/pages/Documents.tsx"] }]
+    },
+    "environments": {
+      "screens": [
+        {
+          "name": "Environments",
+          "files": [
+            "apps/web/src/pages/ProjectEnvironments.tsx",
+            "apps/web/src/components/environments/**",
+            "apps/web/src/components/devops/**"
+          ]
+        }
+      ]
+    },
+    "getting-started": {
+      "screens": [
+        { "name": "Desk", "files": ["apps/web/src/pages/Desk.tsx"] },
+        {
+          "name": "Setup and tour",
+          "files": ["apps/web/src/components/setup/**", "apps/web/src/components/tour/**"]
+        }
+      ]
+    },
+    "governance": {
+      "screens": [{ "name": "Governance", "files": ["apps/web/src/components/governance/**"] }]
+    },
+    "help": {
+      "screens": [
+        {
+          "name": "Help",
+          "files": ["apps/web/src/pages/Help.tsx", "apps/web/src/components/help/**", "apps/web/src/components/video/**"]
+        }
+      ]
+    },
+    "intake": {
+      "screens": [{ "name": "Intake", "files": ["apps/web/src/pages/Intake.tsx", "apps/web/src/pages/IntakeBatch.tsx"] }]
+    },
+    "integrations": {
+      "screens": [
+        {
+          "name": "Integrations",
+          "files": ["apps/web/src/pages/Integrations.tsx", "apps/web/src/components/integrations/**"]
+        }
+      ]
+    },
+    "interests": {
+      "screens": [
+        {
+          "name": "Interests",
+          "files": [
+            "apps/web/src/pages/Interests.tsx",
+            "apps/web/src/pages/InterestDetail.tsx",
+            "apps/web/src/components/interests/**"
+          ]
+        }
+      ]
+    },
+    "ledger": {
+      "screens": [{ "name": "Ledger", "files": ["apps/web/src/pages/Ledger.tsx"] }]
+    },
+    "metrics": {
+      "screens": [{ "name": "Metrics", "files": ["apps/web/src/pages/Metrics.tsx"] }]
+    },
+    "org-chart": {
+      "screens": [
+        { "name": "Org chart", "files": ["apps/web/src/pages/OrgChart.tsx", "apps/web/src/components/orgchart/**"] }
+      ]
+    },
+    "organization": {
+      "screens": [
+        {
+          "name": "Organization settings",
+          "files": ["apps/web/src/pages/OrgSettings.tsx", "apps/web/src/components/orgsettings/**"]
+        }
+      ]
+    },
+    "overview": {
+      "screens": [
+        { "name": "Boardroom", "files": ["apps/web/src/pages/Boardroom.tsx"] },
+        { "name": "Discovery", "files": ["apps/web/src/pages/Discovery.tsx"] },
+        { "name": "Board", "files": ["apps/web/src/pages/Board.tsx"] },
+        { "name": "Invitations", "files": ["apps/web/src/pages/platform/PlatformInvitations.tsx"] }
+      ]
+    },
+    "platform-area": {
+      "screens": [
+        {
+          "name": "Platform",
+          "files": [
+            "apps/web/src/pages/PlatformTeamDesk.tsx",
+            "apps/web/src/pages/platform/*.tsx",
+            "apps/web/src/components/platform/**",
+            "apps/web/src/components/blog/**"
+          ]
+        }
+      ]
+    },
+    "projects": {
+      "screens": [
+        { "name": "Projects", "files": ["apps/web/src/pages/Projects.tsx", "apps/web/src/pages/ProjectSettings.tsx"] }
+      ]
+    },
+    "releases": {
+      "screens": [
+        { "name": "Releases", "files": ["apps/web/src/pages/Releases.tsx", "apps/web/src/components/delivery/**"] }
+      ]
+    },
+    "research": {
+      "screens": [{ "name": "Research", "files": ["apps/web/src/pages/ResearchTab.tsx"] }]
+    },
+    "roles-and-workflows": {
+      "screens": [
+        {
+          "name": "Roles and workflows",
+          "files": [
+            "apps/web/src/pages/OrgDesigner.tsx",
+            "apps/web/src/pages/WorkflowBuilderPage.tsx",
+            "apps/web/src/components/org/**",
+            "apps/web/src/components/builder/**"
+          ]
+        }
+      ]
+    },
+    "settings": {
+      "screens": [
+        {
+          "name": "Settings",
+          "files": [
+            "apps/web/src/pages/Settings.tsx",
+            "apps/web/src/components/settings/**",
+            "apps/web/src/components/profile/**"
+          ]
+        }
+      ]
+    },
+    "vaults": {
+      "screens": [{ "name": "Vaults", "files": ["apps/web/src/pages/Vaults.tsx"] }]
+    },
+    "workstations": {
+      "screens": [
+        {
+          "name": "Workstations",
+          "files": ["apps/web/src/pages/Workstations.tsx", "apps/web/src/components/workstations/**"]
+        }
+      ]
+    }
+  },
+  "planned": {
+    "forms": {
+      "title": "Forms: build a form",
+      "pages": ["apps/web/src/pages/Forms.tsx", "apps/web/src/pages/FormBuilderPage.tsx"]
+    },
+    "journeys": {
+      "title": "Journeys: design a journey",
+      "pages": [
+        "apps/web/src/pages/Journeys.tsx",
+        "apps/web/src/pages/JourneyDesigner.tsx",
+        "apps/web/src/pages/JourneyInstance.tsx"
+      ]
+    }
+  }
+}
