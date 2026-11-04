@@ -15,7 +15,22 @@ export function freeId(taken: Iterable<string>, base = 'step'): string {
 export function addStep(def: JourneyDefinition, kind: JourneyStep['kind'], label: string): JourneyDefinition {
   const id = freeId(def.steps.map((s) => s.id), label);
   const step: JourneyStep =
-    kind === 'workflow' ? { kind, id, label, workflowKey: null, fieldsIn: [] } : { kind, id, label };
+    kind === 'workflow'
+      ? { kind, id, label, workflowKey: null, fieldsIn: [] }
+      : kind === 'webhook_call'
+        ? {
+            kind,
+            id,
+            label,
+            workstationId: null,
+            url: '',
+            method: 'POST',
+            headers: [],
+            credentialHeaders: [],
+            contentType: 'application/json',
+            body: '',
+          }
+        : { kind, id, label };
   return { ...def, steps: [...def.steps, step] };
 }
 
