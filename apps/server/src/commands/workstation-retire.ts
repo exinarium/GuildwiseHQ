@@ -23,15 +23,25 @@ import { unlinkWorkstationIn } from './workstations.ts';
 const ref = (a: Row): RetireAgentRef => ({ id: a.id, name: a.name, roleKey: a.role_key });
 const notKnown = () => notFound('workstation not found in this organization', 'workstation_not_found');
 
-/** Who is in a shift right now on the workstation or among its agents (any status of the shift but `ended`). */
-async function workingAgents(db: Queryable, workstationId: string, agentIds: string[]) {
+/**
+ * Who is in a shift right now on the workstation or among its agents (any status of the shift but `ended`). Other
+ * organizations' agents are included only with `allOrgs` (the caller may unpair the machine).
+ */
+async function workingAgents(
+  db: Queryable,
+  workstationId: string,
+  agentIds: string[],
+  orgId: string,
+  allOrgs: boolean,
+) {
   return rows(
     db,
     `SELECT DISTINCT ON (a.id) a.id, a.name, a.role_key, c.ref AS card_ref
        FROM shifts s JOIN agents a ON a.id = s.agent_id LEFT JOIN cards c ON c.id = s.card_id
       WHERE s.status <> 'ended' AND (s.workstation_id = $1 OR a.id = ANY($2::uuid[]))
+        AND ($3::boolean OR a.org_id = $4)
       ORDER BY a.id`,
-    [workstationId, agentIds],
+    [workstationId, agentIds, allOrgs, orgId],
   );
 }
 
@@ -71,6 +81,8 @@ export async function retirePreview(ctx: Ctx, who: Who, workstationId: string): 
     ctx.pool,
     workstationId,
     relevant.map((a) => a.id as string),
+    who.orgId,
+    seesOthers,
   );
   const cards = await homedCards(ctx.pool, workstationId, who.orgId, seesOthers);
   return {
@@ -128,6 +140,9 @@ export async function retireWorkstation(
       tx,
       workstationId,
       onIt.map((a) => a.id as string),
+      who.orgId,
+      // Paired: the caller is the machine's user (checked above) and unpairing affects every organization on it.
+      active,
     );
     if (working.length > 0) {
       const names = working.map((a) => (a.card_ref ? `${a.name} (${a.card_ref})` : a.name)).join(', ');
@@ -304,7 +319,7 @@ export async function retireWorkstation(
     }
 
     // One audit entry per organization whose agents were handed over (and always one for the acting organization).
-    const orgIds = new Set<string>([who.orgId, ...otherOrg.map((a) => a.org_id as string)]);
+    const orgIds = new Set<string>([who.orgId, ...[...otherOrg, ...ceos].map((a) => a.org_id as string)]);
     for (const orgId of orgIds) {
       events.push({
         streamId: streamId.workstation(workstationId),

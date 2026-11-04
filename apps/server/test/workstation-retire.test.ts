@@ -161,14 +161,24 @@ describe('retire a workstation with agent handover', () => {
     const out = await w.t.userSession(uniqueEmail('out'));
     const outOrg = (await q('SELECT org_id FROM org_members WHERE user_id=$1 LIMIT 1', [out.id]))[0]!.org_id;
     await q('UPDATE agents SET org_id=$2 WHERE id=$1', [s.agents[1]!.id, outOrg]);
+    // the other organization's agent is working on the shared machine
+    const shiftId = crypto.randomUUID();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+       VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now())`,
+      [shiftId, outOrg, s.agents[1]!.id, s.id],
+    );
     const adminView = await as(adminS.cookie).get(`/api/workstations/${s.id}/retire-preview`);
     expect(adminView.status).toBe(200);
     expect(adminView.body.agents.map((a: any) => a.id)).toEqual([s.agents[0]!.id]);
+    expect(adminView.body.working).toEqual([]);
     expect(adminView.body.canUnpair).toBe(false);
     const ownerView = await owner().get(`/api/workstations/${s.id}/retire-preview`);
     expect(ownerView.body.agents).toHaveLength(2);
     expect(ownerView.body.agents.find((a: any) => a.id === s.agents[1]!.id).otherOrg).toBe(true);
+    expect(ownerView.body.working.map((a: any) => a.id)).toEqual([s.agents[1]!.id]);
     expect(ownerView.body.canUnpair).toBe(true);
+    await q(`UPDATE shifts SET status='ended', ended_at=now() WHERE id=$1`, [shiftId]);
   });
 
   it('AC6: a Member gets 403 on the preview and on retiring', async () => {
