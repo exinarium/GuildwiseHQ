@@ -304,7 +304,7 @@ export function WorkstationCard({
             aria-controls={bodyId}
             aria-label={`${expanded ? 'Hide' : 'Show'} details of ${w.name}`}
             onClick={() => setExpanded(!expanded)}
-            className="group -m-1 flex min-h-11 min-w-0 flex-1 basis-full items-center gap-2 rounded-control p-1 text-left sm:basis-0 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="group -m-1 flex min-h-11 min-w-0 flex-1 basis-full items-center gap-2 rounded-control p-1 text-left sm:basis-48 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <ChevronRight
               aria-hidden="true"
