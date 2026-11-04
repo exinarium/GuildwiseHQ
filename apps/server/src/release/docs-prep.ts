@@ -34,7 +34,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { changelogDispatchFor, NO_WRITER, storedStepOutput } from './docs-prep-changelog.ts';
+import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -410,9 +410,7 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
     let changelog: ReleaseDocsPrepPayload['changelog'];
     if (action.step === 'changelog') {
       const d = await changelogDispatchFor(tx, run, repo, summary?.success ? summary.data : null);
-      // Entries for new changes come from the changelog writer, which this server does not run yet.
-      const error = d.kind === 'fail' ? d.error : d.kind === 'write' ? NO_WRITER : null;
-      if (error !== null) {
+      if (d.kind === 'fail') {
         await ctx.store.append(
           [
             {
@@ -425,7 +423,7 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
               streamId: streamId.releaseDocsPrep(runId),
               event: {
                 type: 'ReleaseDocsPrepStepFinished',
-                payload: { runId, repoId, step: action.step, state: 'failed', error, files: [] },
+                payload: { runId, repoId, step: action.step, state: 'failed', error: d.error, files: [] },
               },
               actor,
               scope,
@@ -436,52 +434,82 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
         failedHere = true;
         continue;
       }
+      if (d.kind === 'write') {
+        // The entries for new changes are written by a BA first; its accepted report sends the runner command.
+        await queueChangelogTask(ctx, tx, run, repoId);
+        continue;
+      }
       changelog = { projectName: project?.name ?? '', entries: [] };
     }
-    const payload: ReleaseDocsPrepPayload = {
-      runId,
-      projectId: run.project_id,
-      repoId,
-      remoteUrlNormalized: repo.remote_url_normalized,
-      ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
-      releaseBranch: repo.branch,
-      ...(repo.main_branch ? { mainBranch: repo.main_branch } : {}),
-      step: action.step,
-      ...(action.phase ? { phase: action.phase } : {}),
-      components: await loadComponentRules(tx, repoId),
-      projectKey: project?.key ?? '',
-      ...(summary?.success ? { summary: summary.data } : {}),
-      ...(repo.base_sha ? { base: { sha: repo.base_sha, tag: repo.base_tag ?? null } } : {}),
-      message: `docs(release): prepare the release documentation for ${repo.branch}`,
-      commitAs: commitAs ?? null,
-      ...(changelog ? { changelog } : {}),
-    };
-    const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.releaseDocsPrep(runId),
-          event: {
-            type: 'ReleaseDocsPrepStepStarted',
-            payload: {
-              runId,
-              repoId,
-              step: action.step,
-              ...(action.phase ? { phase: action.phase } : {}),
-              commandId,
-            },
-          },
-          actor,
-          scope,
-        },
-      ],
-      { tx },
+    deliver.push(
+      await sendDocsPrepStepCommand(ctx, tx, run, repo, {
+        step: action.step,
+        ...(action.phase ? { phase: action.phase } : {}),
+        projectKey: project?.key ?? '',
+        commitAs: commitAs ?? null,
+        ...(changelog ? { changelog } : {}),
+      }),
     );
-    deliver.push(repo.workstation_id);
   }
   // A step that failed before anything was sent finishes the run now (nothing is committed).
   if (failedHere) deliver.push(...(await advance(ctx, tx, runId)));
   return deliver;
+}
+
+/**
+ * Sends one `release.docs_prep` command for a (step, repository) of a running run and marks the step running. Returns
+ * the workstation to deliver to after the commit. `repo` is a release_docs_prep_repos row joined with project_repos.
+ */
+export async function sendDocsPrepStepCommand(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  repo: Row,
+  o: {
+    step: string;
+    phase?: CommitPhase;
+    projectKey: string;
+    commitAs: ReleaseDocsPrepPayload['commitAs'];
+    changelog?: ReleaseDocsPrepPayload['changelog'];
+  },
+): Promise<string> {
+  const runId: string = run.id;
+  const repoId: string = repo.repo_id;
+  const summary = repo.summary ? ReleaseDocsPrepSummarySchema.safeParse(repo.summary) : null;
+  const payload: ReleaseDocsPrepPayload = {
+    runId,
+    projectId: run.project_id,
+    repoId,
+    remoteUrlNormalized: repo.remote_url_normalized,
+    ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+    releaseBranch: repo.branch,
+    ...(repo.main_branch ? { mainBranch: repo.main_branch } : {}),
+    step: o.step,
+    ...(o.phase ? { phase: o.phase } : {}),
+    components: await loadComponentRules(tx, repoId),
+    projectKey: o.projectKey,
+    ...(summary?.success ? { summary: summary.data } : {}),
+    ...(repo.base_sha ? { base: { sha: repo.base_sha, tag: repo.base_tag ?? null } } : {}),
+    message: `docs(release): prepare the release documentation for ${repo.branch}`,
+    commitAs: o.commitAs ?? null,
+    ...(o.changelog ? { changelog: o.changelog } : {}),
+  };
+  const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.releaseDocsPrep(runId),
+        event: {
+          type: 'ReleaseDocsPrepStepStarted',
+          payload: { runId, repoId, step: o.step, ...(o.phase ? { phase: o.phase } : {}), commandId },
+        },
+        actor: run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR,
+        scope: projectScope(run.org_id, run.project_id),
+      },
+    ],
+    { tx },
+  );
+  return repo.workstation_id;
 }
 
 // ------------------------------------------------------------------------------------------------------------ result

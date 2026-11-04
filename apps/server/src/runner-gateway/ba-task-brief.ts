@@ -16,6 +16,7 @@ import { toTargetBrief } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
 import { buildReviewTask } from '../commands/review-tasks.ts';
 import { buildSpecCardTask } from '../commands/spec-card.ts';
+import { buildReleaseChangelogTask } from '../release/docs-prep-changelog-task.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
@@ -99,7 +100,8 @@ export async function buildBaTaskShiftStart(
   const batch = task.kind === 'batch_intake';
   const mailDraft = task.kind === 'mail_reply_draft';
   const specCard = task.kind === 'spec_card';
-  if (!task.phase_id && !reporter && !batch && !mailDraft && !specCard) return null;
+  const changelog = task.kind === 'release_changelog';
+  if (!task.phase_id && !reporter && !batch && !mailDraft && !specCard && !changelog) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [task.agent_id]);
   if (!agent) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
@@ -108,7 +110,12 @@ export async function buildBaTaskShiftStart(
   const specTask = specCard
     ? await buildSpecCardTask(ctx.pool, task, agent.role_key === 'architect' ? 'architect' : 'ba')
     : null;
-  const baTask: BaTaskShift | null = specCard
+  const changelogTask = changelog ? await buildReleaseChangelogTask(ctx.pool, task) : null;
+  const baTask: BaTaskShift | null = changelog
+    ? changelogTask
+      ? { taskId: task.id, kind: task.kind, releaseChangelog: changelogTask, cards: [], followups: [], outstanding: [] }
+      : null
+    : specCard
     ? specTask
       ? { taskId: task.id, kind: task.kind, specCard: specTask, cards: [], followups: [], outstanding: [] }
       : null
@@ -137,7 +144,9 @@ export async function buildBaTaskShiftStart(
       id: shiftId,
       kind: 'ba_task',
       stage: 'ba_task',
-      stageLabel: specCard
+      stageLabel: changelog
+        ? 'Release changelog'
+        : specCard
         ? 'Specify a card'
         : mailDraft
           ? 'Mail reply draft'
@@ -156,10 +165,12 @@ export async function buildBaTaskShiftStart(
       ref:
         baTask.phase?.ref ??
         (specCard ? baTask.specCard?.ref : undefined) ??
-        (mailDraft ? 'MAIL' : batch ? (baTask.batch?.ticketKey ?? 'BATCH') : 'REPORT'),
+        (changelog ? 'RELEASE' : mailDraft ? 'MAIL' : batch ? (baTask.batch?.ticketKey ?? 'BATCH') : 'REPORT'),
       title:
         baTask.phase?.name ??
-        (specCard
+        (changelog
+          ? `Changelog entries for ${baTask.releaseChangelog?.repoName}`
+          : specCard
           ? `Specify ${baTask.specCard?.ref}`
           : mailDraft
             ? 'Draft an e-mail reply'

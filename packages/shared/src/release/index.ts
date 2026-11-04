@@ -9,3 +9,4 @@ export * from './recommend.ts';
 export * from './tags.ts';
 export * from './validate.ts';
 export * from './changelog-entries.ts';
+export * from './changelog-task.ts';

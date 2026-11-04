@@ -6,8 +6,13 @@ import {
   ReleaseChangelogOutputSchema,
   type ReleaseDocsPrepSummary,
   ReleasePrepChangelogPayloadSchema,
+  streamId,
 } from '@aom/shared';
+import { randomUUID } from 'node:crypto';
+import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import type { Tx } from '../db/tx.ts';
 import { loadFacts } from './facts.ts';
 
 /**
@@ -18,9 +23,6 @@ import { loadFacts } from './facts.ts';
 export const NEEDS_ANALYSE = 'Write changelog needs Analyse changes. Turn it on in the project settings.';
 export const NEEDS_RUNNER =
   'Write changelog needs a newer runner on the workstation that has this repository. Update the runner and retry prep.';
-export const NO_WRITER =
-  'The changelog writer is not available on this server yet, so the entries for the analysed changes could not be written. Write them under ## [Unreleased] by hand and Skip prep, or turn Write changelog off.';
-
 /** The source ids of a change summary: the commits and merges 'Analyse changes' found. */
 export function summarySources(summary: ReleaseDocsPrepSummary): string[] {
   return [...new Set([...summary.commits.map((c) => c.sha), ...summary.merges.map((m) => m.sha)])];
@@ -102,6 +104,14 @@ export async function changelogDispatchFor(
     'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
     [repo.workstation_id, RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY],
   );
+  const covered = await coveredSourcesFor(db, run, repo);
+  const f = await loadFacts(db, repo.repo_id);
+  const facts = f?.facts ? { headSha: f.facts.headSha, changelog: f.facts.changelog ?? null } : null;
+  return decideChangelogDispatch({ summary, hasCapability: !!cap, facts, covered });
+}
+
+/** The sources earlier passed runs of the same release (branch, repository, base tag) already handled. */
+export async function coveredSourcesFor(db: Queryable, run: Row, repo: Row): Promise<Set<string>> {
   const earlier = await rows(
     db,
     `SELECT s.output, r.commit_sha FROM release_docs_prep_runs u
@@ -111,11 +121,53 @@ export async function changelogDispatchFor(
         AND r.repo_id=$4 AND r.base_tag IS NOT DISTINCT FROM $5`,
     [run.project_id, run.release_branch, run.id, repo.repo_id, repo.base_tag],
   );
-  const covered = coveredSourcesOf(
+  return coveredSourcesOf(
     earlier.map((e) => e.output).filter((o) => o != null),
     earlier.map((e) => e.commit_sha).filter((c): c is string => typeof c === 'string'),
   );
-  const f = await loadFacts(db, repo.repo_id);
-  const facts = f?.facts ? { headSha: f.facts.headSha, changelog: f.facts.changelog ?? null } : null;
-  return decideChangelogDispatch({ summary, hasCapability: !!cap, facts, covered });
+}
+
+/**
+ * Marks the step running (no runner command yet) and queues the BA task that proposes the entries for one repository.
+ * At most one open task per (run, repository).
+ */
+export async function queueChangelogTask(ctx: Ctx, tx: Tx, run: Row, repoId: string): Promise<void> {
+  const open = await one(
+    tx,
+    `SELECT 1 FROM ba_tasks WHERE prep_run_id=$1 AND prep_repo_id=$2 AND status IN ('queued','running')`,
+    [run.id, repoId],
+  );
+  const scope = projectScope(run.org_id, run.project_id);
+  const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
+  const taskId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.releaseDocsPrep(run.id),
+        event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId: run.id, repoId, step: 'changelog' } },
+        actor,
+        scope,
+      },
+      ...(open
+        ? []
+        : [
+            {
+              streamId: streamId.baTask(taskId),
+              event: {
+                type: 'BaTaskQueued' as const,
+                payload: {
+                  taskId,
+                  projectId: run.project_id,
+                  kind: 'release_changelog' as const,
+                  prepRunId: run.id,
+                  prepRepoId: repoId,
+                },
+              },
+              actor,
+              scope,
+            },
+          ]),
+    ],
+    { tx },
+  );
 }
