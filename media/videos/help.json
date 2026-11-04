@@ -14,18 +14,18 @@
   ],
   "captions": "/videos/help.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 51.8,
+  "duration": 51.4,
   "chapters": [
     {
-      "t": 5.9,
+      "t": 5.8,
       "title": "Search the articles"
     },
     {
-      "t": 18.6,
+      "t": 18.5,
       "title": "Glossary, what’s new and the blog"
     },
     {
-      "t": 35.9,
+      "t": 35.5,
       "title": "Page help and the tour"
     }
   ]

@@ -14,23 +14,27 @@
   ],
   "captions": "/videos/agents.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 81.7,
+  "duration": 91.9,
   "chapters": [
     {
-      "t": 10.3,
+      "t": 9.9,
       "title": "Hire an agent"
     },
     {
-      "t": 29.1,
+      "t": 28.8,
       "title": "Pause, resume and change model"
     },
     {
-      "t": 44.6,
+      "t": 44.2,
       "title": "Recommendations"
     },
     {
-      "t": 67.9,
+      "t": 67.5,
       "title": "Filter by project"
+    },
+    {
+      "t": 75.1,
+      "title": "Move an agent"
     }
   ]
 }

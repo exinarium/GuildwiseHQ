@@ -157,6 +157,18 @@
         }
       ]
     },
+    "forms": {
+      "screens": [
+        {
+          "name": "Forms",
+          "files": [
+            "apps/web/src/pages/Forms.tsx",
+            "apps/web/src/pages/FormBuilderPage.tsx",
+            "apps/web/src/components/forms/**"
+          ]
+        }
+      ]
+    },
     "getting-started": {
       "screens": [
         { "name": "Desk", "files": ["apps/web/src/pages/Desk.tsx"] },
@@ -204,6 +216,19 @@
             "apps/web/src/components/interests/**"
           ]
         }
+      ]
+    },
+    "journeys": {
+      "screens": [
+        {
+          "name": "Journeys",
+          "files": [
+            "apps/web/src/pages/Journeys.tsx",
+            "apps/web/src/pages/JourneyDesigner.tsx",
+            "apps/web/src/components/journeys/**"
+          ]
+        },
+        { "name": "Journey instance", "files": ["apps/web/src/pages/JourneyInstance.tsx"] }
       ]
     },
     "ledger": {
@@ -293,6 +318,9 @@
         }
       ]
     },
+    "storage": {
+      "screens": [{ "name": "Storage", "files": ["apps/web/src/components/orgsettings/Storage*.tsx"] }]
+    },
     "vaults": {
       "screens": [{ "name": "Vaults", "files": ["apps/web/src/pages/Vaults.tsx"] }]
     },
@@ -305,18 +333,5 @@
       ]
     }
   },
-  "planned": {
-    "forms": {
-      "title": "Forms: build a form",
-      "pages": ["apps/web/src/pages/Forms.tsx", "apps/web/src/pages/FormBuilderPage.tsx"]
-    },
-    "journeys": {
-      "title": "Journeys: design a journey",
-      "pages": [
-        "apps/web/src/pages/Journeys.tsx",
-        "apps/web/src/pages/JourneyDesigner.tsx",
-        "apps/web/src/pages/JourneyInstance.tsx"
-      ]
-    }
-  }
+  "planned": {}
 }

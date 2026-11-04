@@ -85,12 +85,17 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     help: 'boardroom#start',
     published: true,
   },
-  // Not recorded yet: the video is made with the user guide for this release, then `published` becomes true.
   forms: {
     title: 'Forms: build a form',
     nav: 'forms',
     help: 'forms#build-a-form',
-    published: false,
+    published: true,
+  },
+  journeys: {
+    title: 'Journeys: design a journey',
+    nav: 'journeys',
+    help: 'journeys#design',
+    published: true,
   },
   capabilities: {
     title: 'Capabilities and packs',
@@ -176,6 +181,12 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     nav: null,
     paths: ['/settings/providers'],
     help: 'ai-runtimes#accounts',
+    published: true,
+  },
+  storage: {
+    title: 'Storage connections',
+    nav: null,
+    help: 'storage#connect',
     published: true,
   },
   governance: {

@@ -20,7 +20,7 @@ describe('help video clips', () => {
   it('lists every recorded help video with chapters that tile the video', () => {
     expect(catalog.length).toBeGreaterThan(20);
     const agents = catalog.find((c) => c.slug === 'agents');
-    expect(agents?.chapters[0]).toMatchObject({ index: 0, title: 'Hire an agent', t0: 10.3, t1: 29.1 });
+    expect(agents?.chapters[0]).toMatchObject({ index: 0, title: 'Hire an agent', t0: 9.9, t1: 28.8 });
     expect(agents?.chapters.at(-1)?.t1).toBe(agents?.duration);
     expect(clipCatalogForPrompt(catalog).length).toBeGreaterThan(50);
   });
@@ -34,8 +34,8 @@ describe('help video clips', () => {
   });
   it('resolves chapters by index or title and ranges, and rejects unknown ones', () => {
     const r = clipResolver(catalog);
-    expect(r({ type: 'clip', slug: 'agents', chapter: 1 })).toMatchObject({ from: 29.1, to: 44.6 });
-    expect(r({ type: 'clip', slug: 'agents', chapter: 'recommendations' })).toMatchObject({ from: 44.6 });
+    expect(r({ type: 'clip', slug: 'agents', chapter: 1 })).toMatchObject({ from: 28.8, to: 44.2 });
+    expect(r({ type: 'clip', slug: 'agents', chapter: 'recommendations' })).toMatchObject({ from: 44.2 });
     expect(r({ type: 'clip', slug: 'agents', from: 5, to: 9 })).toMatchObject({ from: 5, to: 9 });
     expect(() => r({ type: 'clip', slug: 'nope', chapter: 0 })).toThrow(/unknown help video/);
     expect(() => r({ type: 'clip', slug: 'agents', chapter: 99 })).toThrow(/no chapter/);

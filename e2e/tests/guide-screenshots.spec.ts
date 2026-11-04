@@ -29,6 +29,7 @@ import { waitForMail } from '../support/mail.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 import { expandWorkstation } from '../support/ui.ts';
 import { git, makeVault } from '../support/vault.ts';
+import { addLocalStorage, createClientLink, createRentalForm, submitPublicForm } from '../video/seed.ts';
 
 /**
  * The screenshot run of docs/guide (project `guide`, never part of `pnpm e2e`):
@@ -2022,6 +2023,213 @@ step('polish: realistic test steps on the QA card', async () => {
   ]);
 });
 
+step('1.5.0: storage, forms and journeys, a workstation with three agents', async (browser) => {
+  const p = await pieter();
+  const ws = S.ids.wsA as string;
+  // Storage: three connections through the API with their health set in the guide database only (the runner cannot sign
+  // in to a real OneDrive or S3 here), and one real local folder that the form below writes to.
+  const made: Record<string, string> = {};
+  for (const [kind, label, state] of [
+    ['onedrive', 'Client documents', 'connected'],
+    ['s3', 'Archive bucket', 'connected'],
+    ['local', 'Old share', 'needs_reauth'],
+  ] as const) {
+    const r = await p.post('/api/org/storage/connections', { data: { kind, label, workstationId: ws } });
+    expect(r.status(), await r.text()).toBe(201);
+    made[label] = (await r.json()).connection.id as string;
+    await q(
+      `INSERT INTO storage_connection_health (connection_id, state, error_code, message, checked_at, last_ok_at)
+       VALUES ($1,$2,$3,$4, now(), $5)
+       ON CONFLICT (connection_id) DO UPDATE SET state=EXCLUDED.state, error_code=EXCLUDED.error_code,
+         message=EXCLUDED.message, checked_at=EXCLUDED.checked_at, last_ok_at=EXCLUDED.last_ok_at`,
+      [
+        made[label],
+        state,
+        state === 'connected' ? null : 'needs_reauth',
+        state === 'connected' ? null : 'The sign-in expired. Reconnect to continue.',
+        state === 'connected' ? new Date() : null,
+      ],
+    );
+  }
+  const office = await addLocalStorage(browser, p, ws, 'Office folder', join(paths.vaults, 'forms-folder'));
+
+  // The rental form, published, with a used and an active personal link and two submissions made through the public page
+  const form = await createRentalForm(p, office);
+  S.ids['form:rental'] = form.formId;
+  const used = await createClientLink(p, form.formId, 'client-1040');
+  await createClientLink(p, form.formId, 'client-1042');
+  await submitPublicForm(browser, used, {
+    name: 'Dana Whitfield',
+    email: 'dana.whitfield@client.example',
+    phone: '0123 456 7890',
+    moveIn: '2027-01-15',
+    home: 'One bedroom',
+  });
+  await submitPublicForm(browser, form.url, { name: 'Ravi Kumar', email: 'ravi.kumar@client.example' });
+  // one of them is still being received
+  await q(
+    `UPDATE form_submissions SET status='receiving', completed_at=NULL
+      WHERE id = (SELECT id FROM form_submissions WHERE form_id=$1 AND link_id IS NULL ORDER BY created_at DESC LIMIT 1)`,
+    [form.formId],
+  );
+
+  // A project of its own for the journey (its step cards stay drafts: they are ended in the database, as in e2e/tests/journeys.spec.ts)
+  const lp = await p.post('/api/projects', { data: { key: 'LET', name: 'Lettings' } });
+  expect(lp.status(), await lp.text()).toBe(201);
+  const letId = (await lp.json()).project.id as string;
+  const workflowKey = (
+    await q<{ workflow_key: string }>(
+      'SELECT workflow_key FROM project_workflows WHERE project_id=$1 AND is_primary',
+      [letId],
+    )
+  )[0]?.workflow_key as string;
+  const wf = (id: string, label: string) => ({ kind: 'workflow', id, label, workflowKey });
+  const order = ['lead', 'viewing', 'application', 'wait_documents', 'approval', 'lease_signed'];
+  const jr = await p.post('/api/journeys', {
+    data: {
+      projectId: letId,
+      definition: {
+        name: 'Tenant rentals',
+        description: 'From first enquiry to a signed lease.',
+        recordType: 'client',
+        firstStepId: 'lead',
+        steps: [
+          wf('lead', 'Lead'),
+          wf('viewing', 'Viewing'),
+          wf('application', 'Application'),
+          {
+            kind: 'wait',
+            id: 'wait_documents',
+            label: 'Wait for forms and documents',
+            waitFor: { kind: 'form', formId: form.formId, purpose: 'upload', send: { via: 'desk' } },
+            duration: { amount: 5, unit: 'days' },
+            onTimeout: { action: 'remind', maxReminders: 2, afterLast: 'escalate' },
+          },
+          {
+            kind: 'gate',
+            id: 'approval',
+            label: 'Approval',
+            approver: { kind: 'project_owner' },
+            question: 'Approve this application?',
+          },
+          wf('lease_signed', 'Lease signed'),
+        ],
+        handoffs: order
+          .slice(0, -1)
+          .map((from, i) => ({ id: `h${i + 1}`, from, on: 'done', to: order[i + 1] })),
+      },
+    },
+  });
+  expect(jr.status(), await jr.text()).toBe(201);
+  const journeyId = (await jr.json()).id as string;
+  S.ids['journey:rentals'] = journeyId;
+  const hook = await p.post(`/api/journeys/${journeyId}/hooks`, {
+    data: {
+      name: 'Website enquiry',
+      purpose: 'start',
+      mapping: { externalId: '/client/id', displayName: '/client/name' },
+    },
+  });
+  expect(hook.status(), await hook.text()).toBe(201);
+
+  const tick = async () => {
+    const r = await p.post('/api/test/clock', { data: { advanceMs: 0 } });
+    expect(r.ok(), await r.text()).toBeTruthy();
+  };
+  type Inst = {
+    status: string;
+    currentStepId: string;
+    currentVisit: number;
+    record: { id: string };
+    history: Array<{ visit: number; stepId: string; status: string; cardId: string | null }>;
+  };
+  const instance = async (displayName: string, externalId: string, through: string[], then: string) => {
+    const st = await p.post('/api/journey-instances', {
+      data: { journeyId, record: { type: 'client', displayName, externalId } },
+    });
+    expect(st.status(), await st.text()).toBe(201);
+    const id = (await st.json()).id as string;
+    const get = async (): Promise<Inst> => (await p.get(`/api/journey-instances/${id}`)).json();
+    for (const stepId of through) {
+      const at = await waitFor(
+        `${displayName} reached ${stepId}`,
+        async () => {
+          await tick();
+          return get();
+        },
+        (v) =>
+          v.currentStepId === stepId && v.history.find((h) => h.visit === v.currentVisit)?.status === 'open',
+        120_000,
+      );
+      const cardId = at.history.find((h) => h.visit === at.currentVisit)?.cardId as string;
+      await q("UPDATE cards SET status='done' WHERE id=$1", [cardId]);
+    }
+    const waiting = await waitFor(
+      `${displayName} waits at ${then}`,
+      async () => {
+        await tick();
+        return get();
+      },
+      (v) =>
+        v.currentStepId === then && v.history.find((h) => h.visit === v.currentVisit)?.status === 'waiting',
+      120_000,
+    );
+    return { id, record: waiting.record.id };
+  };
+  const a = await instance(
+    'Unit 4B, Demo Tenant',
+    'T-4B',
+    ['lead', 'viewing', 'application'],
+    'wait_documents',
+  );
+  S.ids['instance:wait'] = a.id;
+  const ref = await p.post(`/api/journey-records/${a.record}/references`, {
+    data: { kind: 'form_submission', ref: `form:${form.formId}`, label: 'Rental application' },
+  });
+  expect(ref.ok(), await ref.text()).toBeTruthy();
+  const b = await instance(
+    'Unit 7A, Demo Tenant',
+    'T-7A',
+    ['lead', 'viewing', 'application'],
+    'wait_documents',
+  );
+  const waitsOfB = (await (await p.get(`/api/journey-instances/${b.id}/waits`)).json()) as {
+    waits: Array<{ id: string; status: string }>;
+  };
+  const open = waitsOfB.waits.find((w) => w.status === 'open');
+  const go = await p.post(`/api/journey-waits/${open?.id}/continue`, { data: {} });
+  expect(go.ok(), await go.text()).toBeTruthy();
+  await waitFor(
+    'Unit 7A waits at the approval gate',
+    async () => {
+      await tick();
+      return (await (await p.get(`/api/journey-instances/${b.id}`)).json()) as Inst;
+    },
+    (v) =>
+      v.currentStepId === 'approval' &&
+      v.history.find((h) => h.visit === v.currentVisit)?.status === 'waiting',
+    120_000,
+  );
+  S.ids['instance:gate'] = b.id;
+
+  // A third workstation (switched off) that holds three agents, for the Retire dialog
+  const code = (await (await p.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
+  pairRunner(BASE_URL, code, "Pieter's studio laptop", paths.runnerHome('guide-c'));
+  const list = (await (await p.get('/api/workstations')).json()).workstations as Array<{
+    id: string;
+    name: string;
+  }>;
+  const studio = list.find((w) => w.name === "Pieter's studio laptop")?.id as string;
+  expect(studio).toBeTruthy();
+  S.ids.wsStudio = studio;
+  for (const name of ['Mina', 'Otto', 'Jules']) {
+    const r = await p.post('/api/agents', {
+      data: { name, roleKey: 'builder', seniority: 'junior', workstationId: studio, runtime: 'mock' },
+    });
+    expect(r.status(), `${name}: ${await r.text()}`).toBe(201);
+  }
+});
+
 test('seed: finished', async () => {
   expect(Object.keys(S.done).length).toBeGreaterThan(5);
 });
@@ -2525,4 +2733,65 @@ cap('on a phone', async () => {
     await open(phone, path);
     await snap(phone, name, { maxH: 900 });
   }
+});
+
+cap('release 1.5.0 screens', async () => {
+  await pPage.setViewportSize({ width: 1280, height: 1400 });
+  await open(pPage, '/settings/org?tab=storage');
+  await expect(pPage.getByTestId('storage-tab')).toBeVisible();
+  await snap(pPage, 'storage-tab', { maxH: 900, content: true });
+
+  await open(pPage, `/forms/${S.ids['form:rental']}`);
+  await pPage.getByTestId('select-field-4').click();
+  await expect(pPage.getByTestId('field-properties')).toBeVisible();
+  await snap(pPage, 'form-builder', { maxH: 1000, content: true });
+  await pPage.getByTestId('tab-share').click();
+  await expect(pPage.getByTestId('client-links')).toContainText('client-1042');
+  await expect(pPage.getByTestId('submissions')).toContainText('In progress');
+  await snap(pPage, 'form-share', { maxH: 1500, content: true });
+
+  await open(pPage, `/journeys/${S.ids['journey:rentals']}`);
+  await expect(pPage.getByTestId('journey-steps')).toBeVisible();
+  await pPage.getByLabel('Description').fill('From first enquiry to a signed lease. ');
+  await pPage.getByLabel('Description').fill('From first enquiry to a signed lease.');
+  await snap(pPage, 'journey-designer', { maxH: 2400, content: true });
+
+  await open(pPage, `/journeys/instances/${S.ids['instance:wait']}`);
+  await expect(pPage.getByTestId('instance-waits')).toBeVisible();
+  await snap(pPage, 'journey-instance', { maxH: 1300, content: true });
+
+  await open(pPage, '/desk');
+  const gate = (
+    await q<{ id: string }>(
+      `SELECT id FROM desk_items WHERE status='open' AND data->>'instanceId'=$1 ORDER BY created_at DESC LIMIT 1`,
+      [S.ids['instance:gate']],
+    )
+  )[0]?.id;
+  const link = (
+    await q<{ id: string }>(
+      `SELECT id FROM desk_items WHERE status='open' AND data->>'instanceId'=$1 ORDER BY created_at DESC LIMIT 1`,
+      [S.ids['instance:wait']],
+    )
+  )[0]?.id;
+  expect(gate, 'a desk item for the approval gate').toBeTruthy();
+  const items = [pPage.getByTestId(`desk-item-${gate}`)];
+  if (link) items.push(pPage.getByTestId(`desk-item-${link}`));
+  for (const it of items) await expect(it).toBeVisible();
+  await pPage.evaluate(() => window.scrollTo(0, 0));
+  const boxes = (await Promise.all(items.map((it) => it.boundingBox()))).filter(
+    (b): b is { x: number; y: number; width: number; height: number } => !!b,
+  );
+  const x = Math.min(...boxes.map((b) => b.x)) - 8;
+  const y = Math.min(...boxes.map((b) => b.y)) - 8;
+  const x2 = Math.max(...boxes.map((b) => b.x + b.width)) + 8;
+  const y2 = Math.max(...boxes.map((b) => b.y + b.height)) + 8;
+  await snap(pPage, 'desk-journey', { clip: { x, y, width: x2 - x, height: y2 - y } });
+
+  await open(pPage, '/workstations');
+  await pPage.getByRole('button', { name: "Retire Pieter's studio laptop", exact: true }).click();
+  const retire = pPage.getByRole('form', { name: 'Retire workstation' });
+  await expect(retire.getByTestId('retire-agents')).toContainText('3 agents');
+  await expect(retire.getByLabel('Move to', { exact: true })).toBeVisible();
+  await snap(pPage, 'ws-retire', { sel: pPage.getByRole('dialog') });
+  await retire.getByRole('button', { name: 'Cancel' }).click();
 });

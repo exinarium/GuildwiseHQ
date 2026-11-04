@@ -14,23 +14,27 @@
   ],
   "captions": "/videos/workstations.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 85.2,
+  "duration": 98.3,
   "chapters": [
     {
-      "t": 8.1,
+      "t": 7.8,
       "title": "Add a workstation"
     },
     {
-      "t": 38.2,
+      "t": 37.8,
       "title": "Pair with a code"
     },
     {
-      "t": 47.1,
+      "t": 46.6,
       "title": "The workstation card"
     },
     {
-      "t": 70.5,
+      "t": 70.1,
       "title": "Check for updates"
+    },
+    {
+      "t": 77.8,
+      "title": "Retire a workstation"
     }
   ]
 }

@@ -1,33 +1,37 @@
 WEBVTT
 
 1
-00:00:00.751 --> 00:00:06.596
+00:00:00.370 --> 00:00:06.215
 The org chart shows who is on the floor, whom each agent reports to, and who answers its questions.
 
 2
-00:00:07.304 --> 00:00:16.733
+00:00:06.924 --> 00:00:16.353
 Open Org chart in the sidebar. You are at the top as the manager, with your CEO and your business analyst below you, and the teams grouped by department.
 
 3
-00:00:17.433 --> 00:00:30.596
+00:00:17.052 --> 00:00:30.215
 Each tile says in words what the agent is doing, and where it runs. The legend under the chart shows how a question climbs: to a senior of the same role, then the BA, then the CEO, and last to you, on the desk.
 
 4
-00:00:31.296 --> 00:00:40.192
+00:00:30.914 --> 00:00:39.810
 Click an agent for its details: the projects it works on, whom it reports to and escalates to, its workstation, its spend and its recent work.
 
 5
-00:00:40.897 --> 00:00:46.764
-Allowed on project shows who may work one project. Agents allowed on any project always show.
+00:00:40.510 --> 00:00:49.577
+Move to workstation, in the same dialog, hands the agent to another machine. Pick the workstation there; the agent keeps its name and history.
 
 6
-00:00:47.463 --> 00:00:51.602
-The View switch turns the chart into a list, grouped by department, and back.
+00:00:50.279 --> 00:00:56.146
+Allowed on project shows who may work one project. Agents allowed on any project always show.
 
 7
-00:00:52.564 --> 00:01:01.780
-Below the chart, Workstations and DevOps lists every machine with its own DevOps engineer. It looks after that machine and reports to your desk.
+00:00:56.846 --> 00:01:00.985
+The View switch turns the chart into a list, grouped by department, and back.
 
 8
-00:01:02.481 --> 00:01:05.404
+00:01:01.838 --> 00:01:11.054
+Below the chart, Workstations and DevOps lists every machine with its own DevOps engineer. It looks after that machine and reports to your desk.
+
+9
+00:01:11.754 --> 00:01:14.677
 That is the org chart: your whole team on one page.

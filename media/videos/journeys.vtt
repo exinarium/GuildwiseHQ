@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.388 --> 00:00:09.519
+A journey is one process, from first contact to outcome. It links your workflows with handoffs, and they all work on one shared record, such as a tenant.
+
+2
+00:00:10.221 --> 00:00:14.253
+Open Journeys in the sidebar. This lists the journeys of your projects.
+
+3
+00:00:14.955 --> 00:00:19.520
+Choose New journey and start from the Rentals template. It opens in the designer.
+
+4
+00:00:20.222 --> 00:00:30.377
+The designer lists the steps in order: the lead, the viewing, the application, a wait for documents, an approval, and the lease. A workflow step runs one of your workflows.
+
+5
+00:00:31.076 --> 00:00:37.839
+A handoff says where the record goes when a step finishes. You can send it back to an earlier step, or add a condition.
+
+6
+00:00:38.541 --> 00:00:49.314
+A wait pauses the journey until something happens. Here it waits for a form from the client. Pick the form to send, set the longest wait, and choose what happens when time runs out.
+
+7
+00:00:50.014 --> 00:00:57.097
+A gate asks a person to approve or reject before the journey goes on. You choose who decides and what they are asked.
+
+8
+00:00:57.802 --> 00:01:08.362
+Webhooks let an outside system start the journey, or end a wait, with a signed message. Name it, say what it does, and tell Guildwise where to find the record id in the message.
+
+9
+00:01:09.061 --> 00:01:13.733
+The address and the secret are shown once, so copy them now. Then save the journey.
+
+10
+00:01:14.901 --> 00:01:22.218
+Running lists the records moving through your journeys. Open one to see where it is, and its history with the time of every step.
+
+11
+00:01:22.919 --> 00:01:34.439
+The waits panel shows what the journey is waiting for, with the deadline and the personal link for the client. References list the documents and submissions attached to the record, but never their content.
+
+12
+00:01:35.139 --> 00:01:41.816
+That is Journeys: your workflows, linked by handoffs, with waits and gates where a person or a client has to act.

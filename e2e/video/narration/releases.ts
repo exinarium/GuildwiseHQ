@@ -49,6 +49,16 @@ export const CHAPTERS: NarratedChapter[] = [
       },
     ],
   },
+  {
+    title: 'Release prep',
+    banner: 'Release prep',
+    cues: [
+      {
+        id: 'c4-a',
+        text: 'When a project uses release prep, a Release prep tab appears. It shows whether the documentation steps have run for the coming release: the changelog, the user guide and the videos. Run release prep starts them, and the release waits for the result, or for you to skip it.',
+      },
+    ],
+  },
 ];
 
 export const OUTRO: Cue[] = [

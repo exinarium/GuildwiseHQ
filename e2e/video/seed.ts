@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { type APIRequestContext, expect } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { type APIRequestContext, type Browser, expect } from '@playwright/test';
 import { apiAs } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, DATABASE_URL, paths, ROOT } from '../support/env.ts';
+import { ADMIN, BASE_URL, DATABASE_URL, E2E_DIR, paths, ROOT } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 
 /**
@@ -180,4 +182,151 @@ export function ceoAct(
     .split('\n')
     .filter((l) => l.startsWith('{"action"'))
     .map((l) => JSON.parse(l));
+}
+
+/**
+ * A connected local-folder storage ("Organization settings > Storage"), added off camera through the real add and connect
+ * dialogs (steps of e2e/tests/storage.spec.ts), and the id of its connection. A form cannot be published without one.
+ * The workstation must be paired and online. The folder `folder` is created under the stack's e2e directory.
+ */
+export async function addLocalStorage(
+  browser: Browser,
+  api: APIRequestContext,
+  workstationId: string,
+  label: string,
+  folder = join(E2E_DIR, 'storage-local'),
+): Promise<string> {
+  await waitFor(
+    'the workstation announced storage:1',
+    () =>
+      q<{ capabilities: string[] }>(
+        'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+        [workstationId],
+      ),
+    (rows) => rows.some((r) => r.capabilities.includes('storage:1')),
+    30_000,
+  );
+  mkdirSync(folder, { recursive: true });
+  const context = await browser.newContext({ storageState: await api.storageState() });
+  const page = await context.newPage();
+  // The server's test clock can be ahead of real time (a run late in the evening) while the runner checks the sealed
+  // values' expiry against the workstation's real clock: seal with the real time, as a live server would give.
+  await page.route('**/api/workstations/*/integrations', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (typeof body?.serverTime === 'string') body.serverTime = new Date().toISOString();
+    await route.fulfill({ response: res, json: body });
+  });
+  try {
+    await page.goto('/settings/org?tab=storage');
+    await page.getByTestId('storage-new').click();
+    const add = page.getByTestId('storage-add-dialog');
+    await add.getByLabel('Type').selectOption('local');
+    await add.getByLabel('Display name').fill(label);
+    await expect(add.getByLabel('Workstation')).toHaveValue(workstationId);
+    await page.getByTestId('storage-add-next').click();
+    const dialog = page.getByTestId('storage-connect-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Folder on the workstation').fill(folder);
+    await expect(page.getByTestId('storage-seal-connect')).toBeEnabled();
+    await page.getByTestId('storage-seal-connect').click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    const list = (await (await api.get('/api/org/storage/connections')).json()).connections as Array<{
+      id: string;
+      label: string;
+    }>;
+    const id = list.find((c) => c.label === label)?.id as string;
+    expect(id, `the connection "${label}" is listed`).toBeTruthy();
+    await expect(page.getByTestId(`storage-state-${id}`)).toHaveText('Connected', { timeout: 20_000 });
+    return id;
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * The demo "Rental application" form (six fields, answers and the ID copy go to the storage connection `storageId`),
+ * saved and published. Returns its ids and the public address. Used by the forms and journeys videos.
+ */
+export async function createRentalForm(
+  api: APIRequestContext,
+  storageId: string,
+): Promise<{ formId: string; publicId: string; url: string }> {
+  const to = (folder: string, name: string) => ({ connectionId: storageId, folder, name });
+  const definition = {
+    schemaVersion: 1,
+    settings: {
+      title: 'Rental application',
+      description: 'Tell us about the home you would like to rent.',
+      logo: null,
+      answersDestination: to('Forms/{form}', '{date}-{submission}'),
+      confirmationText: 'Thank you. We have received your application.',
+    },
+    fields: [
+      { type: 'short_text', id: 'full_name', label: 'Full name', required: true },
+      { type: 'email', id: 'email_addr', label: 'Email', required: true },
+      { type: 'phone', id: 'phone_no', label: 'Phone number', required: false },
+      { type: 'date', id: 'move_in', label: 'Preferred move-in date', required: false },
+      {
+        type: 'dropdown',
+        id: 'unit_type',
+        label: 'Home type',
+        required: false,
+        options: ['Studio', 'One bedroom', 'Two bedrooms'],
+      },
+      {
+        type: 'file',
+        id: 'id_copy',
+        label: 'Copy of your ID',
+        required: false,
+        allowedTypes: ['.pdf', '.jpg', '.jpeg', '.png'],
+        maxSizeBytes: 5 * 1024 * 1024,
+        destination: to('Forms/{form}/{submission}', '{field}-{original}'),
+      },
+    ],
+  };
+  const created = await api.post('/api/forms', { data: { definition } });
+  expect(created.status(), await created.text()).toBe(201);
+  const formId = (await created.json()).id as string;
+  const pub = await api.post(`/api/forms/${formId}/publish`);
+  expect(pub.ok(), await pub.text()).toBeTruthy();
+  const p = (await pub.json()) as { publicId: string; url: string };
+  return { formId, publicId: p.publicId, url: p.url };
+}
+
+/** A personal link of a published form; returns the address the client opens. */
+export async function createClientLink(
+  api: APIRequestContext,
+  formId: string,
+  reference: string,
+  expiresInDays = 14,
+): Promise<string> {
+  const r = await api.post(`/api/forms/${formId}/client-links`, { data: { reference, expiresInDays } });
+  expect(r.status(), await r.text()).toBe(201);
+  return (await r.json()).url as string;
+}
+
+/** Fills and sends a public form (a client's answers) in a fresh browser context, off camera. */
+export async function submitPublicForm(
+  browser: Browser,
+  address: string,
+  answers: { name: string; email: string; phone?: string; moveIn?: string; home?: string },
+): Promise<void> {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.goto(address);
+    const form = page.getByTestId('form-renderer');
+    await expect(form).toBeVisible();
+    await form.getByLabel('Full name').fill(answers.name);
+    await form.getByLabel('Email').fill(answers.email);
+    if (answers.phone) await form.getByLabel('Phone number').fill(answers.phone);
+    if (answers.moveIn) await form.getByLabel('Preferred move-in date').fill(answers.moveIn);
+    if (answers.home) await form.getByLabel('Home type').selectOption(answers.home);
+    await page.waitForTimeout(3500); // the page refuses a form filled in under three seconds (anti-bot check)
+    await page.getByTestId('form-submit').click();
+    await expect(page.getByTestId('form-done')).toBeVisible({ timeout: 60_000 });
+  } finally {
+    await context.close();
+  }
 }

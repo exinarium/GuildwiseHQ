@@ -77,6 +77,16 @@ export const CHAPTERS: NarratedChapter[] = [
       },
     ],
   },
+  {
+    title: 'Storage',
+    banner: 'Storage',
+    cues: [
+      {
+        id: 'c7-a',
+        text: 'Storage connects your own OneDrive, S3, folder or vault, so forms and journeys write client files to your storage. It has its own video and Help article.',
+      },
+    ],
+  },
 ];
 
 export const OUTRO: Cue[] = [

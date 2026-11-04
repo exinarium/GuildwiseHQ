@@ -1,0 +1,36 @@
+{
+  "title": "Storage connections",
+  "src": "/videos/storage.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/storage.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/storage.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/storage.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 82.4,
+  "chapters": [
+    {
+      "t": 9.5,
+      "title": "The Storage tab"
+    },
+    {
+      "t": 20.6,
+      "title": "Add and connect a folder"
+    },
+    {
+      "t": 40.3,
+      "title": "Test and rename"
+    },
+    {
+      "t": 62.3,
+      "title": "The other kinds"
+    }
+  ]
+}
