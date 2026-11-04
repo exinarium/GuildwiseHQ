@@ -321,6 +321,7 @@ async function latestRun(db: Queryable, projectId: string, branch: string): Prom
     `SELECT * FROM release_docs_prep_runs WHERE project_id=$1 AND release_branch=$2 ORDER BY started_at DESC, id DESC LIMIT 1`,
     [projectId, branch],
   );
+  return r ?? null;
 }
 
 // ----------------------------------------------------------------------------------------------------------- advance
