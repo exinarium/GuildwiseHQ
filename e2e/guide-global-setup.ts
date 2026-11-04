@@ -11,12 +11,12 @@ import {
   PG_ADMIN_URL,
   PORT,
   paths,
-  ROOT,
   SMTP_URL,
 } from './support/env.ts';
 import { SUPER_DEMO } from './support/guide.ts';
 import { deleteMailFor } from './support/mail.ts';
 import { killAllRunners } from './support/runner.ts';
+import { seedE2eAccounts } from './support/seed.ts';
 
 /**
  * Global setup of the `guide` project only (`AOM_E2E_GUIDE=1`, see playwright.config.ts): the same stack as
@@ -124,36 +124,12 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
     AOM_TOUR_AUTOSTART: 'false',
     LOG_LEVEL: 'info',
   };
-  sh(
-    'pnpm',
+  await seedE2eAccounts(
     [
-      '--filter',
-      '@aom/server',
-      'admin:create',
-      '--email',
-      ADMIN.email,
-      '--name',
-      ADMIN.name,
-      '--password',
-      ADMIN.password,
+      { email: ADMIN.email, name: ADMIN.name, password: ADMIN.password, role: 'owner' },
+      { email: SUPER_DEMO.email, name: SUPER_DEMO.name, password: SUPER_DEMO.password, role: 'platform' },
     ],
-    { cwd: ROOT, env },
-  );
-
-  sh(
-    'pnpm',
-    [
-      '--filter',
-      '@aom/server',
-      'superadmin:create',
-      '--email',
-      SUPER_DEMO.email,
-      '--name',
-      SUPER_DEMO.name,
-      '--password',
-      SUPER_DEMO.password,
-    ],
-    { cwd: ROOT, env },
+    { env },
   );
 
   const log = openSync(paths.serverLog, 'a');

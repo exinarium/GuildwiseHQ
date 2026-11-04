@@ -1,7 +1,7 @@
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs, storagePath } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
-import { MEMBER } from '../support/env.ts';
+import { MEMBER, shotPath } from '../support/env.ts';
 import { startRunner } from '../support/runner.ts';
 
 // Mobile (PWA) flows at iPhone size (project `mobile`: the iPhone 15 descriptor, WebKit with AOM_E2E_WEBKIT=1, else
@@ -89,7 +89,7 @@ test('answer a desk question: tap the card, pick an option in the full-screen sh
   const sheet = page.getByTestId('desk-sheet');
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('radio', { name: /yes/ })).toBeChecked();
-  await page.screenshot({ path: '/tmp/aom-e2e-mobile-desk-sheet.png' });
+  await page.screenshot({ path: shotPath('mobile-desk-sheet.png') });
   await sheet.getByRole('button', { name: 'Answer' }).tap();
   await expect(sheet).toHaveCount(0);
   const done = await q<any>(
@@ -183,7 +183,7 @@ test('send a chat message from the desk chat screen', async () => {
     timeout: 30_000,
   });
   await expect(drawer.getByTestId('chat-message').last()).toContainText('(turn 1)', { timeout: 30_000 });
-  await page.screenshot({ path: '/tmp/aom-e2e-mobile-chat.png' });
+  await page.screenshot({ path: shotPath('mobile-chat.png') });
 });
 
 test('create a card from the intake form (New card) on a phone', async () => {

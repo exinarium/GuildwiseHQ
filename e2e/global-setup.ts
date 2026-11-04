@@ -3,7 +3,6 @@ import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pg from 'pg';
 import {
-  ADMIN,
   BASE_URL,
   DATABASE_URL,
   DB_NAME,
@@ -13,12 +12,13 @@ import {
   PG_ADMIN_URL,
   PORT,
   paths,
-  ROOT,
   SMTP_URL,
   SUPER,
 } from './support/env.ts';
 import { deleteMailFor } from './support/mail.ts';
 import { killAllRunners } from './support/runner.ts';
+import { defaultAccounts, seedE2eAccounts } from './support/seed.ts';
+import { requireBindable } from './support/test-services.ts';
 
 function sh(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): string {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...opts });
@@ -89,6 +89,12 @@ async function pinTestClock(): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
+  requireBindable(PORT, 'E2E server');
+  // the specs call `pnpm --filter @aom/server ...`; with copied dependencies pnpm must not try to install first (workers inherit this)
+  process.env.pnpm_config_verify_deps_before_run ??= 'false';
+  // a tester shift's node prints an "EnvHttpProxyAgent is experimental" warning on every start; it must not end up in the
+  // text the specs read back from the mock runner's tool output (which is cut at a fixed length)
+  process.env.NODE_NO_WARNINGS ??= '1';
   process.env.AOM_E2E_DIR = E2E_DIR;
   rmSync(E2E_DIR, { recursive: true, force: true });
   mkdirSync(E2E_DIR, { recursive: true });
@@ -163,42 +169,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_RUNNER_RELEASE_DIR: releaseDir,
     LOG_LEVEL: 'info',
   };
-  sh(
-    'pnpm',
-    [
-      '--filter',
-      '@aom/server',
-      'admin:create',
-      '--email',
-      ADMIN.email,
-      '--name',
-      process.env.AOM_E2E_ADMIN_NAME ?? ADMIN.name,
-      '--password',
-      ADMIN.password,
-      // the getting-started video renames the demo organization ("Acme")
-      ...(process.env.AOM_E2E_ADMIN_ORG ? ['--org', process.env.AOM_E2E_ADMIN_ORG] : []),
-    ],
-    {
-      cwd: ROOT,
-      env,
-    },
-  );
-
-  sh(
-    'pnpm',
-    [
-      '--filter',
-      '@aom/server',
-      'superadmin:create',
-      '--email',
-      SUPER.email,
-      '--name',
-      SUPER.name,
-      '--password',
-      SUPER.password,
-    ],
-    { cwd: ROOT, env },
-  );
+  // idempotent: the server's own CLIs create only the accounts that are missing
+  // (AOM_E2E_ADMIN_NAME / AOM_E2E_ADMIN_ORG rename the demo admin and organization for the getting-started video)
+  await seedE2eAccounts(defaultAccounts(), { env });
 
   const log = openSync(paths.serverLog, 'a');
   const server: ChildProcess = spawn('node', [paths.server], { env, stdio: ['ignore', log, log] });

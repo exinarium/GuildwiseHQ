@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs, inviteAndAccept, storagePath } from '../support/api.ts';
 import { pool, q, transitionsFor, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, MEMBER, OTHER, paths } from '../support/env.ts';
+import { ADMIN, BASE_URL, MEMBER, OTHER, paths, shotPath } from '../support/env.ts';
 import { killRunner, startRunner } from '../support/runner.ts';
 
 test.describe.configure({ mode: 'serial' });
@@ -207,14 +207,14 @@ test('AC5: TOY-1 goes In progress -> Review -> Rework -> Review -> Test with two
   await expect(
     page.getByTestId('column-In progress').getByTestId('card-tile-TOY-1').getByTitle('Rework round'),
   ).toBeVisible({ timeout: 30_000 });
-  await page.screenshot({ path: '/tmp/aom-e2e-board-rework.png' });
+  await page.screenshot({ path: shotPath('board-rework.png') });
   await expect(page.getByTestId('column-Review').getByTestId('card-tile-TOY-1')).toBeVisible({
     timeout: 30_000,
   });
   await expect(page.getByTestId('column-Test').getByTestId('card-tile-TOY-1')).toBeVisible({
     timeout: 60_000,
   });
-  await page.screenshot({ path: '/tmp/aom-e2e-board-test-column.png' });
+  await page.screenshot({ path: shotPath('board-test-column.png') });
 
   const stages = (await transitionsFor('TOY-1')).map(
     (t) => `${t.from_stage ?? 'new'}>${t.to_stage}:${t.to_status}`,
@@ -286,7 +286,7 @@ test('AC6: two cards specified at once are claimed by two different builders con
   await openBoard();
   await expect(page.getByTestId('column-In progress').getByTestId(`card-tile-${a}`)).toBeVisible();
   await expect(page.getByTestId('column-In progress').getByTestId(`card-tile-${b}`)).toBeVisible();
-  await page.screenshot({ path: '/tmp/aom-e2e-board-concurrent.png' });
+  await page.screenshot({ path: shotPath('board-concurrent.png') });
 
   // Let both finish their pipeline so the next tests start from an idle fleet.
   await waitFor(

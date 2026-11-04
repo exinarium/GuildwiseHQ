@@ -8,6 +8,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, E2E_DIR, JOURNEYER, paths, ROOT } from '../support/env.ts';
 import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
+import { readJourneyState } from '../support/journey-containers.ts';
 import { git } from '../support/vault.ts';
 
 /**
@@ -34,9 +35,8 @@ const BIN = join(DIR, 'bin');
 const LOCAL_STATE = join(DIR, 'state-local');
 const ORIGIN = join(DIR, 'origin.git');
 const CLONE = join(DIR, 'repos', 'app');
-const IMAGE = 'aom-test-sshd:1';
-const BOX = `aom-e2e-journey-box-${process.pid}`;
-const REG = `aom-e2e-journey-registry-${process.pid}`;
+let BOX = '';
+let REG = '';
 const COMPOSE_PROJECT = 'demo-flow5-remote';
 const APP_DIR = '/home/deploy/app/flow';
 const OLD_IMAGE = 'demo-server:remote29-showcase-0000000000';
@@ -45,10 +45,6 @@ const REAL_DOCKER = '/usr/bin/docker';
 const docker = (...args: string[]) =>
   execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const onBox = (cmd: string) => docker('exec', BOX, 'sh', '-c', cmd);
-const portOf = (name: string, inner: number) => {
-  const m = docker('port', name, String(inner)).split('\n')[0] ?? '';
-  return Number(m.slice(m.lastIndexOf(':') + 1));
-};
 const freePort = (): Promise<number> =>
   new Promise((resolve) => {
     const s = createServer();
@@ -175,13 +171,7 @@ test.afterAll(() => {
   // AOM_JOURNEY_KEEP=1 leaves the throwaway containers and folder for a look (remove them by hand afterwards)
   if (process.env.AOM_JOURNEY_KEEP === '1') return;
   killRunner('SIGTERM', HOME);
-  for (const n of [BOX, REG]) {
-    try {
-      docker('rm', '-f', n);
-    } catch {
-      // never started
-    }
-  }
+  // the containers are removed by the journey-containers teardown project
   try {
     for (const t of docker('image', 'ls', '--format', '{{.Repository}}:{{.Tag}}')
       .split('\n')
@@ -205,22 +195,8 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
     join(RUNNER_HOME, '.ssh'),
   ])
     mkdirSync(d, { recursive: true });
-  docker('build', '-q', '-t', IMAGE, join(ROOT, 'apps/runner/test/fixtures/sshd'));
-
-  // the registry
-  regPort = await freePort();
-  docker(
-    'run',
-    '-d',
-    '--rm',
-    '--name',
-    REG,
-    '-p',
-    `127.0.0.1:${regPort}:5000`,
-    '-p',
-    `172.17.0.1:${regPort}:5000`,
-    'registry:2',
-  );
+  // the registry and the server are started by the journey-containers setup project
+  ({ box: BOX, registry: REG, regPort, sshPort, httpPort, shopPort } = readJourneyState());
   await waitFor(
     'the registry answers',
     async () => {
@@ -234,24 +210,6 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
     30_000,
   );
 
-  // the server
-  docker(
-    'run',
-    '-d',
-    '--rm',
-    '--name',
-    BOX,
-    '-p',
-    '127.0.0.1::22',
-    '-p',
-    '127.0.0.1::5500',
-    '-p',
-    '127.0.0.1::8090',
-    IMAGE,
-  );
-  sshPort = portOf(BOX, 22);
-  httpPort = portOf(BOX, 5500);
-  shopPort = portOf(BOX, 8090);
   const flowDocker = join(ROOT, 'apps/runner/test/fixtures/fake-flow-docker.sh');
   docker('cp', flowDocker, `${BOX}:/usr/bin/docker`);
   onBox('chmod +x /usr/bin/docker');
