@@ -857,123 +857,134 @@ export function publicFormRoutes(
           throw new PfError(409, 'submission_busy', 'This submission is already being processed.');
         }
 
-        const failWith = async (e: StorageWriteError) => {
-          await ctx.pool.query(
-            `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1`,
-            [sid, e.code, ctx.clock.now()],
-          );
-        };
-        const dest = def.settings.answersDestination;
-        if (!dest.connectionId) {
-          await failWith({ code: 'not_found', message: 'missing', retryable: false });
-          throw new PfError(
-            409,
-            'destination_missing',
-            "This form can't accept submissions. Please contact the firm.",
-            { retryable: false },
-          );
-        }
-        const linkRow = row.link_id
-          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
-              row.link_id,
-            ])
-          : undefined;
-        const at = new Date(row.created_at);
-        const files = parts.map((p) => {
-          const info = FORM_UPLOAD_TYPES[p.ext];
-          const ref = p.reference as StorageReference;
-          return {
-            id: p.field,
-            label: def.fields.find((f) => f.id === p.field)?.label ?? p.field,
-            name: ref.path.split('/').pop() ?? p.field,
-            size: p.size,
-            sha256: p.sha256,
-            contentType: info?.contentType ?? 'application/octet-stream',
-            stored: { connectionId: ref.connectionId, path: ref.path, providerId: ref.providerId },
+        try {
+          const failWith = async (e: StorageWriteError) => {
+            await ctx.pool.query(
+              `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1`,
+              [sid, e.code, ctx.clock.now()],
+            );
           };
-        });
-        const doc = {
-          submissionId: sid,
-          submittedAt: at,
-          form: { id: pub.formId, title: def.settings.title, version: pub.version },
-          client:
-            linkRow && row.link_id
-              ? { reference: linkRow.reference as string, linkId: row.link_id as string }
-              : null,
-          fields: def.fields,
-          answers: body.data.answers,
-          files,
-        };
-        const have = (claimed.answers_refs ?? {}) as { html?: StorageReference; json?: StorageReference };
-        const refs: { html?: StorageReference; json?: StorageReference } = { ...have };
-        for (const kind of ['html', 'json'] as const) {
-          if (refs[kind]) continue;
-          const text = kind === 'html' ? buildAnswersHtml(doc) : buildAnswersJson(doc);
-          const buf = Buffer.from(text, 'utf8');
-          const w = await ctx.services.storage.write({
-            orgId: pub.orgId,
-            connectionId: dest.connectionId,
-            folder: dest.folder,
-            name: dest.name,
-            vars: varsOf(def, sid, at, linkRow ?? null, 'answers', 'answers', kind),
-            ext: kind,
-            contentType: kind === 'html' ? 'text/html; charset=utf-8' : 'application/json',
-            size: buf.length,
-            source: (async function* () {
-              yield buf;
-            })(),
-          });
-          if (!w.ok) {
-            await failWith(w.error);
-            if (w.error.code === 'runner_offline')
-              return offline(req, reply, 'complete', pub, row.link_id, sid, [dest.connectionId]);
-            throw storageFailure(w.error);
+          const dest = def.settings.answersDestination;
+          if (!dest.connectionId) {
+            await failWith({ code: 'not_found', message: 'missing', retryable: false });
+            throw new PfError(
+              409,
+              'destination_missing',
+              "This form can't accept submissions. Please contact the firm.",
+              { retryable: false },
+            );
           }
-          refs[kind] = w.reference;
-          await ctx.pool.query(
-            `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
-            [sid, JSON.stringify(refs), ctx.clock.now()],
-          );
-        }
-
-        // Both documents have references: only now is the submission complete.
-        const html = refs.html as StorageReference;
-        const json = refs.json as StorageReference;
-        await withAppendTx(ctx.pool, async (tx) => {
-          const n = await tx.query(
-            `UPDATE form_submissions SET status='complete', completed_at=$2, updated_at=$2, error_code=NULL, answers_refs=$3::jsonb
-              WHERE id=$1 AND status='storing'`,
-            [sid, ctx.clock.now(), JSON.stringify(refs)],
-          );
-          if (!n.rowCount) return;
-          const events: any[] = [];
-          if (row.link_id)
-            events.push({
-              type: 'FormClientLinkUsed',
-              payload: { linkId: row.link_id, formId: pub.formId, orgId: pub.orgId, submissionId: sid },
-            });
-          events.push({
-            type: 'FormSubmitted',
-            payload: {
-              submissionId: sid,
-              formId: pub.formId,
-              orgId: pub.orgId,
-              version: pub.version,
-              ...(row.link_id ? { linkId: row.link_id } : {}),
-              answers: [html, json],
-              files: parts.map((p) => p.reference as StorageReference),
-            },
+          const linkRow = row.link_id
+            ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
+                row.link_id,
+              ])
+            : undefined;
+          const at = new Date(row.created_at);
+          const files = parts.map((p) => {
+            const info = FORM_UPLOAD_TYPES[p.ext];
+            const ref = p.reference as StorageReference;
+            return {
+              id: p.field,
+              label: def.fields.find((f) => f.id === p.field)?.label ?? p.field,
+              name: ref.path.split('/').pop() ?? p.field,
+              size: p.size,
+              sha256: p.sha256,
+              contentType: info?.contentType ?? 'application/octet-stream',
+              stored: { connectionId: ref.connectionId, path: ref.path, providerId: ref.providerId },
+            };
           });
-          await ctx.store.append(
-            events.map((event) => ({
-              streamId: streamId.form(pub.formId),
-              event,
-              actor: SYSTEM_ACTOR,
-              scope: orgScope(pub.orgId),
-            })),
-            { tx },
-          );
-        });
+          const doc = {
+            submissionId: sid,
+            submittedAt: at,
+            form: { id: pub.formId, title: def.settings.title, version: pub.version },
+            client:
+              linkRow && row.link_id
+                ? { reference: linkRow.reference as string, linkId: row.link_id as string }
+                : null,
+            fields: def.fields,
+            answers: body.data.answers,
+            files,
+          };
+          const have = (claimed.answers_refs ?? {}) as { html?: StorageReference; json?: StorageReference };
+          const refs: { html?: StorageReference; json?: StorageReference } = { ...have };
+          for (const kind of ['html', 'json'] as const) {
+            if (refs[kind]) continue;
+            const text = kind === 'html' ? buildAnswersHtml(doc) : buildAnswersJson(doc);
+            const buf = Buffer.from(text, 'utf8');
+            const w = await ctx.services.storage.write({
+              orgId: pub.orgId,
+              connectionId: dest.connectionId,
+              folder: dest.folder,
+              name: dest.name,
+              vars: varsOf(def, sid, at, linkRow ?? null, 'answers', 'answers', kind),
+              ext: kind,
+              contentType: kind === 'html' ? 'text/html; charset=utf-8' : 'application/json',
+              size: buf.length,
+              source: (async function* () {
+                yield buf;
+              })(),
+            });
+            if (!w.ok) {
+              await failWith(w.error);
+              if (w.error.code === 'runner_offline')
+                return offline(req, reply, 'complete', pub, row.link_id, sid, [dest.connectionId]);
+              throw storageFailure(w.error);
+            }
+            refs[kind] = w.reference;
+            await ctx.pool.query(
+              `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
+              [sid, JSON.stringify(refs), ctx.clock.now()],
+            );
+          }
+
+          // Both documents have references: only now is the submission complete.
+          const html = refs.html as StorageReference;
+          const json = refs.json as StorageReference;
+          await withAppendTx(ctx.pool, async (tx) => {
+            const n = await tx.query(
+              `UPDATE form_submissions SET status='complete', completed_at=$2, updated_at=$2, error_code=NULL, answers_refs=$3::jsonb
+                WHERE id=$1 AND status='storing'`,
+              [sid, ctx.clock.now(), JSON.stringify(refs)],
+            );
+            if (!n.rowCount) return;
+            const events: any[] = [];
+            if (row.link_id)
+              events.push({
+                type: 'FormClientLinkUsed',
+                payload: { linkId: row.link_id, formId: pub.formId, orgId: pub.orgId, submissionId: sid },
+              });
+            events.push({
+              type: 'FormSubmitted',
+              payload: {
+                submissionId: sid,
+                formId: pub.formId,
+                orgId: pub.orgId,
+                version: pub.version,
+                ...(row.link_id ? { linkId: row.link_id } : {}),
+                answers: [html, json],
+                files: parts.map((p) => p.reference as StorageReference),
+              },
+            });
+            await ctx.store.append(
+              events.map((event) => ({
+                streamId: streamId.form(pub.formId),
+                event,
+                actor: SYSTEM_ACTOR,
+                scope: orgScope(pub.orgId),
+              })),
+              { tx },
+            );
+          });
+        } catch (err) {
+          // An unexpected error after the claim must not leave the row 'storing': the retry would get submission_busy.
+          await ctx.pool
+            .query(
+              `UPDATE form_submissions SET status='failed', error_code=COALESCE(error_code,'internal'), updated_at=$2 WHERE id=$1 AND status='storing'`,
+              [sid, ctx.clock.now()],
+            )
+            .catch(() => undefined);
+          throw err;
+        }
         return done();
       },
     });
