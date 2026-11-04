@@ -104,7 +104,7 @@ async function runLocked(input: ReleaseDocsPrepInput): Promise<ReleaseDocsPrepRe
     };
 
   if (p.step === 'analyse') return analyse(input, a, tip);
-  if (p.step === 'commit') return p.phase === 'push' ? commitPush(input, a) : commitPrepare(input, a, tip);
+  if (p.step === 'commit') return p.phase === 'push' ? commitPush(input, a) : commitPrepare(input, tip);
   return contentStep(input, tip);
 }
 
@@ -315,7 +315,6 @@ const treeOf = async (repoPath: string, ref: string): Promise<string | null> => 
 
 async function commitPrepare(
   input: ReleaseDocsPrepInput,
-  a: { args: string[]; env: Record<string, string> },
   tip: string,
 ): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
@@ -377,7 +376,6 @@ async function commitPrepare(
     sha = moved.value.sha;
   }
   await git(repoPath, ['update-ref', commitRef(p.runId), sha]);
-  void a;
   return passed({ commit: sha, files: await changedFiles(repoPath, `${sha}^`, sha) });
 }
 

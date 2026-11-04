@@ -357,6 +357,39 @@ describe('the ship gate', () => {
     expect((await approveShip()).status).toBe(200);
   });
 
+  async function publishNow() {
+    await q(
+      `INSERT INTO release_ships (id, org_id, project_id, repo_id, version, tag, release_date, payload, status, merge_sha, pr_url, published_at, created_at, updated_at)
+       SELECT gen_random_uuid(), org_id, id, $2, '1.3.0', 'v1.3.0', current_date, '{}'::jsonb, 'published', $3, 'https://github.com/o/r/pull/3', now(), now(), now()
+         FROM projects WHERE id=$1`,
+      [w.projectId, w.repoId, 'c'.repeat(40)],
+    );
+  }
+
+  it('after a published ship, an earlier passed run is no run: the overview does not read passed, Skip is accepted', async () => {
+    await enable();
+    await runToPassed();
+    await publishNow();
+    const overview = (await owner('GET', `/api/release-docs-prep`)).body as any[];
+    const mine = overview.find((o) => o.projectId === w.projectId);
+    expect(mine.state).toBe('not_run');
+    expect(mine.run).toBeNull();
+    expect(await latest()).toBeFalsy();
+    expect((await approveShip()).status).toBe(409);
+    expect((await owner('POST', `${base()}/skip`)).status).toBe(204);
+    expect((await latest()).status).toBe('skipped');
+    expect((await approveShip()).status).toBe(200);
+  });
+
+  it('after a published ship, an earlier skipped run can be skipped again for the next release', async () => {
+    await enable();
+    await owner('POST', `${base()}/skip`);
+    await publishNow();
+    expect((await approveShip()).status).toBe(409);
+    expect((await owner('POST', `${base()}/skip`)).status).toBe(204);
+    expect((await approveShip()).status).toBe(200);
+  });
+
   it('adds the gate to the proposal view only when the switch is on', async () => {
     await approveShip(); // switch off: the ship starts and the proposal exists
     const proposal = (await q2(`SELECT * FROM release_proposals`))[0];

@@ -311,10 +311,24 @@ export async function skipReleaseDocsPrep(
   });
 }
 
-async function latestRun(db: Queryable, projectId: string, branch: string): Promise<Row | null> {
+/**
+ * The latest run for a release branch. By default a run that started before the last published ship of any of the
+ * project's repositories belongs to an earlier release and counts as no run (same rule as the ship gate); the gate
+ * passes `any` and applies the rule per repository itself.
+ */
+async function latestRun(
+  db: Queryable,
+  projectId: string,
+  branch: string,
+  any = false,
+): Promise<Row | null> {
+  const fresh = any
+    ? ''
+    : `AND started_at >= COALESCE((SELECT MAX(s.published_at) FROM release_ships s JOIN project_repos pr ON pr.id = s.repo_id
+                                   WHERE pr.project_id = $1 AND s.status='published'), '-infinity'::timestamptz)`;
   const r = await one(
     db,
-    `SELECT * FROM release_docs_prep_runs WHERE project_id=$1 AND release_branch=$2 ORDER BY started_at DESC, id DESC LIMIT 1`,
+    `SELECT * FROM release_docs_prep_runs WHERE project_id=$1 AND release_branch=$2 ${fresh} ORDER BY started_at DESC, id DESC LIMIT 1`,
     [projectId, branch],
   );
   return r ?? null;
@@ -548,7 +562,7 @@ export async function loadReleaseDocsPrepGate(
 
 async function gateInput(db: Queryable, proposal: Row, p: Row): Promise<ReleaseDocsPrepGateInput> {
   const branch: string = p.working_branch ?? p.repo_branch ?? '';
-  const run = branch ? await latestRun(db, proposal.project_id, branch) : null;
+  const run = branch ? await latestRun(db, proposal.project_id, branch, true) : null;
   const repoRow = run
     ? await one(db, 'SELECT * FROM release_docs_prep_repos WHERE run_id=$1 AND repo_id=$2', [
         run.id,
