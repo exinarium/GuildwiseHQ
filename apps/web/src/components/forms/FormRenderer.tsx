@@ -3,6 +3,7 @@ import {
   type FormDefinition,
   type FormField,
   type FormFieldError,
+  type FormFieldErrorCode,
   formatAllowedType,
   formatFormBytes,
   validateFieldAnswer,
@@ -25,22 +26,59 @@ export function FormRenderer({
   logoUrl,
   mode,
   onSubmit,
+  initialAnswers,
+  onAnswersChange,
+  onFileChange,
+  done: doneProp,
+  busy,
+  status,
+  serverErrors,
+  extra,
 }: {
   definition: FormDefinition;
   logoUrl?: string | undefined;
   mode: 'preview' | 'public';
-  onSubmit?: (answers: Answers) => void;
+  /** Preview: ignored. Public: awaited; the form shows its confirmation only when `done` is set by the page. */
+  onSubmit?: (answers: Answers) => void | Promise<void>;
+  /** Public only: answers restored after a reload (text answers; a file cannot be restored). */
+  initialAnswers?: Answers;
+  /** Public only: every change of the answers (the page mirrors them to `sessionStorage`). */
+  onAnswersChange?: (answers: Answers) => void;
+  /** Public only: the chosen `File` of a file field, or null when it was cleared. */
+  onFileChange?: (fieldId: string, file: File | null) => void;
+  /** Public only: the page decides when the confirmation shows. */
+  done?: boolean;
+  /** Public only: disables the submit button while the page sends. */
+  busy?: boolean;
+  /** Public only: progress, retry and error text above the submit button. */
+  status?: ReactNode;
+  /** Public only: codes from the server's answer, shown with the shared wording. */
+  serverErrors?: Record<string, FormFieldErrorCode>;
+  /** Public only: a slot inside the form (the page puts its honeypot here). */
+  extra?: ReactNode;
 }) {
   const uid = useId();
-  const [answers, setAnswers] = useState<Answers>({});
+  const pub = mode === 'public';
+  // A `File` cannot be restored: file answers of an earlier visit are dropped and the person is asked to choose again.
+  const [answers, setAnswers] = useState<Answers>(() => {
+    if (!pub || !initialAnswers) return {};
+    const kept: Answers = { ...initialAnswers };
+    for (const f of definition.fields) if (f.type === 'file') delete kept[f.id];
+    return kept;
+  });
   const [errors, setErrors] = useState<Record<string, FormFieldError>>({});
-  const [done, setDone] = useState(false);
+  const [doneLocal, setDone] = useState(false);
+  const done = pub ? (doneProp ?? false) : doneLocal;
   const summary = useRef<HTMLDivElement>(null);
   const { settings, fields } = definition;
   const fid = (f: FormField) => `${uid}-${f.id}`;
 
   const set = (f: FormField, v: FormAnswerValue) => {
-    setAnswers((a) => ({ ...a, [f.id]: v }));
+    setAnswers((a) => {
+      const next = { ...a, [f.id]: v };
+      if (pub) onAnswersChange?.(next);
+      return next;
+    });
     // an error shown earlier clears as soon as the answer is fixed
     if (errors[f.id] && !validateFieldAnswer(f, v)) setErrors(({ [f.id]: _gone, ...rest }) => rest);
   };
@@ -52,17 +90,33 @@ export function FormRenderer({
     });
   };
 
-  const submit = (ev: FormEvent) => {
+  const submit = async (ev: FormEvent) => {
     ev.preventDefault();
+    if (pub && busy) return;
     const r = validateFormAnswers(definition, answers);
     setErrors(r.errors);
     if (!r.ok) {
       setTimeout(() => summary.current?.focus(), 0);
       return;
     }
-    if (mode === 'public') onSubmit?.(answers);
+    if (pub) {
+      await onSubmit?.(answers);
+      return;
+    }
     setDone(true);
   };
+
+  // Codes the server refused, worded by the shared validator (the same words as the browser's own check).
+  const shown: Record<string, FormFieldError> = { ...errors };
+  if (pub && serverErrors)
+    for (const f of definition.fields) {
+      const code = serverErrors[f.id];
+      if (!code || shown[f.id]) continue;
+      shown[f.id] = validateFieldAnswer(f, answers[f.id]) ?? {
+        code,
+        message: 'Please check this answer and try again.',
+      };
+    }
 
   if (done)
     return (
@@ -74,7 +128,7 @@ export function FormRenderer({
         <p className="whitespace-pre-line text-base text-fg" data-testid="form-confirmation">
           {settings.confirmationText}
         </p>
-        {mode === 'preview' && (
+        {!pub && (
           <p className="mt-3 text-sm text-muted">
             Preview only: nothing was sent.{' '}
             <button
@@ -93,7 +147,7 @@ export function FormRenderer({
       </div>
     );
 
-  const errorList = fields.filter((f) => errors[f.id]);
+  const errorList = fields.filter((f) => shown[f.id]);
   return (
     <form
       noValidate
@@ -120,7 +174,7 @@ export function FormRenderer({
                 <a href={`#${fid(f)}`} className="underline">
                   {f.label}
                 </a>
-                : {errors[f.id]?.message}
+                : {shown[f.id]?.message}
               </li>
             ))}
           </ul>
@@ -132,14 +186,18 @@ export function FormRenderer({
           field={f}
           id={fid(f)}
           value={answers[f.id]}
-          error={errors[f.id]}
+          error={shown[f.id]}
+          restored={pub && f.type === 'file' && !!initialAnswers?.[f.id] && !answers[f.id]}
           onChange={(v) => set(f, v)}
           onBlur={(v) => blur(f, v)}
+          onFile={pub ? (file) => onFileChange?.(f.id, file) : undefined}
         />
       ))}
+      {pub && extra}
+      {pub && status}
       <div>
-        <Button type="submit" variant="primary" data-testid="form-submit">
-          Submit
+        <Button type="submit" variant="primary" data-testid="form-submit" disabled={pub && busy}>
+          {pub && busy ? 'Sending…' : 'Submit'}
         </Button>
       </div>
     </form>
@@ -176,15 +234,20 @@ function FieldView({
   id,
   value,
   error,
+  restored,
   onChange,
   onBlur,
+  onFile,
 }: {
   field: FormField;
   id: string;
   value: FormAnswerValue;
   error: FormFieldError | undefined;
+  /** A file answer restored from an earlier visit: the person must choose the file again. */
+  restored?: boolean;
   onChange: (v: FormAnswerValue) => void;
   onBlur: (v?: FormAnswerValue) => void;
+  onFile?: ((file: File | null) => void) | undefined;
 }) {
   const helpId = field.helpText ? `${id}-help` : undefined;
   const fileId = field.type === 'file' ? `${id}-files` : undefined;
@@ -208,6 +271,11 @@ function FieldView({
       {field.helpText && (
         <p id={helpId} className="text-sm text-muted">
           {field.helpText}
+        </p>
+      )}
+      {field.type === 'file' && restored && (
+        <p className="text-sm text-warning-soft-fg" data-testid={`file-again-${field.id}`}>
+          Choose this file again.
         </p>
       )}
       {field.type === 'file' && (
@@ -307,6 +375,7 @@ function FieldView({
           onChange={(e) => {
             const file = e.target.files?.[0];
             const v = file ? { name: file.name, size: file.size, type: file.type } : null;
+            onFile?.(file ?? null);
             onChange(v);
             onBlur(v);
           }}

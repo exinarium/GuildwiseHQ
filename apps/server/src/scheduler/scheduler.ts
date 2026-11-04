@@ -15,6 +15,7 @@ import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
+import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { pruneStorage } from '../commands/storage-connections.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
@@ -200,6 +201,7 @@ export class Scheduler {
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
+    await pruneFormSubmissions(this.ctx).catch((err) => this.ctx.log.error({ err }, 'form submission prune failed'));
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
   }
 

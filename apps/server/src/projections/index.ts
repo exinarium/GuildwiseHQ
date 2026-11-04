@@ -23,6 +23,7 @@ import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
 import { formProjectors } from './forms.ts';
 import { governanceProjectors } from './governance.ts';
+import { publicFormProjectors } from './public-forms.ts';
 import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
@@ -131,6 +132,7 @@ const domains: Array<Record<string, Projector>> = [
   relayProjectors,
   storageProjectors,
   formProjectors,
+  publicFormProjectors,
 ];
 
 /**
@@ -266,6 +268,8 @@ export const PROJECTION_TABLES = [
   'storage_connections',
   'forms',
   'form_versions',
+  'form_publications',
+  'form_client_links',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',

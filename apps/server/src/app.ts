@@ -86,6 +86,8 @@ import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
 import { formRoutes } from './routes/forms.ts';
+import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
+import { publicFormRoutes } from './public-forms/routes.ts';
 import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
@@ -213,6 +215,9 @@ const DESK_LINK_TOKEN =
 export function redactUrl(url: string): string {
   return url
     .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
+    // a published form's public id is a capability to an organization's form
+    .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
+    .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
     .replace(DESK_LINK_TOKEN, '$1[redacted]')
     .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
     .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
@@ -273,6 +278,13 @@ export const LOG_REDACT = {
     'body.envelope',
     'payload.envelope',
     'err.body.envelope',
+    // Answers of a public form are never logged, whatever object holds them.
+    'req.body.answers',
+    '*.answers',
+    'body.answers',
+    '*.website',
+    '*.x-form-link',
+    '*.x-upload-token',
     // The text of an automation's result for the runner channels never reaches a log line.
     '*.whatsapp.text',
     '*.sheet.row',
@@ -497,6 +509,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(pushRoutes(ctx));
   await app.register(cardAttachmentRoutes(ctx));
   await app.register(formRoutes(ctx));
+  await app.register(publicFormAdminRoutes(ctx));
+  await app.register(publicFormRoutes(ctx, { webRoot: () => (config.serveWeb ? webDistDir(config) : null) }));
   const assistantClient =
     opts.assistantClient !== undefined
       ? opts.assistantClient

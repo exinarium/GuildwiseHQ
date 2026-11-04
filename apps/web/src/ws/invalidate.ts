@@ -115,6 +115,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['relay'],
         ['storage'],
       ];
+    case 'form':
+      // FormPublished / FormClientLink* / FormSubmitted stream as form-<formId>
+      return [['forms']];
     case 'storage':
       // StorageConnection* events stream as storage-<connectionId>
       return [['storage']];

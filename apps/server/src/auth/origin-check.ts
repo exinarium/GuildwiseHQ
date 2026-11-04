@@ -59,6 +59,7 @@ export function checkContentType(req: FastifyRequest, formPostPaths: ReadonlySet
     /^\/api\/cards\/[^/]+\/attachments$/.test(path) ||
     path === '/api/documents/upload' ||
     path === '/api/forms/logos' ||
+    /^\/api\/public\/forms\/[^/]+\/submissions\/[^/]+\/parts\/\d+$/.test(path) ||
     path.startsWith('/api/runner/uploads/') ||
     path.startsWith('/api/worker/video/')
   )

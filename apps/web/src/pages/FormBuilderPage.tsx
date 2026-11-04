@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client.ts';
 import { useMe } from '../api/queries/auth.ts';
+import { usePublication } from '../api/queries/public-forms.ts';
 import {
   useCreateForm,
   useForm,
@@ -24,7 +25,10 @@ import { FieldPalette } from '../components/forms/FieldPalette.tsx';
 import { FieldProperties } from '../components/forms/FieldProperties.tsx';
 import { FormCanvas } from '../components/forms/FormCanvas.tsx';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
+import { ClientLinksPanel } from '../components/forms/ClientLinksPanel.tsx';
 import { FormSettingsPanel } from '../components/forms/FormSettingsPanel.tsx';
+import { PublishPanel } from '../components/forms/PublishPanel.tsx';
+import { SubmissionsList } from '../components/forms/SubmissionsList.tsx';
 import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
@@ -65,6 +69,7 @@ export function FormBuilderPage() {
   const formQ = useForm(isNew ? undefined : id);
   const versionQ = useFormVersion(isNew ? undefined : id, viewVersion);
   const connections = useStorageConnections();
+  const publication = usePublication(isNew ? undefined : id);
   const create = useCreateForm();
   const save = useSaveForm(id);
 
@@ -74,7 +79,7 @@ export function FormBuilderPage() {
   const [baseVersion, setBaseVersion] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'build' | 'preview'>('build');
+  const [tab, setTab] = useState<'build' | 'preview' | 'share'>('build');
   const [announce, setAnnounce] = useState('');
   const [phoneWidth, setPhoneWidth] = useState(false);
 
@@ -229,6 +234,7 @@ export function FormBuilderPage() {
             <span data-testid="form-version">
               Version {viewVersion ?? latest}
               {dirty ? ' · unsaved changes' : ''}
+              {publication.data?.status === 'published' ? ' · Published' : ''}
             </span>
           )
         }
@@ -281,10 +287,11 @@ export function FormBuilderPage() {
         label="Form"
         prefix="builder"
         value={tab}
-        onChange={(v) => setTab(v as 'build' | 'preview')}
+        onChange={(v) => setTab(v as 'build' | 'preview' | 'share')}
         tabs={[
           { id: 'build', label: 'Build', testId: 'tab-build' },
           { id: 'preview', label: 'Preview', testId: 'tab-preview' },
+          ...(isNew ? [] : [{ id: 'share', label: 'Share', testId: 'tab-share' }]),
         ]}
         className="mb-4"
       />
@@ -331,6 +338,23 @@ export function FormBuilderPage() {
                 </Button>
               )}
             </Panel>
+          </div>
+        ) : tab === 'share' && !isNew ? (
+          <div className="mx-auto flex max-w-3xl flex-col gap-8" data-testid="share-tab">
+            {dirty && (
+              <Callout tone="info">You have unsaved changes. Save them before publishing.</Callout>
+            )}
+            {publication.isPending && <Spinner />}
+            {publication.error && <ErrorBox error={publication.error} />}
+            {publication.data && (
+              <PublishPanel formId={id} publication={publication.data} canEdit={canEdit} />
+            )}
+            <ClientLinksPanel
+              formId={id}
+              canEdit={canEdit}
+              published={publication.data?.status === 'published'}
+            />
+            <SubmissionsList formId={id} />
           </div>
         ) : (
           <div>
