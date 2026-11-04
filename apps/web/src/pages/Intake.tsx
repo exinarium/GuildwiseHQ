@@ -161,8 +161,9 @@ export function IntakeView() {
       />
     );
   return (
-    <div className="mx-auto flex h-[calc(100dvh-8.5rem)] min-h-[30rem] max-w-5xl flex-col max-md:h-[calc(100dvh-5.5rem-var(--app-bottom-inset,0px))]">
+    <div className="mx-auto flex h-[calc(100dvh-8.5rem)] min-h-[30rem] max-w-5xl flex-col max-md:h-[calc(var(--app-content-h,100dvh)-2.5rem)] max-md:min-h-0">
       <PageHeader
+        className="kbd-hide"
         title={`Intake ${i.externalKey ?? ''}`.trim()}
         sub={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-base">
@@ -184,7 +185,7 @@ export function IntakeView() {
         }
       />
       {i.status === 'unmapped' && i.mappingDeskItemId && (
-        <Callout tone="warning" role="status" data-testid="intake-mapping-note" className="mb-3">
+        <Callout tone="warning" role="status" data-testid="intake-mapping-note" className="kbd-hide mb-3">
           The BA could not map this ticket to a project and asked you on the desk.{' '}
           <Link to={`/desk#desk-item-${i.mappingDeskItemId}`} className="font-medium underline">
             Pick the project
@@ -196,7 +197,7 @@ export function IntakeView() {
         <ChatPanel threadId={i.threadId} agentName={i.baAgentName} online={i.workstationOnline} />
         <aside
           aria-label="Cards from this intake"
-          className="flex flex-col gap-2 overflow-y-auto max-lg:max-h-48"
+          className="kbd-hide flex flex-col gap-2 overflow-y-auto max-lg:max-h-48"
         >
           <h2 className="text-lg font-semibold text-fg">Cards created</h2>
           {i.cards.length === 0 ? (

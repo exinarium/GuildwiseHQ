@@ -274,9 +274,9 @@ input[type="radio"] {
   }
 }
 @media (max-width: 767.98px) {
-  /* The same bar on a page (not in a sheet): it floats above the bottom tab bar. */
+  /* The same bar on a page (not in a sheet): it sticks to the bottom of the scrolling area, which ends above the tab bar. */
   .sticky-actions-page {
-    bottom: var(--app-bottom-inset, 0px);
+    bottom: 0;
   }
 }
 
@@ -288,17 +288,30 @@ input[type="radio"] {
   }
 }
 
-/* The phone's bottom tab bar (components/shell/MobileTabBar.tsx) is 3.5rem tall plus the home-indicator inset. Pages keep
-   clear of it with pb-[var(--app-bottom-inset,0px)] and fixed bottom bars sit at bottom: var(--app-bottom-inset, 0px).
-   0px from md up (the sidebar) and while the on-screen keyboard hides the bar. */
+/* The phone's bottom tab bar (components/shell/MobileTabBar.tsx) is 3.5rem tall plus the home-indicator inset. It is the last
+   child of the app frame, under the scrolling area, so content never needs padding for it. --app-bottom-inset is only for
+   position:fixed things (FAB, toasts, prompts): it clears the tab bar, or the keyboard while it is open (--kbd-gap is written
+   by lib/viewport.ts). Sticky bars inside the scrolling area use bottom: 0. 0px from md up (the sidebar). */
 :root {
   --app-bottom-inset: 0px;
 }
 @media (max-width: 767.98px) {
   :root {
-    --app-bottom-inset: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    --app-tabbar-h: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    --app-bottom-inset: calc(var(--kbd-gap, 0px) + var(--app-tabbar-h));
   }
   :root[data-kbd] {
-    --app-bottom-inset: 0px;
+    --app-tabbar-h: 0px;
+  }
+  /* The signed-in phone shell owns scrolling: the page itself never scrolls or rubber-bands. */
+  :root[data-app-frame],
+  :root[data-app-frame] body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  /* While typing, page chrome above a conversation steps aside (never the block that holds the focus). */
+  :root[data-kbd] .kbd-hide:not(:focus-within) {
+    display: none;
   }
 }

@@ -1,36 +1,14 @@
 import { Ellipsis, FolderKanban, Inbox, MessageSquare, MessagesSquare, Plus, SquarePen } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { isTurnInFlight, TURN_IN_FLIGHT_TEXT, useCeoStatus, useStartCeoChat } from '../../api/queries/ceo.ts';
 import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { ceoChatPath } from '../../lib/openCeoChat.ts';
 import { useActiveOrgRole } from '../../lib/orgRole.ts';
+import { useKeyboardOpen } from '../../lib/viewport.ts';
 import { BottomSheet } from '../ui/BottomSheet.tsx';
 import { cx } from '../ui/cx.ts';
 import type { DeskCounts } from './Sidebar.tsx';
-
-/** True while the on-screen keyboard is open (a text field has focus and the visual viewport shrank a lot). */
-export function useKeyboardOpen(): boolean {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const vv = typeof window === 'undefined' ? undefined : window.visualViewport;
-    if (!vv) return;
-    const check = () => {
-      const el = document.activeElement;
-      const typing =
-        !!el &&
-        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable);
-      setOpen(typing && window.innerHeight - vv.height > 150);
-    };
-    vv.addEventListener('resize', check);
-    document.addEventListener('focusout', check);
-    return () => {
-      vv.removeEventListener('resize', check);
-      document.removeEventListener('focusout', check);
-    };
-  }, []);
-  return open;
-}
 
 const tabClass = (active: boolean) =>
   cx(
@@ -81,8 +59,9 @@ function Badge({ counts }: { counts: DeskCounts }) {
 }
 
 /**
- * The phone's navigation: Desk, Chats, the Intake/New button in the middle, Projects and More. Fixed to the bottom, safe-area
- * aware; `--app-bottom-inset` (index.css) is its height, so pages and fixed composers keep clear of it.
+ * The phone's navigation: Desk, Chats, the Intake/New button in the middle, Projects and More. The last child of the phone app frame
+ * (AppShell), under the scrolling content, so it never moves with the page. Safe-area aware; `--app-bottom-inset` (index.css)
+ * is its height for fixed elements.
  */
 export function MobileTabBar({
   counts,
@@ -114,14 +93,6 @@ export function MobileTabBar({
   const isIntake = intake.to.startsWith('/intake');
   const unreadChats = useUnreadChatTotal();
   const keyboard = useKeyboardOpen();
-  useEffect(() => {
-    const root = document.documentElement;
-    if (keyboard) root.dataset.kbd = '1';
-    else delete root.dataset.kbd;
-    return () => {
-      delete root.dataset.kbd;
-    };
-  }, [keyboard]);
   const overlay = chatsOpen || moreOpen;
   const deskActive = !overlay && (pathname === '/desk' || pathname.startsWith('/desk/'));
   const projectsActive =
@@ -133,7 +104,7 @@ export function MobileTabBar({
     <nav
       aria-label="Primary"
       data-testid="mobile-tabbar"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] backdrop-blur md:hidden"
+      className="relative z-40 shrink-0 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] backdrop-blur md:hidden"
     >
       <ul className="grid h-14 grid-cols-5 items-stretch">
         <li className="contents">
