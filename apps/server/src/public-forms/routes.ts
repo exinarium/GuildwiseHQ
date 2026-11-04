@@ -60,6 +60,9 @@ declare module 'fastify' {
   interface FastifyRequest {
     pf: PfCall | null;
   }
+  interface FastifyContextConfig {
+    op?: PfCall['op'];
+  }
 }
 
 /** An answer to the public. Nothing from the request is ever put in `message`. */
@@ -305,7 +308,7 @@ export function publicFormRoutes(
       def: FormDefinition,
       sid: string,
       at: Date,
-      link: { reference: string; record_id: string | null } | null,
+      link: { reference?: string; record_id?: string | null } | null,
       field: string,
       original: string,
       ext: string,
