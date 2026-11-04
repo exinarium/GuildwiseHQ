@@ -123,6 +123,16 @@ export const DeskItemDtoSchema = z.object({
       stepId: z.string().optional(),
       /** `gate` for an escalated gate (the desk hides "Continue the journey"). */
       waitKind: z.string().optional(),
+      /** Runner-offline items (`form_offline_link`, `form_offline_hold_expired`): strings only, never an email address. */
+      requestId: z.string().optional(),
+      formId: z.string().optional(),
+      formTitle: z.string().optional(),
+      clientReference: z.string().optional(),
+      recordName: z.string().optional(),
+      attemptedAt: z.string().optional(),
+      linkSentAt: z.string().optional(),
+      linkExpiresAt: z.string().optional(),
+      journeyName: z.string().optional(),
       linkId: z.string().optional(),
     })
     .optional(),

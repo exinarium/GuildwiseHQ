@@ -26,6 +26,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { destinationWorkstations } from '../commands/forms-offline.ts';
 import { readFormLogo } from '../commands/forms.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
@@ -33,6 +34,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { getFormVersion } from '../queries/forms.ts';
 import { buildAnswersHtml, buildAnswersJson } from './answers-doc.ts';
 import { clientKey, createFormLimits, type FormLimits } from './limits.ts';
+import { offlineRequestHandler } from './offline.ts';
 import { defaultRunnerOfflineHook, type RunnerOfflineEvent } from './offline-hook.ts';
 import {
   powValid,
@@ -45,7 +47,7 @@ import {
 
 /** What the lookup found for a request; the only thing kept about a call besides the numbers below. */
 interface PfCall {
-  op: 'view' | 'logo' | 'start' | 'part' | 'status' | 'complete' | 'page';
+  op: 'view' | 'logo' | 'start' | 'part' | 'status' | 'complete' | 'page' | 'offline';
   startedAt: bigint;
   publicId: string;
   formId: string | null;
@@ -66,7 +68,7 @@ declare module 'fastify' {
 }
 
 /** An answer to the public. Nothing from the request is ever put in `message`. */
-class PfError extends Error {
+export class PfError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -236,6 +238,30 @@ export function publicFormRoutes(
       return p;
     };
 
+    /** The session, minimum fill time, honeypot and proof of work: one rule for the start and the offline request. */
+    const checkSession = async (
+      pub: { formId: string; version: number },
+      body: { session: string; nonce: string; website: string },
+    ) => {
+      const now = ctx.clock.now();
+      const session = await verifySession(ctx, pub.formId, body.session);
+      if (!session || now.getTime() - session.issuedAt > cfg.sessionTtlMin * 60_000)
+        throw new PfError(400, 'session_invalid', 'This page has been open too long. Please reload it.');
+      if (session.version !== pub.version)
+        throw new PfError(
+          409,
+          'form_changed',
+          'The form was updated. Please check your answers and send again.',
+        );
+      if (
+        now.getTime() - session.issuedAt < cfg.minFillMs ||
+        body.website !== '' ||
+        !powValid(body.session, body.nonce, cfg.powBits)
+      )
+        throw new PfError(422, 'submission_refused', 'We could not accept this submission. Please try again.');
+      return session;
+    };
+
     const tooMany = (retry: number) =>
       new PfError(
         429,
@@ -246,6 +272,14 @@ export function publicFormRoutes(
           retryAfter: retry,
         },
       );
+
+    /** Is every storage workstation of the published form online? `missing` is a destination problem, not offline. */
+    const availability = async (pub: { formId: string; orgId: string; version: number }) => {
+      const dest = await destinationWorkstations(ctx, pub.orgId, await definitionOf(pub));
+      if (dest.missing) return { state: 'missing' as const, workstations: [] as string[] };
+      const down = dest.workstations.filter((ws) => !ctx.services.runners.isOnline(ws));
+      return { state: down.length ? ('offline' as const) : ('open' as const), workstations: down };
+    };
 
     const onRequest = async (req: FastifyRequest) => {
       const params = req.params as { publicId?: string };
@@ -277,6 +311,16 @@ export function publicFormRoutes(
         if (!a.ok) throw tooMany(a.retryAfterSec);
         const b = limits.formSubmit.take(`form:${pub.formId}`);
         if (!b.ok) throw tooMany(b.retryAfterSec);
+        // The firm's runner is offline: refuse before the body (answers, file list) is read. The handler checks again.
+        const av = await availability(pub);
+        if (av.state === 'offline')
+          throw new PfError(
+            503,
+            'runner_offline',
+            OFFLINE_MSG,
+            { retryable: true },
+            { close: true, retryAfter: retryAfter() },
+          );
       }
     };
 
@@ -293,23 +337,31 @@ export function publicFormRoutes(
           );
         throw new PfError(404, 'link_invalid', 'This personal link is not valid.');
       }
+      const kind = (purpose: unknown) => (purpose === 'offline' ? 'secure link' : 'personal link');
       const row = await one(
         ctx.pool,
         'SELECT * FROM form_client_links WHERE id=$1 AND form_id=$2 AND org_id=$3',
         [v.linkId, pub.formId, pub.orgId],
       );
       if (!row) throw new PfError(404, 'link_invalid', 'This personal link is not valid.');
+      const what = kind(row.purpose);
       if (row.revoked_at)
         throw new PfError(
           410,
           'link_revoked',
-          'This personal link is no longer valid. Ask the firm for a new one.',
+          `This ${what} is no longer valid. Ask the firm for a new one.`,
         );
       if (row.used_at)
-        throw new PfError(410, 'link_used', 'This personal link was already used to send this form.');
+        throw new PfError(410, 'link_used', `This ${what} was already used to send this form.`);
       if (new Date(row.expires_at).getTime() <= ctx.clock.now().getTime())
-        throw new PfError(410, 'link_expired', 'This personal link has expired. Ask the firm for a new one.');
-      return row as { id: string; reference: string; record_id: string | null; expires_at: Date };
+        throw new PfError(410, 'link_expired', `This ${what} has expired. Ask the firm for a new one.`);
+      return row as {
+        id: string;
+        reference: string;
+        record_id: string | null;
+        expires_at: Date;
+        purpose: string;
+      };
     };
 
     // ---------------------------------------------------------------------------------- storage helpers
@@ -464,7 +516,11 @@ export function publicFormRoutes(
         const token = req.headers['x-form-link'];
         if (typeof token === 'string' && token) {
           const row = await checkLink(pub, token);
-          link = { state: 'valid', expiresAt: new Date(row.expires_at).toISOString() };
+          link = {
+            state: 'valid',
+            expiresAt: new Date(row.expires_at).toISOString(),
+            purpose: row.purpose === 'offline' ? 'offline' : 'client',
+          };
         }
         const body: PublicFormDto = {
           form: publicFormView(def),
@@ -475,6 +531,7 @@ export function publicFormRoutes(
           session: await signSession(ctx, pub.formId, pub.version, ctx.clock.now()),
           powBits: cfg.powBits,
           minFillMs: cfg.minFillMs,
+          availability: (await availability(pub)).state === 'offline' ? 'offline' : 'open',
           link,
         };
         return body;
@@ -517,26 +574,7 @@ export function publicFormRoutes(
         if (!parsed.success) throw new PfError(400, 'invalid_answers', 'The submission could not be read.');
         const body = parsed.data;
         const now = ctx.clock.now();
-
-        const session = await verifySession(ctx, pub.formId, body.session);
-        if (!session || now.getTime() - session.issuedAt > cfg.sessionTtlMin * 60_000)
-          throw new PfError(400, 'session_invalid', 'This page has been open too long. Please reload it.');
-        if (session.version !== pub.version)
-          throw new PfError(
-            409,
-            'form_changed',
-            'The form was updated. Please check your answers and send again.',
-          );
-        if (
-          now.getTime() - session.issuedAt < cfg.minFillMs ||
-          body.website !== '' ||
-          !powValid(body.session, body.nonce, cfg.powBits)
-        )
-          throw new PfError(
-            422,
-            'submission_refused',
-            'We could not accept this submission. Please try again.',
-          );
+        const session = await checkSession(pub, body);
 
         const link = body.link ? await checkLink(pub, body.link) : null;
         const def = await definitionOf(pub);
@@ -626,6 +664,25 @@ export function publicFormRoutes(
         };
         return reply.code(201).send(out);
       },
+    });
+
+    // ---------------------------------------------------------------------------------- runner offline: secure link later
+    fastify.route({
+      method: 'POST',
+      url: '/api/public/forms/:publicId/offline-requests',
+      logLevel: 'silent',
+      config: { op: 'offline' },
+      bodyLimit: 8 * 1024,
+      onRequest,
+      handler: offlineRequestHandler(ctx, {
+        Err: PfError,
+        limits,
+        tooMany,
+        pubOf,
+        checkSession,
+        checkLink,
+        availability,
+      }),
     });
 
     // ---------------------------------------------------------------------------------- one file

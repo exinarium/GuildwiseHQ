@@ -99,6 +99,7 @@ import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { journeyRoutes } from './routes/journeys.ts';
+import { formsOfflineRoutes } from './routes/forms-offline.ts';
 import { journeyWaitRoutes } from './routes/journey-waits.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
@@ -141,6 +142,7 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { createFormsOfflineService } from './commands/forms-offline.ts';
 import { StorageRelay } from './storage-relay/hub.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
@@ -289,6 +291,9 @@ export const LOG_REDACT = {
     '*.answers',
     'body.answers',
     '*.website',
+    // The address a client leaves when the firm's runner is offline: never in a log line.
+    '*.email',
+    'req.body.email',
     '*.x-form-link',
     '*.x-upload-token',
     // The text of an automation's result for the runner channels never reaches a log line.
@@ -504,6 +509,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(playbookRoutes(ctx));
   await app.register(journeyRoutes(ctx));
   await app.register(journeyWaitRoutes(ctx));
+  await app.register(formsOfflineRoutes(ctx));
   await app.register(agentUxRoutes(ctx));
   await app.register(delegationRoutes(ctx));
   await app.register(governanceRoutes(ctx));
@@ -557,6 +563,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.formsOffline = createFormsOfflineService(ctx);
   ctx.services.storage = new StorageRelay({
     config: ctx.config.storage,
     lookup: async (orgId, connectionId) => {

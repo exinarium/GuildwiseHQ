@@ -41,6 +41,14 @@ export interface WaitDto {
   resolution: string | null;
   resolvedAt: string | null;
   events: Array<{ at: string; type: string; text: string }>;
+  /** Runner offline: the client tried the form while the firm's runner was offline (a sub-state of this form wait). No email. */
+  offline: null | {
+    requestId: string;
+    status: string;
+    since: string;
+    linkSentAt: string | null;
+    linkExpiresAt: string | null;
+  };
 }
 
 export interface CallDto {
@@ -62,6 +70,14 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
   await loadVisibleProject(ctx.pool, who.userId, inst.project_id);
   const ws = await rows(ctx.pool, 'SELECT * FROM journey_waits WHERE instance_id=$1 ORDER BY visit', [instanceId]);
   const waits: WaitDto[] = [];
+  const cases = await rows(
+    ctx.pool,
+    `SELECT DISTINCT ON (journey_wait_id) id, journey_wait_id, status, attempted_at, link_sent_at, link_expires_at
+       FROM form_offline_requests WHERE journey_instance_id=$1
+      ORDER BY journey_wait_id, (status IN ('held','sending','sent')) DESC, attempted_at DESC`,
+    [instanceId],
+  );
+  const offlineOf = new Map(cases.map((c) => [c.journey_wait_id as string, c]));
   for (const w of ws) {
     const cfg = w.config as { waitFor?: { formId?: string }; onTimeout?: { action?: string; maxReminders?: number } };
     const open = w.status === 'open' || w.status === 'escalated';
@@ -82,6 +98,18 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
       resolution: w.resolution,
       resolvedAt: iso(w.resolved_at),
       events: w.events,
+      offline: (() => {
+        const c = offlineOf.get(w.id);
+        return c
+          ? {
+              requestId: c.id,
+              status: c.status,
+              since: iso(c.attempted_at) as string,
+              linkSentAt: iso(c.link_sent_at),
+              linkExpiresAt: iso(c.link_expires_at),
+            }
+          : null;
+      })(),
     });
   }
   const cs = await rows(ctx.pool, 'SELECT * FROM journey_webhook_calls WHERE instance_id=$1 ORDER BY visit', [instanceId]);

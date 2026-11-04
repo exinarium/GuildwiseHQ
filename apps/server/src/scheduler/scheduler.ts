@@ -5,6 +5,7 @@ import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { publishPendingDocuments } from '../commands/documents.ts';
 import { followUpSweep } from '../commands/follow-up.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
+import { sweepFormsOffline } from '../commands/forms-offline.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { sweepJourneys } from '../commands/journey-runtime.ts';
@@ -202,6 +203,7 @@ export class Scheduler {
     await journeyTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'journey waits failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
+    await sweepFormsOffline(this.ctx).catch((err) => this.ctx.log.error({ err }, 'offline form links failed'));
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),

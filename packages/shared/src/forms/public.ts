@@ -38,6 +38,7 @@ export const PUBLIC_FORM_ERROR_CODES = [
   'submission_expired',
   'storage_failed',
   'runner_offline',
+  'runner_online',
   'destination_missing',
   'rate_limited',
   'submission_not_found',
@@ -274,7 +275,9 @@ export interface PublicFormDto {
   session: string;
   powBits: number;
   minFillMs: number;
-  link: null | { state: 'valid'; expiresAt: string };
+  /** `offline`: the firm's runner cannot receive a form now; the page offers the secure link instead of the fields. */
+  availability: 'open' | 'offline';
+  link: null | { state: 'valid'; expiresAt: string; purpose: 'client' | 'offline' };
 }
 
 export interface SubmissionStartResultDto {

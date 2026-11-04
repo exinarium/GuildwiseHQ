@@ -100,8 +100,31 @@ export async function dedupEntriesFor(db: Queryable, ids: string[]) {
   return new Map(found.map((r) => [r.id, { id: r.id, scope: r.scope, title: r.title, body: r.body }]));
 }
 
-const JOURNEY_DESK_SUBKINDS = new Set(['journey_gate', 'journey_wait_escalated', 'journey_wait_link']);
-const JOURNEY_DATA_KEYS = ['waitId', 'instanceId', 'recordId', 'stepId', 'waitKind', 'linkId'] as const;
+const JOURNEY_DESK_SUBKINDS = new Set([
+  'journey_gate',
+  'journey_wait_escalated',
+  'journey_wait_link',
+  // Runner offline: the secure link was sent / could not be sent (strings only, never an email address).
+  'form_offline_link',
+  'form_offline_hold_expired',
+]);
+const JOURNEY_DATA_KEYS = [
+  'waitId',
+  'instanceId',
+  'recordId',
+  'stepId',
+  'waitKind',
+  'linkId',
+  'requestId',
+  'formId',
+  'formTitle',
+  'clientReference',
+  'recordName',
+  'attemptedAt',
+  'linkSentAt',
+  'linkExpiresAt',
+  'journeyName',
+] as const;
 
 export function toDeskDto(
   r: Row,

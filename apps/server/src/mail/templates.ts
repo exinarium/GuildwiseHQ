@@ -317,3 +317,29 @@ export function platformNoticeMail(opts: {
     note: 'You get this because notifications for the super admin console are switched on (Support page).',
   });
 }
+
+// ------------------------------------------------------------------------------------------------ public forms
+
+/**
+ * The secure link of a client whose form could not land because the firm's runner was offline. Only the firm name,
+ * the link and its expiry: never a form title, an answer or a client reference.
+ */
+export function formSecureLinkMail(opts: {
+  to: string;
+  firmName: string;
+  link: string;
+  expiresAt: Date;
+  origin: string;
+}): MailMessage {
+  const firm = oneLine(opts.firmName) || 'The firm';
+  return brandedMail({
+    to: opts.to,
+    subject: `Your secure link from ${firm}`,
+    preheader: 'Send your form now with your secure link.',
+    heading: `${firm} is ready for your form`,
+    origin: opts.origin,
+    body: [`${firm} could not receive your form earlier. You can send it now with your secure link.`],
+    cta: { label: 'Open your secure link', url: opts.link },
+    note: `This link works once and expires on ${expiry(opts.expiresAt)}. If you did not ask for it, you can ignore this email.`,
+  });
+}
