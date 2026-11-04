@@ -588,6 +588,10 @@ Each entry has the same fields. "Linked from" names the guide chapter, the tour 
 - **Prerequisites and test data:** a DevOps approval on the Desk; the notification link is made with the server's own signing key (the recording browser has no push service); a second member (Jamie Lee) to remove.
 - **Linked from:** Help `organizations-and-roles#audit-log`.
 
+## Screen map (`e2e/video/screens.json`)
+
+The machine-readable form of the re-record map below, used by the release prep step **Generate videos**. Each video lists its screens and the `apps/web/src` files (globs) behind them; `planned` holds the videos of this plan that have no spec yet; `shared` (shell, ui, styles, api, lib, hooks) re-renders nothing; `exclude` holds the pages that never get a video (sign-in, password and invite pages). The rule, in order: a changed spec or narration re-renders its video; a shared file selects nothing; a changed screen file re-renders every video that lists it; a new or changed page in no video asks for a new video (its planned entry, else the file name); other UI files select nothing; non-UI changes are ignored. Keep it in step with this plan: a test in `apps/web` fails when a published video or a page is missing.
+
 ## Re-record map
 
 Each section belongs to exactly one video. G is also re-recorded for the five sections whose first-run flow it shows.
