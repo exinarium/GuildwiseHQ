@@ -61,6 +61,16 @@ export const CHAPTERS: NarratedChapter[] = [
       },
     ],
   },
+  {
+    title: 'Retire a workstation',
+    banner: 'Retire',
+    cues: [
+      {
+        id: 'c5-a',
+        text: 'When a machine is going away, choose Retire on its card. Its agents are listed. Move them to another workstation, or mark them as needing a new home, and nothing is deleted. You can cancel at any point.',
+      },
+    ],
+  },
 ];
 
 export const OUTRO: Cue[] = [

@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { pool } from '../support/db.ts';
+import { paths } from '../support/env.ts';
 import { click } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
 import { allCues, CHAPTERS } from './narration/org-chart.ts';
 import { createProject, demoApi, pairWorkstation, provisionCeo } from './seed.ts';
 
 /**
- * The Org chart video (sidebar section 10): the chart, an agent's details, Allowed on project, the Chart and List
- * views, and the Workstations and DevOps panel.
+ * The Org chart video (sidebar section 10): the chart, an agent's details (and Move to workstation), Allowed on project,
+ * the Chart and List views, and the Workstations and DevOps panel.
  * Output: media/videos/org-chart.{webm,mp4,vtt,json}
  *   e2e/video/record.sh org-chart
  */
@@ -25,6 +26,7 @@ test('record the org-chart video', async ({ browser }) => {
   const { projectId: blog } = await createProject(api, 'BLOG', 'Company blog', { repo: false });
   await provisionCeo(api);
   const workstationId = await pairWorkstation(api);
+  await pairWorkstation(api, 'Studio Mac mini', paths.runnerHome('video-studio')); // a second machine: Move needs a target
   const hire = async (name: string, roleKey: string, allowed: string[] | null, seniority = 'junior') => {
     const r = await api.post('/api/agents', {
       data: { name, roleKey, seniority, runtime: 'mock', workstationId, allowedProjectIds: allowed },
@@ -61,7 +63,15 @@ test('record the org-chart video', async ({ browser }) => {
   await narrate('c1-b', async () => {
     await click(page, page.locator('[data-testid="org-agent"][data-agent="Max"]').first());
     await expect(page.getByTestId('org-agent-card')).toBeVisible();
-    await pause(5000);
+    await pause(4000);
+  });
+  await narrate('c1-m', async () => {
+    await click(page, page.getByRole('button', { name: 'Move Max to another workstation' }));
+    const dlg = page.getByRole('form', { name: 'Move agent' });
+    await expect(dlg).toBeVisible();
+    await pause(2500);
+    await click(page, dlg.getByRole('button', { name: 'Cancel' }));
+    await expect(dlg).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('org-agent-card')).toHaveCount(0);
   });

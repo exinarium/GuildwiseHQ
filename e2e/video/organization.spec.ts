@@ -10,7 +10,7 @@ import { createProject, demoApi } from './seed.ts';
 
 /**
  * The Organization video (sidebar section 22): General and your role, Members (roles, Invite member, Send invitation),
- * Invitations (Resend, Revoke), Guests, E-mail inbox, Project links and Plan & limits.
+ * Invitations (Resend, Revoke), Guests, E-mail inbox, Project links, Plan & limits and the Storage tab.
  * Output: media/videos/organization.{webm,mp4,vtt,json}
  *   e2e/video/record.sh organization
  */
@@ -140,6 +140,12 @@ test('record the organization video', async ({ browser }) => {
   await narrate('c6-a', async () => {
     await click(page, tab('Plan & limits'));
     await expect(page.getByTestId('plan-summary')).toBeVisible();
+    await pause(2000);
+  });
+  await chapter(7);
+  await narrate('c7-a', async () => {
+    await click(page, tab('Storage'));
+    await expect(page.getByTestId('storage-tab')).toBeVisible();
     await pause(2000);
   });
   await narrate('outro-1', async () => {

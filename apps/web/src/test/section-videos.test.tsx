@@ -32,7 +32,7 @@ const unpublish = (...slugs: string[]) => {
   for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = false;
 };
 /** Registered but not recorded yet: the video is made with the user guide (published: false). */
-const waiting = new Set(['forms']);
+const waiting = new Set(['forms', 'journeys', 'storage']);
 let before: Record<string, boolean>;
 beforeEach(() => {
   resetVideoManifest();
@@ -44,9 +44,9 @@ afterEach(() => {
 });
 
 describe('the video registry', () => {
-  it('has 33 videos: the overview, Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
+  it('has 35 videos: the overview, Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
     const slugs = Object.keys(SECTION_VIDEOS);
-    expect(slugs).toHaveLength(33);
+    expect(slugs).toHaveLength(35);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 
@@ -74,8 +74,7 @@ describe('the video registry', () => {
       ).toBe(true);
     }
     // every sidebar entry has a video
-    // Journeys gets its video with the documentation change of the 1.5.0 phase
-    for (const id of navIds) if (id !== 'journeys') expect(seen.has(id), `no video for ${id}`).toBe(true);
+    for (const id of navIds) expect(seen.has(id), `no video for ${id}`).toBe(true);
     expect(ARTICLES.length).toBeGreaterThan(0);
   });
 

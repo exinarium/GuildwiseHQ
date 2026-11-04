@@ -193,7 +193,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Instances in progress, with filters by journey, step and status. Open one to see its history.',
       },
     ],
-    article: 'org-chart-and-design#custom-workflows',
+    article: 'journeys#design',
   },
   '/forms': {
     title: 'Forms',

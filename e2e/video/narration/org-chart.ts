@@ -25,6 +25,10 @@ export const CHAPTERS: NarratedChapter[] = [
         id: 'c1-b',
         text: 'Click an agent for its details: the projects it works on, whom it reports to and escalates to, its workstation, its spend and its recent work.',
       },
+      {
+        id: 'c1-m',
+        text: 'Move to workstation, in the same dialog, hands the agent to another machine. Pick the workstation there; the agent keeps its name and history.',
+      },
     ],
   },
   {

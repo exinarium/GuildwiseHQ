@@ -66,6 +66,16 @@ export const CHAPTERS: NarratedChapter[] = [
       },
     ],
   },
+  {
+    title: 'Move an agent',
+    banner: 'Move to another workstation',
+    cues: [
+      {
+        id: 'c5-a',
+        text: 'An agent can also move to another workstation. Choose Move on its card, pick the workstation, and choose Move. Its name, history and track record go with it.',
+      },
+    ],
+  },
 ];
 
 export const OUTRO: Cue[] = [

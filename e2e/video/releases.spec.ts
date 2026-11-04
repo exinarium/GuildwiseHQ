@@ -22,7 +22,7 @@ import {
 
 /**
  * The Releases video (sidebar section 14): the queue (Release, Not now), What is live, the history and its filters, the
- * standard rule and the advanced rule sets, Freeze all releases and Lift the freeze.
+ * standard rule and the advanced rule sets, Freeze all releases and Lift the freeze, and the Release prep tab.
  * Output: media/videos/releases.{webm,mp4,vtt,json}
  *   e2e/video/record.sh releases
  * The demo computers are mock runners with the fake docker of the runner tests (see seed-deploy.ts). The two queued
@@ -116,6 +116,14 @@ test('record the releases video', async ({ browser }) => {
     (r) => r.filter((x) => x.status === 'waiting_release').length === 2,
     120_000,
   );
+  // release prep is switched on for the project, so the page has its Release prep tab (not run yet)
+  const prepOn = await api.put(`/api/projects/${projectId}/release-docs-prep/settings`, {
+    data: {
+      enabled: true,
+      steps: { analyse: true, changelog: true, guide: true, videos: false, commit: true },
+    },
+  });
+  expect(prepOn.ok(), await prepOn.text()).toBe(true);
   const prepared = prepareVideo({ slug: SLUG, title: 'Releases', cues: allCues(), chapters: CHAPTERS });
   const { page, narrate, chapter, finish } = await startRecording(prepared, browser, api);
 
@@ -181,6 +189,17 @@ test('record the releases video', async ({ browser }) => {
     await pause(1800);
     await click(page, freeze);
     await expect(freeze).toHaveText('Freeze all releases');
+  });
+
+  await chapter(4);
+  await narrate('c4-a', async () => {
+    await click(page, page.getByTestId('releases-tab-prep'));
+    const prep = page.getByTestId('release-docs-prep-SHOP');
+    await expect(prep).toBeVisible();
+    await expect(prep.getByTestId('release-docs-prep-state')).toHaveText('not run');
+    await pause(1500);
+    await prep.getByRole('button', { name: 'Run release prep' }).hover();
+    await pause(2500);
   });
   await narrate('outro-1');
 

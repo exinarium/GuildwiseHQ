@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { pool, q } from '../support/db.ts';
+import { paths } from '../support/env.ts';
 import { click, type } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
 import { allCues, CHAPTERS } from './narration/agents.ts';
@@ -7,7 +8,7 @@ import { createProject, demoApi, pairWorkstation, provisionCeo } from './seed.ts
 
 /**
  * The Agents video (sidebar section 9): Hire agent, Pause and Resume, Change model, the recommendations (apply one,
- * dismiss one) and the Project filter.
+ * dismiss one), the Project filter and Move to another workstation (the dialog; Cancel).
  * Output: media/videos/agents.{webm,mp4,vtt,json}
  *   e2e/video/record.sh agents
  */
@@ -25,6 +26,7 @@ test('record the agents video', async ({ browser }) => {
   const { projectId: blog } = await createProject(api, 'BLOG', 'Company blog', { repo: false });
   await provisionCeo(api);
   const workstationId = await pairWorkstation(api);
+  await pairWorkstation(api, 'Studio Mac mini', paths.runnerHome('video-studio')); // a second machine: the Move dialog needs a target
   const hire = async (name: string, roleKey: string, allowed: string[] | null, seniority = 'junior') => {
     const r = await api.post('/api/agents', {
       data: { name, roleKey, seniority, runtime: 'mock', workstationId, allowedProjectIds: allowed },
@@ -131,6 +133,20 @@ test('record the agents video', async ({ browser }) => {
     await page.getByLabel('Project', { exact: true }).selectOption({ label: 'BLOG Company blog' });
     await expect(page.getByTestId('agent-Max')).toHaveCount(0);
     await expect(page.getByTestId('agent-Tess')).toBeVisible();
+  });
+
+  await chapter(5);
+  await narrate('c5-a', async () => {
+    await page.getByTestId('agent-Tess').scrollIntoViewIfNeeded();
+    await click(page, page.getByRole('button', { name: 'Move Tess to another workstation' }));
+    const dlg = page.getByRole('form', { name: 'Move agent' });
+    await expect(dlg).toBeVisible();
+    await expect(dlg.getByTestId('move-now-on')).toBeVisible();
+    await pause(2500);
+    await dlg.getByLabel('Workstation', { exact: true }).hover();
+    await pause(2000);
+    await click(page, dlg.getByRole('button', { name: 'Cancel' }));
+    await expect(dlg).toHaveCount(0);
   });
   await narrate('outro-1');
 

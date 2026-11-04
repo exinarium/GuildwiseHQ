@@ -588,6 +588,59 @@ Each entry has the same fields. "Linked from" names the guide chapter, the tour 
 - **Prerequisites and test data:** a DevOps approval on the Desk; the notification link is made with the server's own signing key (the recording browser has no push service); a second member (Jamie Lee) to remove.
 - **Linked from:** Help `organizations-and-roles#audit-log`.
 
+### 30. Forms
+
+- **Slug:** `forms`
+- **Title:** Forms: build a form
+- **Sections covered:** Forms (sidebar, Work).
+- **Scope in:** the list, the builder (palette, field properties, `Save`, `Versions`), `Preview` (desktop and phone), the `Share` tab (public address, QR code, `Publish changes`), the form as a client sees it, `New personal link` and `Submissions`.
+- **Scope out:** the company logo, the offline link flow, the Business-view wording.
+- **Target length:** 2:00.
+- **Script outline:**
+  1. Open Forms from the sidebar and open the Rental application form.
+  2. The palette and the properties of a field; add a field, `Save` (a new version), the `Versions` menu.
+  3. `Preview`, desktop and phone.
+  4. `Share`: the address and QR code, `Publish changes`; then the public form as a client sees it.
+  5. `Personal links`: create one (a reference, not a name); `Submissions`.
+- **Prerequisites and test data:** a mock workstation with a connected local-folder storage ("Client documents"); the published form "Rental application" (six fields); one personal link `client-1042`, used by one submission sent through the public page.
+- **Linked from:** Help `forms#build-a-form`; page help of Forms.
+- **Re-record when:** the Forms list, the builder or the Share tab change.
+
+### 31. Journeys
+
+- **Slug:** `journeys`
+- **Title:** Journeys: design a journey
+- **Sections covered:** Journeys (sidebar, Work).
+- **Scope in:** the list, `New journey` from the Rentals template, steps and handoffs, a wait for a form, a gate, the `Webhooks` panel (the secret is shown once), `Save`, the `Running` tab and an instance (history, `Waits, approvals and calls`, references).
+- **Scope out:** timeout actions in detail, outbound webhook calls, deciding a gate on the Desk.
+- **Target length:** 2:30.
+- **Script outline:**
+  1. Open Journeys; `New journey` and the Rentals template.
+  2. The steps and a handoff.
+  3. The wait (pick the form, wait at most, when time runs out) and the gate.
+  4. `Webhooks`: name, what it does, where the record id is; the address and secret; `Save`.
+  5. `Running`: open "Unit 4B, Demo Tenant", its history, the waits panel and its references.
+- **Prerequisites and test data:** the storage and the published form of the Forms video; a "Tenant rentals" journey with a form wait and a gate, and one instance waiting at the documents step (the step cards are ended in the database, as in `e2e/tests/journeys.spec.ts`).
+- **Linked from:** Help `journeys#design`; page help of Journeys.
+- **Re-record when:** the Journeys list, the designer or the instance page change.
+
+### 32. Storage
+
+- **Slug:** `storage`
+- **Title:** Storage connections
+- **Sections covered:** Organization > Storage (no sidebar entry of its own: the registry entry has `nav: null` and no `paths`, so the Watch button of Organization stays with `organization`).
+- **Scope in:** the empty tab, `Add storage` (a local folder), `Connect`, `Test connection`, `Rename`, the other types (one sentence).
+- **Scope out:** the OneDrive, Google Drive and S3 sign-in flows, `Reconnect`, `Remove`.
+- **Target length:** 1:30.
+- **Script outline:**
+  1. Organization, the `Storage` tab: nothing connected yet.
+  2. `Add storage`: name, type, workstation; then the folder path and `Connect`.
+  3. The row shows Connected; `Test connection`; `Rename`.
+  4. The other types in the `Type` list.
+- **Prerequisites and test data:** Owner signed in; one online mock workstation; an existing local folder.
+- **Linked from:** Help `storage#connect`; the Storage tab.
+- **Re-record when:** the Storage tab or its dialogs change.
+
 ## Screen map (`e2e/video/screens.json`)
 
 The machine-readable form of the re-record map below, used by the release prep step **Generate videos**. Each video lists its screens and the `apps/web/src` files (globs) behind them; `planned` holds the videos of this plan that have no spec yet; `shared` (shell, ui, styles, api, lib, hooks) re-renders nothing; `exclude` holds the pages that never get a video (sign-in, password and invite pages). The rule, in order: a changed spec or narration re-renders its video; a shared file selects nothing; a changed screen file re-renders every video that lists it; a new or changed page in no video asks for a new video (its planned entry, else the file name); other UI files select nothing; non-UI changes are ignored. Keep it in step with this plan: a test in `apps/web` fails when a published video or a page is missing.
@@ -627,6 +680,9 @@ Each section belongs to exactly one video. G is also re-recorded for the five se
 | 27 | Capabilities | `capabilities` | never |
 | 28 | AI runtimes, Model providers | `ai-runtimes` | never |
 | 29 | Governance | `governance` | never |
+| 30 | Forms | `forms` | never |
+| 31 | Journeys | `journeys` | never |
+| 32 | Storage (Organization) | `storage` | never |
 | P | Platform area | `platform-area` | never |
 
 A change to the sidebar itself (labels, order, a new entry) re-records G and every video whose first beat opens a changed entry.

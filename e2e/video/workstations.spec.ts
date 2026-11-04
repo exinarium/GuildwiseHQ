@@ -5,11 +5,11 @@ import { killRunner } from '../support/runner.ts';
 import { click } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
 import { allCues, CHAPTERS } from './narration/workstations.ts';
-import { createProject, demoApi, pairWorkstation } from './seed.ts';
+import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
 
 /**
  * The Workstations video (sidebar section 13): the Add a workstation wizard, pairing with a code, the workstation card
- * (health, Shifts at once, git hosts) and Check for updates.
+ * (health, Shifts at once, git hosts), Check for updates and Retire (the choice for the agents; Cancel).
  * Output: media/videos/workstations.{webm,mp4,vtt,json}
  *   e2e/video/record.sh workstations
  */
@@ -24,7 +24,9 @@ test('record the workstations video', async ({ browser }) => {
   const api = await demoApi();
   await createProject(api, 'SHOP', 'Web shop');
   const studioHome = paths.runnerHome('video-studio');
-  await pairWorkstation(api, 'Studio Mac mini', studioHome);
+  const studioId = await pairWorkstation(api, 'Studio Mac mini', studioHome);
+  await hireAgent(api, { name: 'Max', roleKey: 'builder', workstationId: studioId });
+  await hireAgent(api, { name: 'Ben', roleKey: 'builder', workstationId: studioId });
   killRunner('SIGKILL', studioHome); // the second machine is switched off: it stays paired but offline
   await pairWorkstation(api, "Alex's laptop");
 
@@ -124,6 +126,20 @@ test('record the workstations video', async ({ browser }) => {
     await click(page, laptop.getByTestId('update-check-button'));
     await expect(laptop.getByTestId('update-check-result')).toBeVisible({ timeout: 20_000 });
     await pause(1500);
+  });
+
+  await chapter(5);
+  await narrate('c5-a', async () => {
+    await click(page, studio.getByRole('button', { name: 'Retire Studio Mac mini', exact: true }));
+    const form = page.getByRole('form', { name: 'Retire workstation' });
+    await expect(form).toBeVisible();
+    await expect(form.getByTestId('retire-agents')).toContainText('Max');
+    await pause(2500);
+    await click(page, form.getByRole('radio', { name: /Move its agents to another workstation/ }));
+    await expect(form.getByLabel('Move to')).toBeVisible();
+    await pause(2500);
+    await click(page, form.getByRole('button', { name: 'Cancel' }));
+    await expect(form).toHaveCount(0);
   });
   await narrate('outro-1');
 
