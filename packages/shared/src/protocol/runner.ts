@@ -97,6 +97,7 @@ import {
 } from '../models/direct.ts';
 import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
+import { ReleasePrepShiftSchema } from '../release/docs-prep-task.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
 import { ReleaseDocsPrepPayloadSchema } from '../release/docs-prep-dto.ts';
@@ -1959,7 +1960,7 @@ export const WelcomeSchema = msg('welcome', {
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
   claimId: z.uuid(),
-  kind: z.enum(['card', 'question', 'devops', 'ba_task', 'ceo']),
+  kind: z.enum(['card', 'question', 'devops', 'ba_task', 'ceo', 'release_prep']),
   /** The Claude account this shift runs on; absent = 'main'. Only sent to runners with CLAUDE_ACCOUNTS_CAPABILITY. */
   account: z.object({ key: AccountKeySchema }).optional(),
   agent: AgentRuntimeSpecSchema,
@@ -1982,6 +1983,8 @@ export const ShiftStartSchema = msg('shift.start', {
   question: QuestionShiftSchema.optional(),
   /** Phases: for `kind: 'ba_task'` the background task (phase report, follow-up briefs, ...); the brief carries a placeholder card. */
   baTask: BaTaskShiftSchema.optional(),
+  /** Release prep: for `kind: 'release_prep'` the prep task (a new video script, ...); the brief carries a placeholder card. */
+  releasePrep: ReleasePrepShiftSchema.optional(),
   /** The CEO agent's wake or daily review (no card, no worktree); the brief carries a placeholder card. */
   ceo: CeoShiftSchema.optional(),
   /** A CEO shift: where the organization graph is (`aom ceo route`). Absent: none. */

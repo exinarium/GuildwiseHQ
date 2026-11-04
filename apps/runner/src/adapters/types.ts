@@ -135,7 +135,7 @@ export interface ShiftStartInput {
   /** Continue this session (`claude --resume`): a chat's earlier turns, or a card shift that resumes its agent's session. */
   resumeSessionId?: string;
   /** The kind of shift (card shifts get the longer shell timeout for `aom question --wait`). */
-  kind?: 'card' | 'question' | 'devops' | 'ba_task' | 'ceo';
+  kind?: 'card' | 'question' | 'devops' | 'ba_task' | 'ceo' | 'release_prep';
   /** Short shifts (question, CEO, DevOps, QA steps) set the prompt cache to 5 minutes: a 1-hour write costs 2x. */
   promptCacheTtl?: '5m';
   /** The DevOps guard hook's inputs (a DevOps shift or chat only; see devops/guard.ts). */

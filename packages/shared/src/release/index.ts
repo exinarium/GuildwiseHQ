@@ -3,6 +3,7 @@ export * from './commits.ts';
 export * from './components.ts';
 export * from './docs-prep.ts';
 export * from './docs-prep-dto.ts';
+export * from './docs-prep-task.ts';
 export * from './docs-prep-videos.ts';
 export * from './dto.ts';
 export * from './publish.ts';
