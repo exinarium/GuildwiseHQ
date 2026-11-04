@@ -274,6 +274,29 @@ async function commitRelease(
   };
 }
 
+/**
+ * A fast-forward push of `sha` to `refs/heads/<branch>` of origin: no --force and no leading '+'. Shared by the release
+ * commit and Release prep (docs and videos); never a tag.
+ */
+export async function pushFastForward(
+  repoPath: string,
+  sha: string,
+  branch: string,
+  a: { args: string[]; env: Record<string, string> },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const push = await git(repoPath, [...a.args, 'push', 'origin', `${sha}:refs/heads/${branch}`], {
+    env: a.env,
+  });
+  if (push.exitCode === 0) return { ok: true };
+  const why = (push.stderr || push.stdout).trim();
+  return {
+    ok: false,
+    error: isProtectedBranchRejection(why)
+      ? `${branch} is protected and refused the push: ${why}`
+      : `pushing ${branch} failed: ${why}`,
+  };
+}
+
 async function pushCommit(
   input: ReleaseShipInput,
   sha: string,
@@ -297,17 +320,8 @@ async function pushCommit(
     notices: carry.notices,
     ...(carry.section ? { section: carry.section } : {}),
   };
-  // A fast-forward push of the commit: no --force and no leading '+'.
-  const push = await git(repoPath, [...a.args, 'push', 'origin', `${sha}:refs/heads/${p.workingBranch}`], {
-    env: a.env,
-  });
-  if (push.exitCode !== 0) {
-    const why = (push.stderr || push.stdout).trim();
-    const msg = isProtectedBranchRejection(why)
-      ? `${p.workingBranch} is protected and refused the push: ${why}`
-      : `pushing ${p.workingBranch} failed: ${why}`;
-    return { ok: false, step: 'push', error: firstLine(msg), ...base };
-  }
+  const pushed = await pushFastForward(repoPath, sha, p.workingBranch, a);
+  if (!pushed.ok) return { ok: false, step: 'push', error: firstLine(pushed.error), ...base };
   await git(repoPath, ['update-ref', '-d', `refs/guildwise/release/${p.version}`]);
   await advanceLocalBranch(repoPath, p.workingBranch, sha);
   let section = carry.section;

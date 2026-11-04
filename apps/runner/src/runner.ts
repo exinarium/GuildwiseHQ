@@ -43,6 +43,7 @@ import {
   RELAY_FEATURE,
   RELEASE_FACTS_CAPABILITY,
   RELEASE_PUBLISH_CAPABILITY,
+  RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -120,6 +121,7 @@ import { checkBranchMerged } from './git/merged.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
+import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { shipReleaseCommit } from './git/release-ship.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { bumpSubmodule } from './git/submodule-pin.ts';
@@ -1429,6 +1431,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
+        RELEASE_DOCS_PREP_CAPABILITY,
         RELEASE_PUBLISH_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
@@ -2140,6 +2143,31 @@ export class Runner {
             repoId: p.repoId,
             remoteUrlNormalized: p.remoteUrlNormalized,
             workingBranch: p.workingBranch,
+          });
+      } else if (command === 'release.docs_prep') {
+        // "No clone here" and every git refusal are answers (ok:true, result.state:'failed'): the server fails the run.
+        const p = CommandPayloadSchemas['release.docs_prep'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        const result = repo
+          ? await runReleaseDocsPrep({
+              payload: p,
+              repoPath: repo.localPath,
+              integrationDir: this.paths.integration,
+              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+            })
+          : {
+              ok: false,
+              state: 'failed' as const,
+              error: `no local clone for ${p.remoteUrlNormalized}`,
+              files: [],
+              notices: [],
+            };
+        done(true, result);
+        if (result.pushed)
+          void this.sync.sync({
+            repoId: p.repoId,
+            remoteUrlNormalized: p.remoteUrlNormalized,
+            workingBranch: p.releaseBranch,
           });
       } else if (command === 'release.publish') {
         // "No clone here", "not merged yet" and every git or forge refusal are answers (ok:true): the server decides.

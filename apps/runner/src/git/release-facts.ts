@@ -70,6 +70,36 @@ export async function componentFactsAt(
 }
 
 /**
+ * Every release tag (`vX.Y.Z`) of the clone, newest first, and the newest one merged into `headSha`. One rule for the
+ * release facts and for Release prep (docs and videos).
+ */
+export async function releaseTagsAt(
+  repoPath: string,
+  headSha: string,
+): Promise<{
+  all: string[];
+  newestFirst: (xs: string[]) => string[];
+  last: { name: string; sha: string } | null;
+}> {
+  const all = nonEmpty((await git(repoPath, ['tag', '--list', 'v*'])).stdout).filter((t) =>
+    RELEASE_TAG_RE.test(t),
+  );
+  const newestFirst = (xs: string[]) => [...xs].sort((x, y) => compareSemver(y.slice(1), x.slice(1)) ?? 0);
+  const merged = new Set(
+    nonEmpty((await git(repoPath, ['tag', '--merged', headSha, '--list', 'v*'])).stdout),
+  );
+  const lastName = newestFirst(all.filter((t) => merged.has(t)))[0] ?? null;
+  const lastSha = lastName ? await revParse(repoPath, `refs/tags/${lastName}`) : null;
+  return { all, newestFirst, last: lastName && lastSha ? { name: lastName, sha: lastSha } : null };
+}
+
+/** The newest release tag merged into `headSha`, or null. */
+export const lastReleaseTagAt = async (
+  repoPath: string,
+  headSha: string,
+): Promise<{ name: string; sha: string } | null> => (await releaseTagsAt(repoPath, headSha)).last;
+
+/**
  * `repo.release_facts`: what the release proposal needs from the repository. Read-only: fetches the main branch, the
  * working branch and the tags, then reads with `git log`, `git diff` and `git show`. It never pushes, tags or checks
  * out, and never throws for expected failures.
@@ -105,16 +135,8 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     (await git(repoPath, ['rev-list', '--count', `${baseSha}..${headSha}`])).stdout.trim() || '0',
   );
 
-  const all = nonEmpty((await git(repoPath, ['tag', '--list', 'v*'])).stdout).filter((t) =>
-    RELEASE_TAG_RE.test(t),
-  );
-  const newestFirst = (xs: string[]) => [...xs].sort((x, y) => compareSemver(y.slice(1), x.slice(1)) ?? 0);
-  const merged = new Set(
-    nonEmpty((await git(repoPath, ['tag', '--merged', headSha, '--list', 'v*'])).stdout),
-  );
-  const lastName = newestFirst(all.filter((t) => merged.has(t)))[0] ?? null;
-  const lastSha = lastName ? await revParse(repoPath, `refs/tags/${lastName}`) : null;
-  const lastTag = lastName && lastSha ? { name: lastName, sha: lastSha } : null;
+  const { all, newestFirst, last: lastTag } = await releaseTagsAt(repoPath, headSha);
+  const lastName = lastTag?.name ?? null;
 
   const range = lastName ? `${lastName}..${headSha}` : headSha;
   const log = await git(repoPath, [
