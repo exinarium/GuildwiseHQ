@@ -1,4 +1,4 @@
-import type { MoveAllAgentsResponse, MoveBlockReason } from '@aom/shared';
+import { MOVE_BLOCK_LABEL, type MoveAllAgentsResponse } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useBulkMoveTargets, useMoveAllAgents, useMoveAllPreview } from '../../api/queries/agent-move.ts';
@@ -9,16 +9,6 @@ export interface MoveAllSource {
   id: string;
   name: string;
 }
-
-const REASON_LABEL: Record<MoveBlockReason, string> = {
-  running_shift: 'In a running shift',
-  one_devops: 'One DevOps engineer per workstation',
-  workstation_limit: 'Workstation limit reached',
-  sandbox_gate: 'Sandbox',
-  runtime_missing: 'Runtime missing on the target',
-  ceo: 'The CEO moves on the CEO page',
-  other: 'Cannot move',
-};
 
 type Blocked = MoveAllAgentsResponse['blocked'][number];
 
@@ -51,7 +41,7 @@ function BlockedList({
       {list.map((a) => (
         <li key={a.agentId}>
           <span className="font-medium">{a.name}</span>
-          <span className="text-subtle"> · {REASON_LABEL[a.reason]}</span>
+          <span className="text-subtle"> · {MOVE_BLOCK_LABEL[a.reason]}</span>
           <span className="block text-subtle">{a.message}</span>
           {onMoveOne && (
             <Button

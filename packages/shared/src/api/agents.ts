@@ -172,6 +172,16 @@ export const MoveBlockReasonSchema = z.enum([
   'other',
 ]);
 export type MoveBlockReason = z.infer<typeof MoveBlockReasonSchema>;
+/** The short label shown for why a bulk move leaves an agent where it is (the single move's message follows it). */
+export const MOVE_BLOCK_LABEL: Record<MoveBlockReason, string> = {
+  running_shift: 'In a running shift',
+  one_devops: 'One DevOps engineer per workstation',
+  workstation_limit: 'Workstation limit reached',
+  sandbox_gate: 'Sandbox',
+  runtime_missing: 'Runtime missing on the target',
+  ceo: 'The CEO moves on the CEO page',
+  other: 'Cannot move',
+};
 const MovedAgentSchema = z.object({ agentId: z.uuid(), name: z.string() });
 export const MoveAllAgentsResponseSchema = z.object({
   dryRun: z.boolean(),
