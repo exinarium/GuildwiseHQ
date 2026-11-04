@@ -134,6 +134,33 @@ describe('the checks in the build brief', () => {
 });
 
 describe('settings with checks', () => {
+  it('a proposed check gets a timeout the owner can save: default 5, never above 10', async () => {
+    await team();
+    await cardInBuild();
+    const start = await p.next('Bea');
+    await p.startShift(r, start);
+    await rpc(start.shiftId, 'env.suites.propose', {
+      suites: [
+        { name: 'a', cmd: ['pnpm', 'lint'], kind: 'check' },
+        { name: 'b', cmd: ['pnpm', 'typecheck'], kind: 'check', timeoutMin: 30 },
+        { name: 'c', cmd: ['npm', 'run', 'it'], kind: 'integration' },
+      ],
+    });
+    const suites = (await call('GET', settingsUrl())).settings.suites as Array<{
+      name: string;
+      timeoutMin: number;
+    }>;
+    expect(suites.map((x) => [x.name, x.timeoutMin])).toEqual([
+      ['a', 5],
+      ['b', 10],
+      ['c', 20],
+    ]);
+    // the owner can save the settings as they are
+    const cur = (await call('GET', settingsUrl())).settings;
+    await call('PUT', settingsUrl(), { settings: cur });
+    r.ended(start.shiftId, 'reported');
+  });
+
   it('PUT keeps the stored checkDetection, confirming a check works, and the tester never sees checks', async () => {
     await team();
     await cardInBuild();

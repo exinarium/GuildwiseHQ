@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   branchName,
+  CHECK_TIMEOUT_MAX_MIN,
   DEFAULT_RUN_PORT_RANGE,
   DESK_SUBKIND,
   expandEnvId,
@@ -989,7 +990,18 @@ export async function proposeSuites(
       const repoId =
         repos.find((r) => r.id === given || r.name.toLowerCase() === String(given ?? '').toLowerCase())?.id ??
         card.repo_id;
-      return IntegrationSuiteSchema.safeParse({ ...(s as object), repoId, confirmed: false });
+      // A proposed check gets a timeout the owner can save (default 5, at most the limit); set here, never in the projector.
+      const raw = s as { kind?: string; timeoutMin?: unknown };
+      const timeout =
+        raw.kind === 'check'
+          ? {
+              timeoutMin: Math.min(
+                CHECK_TIMEOUT_MAX_MIN,
+                typeof raw.timeoutMin === 'number' && raw.timeoutMin >= 1 ? raw.timeoutMin : 5,
+              ),
+            }
+          : {};
+      return IntegrationSuiteSchema.safeParse({ ...(s as object), ...timeout, repoId, confirmed: false });
     });
     const bad = parsed.find((r) => !r.success);
     if (bad && !bad.success) return [false, undefined, `invalid suite: ${bad.error.issues[0]?.message}`];
