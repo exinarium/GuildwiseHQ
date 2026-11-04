@@ -83,9 +83,9 @@ describe('regression #77 (89f77b67): sandbox dotfile stubs, the post-shift guard
   it('builder autocommit never commits the stubs, and a stub-only worktree makes no commit', async () => {
     const { path } = await setup('builder');
     stubs(path);
-    expect(await autoCommit({ worktree: path, env: {} })).toBe(false);
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(false);
     writeFileSync(join(path, 'a.ts'), 'a');
-    expect(await autoCommit({ worktree: path, env: {} })).toBe(true);
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(true);
     const files = sh(path, 'git', ['show', '--name-only', '--format=', 'HEAD']);
     expect(files.trim()).toBe('a.ts');
   });
@@ -93,7 +93,7 @@ describe('regression #77 (89f77b67): sandbox dotfile stubs, the post-shift guard
   it('a builder that really adds content to .gitmodules has it committed', async () => {
     const { path } = await setup('builder');
     writeFileSync(join(path, '.gitmodules'), '[submodule "x"]\n');
-    expect(await autoCommit({ worktree: path, env: {} })).toBe(true);
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(true);
     expect(sh(path, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim()).toBe('.gitmodules');
   });
 

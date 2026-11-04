@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractFallbackReport } from '../src/shifts/supervisor.ts';
@@ -140,6 +140,30 @@ describe('supervisor', () => {
     expect(note).toMatch(/leftovers commit \([0-9a-f]{7,}\)/);
     // the work itself is kept, as before
     expect(sh(wt, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
+  it('a shift that ends without a report after deleting many tracked files is not auto-committed and posts one refusal note', async () => {
+    let wt = '';
+    await start(async (i) => {
+      wt = i.cwd;
+      mkdirSync(join(wt, 'gen'), { recursive: true });
+      for (let n = 0; n < 30; n++) writeFileSync(join(wt, 'gen', `g${n}.ts`), `${n}\n`);
+      sh(wt, 'git', ['add', '-A']);
+      sh(wt, 'git', ['-c', 'user.name=a', '-c', 'user.email=a@x.test', 'commit', '-qm', 'agent adds gen']);
+      for (let n = 0; n < 30; n++) rmSync(join(wt, 'gen', `g${n}.ts`));
+    });
+    const { shiftId } = await h!.runShift({ stage: 'build' });
+    const notes = h!.server
+      .of('shift.report')
+      .filter((r) => r.shiftId === shiftId && r.report.kind === 'comment')
+      .map((r) => (r.report as { note: string }).note);
+    const refusal = notes.filter((n) => n.includes('did not commit the leftovers'));
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0]).toContain(shiftId);
+    expect(refusal[0]).toContain('deletes 30');
+    expect(notes.some((n) => n.includes('refused to commit them'))).toBe(true);
+    expect(sh(wt, 'git', ['log', '-1', '--format=%s'])).toBe('agent adds gen');
+    expect(existsSync(join(wt, 'gen', 'g0.ts'))).toBe(false);
   });
 
   it('no note when a shift without a report left nothing behind', async () => {
