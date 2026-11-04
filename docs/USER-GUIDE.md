@@ -69,6 +69,9 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.28 Releases](#428-releases)
   - [4.29 Metrics](#429-metrics)
   - [4.30 Your settings](#430-your-settings)
+  - [4.31 Storage connections](#431-storage-connections)
+  - [4.32 Forms, public links and personal links](#432-forms-public-links-and-personal-links)
+  - [4.33 Journeys: a whole process on one record](#433-journeys-a-whole-process-on-one-record)
 - [Discovery: from an idea to a PRD](#discovery-from-an-idea-to-a-prd)
 - [Boardroom: a debate with a Chair](#boardroom-a-debate-with-a-chair)
   - [Choosing providers and models for Discovery and Boardroom](#choosing-providers-and-models-for-discovery-and-boardroom)
@@ -183,6 +186,11 @@ Read this chapter once. Everything else builds on these words.
 | **Interest** | A topic you follow, such as "AI news". Agents look for new items on a schedule and deliver them to your desk. |
 | **Phase** | A named slice of a project ("Phase 2: autosave") that you ship and check together, followed by steps such as deploy and regression run. |
 | **Budget** | A monthly spending limit on a project (or an interest). |
+| **Form** | Questions a client answers without a login, built under Work > Forms and shared by a public address or a personal link (4.32). |
+| **Storage connection** | Your own OneDrive, Google Drive, S3, folder or vault that forms and journeys write files to; the sign-in stays on your workstation (4.31). |
+| **Journey** | One whole process made of your workflows linked by handoffs, working on one shared record (4.33). |
+| **Handoff** | A rule that says where a journey goes when a step is done or cancelled. |
+| **Wait / Gate** | A journey step that pauses for time, a date, a form or a webhook (wait), or asks a person to approve or reject (gate). |
 
 The in-app glossary is at **Help, Glossary**.
 
@@ -590,7 +598,7 @@ Agents belong to the organization, not to a single project. For each agent you d
 - **Effort and Model:** how hard the agent thinks. Higher costs more.
 - **Skills:** extra know-how, such as "Playwright" or "database migrations".
 
-**Changing an agent.** On the agent's card use **Projects** (the allow-list), **Change model**, **Change role**, **Pause** (and **Resume**) and **Fire**. A paused agent takes no new work; the card says "Paused" or "Paused by the CEO". An agent that lost its home (for example when its owner left) shows **needs rehome**: press **Re-home** to give it to someone. Owners and Admins can also press **Move to workstation** on any agent (on the Agents page, or in the agent's card on the Org chart), and the manager who hired an agent can move it too. The agent moves to another workstation of the organization, for example when its computer is offline or was unpaired; it keeps its name, history, projects, runtime and model, and the dialog says so when the new workstation lacks its runtime. A move is refused while the agent is in a running shift: wait until it ends or stop it. Claims the agent still holds without a shift go back to the queue as part of the move. A DevOps engineer can only be moved by an Owner or Admin, only off an unpaired workstation, and only to a workstation that has no DevOps engineer (one DevOps engineer per workstation); the dialog warns before you confirm. A card that was pinned to the old workstation stays there until an agent on that workstation (or **Re-home** on the card) picks it up. A small button on the face re-rolls it. Firing releases the cards the agent holds back to the queue with the last handoff, deletes the agent's private sandbox, and retires the name. The agent's history stays in the records. A fired name is never reused.
+**Changing an agent.** On the agent's card use **Projects** (the allow-list), **Change model**, **Change role**, **Pause** (and **Resume**) and **Fire**. A paused agent takes no new work; the card says "Paused" or "Paused by the CEO". An agent that lost its home (for example when its owner left) shows **needs rehome**: press **Re-home** to give it to someone. Owners and Admins can also press **Move to workstation** on any agent (on the Agents page, or in the agent's card on the Org chart), and the manager who hired an agent can move it too. The agent moves to another workstation of the organization, for example when its computer is offline or was unpaired; it keeps its name, history, projects, runtime and model, and the dialog says so when the new workstation lacks its runtime. A move is refused while the agent is in a running shift: wait until it ends or stop it. Claims the agent still holds without a shift go back to the queue as part of the move. A DevOps engineer can only be moved by an Owner or Admin, only off an unpaired workstation, and only to a workstation that has no DevOps engineer (one DevOps engineer per workstation); the dialog warns before you confirm. A card that was pinned to the old workstation stays there until an agent on that workstation (or **Re-home** on the card) picks it up. **Move all agents.** When a workstation is offline or removed, an Owner or Admin presses **Move all agents from this workstation** (Workstations and Agents pages). The dialog previews who **Will move** and who is **Blocked** and why (in a running shift, one DevOps engineer per workstation, workstation limit reached, runtime missing on the target, the CEO moves on the CEO page), then lists who moved; a blocked agent has its own **Move** button. Your CEO can do the same for you (`aom ceo act move-agents-off`, 4.22). An agent marked **needs rehome** can be re-homed even if its old shift was never ended. A small button on the face re-rolls it. Firing releases the cards the agent holds back to the queue with the last handoff, deletes the agent's private sandbox, and retires the name. The agent's history stays in the records. A fired name is never reused.
 
 ![Changing an agent's allowed projects](guide/assets/dlg-allowlist.jpg)
 
@@ -685,6 +693,10 @@ The items are grouped (**Needs you first**, **Blocking work**, **Decisions**, **
 Each desk item says **what kind it is** (Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Alert, and so on; the CEO's morning report is an Alert titled "Daily report <date>", 4.11), **who asked and what they were doing**, the **question** with options and a **recommendation**, and **how many cards are waiting**. To answer, click an option or type your own answer, optionally add it to the ledger, and click **Answer**. When your CEO has a recommendation, **Accept recommendation** answers with exactly what it recommends.
 
 ![A question with options and a recommendation](guide/assets/desk-question.jpg)
+
+**Journey items and client links.** A journey puts items on the desk (4.33): an approval **gate** (**Approve**, or **Reject** with a note), a wait that timed out (**Extend**, **Continue now**, **Go to step**, **Cancel the journey**), a task "Send this link to ..." for a form link, and a notice when a journey is stuck. When a client's form could not be sent because your workstation was offline, one item per case shows the client, **Link sent at**, **Link expires** and **Resend link** (4.32).
+
+![A journey approval on the desk](guide/assets/desk-journey.jpg)
 
 **CEO decisions.** When your CEO decides something on its own that you would otherwise have been asked (it answers a question routed to it, or decides a matter you delegated, such as which working branch a repository uses), the decision appears under **CEO decisions** at the bottom of the Desk, and under its own filter chip. It is information, not a request: it never sends a notification, is not blocking and is not counted in "open" or in the badge on the Desk tab. Each one shows what was asked, the CEO's decision and reason, the card, the time and "CEO decision · <name>". **Acknowledge** marks it read (the memories the decision relied on gain a little confidence); **Acknowledge all** marks every open CEO decision read in one go. **Correct** is for a decision that was wrong: write what the right decision is. The CEO adds it to its memory at once ("Owner corrected: ... (was: ...)"), the CEO and the BA then discuss it in exactly three turns. The BA analyses it (why the instinct was wrong, which signal it missed, a proposed rule) and assesses the consequences: what already happened because of the wrong decision, with the fix work proposed as concrete cards (nothing is created yet). The CEO replies in its own words: it agrees or disagrees, says what it got wrong and records the lesson (a disagreement is recorded for you, your correction always stands), and comments on the proposed cards. The BA then adjusts the proposal and creates the fix cards in the right projects (drafted by the BA, in the specify stage, linked to the decision and to the original card; on a paused project they are created but do not start). The item shows the discussion as a small timeline and the chip changes from "Under review" to "Lesson recorded · N fix cards". If the BA concludes that no fix work is needed and the CEO does not object, no cards are created. If the CEO does not reply within two hours (it is paused, offline or over budget) the lesson is recorded without it, marked "recorded without the CEO", and the BA still creates the cards it proposed. None of this sends a notification or needs anything from you. Where the decision can be undone (the Owner only), **Apply the correction now** also re-opens the question on your desk. Owners and Admins can acknowledge and correct; decisions taken before this feature existed are not listed.
 
@@ -1162,6 +1174,8 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 ![The Reporting & alerts tab of the CEO page](guide/assets/ceo-reporting.jpg)
 
+**Moving agents.** The CEO can move one agent to another workstation (`aom ceo act move-workstation --agent <name|id> --to <workstation>`) or all agents off an offline or removed one (`aom ceo act move-agents-off --from <workstation> --to <workstation>`), with the same checks as the Move and Move all dialogs in 4.4.
+
 **Where it runs.** The CEO lives on the Owner's most recently seen workstation that serves the organization (the one that last connected). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until the CEO has a workstation the page says "Add a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
 **There is no training period.** The CEO decides what your policy allows from day one; the Owner reviews and corrects what it did (see **CEO decisions** on the Desk and the **Correct** buttons below). Organizations that had a CEO in training were graduated when this shipped.
@@ -1284,6 +1298,12 @@ an information notice when a login account reaches its usage limit. They close b
 ### 4.25 How many shifts a workstation runs at once
 
 Each workstation runs a limited number of agent shifts at the same time; further cards wait in the queue. Open the workstation on the **Workstations** page and set **Shifts at once**: **Runner's own value** (what is in the runner's config file, normally 4), **A number**, or **Unlimited**. Only the workstation's owner can change it. It takes effect at once, with no restart, and the runner remembers it. **Unlimited** means Guildwise sets no limit; the computer's memory and CPU and your model's usage limit still apply, so watch the machine the first time. The platform administrator can also set a ceiling for the whole platform: when it is lower than your choice the page says which number applies. A runner from before this feature (0.1.20 and older) keeps using its own value and the page tells you to update it.
+
+**What the page shows.** Each workstation shows how many shifts run against its limit and **where the limit comes from** (workstation setting, platform cap, runner config, runner local fallback or shared with other pairings). Chat and CEO shifts are shown separately and not counted. When the workstation is full the page says who holds the slots (for example "Held by GWP-94 (Ada)"), and a warning appears when the runner enforces another number than the one set here. A refused shift reads "N shifts already running (limit N), source: ..., held by ...". A runner that does not report its limit asks to be updated.
+
+**Retire a workstation.** On the **Workstations** page an Owner or Admin presses **Retire** on a workstation and chooses what happens to its agents: **Move its agents to another workstation** (pick the target) or **Mark its agents as needing a new home** (re-home them one by one later, 4.4). Retiring is refused while one of its agents is in a running shift, and the refusal names them. An agent of another organization always needs a new home. A workstation that was unpaired but still holds agents is listed under **Removed workstations with agents** with a **Hand over agents** button that does the same. The retirement and each handover are written to the audit log.
+
+![The Retire dialog with the move choice](guide/assets/ws-retire.jpg)
 
 ### 4.26 The lean team workflow (code version 6)
 
@@ -1432,6 +1452,72 @@ It has these panels, top to bottom:
 > **In the app:** Help, "Two-factor login" (`/help/two-factor`) and "Getting started" (`/help/getting-started`).
 
 > **In the app:** watch the video "Your settings" (Help, "Getting started", `/help/getting-started#your-settings`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
+### 4.31 Storage connections
+
+Forms and journeys put client files into **your own storage**, never on the Guildwise server. **Organization > Storage** (Owners and Admins add and change; everyone else only sees the list) is where you connect it.
+
+![Organization, Storage tab with a connected OneDrive and an S3 bucket](guide/assets/storage-tab.jpg)
+
+1. Press **Add storage**, give it a **Display name** and pick the **Type**: OneDrive or SharePoint, Google Drive, S3-compatible storage, a local folder or NAS reachable from the workstation, or a folder in a knowledge vault. Pick the **Workstation** that will hold the sign-in. It must be online and be yours: the sign-in and keys stay encrypted on that workstation (`secrets/storage.json`) and the Guildwise server never receives them. It only knows a connection id.
+2. Press **Connect**. For OneDrive/SharePoint and Google Drive the dialog shows a code: open the sign-in page on any device, enter the code and approve (*device sign-in*). For S3 enter **Endpoint**, **Bucket**, **Region**, **Access key id** and **Secret access key**; for a local folder the **Folder on the workstation**; for a vault the **Vault** and the **Folder inside the vault**. The dialog asks your workstation to test the connection and says **Connected.**
+3. **Test connection** checks it again at any time. **Rename** changes the display name. **Remove** deletes the connection and its sign-in from the workstation; files already written stay where they are.
+
+A connection whose sign-in has expired shows **Needs re-authentication**: press **Reconnect** and sign in again. A form that sends files to it is refused at publish time until it works. When the workstation is offline the connection cannot be used and a public form says it cannot accept submissions right now.
+
+**Watch out:** the folder and file name of every upload come from the form's template (for example `{journey}/{client}/{field}-{date}`). A file is never overwritten: a clash becomes `-2`, `-3`.
+
+> **In the app:** Help, "Storage connections" (`/help/storage`).
+
+### 4.32 Forms, public links and personal links
+
+A **form** is a set of questions your clients answer without a Guildwise login. **Work > Forms** lists them (**Active** and **Archived**); **New form** is for Owners and Admins, everyone else can open a form and see its preview.
+
+![The form builder: palette, canvas and field properties](guide/assets/form-builder.jpg)
+
+**Build a form.** Drag a field from the palette onto the canvas, or tap it or press Enter to add it after the selected field. The ten fields are short text, long text, email, phone, number, date, dropdown, radio, checkbox and file upload. Click a field to set its label, required, placeholder, help text, minimum and maximum, options, and for a file upload the allowed types, the size limit and the destination (a storage connection, a folder and a name template). With nothing selected the panel shows the form settings: title, description, company logo, where the answers go and the text shown after sending. **Preview** shows exactly what a client sees, with the same messages. Every **Save** is a new version; the **Versions** menu opens earlier ones read-only.
+
+**Share tab.** A saved form has a **Share** tab.
+
+![The Share tab: public address, QR code and personal links](guide/assets/form-share.jpg)
+
+- **Publish** gives the form a public address (`/f/` and a long random id) and a QR code for exactly that address, to download as PNG or SVG. Publishing is refused until the answers and every file field have a storage connection.
+- **Unpublish** closes it: the address then says "This form is not available", like an address that never existed.
+- **Create a new link** replaces the address for good: the old address and every printed QR code stop working.
+- **Publish changes** moves the address to the newest saved version.
+- **Submissions** lists what arrived: **In progress**, **Received**, **Failed, client can retry** or **Timed out**. It shows status and times only, never the answers; those are in your storage.
+
+**Personal links.** Under **Personal links** you create a link for one client or record: type a reference (a client number, not a name) and choose 7 to 90 days. The link works once: the first completed submission uses it up. **Revoke** ends it earlier. It carries no personal data and an expired, revoked or used link is refused with a clear message. Send the link yourself.
+
+**What the client sees.** The client opens the address on a phone or computer, with your logo and the same checks as the preview. Answers and files go to your storage through your workstation: a readable HTML copy, the JSON of the answers and every upload. Nothing is marked complete until everything is stored; if your storage fails the client sees "Your answers are still here. Try again." and only what is missing is sent again.
+
+**When your workstation is offline.** The form shows an email box instead of the fields and sends nothing but that address. When the workstation has been back for 30 seconds each waiting client gets one email with a secure link (single use, 7 days by default; set it per form under Settings). The desk gets one notice per case that shows **Link sent at**, **Link expires** and the email, with **Resend link** and, on a journey, **Continue** without the form.
+
+**Watch out:** the server checks everything again: required fields, file type by name and content, file size and number, and rate limits. Programs, SVG and macro-enabled documents are never accepted. Rotating `AOM_SECRET_KEY` ends every personal link.
+
+> **In the app:** Help, "Forms" (`/help/forms#share`), and the video "Forms: build a form".
+
+### 4.33 Journeys: a whole process on one record
+
+A **journey** is one complete process from trigger to outcome, made of workflows you already have (your **steps**) linked by **handoffs**, all working on one shared **record** such as a client, a matter or a deal. The record keeps only a status, the current step, times and references to documents, form submissions and cards, never the answers.
+
+![The journey designer with steps and handoffs](guide/assets/journey-designer.jpg)
+
+**Design.** **Work > Journeys > New journey** starts from nothing or from the **rentals template** (lead, viewing, application, wait for documents, screening, approval, lease, invoices, move-in, monthly rent loop). Add steps, order them with **Move up** and **Move down**, and define the handoffs of a step: when it is done, cancelled or either, go to another step or to the end, optionally only if a field of the finished card or of the record matches. A handoff may go back to an earlier step (a loop). A step can run a playbook. **Save** makes a new version; running instances finish on the version they began on.
+
+**Waits.** A **wait** step pauses the journey for a length of time, a date on the record (taken from the last finished card), a form from the client, or a webhook event. Every wait has a deadline and one **timeout action**: send a reminder and keep waiting, move to another step, ask the project owner on the desk (**Extend**, **Continue now**, **Go to step**, **Cancel the journey**), or cancel. A wait for a form creates a personal link and puts a desk task "Send this link to ..." in front of you.
+
+**Gates.** An approval **gate** asks a person, a role, the project owner or the organization Owner on the desk, optionally within a time. **Approve** follows the approved handoff; **Reject** needs a note and follows the rejected one. Only the approver decides, the first decision wins, and a gate cannot be passed with Continue.
+
+**Webhooks.** The **Webhooks** panel creates inbound addresses (`/hooks/in/<token>`) that start a journey or end a wait. The secret is shown once: copy it. Requests must be signed (HMAC-SHA256, `X-Guildwise-Signature` and `X-Guildwise-Timestamp`, or `X-Hub-Signature-256`); a wrong or missing signature gets `401`. A **webhook call** step calls a URL of yours from your own workstation, which adds its credential headers from its own encrypted store; a failed call is retried after 1, 5, 30 and 120 minutes.
+
+![A journey instance: history, references and the waits panel](guide/assets/journey-instance.jpg)
+
+**Run.** Start an instance by hand on a record (**Journeys**, name and your own id), or by a signed webhook. The **Journeys** page lists instances with filters for journey, step and status. The instance page shows the current step, the **History**, the **References**, and **Waits, approvals and calls** with each deadline, reminders, link and events; a person can extend, continue, move or cancel a wait, or decide a gate there. A journey that cannot go on (no handoff matches, a workflow is off, a person left) says **This journey is stuck** and puts a notice on the desk; it is never silent.
+
+**On the desk.** Gates, timed-out waits and client links are desk items you can decide in place (4.5).
+
+> **In the app:** Help, "Journeys" (`/help/journeys`), and the video "Journeys".
 
 ## Discovery: from an idea to a PRD
 
@@ -1958,7 +2044,9 @@ Every entry of the sidebar, in sidebar order, with who sees it, where this guide
 | 19 | **Ledger** | Everybody | 4.5 | `ledger` | Ledger and vaults |
 | 20 | **Vaults** | Owners and Admins | 4.3, 4.3a | `vaults` | Ledger and vaults |
 | 21 | **Settings** (also **Your settings** in your avatar menu) | Everybody | 3.2, 4.30 | `settings` | Getting started |
-| 22 | **Organization** | Everybody; Owners and Admins manage | 4.1, 4.2, 4.16, 4.17 | `organization` | Organizations and roles |
+| 22 | **Organization** (including **Storage**) | Everybody; Owners and Admins manage | 4.1, 4.2, 4.16, 4.17, 4.31 | `organization` | Organizations and roles |
+| 23a | **Forms** (Work menu) | Everybody sees; Owners and Admins build | 4.32 | `forms` | Forms |
+| 23b | **Journeys** (Work menu) | Everybody sees; Owners and Admins design | 4.33 | `journeys` | Journeys |
 | 23 | **Help** | Everybody | 3.3, 10, 11 | `help` | Getting started |
 | P | **Platform area** (platform administrator) | Platform administrators | 7 | the platform tour | Organizations and roles |
 
