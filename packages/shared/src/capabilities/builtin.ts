@@ -21,6 +21,16 @@ export function builtinCapabilityMeta(): CapabilityMeta[] {
   return builtinCapabilities().map((e) => capabilityMeta(e, 'builtin'));
 }
 
+/**
+ * The whole text of a built-in playbook for an unattended run: the `workflow.md` body (without frontmatter) and then
+ * each step file in order. Undefined when there is no such playbook.
+ */
+export function builtinPlaybookText(key: string): string | undefined {
+  const p = builtinCapabilities().find((e) => e.kind === 'playbook' && e.key === key);
+  if (!p || p.kind !== 'playbook') return undefined;
+  return [p.body.trim(), ...p.steps.map((s) => (p.files[s] as string).trim())].join('\n\n');
+}
+
 /** The text of a built-in persona file (frontmatter and prompt), or undefined. */
 export function builtinPersonaText(key: string): string | undefined {
   return BUILTIN_CAPABILITY_FILES[`personas/${key}.md`];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  builtinPlaybookText,
   canTransitionRun,
   canTransitionStep,
   enabledReleaseDocsPrepSteps,
@@ -24,6 +25,15 @@ describe('release docs prep step registry', () => {
   it('enables steps by default and honours the checklist', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual(['analyse', 'guide', 'commit']);
     expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual(['guide', 'commit']);
+  });
+  it("leaves 'Update user guide' out of the run when it is not ticked", () => {
+    expect(enabledReleaseDocsPrepSteps({ steps: { guide: false } }).map((s) => s.id)).toEqual(['analyse', 'commit']);
+  });
+  it('ships the user guide playbook the guide writer follows', () => {
+    const body = builtinPlaybookText('user-guide') ?? '';
+    expect(body).toMatch(/Never change a heading, never renumber/);
+    expect(body).toMatch(/"op":"add_section"/);
+    expect(builtinPlaybookText('no-such-playbook')).toBeUndefined();
   });
 });
 

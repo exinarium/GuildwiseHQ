@@ -199,6 +199,59 @@ describe("release prep step 'guide'", () => {
     expect(again.guide.output).toMatchObject({ nothing: 'no guide change needed', duplicates: 2 });
   });
 
+  it('runs twice on the same release with no further change (a second run is a no-op)', async () => {
+    const s = setup();
+    const m = fakeModel();
+    const { analyse, guide } = await analyseThenGuide(s, m);
+    expect(guide.files).toEqual(['docs/USER-GUIDE.md']);
+    const work = sh(s.repo.clone, 'git', ['rev-parse', `refs/guildwise/docs-prep/${RUN}/work`]);
+    // the step again (redelivered, or run again): it starts from its own kept work and the writer proposes the same edits
+    const again = await runReleaseDocsPrep({
+      payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+      runModel: m.runModel,
+      exec: fakeExec().exec,
+    });
+    expect(again.state).toBe('passed');
+    expect(again.files).toEqual([]);
+    expect(again.output).toMatchObject({ nothing: 'no guide change needed', changed: [], added: [] });
+    expect(sh(s.repo.clone, 'git', ['rev-parse', `refs/guildwise/docs-prep/${RUN}/work`])).toBe(work);
+    // the commit step squashes one guide change, not two
+    const commit = await runReleaseDocsPrep({
+      payload: payload(s, { step: 'commit', phase: 'prepare', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+    });
+    expect(commit.state).toBe('passed');
+    expect(commit.files).toEqual(['docs/USER-GUIDE.md']);
+    const md = sh(s.repo.clone, 'git', ['show', `${commit.commit}:docs/USER-GUIDE.md`]);
+    expect(md.match(/### 4\.28a Release prep/g)).toHaveLength(1);
+    expect(md.match(/\*\*Release prep\.\*\*/g)).toHaveLength(1);
+  });
+
+  it('with the step not ticked, a run (analyse and commit only) leaves the guide untouched', async () => {
+    const s = setup({ scripts: true });
+    const m = fakeModel();
+    const e = fakeExec();
+    // the server dispatches only the ticked steps: here 'analyse' and 'commit', never 'guide'
+    const analyse = await runReleaseDocsPrep({ payload: payload(s), repoPath: s.repo.clone, integrationDir: s.integrationDir });
+    const commit = await runReleaseDocsPrep({
+      payload: payload(s, { step: 'commit', phase: 'prepare', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+      runModel: m.runModel,
+      exec: e.exec,
+    });
+    expect(commit.state).toBe('passed');
+    expect(commit.notices).toContain('no changes');
+    expect(commit.commit).toBeUndefined();
+    expect(m.calls).toHaveLength(0);
+    expect(e.calls).toHaveLength(0);
+    expect(sh(s.repo.clone, 'git', ['show', 'origin/release/1.5.0:docs/USER-GUIDE.md'])).toBe(GUIDE.trimEnd());
+    expect(sh(s.repo.clone, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
   it('fails with the errors and writes nothing when the edits stay invalid after one repair', async () => {
     const s = setup();
     const m = fakeModel({ edits: [{ op: 'append', section: '9.9', text: 'x', sources: [] }] });

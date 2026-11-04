@@ -119,6 +119,7 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
+import { docsPrepModel } from './git/release-docs-prep-model.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
@@ -2162,6 +2163,11 @@ export class Runner {
               repoPath: repo.localPath,
               integrationDir: this.paths.integration,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              // The writer of the model-backed steps (the user guide): one headless call as the agent the server chose.
+              runModel: docsPrepModel(
+                { adapters: this.adapters, paths: this.paths, toolchains: this.toolchains },
+                p.writer,
+              ),
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();
