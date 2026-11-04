@@ -1143,7 +1143,7 @@ Pending shift starts: if `shift.accepted` is not received within 30 s of `CardCl
 | Blocking question | `question` | `blocked` |
 | Agent fired / reset (DevOps) | `agent_retired` | same stage, queued, last handoff attached |
 | Lease expired | `lease_expired` | same stage, queued |
-| Shift ended without report, crashed, timed out | `shift_failed` | same stage, queued; agent added to `excluded_agent_ids` for one retry cycle only if it failed twice in a row on this card (prevents hot loops); desk alert after 3 consecutive failed shifts on one card |
+| Shift ended without report, crashed, timed out | `shift_failed` | same stage, queued; desk alert after 3 consecutive failed shifts on one card |
 | Runner rejected / never accepted | `runner_rejected` | same stage, queued |
 | Manager release | `manual` | same stage, queued |
 | Workstation unlinked | `workstation_unlinked` | same stage, queued, `home_workstation_id` cleared |
@@ -1201,7 +1201,7 @@ WHERE c.status = 'queued'
   AND st.kind = 'agent'
   AND st.claim_role = $4                                        -- role/stage matching from workflow data
   AND (NOT st.senior_only OR $5)
-  AND NOT ($1 = ANY (c.excluded_agent_ids))                     -- e.g. builder can't review own work; 2nd reviewer differs
+  AND (st.claim_role = 'builder' OR NOT ($1 = ANY (c.excluded_agent_ids))) -- review stages only: no self-review; 2nd reviewer differs
   AND (c.risk_tier IS NULL OR c.risk_tier = ANY ($8))           -- split roles by risk tier
   AND c.required_capabilities <@ $7
   AND (c.home_workstation_id IS NULL OR c.home_workstation_id = $6)

@@ -19,7 +19,13 @@ import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountForAgent, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
-import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
+import {
+  agentView,
+  candidateCards,
+  isCandidate,
+  ONLINE_WINDOW_MS,
+  previousBuilderSql,
+} from './candidates.ts';
 import { type ClaimResult, claim } from './claim.ts';
 import { devopsPass } from './devops.ts';
 import { phasePass } from './phases.ts';
@@ -190,17 +196,20 @@ export class Dispatcher {
         ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [onlineSince],
     );
-    // Rework/bug cards are routed to their original builder first: free original builders pick before the others.
-    const originals = new Set(
+    // A card back at a build stage goes to the builder who worked it last: free previous builders pick before the others.
+    const previousBuilders = new Set(
       (
-        await rows<{ id: string }>(
+        await rows<{ id: string | null }>(
           this.ctx.pool,
-          `SELECT DISTINCT original_builder_agent_id AS id FROM cards
-            WHERE status='queued' AND claim_id IS NULL AND is_rework_or_bug AND original_builder_agent_id IS NOT NULL`,
+          `SELECT DISTINCT ${previousBuilderSql('c')} AS id
+             FROM cards c JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
+            WHERE c.status='queued' AND c.claim_id IS NULL AND st.claim_role = 'builder'`,
         )
-      ).map((r) => r.id),
+      )
+        .map((r) => r.id)
+        .filter((id): id is string => !!id),
     );
-    list.sort((x, y) => Number(originals.has(y.id)) - Number(originals.has(x.id)));
+    list.sort((x, y) => Number(previousBuilders.has(y.id)) - Number(previousBuilders.has(x.id)));
     // Roles whose smoke test failed on a workstation get no work there (runner 0.1.24, role.smoke).
     const blocked = await blockedRoles(this.ctx);
     // An agent whose model would spend the organization's key of a provider whose monthly cap is reached gets no work on that key
@@ -293,13 +302,41 @@ export class Dispatcher {
         load.set(a.row.workstation_id, (load.get(a.row.workstation_id) ?? 0) + 1);
       }
     }
-    for (const { row, caps, active, capped } of agents) {
+    // The previous builder of a card back at a build stage is its preferred pick (a tie-breaker, not a reservation): an
+    // agent whose turn comes first skips such a card only when its previous builder is free, still has its turn ahead in
+    // this same loop and will take that card first. Nothing is held across passes.
+    const pending = new Set(agents.map((a) => a.row.id));
+    const firstPicks = new Map<string, Promise<string | null>>();
+    const offers = (a: FreeAgent) =>
+      candidateCards(this.ctx.pool, agentView(a.row, a.caps), new Date(nowMs), accountScope(a.row, a.capped));
+    const firstPickOf = (a: FreeAgent): Promise<string | null> => {
+      let pick = firstPicks.get(a.row.id);
+      if (!pick) {
+        pick = (async () => {
+          if (a.active >= a.row.capacity || this.skip(a.row, nowMs) || full(a.row.workstation_id))
+            return null;
+          const cands = await offers(a);
+          return cands.find((c) => accountOf(a.row, c.project_id, a.capped))?.id ?? null;
+        })();
+        firstPicks.set(a.row.id, pick);
+      }
+      return pick;
+    };
+    const yieldsTo = async (agentId: string, c: { id: string; prev_builder_id: string | null }) => {
+      const prevId = c.prev_builder_id;
+      if (!prevId || prevId === agentId || !pending.has(prevId)) return false;
+      const prev = agents.find((x) => x.row.id === prevId);
+      return !!prev && (await firstPickOf(prev)) === c.id;
+    };
+    for (const agent of agents) {
+      const { row, active, capped } = agent;
+      pending.delete(row.id);
       if (active >= row.capacity || this.skip(row, nowMs) || full(row.workstation_id)) continue;
-      const view = agentView(row, caps);
-      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs), accountScope(row, capped));
+      const cands = await offers(agent);
       for (const c of cands) {
         const acct = accountOf(row, c.project_id, capped);
         if (!acct) continue;
+        if (await yieldsTo(row.id, c)) continue; // its previous builder takes it later in this pass
         const r = await claim(this.ctx, {
           cardId: c.id,
           agentId: row.id,
@@ -309,6 +346,7 @@ export class Dispatcher {
         if (r) {
           made.push(r);
           load.set(row.workstation_id, (load.get(row.workstation_id) ?? 0) + 1);
+          firstPicks.clear(); // a claim changes what the others can take (workstation load, project limits)
           break;
         }
       }
