@@ -333,22 +333,5 @@
       ]
     }
   },
-  "planned": {
-    "forms": {
-      "title": "Forms: build a form",
-      "pages": ["apps/web/src/pages/Forms.tsx", "apps/web/src/pages/FormBuilderPage.tsx"]
-    },
-    "storage": {
-      "title": "Storage connections",
-      "pages": ["apps/web/src/components/orgsettings/StorageTab.tsx"]
-    },
-    "journeys": {
-      "title": "Journeys: design a journey",
-      "pages": [
-        "apps/web/src/pages/Journeys.tsx",
-        "apps/web/src/pages/JourneyDesigner.tsx",
-        "apps/web/src/pages/JourneyInstance.tsx"
-      ]
-    }
-  }
+  "planned": {}
 }

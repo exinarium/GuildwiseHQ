@@ -31,8 +31,8 @@ const publish = (...slugs: string[]) => {
 const unpublish = (...slugs: string[]) => {
   for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = false;
 };
-/** Registered but not recorded yet: the video is made with the user guide (published: false). */
-const waiting = new Set(['forms', 'journeys', 'storage']);
+/** Registered but not recorded yet (published: false); empty while every registered video is recorded. */
+const waiting = new Set<string>();
 let before: Record<string, boolean>;
 beforeEach(() => {
   resetVideoManifest();

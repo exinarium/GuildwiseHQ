@@ -1,0 +1,40 @@
+{
+  "title": "Journeys: design a journey",
+  "src": "/videos/journeys.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/journeys.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/journeys.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/journeys.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 102.5,
+  "chapters": [
+    {
+      "t": 10.2,
+      "title": "Start from a template"
+    },
+    {
+      "t": 20.2,
+      "title": "Steps and handoffs"
+    },
+    {
+      "t": 38.5,
+      "title": "Waits and gates"
+    },
+    {
+      "t": 57.8,
+      "title": "Webhooks"
+    },
+    {
+      "t": 74.9,
+      "title": "Follow an instance"
+    }
+  ]
+}

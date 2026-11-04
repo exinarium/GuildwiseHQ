@@ -74,7 +74,9 @@ test('record the forms video', async ({ browser }) => {
     await pause(900);
     await click(page, page.getByTestId('palette-long_text'));
     await expect(page.getByTestId('field-properties')).toContainText('Long text field');
-    await type(page, page.getByLabel('Label', { exact: true }), 'Anything we should know?', 60);
+    const label = page.getByTestId('field-properties').getByLabel('Label', { exact: true });
+    await label.fill('');
+    await type(page, label, 'Anything we should know?', 60);
     await pause(900);
   });
   await narrate('c1-c', async () => {

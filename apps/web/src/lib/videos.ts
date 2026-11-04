@@ -89,13 +89,13 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     title: 'Forms: build a form',
     nav: 'forms',
     help: 'forms#build-a-form',
-    published: false,
+    published: true,
   },
   journeys: {
     title: 'Journeys: design a journey',
     nav: 'journeys',
     help: 'journeys#design',
-    published: false,
+    published: true,
   },
   capabilities: {
     title: 'Capabilities and packs',
@@ -187,7 +187,7 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     title: 'Storage connections',
     nav: null,
     help: 'storage#connect',
-    published: false,
+    published: true,
   },
   governance: {
     title: 'Governance: approvals, grants, audit and offboarding',

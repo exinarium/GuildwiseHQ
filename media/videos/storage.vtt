@@ -1,0 +1,33 @@
+WEBVTT
+
+1
+00:00:00.351 --> 00:00:08.799
+Storage is where you tell Guildwise where your client files go. Forms and journeys write them to your own storage, never to the Guildwise server.
+
+2
+00:00:09.503 --> 00:00:19.914
+Open Organization, then the Storage tab. Nothing is connected yet. A form that collects documents cannot be published until it has a storage connection to write to.
+
+3
+00:00:20.616 --> 00:00:29.896
+Choose Add storage. Give the connection a display name, pick the type, and choose one of your online workstations. Here we use a folder on this workstation.
+
+4
+00:00:30.596 --> 00:00:39.620
+Enter the folder path and choose Connect. The path is sealed in your browser for the workstation. The server only keeps the name, the type and the health.
+
+5
+00:00:40.321 --> 00:00:48.172
+The row shows Connected. Test connection asks the workstation to write a small file and delete it again, and tells you whether it worked.
+
+6
+00:00:48.871 --> 00:01:01.650
+Rename changes the display name, and the connection keeps working. If a connection ever shows Needs re-authentication, use Reconnect. Remove deletes it from the workstation; files already written stay.
+
+7
+00:01:02.353 --> 00:01:14.897
+The Type list also offers OneDrive, Google Drive, S3-compatible storage and a folder in a vault. For OneDrive and Google Drive you sign in with a code. The sign-in stays on your workstation.
+
+8
+00:01:15.597 --> 00:01:21.720
+That is Storage: your own place for client files, connected once and used by your forms and journeys.
