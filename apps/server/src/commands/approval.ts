@@ -6,6 +6,8 @@ import {
   type Approver,
   type CardApproval,
   type CardDiffResponse,
+  type CheckEvidence,
+  checkEvidenceRows,
   DESK_SUBKIND,
   getStage,
   isOrgManager,
@@ -535,6 +537,7 @@ async function approvalReviewInfo(db: Queryable, card: Row, ap: ApprovalDoc): Pr
   const ev = card.build_evidence as {
     commands?: Array<{ kind: string; command: string; status: string; result: string }>;
     waived?: string;
+    checks?: CheckEvidence[];
   } | null;
   const verdicts = await rows(
     db,
@@ -553,7 +556,9 @@ async function approvalReviewInfo(db: Queryable, card: Row, ap: ApprovalDoc): Pr
       ? (OWNER_APPROVAL_REASON_TEXT[card.owner_approval_reason as OwnerApprovalReason] ?? null)
       : null,
     diff: diff ? { bytes: Number(diff.bytes), truncated: !!diff.truncated, files: Number(diff.files) } : null,
-    evidence: ev ? { commands: ev.commands ?? [], waived: ev.waived ?? null } : null,
+    evidence: ev
+      ? { commands: [...(ev.commands ?? []), ...checkEvidenceRows(ev.checks)], waived: ev.waived ?? null }
+      : null,
     verdicts: verdicts.map((v) => ({
       reviewerName: v.name ?? 'a reviewer',
       score: Number(v.data?.score ?? 0),

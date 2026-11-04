@@ -4,6 +4,8 @@ import {
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
   allowedOutcomes,
+  type CheckEvidence,
+  checkSuites,
   DevOpsAccessSchema,
   type DevopsShift,
   devopsBriefOutcomes,
@@ -37,6 +39,7 @@ import { effectiveCompletionAction } from '../commands/completion.ts';
 import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { graphScopeFor } from '../commands/graph.ts';
+import { integrationTestsOf } from '../commands/integration-tests.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
 import { runBriefFor } from '../commands/runs.ts';
@@ -394,6 +397,7 @@ export async function buildBrief(
       ? { builderTestsNonBlocking: true }
       : {}),
     ...(await leanBrief(ctx, card, project, stage.id, agent)),
+    ...(stage.requireBuildEvidence ? checksBrief(card, project) : {}),
     ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
       ? { testWithoutEnvironment: true }
       : {}),
@@ -439,6 +443,19 @@ async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?:
   };
 }
 
+/**
+ * lean team, a build stage: the project's confirmed checks of the card's repository (the runner runs them at `aom handoff`)
+ * and whether the runner should propose checks from the repository first (once per repository). An older runner ignores it.
+ */
+function checksBrief(card: Row, project: Row): Partial<ShiftBrief> {
+  if (!card.repo_id) return {};
+  const s = integrationTestsOf(project);
+  const repo = card.repo_id as string;
+  const detect =
+    !s.checkDetection.includes(repo) && !s.suites.some((x) => x.kind === 'check' && x.repoId === repo);
+  return { checks: { suites: checkSuites(s, repo), detect } };
+}
+
 const REVIEW_SIDE = new Set(['pre_review', 'review', 'merge_review']);
 
 /**
@@ -472,12 +489,14 @@ async function leanBrief(
     commands: Array<{ kind: string; command: string; status: string; result: string }>;
     waived?: string;
     at: string;
+    checks?: CheckEvidence[];
   } | null;
   if (ev && (REVIEW_SIDE.has(stageId) || ['test', 'qa_steps'].includes(stageId)))
     out.buildEvidence = {
       sha: ev.sha,
       commands: ev.commands,
       ...(ev.waived ? { waived: ev.waived } : {}),
+      ...(ev.checks?.length ? { checks: ev.checks } : {}),
       at: ev.at,
     };
   if (card.high_risk && (REVIEW_SIDE.has(stageId) || stageId === 'test')) {

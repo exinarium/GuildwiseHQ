@@ -6,6 +6,7 @@ import {
   buildEvidenceProblem,
   type ClaimReleaseReason,
   capDiff,
+  checkEvidenceProblem,
   DEFAULT_OWNER_APPROVAL_POLICY,
   DESK_SUBKIND,
   type DiffStats,
@@ -330,6 +331,23 @@ export async function applyShiftReport(
         lean = built;
         handoffData = { diffStats, riskTier, buildEvidence: built.evidence, highRisk: built.highRisk };
         await storeCardDiff(ctx, tx, cardId, built.evidence.sha, msg);
+        // A check that could not be judged never passes silently: the handoff goes on, and the card says so.
+        const unjudged = (built.evidence.checks ?? []).filter(
+          (c) => c.status === 'error' || c.status === 'timeout',
+        );
+        if (unjudged.length)
+          followUps.push(
+            cardMessage(
+              card,
+              { kind: 'system' },
+              'system',
+              `The handoff of ${card.ref} went on, but ${unjudged.length === 1 ? 'a check' : 'some checks'} could not run: ${unjudged
+                .map((c) => `"${c.name}" (${c.summary || c.status})`)
+                .join(
+                  '; ',
+                )}. The reviewers see ${unjudged.length === 1 ? 'it' : 'them'} as unverified. Check the command in Project settings > Run and test, or the workstation's tools.`,
+            ),
+          );
         if (built.highRisk)
           followUps.push(
             cardMessage(
@@ -787,6 +805,10 @@ function leanHandoff(
   const problem = buildEvidenceProblem(parsed.success ? parsed.data : undefined);
   if (problem) return { ok: false, error: problem };
   if (!parsed.success) return { ok: false, error: 'the build evidence is not valid' };
+  // The runner already refuses a failed check before it sends the report; this is the server's defence in depth. A report
+  // without `checks` (an older runner) is never refused for it.
+  const checkProblem = checkEvidenceProblem(msg.checks);
+  if (checkProblem) return { ok: false, error: checkProblem };
   if (!msg.headSha)
     return {
       ok: false,
@@ -796,7 +818,13 @@ function leanHandoff(
   const paths = highRiskPaths(msg.changedPaths ?? []);
   return {
     ok: true,
-    evidence: { ...parsed.data, sha: msg.headSha, at: ctx.clock.now().toISOString(), agentId },
+    evidence: {
+      ...parsed.data,
+      sha: msg.headSha,
+      at: ctx.clock.now().toISOString(),
+      agentId,
+      ...(msg.checks?.length ? { checks: msg.checks } : {}),
+    },
     highRisk: paths.length > 0,
     highRiskPaths: paths,
   };
