@@ -51,10 +51,11 @@ export async function callDue(ctx: Ctx, projectId: string | null = null): Promis
   const now = ctx.clock.now();
   const due = await rows(
     ctx.pool,
-    `SELECT id, workstation_id FROM journey_webhook_calls
-      WHERE ((status='pending' AND next_attempt_at <= $1) OR (status='dispatched' AND command_deadline <= $1))
-        AND ($2::uuid IS NULL OR project_id = $2)
-      ORDER BY COALESCE(next_attempt_at, command_deadline), id LIMIT 50`,
+    `SELECT c.id, c.workstation_id FROM journey_webhook_calls c JOIN journey_instances i ON i.id = c.instance_id
+      WHERE ((c.status='pending' AND c.next_attempt_at <= $1) OR (c.status='dispatched' AND c.command_deadline <= $1))
+        AND i.status='waiting' AND i.current_visit = c.visit
+        AND ($2::uuid IS NULL OR c.project_id = $2)
+      ORDER BY COALESCE(c.next_attempt_at, c.command_deadline), c.id LIMIT 50`,
     [now, projectId],
   );
   let n = 0;

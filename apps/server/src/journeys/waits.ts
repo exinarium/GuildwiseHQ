@@ -414,8 +414,10 @@ function viewOf(w: Row): WaitView {
 export async function fireDueWaits(ctx: Ctx, projectId: string | null = null): Promise<number> {
   const due = await rows(
     ctx.pool,
-    `SELECT id FROM journey_waits WHERE status='open' AND next_fire_at <= $1 AND ($2::uuid IS NULL OR project_id = $2)
-      ORDER BY next_fire_at, id LIMIT 50`,
+    `SELECT w.id FROM journey_waits w JOIN journey_instances i ON i.id = w.instance_id
+      WHERE w.status='open' AND w.next_fire_at <= $1 AND i.status='waiting' AND i.current_visit = w.visit
+        AND ($2::uuid IS NULL OR w.project_id = $2)
+      ORDER BY w.next_fire_at, w.id LIMIT 50`,
     [ctx.clock.now(), projectId],
   );
   let n = 0;

@@ -116,6 +116,15 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   await exec(tx, `DELETE FROM desk_items WHERE id IN (${desk})`, P);
   // Journeys of the project, in foreign-key order (step runs point at its cards).
   const instances = 'SELECT id FROM journey_instances WHERE project_id=$1';
+  await exec(tx, 'DELETE FROM journey_waits WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM journey_webhook_calls WHERE project_id=$1', P);
+  await exec(
+    tx,
+    `DELETE FROM journey_hook_calls WHERE trigger_id IN (SELECT id FROM journey_hook_triggers WHERE project_id=$1)
+       OR instance_id IN (${instances})`,
+    P,
+  );
+  await exec(tx, 'DELETE FROM journey_hook_triggers WHERE project_id=$1', P);
   await exec(
     tx,
     `DELETE FROM journey_step_runs WHERE instance_id IN (${instances}) OR card_id IN (${cards})`,

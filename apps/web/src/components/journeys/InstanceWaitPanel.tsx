@@ -21,9 +21,8 @@ const WAIT_WORDS: Record<string, string> = {
 };
 const CALL_TONE: Record<string, 'info' | 'warning' | 'success' | 'neutral' | 'danger'> = {
   pending: 'info',
-  retrying: 'warning',
-  sent: 'success',
-  succeeded: 'success',
+  dispatched: 'warning',
+  ok: 'success',
   failed: 'danger',
 };
 
@@ -95,9 +94,11 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
       )}
       {canAct && open && w.kind !== 'gate' && (
         <div className="mt-3 flex flex-wrap items-end gap-2">
-          <Button variant="secondary" size="sm" onClick={() => run('extend', { duration: { amount: 1, unit: 'days' } })}>
-            Wait 1 more day
-          </Button>
+          {w.kind !== 'manual' && (
+            <Button variant="secondary" size="sm" onClick={() => run('extend', { duration: { amount: 1, unit: 'days' } })}>
+              Wait 1 more day
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={() => run('continue')}>
             Continue now
           </Button>

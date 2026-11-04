@@ -94,7 +94,8 @@ export async function decideGate(
         payload: { waitId, reason: decision === 'approved' ? 'approved' : 'rejected', by: who.userId },
       }),
     ];
-    if (w.desk_item_id)
+    const asked = w.desk_item_id ? await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [w.desk_item_id]) : null;
+    if (w.desk_item_id && asked?.status === 'open')
       out.push(
         resolveDeskEvent(
           inst,

@@ -33,7 +33,9 @@ export async function journeyTick(ctx: Ctx, only?: { projectId: string }): Promi
   const forms = await rows(
     ctx.pool,
     `SELECT w.id FROM journey_waits w JOIN form_client_links l ON l.id = w.link_id
+      JOIN journey_instances i ON i.id = w.instance_id
       WHERE w.kind='form' AND w.status IN ('open','escalated') AND l.used_by_submission IS NOT NULL
+        AND i.status='waiting' AND i.current_visit = w.visit
         AND ($1::uuid IS NULL OR w.project_id = $1) LIMIT 100`,
     [pid],
   );
