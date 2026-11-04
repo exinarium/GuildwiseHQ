@@ -10,9 +10,28 @@ Base examined: `release/1.5.0` at `d81aa42f` (this card branch has the same comm
 
 ## 2. The run log
 
-`/home/exinarium/devbox-cache/gwp99-run/run.log` does not exist on the paths this shift can read (`ls` returns
-"No such file or directory"). I asked DevOps (request `41ef9cbc`) to post the failure block on the card. Whoever gets
-the log must paste the failure into the handoff. Section 5 says what the log should show.
+From `/home/exinarium/devbox-cache/gwp99-run/run.log` (GWP-99 full run, checkout gwp-core-caa6a44, 379 tests,
+1 worker, 12.6 min), failure 4 of 6:
+
+```
+✓ 45 [business-card-types] › tests/business-card-types.spec.ts:89:1 › setup: a developer organization with project BIZC (no repository) and a paired mock runner (461ms)
+✘ 46 [business-card-types] › tests/business-card-types.spec.ts:100:1 › the Software view leads with the developer card types and has the business workflows installed already (585ms)
+-  47..49 (Business view, enquiry, quote): not run (serial describe)
+
+Error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+
+  107 |     [projectId],
+  108 |   );
+> 109 |   expect(installed.length).toBeGreaterThan(0);
+  110 | });
+  at e2e/tests/business-card-types.spec.ts:109:28
+```
+
+The failure is at line 109, the "installed" query, which matches the stale expectation in 3.2. Lines 102 and 103
+passed in that run, so the race in 3.3 did not trigger there. It is still a latent fault. The three tests after it
+did not run because the describe is serial, so the fix must also let them run.
 
 ## 3. Findings
 
@@ -54,8 +73,8 @@ copies"*) changed this on purpose:
   (`apps/server/src/catalogue/boot.ts`). `ensureBusinessWorkflows` (`apps/server/src/catalogue/business-workflows.ts`)
   only **enables** them on each project (`ProjectWorkflowsSet`, which `createProject` calls,
   `apps/server/src/commands/projects.ts:95`).
-- The same commit updated the server tests to match. `apps/server/test/business-card-types.test.ts:23` now reads
-  `(org_id IS NULL OR org_id=$1)`, and line 50-53 asserts that the organization owns **none**:
+- The same commit updated the server tests to match. `apps/server/test/business-card-types.test.ts:26` now reads
+  `(org_id IS NULL OR org_id=$1)`, and line 52 asserts that the organization owns **none**:
   `SELECT 1 FROM workflow_versions WHERE org_id=$1 AND key = ANY(...)` must equal `[]`. `org-mode.test.ts` was
   changed the same way.
 - The E2E spec was not updated. `git log` shows its last change was `5f8fd508` (2026-11-01 07:01), before `594d2b33`.
