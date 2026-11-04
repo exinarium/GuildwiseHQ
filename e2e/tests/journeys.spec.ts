@@ -2,6 +2,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN } from '../support/env.ts';
+import { saveJourneyInDesigner } from '../support/ui.ts';
 
 // Journeys: workflows linked by handoffs on one shared record. The designer (template, condition, loop, save and reopen,
 // Move up/down on a phone), starting an instance on a record, the instance following handoffs with timestamps in the
@@ -190,7 +191,7 @@ test('designer: build a journey from workflows with a condition and a loop back,
   await expect(rent.getByText('Loop', { exact: true })).toBeVisible();
 
   await expect(page.getByText('unsaved changes')).toBeVisible();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
   await expect(page.getByText('Journey saved')).toBeVisible();
   await expect(page.getByText('Version 2')).toBeVisible();
   const saved = (await (await api.get(`/api/journeys/${journeyId}`)).json()).definition;
@@ -359,8 +360,7 @@ test('a step can reference a playbook: the choice is saved and the instance offe
   ).filter(Boolean);
   test.skip(keys.length === 0, 'no playbook is available to this organization');
   await picker.selectOption(keys[0] as string);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Journey saved')).toBeVisible();
+  await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
   const saved = (await (await api.get(`/api/journeys/${journeyId}`)).json()).definition;
   expect(saved.steps.find((s: { id: string }) => s.id === 'lead').playbook.key).toBe(keys[0]);
 
@@ -404,8 +404,7 @@ test.describe('on a phone', () => {
     await value.fill('12');
     await expect(value).toBeInViewport();
     await expect(value).toHaveAttribute('inputmode', 'decimal');
-    await phone.getByRole('button', { name: 'Save', exact: true }).tap();
-    await expect(phone.getByText('Journey saved')).toBeVisible();
+    await saveJourneyInDesigner(phone, () => phone.getByRole('button', { name: 'Save', exact: true }).tap());
     const saved = (await (await api.get(`/api/journeys/${journeyId}`)).json()).definition;
     expect(
       saved.handoffs.find((h: { from: string; to: string }) => h.from === 'rent' && h.to === 'rent').condition
