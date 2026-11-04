@@ -64,11 +64,17 @@ export interface CallDto {
 }
 
 /** The waits and calls of an instance with their deadlines and history. The link URL is signed on read, never stored. */
-export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string): Promise<{ waits: WaitDto[]; calls: CallDto[] }> {
+export async function listInstanceWaits(
+  ctx: Ctx,
+  who: Who,
+  instanceId: string,
+): Promise<{ waits: WaitDto[]; calls: CallDto[] }> {
   const inst = await one(ctx.pool, 'SELECT * FROM journey_instances WHERE id=$1', [instanceId]);
   if (!inst) throw notFound('instance not found');
   await loadVisibleProject(ctx.pool, who.userId, inst.project_id);
-  const ws = await rows(ctx.pool, 'SELECT * FROM journey_waits WHERE instance_id=$1 ORDER BY visit', [instanceId]);
+  const ws = await rows(ctx.pool, 'SELECT * FROM journey_waits WHERE instance_id=$1 ORDER BY visit', [
+    instanceId,
+  ]);
   const waits: WaitDto[] = [];
   const cases = await rows(
     ctx.pool,
@@ -79,7 +85,10 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
   );
   const offlineOf = new Map(cases.map((c) => [c.journey_wait_id as string, c]));
   for (const w of ws) {
-    const cfg = w.config as { waitFor?: { formId?: string }; onTimeout?: { action?: string; maxReminders?: number } };
+    const cfg = w.config as {
+      waitFor?: { formId?: string };
+      onTimeout?: { action?: string; maxReminders?: number };
+    };
     const open = w.status === 'open' || w.status === 'escalated';
     waits.push({
       id: w.id,
@@ -92,7 +101,10 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
       nextFireAt: iso(w.next_fire_at),
       remindersSent: w.reminders_sent,
       remindersMax: cfg.onTimeout?.action === 'remind' ? (cfg.onTimeout.maxReminders ?? 3) : null,
-      linkUrl: open && w.link_id && cfg.waitFor?.formId ? await clientLinkUrl(ctx, inst.org_id, cfg.waitFor.formId, w.link_id) : null,
+      linkUrl:
+        open && w.link_id && cfg.waitFor?.formId
+          ? await clientLinkUrl(ctx, inst.org_id, cfg.waitFor.formId, w.link_id)
+          : null,
       linkExpiresAt: iso(w.link_expires_at),
       fellBack: w.fell_back,
       resolution: w.resolution,
@@ -112,7 +124,9 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
       })(),
     });
   }
-  const cs = await rows(ctx.pool, 'SELECT * FROM journey_webhook_calls WHERE instance_id=$1 ORDER BY visit', [instanceId]);
+  const cs = await rows(ctx.pool, 'SELECT * FROM journey_webhook_calls WHERE instance_id=$1 ORDER BY visit', [
+    instanceId,
+  ]);
   return {
     waits,
     calls: cs.map((c) => ({
@@ -129,28 +143,38 @@ export async function listInstanceWaits(ctx: Ctx, who: Who, instanceId: string):
   };
 }
 
-export async function extendWaitCmd(ctx: Ctx, who: Who, waitId: string, duration: JourneyDuration): Promise<void> {
+export async function extendWaitCmd(
+  ctx: Ctx,
+  who: Who,
+  waitId: string,
+  duration: JourneyDuration,
+): Promise<void> {
   const w = await loadWait(ctx.pool, waitId);
   await mayManage(ctx, who, w);
-  if (!(await extendWait(ctx, waitId, who.userId, durationMs(duration)))) throw badRequest('wait_not_open', 'This wait cannot be extended.');
+  if (!(await extendWait(ctx, waitId, who.userId, durationMs(duration))))
+    throw badRequest('wait_not_open', 'This wait cannot be extended.');
 }
 export async function continueWaitCmd(ctx: Ctx, who: Who, waitId: string): Promise<void> {
   const w = await loadWait(ctx.pool, waitId);
   await mayManage(ctx, who, w);
-  if (!(await continueWait(ctx, waitId, who.userId))) throw badRequest('wait_not_open', 'This wait already ended.');
+  if (!(await continueWait(ctx, waitId, who.userId)))
+    throw badRequest('wait_not_open', 'This wait already ended.');
 }
 export async function gotoWaitCmd(ctx: Ctx, who: Who, waitId: string, stepId: string): Promise<void> {
   const w = await loadWait(ctx.pool, waitId);
   await mayManage(ctx, who, w);
-  if (!(await gotoFromWait(ctx, waitId, who.userId, stepId))) throw badRequest('wait_not_open', 'This wait cannot go to that step.');
+  if (!(await gotoFromWait(ctx, waitId, who.userId, stepId)))
+    throw badRequest('wait_not_open', 'This wait cannot go to that step.');
 }
 export async function cancelWaitCmd(ctx: Ctx, who: Who, waitId: string): Promise<void> {
   const w = await loadWait(ctx.pool, waitId);
   await mayManage(ctx, who, w);
-  if (!(await cancelFromWait(ctx, waitId, who.userId))) throw badRequest('wait_not_open', 'This wait already ended.');
+  if (!(await cancelFromWait(ctx, waitId, who.userId)))
+    throw badRequest('wait_not_open', 'This wait already ended.');
 }
 export async function resendLinkCmd(ctx: Ctx, who: Who, waitId: string): Promise<void> {
   const w = await loadWait(ctx.pool, waitId);
   await mayManage(ctx, who, w);
-  if (!(await resendLink(ctx, waitId))) throw badRequest('wait_not_open', 'This wait has no link to send again.');
+  if (!(await resendLink(ctx, waitId)))
+    throw badRequest('wait_not_open', 'This wait has no link to send again.');
 }

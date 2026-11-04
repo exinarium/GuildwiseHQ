@@ -129,6 +129,22 @@ export function FormSettingsPanel({
           onChange={(d) => onChange({ ...settings, answersDestination: d })}
         />
       </fieldset>
+      <TextInput
+        id="form-offline-link-days"
+        label="Secure link expiry when your runner is offline (days)"
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={30}
+        disabled={disabled}
+        value={settings.offlineLinkDays ?? ''}
+        hint="Clients who tried the form while your runner was offline get a secure link that works once. Default 7 days."
+        onChange={(e) => {
+          const { offlineLinkDays: _drop, ...rest } = settings;
+          const n = Number.parseInt(e.target.value, 10);
+          onChange(Number.isFinite(n) ? { ...rest, offlineLinkDays: Math.min(30, Math.max(1, n)) } : rest);
+        }}
+      />
       <TextArea
         id="form-confirmation"
         label="Confirmation text"

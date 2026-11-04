@@ -22,7 +22,9 @@ describe('offlineNoticeText', () => {
 
   it('says what happened when the hold ran out, sending failed or the link expired', () => {
     const base = { formTitle: 'F', clientReference: 'C1' };
-    expect(offlineNoticeText({ ...base, kind: 'hold_expired', holdDays: 7 }).body).toContain('offline for 7 days');
+    expect(offlineNoticeText({ ...base, kind: 'hold_expired', holdDays: 7 }).body).toContain(
+      'offline for 7 days',
+    );
     expect(offlineNoticeText({ ...base, kind: 'failed' }).body).toContain('could not email');
     expect(offlineNoticeText({ ...base, kind: 'link_expired' }).body).toContain('expired unused');
     expect(offlineNoticeText({ ...base, kind: 'cancelled' }).body).toContain('cancelled');
@@ -35,6 +37,8 @@ describe('OfflineRequestSchema', () => {
     expect(OfflineRequestSchema.safeParse(ok).success).toBe(true);
     expect(OfflineRequestSchema.safeParse({ ...ok, answers: { a: 1 } }).success).toBe(false);
     expect(OfflineRequestSchema.safeParse({ ...ok, email: 'not-an-email' }).success).toBe(false);
-    expect(OfflineRequestSchema.safeParse({ ...ok, email: `${'a'.repeat(250)}@b.example` }).success).toBe(false);
+    expect(OfflineRequestSchema.safeParse({ ...ok, email: `${'a'.repeat(250)}@b.example` }).success).toBe(
+      false,
+    );
   });
 });

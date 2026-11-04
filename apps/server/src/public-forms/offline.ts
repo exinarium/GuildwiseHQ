@@ -2,8 +2,8 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { OfflineRequestSchema, streamId } from '@aom/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { encryptFor, signingKey } from '../auth/secrets.ts';
-import { OFFLINE_EMAIL_PURPOSE } from '../commands/forms-offline.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { OFFLINE_EMAIL_PURPOSE } from '../commands/forms-offline.ts';
 import { ev } from '../commands/journey-runtime.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
@@ -21,7 +21,13 @@ export async function emailKey(ctx: Ctx, email: string): Promise<string> {
 
 /** What the plugin in routes.ts gives the offline request handler. */
 export interface OfflineDeps {
-  Err: new (status: number, code: string, message: string, extra?: Record<string, unknown>, opts?: { retryAfter?: number; close?: boolean }) => Error;
+  Err: new (
+    status: number,
+    code: string,
+    message: string,
+    extra?: Record<string, unknown>,
+    opts?: { retryAfter?: number; close?: boolean },
+  ) => Error;
   limits: FormLimits;
   tooMany: (retry: number) => Error;
   pubOf: (req: FastifyRequest) => { formId: string; orgId: string; version: number };
@@ -33,9 +39,11 @@ export interface OfflineDeps {
     pub: { formId: string; orgId: string; version: number },
     token: string,
   ) => Promise<{ id: string; reference: string; record_id: string | null; purpose?: string }>;
-  availability: (
-    pub: { formId: string; orgId: string; version: number },
-  ) => Promise<{ state: 'open' | 'offline' | 'missing'; workstations: string[] }>;
+  availability: (pub: {
+    formId: string;
+    orgId: string;
+    version: number;
+  }) => Promise<{ state: 'open' | 'offline' | 'missing'; workstations: string[] }>;
 }
 
 /**
@@ -66,17 +74,30 @@ export function offlineRequestHandler(ctx: Ctx, d: OfflineDeps) {
     const link = body.link ? await d.checkLink(pub, body.link) : null;
     // The secure link itself, opened while the runner is offline again: no new case.
     if (link?.purpose === 'offline')
-      throw new d.Err(503, 'runner_offline', "This form can't accept submissions right now. Please try again later.", { retryable: true });
+      throw new d.Err(
+        503,
+        'runner_offline',
+        "This form can't accept submissions right now. Please try again later.",
+        { retryable: true },
+      );
 
     const av = await d.availability(pub);
-    if (av.state === 'open') throw new d.Err(409, 'runner_online', 'The form can be sent now. Please reload the page.');
+    if (av.state === 'open')
+      throw new d.Err(409, 'runner_online', 'The form can be sent now. Please reload the page.');
     if (av.state === 'missing')
-      throw new d.Err(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.", { retryable: false });
+      throw new d.Err(
+        409,
+        'destination_missing',
+        "This form can't accept submissions. Please contact the firm.",
+        { retryable: false },
+      );
 
     let wait: { id: string; instance_id: string; visit: number } | null = null;
     let linkRow: { record_kind: string | null; record_id: string | null } | null = null;
     if (link) {
-      linkRow = (await one(ctx.pool, 'SELECT record_kind, record_id FROM form_client_links WHERE id=$1', [link.id])) as any;
+      linkRow = (await one(ctx.pool, 'SELECT record_kind, record_id FROM form_client_links WHERE id=$1', [
+        link.id,
+      ])) as any;
       wait = (await one(
         ctx.pool,
         `SELECT id, instance_id, visit FROM journey_waits WHERE link_id=$1 AND kind='form' AND status IN ('open','escalated')`,

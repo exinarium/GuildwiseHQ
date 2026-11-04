@@ -253,7 +253,10 @@ export async function createClientLinkIn(
     offlineRequestId?: string | undefined;
   },
 ): Promise<{ linkId: string; expiresAt: Date }> {
-  const p = await one(tx, 'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2', [a.formId, a.orgId]);
+  const p = await one(tx, 'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2', [
+    a.formId,
+    a.orgId,
+  ]);
   if (!p || p.status !== 'published')
     throw conflict('form_not_published', 'Publish the form before creating personal links.');
   const linkId = newLinkId();
@@ -295,9 +298,17 @@ export async function revokeClientLinkIn(
 }
 
 /** The signed URL of a link, computed on read; null when the form is not published. */
-export async function clientLinkUrl(ctx: Ctx, orgId: string, formId: string, linkId: string): Promise<string | null> {
+export async function clientLinkUrl(
+  ctx: Ctx,
+  orgId: string,
+  formId: string,
+  linkId: string,
+): Promise<string | null> {
   const r = await one(ctx.pool, 'SELECT * FROM form_client_links WHERE id=$1 AND org_id=$2', [linkId, orgId]);
-  const p = await one(ctx.pool, 'SELECT public_id FROM form_publications WHERE form_id=$1 AND org_id=$2', [formId, orgId]);
+  const p = await one(ctx.pool, 'SELECT public_id FROM form_publications WHERE form_id=$1 AND org_id=$2', [
+    formId,
+    orgId,
+  ]);
   if (!r || !p) return null;
   return (await toDto(ctx, formId, p.public_id, r)).url;
 }

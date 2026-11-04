@@ -34,7 +34,10 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
   { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
   // Journey hook call log (migration 2840): metadata only, never a payload.
-  { table: 'journey_hook_calls', restoreWhere: 'trigger_id IS NULL OR trigger_id IN (SELECT id FROM journey_hook_triggers)' },
+  {
+    table: 'journey_hook_calls',
+    restoreWhere: 'trigger_id IS NULL OR trigger_id IN (SELECT id FROM journey_hook_triggers)',
+  },
   // Health of storage connections (migration 2810): reported by the runner, not an event.
   {
     table: 'storage_connection_health',

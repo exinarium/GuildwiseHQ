@@ -14,11 +14,11 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
-import { ev, lockInstance } from './journey-runtime.ts';
 import { defaultAddressee } from '../journeys/waits.ts';
 import { formSecureLinkMail } from '../mail/templates.ts';
-import { clientLinkUrl, createClientLinkIn, destinationsOf, revokeClientLinkIn } from './public-forms.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { ev, lockInstance } from './journey-runtime.ts';
+import { clientLinkUrl, createClientLinkIn, destinationsOf, revokeClientLinkIn } from './public-forms.ts';
 
 /** The purpose key of the held email (auth/secrets.ts `encryptFor`). */
 export const OFFLINE_EMAIL_PURPOSE = 'form-offline-contact';
@@ -227,7 +227,9 @@ async function raiseCaseAlert(
 
 async function closeCaseDeskItem(ctx: Ctx, tx: Tx, c: Row, note: string): Promise<void> {
   if (!c.desk_item_id) return;
-  const d = await one(tx, `SELECT org_id, project_id FROM desk_items WHERE id=$1 AND status='open'`, [c.desk_item_id]);
+  const d = await one(tx, `SELECT org_id, project_id FROM desk_items WHERE id=$1 AND status='open'`, [
+    c.desk_item_id,
+  ]);
   if (!d) return;
   await ctx.store.append(
     [
@@ -282,12 +284,18 @@ async function closeFinished(ctx: Ctx): Promise<void> {
   for (const o of open) {
     try {
       await withAppendTx(ctx.pool, async (tx) => {
-        const c = await one(tx, `SELECT * FROM form_offline_requests WHERE id=$1 AND status IN ('held','sent') FOR UPDATE`, [o.id]);
+        const c = await one(
+          tx,
+          `SELECT * FROM form_offline_requests WHERE id=$1 AND status IN ('held','sent') FOR UPDATE`,
+          [o.id],
+        );
         if (!c) return;
         const now = ctx.clock.now();
         // a. the secure link was used
         if (c.link_id) {
-          const l = await one(tx, 'SELECT used_by_submission FROM form_client_links WHERE id=$1', [c.link_id]);
+          const l = await one(tx, 'SELECT used_by_submission FROM form_client_links WHERE id=$1', [
+            c.link_id,
+          ]);
           if (l?.used_by_submission) {
             await closeCaseDeskItemIfPublic(ctx, tx, c, 'Submission received.');
             await closeCase(ctx, tx, c, 'submitted', { submissionId: String(l.used_by_submission) });
@@ -296,10 +304,13 @@ async function closeFinished(ctx: Ctx): Promise<void> {
         }
         // b/c. the form wait of a journey case ended, or points at another link
         if (c.journey_wait_id) {
-          const w = await one(tx, 'SELECT status, resolution, link_id FROM journey_waits WHERE id=$1', [c.journey_wait_id]);
+          const w = await one(tx, 'SELECT status, resolution, link_id FROM journey_waits WHERE id=$1', [
+            c.journey_wait_id,
+          ]);
           const open2 = w && (w.status === 'open' || w.status === 'escalated');
           if (!open2) {
-            const how = w?.resolution === 'continued' || w?.resolution === 'form_submitted' ? 'continued' : 'cancelled';
+            const how =
+              w?.resolution === 'continued' || w?.resolution === 'form_submitted' ? 'continued' : 'cancelled';
             await closeCase(ctx, tx, c, how);
             return;
           }
@@ -324,7 +335,11 @@ async function closeFinished(ctx: Ctx): Promise<void> {
           return;
         }
         // link expired unused
-        if (c.status === 'sent' && c.link_expires_at && new Date(c.link_expires_at).getTime() <= now.getTime()) {
+        if (
+          c.status === 'sent' &&
+          c.link_expires_at &&
+          new Date(c.link_expires_at).getTime() <= now.getTime()
+        ) {
           const cx = await contextOf(tx, c, pub.title);
           await closeCaseDeskItemIfPublic(ctx, tx, c, 'The secure link expired unused.');
           await closeCase(ctx, tx, c, 'expired', { error: 'link_expired' });
@@ -396,13 +411,18 @@ async function sendOne(
     let wait: Row | null = null;
     if (cur.journey_wait_id) {
       wait =
-        (await one(tx, `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`, [
-          cur.journey_wait_id,
-        ])) ?? null;
+        (await one(
+          tx,
+          `SELECT * FROM journey_waits WHERE id=$1 AND status IN ('open','escalated') FOR UPDATE`,
+          [cur.journey_wait_id],
+        )) ?? null;
       inst = wait ? await lockInstance(tx, wait.instance_id, wait.visit, 'waiting') : null;
       if (!wait || !inst) {
         // the wait already ended: the case closes in the next pass
-        await tx.query(`UPDATE form_offline_requests SET status='held', updated_at=$2 WHERE id=$1`, [id, now]);
+        await tx.query(`UPDATE form_offline_requests SET status='held', updated_at=$2 WHERE id=$1`, [
+          id,
+          now,
+        ]);
         return null;
       }
       by = inst.started_by;
@@ -427,18 +447,21 @@ async function sendOne(
         [
           ev(inst, {
             type: 'JourneyWaitLinkSent',
-            payload: { waitId: wait.id, linkId: l.linkId, via: 'offline_email', expiresAt: expiresAt.toISOString() },
+            payload: {
+              waitId: wait.id,
+              linkId: l.linkId,
+              via: 'offline_email',
+              expiresAt: expiresAt.toISOString(),
+            },
           }),
         ],
         { tx },
       );
     }
-    await tx.query(`UPDATE form_offline_requests SET link_id=$2, link_expires_at=$3, updated_at=$4 WHERE id=$1`, [
-      id,
-      l.linkId,
-      expiresAt,
-      now,
-    ]);
+    await tx.query(
+      `UPDATE form_offline_requests SET link_id=$2, link_expires_at=$3, updated_at=$4 WHERE id=$1`,
+      [id, l.linkId, expiresAt, now],
+    );
     return { linkId: l.linkId, expiresAt };
   });
   if (!issued) return;
@@ -551,7 +574,10 @@ async function ownerOrAdmin(ctx: Ctx, who: Who): Promise<void> {
 }
 
 async function openCase(ctx: Ctx, who: Who, id: string): Promise<Row> {
-  const c = await one(ctx.pool, 'SELECT * FROM form_offline_requests WHERE id=$1 AND org_id=$2', [id, who.orgId]);
+  const c = await one(ctx.pool, 'SELECT * FROM form_offline_requests WHERE id=$1 AND org_id=$2', [
+    id,
+    who.orgId,
+  ]);
   if (!c) throw notFound('case not found');
   if (!['held', 'sending', 'sent'].includes(c.status) || !c.email_enc)
     throw badRequest('case_closed', 'This case is closed and the email address has been deleted.');
@@ -588,10 +614,13 @@ export async function showOfflineEmail(ctx: Ctx, who: Who, id: string): Promise<
 export async function resendOfflineLink(ctx: Ctx, who: Who, id: string): Promise<{ resends: number }> {
   await ownerOrAdmin(ctx, who);
   const c = await openCase(ctx, who, id);
-  if (c.status !== 'sent' || !c.link_id) throw badRequest('not_sent', 'The secure link has not been sent yet.');
+  if (c.status !== 'sent' || !c.link_id)
+    throw badRequest('not_sent', 'The secure link has not been sent yet.');
   if (c.resends >= OFFLINE_MAX_RESENDS)
     throw badRequest('resend_limit', `The link was already sent again ${OFFLINE_MAX_RESENDS} times.`);
-  const l = await one(ctx.pool, 'SELECT used_at, revoked_at, expires_at FROM form_client_links WHERE id=$1', [c.link_id]);
+  const l = await one(ctx.pool, 'SELECT used_at, revoked_at, expires_at FROM form_client_links WHERE id=$1', [
+    c.link_id,
+  ]);
   if (!l || l.used_at || l.revoked_at || new Date(l.expires_at).getTime() <= ctx.clock.now().getTime())
     throw badRequest('link_not_usable', 'The secure link is used, revoked or expired.');
   let email: string;
@@ -615,7 +644,10 @@ export async function resendOfflineLink(ctx: Ctx, who: Who, id: string): Promise
         formEvent(
           c.org_id,
           c.form_id,
-          { type: 'FormOfflineLinkResent', payload: { requestId: c.id, formId: c.form_id, by: who.userId, n: count } },
+          {
+            type: 'FormOfflineLinkResent',
+            payload: { requestId: c.id, formId: c.form_id, by: who.userId, n: count },
+          },
           who.userId,
         ),
       ],
@@ -641,10 +673,19 @@ export async function cancelOfflineRequest(ctx: Ctx, who: Who, id: string): Prom
   await ownerOrAdmin(ctx, who);
   const c = await openCase(ctx, who, id);
   await withAppendTx(ctx.pool, async (tx) => {
-    const cur = await one(tx, `SELECT * FROM form_offline_requests WHERE id=$1 AND status IN ('held','sending','sent') FOR UPDATE`, [id]);
+    const cur = await one(
+      tx,
+      `SELECT * FROM form_offline_requests WHERE id=$1 AND status IN ('held','sending','sent') FOR UPDATE`,
+      [id],
+    );
     if (!cur) return;
     if (cur.link_id)
-      await revokeClientLinkIn(tx, ctx, { orgId: cur.org_id, formId: cur.form_id, linkId: cur.link_id, by: who.userId });
+      await revokeClientLinkIn(tx, ctx, {
+        orgId: cur.org_id,
+        formId: cur.form_id,
+        linkId: cur.link_id,
+        by: who.userId,
+      });
     await closeCaseDeskItemIfPublic(ctx, tx, cur, 'Cancelled.');
     await closeCase(ctx, tx, cur, 'cancelled', { by: who.userId });
   });

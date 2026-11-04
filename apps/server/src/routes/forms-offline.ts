@@ -11,7 +11,8 @@ export function formsOfflineRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
     const Id = z.object({ id: z.uuid() });
-    const admin = async (req: Parameters<typeof requireOrg>[1]) => whoOf(await requireOrg(ctx, req, { min: 'admin' }));
+    const admin = async (req: Parameters<typeof requireOrg>[1]) =>
+      whoOf(await requireOrg(ctx, req, { min: 'admin' }));
 
     app.post('/api/forms/offline-requests/:id/email', { schema: { params: Id } }, async (req, reply) => {
       const out = await showOfflineEmail(ctx, await admin(req), req.params.id);

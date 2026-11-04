@@ -44,7 +44,10 @@ describe('desk: show email and resend link', () => {
 
     const shown = await ok<any>(pf.api('POST', `/api/forms/offline-requests/${id}/email`));
     expect(shown).toEqual({ email });
-    const audit = await q(`SELECT payload::text AS p FROM events WHERE type='FormOfflineEmailViewed' AND stream_id=$1`, [`form-${formId}`]);
+    const audit = await q(
+      `SELECT payload::text AS p FROM events WHERE type='FormOfflineEmailViewed' AND stream_id=$1`,
+      [`form-${formId}`],
+    );
     expect(audit).toHaveLength(1);
     expect(audit[0].p).toContain(id);
     expect(audit[0].p).not.toContain('@');
@@ -57,7 +60,10 @@ describe('desk: show email and resend link', () => {
     expect(fourth.status).toBe(400);
     expect(JSON.stringify(fourth.body)).toContain('resend_limit');
     expect(await messagesTo(email)).toHaveLength(4);
-    const resent = await q(`SELECT payload::text AS p FROM events WHERE type='FormOfflineLinkResent' AND stream_id=$1`, [`form-${formId}`]);
+    const resent = await q(
+      `SELECT payload::text AS p FROM events WHERE type='FormOfflineLinkResent' AND stream_id=$1`,
+      [`form-${formId}`],
+    );
     expect(resent).toHaveLength(3);
     for (const e of resent) expect(e.p).not.toContain('@');
   });
@@ -66,10 +72,14 @@ describe('desk: show email and resend link', () => {
     const email = `a2c-${randomUUID().slice(0, 8)}@client.example`;
     const { id } = await sentCase(email);
     const { showOfflineEmail } = await import('../src/commands/forms-offline.ts');
-    await expect(showOfflineEmail(ctx(), { userId: randomUUID(), orgId: pf.orgId } as any, id)).rejects.toThrow();
+    await expect(
+      showOfflineEmail(ctx(), { userId: randomUUID(), orgId: pf.orgId } as any, id),
+    ).rejects.toThrow();
 
     await ok(pf.api('POST', `/api/forms/offline-requests/${id}/cancel`));
-    const row = (await q('SELECT status, email_enc, email_key FROM form_offline_requests WHERE id=$1', [id]))[0] as any;
+    const row = (
+      await q('SELECT status, email_enc, email_key FROM form_offline_requests WHERE id=$1', [id])
+    )[0] as any;
     expect(row).toEqual({ status: 'cancelled', email_enc: null, email_key: null });
     expect((await pf.api('POST', `/api/forms/offline-requests/${id}/email`)).status).toBe(400);
     expect((await pf.api('POST', `/api/forms/offline-requests/${id}/resend`)).status).toBe(400);

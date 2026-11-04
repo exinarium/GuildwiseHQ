@@ -26,8 +26,8 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
-import { destinationWorkstations } from '../commands/forms-offline.ts';
 import { readFormLogo } from '../commands/forms.ts';
+import { destinationWorkstations } from '../commands/forms-offline.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -258,7 +258,11 @@ export function publicFormRoutes(
         body.website !== '' ||
         !powValid(body.session, body.nonce, cfg.powBits)
       )
-        throw new PfError(422, 'submission_refused', 'We could not accept this submission. Please try again.');
+        throw new PfError(
+          422,
+          'submission_refused',
+          'We could not accept this submission. Please try again.',
+        );
       return session;
     };
 
@@ -312,8 +316,9 @@ export function publicFormRoutes(
         const b = limits.formSubmit.take(`form:${pub.formId}`);
         if (!b.ok) throw tooMany(b.retryAfterSec);
         // The firm's runner is offline: refuse before the body (answers, file list) is read. The handler checks again.
-        const av = await availability(pub);
-        if (av.state === 'offline')
+        // A replaced hook (the `link_later` answer) decides in the handler instead, as before.
+        const av = ctx.services.publicFormsOffline ? null : await availability(pub);
+        if (av?.state === 'offline')
           throw new PfError(
             503,
             'runner_offline',

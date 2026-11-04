@@ -81,6 +81,10 @@ export function createFormLimits(ctx: Ctx, now: () => number = () => ctx.clock.n
     ipSubmit: new KeyedBuckets(c.ipSubmitsPerHour / 60, c.ipSubmitBurst, now),
     formSubmit: new KeyedBuckets(c.formSubmitsPerMin, c.formSubmitBurst, now),
     offlineIp: new KeyedBuckets(c.offlineIpPerHour / 60, c.offlineIpBurst, now),
-    offlineForm: new KeyedBuckets(c.offlineFormPerHour / 60, Math.max(1, Math.min(c.offlineFormPerHour, 10)), now),
+    offlineForm: new KeyedBuckets(
+      c.offlineFormPerHour / 60,
+      Math.max(1, Math.min(c.offlineFormPerHour, 10)),
+      now,
+    ),
   };
 }

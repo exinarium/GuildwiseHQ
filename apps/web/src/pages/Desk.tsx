@@ -28,13 +28,14 @@ import {
   RememberCheckbox,
 } from '../components/ceo/DeskCeo.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
+import { FormOfflineLinkBlock } from '../components/desk/FormOfflineLinkBlock.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
+import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
-import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
 import { ShipReleaseItem } from '../components/ShipReleaseItem.tsx';
@@ -608,6 +609,11 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <PermissionDeskItem item={item} />
       ) : isJourneyDeskSubkind(item.subkind) ? (
         <JourneyDeskItem item={item} />
+      ) : item.subkind === 'form_offline_link' || item.subkind === 'form_offline_hold_expired' ? (
+        <>
+          <FormOfflineLinkBlock item={item} />
+          <ResolveButtons item={item} />
+        </>
       ) : item.subkind === 'manual_qa' ? (
         <QaDeskItem item={item} />
       ) : item.subkind === 'approval_step' ? (

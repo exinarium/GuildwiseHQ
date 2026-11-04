@@ -4,12 +4,11 @@ import { blogDigestTick } from '../commands/blog-digest.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { publishPendingDocuments } from '../commands/documents.ts';
 import { followUpSweep } from '../commands/follow-up.ts';
-import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepFormsOffline } from '../commands/forms-offline.ts';
+import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { sweepJourneys } from '../commands/journey-runtime.ts';
-import { journeyTick } from '../journeys/tick.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
@@ -24,6 +23,7 @@ import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
 import { reachabilityTick } from '../delivery/reachability.ts';
 import { governanceTick } from '../governance/offboarding.ts';
+import { journeyTick } from '../journeys/tick.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
 import { videoWatch } from '../video/sweep.ts';
@@ -203,7 +203,9 @@ export class Scheduler {
     await journeyTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'journey waits failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
     await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
-    await sweepFormsOffline(this.ctx).catch((err) => this.ctx.log.error({ err }, 'offline form links failed'));
+    await sweepFormsOffline(this.ctx).catch((err) =>
+      this.ctx.log.error({ err }, 'offline form links failed'),
+    );
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),

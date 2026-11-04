@@ -136,7 +136,9 @@ describe('public-URL case: the runner is offline, then back', () => {
     // a second ask for the same address looks the same and changes nothing
     const again = await askForLink(publicId, email);
     expect(again.status).toBe(202);
-    expect((await q('SELECT count(*)::int AS n FROM form_offline_requests WHERE form_id=$1', [formId]))[0].n).toBe(1);
+    expect(
+      (await q('SELECT count(*)::int AS n FROM form_offline_requests WHERE form_id=$1', [formId]))[0].n,
+    ).toBe(1);
 
     // still offline: the sweep sends nothing
     await sweep();
@@ -155,7 +157,10 @@ describe('public-URL case: the runner is offline, then back', () => {
     expect(after.email_enc).toMatch(/^v1:/); // kept until the case closes (A2)
 
     // one desk notice with times and no address
-    const items = await q(`SELECT * FROM desk_items WHERE subkind='form_offline_link' AND data->>'requestId'=$1`, [c.id]);
+    const items = await q(
+      `SELECT * FROM desk_items WHERE subkind='form_offline_link' AND data->>'requestId'=$1`,
+      [c.id],
+    );
     expect(items).toHaveLength(1);
     expect(JSON.stringify(items[0])).not.toContain(email);
     expect(items[0].data).toMatchObject({ requestId: c.id, formTitle: 'Offline public' });
@@ -165,8 +170,16 @@ describe('public-URL case: the runner is offline, then back', () => {
     expect((view as any).data).toMatchObject({ requestId: c.id, linkSentAt: items[0].data.linkSentAt });
 
     // submitting through the secure link writes to the firm's storage and closes the case
-    expect((await pf.load(publicId, mail.token)).json.link).toMatchObject({ state: 'valid', purpose: 'offline' });
-    const s = await pf.submit(publicId, { full_name: 'Ann' }, [{ field: 'id_copy', name: 'id.png', bytes: PNG }], mail.token);
+    expect((await pf.load(publicId, mail.token)).json.link).toMatchObject({
+      state: 'valid',
+      purpose: 'offline',
+    });
+    const s = await pf.submit(
+      publicId,
+      { full_name: 'Ann' },
+      [{ field: 'id_copy', name: 'id.png', bytes: PNG }],
+      mail.token,
+    );
     expect(s.complete?.status).toBe(200);
     expect(pf.stub.files().length).toBeGreaterThan(0);
     await sweep();
@@ -201,7 +214,9 @@ describe('runner flapping sends one link per case', () => {
     await goOffline();
     await sweep();
     await goOnline();
-    await q(`UPDATE workstations SET connected_at=now() - interval '5 minutes' WHERE id=$1`, [pf.w.workstationId]);
+    await q(`UPDATE workstations SET connected_at=now() - interval '5 minutes' WHERE id=$1`, [
+      pf.w.workstationId,
+    ]);
     await Promise.all([sweep(), sweep()]);
     await sweep();
     ctx().config.publicForms.offlineSettleSec = 0;
@@ -210,9 +225,14 @@ describe('runner flapping sends one link per case', () => {
     expect(await waitForMessages(e2)).toHaveLength(1);
     await new Promise((r) => setTimeout(r, 300));
     expect(await messagesTo(e1)).toHaveLength(1);
-    const links = await q(`SELECT id FROM form_client_links WHERE form_id=$1 AND purpose='offline'`, [formId]);
+    const links = await q(`SELECT id FROM form_client_links WHERE form_id=$1 AND purpose='offline'`, [
+      formId,
+    ]);
     expect(links).toHaveLength(2);
-    const notices = await q(`SELECT id FROM desk_items WHERE subkind='form_offline_link' AND data->>'formId'=$1`, [formId]);
+    const notices = await q(
+      `SELECT id FROM desk_items WHERE subkind='form_offline_link' AND data->>'formId'=$1`,
+      [formId],
+    );
     expect(notices).toHaveLength(2);
   });
 
@@ -226,13 +246,18 @@ describe('runner flapping sends one link per case', () => {
     const first = await caseOf(email);
     const m1 = await linkFromMail(email);
     // a crash after the mail, before "sent": the row is back in "sending" and stale
-    await q(`UPDATE form_offline_requests SET status='sending', updated_at=now() - interval '10 minutes' WHERE id=$1`, [first.id]);
+    await q(
+      `UPDATE form_offline_requests SET status='sending', updated_at=now() - interval '10 minutes' WHERE id=$1`,
+      [first.id],
+    );
     await sweep();
     const mails = await waitForMessages(email, 2);
     expect(mails).toHaveLength(2);
     const m2 = /#c=([A-Za-z0-9._-]+)/.exec(await messageText(mails[0]!.ID))?.[1];
     expect(m2).toBe(m1.token);
-    expect((await q(`SELECT id FROM form_client_links WHERE form_id=$1 AND purpose='offline'`, [formId])).length).toBe(1);
+    expect(
+      (await q(`SELECT id FROM form_client_links WHERE form_id=$1 AND purpose='offline'`, [formId])).length,
+    ).toBe(1);
   });
 });
 
@@ -266,10 +291,17 @@ describe('journey case: documents pending, runner offline', () => {
     // the old personal link is revoked
     const old = (await q('SELECT revoked_at FROM form_client_links WHERE id=$1', [wait.link_id]))[0] as any;
     expect(old.revoked_at).not.toBeNull();
-    const notice = (await q(`SELECT * FROM desk_items WHERE subkind='form_offline_link' AND data->>'requestId'=$1`, [c.id]))[0] as any;
+    const notice = (
+      await q(`SELECT * FROM desk_items WHERE subkind='form_offline_link' AND data->>'requestId'=$1`, [c.id])
+    )[0] as any;
     expect(notice.data).toMatchObject({ waitId: wait.id, instanceId: id, journeyName: 'Rentals' });
 
-    const s = await pf.submit(publicId, { full_name: 'Ann' }, [{ field: 'id_copy', name: 'id.png', bytes: PNG }], mail.token);
+    const s = await pf.submit(
+      publicId,
+      { full_name: 'Ann' },
+      [{ field: 'id_copy', name: 'id.png', bytes: PNG }],
+      mail.token,
+    );
     expect(s.complete?.status).toBe(200);
     await tick();
     expect(await instStep(id)).toBe('screening');
@@ -320,17 +352,25 @@ describe('secure link refusals', () => {
     expect(bad.status).toBe(404);
     expect(bad.json.error.code).toBe('link_invalid');
 
-    await q(`UPDATE form_client_links SET expires_at = now() - interval '1 hour' WHERE form_id=$1 AND purpose='offline'`, [formId]);
+    await q(
+      `UPDATE form_client_links SET expires_at = now() - interval '1 hour' WHERE form_id=$1 AND purpose='offline'`,
+      [formId],
+    );
     const expired = await pf.load(publicId, mail.token);
     expect(expired.status).toBe(410);
     expect(expired.json.error.code).toBe('link_expired');
     expect(expired.json.error.message).toContain('secure link');
 
     // the case closes as expired, the address is deleted and the desk is told
-    await q(`UPDATE form_offline_requests SET link_expires_at = now() - interval '1 hour' WHERE form_id=$1`, [formId]);
+    await q(`UPDATE form_offline_requests SET link_expires_at = now() - interval '1 hour' WHERE form_id=$1`, [
+      formId,
+    ]);
     await sweep();
     expect(await caseOf(email)).toMatchObject({ status: 'expired', email_enc: null, email_key: null });
-    const notices = await q(`SELECT title FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`, [formId]);
+    const notices = await q(
+      `SELECT title FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`,
+      [formId],
+    );
     expect(notices).toHaveLength(1);
   });
 
@@ -339,11 +379,17 @@ describe('secure link refusals', () => {
     await goOffline();
     const email = addr('hold');
     await askForLink(publicId, email);
-    await q(`UPDATE form_offline_requests SET hold_expires_at = now() - interval '1 minute' WHERE form_id=$1`, [formId]);
+    await q(
+      `UPDATE form_offline_requests SET hold_expires_at = now() - interval '1 minute' WHERE form_id=$1`,
+      [formId],
+    );
     await sweep();
     await sweep();
     expect(await caseOf(email)).toMatchObject({ status: 'expired', email_enc: null });
-    const n = await q(`SELECT 1 FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`, [formId]);
+    const n = await q(
+      `SELECT 1 FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`,
+      [formId],
+    );
     expect(n).toHaveLength(1);
     await goOnline();
   });
@@ -357,7 +403,10 @@ describe('secure link refusals', () => {
     const dto = (await pf.load(publicId)).json;
     const body = { session: dto.session, nonce: '0', website: '', email: addr('rp') };
     expect((await pf.post(`/api/public/forms/${publicId}/offline-requests`, body)).status).toBe(202);
-    const replay = await pf.post(`/api/public/forms/${publicId}/offline-requests`, { ...body, email: addr('rp2') });
+    const replay = await pf.post(`/api/public/forms/${publicId}/offline-requests`, {
+      ...body,
+      email: addr('rp2'),
+    });
     expect(replay.status).toBe(409);
     expect(replay.json.error.code).toBe('session_used');
     const bot = await pf.post(`/api/public/forms/${publicId}/offline-requests`, {
