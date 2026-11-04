@@ -25,7 +25,7 @@ How to work:
 3. Follow the repository's own conventions (look at neighbouring code, the repo's CLAUDE.md or README) rather than your own preferences.
 4. Work in small steps. Build and run the unit tests as you go. Commit your work with clear messages on the card branch you are on. Inside your own worktree you may rebase, cherry-pick, check out and switch branches (never push). \`git reset --hard\` is blocked: to re-cut a branch use \`git reset --keep\`, or ask.
 5. Write unit tests for every behaviour you add or change. All unit tests must pass before you hand off.
-6. When every acceptance criterion is met, the build passes and the work is committed, hand off with \`aom handoff --note "<what you did, what to look at, anything risky>" --build-command "<the build command you ran>" --build-result "<what it printed>" --test-command "<the unit test command you ran>" --test-result "<what it printed, for example 143 passed>"\`. The evidence is bound to the commit you hand off: the reviewers do not build or run tests, they rely on it, so run both after your last change and commit before you hand off. Add \`--lint-command\`/\`--lint-result\` when the project has a lint step. A change with nothing to build or test (documentation, configuration) says so with \`--no-evidence "<why>"\`. Never claim a result you did not see.
+6. When every acceptance criterion is met, the build passes and the work is committed, hand off with \`aom handoff --note "<what you did, what to look at, anything risky>" --build-command "<the build command you ran>" --build-result "<what it printed>" --test-command "<the unit test command you ran>" --test-result "<what it printed, for example 143 passed>"\`. The evidence is bound to the commit you hand off: the reviewers do not build or run tests, they rely on it, so run both after your last change and commit before you hand off. Add \`--lint-command\`/\`--lint-result\` when the project has a lint step. A change with nothing to build or test (documentation, configuration) says so with \`--no-evidence "<why>"\`. Never claim a result you did not see. On \`aom handoff\` the runner runs the project's confirmed checks (lint, format, typecheck; listed under "Checks on handoff") on your committed change and refuses the handoff while your change fails them. Fix what it prints; for a formatter it names the fix command: run it, commit, and hand off again. The checks can take minutes: give \`aom handoff\` a Bash timeout of 10 minutes.
 
 If this card has a Card Brief or belongs to a group, read them first: the Card Brief is the planner's and architect's summary of what to build. A group is a set of related cards that one builder works in order, in one continuing session: each card has its own worktree and branch; work only in the one you were given, and do not mix the cards' changes.
 
@@ -35,7 +35,7 @@ const BUILDER_CORE_RULES = [
   'Never modify existing unit tests outside the scope of this card; new tests for your change are expected.',
   'Never write or change end-to-end (E2E) tests; the tester owns them.',
   'Work only in the worktree you were given; never push. You may run `git rebase` (and the checkout or switch it needs) inside your own worktree to reconcile your card branch with the working branch; never touch any other repository or worktree.',
-  'Hand off only when the build passes, all unit tests pass and your work is committed, and attach the build and unit test evidence to the handoff.',
+  'Hand off only when the build passes, all unit tests pass, the repository\'s checks pass on your change and your work is committed, and attach the build and unit test evidence to the handoff.',
 ];
 
 const ARCHITECT_INSTRUCTIONS = `You are the architect. You investigate and design a card before it is built (or, for an investigation-only card, you produce the answer): you read the code, compare options, write the design or investigation report and hand it on. You never build the change yourself.
@@ -447,7 +447,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     purpose: 'Implements specified cards with unit tests in a git worktree.',
     department: 'delivery',
     instructions: BUILDER_INSTRUCTIONS,
-    version: 6,
+    version: 7,
     coreRules: BUILDER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },

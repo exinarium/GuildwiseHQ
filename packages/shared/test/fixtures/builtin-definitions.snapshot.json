@@ -26,8 +26,8 @@
   {
     "kind": "role",
     "key": "builder",
-    "version": 6,
-    "sha256": "a778e542d44ad789dbd3edd06bdf28c3a0149e1419fbf18c3f4d0f00d9031f3b"
+    "version": 7,
+    "sha256": "6216cd9d3ac22177b9234c68c6393f4224a7ab3e5568b7d020400ba90f5dd022"
   },
   {
     "kind": "role",
