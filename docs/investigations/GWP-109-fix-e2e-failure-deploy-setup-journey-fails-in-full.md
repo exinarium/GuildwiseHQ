@@ -75,6 +75,13 @@ gateway becomes `10.250.0.1`. DevOps confirmed this on the host.
 **Test (environment assumption).** No product code runs before the failure. The failing call is the spec's own
 `docker run`, before the runner is paired. No deploy-setup behaviour regressed.
 
+The product has the same address in one place, and there it is safe. `apps/runner/src/delivery/prepare.ts:129` reads
+the bridge gateway at run time (`docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'`) and
+uses `172.17.0.1` only when that lookup fails. On this host the lookup returns `10.250.0.1`. The runner therefore
+already copes with a custom address pool, and the only hardcoded assumption is in the spec.
+`apps/runner/test/deploy-prepare.test.ts` (l.252, 274) uses the address only as the value its fake
+`docker network inspect` returns, so that test does not depend on the host either.
+
 ### 3.4 release/1.5.0
 
 **Not caused by release/1.5.0.** The spec was added in `5e2a7c13` (2026-10-21) and last touched in `80c85b05`
