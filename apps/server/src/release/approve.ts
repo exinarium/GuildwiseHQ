@@ -1,4 +1,3 @@
-import { releaseDocsPrepViewFor } from './docs-prep.ts';
 import {
   type DeskResolution,
   type ReleaseFacts,
@@ -13,6 +12,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden } from '../errors.ts';
+import { releaseDocsPrepViewFor } from './docs-prep.ts';
 import { loadFacts } from './facts.ts';
 import { buildProposal } from './proposal.ts';
 import { loadComponentRules } from './rules.ts';

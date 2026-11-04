@@ -1,4 +1,3 @@
-import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
 import {
   type BudgetDto,
   ComponentRulesSchema,
@@ -32,6 +31,7 @@ import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts 
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
+import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
 import { effectiveShiftLimit, platformShiftCap, shiftLimitSettingOf } from '../runner-gateway/shift-limit.ts';
 import {
@@ -284,8 +284,7 @@ export async function getProjectDetail(
   );
   // Release prep (docs and videos): the gate view per live proposal; absent (undefined) when the switch is off.
   const docsPrepViews = new Map<string, Awaited<ReturnType<typeof releaseDocsPrepViewFor>>>();
-  for (const lp of liveProposals)
-    docsPrepViews.set(lp.id, await releaseDocsPrepViewFor(ctx.pool, lp));
+  for (const lp of liveProposals) docsPrepViews.set(lp.id, await releaseDocsPrepViewFor(ctx.pool, lp));
   const ships = await rows(
     ctx.pool,
     `SELECT id, repo_id, version, status, step, commit_sha, error, payload, updated_at, land_mode, pr_url, step_message,

@@ -5,9 +5,9 @@ import {
   RELEASE_PUBLISH_STEPS,
   RELEASE_SHIP_CAPABILITY,
   type ReleaseShipPayload,
-  releaseDocsPrepLink,
   ReleaseShipPayloadSchema,
   ReleaseShipResultSchema,
+  releaseDocsPrepLink,
   streamId,
 } from '@aom/shared';
 import { projectRole } from '../authz/scope.ts';

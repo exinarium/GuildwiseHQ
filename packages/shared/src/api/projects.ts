@@ -17,10 +17,10 @@ import {
 } from '../forge/index.ts';
 import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
-import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
+import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
 import {
   ComponentRulesSchema,
   RepoDescriptionSchema,

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   type CommitPhase,
   enabledReleaseDocsPrepSteps,
-  isReleaseDocsPrepStep,
   isOrgManager,
+  isReleaseDocsPrepStep,
   isResearchStage,
   nextReleaseDocsPrepAction,
   RELEASE_DOCS_PREP_CAPABILITY,
@@ -11,15 +11,15 @@ import {
   type ReleaseDocsPrepGateView,
   type ReleaseDocsPrepOverviewItem,
   type ReleaseDocsPrepPayload,
-  type ReleaseDocsPrepRunDto,
   ReleaseDocsPrepResultSchema,
-  ReleaseDocsPrepSummarySchema,
+  type ReleaseDocsPrepRunDto,
   type ReleaseDocsPrepSettingsDto,
   type ReleaseDocsPrepState,
+  ReleaseDocsPrepSummarySchema,
+  type RunSnapshot,
   releaseDocsPrepGate,
   releaseDocsPrepLink,
   releaseDocsPrepSteps,
-  type RunSnapshot,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -42,11 +42,7 @@ const SWEEP_MS = 12 * 3_600_000;
 // ------------------------------------------------------------------------------------------------------------- roles
 
 /** The project Owner, or an organization Owner or Admin (the `setCommitAs` rule). 404 for outsiders. */
-async function requireManager(
-  db: Queryable,
-  user: AuthSession['user'],
-  projectId: string,
-): Promise<Row> {
+async function requireManager(db: Queryable, user: AuthSession['user'], projectId: string): Promise<Row> {
   const p = await loadVisibleProject(db, user.id, projectId);
   if (!(await canManage(db, user.id, p)))
     throw forbidden('only the project Owner or an organization Owner or Admin can do this');
@@ -140,7 +136,7 @@ export async function docsPrepRepos(db: Queryable, projectId: string): Promise<P
     db,
     `SELECT r.id, r.name, r.working_branch, r.main_branch, r.remote_url_normalized, r.forge_kind, p.working_branch AS project_branch
        FROM project_repos r JOIN projects p ON p.id = r.project_id
-      WHERE r.project_id=$1 AND r.removed_at IS NULL ORDER BY r.created_at, r.name`,
+      WHERE r.project_id=$1 AND r.removed_at IS NULL ORDER BY r.name, r.id`,
     [projectId],
   );
   const out: PrepRepo[] = [];
@@ -268,7 +264,8 @@ export async function startReleaseDocsPrep(
     );
     deliver.push(...(await advance(ctx, tx, runId)));
   });
-  for (const w of new Set(deliver)) void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
+  for (const w of new Set(deliver))
+    void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
   return { runId };
 }
 
@@ -290,8 +287,7 @@ export async function skipReleaseDocsPrep(
     await requireManager(tx, user, projectId);
     const p = await one(tx, 'SELECT * FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
     if (!p) throw notFound('project not found');
-    const branch: string | null =
-      p.working_branch ?? (await docsPrepRepos(tx, projectId))[0]?.branch ?? null;
+    const branch: string | null = p.working_branch ?? (await docsPrepRepos(tx, projectId))[0]?.branch ?? null;
     if (!branch) throw conflict('no_release_branch', 'This project has no release branch.');
     const latest = await latestRun(tx, projectId, branch);
     if (latest && (latest.status === 'passed' || latest.status === 'skipped'))
@@ -420,7 +416,13 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
           streamId: streamId.releaseDocsPrep(runId),
           event: {
             type: 'ReleaseDocsPrepStepStarted',
-            payload: { runId, repoId, step: action.step, ...(action.phase ? { phase: action.phase } : {}), commandId },
+            payload: {
+              runId,
+              repoId,
+              step: action.step,
+              ...(action.phase ? { phase: action.phase } : {}),
+              commandId,
+            },
           },
           actor,
           scope,
@@ -507,11 +509,16 @@ export async function applyReleaseDocsPrepResult(
       projectId = run.project_id;
       userId = run.started_by ?? undefined;
       repoIds = (
-        await rows(tx, 'SELECT repo_id FROM release_docs_prep_repos WHERE run_id=$1 AND commit_sha IS NOT NULL', [runId])
+        await rows(
+          tx,
+          'SELECT repo_id FROM release_docs_prep_repos WHERE run_id=$1 AND commit_sha IS NOT NULL',
+          [runId],
+        )
       ).map((x) => x.repo_id);
     }
   });
-  for (const w of new Set(deliver)) void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
+  for (const w of new Set(deliver))
+    void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
   // The Ship release item must read the prep commit: ask for fresh facts of every repo that got one.
   if (committed && projectId)
     for (const id of repoIds)
@@ -548,10 +555,9 @@ async function gateInput(db: Queryable, proposal: Row, p: Row): Promise<ReleaseD
         proposal.repo_id,
       ])
     : null;
-  const failedRepo =
-    run?.failed_repo_id
-      ? await one(db, 'SELECT name FROM project_repos WHERE id=$1', [run.failed_repo_id])
-      : null;
+  const failedRepo = run?.failed_repo_id
+    ? await one(db, 'SELECT name FROM project_repos WHERE id=$1', [run.failed_repo_id])
+    : null;
   const published = await one(
     db,
     `SELECT MAX(published_at) AS at FROM release_ships WHERE repo_id=$1 AND status='published'`,
@@ -649,8 +655,7 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
         steps: steps
           .filter((s) => s.repo_id === r.repo_id)
           .sort(
-            (a, b) =>
-              (order.get(a.step) ?? 99) - (order.get(b.step) ?? 99) || (a.phase < b.phase ? 1 : -1),
+            (a, b) => (order.get(a.step) ?? 99) - (order.get(b.step) ?? 99) || (a.phase < b.phase ? 1 : -1),
           )
           .map((s) => ({
             step: s.step,

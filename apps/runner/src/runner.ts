@@ -41,9 +41,9 @@ import {
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   RELAY_FEATURE,
+  RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_FACTS_CAPABILITY,
   RELEASE_PUBLISH_CAPABILITY,
-  RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -118,10 +118,10 @@ import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
+import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
-import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { shipReleaseCommit } from './git/release-ship.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { bumpSubmodule } from './git/submodule-pin.ts';

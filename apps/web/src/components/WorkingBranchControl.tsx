@@ -381,6 +381,14 @@ function PrepareRelease({ projectId, repo }: { projectId: string; repo: ProjectR
           Prepare release
         </Button>
       )}
+      {live?.docsPrep?.blocked && (
+        <span className="text-xs text-warning-soft-fg" data-testid="release-docs-prep-blocked">
+          {live.docsPrep.message}{' '}
+          <Link to={live.docsPrep.link} className="underline">
+            See release prep
+          </Link>
+        </span>
+      )}
       <ErrorBox error={prepare.error} />
     </div>
   );

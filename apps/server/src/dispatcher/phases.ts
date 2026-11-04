@@ -1,4 +1,3 @@
-import { releaseDocsPrepSweep } from '../release/docs-prep.ts';
 import { isFollowupTerminal, nextFollowup, phaseCompletion, type Recipe, streamId } from '@aom/shared';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import {
@@ -16,6 +15,7 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { requestDeployRun } from '../delivery/runs.ts';
+import { releaseDocsPrepSweep } from '../release/docs-prep.ts';
 import { releaseChecks } from '../release/publish.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 

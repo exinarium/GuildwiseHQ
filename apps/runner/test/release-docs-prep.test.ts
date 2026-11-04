@@ -31,7 +31,10 @@ function setup(opts: { tag?: boolean } = {}) {
   return { repo, integrationDir: tmp('aom-integration-') };
 }
 
-const payload = (s: ReturnType<typeof setup>, over: Partial<ReleaseDocsPrepPayload> = {}): ReleaseDocsPrepPayload => ({
+const payload = (
+  s: ReturnType<typeof setup>,
+  over: Partial<ReleaseDocsPrepPayload> = {},
+): ReleaseDocsPrepPayload => ({
   runId: RUN,
   projectId: ID(2),
   repoId: ID(3),
@@ -45,7 +48,10 @@ const payload = (s: ReturnType<typeof setup>, over: Partial<ReleaseDocsPrepPaylo
   ...over,
 });
 
-const run = (s: ReturnType<typeof setup>, over: Partial<ReleaseDocsPrepPayload> = {}): Promise<ReleaseDocsPrepResult> =>
+const run = (
+  s: ReturnType<typeof setup>,
+  over: Partial<ReleaseDocsPrepPayload> = {},
+): Promise<ReleaseDocsPrepResult> =>
   runReleaseDocsPrep({ payload: payload(s, over), repoPath: s.repo.clone, integrationDir: s.integrationDir });
 
 const originHead = (origin: string) => sh(origin, 'git', ['rev-parse', 'release/1.4.0']);
@@ -63,7 +69,11 @@ DOCS_PREP_STEP_HANDLERS.boom = async () => ({ ok: false, error: 'the guide could
 async function wholeRun(s: ReturnType<typeof setup>, runId = RUN, withGuide = true) {
   const a = await run(s, { runId });
   const summary = a.summary;
-  const common = { runId, ...(summary ? { summary } : {}), base: { sha: a.baseSha as string, tag: a.baseTag ?? null } };
+  const common = {
+    runId,
+    ...(summary ? { summary } : {}),
+    base: { sha: a.baseSha as string, tag: a.baseTag ?? null },
+  };
   const g = withGuide ? await run(s, { ...common, step: 'guide' }) : undefined;
   const prep = await run(s, { ...common, step: 'commit', phase: 'prepare' });
   const push = await run(s, { ...common, step: 'commit', phase: 'push' });

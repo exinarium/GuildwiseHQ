@@ -21,10 +21,14 @@ export function releaseDocsPrepRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
 
-    app.get('/api/projects/:id/release-docs-prep/settings', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return getReleaseDocsPrepSettings(ctx, s.user, req.params.id);
-    });
+    app.get(
+      '/api/projects/:id/release-docs-prep/settings',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return getReleaseDocsPrepSettings(ctx, s.user, req.params.id);
+      },
+    );
 
     app.put(
       '/api/projects/:id/release-docs-prep/settings',
@@ -79,10 +83,14 @@ export function releaseDocsPrepRoutes(ctx: Ctx) {
       },
     );
 
-    app.post('/api/projects/:id/release-docs-prep/skip', { schema: { params: IdParamsSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
-      await skipReleaseDocsPrep(ctx, s.user, req.params.id);
-      reply.code(204);
-    });
+    app.post(
+      '/api/projects/:id/release-docs-prep/skip',
+      { schema: { params: IdParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await skipReleaseDocsPrep(ctx, s.user, req.params.id);
+        reply.code(204);
+      },
+    );
   };
 }

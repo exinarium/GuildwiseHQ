@@ -30,7 +30,16 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
       `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, retry_of, started_by, started_at, updated_at)
        SELECT $1, pr.org_id, pr.id, $3, 'running', $4::text[], $5, $6, $7, $8, $8 FROM projects pr WHERE pr.id = $2
        ON CONFLICT (id) DO NOTHING`,
-      [p.runId, p.projectId, p.releaseBranch, p.steps, p.trigger, p.retryOf ?? null, p.startedBy, e.createdAt],
+      [
+        p.runId,
+        p.projectId,
+        p.releaseBranch,
+        p.steps,
+        p.trigger,
+        p.retryOf ?? null,
+        p.startedBy,
+        e.createdAt,
+      ],
     );
     for (const r of p.repos) {
       await exec(

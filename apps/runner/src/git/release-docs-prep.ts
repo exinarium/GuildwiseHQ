@@ -10,8 +10,8 @@ import { detectSignOff } from './dco.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
-import { lastReleaseTagAt } from './release-facts.ts';
 import { DOCS_PREP_STEP_HANDLERS } from './release-docs-prep-steps.ts';
+import { lastReleaseTagAt } from './release-facts.ts';
 import { pushFastForward } from './release-ship.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -84,12 +84,24 @@ async function runLocked(input: ReleaseDocsPrepInput): Promise<ReleaseDocsPrepRe
   if (fetched.exitCode !== 0) {
     const why = (fetched.stderr || fetched.stdout).trim();
     if (/couldn't find remote ref|no such remote ref/i.test(why))
-      return { ok: true, state: 'skipped', error: `the release branch '${b}' does not exist on origin`, files: [], notices: [] };
+      return {
+        ok: true,
+        state: 'skipped',
+        error: `the release branch '${b}' does not exist on origin`,
+        files: [],
+        notices: [],
+      };
     return failed(`could not fetch ${b}: ${why}`);
   }
   const tip = await revParse(repoPath, `refs/remotes/origin/${b}`);
   if (!tip)
-    return { ok: true, state: 'skipped', error: `the release branch '${b}' does not exist on origin`, files: [], notices: [] };
+    return {
+      ok: true,
+      state: 'skipped',
+      error: `the release branch '${b}' does not exist on origin`,
+      files: [],
+      notices: [],
+    };
 
   if (p.step === 'analyse') return analyse(input, a, tip);
   if (p.step === 'commit') return p.phase === 'push' ? commitPush(input, a) : commitPrepare(input, a, tip);
@@ -121,9 +133,13 @@ async function analyse(
   const { payload: p, repoPath } = input;
   const main = p.mainBranch;
   if (main) await git(repoPath, [...a.args, 'fetch', '--', 'origin', main], { env: a.env });
-  await git(repoPath, [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'], {
-    env: a.env,
-  });
+  await git(
+    repoPath,
+    [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'],
+    {
+      env: a.env,
+    },
+  );
   // Kept refs of an earlier run (a failed one) are of no use to this one.
   const refs = (await git(repoPath, ['for-each-ref', '--format=%(refname)', `${KEPT}/`])).stdout
     .split('\n')
@@ -140,21 +156,29 @@ async function analyse(
         : main
       : null;
     const mb = mainRef ? (await git(repoPath, ['merge-base', mainRef, tip])).stdout.trim() : '';
-    if (!mb) return failed(`cannot find where '${p.releaseBranch}' starts: set the main branch in the project settings`);
+    if (!mb)
+      return failed(
+        `cannot find where '${p.releaseBranch}' starts: set the main branch in the project settings`,
+      );
     base = { kind: 'main', branch: main as string, sha: mb };
   }
   const range = `${base.sha}..${tip}`;
 
-  const count = Number((await git(repoPath, ['rev-list', '--no-merges', '--count', range])).stdout.trim() || '0');
-  const log = await git(repoPath, [
-    'log',
-    '--no-merges',
-    '--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e',
-    range,
-  ]);
+  const count = Number(
+    (await git(repoPath, ['rev-list', '--no-merges', '--count', range])).stdout.trim() || '0',
+  );
+  const log = await git(repoPath, ['log', '--no-merges', '--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e', range]);
   const commitRows = split(log.stdout);
   const merges = split(
-    (await git(repoPath, ['log', '--merges', '--first-parent', '--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e', range])).stdout,
+    (
+      await git(repoPath, [
+        'log',
+        '--merges',
+        '--first-parent',
+        '--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e',
+        range,
+      ])
+    ).stdout,
   );
   const keys = new Set<string>();
   const mergeOut = merges.slice(0, MERGES_KEPT).map((r) => {
@@ -162,12 +186,21 @@ async function analyse(
     const ks = cardKeys(`${subject}\n${body}`, p.projectKey);
     for (const k of ks) keys.add(k);
     const pr = /Merge pull request #(\d+)/.exec(subject) ?? /\(#(\d+)\)\s*$/.exec(subject);
-    return { sha: sha.slice(0, 40), subject: subject.slice(0, 300), cardKeys: ks.slice(0, 20), prNumber: pr ? Number(pr[1]) : null };
+    return {
+      sha: sha.slice(0, 40),
+      subject: subject.slice(0, 300),
+      cardKeys: ks.slice(0, 20),
+      prNumber: pr ? Number(pr[1]) : null,
+    };
   });
-  for (const r of commitRows) for (const k of cardKeys(`${r[3] ?? ''}\n${r[4] ?? ''}`, p.projectKey)) keys.add(k);
+  for (const r of commitRows)
+    for (const k of cardKeys(`${r[3] ?? ''}\n${r[4] ?? ''}`, p.projectKey)) keys.add(k);
 
   const diff = await git(repoPath, ['diff', '--name-status', '-z', '--no-renames', base.sha, tip]);
-  const byArea = new Map<string, { added: number; modified: number; deleted: number; paths: string[]; files: number }>();
+  const byArea = new Map<
+    string,
+    { added: number; modified: number; deleted: number; paths: string[]; files: number }
+  >();
   const toks = diff.stdout.split('\0').filter((t) => t !== '');
   for (let i = 0; i + 1 < toks.length; i += 2) {
     const status = (toks[i] as string)[0];
@@ -200,7 +233,10 @@ async function analyse(
     })),
     commitsTruncated: commitRows.length > COMMITS_KEPT,
     merges: mergeOut,
-    cards: [...keys].sort().slice(0, CARDS_KEPT).map((key) => ({ key, title: null })),
+    cards: [...keys]
+      .sort()
+      .slice(0, CARDS_KEPT)
+      .map((key) => ({ key, title: null })),
     areas,
   };
   return passed({
@@ -257,8 +293,11 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
       const extra = status.filter((f) => !out.files.includes(f));
       if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`);
       if (status.length === 0) return passed({ notices: ['no changes'] });
-      const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], { env: commitEnv(identity) });
-      if (commit.exitCode !== 0) return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`);
+      const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], {
+        env: commitEnv(identity),
+      });
+      if (commit.exitCode !== 0)
+        return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`);
       const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
       await git(repoPath, ['update-ref', workRef(p.runId), sha]);
       return passed({ files: status });
@@ -297,17 +336,16 @@ async function commitPrepare(
     if (parent === tip) return passed({ commit: kept, files: await changedFiles(repoPath, parent, kept) });
   }
   const sign =
-    p.signOff === undefined
-      ? await detectSignOff(repoPath)
-      : { required: p.signOff, reason: 'requested' };
+    p.signOff === undefined ? await detectSignOff(repoPath) : { required: p.signOff, reason: 'requested' };
   const subject = p.message ?? `docs(release): prepare the release documentation for ${p.releaseBranch}`;
-  const message = sign.required ? `${subject}\n\nSigned-off-by: ${identity.name} <${identity.email}>\n` : `${subject}\n`;
-  const squash = await git(
-    repoPath,
-    ['commit-tree', `${work}^{tree}`, '-p', analysed, '-m', message],
-    { env: commitEnv(identity) },
-  );
-  if (squash.exitCode !== 0) return failed(`git commit-tree failed: ${(squash.stderr || squash.stdout).trim()}`);
+  const message = sign.required
+    ? `${subject}\n\nSigned-off-by: ${identity.name} <${identity.email}>\n`
+    : `${subject}\n`;
+  const squash = await git(repoPath, ['commit-tree', `${work}^{tree}`, '-p', analysed, '-m', message], {
+    env: commitEnv(identity),
+  });
+  if (squash.exitCode !== 0)
+    return failed(`git commit-tree failed: ${(squash.stderr || squash.stdout).trim()}`);
   let sha = squash.stdout.trim();
   if (analysed !== tip) {
     // The release branch moved since the analysis: carry the squash commit over onto the new tip.
@@ -325,7 +363,10 @@ async function commitPrepare(
           const unmerged = (await git(wt, ['diff', '--name-only', '--diff-filter=U'])).stdout.trim();
           await git(wt, ['cherry-pick', '--abort']);
           if (!unmerged) return { sha: null }; // the changes are on the tip already
-          return { sha: null, error: 'the release branch moved and the prepared files conflict: run prep again' };
+          return {
+            sha: null,
+            error: 'the release branch moved and the prepared files conflict: run prep again',
+          };
         }
         return { sha: (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim() };
       },
@@ -341,7 +382,10 @@ async function commitPrepare(
 }
 
 async function changedFiles(repoPath: string, from: string, to: string): Promise<string[]> {
-  return (await git(repoPath, ['diff', '--name-only', from, to])).stdout.split('\n').filter(Boolean).slice(0, 500);
+  return (await git(repoPath, ['diff', '--name-only', from, to])).stdout
+    .split('\n')
+    .filter(Boolean)
+    .slice(0, 500);
 }
 
 async function commitPush(
@@ -352,7 +396,12 @@ async function commitPush(
   const sha = await revParse(repoPath, commitRef(p.runId));
   if (!sha) return passed({ notices: ['no changes'] });
   // Redelivered, or pushed by an earlier attempt: it is on origin already.
-  const onOrigin = await git(repoPath, ['merge-base', '--is-ancestor', sha, `refs/remotes/origin/${p.releaseBranch}`]);
+  const onOrigin = await git(repoPath, [
+    'merge-base',
+    '--is-ancestor',
+    sha,
+    `refs/remotes/origin/${p.releaseBranch}`,
+  ]);
   if (onOrigin.exitCode === 0) {
     await cleanup(repoPath, p.runId);
     return passed({ commit: sha, pushed: true, alreadyPushed: true });
@@ -360,7 +409,9 @@ async function commitPush(
   const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${sha}^`])).stdout.trim();
   const tip = await revParse(repoPath, `refs/remotes/origin/${p.releaseBranch}`);
   if (parent !== tip)
-    return failed(`${p.releaseBranch} moved since the prepared commit was made: run prep again`, { commit: sha });
+    return failed(`${p.releaseBranch} moved since the prepared commit was made: run prep again`, {
+      commit: sha,
+    });
   const pushed = await pushFastForward(repoPath, sha, p.releaseBranch, a);
   if (!pushed.ok) return failed(pushed.error, { commit: sha });
   await cleanup(repoPath, p.runId);
