@@ -810,6 +810,7 @@ const camel = (k: string): string => k.replace(/-([a-z])/g, (_m, c: string) => c
 
 const CEO_USAGE = `usage: aom ceo diag server|workstation <name> ... (diagnostics) | snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | route "<request>" | route --drafts | costs [--days n]
        aom ceo act <action> [--<param> <value>]... --reason "<why>" --confidence 0.0-1.0 [--evidence ledger:<id>|memory:<id>|signal:<id>|hr:<id>]... [--dry-run] [--key <k>]
+       aom ceo act move-workstation --agent <name|id> --to <workstation>  |  act move-agents-off --from <workstation> --to <workstation>   (+ --reason "..." --confidence ...)
        aom ceo recommend --item <desk id> [--option <o1>|--text "..."] --reason "..." --confidence 0.0-1.0  |  --action <name> [--<param> <value>]... --reason "..." --confidence ...
        aom ceo notify --kind needs_you|urgent|task_done --text "..." [--title "..."] [--task <id>] [--item <id>]
        aom ceo task create --title "..." [--request "..."] [--due <iso>] | task update --id <id> [--status s] [--note "..."] [--watch card:<id>]... | task list

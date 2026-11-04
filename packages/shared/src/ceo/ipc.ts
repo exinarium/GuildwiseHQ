@@ -32,6 +32,8 @@ export const CEO_ACTIONS = [
   'allow',
   /** `aom ceo act move-workstation`: move an agent to another workstation of the Owner (the owner/admin move). */
   'move-workstation',
+  /** `aom ceo act move-agents-off`: move every movable agent off an offline or removed workstation (the owner's bulk move). */
+  'move-agents-off',
   'hire',
   'bench',
   'retire',
