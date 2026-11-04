@@ -93,7 +93,7 @@ describe('forms API', () => {
     await ok(asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('B') }));
     const r = await asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('C') });
     expect(r.status).toBe(409);
-    expect(r.body.code ?? r.body.error).toBe('form_version_conflict');
+    expect(r.body.error.code).toBe('form_version_conflict');
   });
 
   it('an invalid definition answers 422 with the issues', async () => {
@@ -108,20 +108,20 @@ describe('forms API', () => {
   it('a member reads but cannot write', async () => {
     const f = await create();
     const m = await memberCookie('member');
-    expect((await w.t.req('GET', '/api/forms', { cookie: m })).status).toBe(200);
-    expect((await w.t.req('GET', `/api/forms/${f.id}`, { cookie: m })).status).toBe(200);
-    expect((await w.t.req('POST', '/api/forms', { cookie: m, body: { definition: defOf() } })).status).toBe(
-      403,
-    );
+    // the member's oldest membership is their own personal org: name the Owner's org explicitly
+    const asMember = (method: string, url: string, body?: unknown) =>
+      w.t.req(method, url, {
+        cookie: m,
+        headers: { 'x-aom-org': orgId },
+        ...(body !== undefined ? { body } : {}),
+      });
+    expect((await asMember('GET', '/api/forms')).status).toBe(200);
+    expect((await asMember('GET', `/api/forms/${f.id}`)).status).toBe(200);
+    expect((await asMember('POST', '/api/forms', { definition: defOf() })).status).toBe(403);
     expect(
-      (
-        await w.t.req('PUT', `/api/forms/${f.id}`, {
-          cookie: m,
-          body: { baseVersion: 1, definition: defOf() },
-        })
-      ).status,
+      (await asMember('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf() })).status,
     ).toBe(403);
-    expect((await w.t.req('POST', `/api/forms/${f.id}/archive`, { cookie: m })).status).toBe(403);
+    expect((await asMember('POST', `/api/forms/${f.id}/archive`)).status).toBe(403);
     expect((await upload(m, PNG)).statusCode).toBe(403);
   });
 
@@ -158,11 +158,17 @@ describe('forms API', () => {
   it('rebuilding the projections gives the same rows', async () => {
     const f = await create();
     await ok(asOwner('PUT', `/api/forms/${f.id}`, { baseVersion: 1, definition: defOf('Two', 3) }));
-    const before = await q('SELECT form_id, version, definition_hash FROM form_versions ORDER BY version');
+    // the rebuild replays every event of the file, so look at this test's form only
+    const versions = () =>
+      q('SELECT form_id, version, definition_hash FROM form_versions WHERE form_id=$1 ORDER BY version', [
+        f.id,
+      ]);
+    const before = await versions();
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
-    const after = await q('SELECT form_id, version, definition_hash FROM form_versions ORDER BY version');
+    const after = await versions();
+    expect(after).toHaveLength(2);
     expect(after).toEqual(before);
-    expect((await q('SELECT latest_version, title FROM forms'))[0]).toMatchObject({
+    expect((await q('SELECT latest_version, title FROM forms WHERE id=$1', [f.id]))[0]).toMatchObject({
       latest_version: 2,
       title: 'Two',
     });

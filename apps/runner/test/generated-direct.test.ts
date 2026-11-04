@@ -33,6 +33,8 @@ const COMMIT = 'ccc882384f960d462ce4b64798c78dd2b53f6025';
 const SHORT = COMMIT.slice(0, 12);
 const OLD = 'a'.repeat(12);
 const here = dirname(fileURLToPath(import.meta.url));
+// the setup script copies a sqlite database with sqlite3 .backup; the tests that build one need the tool
+const hasSqlite = spawnSync('sqlite3', ['--version']).status === 0;
 
 interface World {
   root: string;
@@ -470,16 +472,27 @@ describe('review fixes: the lock, shared data, adopting a folder, restarts', () 
       expect(existsSync(join(w.app, 'releases', 'initial'))).toBe(false);
     }
     expect(restarts(w)).toEqual([]);
-    // marked as shared: it goes ahead (the database through sqlite3 .backup)
-    spawnSync('sqlite3', [join(dir, 'shop.sqlite'), 'create table t(a); insert into t values (1),(2);']);
-    const ok = run(w, script(w, { ...over, shared: ['.env', 'uploads', 'shop.sqlite'] }));
-    expect(ok.code, ok.out).toBe(0);
-    expect(readFileSync(join(w.app, 'shared', 'uploads', 'a.png'), 'utf8')).toBe('x');
-    const n = spawnSync('sqlite3', [join(w.app, 'shared', 'shop.sqlite'), 'select count(*) from t;'], {
-      encoding: 'utf8',
-    });
-    expect(n.stdout.trim()).toBe('2');
   });
+
+  it.skipIf(!hasSqlite)(
+    'M2a: marked as shared, the same folder goes ahead (the database through sqlite3 .backup)',
+    () => {
+      const w = world();
+      const dir = plainWith(w);
+      mkdirSync(join(dir, 'uploads'));
+      writeFileSync(join(dir, 'uploads', 'a.png'), 'x');
+      writeFileSync(join(dir, '.env'), 'A=1\n');
+      const over = { currentLink: dir, adoptFolder: true, shared: ['.env'], database: undefined };
+      spawnSync('sqlite3', [join(dir, 'shop.sqlite'), 'create table t(a); insert into t values (1),(2);']);
+      const ok = run(w, script(w, { ...over, shared: ['.env', 'uploads', 'shop.sqlite'] }));
+      expect(ok.code, ok.out).toBe(0);
+      expect(readFileSync(join(w.app, 'shared', 'uploads', 'a.png'), 'utf8')).toBe('x');
+      const n = spawnSync('sqlite3', [join(w.app, 'shared', 'shop.sqlite'), 'select count(*) from t;'], {
+        encoding: 'utf8',
+      });
+      expect(n.stdout.trim()).toBe('2');
+    },
+  );
 
   it('M2b: shared files are copied at the switch (from what runs then), not when the files are prepared', () => {
     const w = world();
@@ -500,7 +513,7 @@ describe('review fixes: the lock, shared data, adopting a folder, restarts', () 
     expect(lstatSync(join(w.app, 'releases', SHORT, 'late.txt')).isSymbolicLink()).toBe(true);
   });
 
-  it('M2b: a sqlite database is copied with sqlite3 .backup (consistent), and refused when sqlite3 is not installed', () => {
+  it.skipIf(!hasSqlite)('M2b: a sqlite database is copied with sqlite3 .backup (consistent)', () => {
     const w = world();
     const old = running(w);
     spawnSync('sqlite3', [join(old, 'app.db'), 'create table t(a); insert into t values (1),(2),(3);']);
@@ -511,10 +524,13 @@ describe('review fixes: the lock, shared data, adopting a folder, restarts', () 
       encoding: 'utf8',
     });
     expect(n.stdout.trim()).toBe('3');
-    // without sqlite3: refused before anything is switched
+  });
+
+  it('M2b: a sqlite database is refused when sqlite3 is not installed', () => {
+    // the script matches the database by its extension; no sqlite3 is needed to make the file
     const w2 = world();
     const old2 = running(w2);
-    spawnSync('sqlite3', [join(old2, 'app.db'), 'create table t(a); insert into t values (1);']);
+    writeFileSync(join(old2, 'app.db'), 'x');
     const tools = join(w2.root, 'tools');
     mkdirSync(tools);
     for (const f of readdirSync('/usr/bin'))

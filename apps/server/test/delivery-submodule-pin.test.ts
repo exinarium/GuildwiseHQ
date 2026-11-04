@@ -82,6 +82,9 @@ async function mergeIn(repoId: string, commit: string) {
   const card = await d.w.card({ title: `Merge ${commit.slice(0, 4)}` });
   await q('UPDATE cards SET repo_id=$1 WHERE id=$2', [repoId, card.id]);
   await mergeLanded(d, commit, card.id);
+  // the gateway queues the same trigger from the event, asynchronously: let it finish before the
+  // clock moves, or its late upsert pushes due_at past the settle() advance
+  await ctx().notifier.flush();
   expect(await queueMergeTrigger(ctx(), card.id, commit)).toBe(true);
   return card.id as string;
 }

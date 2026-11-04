@@ -241,7 +241,7 @@ describe('held claims on the paths that release nothing', () => {
     return card;
   };
 
-  it('M1: a bulk move skips a claim-holding agent as running_shift and leaves claim and workstation', async () => {
+  it("M1: a bulk move releases a claim-holding agent's claim and moves it", async () => {
     const src = (await pairWorkstation(w.t, w.owner, 'bulk-src')).workstationId;
     await markOnline(w.t, src);
     const a = await hire();
@@ -249,12 +249,18 @@ describe('held claims on the paths that release nothing', () => {
     const card = await holdClaim(a.id, src);
     const r = await owner().post(`/api/workstations/${src}/move-agents`, { targetWorkstationId: second });
     expect(r.status).toBe(200);
-    expect(r.body.skipped).toEqual(
-      expect.arrayContaining([expect.objectContaining({ agentId: a.id, reason: 'running_shift' })]),
+    expect(r.body.moved).toEqual(
+      expect.arrayContaining([expect.objectContaining({ agentId: a.id, releasedClaims: [card.ref] })]),
     );
-    expect((await agentRow(a.id)).workstation_id).toBe(src);
-    expect((await q('SELECT * FROM cards WHERE id=$1', [card.id]))[0]!.claimed_by_agent_id).toBe(a.id);
-    expect(await events(a.id, 'AgentRehomed')).toHaveLength(0);
+    expect(r.body.blocked ?? []).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ agentId: a.id })]),
+    );
+    expect((await agentRow(a.id)).workstation_id).toBe(second);
+    expect((await q('SELECT * FROM cards WHERE id=$1', [card.id]))[0]!.claimed_by_agent_id).toBeNull();
+    expect(await events(a.id, 'AgentRehomed')).toHaveLength(1);
+    expect(
+      await q(`SELECT 1 FROM events WHERE stream_id=$1 AND type='ClaimReleased'`, [`card-${card.id}`]),
+    ).toHaveLength(1);
   });
 
   it('M2: checkAgentMove refuses a held claim by default and passes with releaseHeldClaims', async () => {

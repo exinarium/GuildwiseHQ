@@ -503,6 +503,12 @@ describe('a card shift sees only the vault of its project', () => {
   });
 
   it('a project without a vault of its own, in an organization without a vault, has none', async () => {
+    // leftovers of the previous test: its queued card would be dispatched first (the builder who worked it resumes it)
+    await q(`UPDATE cards SET status='cancelled' WHERE status IN ('queued','claimed')`);
+    await q(`UPDATE shifts SET status='ended' WHERE status <> 'ended'`);
+    await q(
+      `UPDATE cards SET claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL, lease_expires_at=NULL`,
+    );
     await q(`DELETE FROM workstation_vaults WHERE vault_id IN (SELECT id FROM vaults WHERE kind='org')`);
     await q(`DELETE FROM vaults WHERE kind='org'`);
     const card = await w.card({ title: 'No vault card' });
