@@ -143,6 +143,7 @@ describe('check prompts', () => {
       ...b,
       buildEvidence: {
         sha: 'abcdef1',
+        at: '2026-11-04T10:00:00.000Z',
         commands: [],
         checks: [
           ev({ name: 'fmt', command: 'pnpm fmt', status: 'passed' }),

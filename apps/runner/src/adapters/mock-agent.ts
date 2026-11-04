@@ -8,7 +8,6 @@ import { basename, dirname, join } from 'node:path';
 
 type Action =
   | 'ok'
-  | 'checkfail'
   | 'changes'
   | 'fail'
   | 'question'
@@ -114,7 +113,7 @@ function pickAction(brief: Brief, index: number): Action {
   return 'ok';
 }
 
-function buildWork(brief: Brief, action: Action = 'ok'): void {
+function buildWork(brief: Brief): void {
   const round = brief.card.reworkRound + 1;
   mkdirSync('.guildwise-mock', { recursive: true });
   writeFileSync(join('.guildwise-mock', `${brief.card.ref}.txt`), `round ${round}\n${brief.card.title}\n`);
@@ -122,35 +121,8 @@ function buildWork(brief: Brief, action: Action = 'ok'): void {
     join('.guildwise-mock', `${brief.card.ref}.test.txt`),
     `unit-test-like file for ${brief.card.ref}, round ${round}\n`,
   );
-  // `checkfail`: a file a repository check rejects (E2E: the runner refuses the first handoff, the second one passes)
-  if (action === 'checkfail') writeFileSync(join('.guildwise-mock', `${brief.card.ref}.fmt`), 'BAD-FORMAT\n');
   sh('git', ['add', '-A']);
   sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${brief.card.ref}`]);
-}
-
-const MOCK_EVIDENCE = [
-  '--build-command',
-  'mock build',
-  '--build-result',
-  'mock: build ok',
-  '--test-command',
-  'mock unit tests',
-  '--test-result',
-  'mock: 3 passed',
-];
-
-/** `checkfail`: the first handoff is refused by the runner's checks; the mock fixes the file, commits and hands off again. */
-function handoffAfterCheckFailure(brief: Brief): { code: number; out: string; err: string } {
-  const note = `mock build round ${brief.card.reworkRound + 1}`;
-  const first = aom(['handoff', '--note', note, ...MOCK_EVIDENCE]);
-  if (first.code === 0) return first;
-  for (const line of first.err.split('\n'))
-    if (/^(Report rejected|\s+\.guildwise|Fix:)/.test(line))
-      emit({ kind: 'progress', text: line.slice(0, 300) });
-  writeFileSync(join('.guildwise-mock', `${brief.card.ref}.fmt`), 'ok\n');
-  sh('git', ['add', '-A']);
-  sh('git', ['commit', '--no-verify', '-m', `mock: fix the format of ${brief.card.ref}`]);
-  return aom(['handoff', '--note', note, ...MOCK_EVIDENCE]);
 }
 
 async function report(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
@@ -171,12 +143,6 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
     aom(['brief', '--text', `mock Card Brief for ${brief.card.ref}: build what the card says.`]);
     return aom(['plan', '--note', `mock planning note for ${brief.card.ref}`]);
   }
-  if (
-    has('handoff') &&
-    action === 'checkfail' &&
-    outcomes.find((o) => o.id === 'handoff')?.data === 'buildHandoff'
-  )
-    return handoffAfterCheckFailure(brief);
   if (has('handoff') && !failing)
     return aom([
       'handoff',
@@ -2271,7 +2237,7 @@ async function main(): Promise<number> {
       text: `mock suggested a backlog item: ${(asked.code === 0 ? asked.out : asked.err).trim()}`,
     });
   }
-  if (stage === 'build') buildWork(brief, action);
+  if (stage === 'build') buildWork(brief);
   if (action === 'edit_outside_scope') {
     mkdirSync('.guildwise-mock', { recursive: true });
     writeFileSync(join('.guildwise-mock', 'outside-scope.txt'), 'edited outside the role scope\n');

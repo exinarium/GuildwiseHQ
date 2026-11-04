@@ -94,8 +94,8 @@ describe('the checks in the build brief', () => {
     ]);
     await cardInBuild();
     const start = await p.next('Bea');
-    expect(start.brief.checks.suites.map((s: any) => s.name)).toEqual(['lint', 'types']);
-    expect(start.brief.checks.detect).toBe(false);
+    expect(start.brief.checks?.suites.map((s: any) => s.name)).toEqual(['lint', 'types']);
+    expect(start.brief.checks?.detect).toBe(false);
     await p.startShift(r, start);
     await p.report(r, start.shiftId, handoffEv(), leanAttach());
     r.ended(start.shiftId, 'reported');
@@ -200,8 +200,8 @@ describe('a handoff with checks', () => {
     expect(row.build_evidence.checks.map((c: any) => c.status)).toEqual(['passed', 'preexisting']);
     // the pre-reviewer's brief carries them
     const start = await p.next('Pre');
-    expect(start.brief.buildEvidence.checks).toHaveLength(2);
-    expect(start.brief.buildEvidence.checks[1]).toMatchObject({ name: 'types', elsewhereCount: 3 });
+    expect(start.brief.buildEvidence?.checks).toHaveLength(2);
+    expect(start.brief.buildEvidence?.checks?.[1]).toMatchObject({ name: 'types', elsewhereCount: 3 });
     await p.startShift(r, start, SHA1);
     await p.report(r, start.shiftId, verdict('approve'));
     r.ended(start.shiftId, 'reported');
