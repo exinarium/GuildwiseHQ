@@ -27,8 +27,8 @@ import { DescribeAgentDialog } from '../components/agents/DescribeAgent.tsx';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
-import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { MoveAgentDialog } from '../components/agents/MoveAgentDialog.tsx';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import { AllowedProjectsDialog, WorksOn } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
@@ -438,11 +438,7 @@ function AgentCard({
             {a.workstationState === 'unpaired' ? 'workstation unpaired' : 'workstation offline'}
           </Badge>
           {canMove && (
-            <Button
-              size="sm"
-              className="min-h-11 w-full sm:min-h-0 sm:w-auto"
-              onClick={onMoveAll}
-            >
+            <Button size="sm" className="min-h-11 w-full sm:min-h-0 sm:w-auto" onClick={onMoveAll}>
               Move all agents from this workstation
             </Button>
           )}

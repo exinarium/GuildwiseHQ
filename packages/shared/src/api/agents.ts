@@ -187,7 +187,9 @@ export const MoveAllAgentsResponseSchema = z.object({
   /** Moved (dryRun: would move), with the refs of the cards whose claims the move released (would release). */
   moved: z.array(MovedAgentSchema.extend({ releasedClaims: z.array(z.string()) })),
   /** Left where they are: the reason, the single move's code and its message. */
-  blocked: z.array(MovedAgentSchema.extend({ reason: MoveBlockReasonSchema, code: z.string(), message: z.string() })),
+  blocked: z.array(
+    MovedAgentSchema.extend({ reason: MoveBlockReasonSchema, code: z.string(), message: z.string() }),
+  ),
   /** True when at least one agent would run unsandboxed on the target and no acknowledgement was sent. */
   needsUnsandboxedAck: z.boolean(),
 });

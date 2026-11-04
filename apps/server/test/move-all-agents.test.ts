@@ -272,7 +272,9 @@ describe('move all agents from one workstation to another', () => {
               claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
       [card.id, crypto.randomUUID(), a.id, s.id],
     );
-    const prev = await owner().get(`/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`);
+    const prev = await owner().get(
+      `/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`,
+    );
     expect(prev.body.moved.find((x: any) => x.agentId === a.id).releasedClaims).toEqual([card.ref]);
     expect((await agentRow(a.id)).workstation_id).toBe(s.id);
     const r = await moveAll(s.id);
@@ -328,8 +330,7 @@ describe('move all agents from one workstation to another', () => {
     const planLimits = w.t.app.ctx.ext.planLimits;
     const orig = planLimits.assertWithin;
     planLimits.assertWithin = async (_tx: any, _org: any, kind: string) => {
-      if (kind === 'workstations')
-        throw conflict('limit_reached', 'workstation limit reached');
+      if (kind === 'workstations') throw conflict('limit_reached', 'workstation limit reached');
     };
     try {
       const r = await moveAll(s.id, fresh);

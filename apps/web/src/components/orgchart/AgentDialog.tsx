@@ -115,14 +115,9 @@ export function AgentDialog({
           <Row label="Workstation">
             {station ? (
               <>
-                {station.name}{' '}
-                {station.unpaired ? '(removed)' : station.online ? '(online)' : '(offline)'}
+                {station.name} {station.unpaired ? '(removed)' : station.online ? '(online)' : '(offline)'}
                 {canMove && onMoveAll && (station.unpaired || !station.online) && (
-                  <Button
-                    size="sm"
-                    className="mt-2 min-h-11 w-full sm:min-h-0 sm:w-auto"
-                    onClick={onMoveAll}
-                  >
+                  <Button size="sm" className="mt-2 min-h-11 w-full sm:min-h-0 sm:w-auto" onClick={onMoveAll}>
                     Move all agents from this workstation
                   </Button>
                 )}

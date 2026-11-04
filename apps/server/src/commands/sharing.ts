@@ -4,8 +4,8 @@ import {
   type DecisionPolicyRequest,
   isOrgManager,
   type MoveAllAgentsRequest,
-  type MoveBlockReason,
   type MoveAllAgentsResponse,
+  type MoveBlockReason,
   type OrgRole,
   type ProjectInvitationDto,
   type RehomeAgentRequest,
@@ -481,7 +481,7 @@ export async function checkAgentMove(
     req.acknowledgeUnsandboxed,
     { roleKey: a.role_key, isDevops: a.is_devops, permissions: a.permissions, model: req.model },
   );
-  assertTargetRuntime(w, { name: a.name, runtime: req.runtime });
+  assertTargetRuntime(w, { ...a, runtime: req.runtime });
   // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4);
   // the one this agent leaves counts as one less when it was the last agent there.
   const used = await one(
@@ -626,7 +626,7 @@ export async function loadSourceWorkstation(
  * The target must offer the runtime the agent will run: a target that has not reported its runtimes yet (an empty
  * list) is not judged here; the sandbox gate still applies. The single move and the bulk move share this check.
  */
-export function assertTargetRuntime(target: Row, a: { runtime: string }): void {
+export function assertTargetRuntime(target: Row, a: Row): void {
   const targetRuntimes = (target.runtimes ?? []) as Array<{ id: string; available?: boolean }>;
   if (targetRuntimes.length > 0 && !targetRuntimes.some((r) => r.id === a.runtime && r.available !== false))
     throw conflict(
@@ -750,7 +750,10 @@ export async function moveAllAgents(
   const passed: Row[] = [];
   for (const a of agents) {
     try {
-      await checkAgentMove(ctx, ctx.pool, by, a, reqFor(a), { releaseHeldClaims: true, skipLimitCheck: true });
+      await checkAgentMove(ctx, ctx.pool, by, a, reqFor(a), {
+        releaseHeldClaims: true,
+        skipLimitCheck: true,
+      });
       passed.push(a);
     } catch (e) {
       block(a, e);

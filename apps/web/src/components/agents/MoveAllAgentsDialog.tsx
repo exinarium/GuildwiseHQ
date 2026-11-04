@@ -26,7 +26,9 @@ function Names({ title, testId, children }: { title: string; testId: string; chi
   return (
     <div data-testid={testId}>
       <p className="text-sm font-medium">{title}</p>
-      <ul className="mt-1 flex max-h-[50vh] list-disc flex-col gap-1 overflow-auto pl-5 text-sm">{children}</ul>
+      <ul className="mt-1 flex max-h-[50vh] list-disc flex-col gap-1 overflow-auto pl-5 text-sm">
+        {children}
+      </ul>
     </div>
   );
 }

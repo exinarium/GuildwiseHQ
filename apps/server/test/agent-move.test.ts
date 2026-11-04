@@ -49,9 +49,10 @@ const body = (workstationId: string) => ({ workstationId, runtime: 'mock', model
 const agentRow = async (id: string) => (await q('SELECT * FROM agents WHERE id=$1', [id]))[0]!;
 const hire = () => w.hire(`Mover${++n}`, 'builder', 'junior');
 const moved = (id: string) =>
-  q(`SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`, [
-    `agent-${id}`,
-  ]);
+  q(
+    `SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`,
+    [`agent-${id}`],
+  );
 
 describe('move any agent to another workstation', () => {
   it('moves an active agent whose workstation is offline, and keeps its projects', async () => {

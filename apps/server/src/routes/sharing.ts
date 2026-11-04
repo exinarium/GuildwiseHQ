@@ -150,7 +150,10 @@ export function sharingRoutes(ctx: Ctx) {
              AND manager_user_id=$3 AND NOT is_builtin LIMIT 1`,
           [a.orgId, req.params.id, a.session.user.id],
         );
-        if (!own) throw forbidden('only the organization Owner and Admins, or the hiring manager of these agents, can move them');
+        if (!own)
+          throw forbidden(
+            'only the organization Owner and Admins, or the hiring manager of these agents, can move them',
+          );
       }
       return MoveTargetsResponseSchema.parse(
         await listMoveTargets(

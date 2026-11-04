@@ -219,7 +219,9 @@ describe('move all agents from a workstation', () => {
     expect(within(result).getByTestId('move-all-moved')).toHaveTextContent('Dora');
     expect(within(result).getByTestId('move-all-not-moved')).toHaveTextContent('Odd');
     expect(within(result).getByTestId('move-all-not-moved')).toHaveTextContent('Desk has no ghost runtime');
-    expect(within(result).getByRole('button', { name: 'Move the rest to another workstation' })).toBeVisible();
+    expect(
+      within(result).getByRole('button', { name: 'Move the rest to another workstation' }),
+    ).toBeVisible();
   });
 
   it('disables the button when nothing would move', async () => {

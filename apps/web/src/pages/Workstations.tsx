@@ -3,7 +3,6 @@ import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAgentHomes } from '../api/queries/agent-move.ts';
-import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { useMe } from '../api/queries/auth.ts';
 import { useRuns } from '../api/queries/runs.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
@@ -14,6 +13,7 @@ import {
   useWorkstations,
 } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
