@@ -357,12 +357,12 @@ export async function continuePlaceholder(
     if (!run || run.status !== 'waiting') return false;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
     const kind = kindOf(def, run.step_id);
-    if (kind === 'gate') throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
     if (kind === 'webhook_call') throw conflict('call_running', 'This step is a webhook call that is still running.');
-    const wait = await one(tx, `SELECT id FROM journey_waits WHERE instance_id=$1 AND visit=$2 AND status IN ('open','escalated')`, [
+    const wait = await one(tx, `SELECT id, kind FROM journey_waits WHERE instance_id=$1 AND visit=$2 AND status IN ('open','escalated')`, [
       instanceId,
       visit,
     ]);
+    if (wait?.kind === 'gate') throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
     if (wait) {
       await ctx.store.append(
         [

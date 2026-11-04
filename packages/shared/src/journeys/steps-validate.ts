@@ -61,7 +61,12 @@ export function validateJourneyWaitsAndGates(
     if (s.kind === 'wait') {
       const w = s.waitFor;
       if (!w) {
-        err('no_wait_config', `Step "${s.label}" does not say what it waits for yet.`, s.id);
+        // An unconfigured step still works: it waits until someone continues it (as in GWP-66).
+        warnings.push({
+          code: 'no_wait_config',
+          message: `Step "${s.label}" does not say what it waits for: it waits until someone continues it.`,
+          stepId: s.id,
+        });
       } else {
         if (w.kind !== 'date' && !s.duration) err('no_wait_config', `Step "${s.label}" needs a duration.`, s.id);
         if (w.kind === 'form') {
@@ -81,7 +86,14 @@ export function validateJourneyWaitsAndGates(
       if (!leaving.some((h) => h.on === 'done' || h.on === 'any') && leaving.length > 0)
         err('no_done_handoff', `Step "${s.label}" needs a handoff for when the wait ends.`, s.id);
     } else if (s.kind === 'gate') {
-      if (!s.approver) err('no_approver', `Step "${s.label}" needs someone to approve.`, s.id);
+      if (!s.approver) {
+        warnings.push({
+          code: 'no_approver',
+          message: `Step "${s.label}" has no approver: it waits until someone continues it.`,
+          stepId: s.id,
+        });
+        continue;
+      }
       if (!s.question?.trim()) err('no_question', `Step "${s.label}" needs a question for the approver.`, s.id);
       if (s.deadline) checkTimeout(s, s.deadline.onTimeout);
       if (!leaving.some((h) => matchesApprove(h.on)) && leaving.length > 0)

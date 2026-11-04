@@ -490,7 +490,6 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(storageRoutes(ctx));
   await app.register(relayPublicRoutes(ctx));
   await app.register(journeyHookRoutes(ctx));
-  await app.register(journeyHookRoutes(ctx));
   await app.register(approvalRoutes(ctx));
   await app.register(interestRoutes(ctx));
   await app.register(digestRoutes(ctx));

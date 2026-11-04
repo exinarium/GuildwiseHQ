@@ -41,16 +41,17 @@ describe('step schemas', () => {
 
 describe('validation', () => {
   const codes = (d: ReturnType<typeof base>, o = {}) => validateJourney(d, o).errors.map((e) => e.code);
-  it('flags unconfigured wait, gate and call', () => {
+  it('an unconfigured wait or gate is a warning (it waits for Continue); an unconfigured call is an error', () => {
     const d = base(
       [{ kind: 'wait', id: 'a', label: 'A' }, { kind: 'gate', id: 'b', label: 'B' }, { kind: 'webhook_call', id: 'c', label: 'C' }],
       [],
     );
     const c = codes(d);
-    expect(c).toContain('no_wait_config');
-    expect(c).toContain('no_approver');
+    expect(c).not.toContain('no_wait_config');
+    expect(c).not.toContain('no_approver');
     expect(c).toContain('no_url');
     expect(c).toContain('no_workstation');
+    expect(validateJourney(d).warnings.map((x) => x.code)).toEqual(expect.arrayContaining(['no_wait_config', 'no_approver']));
   });
   it('a form wait needs a form and a timeout action; a duration wait refuses one', () => {
     const d = base(
