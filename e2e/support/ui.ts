@@ -26,4 +26,6 @@ export async function saveJourneyInDesigner(page: Page, trigger: () => Promise<v
   );
   await trigger();
   expect((await put).ok()).toBe(true);
+  // the page has taken the save in (dirty cleared): Save is disabled again
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 }

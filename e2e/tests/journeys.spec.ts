@@ -192,6 +192,7 @@ test('designer: build a journey from workflows with a condition and a loop back,
 
   await expect(page.getByText('unsaved changes')).toBeVisible();
   await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
+  await expect(page.getByText('Journey saved')).toBeVisible();
   await expect(page.getByText('Version 2')).toBeVisible();
   const saved = (await (await api.get(`/api/journeys/${journeyId}`)).json()).definition;
 
