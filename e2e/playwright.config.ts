@@ -37,6 +37,8 @@ export default defineConfig({
     { name: 'architect', testMatch: 'architect.spec.ts', dependencies: ['intake'] },
     { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
     { name: 'phases', testMatch: 'phases.spec.ts', dependencies: ['intake'] },
+    // Release prep (docs and videos): its own owner, guest, runner (mock) and two local origins; needs only the shared stack.
+    { name: 'release-docs-prep', testMatch: 'release-docs-prep.spec.ts', dependencies: ['auth'] },
     // Guided run steps and Scan with DevOps (v1a): its own user, runner and project; needs only the shared stack.
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Business mode: its own user and paired mock workstation (no runner process); needs only the shared stack.

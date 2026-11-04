@@ -117,6 +117,7 @@ import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
+import { releaseDocsPrepRoutes } from './routes/release-docs-prep.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
@@ -475,6 +476,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgProviderRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
+  await app.register(releaseDocsPrepRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));

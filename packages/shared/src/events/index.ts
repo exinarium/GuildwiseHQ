@@ -44,6 +44,7 @@ import { qaEvents } from './qa.ts';
 import { questionFlowEvents } from './question-flow.ts';
 import { relayEvents } from './relay.ts';
 import { releaseEvents } from './release.ts';
+import { releaseDocsPrepEvents } from './release-docs-prep.ts';
 import { repoEvents } from './repo.ts';
 import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
@@ -107,6 +108,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...qaEvents,
   ...approvalEvents,
   ...releaseEvents,
+  ...releaseDocsPrepEvents,
   ...questionFlowEvents,
   ...platformEvents,
   ...codeV6Events,

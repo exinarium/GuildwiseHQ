@@ -1498,6 +1498,16 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
 
 A failure comes back as an answer (`ok: false`, the `step` and git's message), never a crash. Runners announce `release-ship:1`.
 
+### `release.docs_prep`
+
+One step of Release prep (docs and videos) in one repository (`apps/runner/src/git/release-docs-prep.ts`), always under `withRepoLock`. The payload carries `runId`, `releaseBranch`, `mainBranch`, `step` (`analyse`, `commit` with `phase` `prepare` or `push`, or a content step) and, after `analyse`, its `summary` and `base`.
+
+- **analyse** fetches the release branch, the main branch and the tags and reads (writes nothing): commits, merges with card keys, and files by area since the newest release tag merged into the branch (`lastReleaseTagAt`), else since the merge base with main. A branch missing on origin answers `state: skipped`. It deletes kept refs of other runs.
+- **content steps** (handlers in `release-docs-prep-steps.ts`) run in a throwaway worktree and commit locally to `refs/guildwise/docs-prep/<run>/work`. A step must produce byte-identical files when its content is already on the branch.
+- **commit / prepare** squashes `work` into one commit on the branch tip (carried over by cherry-pick when the branch moved), as the project identity; no change, no commit. **commit / push** pushes it to `refs/heads/<release branch>` with `pushFastForward` (no force, never main, never a tag) and answers `alreadyPushed` when it is on origin already.
+
+Answers are `{ok, state: passed|failed|skipped, error?, summary?, files, commit?, pushed?}`, never a crash. Runners announce `release-docs-prep:1`.
+
 ### `release.publish`
 
 After the release commit: bring it to the main branch, tag it, create the forge release. It runs under the per-clone lock

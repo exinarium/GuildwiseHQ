@@ -24,6 +24,7 @@ import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
+import { ReleaseDocsPrepPanel } from '../components/ReleaseDocsPrepPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoComponentRulesControl } from '../components/RepoComponentRulesControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
@@ -378,6 +379,11 @@ export function ProjectSettings() {
       {project && repoUi && (
         <div id="commit-as" className="scroll-mt-20">
           <CommitAsPanel projectId={id} canEdit={project.myRole === 'owner' || canConvert} />
+        </div>
+      )}
+      {project && repoUi && (
+        <div id="release-docs-prep" className="scroll-mt-20">
+          <ReleaseDocsPrepPanel projectId={id} />
         </div>
       )}
       {project && repoUi && (q.data.environments ?? []).length > 0 && (

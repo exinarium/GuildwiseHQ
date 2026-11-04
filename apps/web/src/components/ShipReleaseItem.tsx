@@ -8,10 +8,12 @@ import {
   validateReleaseVersion,
 } from '@aom/shared';
 import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router';
+import { ApiError } from '../api/client.ts';
 import { useResolveDeskItem } from '../api/queries/desk.ts';
 import { usePrepareRelease } from '../api/queries/forges.ts';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
-import { Button, ErrorBox, TextArea, TextInput } from './ui.tsx';
+import { Button, Callout, ErrorBox, TextArea, TextInput } from './ui.tsx';
 
 const LEVELS: BumpLevel[] = ['patch', 'minor', 'major'];
 
@@ -66,7 +68,14 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
       )
     : composeReleaseSection(check.ok ? check.version : version.trim() || '?', rel.today, '', noteText);
   const shown = version.trim() === '' ? undefined : check.ok ? undefined : check.message;
-  const serverMsg = resolve.error instanceof Error ? resolve.error.message : undefined;
+  const gateErr =
+    resolve.error instanceof ApiError && resolve.error.code === 'release_docs_prep_required'
+      ? resolve.error
+      : undefined;
+  // Release prep (docs and videos): the server refuses the ship; the same reason is shown here in advance.
+  const gateMessage = rel.docsPrep?.blocked ? rel.docsPrep.message : gateErr?.message;
+  const gateLink = rel.docsPrep?.link ?? `/releases?tab=prep#release-docs-prep-${rel.projectId}`;
+  const serverMsg = resolve.error instanceof Error && !gateErr ? resolve.error.message : undefined;
   const reading = rel.factsState === 'pending';
 
   const approve = () =>
@@ -106,6 +115,14 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
         </p>
       )}
       {rel.commitsTruncated && <p className="text-xs text-subtle">Only the newest 1000 commits were read.</p>}
+      {gateMessage && (
+        <Callout tone="warning" role="alert" data-testid="ship-docs-prep-blocked">
+          {gateMessage}{' '}
+          <Link to={gateLink} className="underline">
+            See release prep
+          </Link>
+        </Callout>
+      )}
 
       <div>
         <TextInput
@@ -216,7 +233,7 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
         <Button
           variant="primary"
           className="min-h-11 sm:min-h-0"
-          disabled={!check.ok || reading}
+          disabled={!check.ok || reading || rel.docsPrep?.blocked === true}
           loading={resolve.isPending}
           onClick={approve}
         >

@@ -1,15 +1,17 @@
 import { useSearchParams } from 'react-router';
 import { useReleaseQueue } from '../api/queries/delivery.ts';
+import { useReleaseDocsPrepOverview } from '../api/queries/releaseDocsPrep.ts';
 import { DeployRuns } from '../components/delivery/DeployRuns.tsx';
 import { RulesPanel } from '../components/delivery/GatesPanel.tsx';
 import { LiveMatrix } from '../components/delivery/LiveMatrix.tsx';
+import { ReleaseDocsPrepTab } from '../components/delivery/ReleaseDocsPrepTab.tsx';
 import { ReleaseQueue } from '../components/delivery/ReleaseQueue.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Callout, PageHeader, Tabs } from '../components/ui.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 
 const PREFIX = 'releases';
-type TabKey = 'waiting' | 'live' | 'history' | 'rules';
+type TabKey = 'waiting' | 'live' | 'history' | 'rules' | 'prep';
 
 /**
  * Releases (docs/design/environments-ux.md section 5.5): what needs a decision or is moving, across projects. Waiting for you
@@ -21,7 +23,10 @@ export function Releases() {
   const [params, setParams] = useSearchParams();
   const queue = useReleaseQueue(manage);
   const waiting = queue.data?.length ?? 0;
-  const tabs: Array<{ id: TabKey; label: string; badge?: React.ReactNode }> = manage
+  // Release prep (docs and videos): the tab exists only when a project uses it, so the page is unchanged otherwise.
+  const prep = useReleaseDocsPrepOverview();
+  const prepTab = (prep.data?.length ?? 0) > 0;
+  const base: Array<{ id: TabKey; label: string; badge?: React.ReactNode }> = manage
     ? [
         {
           id: 'waiting',
@@ -36,6 +41,7 @@ export function Releases() {
         { id: 'live', label: 'What is live' },
         { id: 'history', label: 'History' },
       ];
+  const tabs = prepTab ? [...base, { id: 'prep' as TabKey, label: 'Release prep' }] : base;
   const asked = params.get('tab');
   const value: TabKey = tabs.some((t) => t.id === asked) ? (asked as TabKey) : (tabs[0]?.id as TabKey);
   return (
@@ -61,6 +67,7 @@ export function Releases() {
         {value === 'live' && <LiveMatrix canRelease={manage} />}
         {value === 'history' && <DeployRuns filters />}
         {value === 'rules' && manage && <RulesPanel canEdit={manage} />}
+        {value === 'prep' && <ReleaseDocsPrepTab />}
       </div>
     </div>
   );

@@ -99,6 +99,7 @@ import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
+import { ReleaseDocsPrepPayloadSchema } from '../release/docs-prep-dto.ts';
 import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
 import { RELEASE_TAG_RE } from '../release/tags.ts';
 import {
@@ -1123,6 +1124,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'release.ship',
+  'release.docs_prep',
   'release.publish',
   'repo.bump_submodule',
   'org.folder',
@@ -1233,6 +1235,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
+  'release.docs_prep': ReleaseDocsPrepPayloadSchema,
   'release.publish': ReleasePublishPayloadSchema,
   'repo.bump_submodule': RepoBumpSubmodulePayloadSchema,
   'org.folder': OrgFolderCommandSchema,
