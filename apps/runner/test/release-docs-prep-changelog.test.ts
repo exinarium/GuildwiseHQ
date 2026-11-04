@@ -35,7 +35,7 @@ const UNDATED = EXISTING.replace(
   '## [1.4.0]\n\n### Added\n\n- Pending.\n\n## [1.3.0] - 2026-10-01',
 );
 
-const ENTRIES = [
+const ENTRIES: { heading: 'Added' | 'Fixed'; text: string; sources: string[] }[] = [
   {
     heading: 'Added',
     text: 'Release prep on the Releases page writes the changelog before a release ships.',

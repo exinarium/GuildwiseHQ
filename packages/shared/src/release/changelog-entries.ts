@@ -113,7 +113,7 @@ const FINDING_TEXT: Record<EntryFindingCode, string> = {
 export const describeEntryFinding = (index: number, f: EntryFinding): string =>
   `entry ${index + 1}: ${FINDING_TEXT[f.code]}${f.detail && f.code !== 'deny_list' ? ` '${f.detail}'` : ''}`;
 
-const HeadingSchema = z.enum(CHANGELOG_HEADINGS as unknown as [string, ...string[]]);
+const HeadingSchema = z.enum(['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'] as const);
 
 /** What the changelog writer reports (`aom release-changelog --file`). Every change ends up in exactly one list. */
 export const ChangelogProposalSchema = z.object({
