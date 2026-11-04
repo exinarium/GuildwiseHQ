@@ -41,3 +41,15 @@ Every save creates a new version. Earlier versions stay readable: open the **Ver
 ## Company logo {#company-logo}
 
 In the form settings choose a PNG, JPEG or WebP image of up to 512 KB. It is shown at the top of the form and of the preview. SVG images are not accepted. The logo is your organisation's branding picture, not client data; client answers and uploads never go to Guildwise.
+
+## Share a form {#share}
+
+A saved form has a **Share** tab (Owners and Admins). **Publish** gives the form a public address (`/f/` and a long random id) with a QR code of exactly that address, to download as PNG or SVG. Publishing needs a storage connection for the answers and for every file field. **Unpublish** closes the address: it then says "This form is not available". **Create a new link** replaces the address for good; old addresses and printed QR codes stop working. **Publish changes** moves the address to the newest saved version.
+
+## Personal links {#personal-links}
+
+Under **Personal links** create a link for one client or record: type a reference (use a client number, not a name) and choose 7 to 90 days. The link works once, can be revoked, and carries no personal data. **Submissions** shows each submission's status and times, never the answers: those are in your own storage.
+
+## When your workstation is offline {#offline}
+
+The public form shows an email box and sends nothing but the address. When the workstation has been back for 30 seconds the client gets one email with a secure, single-use link, and your desk gets one notice per case with **Resend link**.
