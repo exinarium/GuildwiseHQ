@@ -5,6 +5,7 @@ import {
   isOrgManager,
   isReleaseDocsPrepStep,
   isResearchStage,
+  missingReleaseDocsPrepRequirements,
   nextReleaseDocsPrepAction,
   RELEASE_DOCS_PREP_CAPABILITY,
   type ReleaseDocsPrepGateInput,
@@ -34,10 +35,13 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
+import { DOCS_PREP_STEP_HOOKS, docsPrepWriter } from './docs-prep-steps.ts';
 import { loadComponentRules } from './rules.ts';
 
 const NAME = 'Release prep (docs and videos)';
 const SWEEP_MS = 12 * 3_600_000;
+/** A step's output larger than this (as JSON) is not stored. */
+const OUTPUT_MAX = 64 * 1024;
 
 // ------------------------------------------------------------------------------------------------------------- roles
 
@@ -190,6 +194,12 @@ export async function startReleaseDocsPrep(
     if (!p) throw notFound('project not found');
     if (!settingsOf(p).enabled)
       throw conflict('release_docs_prep_off', `${NAME} is switched off for this project.`);
+    const missing = missingReleaseDocsPrepRequirements(enabledReleaseDocsPrepSteps(settingsOf(p)))[0];
+    if (missing)
+      throw conflict(
+        'step_requires',
+        `${missing.step.label} needs ${missing.missing.map((m) => m.label).join(' and ')}: tick it in the release prep settings.`,
+      );
     const repos = isResearchStage(p.workflow_key) || p.simulation ? [] : await docsPrepRepos(tx, projectId);
     const branch: string | null = p.working_branch ?? repos[0]?.branch ?? null;
     if (repos.length === 0 || !branch)
@@ -400,6 +410,41 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
       [runId, repoId],
     );
     if (!repo) continue;
+    const hook = action.phase ? undefined : DOCS_PREP_STEP_HOOKS[action.step];
+    const writer = hook?.needsWriter ? await docsPrepWriter(ctx, tx, run, repo) : null;
+    if (hook?.needsWriter && !writer) {
+      // Not dispatched: the step fails here with the reason, and the run ends as failed (Retry or Skip).
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.releaseDocsPrep(runId),
+            event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId, repoId, step: action.step } },
+            actor,
+            scope,
+          },
+          {
+            streamId: streamId.releaseDocsPrep(runId),
+            event: {
+              type: 'ReleaseDocsPrepStepFinished',
+              payload: {
+                runId,
+                repoId,
+                step: action.step,
+                state: 'failed',
+                error: `no agent on the workstation that has ${repo.name} can write the release documentation`,
+                files: [],
+              },
+            },
+            actor,
+            scope,
+          },
+        ],
+        { tx },
+      );
+      deliver.push(...(await advance(ctx, tx, runId)));
+      return deliver;
+    }
+    const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
     const summary = repo.summary ? ReleaseDocsPrepSummarySchema.safeParse(repo.summary) : null;
     const payload: ReleaseDocsPrepPayload = {
       runId,
@@ -417,6 +462,8 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
       ...(repo.base_sha ? { base: { sha: repo.base_sha, tag: repo.base_tag ?? null } } : {}),
       message: `docs(release): prepare the release documentation for ${repo.branch}`,
       commitAs: commitAs ?? null,
+      ...(stepInput ? { stepInput } : {}),
+      ...(writer ? { writer } : {}),
     };
     const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
     await ctx.store.append(
@@ -503,6 +550,7 @@ export async function applyReleaseDocsPrepResult(
               ...(r?.headSha ? { headSha: r.headSha } : {}),
               ...(r?.commit ? { commit: r.commit } : {}),
               ...(phase === 'push' && state === 'passed' && r?.commit ? { pushed: true } : {}),
+              ...stepOutput(ok && parsed.success ? parsed.data.output : undefined),
             },
           },
           actor: run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR,
@@ -532,6 +580,14 @@ export async function applyReleaseDocsPrepResult(
   if (committed && projectId)
     for (const id of repoIds)
       await requestReleaseFacts(ctx, id, 'manual', { ...(userId ? { userId } : {}) }).catch(() => undefined);
+}
+
+/** The step's output for the event, or nothing when there is none or it is too large to keep. */
+export function stepOutput(output: unknown): { output?: unknown } {
+  if (output === undefined || output === null) return {};
+  const json = JSON.stringify(output);
+  if (json === undefined || json.length > OUTPUT_MAX) return {};
+  return { output };
 }
 
 // ------------------------------------------------------------------------------------------------------------- gate
@@ -679,6 +735,7 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
             finishedAt: iso(s.finished_at),
             error: s.error ?? null,
             files: s.files ?? [],
+            output: s.output ?? null,
           })),
       };
     }),

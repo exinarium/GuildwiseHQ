@@ -61,6 +61,7 @@ export const releaseDocsPrepEvents = [
       headSha: z.string().optional(),
       commit: z.string().optional(),
       pushed: z.boolean().optional(),
+      output: z.unknown().optional(),
     }),
   ),
   defineEvent(

@@ -146,7 +146,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'guide', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { ForgeKindSchema } from '../forge/index.ts';
+// Read lazily below: protocol/runner.ts imports this module.
+import { AgentRuntimeSpecSchema } from '../protocol/runner.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
 
@@ -108,6 +110,8 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
           finishedAt: z.string().nullable(),
           error: z.string().nullable(),
           files: z.array(z.string()),
+          /** The step's own output (for 'guide': ReleaseDocsPrepGuideOutputSchema); null when it has none. */
+          output: z.unknown().nullable().default(null),
         }),
       ),
     }),
@@ -156,6 +160,10 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   message: z.string().max(500).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
   signOff: z.boolean().optional(),
+  /** Input of a content step, checked by the step's own schema on the runner. */
+  stepInput: z.record(z.string(), z.unknown()).optional(),
+  /** The agent that writes the step's text (model-backed steps only). */
+  writer: z.lazy(() => AgentRuntimeSpecSchema).optional(),
 });
 
 export type ReleaseDocsPrepPayload = z.infer<typeof ReleaseDocsPrepPayloadSchema>;
@@ -174,6 +182,8 @@ export const ReleaseDocsPrepResultSchema = z.object({
   pushed: z.boolean().optional(),
   alreadyPushed: z.boolean().optional(),
   notices: z.array(z.string().max(500)).default([]),
+  /** The step's own output (JSON, at most 64 KB; the server drops a larger one). */
+  output: z.unknown().optional(),
 });
 export type ReleaseDocsPrepResult = z.infer<typeof ReleaseDocsPrepResultSchema>;
 

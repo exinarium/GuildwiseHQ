@@ -7,4 +7,5 @@ export * from './dto.ts';
 export * from './publish.ts';
 export * from './recommend.ts';
 export * from './tags.ts';
+export * from './user-guide.ts';
 export * from './validate.ts';

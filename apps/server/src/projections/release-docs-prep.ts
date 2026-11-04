@@ -79,9 +79,19 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepStepFinished'>(e).payload;
     await exec(
       tx,
-      `UPDATE release_docs_prep_steps SET state=$5, finished_at=$6, files=$7::text[], error=$8
+      `UPDATE release_docs_prep_steps SET state=$5, finished_at=$6, files=$7::text[], error=$8, output=$9::jsonb
         WHERE run_id=$1 AND repo_id=$2 AND step=$3 AND phase=$4`,
-      [p.runId, p.repoId, p.step, p.phase ?? '', p.state, e.createdAt, p.files, p.error ?? null],
+      [
+        p.runId,
+        p.repoId,
+        p.step,
+        p.phase ?? '',
+        p.state,
+        e.createdAt,
+        p.files,
+        p.error ?? null,
+        p.output === undefined ? null : JSON.stringify(p.output),
+      ],
     );
     await exec(
       tx,

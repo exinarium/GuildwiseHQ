@@ -20,6 +20,8 @@ export interface ReleaseDocsPrepStepDef {
   producesFiles: boolean;
   /** Only `commit`: always runs last, and only when every step before it passed in every repo. */
   last?: true;
+  /** Steps that must be ticked too (a run that ticks this step without them is refused at the start). */
+  requires?: string[];
 }
 
 export const ANALYSE_STEP: ReleaseDocsPrepStepDef = {
@@ -43,8 +45,19 @@ export const COMMIT_STEP: ReleaseDocsPrepStepDef = {
   last: true,
 };
 
+export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
+  id: 'guide',
+  label: 'Update user guide',
+  description:
+    'Updates the user guide sections for the changed features and rebuilds the PDF guide when the text changed. Needs Analyse changes.',
+  order: 30,
+  defaultOn: true,
+  producesFiles: true,
+  requires: ['analyse'],
+};
+
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, COMMIT_STEP];
+const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, GUIDE_STEP, COMMIT_STEP];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {
@@ -68,6 +81,22 @@ export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: fal
 export const enabledReleaseDocsPrepSteps = (
   settings: Pick<ReleaseDocsPrepSettings, 'steps'>,
 ): ReleaseDocsPrepStepDef[] => releaseDocsPrepSteps().filter((s) => settings.steps[s.id] ?? s.defaultOn);
+
+/** The ticked steps whose required steps are not ticked: `[{ step, missing }]`, in run order. */
+export const missingReleaseDocsPrepRequirements = (
+  steps: readonly ReleaseDocsPrepStepDef[],
+): Array<{ step: ReleaseDocsPrepStepDef; missing: ReleaseDocsPrepStepDef[] }> => {
+  const ticked = new Set(steps.map((s) => s.id));
+  const out: Array<{ step: ReleaseDocsPrepStepDef; missing: ReleaseDocsPrepStepDef[] }> = [];
+  for (const s of steps) {
+    const missing = (s.requires ?? [])
+      .filter((id) => !ticked.has(id))
+      .map((id) => releaseDocsPrepStep(id))
+      .filter((d): d is ReleaseDocsPrepStepDef => !!d);
+    if (missing.length > 0) out.push({ step: s, missing });
+  }
+  return out;
+};
 
 export type ReleaseDocsPrepRunStatus = 'running' | 'passed' | 'failed' | 'skipped';
 export type ReleaseDocsPrepStepState = 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
