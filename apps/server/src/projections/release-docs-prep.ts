@@ -8,7 +8,12 @@ type T =
   | 'ReleaseDocsPrepStepStarted'
   | 'ReleaseDocsPrepStepFinished'
   | 'ReleaseDocsPrepFinished'
-  | 'ReleaseDocsPrepSkipped';
+  | 'ReleaseDocsPrepSkipped'
+  | 'ReleaseDocsPrepStepReset'
+  | 'ReleaseDocsPrepTaskQueued'
+  | 'ReleaseDocsPrepTaskDispatched'
+  | 'ReleaseDocsPrepTaskRequeued'
+  | 'ReleaseDocsPrepTaskFinished';
 const ev = <K extends T>(e: { event: unknown }) => e.event as EventOf<K>;
 
 /**
@@ -131,6 +136,77 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         `UPDATE release_docs_prep_repos SET state='passed' WHERE run_id=$1 AND state IN ('pending','running')`,
         [p.runId],
       );
+  },
+  ReleaseDocsPrepStepReset: async (tx, e) => {
+    const p = ev<'ReleaseDocsPrepStepReset'>(e).payload;
+    // The report stays: the author phase of the repair round reads the render errors from it.
+    await exec(
+      tx,
+      `UPDATE release_docs_prep_steps SET state='pending', command_id=NULL, started_at=NULL, finished_at=NULL, error=NULL
+        WHERE run_id=$1 AND repo_id=$2 AND step=$3 AND phase=$4`,
+      [p.runId, p.repoId, p.step, p.phase],
+    );
+    await exec(
+      tx,
+      `UPDATE release_docs_prep_repos SET state='running' WHERE run_id=$1 AND repo_id=$2 AND state='failed'`,
+      [p.runId, p.repoId],
+    );
+  },
+  ReleaseDocsPrepTaskQueued: async (tx, e) => {
+    const p = ev<'ReleaseDocsPrepTaskQueued'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO release_docs_prep_tasks (id, run_id, repo_id, step, phase, position, attempt, task, workstation_id,
+         status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'queued',$10,$10) ON CONFLICT (id) DO NOTHING`,
+      [
+        p.taskId,
+        p.runId,
+        p.repoId,
+        p.step,
+        p.phase,
+        p.position,
+        p.attempt,
+        JSON.stringify(p.task),
+        p.workstationId,
+        e.createdAt,
+      ],
+    );
+  },
+  ReleaseDocsPrepTaskDispatched: async (tx, e) => {
+    const p = ev<'ReleaseDocsPrepTaskDispatched'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow,
+         started_at, release_prep_task_id, account_key)
+       SELECT $1, a.org_id, a.id, $3, NULL, 'release_prep', NULL, 'starting', a.runtime, a.model, false, $4, $5, $6
+         FROM agents a WHERE a.id = $2
+       ON CONFLICT (id) DO NOTHING`,
+      [p.shiftId, p.agentId, p.workstationId, e.createdAt, p.taskId, p.accountKey ?? null],
+    );
+    await exec(
+      tx,
+      `UPDATE release_docs_prep_tasks SET status='running', agent_id=$2, shift_id=$3, updated_at=$4 WHERE id=$1`,
+      [p.taskId, p.agentId, p.shiftId, e.createdAt],
+    );
+  },
+  ReleaseDocsPrepTaskRequeued: async (tx, e) => {
+    const p = ev<'ReleaseDocsPrepTaskRequeued'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_docs_prep_tasks SET status='queued', shift_id=NULL, agent_id=NULL, note=$2, updated_at=$3
+        WHERE id=$1 AND status='running'`,
+      [p.taskId, p.reason, e.createdAt],
+    );
+  },
+  ReleaseDocsPrepTaskFinished: async (tx, e) => {
+    const p = ev<'ReleaseDocsPrepTaskFinished'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE release_docs_prep_tasks SET status=$2, note=$3, commit_sha=$4, files=$5::jsonb, updated_at=$6
+        WHERE id=$1 AND status IN ('queued','running')`,
+      [p.taskId, p.ok ? 'done' : 'failed', p.note, p.commit ?? null, JSON.stringify(p.files), e.createdAt],
+    );
   },
   ReleaseDocsPrepSkipped: async (tx, e) => {
     const p = ev<'ReleaseDocsPrepSkipped'>(e).payload;

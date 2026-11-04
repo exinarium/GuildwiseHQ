@@ -43,6 +43,20 @@ export const ReleasePrepShiftSchema = z.object({
 });
 export type ReleasePrepShift = z.infer<typeof ReleasePrepShiftSchema>;
 
+/** The outcome ids of `aom prep done` and `aom prep fail`. */
+export const PREP_OUTCOME = { done: 'prep_done', failed: 'prep_failed' } as const;
+
+/** The outcomes a release_prep shift's brief lists. */
+export function releasePrepBriefOutcomes() {
+  return [
+    { id: PREP_OUTCOME.done, label: 'The files are written', kind: 'success' as const, data: 'prepDone' },
+    { id: PREP_OUTCOME.failed, label: 'The files could not be written', kind: 'failure' as const, data: 'prepFailed' },
+  ];
+}
+
+/** The longest a release_prep shift may run. */
+export const RELEASE_PREP_MAX_SHIFT_MINUTES = 45;
+
 /** `aom prep done --summary "..."` / `aom prep fail --reason "..."`: the terminal commands of a release_prep shift. */
 export const PrepDoneParamsSchema = z.object({ summary: z.string().trim().min(1).max(4000) });
 export const PrepFailParamsSchema = z.object({ reason: z.string().trim().min(1).max(4000) });

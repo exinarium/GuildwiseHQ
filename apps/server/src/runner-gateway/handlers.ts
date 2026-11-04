@@ -23,6 +23,7 @@ import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
+import { endReleasePrepShift } from '../release/docs-prep-tasks.ts';
 import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
@@ -1221,14 +1222,16 @@ export class RunnerHandlers {
     const { ctx } = this;
     const open = await rows(
       ctx.pool,
-      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='ba_task' AND status <> 'ended' AND started_at <= $2`,
+      `SELECT id, kind FROM shifts WHERE workstation_id=$1 AND kind IN ('ba_task','release_prep') AND status <> 'ended' AND started_at <= $2`,
       [conn.workstationId, helloAt],
     );
     for (const s of open) {
       if (known.has(s.id)) continue;
       await withAppendTx(ctx.pool, async (tx) => {
         const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
-        if (shift) await ctx.store.append(await endBaTaskShift(tx, shift, 'lost'), { tx });
+        if (!shift) return;
+        if (shift.kind === 'release_prep') await endReleasePrepShift(ctx, tx, shift, 'lost');
+        else await ctx.store.append(await endBaTaskShift(tx, shift, 'lost'), { tx });
       });
     }
   }
@@ -1528,6 +1531,9 @@ export class RunnerHandlers {
         return reply(...(await addBacklogSuggestionRpc(ctx, shift, msg.params)));
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
+      // A release prep task shift writes the files it was given and ends with `aom prep done|fail`: nothing else.
+      if (shift.kind === 'release_prep')
+        return reply(false, undefined, `${msg.method} is not available in a release prep task`);
       // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).
       if (shift.kind === 'devops' && DEVOPS_CARD_METHODS.has(msg.method))
         return reply(...(await devopsCardRpc(ctx, shift, msg.method, msg.params)));

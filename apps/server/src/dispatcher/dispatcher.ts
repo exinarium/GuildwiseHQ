@@ -18,6 +18,7 @@ import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountForAgent, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
+import { releasePrepTaskPass } from '../release/docs-prep-tasks.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import {
@@ -373,6 +374,7 @@ export class Dispatcher {
     await this.safely('blocked-questions', () => blockedQuestionPass(this.ctx), undefined);
     counted(await this.safely('question', () => questionPass(this.ctx, cooling, full), []));
     counted(await this.safely('ba-task', () => baTaskPass(this.ctx, cooling, full), []));
+    counted(await this.safely('release-prep-task', () => releasePrepTaskPass(this.ctx, cooling, full), []));
     await this.safely('ceo', () => ceoPass(this.ctx), undefined);
     // Delivery: merge triggers that are due become deploy requests; deploys nobody collected expire (never throws).
     await deliveryPass(this.ctx).catch((err) => this.ctx.log.error({ err }, 'delivery pass failed'));

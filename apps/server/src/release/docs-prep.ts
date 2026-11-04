@@ -38,7 +38,13 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
 import { DOCS_PREP_STEP_HOOKS, docsPrepWriter } from './docs-prep-steps.ts';
-import { PHASE_INPUTS, REPORT_MAX_BYTES, SERVER_PHASES, type ServerPhaseOutcome } from './docs-prep-videos.ts';
+import {
+  PHASE_FAILURE_HOOKS,
+  PHASE_INPUTS,
+  REPORT_MAX_BYTES,
+  SERVER_PHASES,
+  type ServerPhaseOutcome,
+} from './docs-prep-videos.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -388,7 +394,7 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
       const handler = SERVER_PHASES[`${action.step}/${action.phase ?? ''}`];
       for (const repoId of action.repoIds) {
         const out = handler
-          ? await handler(tx, runId, repoId)
+          ? await handler(ctx, tx, s.run, repoId)
           : { state: 'failed' as const, error: `no server phase ${action.step}/${action.phase}` };
         await finishInline(ctx, tx, s.run, repoId, action.step, action.phase ?? '', out);
       }
@@ -412,14 +418,20 @@ async function finishInline(
   const scope = projectScope(run.org_id, run.project_id);
   const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
   const base = { runId: run.id as string, repoId, step, ...(phase ? { phase } : {}) };
+  const started = {
+    streamId: streamId.releaseDocsPrep(run.id),
+    event: { type: 'ReleaseDocsPrepStepStarted' as const, payload: base },
+    actor,
+    scope,
+  };
+  // A phase waiting for its tasks stays running; the last task's end finishes it (docs-prep-tasks.ts).
+  if (out.state === 'running') {
+    await ctx.store.append([started], { tx });
+    return;
+  }
   await ctx.store.append(
     [
-      {
-        streamId: streamId.releaseDocsPrep(run.id),
-        event: { type: 'ReleaseDocsPrepStepStarted', payload: base },
-        actor,
-        scope,
-      },
+      started,
       {
         streamId: streamId.releaseDocsPrep(run.id),
         event: {
@@ -711,6 +723,9 @@ export async function applyReleaseDocsPrepResult(
       ],
       { tx },
     );
+    // A failed phase may get one more round (videos: a newly written script whose render failed) instead of failing.
+    const onFailure = PHASE_FAILURE_HOOKS[`${step}/${phase ?? ''}`];
+    if (state === 'failed' && onFailure) await onFailure(ctx, tx, run, repoId);
     deliver.push(...(await advance(ctx, tx, runId)));
     const after = await one(tx, 'SELECT status FROM release_docs_prep_runs WHERE id=$1', [runId]);
     if (after?.status === 'passed') {
