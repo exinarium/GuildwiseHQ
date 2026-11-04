@@ -62,8 +62,10 @@ export function BottomSheet({
           style={drag ? { transform: `translateY(${drag}px)`, transition: 'none' } : undefined}
           className={cx(
             'fixed z-70 flex flex-col overflow-hidden border border-line bg-surface shadow-lg',
-            'inset-x-0 bottom-0 animate-sheet rounded-t-dialog',
-            size === 'full' ? 'top-[env(safe-area-inset-top)] max-h-none' : 'max-h-[90dvh]',
+            'inset-x-0 bottom-[var(--kbd-gap,0px)] animate-sheet rounded-t-dialog',
+            size === 'full'
+              ? 'top-[calc(var(--vv-top,0px)+env(safe-area-inset-top))] max-h-none'
+              : 'max-h-[calc(var(--vvh,100dvh)*0.9)]',
             'md:inset-x-auto md:top-1/2 md:bottom-auto md:left-1/2 md:max-h-[90dvh] md:w-[min(92vw,36rem)] md:-translate-x-1/2 md:-translate-y-1/2 md:animate-rise md:rounded-dialog',
           )}
         >

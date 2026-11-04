@@ -146,10 +146,16 @@ Collapsed items keep `<span class="sr-only">Board</span>` so `getByRole('link', 
 
 ### 3.3 Mobile (< 768): top bar plus off-canvas drawer
 
-No bottom tab bar: the desk badge and New card live in the top bar so there is one navigation model, and the board needs the vertical space.
+The phone shell is an **app frame**: a `position: fixed` flex column whose `top` and `height` follow the visible viewport (`--vv-top`, `--vvh`, falling back to `100dvh`). Its rows are the top bar, one scrolling content area (`data-testid="app-scroll"`, `overflow-y: auto`) and the bottom tab bar (Desk, Chats, Intake/New, Projects, More). The tab bar is the last child of the frame, not `position: fixed`, so it can never scroll with the content and nothing hides behind it. The document itself does not scroll: `html[data-app-frame]` (set while the frame is mounted) locks `html` and `body`, so public pages are not affected.
+
+- `lib/viewport.ts` is the only place that reads `visualViewport`. It writes `--vvh` (visible height), `--vv-top` (pan offset) and `--kbd-gap` (keyboard height) on `<html>`, sets `html[data-kbd]` while the keyboard is open (a text field has focus and the viewport shrank by more than 150 px; pinch-zoom is ignored) and exports `useKeyboardOpen()`. Do not add another keyboard or viewport hook.
+- Keyboard open: the frame shrinks to the visible area, the tab bar is not rendered and `--app-tabbar-h` is 0. Pages that sit above a conversation carry `kbd-hide` and fold away (except the block that holds the focus), so the conversation fills the content area and its composer ends on the keyboard.
+- `--app-content-h` (published on the scroller) is the height of the content area. Conversation pages use `calc(var(--app-content-h) - 2.5rem)`; never `100dvh - N rem`.
+- `PinnedScreen` (chat pages) is `absolute inset-0` inside `main`. The chat drawer and bottom sheets take `top`/`max-height` from `--vv-top`/`--vvh` and `bottom` from `--kbd-gap`.
+- Sticky bars inside the content area use `bottom: 0`. `position: fixed` elements (FAB, toasts, prompts) use `--app-bottom-inset` (= `--kbd-gap` + tab bar height + home-indicator inset).
 
 ```
-Top bar (56 px + safe-area-inset-top), sticky
+Top bar (56 px + safe-area-inset-top), the first row of the app frame
 +--------------------------------------------+
 | [=]  Board              [+]  [Desk (3)] [o]|
 |      WEB                                   |

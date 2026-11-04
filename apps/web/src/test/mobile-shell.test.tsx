@@ -1,6 +1,6 @@
 import type { MeResponse } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,6 +127,16 @@ describe('the app shell on a desktop', () => {
     expect(screen.queryByTestId('mobile-tabbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('mobile-topbar')).not.toBeInTheDocument();
   });
+
+  it('keeps the document scroller: no app frame and no page lock', async () => {
+    setViewport(false);
+    mount();
+    await screen.findByRole('navigation', { name: 'Main' });
+    expect(screen.queryByTestId('app-frame')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-scroll')).not.toBeInTheDocument();
+    expect(document.documentElement.dataset.appFrame).toBeUndefined();
+    expect(screen.getByRole('main').parentElement).toHaveClass('min-h-dvh');
+  });
 });
 
 describe('the app shell on a phone', () => {
@@ -219,6 +229,96 @@ describe('the app shell on a phone', () => {
     mount('/cards/TOY-3');
     await user.click(await screen.findByTestId('mobile-back'));
     expect(screen.getByTestId('where')).toHaveTextContent('/p/TOY/board');
+  });
+});
+
+describe('the phone app frame', () => {
+  beforeEach(() => setViewport(true));
+  afterEach(() => {
+    Object.defineProperty(window, 'visualViewport', { value: undefined, configurable: true });
+  });
+
+  it('is fixed to the visible viewport and locks the page', async () => {
+    mount();
+    const frame = await screen.findByTestId('app-frame');
+    expect(frame).toHaveClass('fixed', 'flex-col', 'overflow-hidden');
+    expect(frame.className).toContain('h-[var(--vvh,100dvh)]');
+    expect(frame.className).toContain('top-[var(--vv-top,0px)]');
+    expect(document.documentElement.dataset.appFrame).toBe('');
+  });
+
+  it('scrolls only the inner area, with the tab bar after it and not fixed', async () => {
+    mount('/desk');
+    const bar = await screen.findByTestId('mobile-tabbar');
+    const scroll = screen.getByTestId('app-scroll');
+    expect(scroll).toHaveClass('overflow-y-auto', 'overflow-x-hidden', 'overscroll-contain');
+    expect(screen.getByRole('main')).not.toHaveClass('overflow-y-auto');
+    expect(screen.getByTestId('app-frame')).toContainElement(bar);
+    expect(scroll.contains(bar)).toBe(false);
+    expect(bar).toHaveClass('shrink-0', 'relative');
+    expect(bar).not.toHaveClass('fixed');
+    // the tab bar comes after the scrolling area in the frame
+    expect(scroll.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the header does not stick to the page: it is a frame row
+    expect(screen.getByTestId('mobile-topbar')).toHaveClass('shrink-0');
+    expect(screen.getByTestId('mobile-topbar')).not.toHaveClass('sticky');
+  });
+
+  it.each(['/desk', '/projects', '/cards/TOY-3', '/agents'])(
+    'has the same structure on %s, with no padding for the tab bar',
+    async (path) => {
+      mount(path);
+      const bar = await screen.findByTestId('mobile-tabbar');
+      const scroll = screen.getByTestId('app-scroll');
+      expect(scroll.contains(bar)).toBe(false);
+      expect(screen.getByTestId('page').parentElement?.className).not.toContain('app-bottom-inset');
+      expect(bar.className).toContain('pb-[env(safe-area-inset-bottom)]');
+    },
+  );
+
+  it('removes the page lock when the shell goes away', async () => {
+    const { unmount } = mount();
+    await screen.findByTestId('app-frame');
+    unmount();
+    expect(document.documentElement.dataset.appFrame).toBeUndefined();
+  });
+
+  it('hides the tab bar while the keyboard is open and brings it back when it closes', async () => {
+    class VV extends EventTarget {
+      height = 800;
+      offsetTop = 0;
+      scale = 1;
+    }
+    const vv = new VV();
+    Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true });
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    const field = document.createElement('input');
+    field.type = 'text';
+    document.body.append(field);
+    mount('/desk');
+    await screen.findByTestId('mobile-tabbar');
+    act(() => field.focus());
+    vv.height = 480;
+    act(() => {
+      vv.dispatchEvent(new Event('resize'));
+    });
+    await waitFor(() => expect(screen.queryByTestId('mobile-tabbar')).not.toBeInTheDocument());
+    expect(document.documentElement.dataset.kbd).toBe('1');
+    expect(document.documentElement.style.getPropertyValue('--vvh')).toBe('480px');
+    act(() => field.blur());
+    vv.height = 800;
+    act(() => {
+      vv.dispatchEvent(new Event('resize'));
+    });
+    expect(await screen.findByTestId('mobile-tabbar')).toBeInTheDocument();
+    expect(document.documentElement.dataset.kbd).toBeUndefined();
+    expect(document.documentElement.style.getPropertyValue('--kbd-gap')).toBe('0px');
+    field.remove();
+    vi.unstubAllGlobals();
   });
 });
 

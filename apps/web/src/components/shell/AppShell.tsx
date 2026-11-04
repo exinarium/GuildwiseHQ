@@ -17,6 +17,7 @@ import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useOrgTerms } from '../../lib/terms.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
+import { useKeyboardOpen, useViewportSync } from '../../lib/viewport.ts';
 import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
@@ -118,6 +119,10 @@ function Shell({ name, live }: { name: string; live: string }) {
   const navigate = useNavigate();
   const main = useRef<HTMLElement>(null);
   const first = useRef(true);
+  const scroller = useRef<HTMLDivElement>(null);
+  const keyboard = useKeyboardOpen();
+  const savedScroll = useRef<number | null>(null);
+  useViewportSync(!isTabletUp);
 
   const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
   const org = me.data?.activeOrg ?? null;
@@ -159,6 +164,7 @@ function Shell({ name, live }: { name: string; live: string }) {
       first.current = false;
       return;
     }
+    if (scroller.current) scroller.current.scrollTop = 0;
     if (!window.location.hash) {
       window.scrollTo?.(0, 0);
       main.current?.focus({ preventScroll: true });
@@ -167,6 +173,42 @@ function Shell({ name, live }: { name: string; live: string }) {
   useEffect(() => {
     if (isTabletUp) setDrawer(false);
   }, [isTabletUp]);
+  // On a phone the shell is a frame fixed to the visible viewport: the page itself never scrolls (index.css).
+  useEffect(() => {
+    if (isTabletUp) return;
+    const root = document.documentElement;
+    root.dataset.appFrame = '';
+    return () => {
+      delete root.dataset.appFrame;
+    };
+  }, [isTabletUp]);
+  // Publish the height of the scrolling area so conversation pages can fill it (--app-content-h).
+  useEffect(() => {
+    const el = scroller.current;
+    if (isTabletUp || !el) return;
+    const publish = () => el.style.setProperty('--app-content-h', `${el.clientHeight}px`);
+    publish();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isTabletUp]);
+  // Pages above a conversation fold away while typing; put the scroll position back once the keyboard closes.
+  useEffect(() => {
+    const el = scroller.current;
+    if (isTabletUp || !el) return;
+    const onIn = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && el.contains(t) && !document.documentElement.dataset.kbd) savedScroll.current = el.scrollTop;
+    };
+    document.addEventListener('focusin', onIn);
+    return () => document.removeEventListener('focusin', onIn);
+  }, [isTabletUp]);
+  useEffect(() => {
+    if (keyboard || savedScroll.current === null) return;
+    if (scroller.current) scroller.current.scrollTop = savedScroll.current;
+    savedScroll.current = null;
+  }, [keyboard]);
 
   const toggle = () => {
     const next = !pref;
@@ -227,7 +269,12 @@ function Shell({ name, live }: { name: string; live: string }) {
             Skip to content
           </a>
           <div
-            className="min-h-dvh md:grid md:grid-cols-[var(--sidebar-w)_1fr] md:transition-[grid-template-columns] md:duration-200"
+            data-testid={isTabletUp ? undefined : 'app-frame'}
+            className={cx(
+              isTabletUp
+                ? 'min-h-dvh md:grid md:grid-cols-[var(--sidebar-w)_1fr] md:transition-[grid-template-columns] md:duration-200'
+                : 'fixed inset-x-0 top-[var(--vv-top,0px)] flex h-[var(--vvh,100dvh)] flex-col overflow-hidden',
+            )}
             style={{ ['--sidebar-w' as string]: isTabletUp ? (collapsed ? '4rem' : '16rem') : '0px' }}
           >
             {isTabletUp && (
@@ -252,7 +299,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               </aside>
             )}
 
-            <div className="flex min-h-dvh min-w-0 flex-col">
+            <div className={cx('flex min-w-0 flex-col', isTabletUp ? 'min-h-dvh' : 'min-h-0 flex-1')}>
               {isTabletUp ? (
                 <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 backdrop-blur lg:px-8">
                   <div className="flex min-w-0 items-center gap-3">
@@ -307,7 +354,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               ) : (
                 <header
                   data-testid="mobile-topbar"
-                  className="sticky top-0 z-20 flex min-h-14 items-center gap-1 border-b border-line bg-canvas/90 pr-2 pl-[max(0.5rem,env(safe-area-inset-left))] pt-[env(safe-area-inset-top)] backdrop-blur"
+                  className="z-20 flex min-h-14 shrink-0 items-center gap-1 border-b border-line bg-canvas/90 pr-2 pl-[max(0.5rem,env(safe-area-inset-left))] pt-[env(safe-area-inset-top)] backdrop-blur"
                 >
                   {backTo ? (
                     <button
@@ -335,12 +382,48 @@ function Shell({ name, live }: { name: string; live: string }) {
                   </span>
                 </header>
               )}
-              <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
-                {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
-                <div className="px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8">
-                  <Outlet />
-                </div>
+              <main
+                id="main"
+                ref={main}
+                tabIndex={-1}
+                className={cx(
+                  'mx-auto w-full min-w-0 flex-1 outline-none',
+                  !isTabletUp && 'relative flex min-h-0 flex-col',
+                )}
+              >
+                {isTabletUp ? (
+                  <>
+                    {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
+                    <div className="px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8">
+                      <Outlet />
+                    </div>
+                  </>
+                ) : (
+                  <div
+                    ref={scroller}
+                    data-testid="app-scroll"
+                    className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+                  >
+                    {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
+                    <div className="px-4 py-5 sm:px-6 sm:py-6">
+                      <Outlet />
+                    </div>
+                  </div>
+                )}
               </main>
+              {!isTabletUp && (
+                <MobileTabBar
+                  counts={counts}
+                  intake={intake}
+                  chatsOpen={chat}
+                  moreOpen={drawer}
+                  onChats={() => {
+                    setDrawer(false);
+                    setChat(true);
+                  }}
+                  onMore={() => setDrawer(true)}
+                />
+              )}
             </div>
           </div>
 
@@ -381,19 +464,6 @@ function Shell({ name, live }: { name: string; live: string }) {
                 </RadixDialog.Content>
               </RadixDialog.Portal>
             </RadixDialog.Root>
-          )}
-          {!isTabletUp && (
-            <MobileTabBar
-              counts={counts}
-              intake={intake}
-              chatsOpen={chat}
-              moreOpen={drawer}
-              onChats={() => {
-                setDrawer(false);
-                setChat(true);
-              }}
-              onMore={() => setDrawer(true)}
-            />
           )}
           <AgentFacesSync />
           <CommandPalette

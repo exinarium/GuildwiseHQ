@@ -226,6 +226,7 @@ export function BoardroomSession() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col" data-testid="boardroom-session">
       <PageHeader
+        className="kbd-hide"
         title={s.title}
         documentTitle={`Boardroom: ${s.title}`}
         back={{ to: '/boardroom', label: 'All boardrooms' }}
@@ -280,7 +281,7 @@ export function BoardroomSession() {
           </div>
         }
       />
-      <div className="mb-4 flex flex-col gap-3">
+      <div className="kbd-hide mb-4 flex flex-col gap-3">
         <BoardMeters state={s} canManage={canManage && !archived} />
         <DelegationSteps steps={s.delegations} />
         <DelegateGrants ownerKind="session" ownerId={id} />
@@ -306,6 +307,7 @@ export function BoardroomSession() {
       {mobile ? (
         <div className="flex min-h-0 flex-col">
           <Tabs
+            className="kbd-hide"
             label="Boardroom"
             prefix="board"
             value={tab}
@@ -321,7 +323,7 @@ export function BoardroomSession() {
             ]}
           />
           {tab === 'conversation' && (
-            <div className="flex h-[calc(100dvh-30rem)] min-h-[20rem] flex-col">{conversation}</div>
+            <div className="flex h-[calc(var(--app-content-h,100dvh)-2.5rem)] min-h-0 flex-col">{conversation}</div>
           )}
           {tab === 'whiteboard' && board}
           {tab === 'minutes' && minutes}
