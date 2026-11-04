@@ -87,6 +87,8 @@ export interface Services {
   storage: StorageRelay;
   /** What a public form does when the firm's runner is offline (the offline flow replaces the default). */
   publicFormsOffline?: RunnerOfflineHook;
+  /** Runner-offline secure links: told when a runner reconnects (schedules a sweep after the settle delay). */
+  formsOffline?: { onReconnect(workstationId: string): void };
   /** Web Push notifier (only when VAPID is configured). */
   push?: PushService;
 }

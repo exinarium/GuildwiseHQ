@@ -407,6 +407,11 @@ A form published from the forms builder is open to anyone with its address (`htt
 | `AOM_FORMS_MIN_FILL_MS` | `3000` | A page must have been open this long before it can send. |
 | `AOM_FORMS_SESSION_TTL_MIN`, `AOM_FORMS_SUBMISSION_TTL_MIN` | `240`, `120` | How long a page session and an open submission stay valid. |
 | `AOM_FORMS_MAX_FILES`, `AOM_FORMS_MAX_SUBMISSION_BYTES` | `20`, `104857600` | Files and total bytes of one submission. |
+| `AOM_FORMS_OFFLINE_IP_PER_HOUR`, `AOM_FORMS_OFFLINE_IP_BURST` | `3`, `2` | Requests for a secure link (runner offline) per client address and hour, and the burst. |
+| `AOM_FORMS_OFFLINE_FORM_PER_HOUR`, `AOM_FORMS_OFFLINE_MAX_OPEN` | `30`, `500` | Requests per form and hour, and open cases per organization. |
+| `AOM_FORMS_OFFLINE_HOLD_DAYS` | `7` | Days a client's email is held (encrypted) while the runner stays offline, 1 to 30. After that the case closes and the address is deleted. |
+| `AOM_FORMS_OFFLINE_LINK_DAYS` | `7` | Days a secure link lasts, 1 to 30. A form's own setting overrides it. |
+| `AOM_FORMS_OFFLINE_SETTLE_SEC` | `30` | Seconds a runner must stay connected before secure links go out. `0` sends at once. |
 | `AOM_FORMS_IP_PER_MIN`, `AOM_FORMS_IP_BURST` | `120`, `60` | Public form requests per client address. More is `429`. |
 | `AOM_FORMS_IP_SUBMITS_PER_HOUR`, `AOM_FORMS_IP_SUBMIT_BURST` | `10`, `5` | Submissions started per client address. |
 | `AOM_FORMS_FORM_SUBMITS_PER_MIN`, `AOM_FORMS_FORM_SUBMIT_BURST` | `60`, `30` | Submissions started per form, whatever the address. |
@@ -474,3 +479,11 @@ The help videos are served by the `media` container. If it is down, the video UI
 **Deleting everything**
 
 `docker compose -f docker-compose.prod.yml down -v` deletes `pgdata` and `caddy_data`. Only run it when you have a verified backup and mean it.
+
+**Held email addresses (runner offline).** A client who tries a form while the firm's runner is offline leaves an email
+address. The server holds only that address, encrypted (AES-256-GCM with a key derived from `AOM_SECRET_KEY` for this
+purpose, the case id as authenticated data), in the table `form_offline_requests`. It never appears in events, logs or
+desk items, and no answer or file is held. It is deleted when the case closes: the secure link is used, the journey is
+continued, the link or the hold expires, or the desk cancels. Closed rows (references and times only) are pruned after 30
+days. The longest an address can be held is the hold days plus the link days (14 by default). Database backups follow your
+own backup retention. Rotating `AOM_SECRET_KEY` makes held addresses unreadable: those cases close as failed with a desk notice.

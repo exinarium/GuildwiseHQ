@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 import { PublicApiError, publicApi } from './api.ts';
 import { describePublicError } from './messages.ts';
+import { OfflinePanel } from './OfflinePanel.tsx';
 import { solvePow } from './pow.ts';
 import { sha256File } from './sha256.ts';
 
@@ -11,7 +12,11 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'closed'; text: string }
   | { kind: 'form'; dto: PublicFormDto }
-  | { kind: 'later'; text: string };
+  | { kind: 'later'; text: string }
+  /** The firm's runner is offline: only an email address is asked for. */
+  | { kind: 'offline'; dto: PublicFormDto; sent: boolean }
+  /** The secure link was opened while the runner is offline again: nothing to send, the link stays valid. */
+  | { kind: 'secure-offline'; text: string };
 
 interface Submission {
   id: string;
@@ -64,12 +69,25 @@ export function PublicFormPage({
   const link = useRef(linkToken);
   const initial = useRef<Answers | undefined>(undefined);
   const loadedAt = useRef(Date.now());
+  const prefill = useRef<string | undefined>(undefined);
+  const [offlineState, setOfflineState] = useState<'ask' | 'sending'>('ask');
+  const [offlineError, setOfflineError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const dto = await publicApi.load(publicId, link.current);
       pow.current = solvePow(dto.session, dto.powBits);
       loadedAt.current = Date.now();
+      if (dto.availability === 'offline') {
+        if (dto.link?.purpose === 'offline') {
+          const until = new Date(dto.link.expiresAt).toLocaleDateString();
+          setPhase({
+            kind: 'secure-offline',
+            text: `${dto.form.settings.title} can't receive your form right now. Your secure link stays valid until ${until}; please try again later.`,
+          });
+        } else setPhase({ kind: 'offline', dto, sent: false });
+        return null;
+      }
       setPhase({ kind: 'form', dto });
       return dto;
     } catch (e) {
@@ -169,6 +187,77 @@ export function PublicFormPage({
     };
   };
 
+  /** The runner went offline while the person was filling in: keep only an email address to prefill, drop the rest. */
+  const goOffline = async () => {
+    const email = Object.entries(answers.current).find(
+      ([k, v]) =>
+        typeof v === 'string' &&
+        v.includes('@') &&
+        phase.kind === 'form' &&
+        phase.dto.form.fields.some((f) => f.id === k && f.type === 'email'),
+    );
+    prefill.current = typeof email?.[1] === 'string' ? email[1] : undefined;
+    answers.current = {};
+    files.current.clear();
+    sub.current = null;
+    try {
+      sessionStorage.removeItem(storeKey(publicId));
+    } catch {
+      // ignore
+    }
+    const fresh = await publicApi.load(publicId, link.current).catch(() => null);
+    if (!fresh) {
+      setPhase({
+        kind: 'closed',
+        text: describePublicError({ code: 'network', status: 0, retryable: true }).text,
+      });
+      return;
+    }
+    pow.current = solvePow(fresh.session, fresh.powBits);
+    loadedAt.current = Date.now();
+    setPhase({ kind: 'offline', dto: fresh, sent: false });
+  };
+
+  const sendOfflineRequest = async (email: string) => {
+    if (phase.kind !== 'offline') return;
+    const dto = phase.dto;
+    setOfflineState('sending');
+    setOfflineError(null);
+    try {
+      await wait(Math.max(0, loadedAt.current + dto.minFillMs - Date.now()));
+      const nonce = (await pow.current) ?? '0';
+      await publicApi.offlineRequest(publicId, {
+        session: dto.session,
+        nonce,
+        website: honey,
+        email,
+        ...(link.current ? { link: link.current } : {}),
+      });
+      setPhase({ kind: 'offline', dto, sent: true });
+    } catch (e) {
+      const err = e instanceof PublicApiError ? e : new PublicApiError(0, 'network', 'failed', true);
+      if (err.code === 'runner_online') {
+        const fresh = await load();
+        if (fresh) setPhase({ kind: 'form', dto: fresh });
+        return;
+      }
+      // a used or stale session needs a fresh one
+      if (['session_used', 'session_invalid', 'form_changed'].includes(err.code)) {
+        const fresh = await publicApi.load(publicId, link.current).catch(() => null);
+        if (fresh) {
+          pow.current = solvePow(fresh.session, fresh.powBits);
+          loadedAt.current = Date.now();
+          setPhase({ kind: 'offline', dto: fresh, sent: false });
+        }
+      }
+      const d = describePublicError(err);
+      if (d.closed) setPhase({ kind: 'closed', text: d.text });
+      else setOfflineError(d.text);
+    } finally {
+      setOfflineState('ask');
+    }
+  };
+
   const submit = async () => {
     if (phase.kind !== 'form') return;
     let dto = phase.dto;
@@ -212,6 +301,10 @@ export function PublicFormPage({
         return;
       }
       const err = e instanceof PublicApiError ? e : new PublicApiError(0, 'network', 'failed', true);
+      if (err.code === 'runner_offline') {
+        await goOffline();
+        return;
+      }
       if (err.fields.length)
         setServerErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.code as FormFieldErrorCode])));
       const d = describePublicError(err);
@@ -231,7 +324,33 @@ export function PublicFormPage({
         </p>
       </main>
     );
-  if (phase.kind === 'closed' || phase.kind === 'later')
+  if (phase.kind === 'offline')
+    return (
+      <OfflinePanel
+        firm={phase.dto.form.settings.title}
+        logoUrl={phase.dto.logo ?? undefined}
+        initialEmail={prefill.current}
+        state={phase.sent ? 'sent' : offlineState}
+        error={offlineError}
+        onSend={(email) => void sendOfflineRequest(email)}
+        honeypot={
+          <div className="absolute left-[-9999px] h-px w-px overflow-hidden" aria-hidden="true">
+            <label>
+              Website
+              <input
+                type="text"
+                name="website"
+                tabIndex={-1}
+                autoComplete="off"
+                value={honey}
+                onChange={(e) => setHoney(e.target.value)}
+              />
+            </label>
+          </div>
+        }
+      />
+    );
+  if (phase.kind === 'closed' || phase.kind === 'later' || phase.kind === 'secure-offline')
     return (
       <main className="mx-auto max-w-xl p-6" data-testid="public-closed">
         <div className="rounded-card border border-line bg-surface p-6">

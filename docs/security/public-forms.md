@@ -69,3 +69,15 @@ uploader; someone who controls a client's network (TLS assumed); an operator wit
 `AOM_FORMS_IP_PER_MIN` / `AOM_FORMS_IP_BURST` (120 / 60), `AOM_FORMS_IP_SUBMITS_PER_HOUR` / `AOM_FORMS_IP_SUBMIT_BURST`
 (10 / 5), `AOM_FORMS_FORM_SUBMITS_PER_MIN` / `AOM_FORMS_FORM_SUBMIT_BURST` (60 / 30). The per-file size is the smaller of the
 field's limit and `AOM_STORAGE_MAX_FILE_BYTES`. Rotating `AOM_SECRET_KEY` ends every personal link and open page session.
+
+## Runner offline: secure link later (release 1.5.0)
+
+| Id | Threat | Handling |
+|---|---|---|
+| T-off-1 | Inbox bombing through the offline panel | Session, minimum fill time, honeypot and proof of work as for a submission; 3 requests per hour per client address, 30 per hour per form, 500 open cases per organization; one open case per address per form and per personal link; the desk resends at most 3 times. |
+| T-off-2 | Email addresses leaking from the database | Only the address is held, encrypted (AES-256-GCM, purpose key, case id as authenticated data), in an operational table that is not event-sourced. Cleared when the case closes. The dedupe hash is keyed and cleared with it. Never in events, logs (`email` is redacted), desk items or metrics. |
+| T-off-3 | Finding out whether an address already has a case | The same `202` answer for a new case and a duplicate. |
+| T-off-4 | The secure link forwarded or reused | A personal client link of purpose `offline`: signed, expiring, consumed by the first completed submission, revoked when the journey is continued. The token travels in the URL fragment. |
+| T-off-5 | An insider reading held addresses | Show email is for an Owner or Admin only, on request, and writes `FormOfflineEmailViewed` (without the address). The address is not kept in the desk item. |
+
+The email contains the firm name and the link only: no form title, no answer and no client reference.

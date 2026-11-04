@@ -51,7 +51,13 @@ export const journeyWaitProjectors: Record<string, Projector> = {
         p.triggerId ?? null,
       ],
     );
-    await note(tx, p.waitId, e.createdAt, 'started', p.kind === 'gate' ? 'Waiting for a decision' : `Waiting (${p.kind})`);
+    await note(
+      tx,
+      p.waitId,
+      e.createdAt,
+      'started',
+      p.kind === 'gate' ? 'Waiting for a decision' : `Waiting (${p.kind})`,
+    );
   },
 
   JourneyWaitLinkSent: async (tx, e) => {
@@ -61,7 +67,22 @@ export const journeyWaitProjectors: Record<string, Projector> = {
       `UPDATE journey_waits SET link_id=$2, link_expires_at=$3, desk_item_id=COALESCE($4, desk_item_id) WHERE id=$1`,
       [p.waitId, p.linkId, p.expiresAt, p.deskItemId ?? null],
     );
-    await note(tx, p.waitId, e.createdAt, 'link', p.via === 'desk' ? 'Link shown on the desk' : 'Link passed to a webhook step');
+    await note(
+      tx,
+      p.waitId,
+      e.createdAt,
+      'link',
+      p.via === 'desk'
+        ? 'Link shown on the desk'
+        : p.via === 'offline_email'
+          ? 'Secure link emailed (runner back online)'
+          : 'Link passed to a webhook step',
+    );
+  },
+
+  JourneyWaitOfflinePending: async (tx, e) => {
+    const p = ev<'JourneyWaitOfflinePending'>(e).payload;
+    await note(tx, p.waitId, p.attemptedAt, 'offline_pending', 'Documents pending, runner offline');
   },
 
   JourneyWaitTimedOut: async (tx, e) => {
@@ -90,7 +111,9 @@ export const journeyWaitProjectors: Record<string, Projector> = {
         p.nextFireAt,
         p.firedFor,
         p.linkId ?? null,
-        JSON.stringify([{ at: new Date(e.createdAt).toISOString(), type: 'reminded', text: `Reminder ${p.n} of ${p.of}` }]),
+        JSON.stringify([
+          { at: new Date(e.createdAt).toISOString(), type: 'reminded', text: `Reminder ${p.n} of ${p.of}` },
+        ]),
         p.deskItemId ?? null,
       ],
     );
@@ -111,7 +134,10 @@ export const journeyWaitProjectors: Record<string, Projector> = {
           {
             at: new Date(e.createdAt).toISOString(),
             type: 'escalated',
-            text: p.reason === 'date_missing' ? 'The date could not be read: asked on the desk' : 'Timed out: asked on the desk',
+            text:
+              p.reason === 'date_missing'
+                ? 'The date could not be read: asked on the desk'
+                : 'Timed out: asked on the desk',
           },
         ]),
       ],
@@ -127,7 +153,9 @@ export const journeyWaitProjectors: Record<string, Projector> = {
       [
         p.waitId,
         p.deadlineAt,
-        JSON.stringify([{ at: new Date(e.createdAt).toISOString(), type: 'extended', text: 'Deadline extended' }]),
+        JSON.stringify([
+          { at: new Date(e.createdAt).toISOString(), type: 'extended', text: 'Deadline extended' },
+        ]),
       ],
     );
   },
@@ -147,7 +175,11 @@ export const journeyWaitProjectors: Record<string, Projector> = {
         p.submissionId ?? null,
         p.firedFor ?? null,
         JSON.stringify([
-          { at: new Date(e.createdAt).toISOString(), type: 'resolved', text: `Ended: ${p.reason.replace(/_/g, ' ')}` },
+          {
+            at: new Date(e.createdAt).toISOString(),
+            type: 'resolved',
+            text: `Ended: ${p.reason.replace(/_/g, ' ')}`,
+          },
         ]),
       ],
     );
@@ -163,7 +195,9 @@ export const journeyWaitProjectors: Record<string, Projector> = {
       [
         p.waitId,
         e.createdAt,
-        JSON.stringify([{ at: new Date(e.createdAt).toISOString(), type: 'cancelled', text: `Cancelled: ${p.reason}` }]),
+        JSON.stringify([
+          { at: new Date(e.createdAt).toISOString(), type: 'cancelled', text: `Cancelled: ${p.reason}` },
+        ]),
       ],
     );
   },
@@ -257,18 +291,23 @@ export const journeyWaitProjectors: Record<string, Projector> = {
       tx,
       `UPDATE journey_hook_triggers SET name=COALESCE($2,name), scheme=COALESCE($3,scheme),
          mapping=COALESCE($4::jsonb,mapping), on_no_match=COALESCE($5,on_no_match) WHERE id=$1`,
-      [p.triggerId, p.name ?? null, p.scheme ?? null, p.mapping ? JSON.stringify(p.mapping) : null, p.onNoMatch ?? null],
+      [
+        p.triggerId,
+        p.name ?? null,
+        p.scheme ?? null,
+        p.mapping ? JSON.stringify(p.mapping) : null,
+        p.onNoMatch ?? null,
+      ],
     );
   },
 
   JourneyHookTriggerRotated: async (tx, e) => {
     const p = ev<'JourneyHookTriggerRotated'>(e).payload;
-    await exec(tx, `UPDATE journey_hook_triggers SET token_hash=$2, secret_enc=$3, rotated_at=$4 WHERE id=$1`, [
-      p.triggerId,
-      p.tokenHash,
-      p.secretEnc,
-      e.createdAt,
-    ]);
+    await exec(
+      tx,
+      `UPDATE journey_hook_triggers SET token_hash=$2, secret_enc=$3, rotated_at=$4 WHERE id=$1`,
+      [p.triggerId, p.tokenHash, p.secretEnc, e.createdAt],
+    );
   },
 
   JourneyHookTriggerDisabled: async (tx, e) => {

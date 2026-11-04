@@ -80,6 +80,10 @@ export const DESK_SUBKIND = {
   journeyWaitEscalated: 'journey_wait_escalated',
   /** A journey wait has a personal form link to pass on (a task). */
   journeyWaitLink: 'journey_wait_link',
+  /** The firm's runner came back and a client was sent a secure link (one per case, an alert). */
+  formOfflineLink: 'form_offline_link',
+  /** A client's secure link could not be sent (hold ran out, mail failed, key unreadable) or expired unused. */
+  formOfflineHoldExpired: 'form_offline_hold_expired',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
   /** A card waits at an approval step (workflow `human` step with purpose approval). */

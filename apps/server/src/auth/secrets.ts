@@ -92,3 +92,32 @@ export async function signingKey(ctx: Ctx, purpose: string): Promise<Buffer> {
     .update(`sign|${purpose}`)
     .digest();
 }
+
+/**
+ * Encrypts a small value for one purpose (AES-256-GCM, 96-bit IV). The key is derived from the server secret and the
+ * purpose, and `aad` (for example the id of the row) is authenticated, so a ciphertext copied to another row or
+ * another purpose does not open. Format `v1:<iv>:<tag>:<ct>`.
+ */
+export async function encryptFor(ctx: Ctx, purpose: string, aad: string, plain: string): Promise<string> {
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', await purposeKey(ctx, purpose), iv);
+  c.setAAD(Buffer.from(aad, 'utf8'));
+  const enc = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
+  return `v1:${iv.toString('base64url')}:${c.getAuthTag().toString('base64url')}:${enc.toString('base64url')}`;
+}
+
+/** The value `encryptFor` sealed. Throws when the purpose, the `aad` or the server key differ. */
+export async function decryptFor(ctx: Ctx, purpose: string, aad: string, blob: string): Promise<string> {
+  const [v, iv, tag, enc] = blob.split(':');
+  if (v !== 'v1' || !iv || !tag || !enc) throw new Error('unknown secret format');
+  const d = createDecipheriv('aes-256-gcm', await purposeKey(ctx, purpose), Buffer.from(iv, 'base64url'));
+  d.setAAD(Buffer.from(aad, 'utf8'));
+  d.setAuthTag(Buffer.from(tag, 'base64url'));
+  return Buffer.concat([d.update(Buffer.from(enc, 'base64url')), d.final()]).toString('utf8');
+}
+
+async function purposeKey(ctx: Ctx, purpose: string): Promise<Buffer> {
+  return createHmac('sha256', await key(ctx))
+    .update(`enc|${purpose}`)
+    .digest();
+}

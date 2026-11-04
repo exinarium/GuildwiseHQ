@@ -1,7 +1,13 @@
 import type { JourneyDefinition } from '@aom/shared';
 import { useState } from 'react';
 import { errorMessage } from '../../api/client.ts';
-import { type InstanceCall, type InstanceWait, useDecideGate, useInstanceWaits, useWaitAction } from '../../api/queries/journeys.ts';
+import {
+  type InstanceCall,
+  type InstanceWait,
+  useDecideGate,
+  useInstanceWaits,
+  useWaitAction,
+} from '../../api/queries/journeys.ts';
 import { relativeTime } from '../../lib/journeys.ts';
 import { Badge, Button, Select, TextArea, useToast } from '../ui.tsx';
 
@@ -39,15 +45,28 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
   const step = def.steps.find((s) => s.id === w.stepId);
   const open = w.status === 'open' || w.status === 'escalated';
   const fail = (e: unknown) => toast.error(errorMessage(e));
-  const run = (action: 'continue' | 'cancel' | 'resend-link' | 'extend' | 'goto', body?: Record<string, unknown>) =>
-    act.mutate({ waitId: w.id, action, ...(body ? { body } : {}) }, { onError: fail });
+  const run = (
+    action: 'continue' | 'cancel' | 'resend-link' | 'extend' | 'goto',
+    body?: Record<string, unknown>,
+  ) => act.mutate({ waitId: w.id, action, ...(body ? { body } : {}) }, { onError: fail });
   return (
     <li className="rounded-control border border-line bg-sunken/40 p-3" data-testid={`wait-${w.id}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-fg">{step?.label ?? w.stepId}</span>
         <Badge tone={WAIT_TONE[w.status] ?? 'neutral'}>{WAIT_WORDS[w.status] ?? w.status}</Badge>
         <Badge tone="neutral">{w.kind === 'gate' ? 'Approval' : w.kind}</Badge>
+        {open && w.offline && ['held', 'sending', 'sent'].includes(w.offline.status) && (
+          <Badge tone="warning">Documents pending, runner offline</Badge>
+        )}
       </div>
+      {open && w.offline && ['held', 'sending', 'sent'].includes(w.offline.status) && (
+        <p className="mt-1 text-sm text-muted" data-testid="wait-offline">
+          Runner offline since {when(w.offline.since)}
+          {w.offline.linkSentAt
+            ? `. Secure link emailed ${when(w.offline.linkSentAt)}${w.offline.linkExpiresAt ? `, expires ${when(w.offline.linkExpiresAt)}` : ''}.`
+            : '. The link is emailed when the runner is back.'}
+        </p>
+      )}
       <p className="mt-1 text-sm text-muted" data-testid="wait-deadline">
         {w.deadlineAt
           ? open
@@ -60,7 +79,10 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
       </p>
       {w.linkUrl && open && (
         <p className="mt-1 text-sm [overflow-wrap:anywhere]" data-testid="wait-link">
-          Client link: <a className="underline" href={w.linkUrl}>{w.linkUrl}</a>
+          Client link:{' '}
+          <a className="underline" href={w.linkUrl}>
+            {w.linkUrl}
+          </a>
         </p>
       )}
       {w.events.length > 0 && (
@@ -74,18 +96,30 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
       )}
       {canAct && open && w.kind === 'gate' && (
         <div className="mt-3 flex flex-col gap-2">
-          <TextArea label="Note (required to reject)" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+          <TextArea
+            label="Note (required to reject)"
+            rows={2}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
           <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
             <Button
               loading={decide.isPending}
-              onClick={() => decide.mutate({ waitId: w.id, decision: 'approved', ...(note.trim() ? { note: note.trim() } : {}) }, { onError: fail })}
+              onClick={() =>
+                decide.mutate(
+                  { waitId: w.id, decision: 'approved', ...(note.trim() ? { note: note.trim() } : {}) },
+                  { onError: fail },
+                )
+              }
             >
               Approve
             </Button>
             <Button
               variant="danger"
               disabled={!note.trim() || decide.isPending}
-              onClick={() => decide.mutate({ waitId: w.id, decision: 'rejected', note: note.trim() }, { onError: fail })}
+              onClick={() =>
+                decide.mutate({ waitId: w.id, decision: 'rejected', note: note.trim() }, { onError: fail })
+              }
             >
               Reject
             </Button>
@@ -95,7 +129,11 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
       {canAct && open && w.kind !== 'gate' && (
         <div className="mt-3 flex flex-wrap items-end gap-2">
           {w.kind !== 'manual' && (
-            <Button variant="secondary" size="sm" onClick={() => run('extend', { duration: { amount: 1, unit: 'days' } })}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => run('extend', { duration: { amount: 1, unit: 'days' } })}
+            >
               Wait 1 more day
             </Button>
           )}
@@ -117,10 +155,18 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
                 </option>
               ))}
           </Select>
-          <Button variant="secondary" size="sm" disabled={!goto} onClick={() => run('goto', { stepId: goto })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!goto}
+            onClick={() => run('goto', { stepId: goto })}
+          >
             Move
           </Button>
-          <Button variant="danger" size="sm" onClick={() => {
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => {
               if (window.confirm('Cancel the whole journey? This cannot be undone.')) run('cancel');
             }}
           >

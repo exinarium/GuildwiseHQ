@@ -68,6 +68,10 @@ export interface FormLimits {
   ipSubmit: KeyedBuckets;
   /** Submission starts per form. */
   formSubmit: KeyedBuckets;
+  /** Runner-offline requests per client address. */
+  offlineIp: KeyedBuckets;
+  /** Runner-offline requests per form. */
+  offlineForm: KeyedBuckets;
 }
 
 export function createFormLimits(ctx: Ctx, now: () => number = () => ctx.clock.now().getTime()): FormLimits {
@@ -76,5 +80,11 @@ export function createFormLimits(ctx: Ctx, now: () => number = () => ctx.clock.n
     ip: new KeyedBuckets(c.ipPerMin, c.ipBurst, now),
     ipSubmit: new KeyedBuckets(c.ipSubmitsPerHour / 60, c.ipSubmitBurst, now),
     formSubmit: new KeyedBuckets(c.formSubmitsPerMin, c.formSubmitBurst, now),
+    offlineIp: new KeyedBuckets(c.offlineIpPerHour / 60, c.offlineIpBurst, now),
+    offlineForm: new KeyedBuckets(
+      c.offlineFormPerHour / 60,
+      Math.max(1, Math.min(c.offlineFormPerHour, 10)),
+      now,
+    ),
   };
 }

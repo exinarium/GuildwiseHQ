@@ -115,7 +115,12 @@ export function useSaveJourney(id: string) {
   });
 }
 
-export const useJourneyInstances = (f: { projectId?: string; journeyId?: string; status?: string; stepId?: string }) =>
+export const useJourneyInstances = (f: {
+  projectId?: string;
+  journeyId?: string;
+  status?: string;
+  stepId?: string;
+}) =>
   useQuery({
     queryKey: ['journey-instances', f],
     refetchInterval: 10_000,
@@ -183,6 +188,14 @@ export interface InstanceWait {
   resolution: string | null;
   resolvedAt: string | null;
   events: Array<{ at: string; type: string; text: string }>;
+  /** The client tried the form while the firm's runner was offline (a sub-state of this form wait). */
+  offline: null | {
+    requestId: string;
+    status: string;
+    since: string;
+    linkSentAt: string | null;
+    linkExpiresAt: string | null;
+  };
 }
 export interface InstanceCall {
   id: string;
@@ -217,8 +230,11 @@ function useWaitMutation<V>(fn: (v: V) => Promise<unknown>) {
 }
 export const useWaitAction = () =>
   useWaitMutation(
-    (v: { waitId: string; action: 'continue' | 'cancel' | 'resend-link' | 'extend' | 'goto'; body?: Record<string, unknown> }) =>
-      post(`/journey-waits/${v.waitId}/${v.action}`, v.body ?? {}),
+    (v: {
+      waitId: string;
+      action: 'continue' | 'cancel' | 'resend-link' | 'extend' | 'goto';
+      body?: Record<string, unknown>;
+    }) => post(`/journey-waits/${v.waitId}/${v.action}`, v.body ?? {}),
   );
 export const useDecideGate = () =>
   useWaitMutation((v: { waitId: string; decision: 'approved' | 'rejected'; note?: string }) =>
@@ -245,13 +261,17 @@ export const useJourneyHooks = (journeyId: string | undefined) =>
 export function useCreateJourneyHook(journeyId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { name: string; purpose: 'start' | 'resume'; mapping: { externalId: string; displayName?: string } }) =>
-      post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks`, v),
+    mutationFn: (v: {
+      name: string;
+      purpose: 'start' | 'resume';
+      mapping: { externalId: string; displayName?: string };
+    }) => post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks`, v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['journey-hooks', journeyId] }),
   });
 }
 export function useRotateJourneyHook(journeyId: string) {
   return useMutation({
-    mutationFn: (hookId: string) => post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks/${hookId}/rotate`, {}),
+    mutationFn: (hookId: string) =>
+      post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks/${hookId}/rotate`, {}),
   });
 }

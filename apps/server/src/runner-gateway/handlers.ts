@@ -1110,6 +1110,7 @@ export class RunnerHandlers {
     const { ctx } = this;
     if (conn.reconciled) return;
     conn.reconciled = true;
+    ctx.services.formsOffline?.onReconnect(conn.workstationId);
     const helloAt = conn.helloAt ?? ctx.clock.now();
     const known = new Set(conn.helloShiftIds);
     const lost = await rows(

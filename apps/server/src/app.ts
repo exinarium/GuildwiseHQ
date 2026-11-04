@@ -31,6 +31,7 @@ import { registerDecisionHook } from './commands/decisions.ts';
 import { registerDefinitionHook } from './commands/designer.ts';
 import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerDevopsQuestionHook } from './commands/devops-routing.ts';
+import { createFormsOfflineService } from './commands/forms-offline.ts';
 import { registerProviderCapHook } from './commands/org-provider-keys.ts';
 import { registerPackReviewWaitHook } from './commands/pack-review-wait.ts';
 import { recordWriteOutcome } from './commands/storage-connections.ts';
@@ -49,6 +50,7 @@ import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
 import { createExtensionHost, type ServerExtension } from './extension.ts';
 import { registerHrHook } from './hr/hr.ts';
+import { journeyHookRoutes } from './journeys/hooks/route.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { withSimulationPrefix } from './mail/simulation.ts';
 import { registerMediaProxy } from './media-proxy.ts';
@@ -87,6 +89,7 @@ import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
 import { formRoutes } from './routes/forms.ts';
+import { formsOfflineRoutes } from './routes/forms-offline.ts';
 import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
@@ -98,8 +101,8 @@ import { intakeRoutes } from './routes/intakes.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
-import { journeyRoutes } from './routes/journeys.ts';
 import { journeyWaitRoutes } from './routes/journey-waits.ts';
+import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
@@ -147,7 +150,6 @@ import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 import { RelayHub } from './webhook-relay/hub.ts';
-import { journeyHookRoutes } from './journeys/hooks/route.ts';
 import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
@@ -289,6 +291,9 @@ export const LOG_REDACT = {
     '*.answers',
     'body.answers',
     '*.website',
+    // The address a client leaves when the firm's runner is offline: never in a log line.
+    '*.email',
+    'req.body.email',
     '*.x-form-link',
     '*.x-upload-token',
     // The text of an automation's result for the runner channels never reaches a log line.
@@ -504,6 +509,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(playbookRoutes(ctx));
   await app.register(journeyRoutes(ctx));
   await app.register(journeyWaitRoutes(ctx));
+  await app.register(formsOfflineRoutes(ctx));
   await app.register(agentUxRoutes(ctx));
   await app.register(delegationRoutes(ctx));
   await app.register(governanceRoutes(ctx));
@@ -557,6 +563,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.formsOffline = createFormsOfflineService(ctx);
   ctx.services.storage = new StorageRelay({
     config: ctx.config.storage,
     lookup: async (orgId, connectionId) => {
