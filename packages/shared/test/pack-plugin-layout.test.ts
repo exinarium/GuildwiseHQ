@@ -255,5 +255,5 @@ describe('a huge snapshot stays below what the connection accepts', () => {
     // the hashes still cover everything
     expect(snap.contentHash).toBe(packContentHash(index.entries));
     expect(PackSnapshotSchema.safeParse(snap).success).toBe(true);
-  });
+  }, 20_000); // builds a huge snapshot: about 2.5 s alone, 3.6 s on CI, over 5 s on a busy machine
 });
