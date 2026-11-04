@@ -69,8 +69,9 @@ beforeEach(async () => {
   await capable();
 });
 
+/** The guide step is on by default but needs a writer agent: these tests untick it unless they ask for it. */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps });
+  owner('PUT', `${base()}/settings`, { enabled: true, steps: { guide: false, ...steps } });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -296,6 +297,69 @@ describe('prep run', () => {
     const r = await owner('POST', `${base()}/runs`);
     expect(r.status).toBe(409);
     expect(JSON.stringify(r.body)).toContain('release_shipping');
+  });
+});
+
+describe('the Update user guide step', () => {
+  const lastPayload = async () => (await cmds()).at(-1)!.payload;
+
+  it('refuses a run when the guide step is on but Analyse changes is unticked (409 step_requires)', async () => {
+    await enable({ analyse: false, guide: true });
+    const res = await owner('POST', `${base()}/runs`);
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toContain('step_requires');
+  });
+
+  it('with no writer agent on the workstation the guide step fails the run before any commit', async () => {
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    const guide = run.repos[0].steps.find((s: any) => s.step === 'guide');
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toContain('can write the release documentation');
+    expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse']);
+  });
+
+  it('dispatches the guide step with the preferred writer (architect before builder) and then the commit', async () => {
+    await w.hire('Zed', 'builder', 'junior');
+    const architect = await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const payload = await lastPayload();
+    expect(payload.step).toBe('guide');
+    expect(payload.writer).toBeTruthy();
+    expect(JSON.stringify(payload.writer)).toContain(architect.agent?.id ?? architect.id);
+    expect(payload.stepInput.coveredSources).toEqual([]);
+    await answer({ ok: true, state: 'passed', files: [], notices: [], output: { status: 'passed' } });
+    expect((await lastPayload()).step).toBe('commit');
+  });
+
+  it('stores the step output, shows it in the run view, and hands its sources to the next run as coveredSources', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const output = {
+      status: 'passed',
+      changed: [{ section: '4.2 Cards', sources: ['card:TOY-1'] }],
+      covered: [{ source: 'merge:' + 'c'.repeat(40), section: '4.3 Releases' }],
+    };
+    await answer({ ok: true, state: 'passed', files: ['docs/G.md'], notices: [], output });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    const first = await latest();
+    expect(first.status).toBe('passed');
+    const guide = first.repos[0].steps.find((s: any) => s.step === 'guide');
+    expect(guide.output).toMatchObject({ status: 'passed', changed: [{ section: '4.2 Cards' }] });
+
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const next = await lastPayload();
+    expect(next.step).toBe('guide');
+    expect(next.stepInput.coveredSources).toEqual(['card:TOY-1', 'merge:' + 'c'.repeat(40)]);
   });
 });
 
