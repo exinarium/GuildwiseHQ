@@ -119,11 +119,14 @@ test('the Journeys page is in the navigation and the rentals template opens in t
     await expect(
       page.getByRole('textbox', { name: 'Step name' }).and(page.locator(`[value="${label}"]`)),
     ).toHaveCount(1);
-  // wait and gate are placeholders until waits and gates are available; the monthly rent loops
+  // the wait and the gate come with their settings (a form wait and a project-owner approval); the monthly rent loops
+  await expect(page.getByText('Coming with waits and gates')).toHaveCount(0);
   await expect(
-    page.getByTestId('step-wait_documents').getByText('Coming with waits and gates'),
-  ).toBeVisible();
-  await expect(page.getByTestId('step-approval').getByText('Coming with waits and gates')).toBeVisible();
+    page.getByTestId('wait-settings-wait_documents').getByLabel('Wait for', { exact: true }),
+  ).toHaveValue('form');
+  await expect(
+    page.getByTestId('gate-settings-approval').getByLabel('Who decides', { exact: true }),
+  ).toHaveValue('project_owner');
   await expect(page.getByTestId('step-monthly_rent').getByText('Loop', { exact: true })).toBeVisible();
 
   // the template is saved in the project: it is listed and its version reopens with the same steps

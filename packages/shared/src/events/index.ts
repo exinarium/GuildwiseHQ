@@ -29,6 +29,7 @@ import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
 import { interestEvents } from './interest.ts';
 import { journeyEvents } from './journey.ts';
+import { journeyWaitEvents } from './journey-waits.ts';
 import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
@@ -125,6 +126,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...storageEvents,
   ...formEvents,
   ...journeyEvents,
+  ...journeyWaitEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];

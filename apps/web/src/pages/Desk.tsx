@@ -34,6 +34,7 @@ import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
+import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
 import { ShipReleaseItem } from '../components/ShipReleaseItem.tsx';
@@ -430,6 +431,7 @@ function usesAnswerForm(item: DeskItemDto): boolean {
     item.canAnswer &&
     item.subkind !== 'manual_qa' &&
     !isPhaseDeskSubkind(item.subkind) &&
+    !isJourneyDeskSubkind(item.subkind) &&
     item.subkind !== 'unmapped_ticket' &&
     item.subkind !== WORKING_BRANCH_SUBKIND &&
     (item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict'))
@@ -604,6 +606,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         </p>
       ) : item.subkind === 'ceo_permission' ? (
         <PermissionDeskItem item={item} />
+      ) : isJourneyDeskSubkind(item.subkind) ? (
+        <JourneyDeskItem item={item} />
       ) : item.subkind === 'manual_qa' ? (
         <QaDeskItem item={item} />
       ) : item.subkind === 'approval_step' ? (

@@ -18,9 +18,11 @@ import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { HttpError } from '../errors.ts';
+import { conflict, HttpError } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { createCardIn, workflowView } from './cards.ts';
+import { endWaitSideEffects } from '../journeys/wait-effects.ts';
+import { cancelWaitsIn } from '../journeys/cancel-waits.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
@@ -31,7 +33,7 @@ import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts'
  */
 
 type Refusal = EventOf<'JourneyStepRefused'>['payload']['reason'];
-class Refused extends Error {
+export class Refused extends Error {
   constructor(
     readonly reason: Refusal,
     readonly detail: string,
@@ -40,12 +42,13 @@ class Refused extends Error {
   }
 }
 
-const REASON: Record<Refusal, string> = {
+export const REASON: Record<Refusal, string> = {
   not_enabled: 'the workflow is not enabled in the project',
   not_found: 'the workflow or project could not be found',
   not_member: 'the person who started the journey is no longer a member of the project',
   invalid_mapping: 'the card could not be filled in',
   visit_limit: 'the step ran too many times',
+  not_published: 'the form of the step is not published',
 };
 
 export async function loadDefinition(db: Queryable, journeyId: string, version: number): Promise<JourneyDefinition> {
@@ -57,10 +60,10 @@ export async function loadDefinition(db: Queryable, journeyId: string, version: 
   return JourneyDefinitionSchema.parse(r.definition);
 }
 
-const kindOf = (def: JourneyDefinition, stepId: string): 'workflow' | 'wait' | 'gate' =>
+export const kindOf = (def: JourneyDefinition, stepId: string): 'workflow' | 'wait' | 'gate' | 'webhook_call' =>
   getJourneyStep(def, stepId)?.kind ?? 'workflow';
 
-function alert(
+export function alert(
   inst: Row,
   title: string,
   body: string,
@@ -92,7 +95,7 @@ function alert(
   };
 }
 
-const ev = (inst: Row, event: AppendInput['event']): AppendInput => ({
+export const ev = (inst: Row, event: AppendInput['event']): AppendInput => ({
   streamId: streamId.journeyInstance(inst.id),
   event,
   actor: SYSTEM_ACTOR,
@@ -100,7 +103,7 @@ const ev = (inst: Row, event: AppendInput['event']): AppendInput => ({
 });
 
 /** Locks the instance and checks it is still where the caller expects. */
-async function lockInstance(tx: Tx, instanceId: string, visit: number, status: string): Promise<Row | null> {
+export async function lockInstance(tx: Tx, instanceId: string, visit: number, status: string): Promise<Row | null> {
   const inst = await one(tx, 'SELECT * FROM journey_instances WHERE id=$1 FOR UPDATE', [instanceId]);
   if (!inst || inst.status !== status || inst.current_visit !== visit) return null;
   return inst;
@@ -110,7 +113,7 @@ async function lockInstance(tx: Tx, instanceId: string, visit: number, status: s
  * Ends the current run with `result` and moves along the matching handoff: the next step is entered, the instance
  * completes, or it is stuck with a desk alert. The caller holds the instance lock and has checked the run.
  */
-async function advance(
+export async function advanceIn(
   ctx: Ctx,
   tx: Tx,
   inst: Row,
@@ -118,6 +121,7 @@ async function advance(
   run: Row,
   result: 'done' | 'cancelled' | 'skipped',
   card: Row | null,
+  outcome?: 'approved' | 'rejected' | 'failed',
 ): Promise<void> {
   const record = (await one(tx, 'SELECT * FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
   const visits = Number(
@@ -135,12 +139,14 @@ async function advance(
         instanceId: inst.id,
         visit: run.visit,
         result,
+        ...(outcome ? { outcome } : {}),
         ...(card ? { cardId: card.id } : {}),
       },
     }),
   ];
   const move = nextMove(def, run.step_id, {
     result: result === 'cancelled' ? 'cancelled' : 'done',
+    ...(outcome ? { outcome } : {}),
     card: card ? workflowView(card) : null,
     record: { type: record.record_type, status: record.status },
     visits,
@@ -325,13 +331,22 @@ export async function completeStep(ctx: Ctx, instanceId: string, visit: number):
     const card = await one(tx, 'SELECT * FROM cards WHERE id=$1', [run.card_id]);
     if (!card || (card.status !== 'done' && card.status !== 'cancelled')) return false;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
-    await advance(ctx, tx, inst, def, run, card.status === 'done' ? 'done' : 'cancelled', card);
+    await advanceIn(ctx, tx, inst, def, run, card.status === 'done' ? 'done' : 'cancelled', card);
     return true;
   });
 }
 
-/** A placeholder (wait or gate) step is continued by a person. Returns false when it already moved on. */
-export async function continuePlaceholder(ctx: Ctx, instanceId: string, visit: number): Promise<boolean> {
+/**
+ * A wait is continued by a person (the generic Continue, or the desk answer). The open wait row gets
+ * `JourneyWaitResolved{continued}` first, so no wait ends without an event. A gate needs its decision and a webhook call
+ * is running: both answer 409. Returns false when the step already moved on.
+ */
+export async function continuePlaceholder(
+  ctx: Ctx,
+  instanceId: string,
+  visit: number,
+  byUserId?: string,
+): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
     const inst = await lockInstance(tx, instanceId, visit, 'waiting');
     if (!inst) return false;
@@ -341,7 +356,26 @@ export async function continuePlaceholder(ctx: Ctx, instanceId: string, visit: n
     ]);
     if (!run || run.status !== 'waiting') return false;
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
-    await advance(ctx, tx, inst, def, run, 'skipped', null);
+    const kind = kindOf(def, run.step_id);
+    if (kind === 'webhook_call') throw conflict('call_running', 'This step is a webhook call that is still running.');
+    const wait = await one(tx, `SELECT id, kind FROM journey_waits WHERE instance_id=$1 AND visit=$2 AND status IN ('open','escalated')`, [
+      instanceId,
+      visit,
+    ]);
+    if (wait?.kind === 'gate') throw conflict('gate_needs_decision', 'This step is an approval gate: approve or reject it.');
+    if (wait) {
+      await ctx.store.append(
+        [
+          ev(inst, {
+            type: 'JourneyWaitResolved',
+            payload: { waitId: wait.id, reason: 'continued', ...(byUserId ? { by: byUserId } : {}) },
+          }),
+        ],
+        { tx },
+      );
+      await endWaitSideEffects(ctx, tx, inst, wait.id);
+    }
+    await advanceIn(ctx, tx, inst, def, run, 'skipped', null);
     return true;
   });
 }
@@ -421,26 +455,39 @@ export async function sweepJourneys(ctx: Ctx): Promise<number> {
 export async function cancelInstance(ctx: Ctx, instanceId: string, byUserId: string): Promise<boolean> {
   return withAppendTx(ctx.pool, async (tx) => {
     const inst = await one(tx, 'SELECT * FROM journey_instances WHERE id=$1 FOR UPDATE', [instanceId]);
-    if (!inst || inst.status === 'completed' || inst.status === 'cancelled') return false;
-    const events: AppendInput[] = [
-      {
-        streamId: streamId.journeyInstance(instanceId),
-        event: { type: 'JourneyInstanceCancelled', payload: { instanceId, by: byUserId } },
-        actor: userActor(byUserId),
-        scope: projectScope(inst.org_id, inst.project_id),
-      },
-    ];
-    const open = await one(
-      tx,
-      `SELECT c.* FROM journey_step_runs r JOIN cards c ON c.id=r.card_id
-        WHERE r.instance_id=$1 AND r.status='open' AND c.status NOT IN ('done','cancelled')`,
-      [instanceId],
-    );
-    if (open)
-      events.push(
-        cardMessage(open, { kind: 'system' }, 'system', 'The journey this card belongs to was cancelled. The card itself is unchanged.'),
-      );
-    await ctx.store.append(events, { tx });
-    return true;
+    if (!inst) return false;
+    return cancelInstanceIn(tx, ctx, inst, byUserId, 'user');
   });
+}
+
+/** The cancel itself, inside the caller's transaction with the instance row locked. `by` is null for timeouts. */
+export async function cancelInstanceIn(
+  tx: Tx,
+  ctx: Ctx,
+  inst: Row,
+  by: string | null,
+  reason: 'user' | 'wait_timeout' | 'gate_timeout' | 'escalation',
+): Promise<boolean> {
+  if (inst.status === 'completed' || inst.status === 'cancelled') return false;
+  await cancelWaitsIn(tx, ctx, inst, reason);
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.journeyInstance(inst.id),
+      event: { type: 'JourneyInstanceCancelled', payload: { instanceId: inst.id, ...(by ? { by } : {}), reason } },
+      actor: by ? userActor(by) : SYSTEM_ACTOR,
+      scope: projectScope(inst.org_id, inst.project_id),
+    },
+  ];
+  const open = await one(
+    tx,
+    `SELECT c.* FROM journey_step_runs r JOIN cards c ON c.id=r.card_id
+      WHERE r.instance_id=$1 AND r.status='open' AND c.status NOT IN ('done','cancelled')`,
+    [inst.id],
+  );
+  if (open)
+    events.push(
+      cardMessage(open, { kind: 'system' }, 'system', 'The journey this card belongs to was cancelled. The card itself is unchanged.'),
+    );
+  await ctx.store.append(events, { tx });
+  return true;
 }

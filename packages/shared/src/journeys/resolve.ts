@@ -8,6 +8,8 @@ export type JourneyRecordStatus = 'active' | 'closed';
 
 export interface HandoffContext {
   result: 'done' | 'cancelled';
+  /** Set by gate (approved/rejected) and webhook call (failed) steps. */
+  outcome?: 'approved' | 'rejected' | 'failed' | undefined;
   /** The ended card of a workflow step; null for a placeholder. */
   card: WorkflowCardView | null;
   record: { type: JourneyRecordType; status: JourneyRecordStatus };
@@ -62,7 +64,7 @@ export function resolveHandoff(
 ): JourneyHandoff | null {
   for (const h of def.handoffs) {
     if (h.from !== stepId) continue;
-    if (h.on !== 'any' && h.on !== ctx.result) continue;
+    if (h.on !== 'any' && h.on !== ctx.outcome && h.on !== ctx.result) continue;
     if (h.condition && !conditionHolds(h.condition, ctx)) continue;
     return h;
   }

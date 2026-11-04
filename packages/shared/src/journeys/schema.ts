@@ -4,8 +4,17 @@ export const RECORD_TYPES = ['client', 'matter', 'deal'] as const;
 export const JourneyRecordTypeSchema = z.enum(RECORD_TYPES);
 export type JourneyRecordType = z.infer<typeof JourneyRecordTypeSchema>;
 
-/** `end` is reserved: a handoff to it completes the instance. */
-export const StepIdSchema = z.string().regex(/^[a-z][a-z0-9_]{0,59}$/);
+import { Position, StepIdSchema } from './step-base.ts';
+import {
+  JourneyGateStepSchema,
+  JourneyWaitStepSchema,
+  JourneyWebhookCallStepSchema,
+  type JourneyGateStep,
+  type JourneyWaitStep,
+  type JourneyWebhookCallStep,
+} from './steps-wait.ts';
+
+export { Position, StepIdSchema };
 
 export const JourneyConditionSchema = z.object({
   /** `card`: a field of the card the step just ended with (column first, then card.fields). `record`: type | status | visits. */
@@ -16,7 +25,6 @@ export const JourneyConditionSchema = z.object({
 });
 export type JourneyCondition = z.infer<typeof JourneyConditionSchema>;
 
-const Position = z.object({ x: z.number(), y: z.number() });
 
 export const WorkflowStepSchema = z.object({
   kind: z.literal('workflow'),
@@ -35,30 +43,18 @@ export const WorkflowStepSchema = z.object({
 });
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
 
-export const PlaceholderStepSchema = z.object({
-  kind: z.enum(['wait', 'gate']),
-  id: StepIdSchema,
-  label: z.string().min(1).max(120),
-  position: Position.optional(),
-});
-export type PlaceholderStep = z.infer<typeof PlaceholderStepSchema>;
-
 export const JourneyStepSchema = z.discriminatedUnion('kind', [
   WorkflowStepSchema,
-  z.object({
-    kind: z.enum(['wait', 'gate']),
-    id: StepIdSchema,
-    label: z.string().min(1).max(120),
-    position: Position.optional(),
-  }),
+  JourneyWaitStepSchema,
+  JourneyGateStepSchema,
+  JourneyWebhookCallStepSchema,
 ]);
-export type JourneyStep = z.infer<typeof JourneyStepSchema>;
-
+export type JourneyStep = WorkflowStep | JourneyWaitStep | JourneyGateStep | JourneyWebhookCallStep;
 export const JourneyHandoffSchema = z.object({
   id: StepIdSchema,
   from: StepIdSchema,
   /** The result of the from-step: its card finished (`done`) or was cancelled. Placeholders end with `done`. */
-  on: z.enum(['done', 'cancelled', 'any']).default('done'),
+  on: z.enum(['done', 'cancelled', 'any', 'approved', 'rejected', 'failed']).default('done'),
   /** A step id (may equal `from` or an earlier step: a loop) or `end` (the instance completes). */
   to: z.union([StepIdSchema, z.literal('end')]),
   condition: JourneyConditionSchema.optional(),

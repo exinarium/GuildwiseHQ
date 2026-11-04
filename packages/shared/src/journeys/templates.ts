@@ -7,7 +7,7 @@ export interface JourneyTemplate {
   definition: JourneyDefinition;
 }
 
-type Spec = [id: string, label: string, kind: 'workflow' | 'wait' | 'gate', workflowKey?: string];
+type Spec = [id: string, label: string, kind: 'workflow' | 'wait' | 'gate', workflowKey?: string, config?: Record<string, unknown>];
 
 function build(
   name: string,
@@ -16,10 +16,10 @@ function build(
   specs: Spec[],
   extra: Array<Omit<JourneyHandoff, 'id'>>,
 ): JourneyDefinition {
-  const steps: JourneyStep[] = specs.map(([id, label, kind, workflowKey]) =>
+  const steps: JourneyStep[] = specs.map(([id, label, kind, workflowKey, config]) =>
     kind === 'workflow'
       ? { kind, id, label, workflowKey: workflowKey ?? null, fieldsIn: [] }
-      : { kind, id, label },
+      : ({ kind, id, label, ...(config ?? {}) } as JourneyStep),
   );
   const handoffs: JourneyHandoff[] = [];
   const add = (h: Omit<JourneyHandoff, 'id'>): void => {
@@ -50,7 +50,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
     id: RENTALS_TEMPLATE_ID,
     name: 'Rentals: lead to monthly rent',
     description:
-      'A tenant from first enquiry to monthly rent. The wait and the approval gate are placeholders until waits and gates are available.',
+      'A tenant from first enquiry to monthly rent, with a wait for forms and documents and an approval gate. Pick the form for the wait.',
     definition: build(
       'Rentals',
       'Lead, viewing, application, documents, screening, approval, lease, invoice, move-in and monthly rent.',
@@ -59,9 +59,19 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         ['lead', 'Lead', 'workflow', 'business-enquiry'],
         ['viewing', 'Viewing', 'workflow', 'business-follow-up'],
         ['application', 'Application', 'workflow', 'business-document-request'],
-        ['wait_documents', 'Wait for forms and documents', 'wait'],
+        [
+          'wait_documents',
+          'Wait for forms and documents',
+          'wait',
+          undefined,
+          {
+            waitFor: { kind: 'form', formId: null, purpose: 'upload', send: { via: 'desk' } },
+            duration: { amount: 5, unit: 'days' },
+            onTimeout: { action: 'remind', maxReminders: 2, afterLast: 'escalate' },
+          },
+        ],
         ['screening', 'Screening', 'workflow', 'business-report'],
-        ['approval', 'Approval', 'gate'],
+        ['approval', 'Approval', 'gate', undefined, { approver: { kind: 'project_owner' }, question: 'Approve this application?' }],
         ['lease_signed', 'Lease signed', 'workflow', 'business-document-request'],
         ['deposit_invoice', 'Deposit and first-rent invoice', 'workflow', 'business-quote'],
         ['move_in', 'Move-in', 'workflow', 'business-follow-up'],
@@ -70,6 +80,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
       [
         { from: 'lead', on: 'cancelled', to: 'end', label: 'Lead lost' },
         { from: 'screening', on: 'cancelled', to: 'end', label: 'Application declined' },
+        { from: 'approval', on: 'rejected', to: 'end', label: 'Application declined' },
         { from: 'monthly_rent', on: 'cancelled', to: 'end', label: 'Lease ended' },
         { from: 'monthly_rent', on: 'done', to: 'monthly_rent', label: 'Next month' },
       ],

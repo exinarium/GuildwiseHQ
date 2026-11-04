@@ -6,6 +6,7 @@ import { ApiError, errorMessage } from '../api/client.ts';
 import { useJourney, useSaveJourney, useStartJourneyInstance } from '../api/queries/journeys.ts';
 import { useSlashCommands } from '../api/queries/playbooks.ts';
 import { useProjectWorkflows } from '../api/queries/project-workflows.ts';
+import { HookTriggerPanel } from '../components/journeys/HookTriggerPanel.tsx';
 import { StartInstanceDialog } from '../components/journeys/StartInstanceDialog.tsx';
 import { StepEditor } from '../components/journeys/StepEditor.tsx';
 import {
@@ -164,8 +165,12 @@ export function JourneyDesigner() {
           <Button variant="secondary" onClick={() => edit(addStep(def, 'gate', 'Approval'))}>
             Add a gate
           </Button>
+          <Button variant="secondary" onClick={() => edit(addStep(def, 'webhook_call', 'Call a webhook'))}>
+            Add a webhook call
+          </Button>
         </div>
       )}
+      {id && <HookTriggerPanel journeyId={id} canEdit={canEdit} />}
       <StartInstanceDialog
         open={starting}
         onOpenChange={setStarting}

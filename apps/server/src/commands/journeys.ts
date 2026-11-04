@@ -15,7 +15,7 @@ import { loadVisibleProject, visibleProjectIds } from '../authz/scope.ts';
 import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { runPlaybookSession } from '../sessions/playbooks.ts';
@@ -30,7 +30,15 @@ import {
 
 async function validationFor(db: Queryable, project: Row, def: JourneyDefinition) {
   const enabled = (await enabledWorkflows(db, project)).map((e) => e.workflowKey);
-  return validateJourney(def, { enabledWorkflowKeys: new Set(enabled) });
+  const forms = await rows(
+    db,
+    `SELECT form_id FROM form_publications WHERE org_id=$1 AND status='published'`,
+    [project.org_id],
+  );
+  return validateJourney(def, {
+    enabledWorkflowKeys: new Set(enabled),
+    publishedFormIds: new Set(forms.map((f) => f.form_id as string)),
+  });
 }
 
 function assertAuthor(project: Row): void {
@@ -189,71 +197,100 @@ export async function startInstance(ctx: Ctx, who: Who, body: StartInstanceBody)
     const { journey, project } = await loadJourney(tx, who.userId, body.journeyId);
     if (journey.status !== 'active') throw conflict('journey_archived', 'the journey is archived');
     const def = await loadDefinition(tx, journey.id, journey.current_version);
-    const v = await validationFor(tx, project, def);
-    if (v.errors.length) throw badRequest('journey_invalid', 'fix the journey before starting it', v.errors);
-    const events: AppendInput[] = [];
-    const scope = projectScope(project.org_id, project.id);
-    let recordId: string;
-    if ('recordId' in body.record) {
-      const rec = await one(tx, 'SELECT * FROM journey_records WHERE id=$1 FOR UPDATE', [body.record.recordId]);
-      if (!rec || rec.project_id !== project.id) throw notFound('record not found');
-      if (rec.record_type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
-      if (rec.status !== 'active') throw conflict('record_closed', 'the record is closed');
-      if (rec.current_instance_id) throw conflict('record_busy', 'a journey is already running on this record');
-      recordId = rec.id;
-    } else {
-      if (body.record.type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
-      recordId = randomUUID();
-      events.push({
-        streamId: streamId.journeyRecord(recordId),
-        event: {
-          type: 'JourneyRecordCreated',
-          payload: {
-            recordId,
-            orgId: project.org_id,
-            projectId: project.id,
-            recordType: body.record.type,
-            displayName: body.record.displayName,
-            ...(body.record.externalId ? { externalId: body.record.externalId } : {}),
-          },
-        },
-        actor: userActor(who.userId),
-        scope,
-      });
-    }
-    const instanceId = randomUUID();
-    const first = getJourneyStep(def, def.firstStepId);
-    if (!first) throw badRequest('journey_invalid', 'the first step does not exist');
-    const stream = streamId.journeyInstance(instanceId);
-    events.push(
-      {
-        streamId: stream,
-        event: {
-          type: 'JourneyInstanceStarted',
-          payload: {
-            instanceId,
-            journeyId: journey.id,
-            version: journey.current_version,
-            recordId,
-            orgId: project.org_id,
-            projectId: project.id,
-            firstStepId: def.firstStepId,
-            startedBy: who.userId,
-          },
-        },
-        actor: userActor(who.userId),
-        scope,
-      },
-      {
-        streamId: stream,
-        event: { type: 'JourneyStepEntered', payload: { instanceId, visit: 1, stepId: first.id, kind: first.kind } },
-        actor: userActor(who.userId),
-        scope,
-      },
-    );
-    await ctx.store.append(events, { tx });
-    return { id: instanceId, recordId };
+    return startInstanceIn(tx, ctx, {
+      project,
+      journey,
+      def,
+      record: 'recordId' in body.record ? { recordId: body.record.recordId } : { create: body.record },
+      startedBy: who.userId,
+      actor: userActor(who.userId),
+    });
   });
+}
+
+/** Starts an instance inside the caller's append transaction (a user, or an inbound hook in the trigger creator's name). */
+export async function startInstanceIn(
+  tx: Tx,
+  ctx: Ctx,
+  a: {
+    project: Row;
+    journey: Row;
+    def: JourneyDefinition;
+    record: { recordId: string } | { create: { type: string; displayName: string; externalId?: string | undefined } };
+    startedBy: string;
+    actor: AppendInput['actor'];
+    /** Events appended after the instance's own (the hook's `JourneyStartedByHook`). */
+    after?: (ids: { instanceId: string; recordId: string; matched: boolean }) => AppendInput[];
+  },
+): Promise<{ id: string; recordId: string }> {
+  const { journey, project, def } = a;
+  const v = await validationFor(tx, project, def);
+  if (v.errors.length) throw badRequest('journey_invalid', 'fix the journey before starting it', v.errors);
+  const events: AppendInput[] = [];
+  const scope = projectScope(project.org_id, project.id);
+  let recordId: string;
+  const matched = 'recordId' in a.record;
+  if ('recordId' in a.record) {
+    const rec = await one(tx, 'SELECT * FROM journey_records WHERE id=$1 FOR UPDATE', [a.record.recordId]);
+    if (!rec || rec.project_id !== project.id) throw notFound('record not found');
+    if (rec.record_type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
+    if (rec.status !== 'active') throw conflict('record_closed', 'the record is closed');
+    if (rec.current_instance_id) throw conflict('record_busy', 'a journey is already running on this record');
+    recordId = rec.id;
+  } else {
+    const c = a.record.create;
+    if (c.type !== def.recordType) throw badRequest('record_type_mismatch', `this journey runs on a ${def.recordType}`);
+    recordId = randomUUID();
+    events.push({
+      streamId: streamId.journeyRecord(recordId),
+      event: {
+        type: 'JourneyRecordCreated',
+        payload: {
+          recordId,
+          orgId: project.org_id,
+          projectId: project.id,
+          recordType: c.type as never,
+          displayName: c.displayName,
+          ...(c.externalId ? { externalId: c.externalId } : {}),
+        },
+      },
+      actor: a.actor,
+      scope,
+    });
+  }
+  const instanceId = randomUUID();
+  const first = getJourneyStep(def, def.firstStepId);
+  if (!first) throw badRequest('journey_invalid', 'the first step does not exist');
+  const stream = streamId.journeyInstance(instanceId);
+  events.push(
+    {
+      streamId: stream,
+      event: {
+        type: 'JourneyInstanceStarted',
+        payload: {
+          instanceId,
+          journeyId: journey.id,
+          version: journey.current_version,
+          recordId,
+          orgId: project.org_id,
+          projectId: project.id,
+          firstStepId: def.firstStepId,
+          startedBy: a.startedBy,
+        },
+      },
+      actor: a.actor,
+      scope,
+    },
+    {
+      streamId: stream,
+      event: { type: 'JourneyStepEntered', payload: { instanceId, visit: 1, stepId: first.id, kind: first.kind } },
+      actor: a.actor,
+      scope,
+    },
+    ...(a.after ? a.after({ instanceId, recordId, matched }) : []),
+  );
+  await ctx.store.append(events, { tx });
+  return { id: instanceId, recordId };
 }
 
 export interface InstanceFilters {

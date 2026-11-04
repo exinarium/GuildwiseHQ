@@ -74,6 +74,12 @@ export const DESK_SUBKIND = {
   subworkflowRefused: 'subworkflow_refused',
   /** A journey step could not start or no handoff matched; the instance is stuck until the manager looks (an alert). */
   journeyStepRefused: 'journey_step_refused',
+  /** A journey gate waits for an approver (a question). */
+  journeyGate: 'journey_gate',
+  /** A journey wait timed out and asks what to do (a question). */
+  journeyWaitEscalated: 'journey_wait_escalated',
+  /** A journey wait has a personal form link to pass on (a task). */
+  journeyWaitLink: 'journey_wait_link',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
   /** A card waits at an approval step (workflow `human` step with purpose approval). */

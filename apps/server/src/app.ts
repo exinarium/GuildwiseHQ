@@ -99,6 +99,7 @@ import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { journeyRoutes } from './routes/journeys.ts';
+import { journeyWaitRoutes } from './routes/journey-waits.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
@@ -146,6 +147,7 @@ import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
 import { createYouTubeClient, type YouTubeClient } from './video/youtube.ts';
 import { RelayHub } from './webhook-relay/hub.ts';
+import { journeyHookRoutes } from './journeys/hooks/route.ts';
 import { relayPublicRoutes } from './webhook-relay/route.ts';
 
 export interface BuildOptions {
@@ -217,6 +219,7 @@ export function redactUrl(url: string): string {
   return (
     url
       .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
+      .replace(/(\/hooks\/in\/)[^\s]*/gi, '$1[redacted]')
       // a published form's public id is a capability to an organization's form
       .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
       .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
@@ -486,6 +489,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(relayIntegrationRoutes(ctx));
   await app.register(storageRoutes(ctx));
   await app.register(relayPublicRoutes(ctx));
+  await app.register(journeyHookRoutes(ctx));
   await app.register(approvalRoutes(ctx));
   await app.register(interestRoutes(ctx));
   await app.register(digestRoutes(ctx));
@@ -499,6 +503,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(capabilityRoutes(ctx));
   await app.register(playbookRoutes(ctx));
   await app.register(journeyRoutes(ctx));
+  await app.register(journeyWaitRoutes(ctx));
   await app.register(agentUxRoutes(ctx));
   await app.register(delegationRoutes(ctx));
   await app.register(governanceRoutes(ctx));

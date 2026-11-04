@@ -163,3 +163,95 @@ export const useRunJourneyPlaybook = (id: string) =>
   useInstanceMutation(id, (v: { visit: number; workstationId?: string }) =>
     post<{ threadId: string; path: string }>(`/journey-instances/${id}/playbook`, v),
   );
+
+// ---------------------------------------------------------------------------- waits, gates, calls and hooks
+
+export interface InstanceWait {
+  id: string;
+  visit: number;
+  stepId: string;
+  kind: string;
+  status: string;
+  startedAt: string | null;
+  deadlineAt: string | null;
+  nextFireAt: string | null;
+  remindersSent: number;
+  remindersMax: number | null;
+  linkUrl: string | null;
+  linkExpiresAt: string | null;
+  fellBack: boolean;
+  resolution: string | null;
+  resolvedAt: string | null;
+  events: Array<{ at: string; type: string; text: string }>;
+}
+export interface InstanceCall {
+  id: string;
+  visit: number;
+  stepId: string;
+  status: string;
+  attempts: number;
+  nextAttemptAt: string | null;
+  lastHttpStatus: number | null;
+  lastError: string | null;
+  finishedAt: string | null;
+}
+
+export const useInstanceWaits = (id: string | undefined, active = true) =>
+  useQuery({
+    enabled: !!id,
+    queryKey: ['journey-instance', id, 'waits'],
+    refetchInterval: active ? 5_000 : false,
+    queryFn: () => get<{ waits: InstanceWait[]; calls: InstanceCall[] }>(`/journey-instances/${id}/waits`),
+  });
+
+function useWaitMutation<V>(fn: (v: V) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['journey-instance'] });
+      void qc.invalidateQueries({ queryKey: ['journey-instances'] });
+      void qc.invalidateQueries({ queryKey: ['desk'] });
+    },
+  });
+}
+export const useWaitAction = () =>
+  useWaitMutation(
+    (v: { waitId: string; action: 'continue' | 'cancel' | 'resend-link' | 'extend' | 'goto'; body?: Record<string, unknown> }) =>
+      post(`/journey-waits/${v.waitId}/${v.action}`, v.body ?? {}),
+  );
+export const useDecideGate = () =>
+  useWaitMutation((v: { waitId: string; decision: 'approved' | 'rejected'; note?: string }) =>
+    post(`/journey-gates/${v.waitId}/decide`, { decision: v.decision, ...(v.note ? { note: v.note } : {}) }),
+  );
+
+export interface HookTriggerItem {
+  id: string;
+  name: string;
+  purpose: 'start' | 'resume';
+  scheme: string;
+  mapping: { externalId: string; displayName?: string };
+  onNoMatch: string;
+  enabled: boolean;
+  createdAt: string;
+  recentCalls: Array<{ at: string; status: string; outcome: string | null; sizeBytes: number | null }>;
+}
+export const useJourneyHooks = (journeyId: string | undefined) =>
+  useQuery({
+    enabled: !!journeyId,
+    queryKey: ['journey-hooks', journeyId],
+    queryFn: () => get<HookTriggerItem[]>(`/journeys/${journeyId}/hooks`),
+  });
+export function useCreateJourneyHook(journeyId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { name: string; purpose: 'start' | 'resume'; mapping: { externalId: string; displayName?: string } }) =>
+      post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks`, v),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['journey-hooks', journeyId] }),
+  });
+}
+export function useRotateJourneyHook(journeyId: string) {
+  return useMutation({
+    mutationFn: (hookId: string) => post<{ id: string; url: string; secret: string }>(`/journeys/${journeyId}/hooks/${hookId}/rotate`, {}),
+  });
+}
