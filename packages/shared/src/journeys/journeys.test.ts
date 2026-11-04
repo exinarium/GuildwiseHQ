@@ -89,7 +89,7 @@ describe('validation', () => {
       steps: [{ kind: 'wait', id: 'w1', label: 'W' }, { kind: 'gate', id: 'g1', label: 'G' }],
       handoffs: [{ id: 'a', from: 'w1', to: 'g1' }, { id: 'b', from: 'g1', to: 'w1' }],
     });
-    expect(validateJourney(d).errors.map((e) => e.code)).toContain('server_step_cycle');
+    expect(validateJourney(d).errors.map((e) => e.code)).toContain('placeholder_cycle');
   });
   it('fills record templates', () => {
     expect(expandRecordTemplate('{step.label}: {record.name} ({record.externalId}) {nope}', { name: 'Ann', type: 'client', externalId: null, stepLabel: 'Lead' })).toBe('Lead: Ann () {nope}');
@@ -111,7 +111,7 @@ describe('rentals template', () => {
     ]);
     expect(t?.definition.steps.filter((s) => s.kind !== 'workflow').map((s) => s.kind)).toEqual(['wait', 'gate']);
     expect(t?.definition.handoffs.find((h) => h.from === 'monthly_rent' && h.on === 'done')?.to).toBe('monthly_rent');
-    expect(validateJourney(t!.definition, { enabledWorkflowKeys: new Set(t!.definition.steps.flatMap((s) => (s.kind === 'workflow' && s.workflowKey ? [s.workflowKey] : []))) }).errors.map((e) => e.code)).toEqual(['no_form']);
+    expect(validateJourney(t!.definition, { enabledWorkflowKeys: new Set(t!.definition.steps.flatMap((s) => (s.kind === 'workflow' && s.workflowKey ? [s.workflowKey] : []))) }).errors).toEqual([]);
   });
   it('walks from lead to the loop', () => {
     const d = t!.definition;

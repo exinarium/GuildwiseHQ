@@ -4,6 +4,22 @@ import { one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { revokeClientLinkIn } from '../commands/public-forms.ts';
 import { resolveDeskEvent } from './desk.ts';
+import { rows } from '../db/sql.ts';
+
+/** Closes every open desk item that belongs to a wait (the original question, a reminder, an escalation, a link task). */
+export async function closeWaitDeskItems(
+  ctx: Ctx,
+  tx: Tx,
+  inst: Row,
+  waitId: string,
+  resolution: 'acknowledged' | 'dismissed',
+  note: string,
+  exceptId?: string | null,
+): Promise<void> {
+  const open = await rows(tx, `SELECT id FROM desk_items WHERE status='open' AND data->>'waitId'=$1 AND id::text<>$2`, [waitId, exceptId ?? '']);
+  if (open.length)
+    await ctx.store.append(open.map((d) => resolveDeskEvent(inst, d.id as string, resolution, note)), { tx });
+}
 
 /**
  * After a wait ended in any way: revoke an unused client link and close the desk task or question that belonged to it.
@@ -15,10 +31,6 @@ export async function endWaitSideEffects(ctx: Ctx, tx: Tx, inst: Row, waitId: st
   const formId = (w.config as { waitFor?: { formId?: string } })?.waitFor?.formId;
   if (w.link_id && formId)
     await revokeClientLinkIn(tx, ctx, { orgId: inst.org_id, formId, linkId: w.link_id, by: inst.started_by });
-  if (w.desk_item_id) {
-    const d = await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [w.desk_item_id]);
-    if (d?.status === 'open')
-      await ctx.store.append([resolveDeskEvent(inst, w.desk_item_id, 'acknowledged', 'The wait ended.')], { tx });
-  }
+  await closeWaitDeskItems(ctx, tx, inst, waitId, 'acknowledged', 'The wait ended.');
   void streamId;
 }

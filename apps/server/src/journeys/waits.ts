@@ -56,7 +56,7 @@ function lastDeadline(startedAt: Date, step: JourneyWaitStep): Date {
 function escalationEvents(
   ctx: Ctx,
   inst: Row,
-  w: { id: string; step_id: string },
+  w: { id: string; step_id: string; kind?: string },
   addressee: string,
   reason: 'timeout' | 'date_missing',
   firedFor: string | undefined,
@@ -74,7 +74,7 @@ function escalationEvents(
           : `"${w.step_id}" for ${recordName} timed out. What should happen?`,
       options: ESCALATION_OPTIONS,
       addresseeUserId: addressee,
-      data: { waitId: w.id, instanceId: inst.id, recordId: inst.record_id, stepId: w.step_id },
+      data: { waitId: w.id, instanceId: inst.id, recordId: inst.record_id, stepId: w.step_id, ...(w.kind ? { waitKind: w.kind } : {}) },
     }),
     ev(inst, {
       type: 'JourneyWaitEscalated',

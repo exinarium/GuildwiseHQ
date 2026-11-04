@@ -28,10 +28,8 @@ export async function cancelWaitsIn(tx: Tx, ctx: Ctx, inst: Row, reason: string)
     const formId = (w.config as { waitFor?: { formId?: string } })?.waitFor?.formId;
     if (w.link_id && formId)
       await revokeClientLinkIn(tx, ctx, { orgId: inst.org_id, formId, linkId: w.link_id, by: inst.started_by });
-    if (w.desk_item_id) {
-      const d = await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [w.desk_item_id]);
-      if (d?.status === 'open') events.push(resolveDeskEvent(inst, w.desk_item_id, 'dismissed', 'The journey was cancelled.'));
-    }
+    const openItems = await rows(tx, `SELECT id FROM desk_items WHERE status='open' AND data->>'waitId'=$1`, [w.id]);
+    for (const d of openItems) events.push(resolveDeskEvent(inst, d.id as string, 'dismissed', 'The journey was cancelled.'));
   }
   const call = await one(tx, `SELECT * FROM journey_webhook_calls WHERE instance_id=$1 AND status IN ('pending','dispatched')`, [inst.id]);
   if (call)

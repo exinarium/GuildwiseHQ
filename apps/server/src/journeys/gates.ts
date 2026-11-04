@@ -9,6 +9,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { deadlineOf } from '@aom/shared';
 import { mayDecideGate, resolveJourneyApprover } from './approvers.ts';
 import { deskQuestion, resolveDeskEvent } from './desk.ts';
+import { closeWaitDeskItems } from './wait-effects.ts';
 
 const GATE_OPTIONS = [
   { id: 'approve', label: 'Approve', description: 'Let the journey go on.' },
@@ -77,7 +78,7 @@ export async function decideGate(
     const inst0 = await one(tx, 'SELECT * FROM journey_instances WHERE id=$1', [w.instance_id]);
     if (!inst0) throw notFound('gate not found');
     if (!(await mayDecideGate(tx, who.userId, inst0, w))) throw new HttpError(403, 'not_approver', 'only the approver can decide');
-    if (w.status !== 'open') throw conflict('gate_decided', 'This gate was already decided.');
+    if (w.status !== 'open' && w.status !== 'escalated') throw conflict('gate_decided', 'This gate was already decided.');
     const inst = await lockInstance(tx, w.instance_id, w.visit, 'waiting');
     if (!inst) throw conflict('gate_decided', 'This gate is no longer waiting.');
     const def = await loadDefinition(tx, inst.journey_id, inst.journey_version);
@@ -104,6 +105,7 @@ export async function decideGate(
         ),
       );
     await ctx.store.append(out, { tx });
+    await closeWaitDeskItems(ctx, tx, inst, waitId, 'dismissed', 'The gate was decided.', w.desk_item_id);
     await advanceIn(
       ctx,
       tx,

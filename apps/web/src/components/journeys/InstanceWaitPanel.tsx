@@ -119,8 +119,11 @@ function WaitCard({ w, def, canAct }: { w: InstanceWait; def: JourneyDefinition;
           <Button variant="secondary" size="sm" disabled={!goto} onClick={() => run('goto', { stepId: goto })}>
             Move
           </Button>
-          <Button variant="danger" size="sm" onClick={() => run('cancel')}>
-            Cancel the wait
+          <Button variant="danger" size="sm" onClick={() => {
+              if (window.confirm('Cancel the whole journey? This cannot be undone.')) run('cancel');
+            }}
+          >
+            Cancel the journey
           </Button>
         </div>
       )}

@@ -151,3 +151,34 @@ describe('gate reminders are visible on the desk', () => {
   });
 });
 
+
+describe('a gate that escalated can still be decided', () => {
+  it('approves after the deadline escalated, follows the approved handoff and leaves no desk item of the wait open', async () => {
+    const j = await create(
+      [
+        {
+          kind: 'gate',
+          id: 'g',
+          label: 'Approval',
+          approver: { kind: 'project_owner' },
+          question: 'Approve the lease?',
+          deadline: { duration: { amount: 10, unit: 'minutes' }, onTimeout: { action: 'escalate' } },
+        },
+        manual('yes'),
+      ],
+      [{ id: 'h1', from: 'g', on: 'approved', to: 'yes' }],
+      'g',
+    );
+    const id = await start(j);
+    await tick();
+    pf.w.t.clock.advance(11 * MIN);
+    await tick(2);
+    const row = await waitRow(id);
+    expect(row.status).toBe('escalated');
+
+    await ok(pf.api('POST', `/api/journey-gates/${row.id}/decide`, { decision: 'approved' }));
+    expect((await inst(id)).current_step_id).toBe('yes');
+    const open = await q(`SELECT id FROM desk_items WHERE status='open' AND data->>'waitId'=$1`, [row.id]);
+    expect(open).toHaveLength(0);
+  });
+});

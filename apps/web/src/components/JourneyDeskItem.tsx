@@ -18,7 +18,7 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
   const decide = useDecideGate();
   const act = useWaitAction();
   const [note, setNote] = useState('');
-  const data = (item.data ?? {}) as { waitId?: string; instanceId?: string };
+  const data = (item.data ?? {}) as { waitId?: string; instanceId?: string; waitKind?: string };
   const waitId = data.waitId ?? '';
   const fail = (e: unknown) => toast.error(errorMessage(e));
   const link = data.instanceId ? (
@@ -67,9 +67,11 @@ export function JourneyDeskItem({ item }: { item: DeskItemDto }) {
           >
             Wait 1 more day
           </Button>
-          <Button disabled={busy} data-testid="journey-wait-continue" onClick={() => act.mutate({ waitId, action: 'continue' }, { onError: fail })}>
-            Continue the journey
-          </Button>
+          {data.waitKind !== 'gate' && (
+            <Button disabled={busy} data-testid="journey-wait-continue" onClick={() => act.mutate({ waitId, action: 'continue' }, { onError: fail })}>
+              Continue the journey
+            </Button>
+          )}
           <Button variant="danger" disabled={busy} data-testid="journey-wait-cancel" onClick={() => act.mutate({ waitId, action: 'cancel' }, { onError: fail })}>
             Cancel the journey
           </Button>
