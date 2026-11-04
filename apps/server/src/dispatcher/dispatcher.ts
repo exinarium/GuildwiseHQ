@@ -13,13 +13,13 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { orgCapPaused, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { SLOT_KINDS_SQL } from '../runner-gateway/shift-limit.ts';
 import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountForAgent, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
-import { SLOT_KINDS_SQL } from '../runner-gateway/shift-limit.ts';
 import {
   agentView,
   candidateCards,

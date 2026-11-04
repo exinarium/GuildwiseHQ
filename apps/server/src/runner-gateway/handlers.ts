@@ -1,4 +1,3 @@
-import { applyJourneyWebhookResult } from '../journeys/webhook-calls.ts';
 import {
   CAPABILITY_REGISTRY_FEATURE,
   CHAT_ACTIVITY_FEATURE,
@@ -134,6 +133,7 @@ import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
 import { applySubmodulePinResult } from '../delivery/submodule-pin.ts';
 import { packScriptGateRpc } from '../governance/gates.ts';
+import { applyJourneyWebhookResult } from '../journeys/webhook-calls.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
@@ -566,7 +566,9 @@ export class RunnerHandlers {
     } else if (cmd?.type === 'journey.webhook.call') {
       // Terminal: the server retries with backoff. The body is emptied at once.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [msg.commandId]);
+      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+        msg.commandId,
+      ]);
       await applyJourneyWebhookResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'repo.create') {
       // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).

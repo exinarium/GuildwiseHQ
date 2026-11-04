@@ -63,9 +63,9 @@ import {
   SHIFT_LIMIT_REPORT_CAPABILITY,
   type ShiftLimitSetting,
   type ShiftLimitSource,
+  STORAGE_CAPABILITY,
   shiftLimitSourceOf,
   UNLIMITED_SHIFTS,
-  STORAGE_CAPABILITY,
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
@@ -996,7 +996,10 @@ export class Runner {
   ): void {
     if (shiftLimit === undefined || shiftLimit === null) {
       if (shiftLimit === null) clearServerLimit(this.serverLimitFile);
-      this.limit = { max: Math.min(serverMax, this.freshConfig().maxConcurrentShifts), source: 'runner_config' };
+      this.limit = {
+        max: Math.min(serverMax, this.freshConfig().maxConcurrentShifts),
+        source: 'runner_config',
+      };
     } else {
       try {
         saveServerLimit(this.serverLimitFile, { shiftLimit, maxConcurrentShifts: serverMax });
@@ -1027,7 +1030,9 @@ export class Runner {
   /** What the supervisor enforces for the next start: the grant, or the machine budget when that is smaller. */
   effectiveShiftLimit(): ShiftCap {
     const shared = this.opts.sharedCap?.();
-    return shared !== undefined && shared < this.limit.max ? { max: shared, source: 'pairing_budget' } : this.limit;
+    return shared !== undefined && shared < this.limit.max
+      ? { max: shared, source: 'pairing_budget' }
+      : this.limit;
   }
 
   private freshConfig(): RunnerConfig {
@@ -2271,7 +2276,10 @@ export class Runner {
         done(true, await this.outboundDelivery.run(CommandPayloadSchemas['delivery.send'].parse(payload)));
       } else if (command === 'journey.webhook.call') {
         // A failed call is an answer (ok:true, result.ok:false, retryable): the server retries with backoff.
-        done(true, await this.journeyWebhook.run(CommandPayloadSchemas['journey.webhook.call'].parse(payload)));
+        done(
+          true,
+          await this.journeyWebhook.run(CommandPayloadSchemas['journey.webhook.call'].parse(payload)),
+        );
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));

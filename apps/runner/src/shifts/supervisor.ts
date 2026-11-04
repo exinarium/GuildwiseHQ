@@ -38,18 +38,18 @@ import {
   renderCardAttachments,
   renderReadableFolders,
   type ServerToRunnerOf,
+  SHIFT_LIMIT_SOURCE_LABEL,
   type ShiftBrief,
   type ShiftCapacity,
   type ShiftLimitSource,
   type ShiftReport,
   ShiftReportSchema,
-  SHIFT_LIMIT_SOURCE_LABEL,
-  takesShiftSlot,
-  UNLIMITED_SHIFTS,
   type ShiftVault,
   scanReportForSecrets,
   splitBackendModel,
   type TranscriptRef,
+  takesShiftSlot,
+  UNLIMITED_SHIFTS,
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
@@ -213,7 +213,9 @@ export function capacityOf(
     holders: holders.slice(0, 50).map((h) => ({
       shiftId: h.msg.shiftId,
       kind: h.msg.kind,
-      ...(h.msg.kind === 'card' && h.msg.brief.card?.ref ? { cardRef: h.msg.brief.card.ref.slice(0, 40) } : {}),
+      ...(h.msg.kind === 'card' && h.msg.brief.card?.ref
+        ? { cardRef: h.msg.brief.card.ref.slice(0, 40) }
+        : {}),
       ...(h.msg.agent.name ? { agentName: h.msg.agent.name.slice(0, 80) } : {}),
     })),
   };

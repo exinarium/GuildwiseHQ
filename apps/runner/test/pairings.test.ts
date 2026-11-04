@@ -294,14 +294,21 @@ describe('runner host', () => {
   }, 60_000);
 
   it('GWP-95: pairings.json maxConcurrentShifts no longer caps an Unlimited grant; the budget is the largest grant', async () => {
-    const s1 = await FakeServer.start({ token: 'aomr_one', shiftLimit: 'unlimited', maxConcurrentShifts: 16 });
+    const s1 = await FakeServer.start({
+      token: 'aomr_one',
+      shiftLimit: 'unlimited',
+      maxConcurrentShifts: 16,
+    });
     const s2 = await FakeServer.start({ token: 'aomr_two', shiftLimit: 6, maxConcurrentShifts: 6 });
     const root = tmp();
     const p1 = await pairTo(root, s1, 'Acme', WS_A);
     const p2 = await pairTo(root, s2, 'Globex', WS_B);
     // the retired hand-written key that held 4 on 2 Nov
     const indexFile = join(root, 'pairings.json');
-    writeFileSync(indexFile, JSON.stringify({ ...JSON.parse(readFileSync(indexFile, 'utf8')), maxConcurrentShifts: 4 }));
+    writeFileSync(
+      indexFile,
+      JSON.stringify({ ...JSON.parse(readFileSync(indexFile, 'utf8')), maxConcurrentShifts: 4 }),
+    );
     const host = new RunnerHost({ root, log: nullLogger, mock: true, ...quick });
     try {
       await host.start();

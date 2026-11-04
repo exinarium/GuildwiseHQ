@@ -182,7 +182,10 @@ describe('GWP-95: the effective shift limit, its source and the running count', 
   const V2 = ['shift-limit:1', 'shift-limit:2'];
   const starts = (r: FakeRunner) => r.received.filter((f) => f.type === 'shift.start');
   const beat = (r: FakeRunner, maxShifts: number, limitSource: string, active: string[] = []) =>
-    r.send('heartbeat', { activeShifts: active, load: { runningShifts: active.length, maxShifts, limitSource } });
+    r.send('heartbeat', {
+      activeShifts: active,
+      load: { runningShifts: active.length, maxShifts, limitSource },
+    });
 
   it('the push and the welcome carry the source; Unlimited under the platform cap names it', async () => {
     const { r } = await connect({ capabilities: V2 });
@@ -192,7 +195,11 @@ describe('GWP-95: the effective shift limit, its source and the running count', 
     expect(cmd.payload).toEqual({ shiftLimit: 'unlimited', maxConcurrentShifts: 16, source: 'platform_cap' });
     await hangUp(r);
     const again = await connect({ capabilities: V2 });
-    expect(again.welcome.limits).toMatchObject({ maxConcurrentShifts: 16, shiftLimit: 'unlimited', source: 'platform_cap' });
+    expect(again.welcome.limits).toMatchObject({
+      maxConcurrentShifts: 16,
+      shiftLimit: 'unlimited',
+      source: 'platform_cap',
+    });
     expect((await shifts()).source).toBe('platform_cap');
     await hangUp(again.r);
   });
@@ -200,7 +207,12 @@ describe('GWP-95: the effective shift limit, its source and the running count', 
   it('applying until the runner reports, then in sync; a different enforced value is a mismatch', async () => {
     await put(5);
     const { r } = await connect({ capabilities: V2 });
-    expect(await shifts()).toMatchObject({ limit: 5, source: 'workstation_setting', enforced: null, sync: 'applying' });
+    expect(await shifts()).toMatchObject({
+      limit: 5,
+      source: 'workstation_setting',
+      enforced: null,
+      sync: 'applying',
+    });
     beat(r, 5, 'workstation_setting');
     await until(async () => (await shifts()).sync === 'in_sync', 3000, 'in sync');
     expect((await shifts()).enforced).toEqual({ limit: 5, source: 'workstation_setting' });
@@ -247,7 +259,10 @@ describe('GWP-95: the effective shift limit, its source and the running count', 
   it('chat and CEO shifts take no slot: running counts card shifts, otherRunning the rest, holders name the cards', async () => {
     await q('TRUNCATE shifts, threads, thread_messages CASCADE');
     const { r } = await connect({ capabilities: V2 });
-    const agent = (await q(`SELECT id, name FROM agents WHERE status='active' LIMIT 1`))[0] as { id: string; name: string };
+    const agent = (await q(`SELECT id, name FROM agents WHERE status='active' LIMIT 1`))[0] as {
+      id: string;
+      name: string;
+    };
     const card = (await q('SELECT id, ref FROM cards LIMIT 1'))[0] as { id: string; ref: string };
     const ws = w.workstationId;
     const ins = (id: string, kind: string, cardId: string | null) =>
@@ -262,7 +277,12 @@ describe('GWP-95: the effective shift limit, its source and the running count', 
     const dto = await shifts();
     expect(dto).toMatchObject({ running: 1, otherRunning: 2 });
     expect(dto.holders).toEqual([
-      { shiftId: '019e3f6a-7b1c-7a2d-8c3e-00000000c001', kind: 'card', cardRef: card.ref, agentName: agent.name },
+      {
+        shiftId: '019e3f6a-7b1c-7a2d-8c3e-00000000c001',
+        kind: 'card',
+        cardRef: card.ref,
+        agentName: agent.name,
+      },
     ]);
     await q('TRUNCATE shifts CASCADE');
     await hangUp(r);

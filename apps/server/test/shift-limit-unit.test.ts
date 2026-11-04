@@ -36,7 +36,9 @@ describe('shiftLimitSync', () => {
   it('applying before the first report and while a report predates the change', () => {
     expect(shiftLimitSync(conn({ reportsShiftLimit: true }))).toBe('applying');
     expect(
-      shiftLimitSync(conn({ reportsShiftLimit: true, enforcedMaxShifts: 4, enforcedAt: t0, limitChangedAt: t1 })),
+      shiftLimitSync(
+        conn({ reportsShiftLimit: true, enforcedMaxShifts: 4, enforcedAt: t0, limitChangedAt: t1 }),
+      ),
     ).toBe('applying');
   });
   it('in sync, mismatch, and a pairing budget is a mismatch even at the same value', () => {
@@ -79,7 +81,12 @@ describe('shiftCapMessage', () => {
       source: 'workstation_setting',
       running: 4,
       holders: [
-        { shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1', kind: 'card', cardRef: 'GWP-94', agentName: 'Ada' },
+        {
+          shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+          kind: 'card',
+          cardRef: 'GWP-94',
+          agentName: 'Ada',
+        },
         { shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a2', kind: 'devops', agentName: 'Anvil' },
       ],
     });
@@ -88,7 +95,14 @@ describe('shiftCapMessage', () => {
     );
   });
   it('an unknown source is shown as sent; no limit reads as such', async () => {
-    const text = await shiftCapMessage(tx, 'ws-1', { limit: 100_000, source: 'later', running: 0, holders: [] });
-    expect(text).toBe('Waiting: workstation Studio is at its shift limit (no limit, later; 0 running). The card is back in the queue.');
+    const text = await shiftCapMessage(tx, 'ws-1', {
+      limit: 100_000,
+      source: 'later',
+      running: 0,
+      holders: [],
+    });
+    expect(text).toBe(
+      'Waiting: workstation Studio is at its shift limit (no limit, later; 0 running). The card is back in the queue.',
+    );
   });
 });

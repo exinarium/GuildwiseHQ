@@ -136,7 +136,11 @@ describe('GWP-95: the server setting decides, the runner reports what it enforce
     expect(h.runner.effectiveShiftLimit()).toEqual({ max: 16, source: 'platform_cap' });
     const ids: string[] = [];
     for (let i = 1; i <= 6; i++) {
-      const s = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: `TOY-${i}`, title: `n${i}` });
+      const s = makeShiftStart({
+        remoteNormalized: h.repo.remoteNormalized,
+        ref: `TOY-${i}`,
+        title: `n${i}`,
+      });
       ids.push(s.shiftId as string);
       h.server.send('shift.start', s);
     }
@@ -170,7 +174,10 @@ describe('GWP-95: the server setting decides, the runner reports what it enforce
     h = await startHarness({ maxConcurrentShifts: 9, shiftLimit: 9 });
     const saved = new Runner({ config: makeConfig(h.server.url, { repoRoots: [] }), dataDir: h.dataDir });
     expect(saved.effectiveShiftLimit()).toEqual({ max: 9, source: 'local_fallback' });
-    const fresh = new Runner({ config: makeConfig(h.server.url, { repoRoots: [] }), dataDir: tmp('aom-data-') });
+    const fresh = new Runner({
+      config: makeConfig(h.server.url, { repoRoots: [] }),
+      dataDir: tmp('aom-data-'),
+    });
     expect(fresh.effectiveShiftLimit()).toEqual({ max: 4, source: 'local_fallback' });
   });
 
@@ -204,8 +211,18 @@ describe('GWP-95: the server setting decides, the runner reports what it enforce
     const g = gated();
     h = await startHarness({}, { adapters: new Map([['mock', g.adapter]]) });
     await sendLimit(3, 3);
-    const a = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: 'TOY-1', title: 'a', agentName: 'Ada' });
-    const b = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: 'TOY-2', title: 'b', agentName: 'Ken' });
+    const a = makeShiftStart({
+      remoteNormalized: h.repo.remoteNormalized,
+      ref: 'TOY-1',
+      title: 'a',
+      agentName: 'Ada',
+    });
+    const b = makeShiftStart({
+      remoteNormalized: h.repo.remoteNormalized,
+      ref: 'TOY-2',
+      title: 'b',
+      agentName: 'Ken',
+    });
     h.server.send('shift.start', a);
     h.server.send('shift.start', b);
     await waitUntil(() => h!.server.of('shift.started').length >= 2, 30_000, 'two started');
@@ -230,13 +247,18 @@ describe('GWP-95: the server setting decides, the runner reports what it enforce
 
   it('(f) the CEO shift takes no slot; the heartbeat reports the slot count and the limit in force', async () => {
     h = await startHarness({ maxConcurrentShifts: 5, shiftLimit: 5 });
-    const active = (h.runner.supervisor as unknown as { active: Map<string, { msg: { kind: string } }> }).active;
+    const active = (h.runner.supervisor as unknown as { active: Map<string, { msg: { kind: string } }> })
+      .active;
     active.set('x-card', { msg: { kind: 'card' } });
     active.set('x-ceo', { msg: { kind: 'ceo' } });
     try {
       expect(h.runner.supervisor.size).toBe(2);
       expect(h.runner.supervisor.slotCount).toBe(1);
-      expect(h.runner.shiftLoad()).toEqual({ runningShifts: 1, maxShifts: 5, limitSource: 'workstation_setting' });
+      expect(h.runner.shiftLoad()).toEqual({
+        runningShifts: 1,
+        maxShifts: 5,
+        limitSource: 'workstation_setting',
+      });
     } finally {
       active.clear();
     }
@@ -263,10 +285,16 @@ describe('GWP-95: busy rejection text', () => {
         },
       },
     ]);
-    expect(capacity.holders[1]).toEqual({ shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a2', kind: 'devops', agentName: 'Anvil' });
+    expect(capacity.holders[1]).toEqual({
+      shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a2',
+      kind: 'devops',
+      agentName: 'Anvil',
+    });
     expect(busyDetail(capacity)).toBe(
       '2 shifts already running (limit 4, shared with other pairings): GWP-94 (Ada), devops (Anvil)',
     );
-    expect(busyDetail({ ...capacity, limit: 100_000, source: 'workstation_setting' })).toContain('(limit none, workstation setting)');
+    expect(busyDetail({ ...capacity, limit: 100_000, source: 'workstation_setting' })).toContain(
+      '(limit none, workstation setting)',
+    );
   });
 });

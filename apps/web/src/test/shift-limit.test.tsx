@@ -163,3 +163,105 @@ describe('shift limit control', () => {
     expect(within(form).getByTestId('shift-limit-old-runner')).toHaveTextContent('too old');
   });
 });
+
+// GWP-95: the limit the runner enforces, its source, what counts, who holds the slots, and any mismatch.
+describe('effective shift limit', () => {
+  const holders = [
+    { shiftId: ID(21), kind: 'card', cardRef: 'GWP-94', agentName: 'Ada' },
+    { shiftId: ID(22), kind: 'devops', cardRef: null, agentName: 'Anvil' },
+  ];
+
+  it('shows the enforced limit with its source, the chat/CEO turns apart and who holds a full workstation', async () => {
+    current = shifts({
+      running: 2,
+      limit: 2,
+      setting: 2,
+      source: 'workstation_setting',
+      enforced: { limit: 2, source: 'workstation_setting' },
+      sync: 'in_sync',
+      otherRunning: 1,
+      holders,
+    });
+    const { desk } = await open();
+    expect(within(desk).getByTestId('shift-limit-effective')).toHaveTextContent(
+      '2 of 2 · workstation setting',
+    );
+    expect(within(desk).getByTestId('shift-limit-other')).toHaveTextContent('+1 chat/CEO (not counted)');
+    expect(within(desk).getByTestId('shift-limit-full')).toHaveTextContent(
+      'Full: new shifts wait. Held by GWP-94 (Ada), devops (Anvil).',
+    );
+    expect(within(desk).queryByTestId('shift-limit-mismatch')).toBeNull();
+  });
+
+  it('Unlimited under the platform cap names the cap', async () => {
+    current = shifts({
+      running: 3,
+      limit: 16,
+      setting: 'unlimited',
+      source: 'platform_cap',
+      enforced: { limit: 16, source: 'platform_cap' },
+      sync: 'in_sync',
+      otherRunning: 0,
+      holders: [],
+    });
+    const { desk } = await open();
+    expect(within(desk).getByTestId('shift-limit-effective')).toHaveTextContent('3 of 16 · platform cap');
+    expect(within(desk).queryByTestId('shift-limit-full')).toBeNull();
+  });
+
+  it('warns visibly when the runner enforces something else', async () => {
+    current = shifts({
+      running: 4,
+      limit: null,
+      unlimited: true,
+      setting: 'unlimited',
+      source: 'workstation_setting',
+      enforced: { limit: 4, source: 'pairing_budget' },
+      sync: 'mismatch',
+      otherRunning: 0,
+      holders,
+    });
+    const { desk } = await open();
+    expect(within(desk).getByTestId('shift-limit-mismatch')).toHaveTextContent(
+      'The runner enforces 4 (shared with other pairings), not no limit as set here.',
+    );
+    expect(within(desk).getByTestId('shift-limit-effective')).toHaveTextContent(
+      '4 of 4 · shared with other pairings',
+    );
+  });
+
+  it('a runner that does not report its limit says so; applying shows while a change is on its way', async () => {
+    current = shifts({
+      source: 'runner_config',
+      enforced: null,
+      sync: 'unknown',
+      otherRunning: 0,
+      holders: [],
+    });
+    const first = await open();
+    expect(within(first.desk).getByTestId('shift-limit-unknown')).toHaveTextContent(
+      'does not report the limit',
+    );
+    expect(within(first.desk).getByTestId('shift-limit-effective')).toHaveTextContent(
+      '1 of 4 · runner config',
+    );
+  });
+
+  it('applying', async () => {
+    current = shifts({
+      source: 'workstation_setting',
+      enforced: null,
+      sync: 'applying',
+      otherRunning: 0,
+      holders: [],
+    });
+    const { desk } = await open();
+    expect(within(desk).getByTestId('shift-limit-applying')).toHaveTextContent('Applying');
+  });
+
+  it('an older server without the new fields still renders', async () => {
+    const { desk } = await open();
+    expect(within(desk).getByTestId('workstation-shifts')).toHaveTextContent('1 of 4');
+    expect(within(desk).queryByTestId('shift-limit-effective')).toBeNull();
+  });
+});

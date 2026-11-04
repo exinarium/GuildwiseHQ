@@ -497,7 +497,11 @@ export function shiftsDto(
       ? effectiveShiftLimit(ctx, setting, undefined)
       : null;
   const unlimited = effective !== null && effective >= UNLIMITED_SHIFTS;
-  const source = conn ? (conn.limitSource ?? shiftLimitSourceFor(ctx, setting)) : setting !== null ? shiftLimitSourceFor(ctx, setting) : null;
+  const source = conn
+    ? (conn.limitSource ?? shiftLimitSourceFor(ctx, setting))
+    : setting !== null
+      ? shiftLimitSourceFor(ctx, setting)
+      : null;
   const sync = shiftLimitSync(conn);
   const enforced =
     conn?.reportsShiftLimit && conn.enforcedMaxShifts !== undefined && conn.enforcedAt

@@ -1,9 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import {
-  SHIFT_LIMIT_SOURCE_LABEL,
-  type ShiftCapacity,
-  shiftLimitSourceOf,
-  UNLIMITED_SHIFTS,
   allowedOutcomes,
   BRIEF_STAGE_ID,
   BuildEvidenceInputSchema,
@@ -33,10 +29,14 @@ import {
   type RunnerToServerOf,
   requiredMissing,
   resolveOutcome,
+  SHIFT_LIMIT_SOURCE_LABEL,
+  type ShiftCapacity,
   type ShiftEndOutcome,
   type StoredBuildEvidence,
+  shiftLimitSourceOf,
   streamId,
   type TestEvidence,
+  UNLIMITED_SHIFTS,
   WorkflowResolveError,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
@@ -1284,7 +1284,11 @@ export async function applyShiftRejected(
  * The card message for a shift the runner turned away at its shift limit: the limit, its source and the shifts that
  * hold the slots (identifiers only, no paths).
  */
-export async function shiftCapMessage(tx: Tx, workstationId: string, capacity: ShiftCapacity): Promise<string> {
+export async function shiftCapMessage(
+  tx: Tx,
+  workstationId: string,
+  capacity: ShiftCapacity,
+): Promise<string> {
   const ws = await one(tx, 'SELECT name FROM workstations WHERE id=$1', [workstationId]);
   const source = shiftLimitSourceOf(capacity.source);
   const label = source ? SHIFT_LIMIT_SOURCE_LABEL[source] : capacity.source.slice(0, 40);

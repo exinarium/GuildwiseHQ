@@ -72,7 +72,8 @@ export function shiftLimitSync(conn: RunnerConn | undefined): ShiftLimitSync {
   if (conn.enforcedMaxShifts === undefined || !conn.enforcedAt) return 'applying';
   if (conn.limitChangedAt && conn.enforcedAt < conn.limitChangedAt) return 'applying';
   const same = (a: number, b: number) => a === b || (a >= UNLIMITED_SHIFTS && b >= UNLIMITED_SHIFTS);
-  if (!same(conn.enforcedMaxShifts, conn.maxShifts) || conn.enforcedSource === 'pairing_budget') return 'mismatch';
+  if (!same(conn.enforcedMaxShifts, conn.maxShifts) || conn.enforcedSource === 'pairing_budget')
+    return 'mismatch';
   return 'in_sync';
 }
 
