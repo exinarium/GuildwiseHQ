@@ -47,9 +47,12 @@ import {
   DEPLOY_ASK_ALLOW,
   DEVOPS_INHERITED_ENV,
   gitDirsOf,
+  isReadOnlyWorktreeRole,
   type SandboxState,
   sandboxMissing,
   sandboxState,
+  shadowedWrites,
+  splitOwnRepository,
   toolchainReadPaths,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
@@ -889,13 +892,29 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
+    // A role that edits or commits must not get its own main clone as a read-only folder: that bind would cover the
+    // writable git dir (GWP-86). Read-only roles and DevOps keep their folders unchanged.
+    let ownRepoDirs: string[] = [];
+    if (!input.agent.isDevops && !isReadOnlyWorktreeRole(input.agent.permissions)) {
+      const split = splitOwnRepository(input.readDirs ?? [], input.cwd, gitDirsOf(input.cwd));
+      ownRepoDirs = split.ownRepoDirs;
+      input = { ...input, readDirs: split.readDirs };
+    }
     const settings = buildShiftSettings(
       input.agent.permissions,
-      this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
+      {
+        ...this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
+        ...(ownRepoDirs.length ? { ownRepoDirs } : {}),
+      },
       input.sandbox,
       input.agent.roleKey,
       input.agent.isDevops,
     );
+    if (settings.sandbox)
+      for (const d of shadowedWrites(settings.sandbox.filesystem, input.cwd))
+        process.stderr.write(
+          `WARN sandbox: ${d} hides a writable path (denyWrite is bound after allowWrite)\n`,
+        );
     input = this.prepareSkills(dir, input, settings);
     input = this.prepareSubagents(dir, input, settings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
