@@ -118,7 +118,7 @@ describe('architect post-shift guard', () => {
       branchesAtStart: {},
       e2eGlobs: [],
     });
-    expect(dropped).toEqual(['code.ts']);
+    expect(dropped.discarded).toEqual(['code.ts']);
     const who = { name: 'a', email: 'a@x.test' };
     await autoCommit({
       worktree: t.path,
