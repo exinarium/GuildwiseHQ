@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
+import { ReleasePrepChangelogPayloadSchema } from './changelog-entries.ts';
 
 /** The change summary of 'Analyse changes' for one repository (stored per repo, capped to keep events small). */
 export const ReleaseDocsPrepSummarySchema = z.object({
@@ -59,7 +60,13 @@ export const ReleaseDocsPrepSettingsSchema = z.object({
 export const ReleaseDocsPrepSettingsDtoSchema = z.object({
   enabled: z.boolean(),
   steps: z.array(
-    z.object({ id: z.string(), label: z.string(), description: z.string(), enabled: z.boolean() }),
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string(),
+      enabled: z.boolean(),
+      requires: z.array(z.string()).optional(),
+    }),
   ),
   canEdit: z.boolean(),
 });
@@ -108,6 +115,8 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
           finishedAt: z.string().nullable(),
           error: z.string().nullable(),
           files: z.array(z.string()),
+          /** What the step reports (per step id; 'changelog': ReleaseChangelogOutput). */
+          output: z.unknown().optional(),
         }),
       ),
     }),
@@ -156,6 +165,8 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   message: z.string().max(500).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
   signOff: z.boolean().optional(),
+  /** Step 'changelog': the checked entries to merge into Unreleased. */
+  changelog: ReleasePrepChangelogPayloadSchema.optional(),
 });
 
 export type ReleaseDocsPrepPayload = z.infer<typeof ReleaseDocsPrepPayloadSchema>;
@@ -174,7 +185,14 @@ export const ReleaseDocsPrepResultSchema = z.object({
   pushed: z.boolean().optional(),
   alreadyPushed: z.boolean().optional(),
   notices: z.array(z.string().max(500)).default([]),
+  /** A content step's report (shown on the Releases page; the server checks the size and the step's schema). */
+  output: z.unknown().optional(),
 });
 export type ReleaseDocsPrepResult = z.infer<typeof ReleaseDocsPrepResultSchema>;
 
 export const RELEASE_DOCS_PREP_CAPABILITY = 'release-docs-prep:1';
+/** The runner can apply the entries of the step 'changelog'. */
+export const RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY = 'release-docs-prep-changelog:1';
+
+/** The largest step output stored (serialised JSON). */
+export const RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES = 64 * 1024;

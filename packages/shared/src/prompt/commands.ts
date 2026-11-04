@@ -75,6 +75,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom report spec-card --file <fields.json>   # { "fields": { "<missing field key>": "<text>", ... } }; to find the repository: { "repo": "<name>", "fields": {...} } or { "split": [ { "title", "repo", "fields", "dependsOn": [1] }, ... ] }';
     case 'spec_card_fail':
       return 'aom report spec-card-fail --note "<why the card cannot be specified and what the manager must say>"';
+    case 'release_changelog_done':
+      return 'aom report release-changelog --file <entries.json>   # { "entries": [ { "heading", "text", "sources": ["<change id>"] } ], "covered": [ { "source", "existing": <n> } ], "skipped": [ { "source", "reason" } ] }';
+    case 'release_changelog_fail':
+      return 'aom report release-changelog-fail --note "<why no entries can be written>"';
     case 'batch_done':
       return 'aom batch done --note "<the cards you created and why this split>"';
     case 'batch_ask':

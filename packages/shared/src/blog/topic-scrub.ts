@@ -101,6 +101,9 @@ const PATTERNS: Array<{ code: ScrubCode; re: RegExp }> = [
   { code: 'camel_case', re: /\b[A-Za-z]*[a-z][A-Z][A-Za-z]*\b/ },
 ];
 
+/** The pattern set of the gate, shared with other public-text gates (read only). */
+export const SCRUB_PATTERNS: ReadonlyArray<{ code: ScrubCode; re: RegExp }> = PATTERNS;
+
 /** Characters that may remain once the specific patterns found nothing: letters, digits, space and light punctuation. */
 const PLAIN = /^[A-Za-z0-9 ,'\-():.?]*$/;
 

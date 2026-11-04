@@ -465,8 +465,8 @@ export const phaseProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO ba_tasks (id, org_id, project_id, phase_id, followup_id, kind, status, preferred_agent_id,
          signal_ids, desk_item_ids, local_date, instructions, deliver, schedule_id, schedule_name, org_level, created_at, updated_at,
-         batch_id, batch_item_id, mail_draft_id, card_id)
-       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$18,$19,$20)`,
+         batch_id, batch_item_id, mail_draft_id, card_id, prep_run_id, prep_repo_id)
+       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$18,$19,$20,$21,$22)`,
       [
         p.taskId,
         org,
@@ -488,6 +488,8 @@ export const phaseProjectors: Record<string, Projector> = {
         p.batchItemId ?? null,
         p.mailDraftId ?? null,
         p.cardId ?? null,
+        p.prepRunId ?? null,
+        p.prepRepoId ?? null,
       ],
     );
     // A floor report is queued once per local day: remember the day on the owner.

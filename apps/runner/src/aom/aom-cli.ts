@@ -444,7 +444,9 @@ const REPORT_USAGE = `usage: aom report brief --summary-file <report.md>   # the
        aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]
        aom report mail-draft-fail --note "<why no reply can be written>"
        aom report spec-card --file <fields.json>      # { "fields": { "<missing field key>": "<text>" } } | { "repo": "<name>", "fields": {...} } | { "split": [ { "title", "repo", "fields", "dependsOn" } ] }
-       aom report spec-card-fail --note "<why the card cannot be specified>"`;
+       aom report spec-card-fail --note "<why the card cannot be specified>"
+       aom report release-changelog --file <entries.json>   # { "entries": [ { "heading", "text", "sources" } ], "covered": [ { "source", "existing" } ], "skipped": [ { "source", "reason" } ] }
+       aom report release-changelog-fail --note "<why no entries can be written>"`;
 
 /**
  * `aom report ...`: the BA's task reports. The BA reporter is retired (docs/design/ceo-front-door.md step 3): `triage`,
@@ -494,6 +496,13 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
       return report(
         ctx,
         outcome('spec_card_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
+      );
+    case 'release-changelog':
+      return report(ctx, outcome('release_changelog_done', 'Changelog entries', data()));
+    case 'release-changelog-fail':
+      return report(
+        ctx,
+        outcome('release_changelog_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
       );
     default:
       throw new UsageError(REPORT_USAGE);
@@ -2832,7 +2841,8 @@ export const USAGE = `usage: aom <verb> [options]
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
   report brief --summary-file <md>   the CEO's analysis request (report triage|notes|signals|floor are retired)
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
-  report spec-card --file <json> | report spec-card-fail --note "<why>"   BA card task: write the missing fields of a draft card so it can be specified (terminal)
+  report spec-card --file <json>   report release-changelog --file <json> | report release-changelog-fail --note "<why>"   BA release prep task: propose the public changelog entries for one repository (terminal)
+| report spec-card-fail --note "<why>"   BA card task: write the missing fields of a draft card so it can be specified (terminal)
   deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | deploy status [--project KEY]   ask for a deploy through the project's approved delivery recipe (the server decides who releases it; nothing runs here)
   deploy trial --env <env> [--project KEY] | recipe save --dir <scratch> --project KEY   DevOps, in a recipe request: trial a drafted recipe, save it into the project vault
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)

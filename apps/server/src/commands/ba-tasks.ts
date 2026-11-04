@@ -27,6 +27,10 @@ import { intakeRpc } from './intake.ts';
 import { applyBatchReport, batchRpcGuard } from './intake-batch.ts';
 import { applyMailDraftReport, runMailDraftFallback } from './mail-draft.ts';
 import {
+  applyReleaseChangelogReport,
+  runReleaseChangelogFallback,
+} from '../release/docs-prep-changelog-task.ts';
+import {
   actorOf,
   agentBy,
   baTaskCompleted,
@@ -122,6 +126,7 @@ export async function applyBaTaskReport(
   if (task.kind === 'batch_intake') return applyBatchReport(ctx, tx, shift, task, msg.report);
   if (task.kind === 'mail_reply_draft') return applyMailDraftReport(ctx, tx, task, msg);
   if (task.kind === 'spec_card') return applySpecCardReport(ctx, tx, task, shift, msg);
+  if (task.kind === 'release_changelog') return applyReleaseChangelogReport(ctx, tx, task, msg);
   if (isReporterTaskKind(task.kind)) return applyReviewReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
@@ -488,6 +493,7 @@ export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<vo
   }
   if (task.kind === 'mail_reply_draft') return runMailDraftFallback(ctx, tx, task);
   if (task.kind === 'spec_card') return runSpecCardFallback(ctx, tx, task);
+  if (task.kind === 'release_changelog') return runReleaseChangelogFallback(ctx, tx, task);
   if (isReporterTaskKind(task.kind)) return runReviewFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>

@@ -78,6 +78,14 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
               <span className="flex flex-col">
                 <span className="text-sm text-fg">{s.label}</span>
                 <span className="text-xs text-subtle">{s.description}</span>
+                {(steps[s.id] ?? s.enabled) &&
+                  (s.requires ?? [])
+                    .filter((r) => !(steps[r] ?? listed.find((x) => x.id === r)?.enabled ?? false))
+                    .map((r) => (
+                      <span key={r} className="text-xs text-warning-soft-fg" data-testid={`prep-needs-${r}`}>
+                        Needs {listed.find((x) => x.id === r)?.label ?? r}
+                      </span>
+                    ))}
               </span>
             </label>
           ))}

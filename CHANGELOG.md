@@ -6,6 +6,8 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ### Added
 
+- Write changelog in release prep. When release prep is on, a new Write changelog step adds user-facing entries for the release's changes to the Unreleased section of each repository's `CHANGELOG.md`, keeps the entries already there and never writes one twice. The Release prep tab on the Releases page lists the entries added per repository, and a changelog the release notes cannot read stops the step with the fix to make.
+
 - Retire a workstation with agent handover. On the Workstations page an Owner or Admin can retire a workstation and either move all its agents to another workstation or mark them as needing a new home (re-home them one by one later). Retiring is refused while one of its agents is in a running shift, and the refusal names them. A workstation that was already unpaired but still holds agents is listed under "Removed workstations with agents" with a "Hand over agents" button. The retirement and each handover are written to the audit log. New events `WorkstationRetired` and `AgentNeedsRehome`; endpoints `GET /api/workstations/:id/retire-preview` and `POST /api/workstations/:id/retire`.
 
 ### Changed

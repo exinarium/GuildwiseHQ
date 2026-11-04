@@ -22,8 +22,11 @@ describe('release docs prep step registry', () => {
     expect(isReleaseDocsPrepStep('videos')).toBe(false);
   });
   it('enables steps by default and honours the checklist', () => {
-    expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual(['analyse', 'commit']);
-    expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual(['commit']);
+    expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual(['analyse', 'changelog', 'commit']);
+    expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual([
+      'changelog',
+      'commit',
+    ]);
   });
 });
 
