@@ -199,7 +199,9 @@ function Shell({ name, live }: { name: string; live: string }) {
     if (isTabletUp || !el) return;
     const onIn = (e: FocusEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && el.contains(t) && !document.documentElement.dataset.kbd) savedScroll.current = el.scrollTop;
+      // Only pages that fold content away while typing need their scroll position put back afterwards.
+      if (t && el.contains(t) && !document.documentElement.dataset.kbd && el.querySelector('.kbd-hide'))
+        savedScroll.current = el.scrollTop;
     };
     document.addEventListener('focusin', onIn);
     return () => document.removeEventListener('focusin', onIn);
@@ -391,25 +393,27 @@ function Shell({ name, live }: { name: string; live: string }) {
                   !isTabletUp && 'relative flex min-h-0 flex-col',
                 )}
               >
-                {isTabletUp ? (
-                  <>
-                    {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
-                    <div className="px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8">
-                      <Outlet />
-                    </div>
-                  </>
-                ) : (
+                {/* One stable tree on every width, so the routed page keeps its state when the width crosses 768px. */}
+                <div
+                  ref={scroller}
+                  data-testid={isTabletUp ? undefined : 'app-scroll'}
+                  className={cx(
+                    isTabletUp
+                      ? 'contents'
+                      : 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain',
+                  )}
+                >
+                  {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
                   <div
-                    ref={scroller}
-                    data-testid="app-scroll"
-                    className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+                    className={cx(
+                      isTabletUp
+                        ? 'px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8'
+                        : 'px-4 py-5 sm:px-6 sm:py-6',
+                    )}
                   >
-                    {me.data && <OrgBanner me={me.data} project={project} relayOffline={relayOffline} />}
-                    <div className="px-4 py-5 sm:px-6 sm:py-6">
-                      <Outlet />
-                    </div>
+                    <Outlet />
                   </div>
-                )}
+                </div>
               </main>
               {!isTabletUp && (
                 <MobileTabBar

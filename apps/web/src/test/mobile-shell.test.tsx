@@ -322,6 +322,124 @@ describe('the phone app frame', () => {
   });
 });
 
+describe('the phone app frame: rotation and scroll restore', () => {
+  type Listener = () => void;
+  const listeners = new Set<Listener>();
+  let phone = true;
+  function liveViewport() {
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return phone ? /max-width:\s*767\.98px/.test(query) : /min-width:\s*(1024|768|640)px/.test(query);
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_: string, cb: Listener) => listeners.add(cb),
+      removeEventListener: (_: string, cb: Listener) => listeners.delete(cb),
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+  const flip = (toPhone: boolean) => {
+    phone = toPhone;
+    act(() => {
+      for (const cb of [...listeners]) cb();
+    });
+  };
+  beforeEach(() => {
+    phone = true;
+    listeners.clear();
+    liveViewport();
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'visualViewport', { value: undefined, configurable: true });
+    vi.unstubAllGlobals();
+  });
+
+  function Form({ hide }: { hide?: boolean }) {
+    return (
+      <div>
+        <input data-testid="field" aria-label="field" />
+        {hide && <p className="kbd-hide">above</p>}
+      </div>
+    );
+  }
+  function mountPage(hide: boolean) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/x']}>
+            <Routes>
+              <Route element={<AppShell name="Olive" live="open" />}>
+                <Route path="*" element={<Form hide={hide} />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('keeps the routed page (and what was typed) when the width crosses 768px', async () => {
+    const user = userEvent.setup();
+    mountPage(false);
+    const field = await screen.findByTestId('field');
+    await user.type(field, 'draft');
+    flip(false);
+    await waitFor(() => expect(screen.queryByTestId('app-frame')).not.toBeInTheDocument());
+    expect(screen.getByTestId('field')).toBe(field);
+    expect(field).toHaveValue('draft');
+    flip(true);
+    await waitFor(() => expect(screen.getByTestId('app-frame')).toBeInTheDocument());
+    expect(screen.getByTestId('field')).toBe(field);
+    expect(field).toHaveValue('draft');
+  });
+
+  async function openAndCloseKeyboard(hide: boolean, scrollAtFocus: number) {
+    class VV extends EventTarget {
+      height = 800;
+      offsetTop = 0;
+      scale = 1;
+    }
+    const vv = new VV();
+    Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true });
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    mountPage(hide);
+    const scroll = await screen.findByTestId('app-scroll');
+    scroll.scrollTop = scrollAtFocus;
+    const field = screen.getByTestId('field');
+    act(() => field.focus());
+    vv.height = 480;
+    act(() => {
+      vv.dispatchEvent(new Event('resize'));
+    });
+    await waitFor(() => expect(document.documentElement.dataset.kbd).toBe('1'));
+    scroll.scrollTop = 0; // the page folded away and the browser reset the position
+    act(() => field.blur());
+    vv.height = 800;
+    act(() => {
+      vv.dispatchEvent(new Event('resize'));
+    });
+    await waitFor(() => expect(document.documentElement.dataset.kbd).toBeUndefined());
+    return scroll;
+  }
+
+  it('puts the scroll position back after the keyboard on a page that folds content away', async () => {
+    const scroll = await openAndCloseKeyboard(true, 300);
+    expect(scroll.scrollTop).toBe(300);
+  });
+
+  it('leaves the scroll position alone on an ordinary page without kbd-hide content', async () => {
+    const scroll = await openAndCloseKeyboard(false, 300);
+    expect(scroll.scrollTop).toBe(0);
+  });
+});
+
 describe('backTargetFor', () => {
   it('uses the parent crumb, else the list of a detail page', () => {
     expect(backTargetFor('/x', [{ label: 'P', to: '/p/K/board' }, { label: 'Card' }])).toBe('/p/K/board');
