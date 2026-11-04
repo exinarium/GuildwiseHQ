@@ -17,6 +17,7 @@ import {
 } from '../forge/index.ts';
 import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
@@ -76,6 +77,8 @@ export const ProjectRepoDtoSchema = z.object({
       state: z.enum(['proposed', 'approved']),
       deskItemId: z.uuid(),
       version: z.string().nullable(),
+      /** Release prep (docs and videos): only present when the project's switch is on. */
+      docsPrep: ReleaseDocsPrepGateViewSchema.optional(),
       /** The release commit of an approved proposal: preparing, pushed, or stopped at a step. */
       ship: z
         .object({

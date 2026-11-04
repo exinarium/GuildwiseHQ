@@ -1,3 +1,4 @@
+import { releaseDocsPrepSweep } from '../release/docs-prep.ts';
 import { isFollowupTerminal, nextFollowup, phaseCompletion, type Recipe, streamId } from '@aom/shared';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import {
@@ -42,6 +43,7 @@ export async function phasePass(ctx: Ctx): Promise<void> {
   };
   await step('merge checks', () => mergeChecks(ctx));
   await step('release checks', () => releaseChecks(ctx));
+  await step('release docs prep sweep', () => releaseDocsPrepSweep(ctx));
   await step('completion', () => completionStep(ctx));
   await step('results', () => resultsStep(ctx));
   await step('sequencing', () => sequenceStep(ctx));

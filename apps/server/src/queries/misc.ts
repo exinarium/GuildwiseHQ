@@ -1,3 +1,4 @@
+import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
 import {
   type BudgetDto,
   ComponentRulesSchema,
@@ -278,9 +279,13 @@ export async function getProjectDetail(
   );
   const liveProposals = await rows(
     ctx.pool,
-    `SELECT id, repo_id, state, desk_item_id, version FROM release_proposals WHERE project_id=$1 AND state IN ('proposed','approved')`,
+    `SELECT id, project_id, repo_id, state, desk_item_id, version, last_tag FROM release_proposals WHERE project_id=$1 AND state IN ('proposed','approved')`,
     [projectId],
   );
+  // Release prep (docs and videos): the gate view per live proposal; absent (undefined) when the switch is off.
+  const docsPrepViews = new Map<string, Awaited<ReturnType<typeof releaseDocsPrepViewFor>>>();
+  for (const lp of liveProposals)
+    docsPrepViews.set(lp.id, await releaseDocsPrepViewFor(ctx.pool, lp));
   const ships = await rows(
     ctx.pool,
     `SELECT id, repo_id, version, status, step, commit_sha, error, payload, updated_at, land_mode, pr_url, step_message,
@@ -363,6 +368,7 @@ export async function getProjectDetail(
           state: lp.state,
           deskItemId: lp.desk_item_id,
           version: lp.version ?? null,
+          ...(docsPrepViews.get(lp.id) ? { docsPrep: docsPrepViews.get(lp.id) } : {}),
           ship: sh
             ? {
                 version: sh.version,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
+import { ReleaseDocsPrepGateViewSchema } from './docs-prep-dto.ts';
 
 export const BumpLevelSchema = z.enum(['patch', 'minor', 'major']);
 
@@ -74,6 +75,8 @@ export const ReleaseProposalViewSchema = z.object({
   }),
   rules: z.array(ComponentRuleSchema.pick({ name: true, paths: true, versionFile: true })),
   existingTags: z.array(z.string()),
+  /** Release prep (docs and videos): only present when the project's switch is on. */
+  docsPrep: ReleaseDocsPrepGateViewSchema.optional(),
 });
 export type ReleaseProposalView = z.infer<typeof ReleaseProposalViewSchema>;
 

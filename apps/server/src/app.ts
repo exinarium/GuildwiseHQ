@@ -77,6 +77,7 @@ import { ceoRoutes } from './routes/ceo.ts';
 import { chatRoutes } from './routes/chats.ts';
 import { cloudRoutes } from './routes/cloud.ts';
 import { commitAsRoutes } from './routes/commit-as.ts';
+import { releaseDocsPrepRoutes } from './routes/release-docs-prep.ts';
 import { costRoutes } from './routes/costs.ts';
 import { delegationRoutes } from './routes/delegation.ts';
 import { deliveryRoutes } from './routes/delivery.ts';
@@ -475,6 +476,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgProviderRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
+  await app.register(releaseDocsPrepRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));

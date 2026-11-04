@@ -13,6 +13,7 @@ import { ceoTopicProjectors } from './ceo-topics.ts';
 import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
+import { releaseDocsPrepProjectors } from './release-docs-prep.ts';
 import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
 import { deskProjectors } from './desk.ts';
@@ -108,6 +109,7 @@ const domains: Array<Record<string, Projector>> = [
   outboundProjectors,
   repoProjectors,
   releaseProjectors,
+  releaseDocsPrepProjectors,
   phaseProjectors,
   reporterProjectors,
   interestProjectors,
@@ -278,6 +280,9 @@ export const PROJECTION_TABLES = [
   'repo_requests',
   'release_proposals',
   'release_ships',
+  'release_docs_prep_runs',
+  'release_docs_prep_repos',
+  'release_docs_prep_steps',
   'deploy_targets',
   'phases',
   'phase_followups',

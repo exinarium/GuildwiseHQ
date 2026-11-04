@@ -1,3 +1,4 @@
+import { releaseDocsPrepViewFor } from './docs-prep.ts';
 import {
   type DeskResolution,
   type ReleaseFacts,
@@ -124,6 +125,15 @@ const allAt = (rules: { name: string }[], level: 'minor' | 'major'): Record<stri
 
 /** The live view of a Ship release desk item (facts and rules read now, so a refresh shows at once). */
 export async function releaseViewFor(db: Queryable, item: Row): Promise<ReleaseProposalView | null> {
+  const view = await releaseViewBase(db, item);
+  if (!view) return null;
+  // Release prep (docs and videos): only added when the project's switch is on, so the item reads as before when off.
+  const proposal = await one(db, 'SELECT * FROM release_proposals WHERE desk_item_id=$1', [item.id]);
+  const docsPrep = proposal ? await releaseDocsPrepViewFor(db, proposal) : undefined;
+  return docsPrep ? { ...view, docsPrep } : view;
+}
+
+async function releaseViewBase(db: Queryable, item: Row): Promise<ReleaseProposalView | null> {
   const repoId = (item.data as { repoId?: string } | null)?.repoId;
   if (!repoId) return null;
   const proposal = await one(db, 'SELECT * FROM release_proposals WHERE desk_item_id=$1', [item.id]);

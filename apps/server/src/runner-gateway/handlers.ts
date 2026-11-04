@@ -137,6 +137,7 @@ import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
 import { applyReleaseFactsResult } from '../release/facts.ts';
 import { applyReleasePublishResult } from '../release/publish.ts';
+import { applyReleaseDocsPrepResult } from '../release/docs-prep.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
@@ -588,6 +589,17 @@ export class RunnerHandlers {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseShipResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'release.docs_prep') {
+      // Terminal: the step is recorded and the run moves on (or fails with Retry/Skip); never redelivered blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleaseDocsPrepResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
     } else if (cmd?.type === 'release.publish') {
       // Terminal: the tag and release are recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
