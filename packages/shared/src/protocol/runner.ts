@@ -738,6 +738,24 @@ export const DeliverySendResultSchema = z.object({
 });
 export type DeliverySendResult = z.infer<typeof DeliverySendResultSchema>;
 
+/**
+ * `journey.webhook.call`: the workstation calls a firm's URL for a journey step, adding the credential headers and the
+ * optional signature from its own sealed store. Terminal (never re-sent blindly): the server retries with backoff. The
+ * server empties the payload when the answer arrives or the command expires; it holds the rendered body.
+ */
+export const JourneyWebhookCallPayloadSchema = z.object({
+  callId: z.uuid(),
+  attempt: z.number().int().positive(),
+  url: z.string().max(2000),
+  method: z.enum(['POST', 'PUT', 'PATCH', 'GET', 'DELETE']),
+  headers: z.array(z.object({ name: z.string().max(60), value: z.string().max(1000) })).max(20),
+  credentialHeaders: z.array(z.object({ name: z.string().max(60), credential: z.string().max(60) })).max(5),
+  signWith: z.string().max(60).optional(),
+  contentType: z.string().max(100),
+  body: z.string().max(20_000),
+});
+export type JourneyWebhookCallPayload = z.infer<typeof JourneyWebhookCallPayloadSchema>;
+
 export const PolledIssueSchema = z.object({
   key: z.string().min(1).max(300),
   title: z.string().max(500),
@@ -1110,6 +1128,7 @@ export const RunnerCommandNameSchema = z.enum([
   'worktrees.sweep',
   'integration.run',
   'delivery.send',
+  'journey.webhook.call',
   'repo.clone',
   'env.ensure',
   'rights.verify',
@@ -1221,6 +1240,7 @@ export const CommandPayloadSchemas = {
   'worktrees.sweep': WorktreesSweepPayloadSchema,
   'integration.run': IntegrationRunPayloadSchema,
   'delivery.send': DeliverySendPayloadSchema,
+  'journey.webhook.call': JourneyWebhookCallPayloadSchema,
   'repo.clone': RepoClonePayloadSchema,
   'env.ensure': EnvEnsurePayloadSchema,
   'rights.verify': RightsVerifyPayloadSchema,

@@ -237,6 +237,67 @@ async function toDto(ctx: Ctx, formId: string, publicId: string | null, r: any):
   };
 }
 
+/** Creates a personal link inside the caller's append transaction (journey steps). The form must be published. */
+export async function createClientLinkIn(
+  tx: Parameters<Parameters<typeof withAppendTx>[1]>[0],
+  ctx: Ctx,
+  a: {
+    orgId: string;
+    formId: string;
+    by: string;
+    reference: string;
+    recordKind?: string | undefined;
+    recordId?: string | undefined;
+    expiresAt: Date;
+  },
+): Promise<{ linkId: string; expiresAt: Date }> {
+  const p = await one(tx, 'SELECT status FROM form_publications WHERE form_id=$1 AND org_id=$2', [a.formId, a.orgId]);
+  if (!p || p.status !== 'published')
+    throw conflict('form_not_published', 'Publish the form before creating personal links.');
+  const linkId = newLinkId();
+  await append(ctx, tx, { userId: a.by, orgId: a.orgId } as Who, a.formId, {
+    type: 'FormClientLinkCreated',
+    payload: {
+      linkId,
+      formId: a.formId,
+      orgId: a.orgId,
+      reference: a.reference,
+      ...(a.recordKind ? { recordKind: a.recordKind } : {}),
+      ...(a.recordId ? { recordId: a.recordId } : {}),
+      expiresAt: a.expiresAt.toISOString(),
+      by: a.by,
+    },
+  });
+  return { linkId, expiresAt: a.expiresAt };
+}
+
+/** Revokes an unrevoked link inside the caller's transaction. A link that is gone or already revoked is left alone. */
+export async function revokeClientLinkIn(
+  tx: Parameters<Parameters<typeof withAppendTx>[1]>[0],
+  ctx: Ctx,
+  a: { orgId: string; formId: string; linkId: string; by: string },
+): Promise<boolean> {
+  const l = await one(
+    tx,
+    'SELECT revoked_at FROM form_client_links WHERE id=$1 AND form_id=$2 AND org_id=$3 FOR UPDATE',
+    [a.linkId, a.formId, a.orgId],
+  );
+  if (!l || l.revoked_at) return false;
+  await append(ctx, tx, { userId: a.by, orgId: a.orgId } as Who, a.formId, {
+    type: 'FormClientLinkRevoked',
+    payload: { linkId: a.linkId, formId: a.formId, orgId: a.orgId, by: a.by },
+  });
+  return true;
+}
+
+/** The signed URL of a link, computed on read; null when the form is not published. */
+export async function clientLinkUrl(ctx: Ctx, orgId: string, formId: string, linkId: string): Promise<string | null> {
+  const r = await one(ctx.pool, 'SELECT * FROM form_client_links WHERE id=$1 AND org_id=$2', [linkId, orgId]);
+  const p = await one(ctx.pool, 'SELECT public_id FROM form_publications WHERE form_id=$1 AND org_id=$2', [formId, orgId]);
+  if (!r || !p) return null;
+  return (await toDto(ctx, formId, p.public_id, r)).url;
+}
+
 /** A personal link for one client (or record). Also used by journey steps. */
 export async function createClientLink(
   ctx: Ctx,

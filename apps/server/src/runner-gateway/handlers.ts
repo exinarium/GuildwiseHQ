@@ -1,3 +1,4 @@
+import { applyJourneyWebhookResult } from '../journeys/webhook-calls.ts';
 import {
   CAPABILITY_REGISTRY_FEATURE,
   CHAT_ACTIVITY_FEATURE,
@@ -555,6 +556,11 @@ export class RunnerHandlers {
         msg.commandId,
       ]);
       await applyDeliverySendResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'journey.webhook.call') {
+      // Terminal: the server retries with backoff. The body is emptied at once.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [msg.commandId]);
+      await applyJourneyWebhookResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'repo.create') {
       // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

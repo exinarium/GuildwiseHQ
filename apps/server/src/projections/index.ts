@@ -30,6 +30,7 @@ import { intakeBatchProjectors } from './intake-batch.ts';
 import { interestRunProjectors } from './interest-runs.ts';
 import { interestProjectors } from './interests.ts';
 import { journeyProjectors } from './journeys.ts';
+import { journeyWaitProjectors } from './journey-waits.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
@@ -85,6 +86,7 @@ const domains: Array<Record<string, Projector>> = [
   cardProjectors,
   subworkflowProjectors,
   journeyProjectors,
+  journeyWaitProjectors,
   shiftProjectors,
   costProjectors,
   providerKeyProjectors,
@@ -215,6 +217,9 @@ export const PROJECTION_TABLES = [
   'journey_record_refs',
   'journey_instances',
   'journey_step_runs',
+  'journey_waits',
+  'journey_webhook_calls',
+  'journey_hook_triggers',
   'card_handoffs',
   'card_transitions',
   'card_activity',
