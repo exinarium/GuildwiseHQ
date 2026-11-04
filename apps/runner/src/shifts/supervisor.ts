@@ -24,6 +24,7 @@ import {
   identityLast,
   isDelegateServerRpc,
   isPublishRequest,
+  isSafeGitRef,
   isTerminalReport,
   isValidReportPath,
   type LedgerMatch,
@@ -169,6 +170,7 @@ import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.t
 import {
   type BranchSnapshot,
   discardOutOfScope,
+  uncommittedOutOfScope,
   discardTestArtifacts,
   type GuardInput,
   resetReadOnlyWorktree,
@@ -354,6 +356,10 @@ interface ActiveShift {
   syncMain?: { result: NonNullable<ShiftStartedSyncMain['result']>; commit?: string; files?: string[] };
   /** `origin/<main>` SHAs merged into the card branch this shift: the guard exempts what those merges brought in. */
   mainShas: string[];
+  /** Shas of the card's base and working branch (local and origin/): merges of them are exempt in the guard. */
+  baseTips: string[];
+  /** When the shift's start sha was taken (ms since epoch). */
+  startedAtMs?: number;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
   forwards?: EnvForwards;
   /** Releases the hold on the agent's TMPDIR (see `holdAgentTmp`). */
@@ -381,6 +387,7 @@ interface PersistedShift {
   msg: ShiftStartMsg;
   startedSent: boolean;
   mainShas?: string[];
+  baseTips?: string[];
 }
 
 /**
@@ -489,7 +496,7 @@ export class ShiftSupervisor {
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
   async handleStart(
     msg: ShiftStartMsg,
-    resume?: { startedSent: boolean; mainShas?: string[] },
+    resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[] },
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
@@ -520,6 +527,7 @@ export class ShiftSupervisor {
       counter: new ContextCounter(msg.graph?.arm ?? 'none'),
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
+      baseTips: resume?.baseTips ? [...resume.baseTips] : [],
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
@@ -573,6 +581,7 @@ export class ShiftSupervisor {
         void this.handleStart(rec.msg, {
           startedSent: rec.startedSent,
           ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
+          ...(rec.baseTips ? { baseTips: rec.baseTips } : {}),
         });
       } catch (err) {
         this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
@@ -609,6 +618,7 @@ export class ShiftSupervisor {
         msg: s.msg,
         startedSent: !!s.startedSent,
         ...(s.mainShas.length ? { mainShas: s.mainShas } : {}),
+        ...(s.baseTips.length ? { baseTips: s.baseTips } : {}),
       };
       writeFileSync(`${file}.tmp`, JSON.stringify(rec), { mode: 0o600 });
       renameSync(`${file}.tmp`, file);
@@ -1041,6 +1051,8 @@ export class ShiftSupervisor {
         this.log.warn(`${msg.brief.card.ref}: ${note}`);
       }
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
+      s.startedAtMs = Date.now();
+      await this.recordBaseTips(s);
       s.branchesAtStart = await snapshotBranches(cwd);
       const seen = await originBranchNames(repo.localPath);
       if (seen.length) s.originBranches = seen;
@@ -1520,22 +1532,42 @@ export class ShiftSupervisor {
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
       await discardTestArtifacts(s.worktree.path);
+      let holdCommit: string[] = [];
       // (not while a main-branch merge waits for the architect: discarding paths would wreck the merge state)
       if (s.startSha && !(await mergeInProgress(s.worktree.path))) {
-        const dropped = await discardOutOfScope(this.guardInput(s, s.worktree.path, s.startSha));
-        if (dropped.length > 0)
-          this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${dropped.join(', ')}`);
+        const input = this.guardInput(s, s.worktree.path, s.startSha);
+        const r = await discardOutOfScope(input);
+        if (r.discarded.length > 0)
+          this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${r.discarded.join(', ')}`);
+        if (r.kept.length > 0)
+          this.log.warn(
+            `kept ${r.kept.length} out-of-scope paths of shift ${msg.shiftId} that are not its own changes: ${r.kept.slice(0, 10).join(', ')}`,
+          );
+        if (r.skipped) {
+          holdCommit = await uncommittedOutOfScope(input);
+          const text =
+            `The out-of-scope discard was skipped: HEAD moved from ${r.skipped.from.slice(0, 8)} to ${r.skipped.to.slice(0, 8)} ` +
+            `outside this shift's commits (a reset, rebase or rewrite of ${s.worktree.branchName}). Nothing was reverted.` +
+            (holdCommit.length > 0
+              ? ` These out-of-scope files were left uncommitted: ${holdCommit.slice(0, 10).join(', ')}.`
+              : '');
+          this.log.warn(`${msg.brief.card.ref}: ${text}`);
+          await this.submit(s, { kind: 'comment', note: text });
+        }
       }
       // A shift that ends without a report but with work in the worktree says so on the card (a denied tool used to
       // end shifts silently, with the work only in the worktree).
       const unreported =
         s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout' || s.stopReason === 'idle');
       const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
-      const committed = await autoCommit({
-        worktree: s.worktree.path,
-        ticket: ticketOf(msg),
-        env: s.env,
-      });
+      const committed =
+        holdCommit.length > 0
+          ? false
+          : await autoCommit({
+              worktree: s.worktree.path,
+              ticket: ticketOf(msg),
+              env: s.env,
+            });
       if (leftovers.length > 0) {
         const sha = committed
           ? (await git(s.worktree.path, ['rev-parse', '--short', 'HEAD'])).stdout.trim()
@@ -2056,6 +2088,29 @@ export class ShiftSupervisor {
     return { ok: true, result: describeSynced(synced) };
   }
 
+  /** Records the tips of the card's base and working branch (local and origin/): merges of them are base content. */
+  private async recordBaseTips(s: ActiveShift): Promise<void> {
+    const wt = s.worktree?.path;
+    if (!wt) return;
+    const branches = new Set(
+      [s.worktree?.baseBranch, s.msg.brief.project.workingBranch].filter(
+        (b): b is string => !!b && isSafeGitRef(b),
+      ),
+    );
+    let added = false;
+    for (const b of branches) {
+      for (const ref of [`refs/remotes/origin/${b}`, `refs/heads/${b}`]) {
+        const r = await git(wt, ['rev-parse', '--verify', '--quiet', ref]);
+        const sha = r.exitCode === 0 ? r.stdout.trim() : '';
+        if (sha && !s.baseTips.includes(sha)) {
+          s.baseTips.push(sha);
+          added = true;
+        }
+      }
+    }
+    if (added) this.persist(s);
+  }
+
   /** The guard's view of this shift: the role's scope plus what the project and the main-branch merges add. */
   private guardInput(s: ActiveShift, worktree: string, startSha: string): GuardInput {
     const { msg } = s;
@@ -2076,6 +2131,8 @@ export class ShiftSupervisor {
       ...(s.worktree?.baseBranch ? { baseBranch: s.worktree.baseBranch } : {}),
       ...(extra.length ? { extraWritableGlobs: extra } : {}),
       ...(s.mainShas.length ? { mainMergeShas: s.mainShas } : {}),
+      ...(s.baseTips.length ? { baseTipShas: s.baseTips } : {}),
+      ...(s.startedAtMs ? { startedAtMs: s.startedAtMs } : {}),
     };
   }
 
@@ -2172,6 +2229,7 @@ export class ShiftSupervisor {
     else if (method === 'git.fetch') r = await architectFetch(ctx);
     else if (method === 'git.merge_main') r = await architectMergeMain(ctx);
     else r = await architectVerifyMerge(ctx);
+    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main')) await this.recordBaseTips(s);
     this.addProgress(
       s,
       'status',

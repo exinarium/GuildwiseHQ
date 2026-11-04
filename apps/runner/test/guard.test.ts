@@ -208,7 +208,7 @@ describe('writable globs are enforced for every role (review M3)', () => {
     expect((await runGuard(input([]))).map((x) => x.rule)).toContain('edited_outside_writable_globs');
     // and the runner throws the out-of-scope edit away instead of committing it
     const dropped = await discardOutOfScope(input(['notes/**']));
-    expect(dropped).toEqual(['src.ts']);
+    expect(dropped.discarded).toEqual(['src.ts']);
     expect(repo.clone).toBeTruthy();
   });
 });
@@ -257,7 +257,7 @@ describe('test output directories are artifacts, not changes', () => {
       branchesAtStart: {},
       e2eGlobs: ['e2e/**'],
     };
-    expect(await discardOutOfScope(input)).toEqual([]);
+    expect((await discardOutOfScope(input)).discarded).toEqual([]);
     expect(await discardTestArtifacts(path)).toBe(true);
     expect(existsSync(join(path, 'test-results'))).toBe(false);
     expect(existsSync(join(path, 'apps/web/test-results'))).toBe(false);
