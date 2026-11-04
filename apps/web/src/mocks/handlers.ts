@@ -30,6 +30,7 @@ import {
   transition,
   workflows,
 } from './db.ts';
+import { agentMoveHandlers } from './handlers-agent-move.ts';
 import { chatHandlers } from './handlers-chat.ts';
 import { delegationHandlers } from './handlers-delegation.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
@@ -528,6 +529,7 @@ export const handlers = [
   ...delegationHandlers,
   ...governanceHandlers,
   ...extraHandlers,
+  ...agentMoveHandlers,
 ];
 
 function unlink(id: string) {

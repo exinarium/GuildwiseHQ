@@ -2,6 +2,7 @@ import {
   CardParamsSchema,
   DecisionPolicyRequestSchema,
   IdParamsSchema,
+  isOrgManager,
   MemberParamsSchema,
   MoveAllAgentsPreviewQuerySchema,
   MoveAllAgentsRequestSchema,
@@ -26,7 +27,8 @@ import {
   shareProject,
 } from '../commands/sharing.ts';
 import type { Ctx } from '../context.ts';
-import { notFound } from '../errors.ts';
+import { one } from '../db/sql.ts';
+import { forbidden, notFound } from '../errors.ts';
 import { getAgentDto } from '../queries/agents.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getProjectDetail } from '../queries/misc.ts';
@@ -104,18 +106,22 @@ export function sharingRoutes(ctx: Ctx) {
       return MoveTargetsResponseSchema.parse(await listMoveTargets(ctx.pool, a, s.user.id));
     });
 
-    /** Owner/Admin: workstations (any status) that hold the organization's agents. */
+    /** Workstations (any status) that hold agents the caller may move: all for an Owner or Admin, the hired ones otherwise. */
     app.get('/api/agents/workstations', async (req) => {
-      const a = await requireOrg(ctx, req, { min: 'admin' });
-      return { workstations: await agentHomes(ctx.pool, a.orgId, a.session.user.id) };
+      const a = await requireOrg(ctx, req);
+      return {
+        workstations: await agentHomes(ctx.pool, a.orgId, a.session.user.id, {
+          own: !isOrgManager({ orgRole: a.role }),
+        }),
+      };
     });
 
-    /** Owner/Admin: moves every agent of a workstation to another one (partial success is reported). */
+    /** Moves every agent of a workstation the caller may move to another one (partial success is reported). */
     app.post(
       '/api/workstations/:id/move-agents',
       { schema: { params: IdParamsSchema, body: MoveAllAgentsRequestSchema } },
       async (req) => {
-        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const a = await requireOrg(ctx, req);
         const r = await moveAllAgents(ctx, whoOf(a), req.params.id, req.body);
         if (r.moved.length > 0) ctx.services.dispatcher.trigger();
         return r;
@@ -127,16 +133,28 @@ export function sharingRoutes(ctx: Ctx) {
       '/api/workstations/:id/move-agents/preview',
       { schema: { params: IdParamsSchema, querystring: MoveAllAgentsPreviewQuerySchema } },
       async (req) => {
-        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const a = await requireOrg(ctx, req);
         return moveAllAgents(ctx, whoOf(a), req.params.id, req.query, { dryRun: true });
       },
     );
 
     /** The workstations the agents of :id can move to (same rule as the single move). */
     app.get('/api/workstations/:id/move-targets', { schema: { params: IdParamsSchema } }, async (req) => {
-      const a = await requireOrg(ctx, req, { min: 'admin' });
+      const a = await requireOrg(ctx, req);
       if (!(await loadSourceWorkstation(ctx.pool, a.orgId, req.params.id)))
         throw notFound('workstation not found in this organization', 'workstation_not_found');
+      if (!isOrgManager({ orgRole: a.role })) {
+        const own = await one(
+          ctx.pool,
+          `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status <> 'retired'
+             AND manager_user_id=$3 AND NOT is_builtin LIMIT 1`,
+          [a.orgId, req.params.id, a.session.user.id],
+        );
+        if (!own)
+          throw forbidden(
+            'only the organization Owner and Admins, or the hiring manager of these agents, can move them',
+          );
+      }
       return MoveTargetsResponseSchema.parse(
         await listMoveTargets(
           ctx.pool,

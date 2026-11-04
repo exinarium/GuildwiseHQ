@@ -221,6 +221,54 @@ describe('removed workstations with agents (Workstations page)', () => {
     expect(await screen.findByText('Retire My workstation?')).toBeVisible();
   });
 
+  it('the move-all result stays visible after the refetch drops the emptied workstation', async () => {
+    let moved = false;
+    const orig = fetchMock.getMockImplementation()!;
+    const ref = { agentId: ID(101), name: 'Una' };
+    const body = (dryRun: boolean) => ({
+      dryRun,
+      scope: 'all',
+      source: { id: WS, name: 'My workstation', status: 'unlinked', connected: false },
+      target: { id: WS_Y, name: 'Desk' },
+      moved: [{ ...ref, releasedClaims: [] }],
+      blocked: [
+        {
+          agentId: ID(102),
+          name: 'Devon',
+          reason: 'one_devops',
+          code: 'one_devops_per_workstation',
+          message: 'Desk already has a DevOps engineer',
+        },
+      ],
+      needsUnsandboxedAck: false,
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = url.split('?')[0]!;
+      if (path === `/api/workstations/${WS}/move-agents/preview`) return json(body(true));
+      if (path === `/api/workstations/${WS}/move-agents` && init?.method === 'POST') {
+        moved = true;
+        return json(body(false));
+      }
+      if (moved && path === '/api/agents/workstations') return json({ workstations: [] });
+      return orig(url, init);
+    });
+    wrap(<Workstations />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Move all agents from My workstation' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Move 1 agent' }));
+    const result = await screen.findByTestId('move-all-result');
+    expect(result).toHaveTextContent('1 moved to Desk, 1 not moved');
+    expect(screen.getByTestId('move-all-not-moved')).toHaveTextContent('Devon');
+    expect(screen.getByTestId('move-all-not-moved')).toHaveTextContent('DevOps engineer');
+    // the homes list is refetched without the workstation; the result must remain
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/agents/workstations')).length,
+      ).toBeGreaterThan(1),
+    );
+    expect(screen.getByTestId('move-all-result')).toBeVisible();
+    expect(screen.queryByTestId('stranded-workstations')).not.toBeNull();
+  });
+
   it('a member sees no section', async () => {
     role = 'member';
     wrap(<Workstations />);
