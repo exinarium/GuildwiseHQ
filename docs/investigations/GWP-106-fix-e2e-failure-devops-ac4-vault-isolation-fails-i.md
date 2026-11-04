@@ -191,3 +191,93 @@ before it produced those rows. This card changes none of them, so card AC6 is sa
   also checks the seed files on disk.
 - Coordination: GWP-103 (`tester-e2e-env`) edits `e2e/support/*`. This design does not touch them, so there is no
   conflict. GWP-105 is in the same group and also touches only its own spec.
+
+## 7. Reference change for `e2e/tests/devops.spec.ts`
+
+The spec is owned by the tester role, so the change is written out here to apply as it stands. Checked against the
+base commit: `POST /api/vaults` returns the vault object (`apps/server/src/routes/vaults.ts`, `return one(whoOf(a), id)`)
+and `POST /api/agents` returns the agent object (`apps/server/src/routes/agents.ts`, `return one(a.session.user.id, id)`),
+so both have `.id` at the top level, as `halId` already relies on.
+
+### 7.1 Store Dana's id at hire (`setup`, l.24-27 and l.126-136)
+
+```ts
+// with the other module-level lets
+let danaId: string;
+```
+
+```ts
+  expect(hire.status(), await hire.text()).toBe(201);
+  danaId = (await hire.json()).id as string;
+```
+
+### 7.2 Capture the two vault ids (AC4, after l.521)
+
+```ts
+  expect(hobVault.status(), await hobVault.text()).toBe(201);
+  const hobVaultId = (await hobVault.json()).id as string;
+  // the organization vault registered in AC2 (the same lookup as workClone)
+  const workVaultId = (
+    await q<{ id: string }>(
+      `SELECT id FROM vaults WHERE kind='org' AND org_id = (SELECT org_id FROM projects WHERE id=$1)`,
+      [projectId],
+    )
+  )[0]?.id as string;
+  expect(workVaultId).toBeTruthy();
+```
+
+### 7.3 Replace the `'both vaults cloned'` wait (l.526-539)
+
+```ts
+  // this test's two repository vaults are cloned on Dev Box, with their files on disk. The wait reads only these two
+  // vaults on this workstation: rows other specs leave in workstation_vaults (storage.spec runs first in a full run)
+  // must not satisfy it. local_path is recorded before the clone has its files, so the seed files are checked too.
+  // (The projects' automatic local folders are not clones.)
+  await waitFor(
+    'the organization and HOB vaults are cloned on Dev Box',
+    async () => {
+      const rows = await q<{ vault_id: string }>(
+        `SELECT vault_id FROM workstation_vaults
+          WHERE workstation_id = $1 AND vault_id = ANY($2::uuid[]) AND local_path IS NOT NULL`,
+        [workstationId, [workVaultId, hobVaultId]],
+      );
+      return (
+        rows.length === 2 &&
+        existsSync(join(HOME, 'vaults', workVaultId, 'standing-orders.md')) &&
+        existsSync(join(HOME, 'vaults', hobVaultId, 'projects', 'hob', 'PROJECT.md'))
+      );
+    },
+    (ok) => ok,
+    30_000,
+  );
+```
+
+`workstation_vaults.workstation_id` and `vault_id` are both `uuid` (`apps/server/migrations/0300_vaults.sql` l.18-20),
+so `$2::uuid[]` matches the column type.
+
+### 7.4 Read Dana by id (l.575-577 and l.593)
+
+Delete the `const dana = ... .find((a) => a.name === 'Dana')` lookup and use:
+
+```ts
+  const w = instructions(danaId);
+```
+
+### 7.5 Assertions
+
+Lines 594-603 stay exactly as they are. Optional addition, only together with its positive control, and only if a run
+shows the read list in this form (`packages/shared/src/prompt/readable.ts` l.26):
+
+```ts
+  expect(h).toContain(join(HOME, 'vaults', hobVaultId)); // positive control: Hal is given the HOB vault folder
+  expect(w).not.toContain(join(HOME, 'vaults', hobVaultId)); // Dana is not
+```
+
+No skip, no retry, no timeout change, no `>= 2` count, no change under `e2e/support/`, no product change.
+
+### 7.6 Runs (DevOps, per standing order)
+
+1. `pnpm -C e2e exec playwright test --project=devops` three times: green.
+2. `pnpm -C e2e exec playwright test --project=storage --project=devops`: fails on the base commit at AC4, green with
+   the change.
+3. The full suite on release/1.5.0: AC4 green, no new failures compared with the GWP-99 run.
