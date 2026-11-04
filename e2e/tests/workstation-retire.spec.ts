@@ -14,6 +14,8 @@ test.describe.configure({ mode: 'serial' });
 const RETIRER = { email: 'retirer@e2e.test', name: 'E2E Retirer', password: 'retirer-password-12345' };
 const RETADMIN = { email: 'retadmin@e2e.test', name: 'E2E RetAdmin', password: 'retadmin-password-12345' };
 const RETMEM = { email: 'retmem@e2e.test', name: 'E2E RetMem', password: 'retmem-password-12345' };
+/** Owner of a second organization that shares the Retirer's machine. */
+const RETOTHER = { email: 'retother@e2e.test', name: 'E2E RetOther', password: 'retother-password-12345' };
 
 let page: Page;
 let api: APIRequestContext;
@@ -319,4 +321,112 @@ test('AC7: the retirement and every agent handover are in the audit log', async 
   const ownerId = (await q<{ id: string }>('SELECT id FROM users WHERE lower(email)=$1', [RETIRER.email]))[0]!
     .id;
   for (const e of [...moved, ...marked]) expect(e.actor_id).toBe(ownerId);
+});
+
+test("a machine shared by two organizations: an Admin who is not its user sees only their organization's agents and shifts; its user sees and hands over both", async () => {
+  // the Owner of a second organization joins the Retirer's organization as an Admin, then pairs one machine: it serves
+  // both organizations and holds an agent of each
+  await inviteAndAccept(api, RETOTHER);
+  const other = await apiAs(RETOTHER.email, RETOTHER.password);
+  const otherOrg = (await (await other.get('/api/org')).json()).id as string;
+  expect(otherOrg).not.toBe(orgId);
+  await deleteMailFor(RETOTHER.email);
+  const inv = await api.post('/api/org/invitations', { data: { email: RETOTHER.email, role: 'admin' } });
+  expect(inv.ok(), await inv.text()).toBeTruthy();
+  const token = /\/invite\/([A-Za-z0-9_-]+)/.exec((await waitForMail(RETOTHER.email)).text)?.[1] as string;
+  expect(token).toBeTruthy();
+  const acc = await other.post(`/api/invitations/${token}/accept-existing`, { data: {} });
+  expect(acc.status(), await acc.text()).toBe(201);
+  const inA = { 'x-aom-org': orgId };
+  const inB = { 'x-aom-org': otherOrg };
+  const shared = await pair(other, 'Ret Shared');
+  const hireIn = async (headers: Record<string, string>, name: string) => {
+    const r = await other.post('/api/agents', {
+      headers,
+      data: { name, roleKey: 'builder', seniority: 'junior', workstationId: shared, runtime: 'mock' },
+    });
+    expect(r.status(), await r.text()).toBe(201);
+    const b = await r.json();
+    return (b.agent?.id ?? b.id) as string;
+  };
+  const larch = await hireIn(inA, 'Larch');
+  const hazel = await hireIn(inB, 'Hazel');
+  expect(
+    (
+      await q<{ org_id: string; workstation_id: string }>(
+        'SELECT org_id, workstation_id FROM agents WHERE id=$1',
+        [larch],
+      )
+    )[0],
+  ).toMatchObject({ org_id: orgId, workstation_id: shared });
+  expect(
+    (
+      await q<{ org_id: string; workstation_id: string }>(
+        'SELECT org_id, workstation_id FROM agents WHERE id=$1',
+        [hazel],
+      )
+    )[0],
+  ).toMatchObject({ org_id: otherOrg, workstation_id: shared });
+
+  // the other organization's agent is working on the shared machine
+  const shiftId = crypto.randomUUID();
+  await q(
+    `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+     VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now())`,
+    [shiftId, otherOrg, hazel, shared],
+  );
+  try {
+    // an Admin and the Owner of the first organization, neither the machine's user: own agents only, no other-org shift,
+    // may not unpair
+    for (const who of [await apiAs(RETADMIN.email, RETADMIN.password), api]) {
+      const av = await who.get(`/api/workstations/${shared}/retire-preview`, { headers: inA });
+      expect(av.status(), await av.text()).toBe(200);
+      const view = await av.json();
+      expect(view.canUnpair).toBe(false);
+      expect((view.agents as Array<{ id: string }>).map((a) => a.id)).toEqual([larch]);
+      expect(view.working).toEqual([]);
+      expect(JSON.stringify(view)).not.toContain('Hazel');
+      const ar = await who.post(`/api/workstations/${shared}/retire`, {
+        headers: inA,
+        data: { handover: 'needs_rehome' },
+      });
+      expect(ar.status()).toBe(403);
+      expect((await ar.json()).error.code).toBe('workstation_not_yours');
+    }
+
+    // the machine's user sees both organizations' agents and the running shift, and is refused while it runs
+    const ov = await (await other.get(`/api/workstations/${shared}/retire-preview`, { headers: inA })).json();
+    expect(ov.canUnpair).toBe(true);
+    expect((ov.agents as Array<{ id: string }>).map((a) => a.id).sort()).toEqual([larch, hazel].sort());
+    expect(
+      (ov.agents as Array<{ id: string; otherOrg: boolean }>).find((a) => a.id === hazel)?.otherOrg,
+    ).toBe(true);
+    expect((ov.working as Array<{ name: string }>).map((a) => a.name)).toEqual(['Hazel']);
+    const refused = await other.post(`/api/workstations/${shared}/retire`, {
+      headers: inA,
+      data: { handover: 'needs_rehome' },
+    });
+    expect(refused.status()).toBe(409);
+    const { error } = await refused.json();
+    expect(error.code).toBe('agents_working');
+    expect((error.details.agents as Array<{ name: string }>).map((a) => a.name)).toEqual(['Hazel']);
+    expect(await wsStatus(shared)).toBe('active');
+  } finally {
+    await q(`UPDATE shifts SET status='ended', ended_at=now() WHERE id=$1`, [shiftId]);
+  }
+
+  // once the shift ended, the machine's user retires it: both organizations' agents need a new home, each org is audited
+  const ok = await other.post(`/api/workstations/${shared}/retire`, {
+    headers: inA,
+    data: { handover: 'needs_rehome' },
+  });
+  expect(ok.status(), await ok.text()).toBe(200);
+  for (const id of [larch, hazel])
+    expect(await agentRow(id)).toMatchObject({ status: 'needs_rehome', workstation_id: null });
+  expect(await wsStatus(shared)).toBe('unlinked');
+  expect(await leftOn(shared)).toBe(0);
+  const audit = await eventsOf('WorkstationRetired', `workstation-${shared}`);
+  expect(audit.map((e) => e.org_id).sort()).toEqual([orgId, otherOrg].sort());
+  for (const e of audit) expect(e.payload.needsRehomeAgentIds).toEqual([e.org_id === orgId ? larch : hazel]);
+  for (const id of [larch, hazel]) expect(await eventsOf('AgentNeedsRehome', `agent-${id}`)).toHaveLength(1);
 });
