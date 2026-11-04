@@ -47,6 +47,7 @@ import {
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
+import { isReadOnlyWorktreeRole } from '../adapters/claude-policy.ts';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
@@ -1189,6 +1190,9 @@ export class ShiftSupervisor {
       texts.instructions += `\n${renderReadableFolders(mergeReadFolders(registeredFolders, vaultReadFolder), { workingDir: cwd })}\n`;
     else if (vaultReadFolder.length > 0)
       texts.instructions += `\n${renderReadableFolders(vaultReadFolder, { workingDir: cwd })}\n`;
+    if (msg.kind === 'card' && msg.worktree && isReadOnlyWorktreeRole(msg.agent.permissions))
+      texts.instructions +=
+        '\nYour working folder is read-only in this role. A "Read-only file system" error from a write there (files, git add, git commit) is by design, not an environment fault: do not ask DevOps to fix it.\n';
     // The card's attachments, copied read-only next to the shift (outside the worktree) and listed in the instructions.
     const attachDir = cardAttachmentsDir(sandbox.tmp);
     mkdirSync(attachDir, { recursive: true });
