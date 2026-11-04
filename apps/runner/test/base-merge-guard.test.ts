@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { autoCommit } from '../src/shifts/autocommit.ts';
 import {
   discardOutOfScope,
+  fetchedRemoteTip,
   type GuardInput,
   runGuard,
   snapshotBranches,
@@ -271,5 +272,42 @@ describe('the shift-end sequence after a base merge (GWP-63 replay)', () => {
     expect(hold).toEqual(['src/other.ts']);
     expect(sh(t.path, 'git', ['diff', '--name-only', merge, 'HEAD'])).toBe('');
     expect(sh(t.path, 'git', ['ls-files'])).toBe(files);
+  });
+});
+
+describe('the base moves while the shift runs', () => {
+  it('a merge of a newer origin/<base> than the start tip is exempt once the tip is refreshed; the discard and autoCommit revert nothing', async () => {
+    const t = await setup();
+    t.releasePush({ 'rel/early.ts': 'early\n' });
+    const startTips = t.tips();
+    // another shift of the same clone fetches a newer release while this architect shift runs
+    t.releasePush({ 'rel/late.ts': 'late\n', 'src/existing.ts': 'export const a = 5;\n', 'rel/old.ts': null }, 'later');
+    sh(t.path, 'git', ['merge', '--no-ff', '-m', 'merge release', `origin/${REL}`]);
+    const fresh = await fetchedRemoteTip(t.path, REL);
+    expect(fresh).toBe(t.tips()[0]);
+    expect(startTips).not.toContain(fresh);
+    const input = t.input({ baseTipShas: [...startTips, fresh as string] });
+    expect(await rules(runGuard(input))).toEqual([]);
+    write(t.path, 'ok.md', 'ok\n');
+    const before = sh(t.path, 'git', ['rev-parse', 'HEAD']);
+    expect(await discardOutOfScope(input)).toEqual({ discarded: [], kept: [] });
+    await autoCommit({
+      worktree: t.path,
+      env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@x.test', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@x.test' },
+    });
+    expect(sh(t.path, 'git', ['diff', '--name-status', before, 'HEAD'])).toBe('A\tok.md');
+    expect(existsSync(join(t.path, 'rel/late.ts'))).toBe(true);
+  });
+
+  it('only a fetch makes origin/<base> a trusted tip; a hand-moved ref is not', async () => {
+    const t = await setup();
+    t.releasePush({ 'rel/x.ts': 'x\n' });
+    expect(await fetchedRemoteTip(t.path, REL)).toBe(t.tips()[0]);
+    // the agent moves the remote-tracking ref to its own commit
+    write(t.path, 'mine.ts', 'mine\n');
+    t.commit('mine');
+    sh(t.path, 'git', ['update-ref', `refs/remotes/origin/${REL}`, 'HEAD']);
+    expect(await fetchedRemoteTip(t.path, REL)).toBeNull();
+    expect(await fetchedRemoteTip(t.path, 'no-such-branch')).toBeNull();
   });
 });

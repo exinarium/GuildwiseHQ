@@ -170,6 +170,7 @@ import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.t
 import {
   type BranchSnapshot,
   discardOutOfScope,
+  fetchedRemoteTip,
   uncommittedOutOfScope,
   discardTestArtifacts,
   type GuardInput,
@@ -1535,6 +1536,7 @@ export class ShiftSupervisor {
       let holdCommit: string[] = [];
       // (not while a main-branch merge waits for the architect: discarding paths would wreck the merge state)
       if (s.startSha && !(await mergeInProgress(s.worktree.path))) {
+        await this.recordBaseTips(s, true);
         const input = this.guardInput(s, s.worktree.path, s.startSha);
         const r = await discardOutOfScope(input);
         if (r.discarded.length > 0)
@@ -2089,7 +2091,7 @@ export class ShiftSupervisor {
   }
 
   /** Records the tips of the card's base and working branch (local and origin/): merges of them are base content. */
-  private async recordBaseTips(s: ActiveShift): Promise<void> {
+  private async recordBaseTips(s: ActiveShift, onlyFetched = false): Promise<void> {
     const wt = s.worktree?.path;
     if (!wt) return;
     const branches = new Set(
@@ -2098,14 +2100,22 @@ export class ShiftSupervisor {
       ),
     );
     let added = false;
+    const add = (sha: string | null | undefined): void => {
+      if (sha && !s.baseTips.includes(sha)) {
+        s.baseTips.push(sha);
+        added = true;
+      }
+    };
     for (const b of branches) {
+      if (onlyFetched) {
+        // after the start only a runner fetch counts (other shifts of this clone fetch while this one runs): refs the
+        // agent can write (refs/heads/<b>, a hand-moved origin/<b>) are not trusted mid-shift
+        add(await fetchedRemoteTip(wt, b));
+        continue;
+      }
       for (const ref of [`refs/remotes/origin/${b}`, `refs/heads/${b}`]) {
         const r = await git(wt, ['rev-parse', '--verify', '--quiet', ref]);
-        const sha = r.exitCode === 0 ? r.stdout.trim() : '';
-        if (sha && !s.baseTips.includes(sha)) {
-          s.baseTips.push(sha);
-          added = true;
-        }
+        if (r.exitCode === 0) add(r.stdout.trim());
       }
     }
     if (added) this.persist(s);
@@ -2229,7 +2239,8 @@ export class ShiftSupervisor {
     else if (method === 'git.fetch') r = await architectFetch(ctx);
     else if (method === 'git.merge_main') r = await architectMergeMain(ctx);
     else r = await architectVerifyMerge(ctx);
-    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main')) await this.recordBaseTips(s);
+    if (r.ok && (method === 'git.fetch' || method === 'git.merge_main'))
+      await this.recordBaseTips(s, true);
     this.addProgress(
       s,
       'status',
@@ -2602,6 +2613,7 @@ export class ShiftSupervisor {
       }
 
       if (s.worktree && s.startSha) {
+        await this.recordBaseTips(s, true);
         const violations = await runGuard(this.guardInput(s, s.worktree.path, s.startSha));
         if (violations.length > 0) {
           for (const v of violations) {

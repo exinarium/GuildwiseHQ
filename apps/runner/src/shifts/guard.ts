@@ -268,6 +268,19 @@ export async function mergeExemptions(
   return res;
 }
 
+/**
+ * The sha of `origin/<branch>` when the latest update of that remote-tracking ref was a fetch (the runner's own: other
+ * shifts of the same clone fetch it while this shift runs). A ref an agent moved by hand (`update-ref`, no fetch entry in
+ * its reflog) is not trusted. Null when the ref is missing or was not last moved by a fetch.
+ */
+export async function fetchedRemoteTip(worktree: string, branch: string): Promise<string | null> {
+  const ref = `refs/remotes/origin/${branch}`;
+  const rl = await git(worktree, ['reflog', 'show', '--format=%H%x09%gs', '-n', '1', ref]);
+  if (rl.exitCode !== 0) return null;
+  const [sha, subject = ''] = rl.stdout.trim().split('\t');
+  return sha && /^(fetch|pull)\b/.test(subject) ? sha : null;
+}
+
 /** Uncommitted paths (tracked and untracked), minus the sandbox stubs and test output dirs. */
 async function dirtyPaths(worktree: string): Promise<string[]> {
   const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
