@@ -6,8 +6,8 @@ import {
   RELEASE_PREP_MAX_SHIFT_MINUTES,
   type ReleasePrepTask,
   ReleasePrepTaskSchema,
-  releasePrepBriefOutcomes,
   type RunnerToServerOf,
+  releasePrepBriefOutcomes,
   type ServerToRunnerOf,
   type ShiftBrief,
   streamId,
@@ -22,8 +22,8 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { accountOf, agentSpecFor, briefAgent } from '../runner-gateway/brief.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
+import { accountOf, agentSpecFor, briefAgent } from '../runner-gateway/brief.ts';
 
 /**
  * Release prep tasks (design GWP-92 5.4/5.7): work inside a prep step that an agent does in a `release_prep` shift. The
@@ -54,10 +54,11 @@ export async function queueReleasePrepTasks(
   attempt: number,
   tasks: ReleasePrepTask[],
 ): Promise<void> {
-  const repo = await one(tx, 'SELECT workstation_id FROM release_docs_prep_repos WHERE run_id=$1 AND repo_id=$2', [
-    run.id,
-    repoId,
-  ]);
+  const repo = await one(
+    tx,
+    'SELECT workstation_id FROM release_docs_prep_repos WHERE run_id=$1 AND repo_id=$2',
+    [run.id, repoId],
+  );
   if (!repo) return;
   await ctx.store.append(
     tasks.map((task, position) => ({
@@ -106,7 +107,12 @@ export type PhaseTasksOutcome = {
   error?: string;
   report?: Record<string, unknown>;
 };
-export type PhaseTasksFinisher = (tx: Queryable, run: Row, repoId: string, tasks: Row[]) => Promise<PhaseTasksOutcome>;
+export type PhaseTasksFinisher = (
+  tx: Queryable,
+  run: Row,
+  repoId: string,
+  tasks: Row[],
+) => Promise<PhaseTasksOutcome>;
 
 const finishers = new Map<string, PhaseTasksFinisher>();
 /** Registered by the step modules (`videos/author`). */
@@ -171,7 +177,13 @@ function flushDelivery(ctx: Ctx): void {
   for (const w of ws) void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
 }
 
-function taskFinished(run: Row, taskId: string, ok: boolean, note: string, extra: { commit?: string; files?: string[] } = {}): AppendInput {
+function taskFinished(
+  run: Row,
+  taskId: string,
+  ok: boolean,
+  note: string,
+  extra: { commit?: string; files?: string[] } = {},
+): AppendInput {
   return {
     streamId: runStream(run.id),
     event: {
@@ -255,7 +267,11 @@ export async function releasePrepTaskPass(
     );
     const fail = async (reason: string) =>
       withAppendTx(ctx.pool, async (tx) => {
-        const cur = await one(tx, `SELECT * FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [t.id]);
+        const cur = await one(
+          tx,
+          `SELECT * FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`,
+          [t.id],
+        );
         if (cur) await finishReleasePrepTask(ctx, tx, cur, false, reason);
       });
     if (!task.success) {
@@ -274,15 +290,24 @@ export async function releasePrepTaskPass(
     const accounts = await loadProjectAccounts(ctx.pool, [t.project_id]);
     for (const a of builders) {
       const account = accountForAgent(accounts, t.project_id, a as never, now);
-      const reachable = a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
+      const reachable =
+        a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
       const conn = ctx.services.runners.get(a.ws_id);
       if (!conn || !conn.reconciled) continue;
       const shiftId = randomUUID();
       const ok = await withAppendTx(ctx.pool, async (tx) => {
-        const cur = await one(tx, `SELECT 1 FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [t.id]);
+        const cur = await one(
+          tx,
+          `SELECT 1 FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`,
+          [t.id],
+        );
         if (!cur) return false;
-        const open = await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND kind='release_prep' AND status <> 'ended' LIMIT 1`, [a.id]);
+        const open = await one(
+          tx,
+          `SELECT 1 FROM shifts WHERE agent_id=$1 AND kind='release_prep' AND status <> 'ended' LIMIT 1`,
+          [a.id],
+        );
         if (open) return false;
         await ctx.store.append(
           [
@@ -347,7 +372,8 @@ export async function buildReleasePrepShiftStart(
       kind: 'release_prep',
       stage: 'release_prep',
       stageLabel: 'Release prep task',
-      doneCriteria: 'The files are written and you ended with `aom prep done`, or you said why not with `aom prep fail`.',
+      doneCriteria:
+        'The files are written and you ended with `aom prep done`, or you said why not with `aom prep fail`.',
       outcomes: releasePrepBriefOutcomes(),
       maxShiftMinutes: RELEASE_PREP_MAX_SHIFT_MINUTES,
     },
@@ -394,7 +420,9 @@ export async function buildReleasePrepShiftStart(
     worktree: null,
     prepare: { rebase: false },
     maxShiftMinutes: RELEASE_PREP_MAX_SHIFT_MINUTES,
-    ...accountOf(await one(ctx.pool, 'SELECT account_key FROM shifts WHERE id=$1', [shiftId]).then((s) => s ?? {})),
+    ...accountOf(
+      await one(ctx.pool, 'SELECT account_key FROM shifts WHERE id=$1', [shiftId]).then((s) => s ?? {}),
+    ),
     releasePrep: {
       taskId: t.id,
       runId: t.run_id,
@@ -424,18 +452,28 @@ export async function applyReleasePrepReport(
   msg: RunnerToServerOf<'shift.report'>,
   shift: Row,
 ): Promise<ReportResult> {
-  const task = await one(tx, 'SELECT * FROM release_docs_prep_tasks WHERE shift_id=$1 FOR UPDATE', [shift.id]);
+  const task = await one(tx, 'SELECT * FROM release_docs_prep_tasks WHERE shift_id=$1 FOR UPDATE', [
+    shift.id,
+  ]);
   if (!task || task.status !== 'running')
-    return { accepted: false, error: 'this task is no longer open; there is nothing left to do. Finish now.' };
-  const report = msg.report;
-  if (report.kind === 'comment') return { accepted: true };
-  if (report.kind !== 'outcome' || (report.outcomeId !== PREP_OUTCOME.done && report.outcomeId !== PREP_OUTCOME.failed))
     return {
       accepted: false,
-      error: 'a release prep task ends with `aom prep done --summary "..."` or `aom prep fail --reason "..."`',
+      error: 'this task is no longer open; there is nothing left to do. Finish now.',
+    };
+  const report = msg.report;
+  if (report.kind === 'comment') return { accepted: true };
+  if (
+    report.kind !== 'outcome' ||
+    (report.outcomeId !== PREP_OUTCOME.done && report.outcomeId !== PREP_OUTCOME.failed)
+  )
+    return {
+      accepted: false,
+      error:
+        'a release prep task ends with `aom prep done --summary "..."` or `aom prep fail --reason "..."`',
     };
   const data = report.data as { commit?: unknown; files?: unknown; refused?: unknown };
-  const commit = typeof data.commit === 'string' && /^[0-9a-f]{40}$/.test(data.commit) ? data.commit : undefined;
+  const commit =
+    typeof data.commit === 'string' && /^[0-9a-f]{40}$/.test(data.commit) ? data.commit : undefined;
   const files = Array.isArray(data.files) ? data.files.map(String).slice(0, 50) : [];
   if (report.outcomeId === PREP_OUTCOME.done && !commit)
     await finishReleasePrepTask(ctx, tx, task, false, 'the workstation did not commit the files');
@@ -476,7 +514,12 @@ export async function endReleasePrepShift(
             agentId: shift.agent_id,
             outcome,
             durationMs: extra.durationMs ?? 0,
-            usage: extra.usage ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+            usage: extra.usage ?? {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
             exitCode: extra.exitCode,
             guardViolations: extra.guardViolations ?? [],
           },
@@ -487,9 +530,11 @@ export async function endReleasePrepShift(
     ],
     { tx },
   );
-  const task = await one(tx, `SELECT * FROM release_docs_prep_tasks WHERE shift_id=$1 AND status='running' FOR UPDATE`, [
-    shift.id,
-  ]);
+  const task = await one(
+    tx,
+    `SELECT * FROM release_docs_prep_tasks WHERE shift_id=$1 AND status='running' FOR UPDATE`,
+    [shift.id],
+  );
   if (!task) return;
   const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [task.run_id]);
   if (!run) return;
@@ -551,7 +596,8 @@ export function failedNewVideos(renderReport: unknown, authored: ReadonlySet<str
   const parsed = VideoStepReportSchema.safeParse(renderReport);
   if (!parsed.success) return out;
   for (const v of parsed.data.videos)
-    if (v.action === 'create' && v.state === 'failed' && authored.has(v.slug)) out.set(v.slug, v.error ?? 'the render failed');
+    if (v.action === 'create' && v.state === 'failed' && authored.has(v.slug))
+      out.set(v.slug, v.error ?? 'the render failed');
   return out;
 }
 

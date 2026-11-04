@@ -26,12 +26,12 @@ import {
   isPublishRequest,
   isSafeGitRef,
   isTerminalReport,
-  PREP_OUTCOME,
   isValidReportPath,
   type LedgerMatch,
   normalizeUrl,
   type OrgGraphScope,
   outcomeDataSchema,
+  PREP_OUTCOME,
   type PublishRequest,
   type ReadableFolder,
   type RepoReport,
@@ -99,6 +99,12 @@ import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import {
+  addPrepTaskWorktree,
+  finishPrepTask,
+  type PrepTaskWorktree,
+  removePrepTaskWorktree,
+} from '../git/release-prep-task.ts';
+import {
   abortMerge,
   mergeInProgress,
   mergeMainIntoCard,
@@ -116,12 +122,6 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
-import {
-  addPrepTaskWorktree,
-  finishPrepTask,
-  type PrepTaskWorktree,
-  removePrepTaskWorktree,
-} from '../git/release-prep-task.ts';
 import { ContextCounter } from '../graph/measure.ts';
 import type { GraphService } from '../graph/service.ts';
 import { diskProblem } from '../health/disk.ts';
