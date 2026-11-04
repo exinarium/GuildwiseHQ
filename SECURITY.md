@@ -39,6 +39,8 @@ Out of scope:
 - third-party services, such as Anthropic, git hosts, SMTP providers and payment providers;
 - findings that need a user to install malicious software on their own machine, unless the runner's protections were bypassed.
 
+Published forms are open to the public by design. Their threat model and controls are in [docs/security/public-forms.md](docs/security/public-forms.md).
+
 ## Safe testing
 
 Test only against systems you own or are allowed to test. Do not run tests against Guildwise Cloud data belonging to other people.

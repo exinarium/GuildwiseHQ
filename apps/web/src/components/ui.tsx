@@ -6,14 +6,18 @@ import { hueFor, initials } from '../lib/avatar.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { useDelayedFlag } from '../lib/useDelayedFlag.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
+import { Button, type Size, sizes, type Variant, variants } from './ui/Button.tsx';
 import { cx } from './ui/cx.ts';
+import { inputCls } from './ui/inputCls.ts';
 
 export { BottomSheet } from './ui/BottomSheet.tsx';
+export { Button, type Size, sizes, type Variant, variants } from './ui/Button.tsx';
 export { Callout } from './ui/Callout.tsx';
 export { FilterChip, PriorityPicker, Segmented } from './ui/Chips.tsx';
 export { ConfirmDialog } from './ui/ConfirmDialog.tsx';
 export { Disclosure } from './ui/Disclosure.tsx';
 export { EmptyState } from './ui/EmptyState.tsx';
+export { inputCls } from './ui/inputCls.ts';
 export { Menu, MenuItem, MenuSeparator } from './ui/Menu.tsx';
 export { ListSkeleton, PageSkeleton, Skeleton, SkeletonLine } from './ui/Skeleton.tsx';
 export { StatusDot } from './ui/StatusDot.tsx';
@@ -23,53 +27,6 @@ export { ToastProvider, useToast } from './ui/Toast.tsx';
 export { cx };
 
 // ---------------------------------------------------------------- buttons
-
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'danger-ghost' | 'link';
-type Size = 'sm' | 'md' | 'lg';
-const variants: Record<Variant, string> = {
-  primary: 'bg-brand text-brand-fg hover:bg-brand-hover disabled:bg-sunken disabled:text-disabled-fg',
-  secondary:
-    'border border-control bg-surface text-fg hover:bg-sunken disabled:text-disabled-fg disabled:hover:bg-surface',
-  danger:
-    'bg-danger-fill text-white hover:brightness-95 disabled:opacity-50 dark:border dark:border-danger-fill/60 dark:bg-danger-soft dark:text-danger-soft-fg dark:hover:brightness-110',
-  ghost: 'text-muted hover:bg-sunken hover:text-fg disabled:text-disabled-fg disabled:hover:bg-transparent',
-  'danger-ghost': 'text-danger hover:bg-danger-soft disabled:text-disabled-fg disabled:hover:bg-transparent',
-  link: 'text-brand-text underline-offset-2 hover:underline disabled:text-disabled-fg',
-};
-const sizes: Record<Size, string> = {
-  sm: 'h-8 px-3 text-sm [@media(pointer:coarse)]:min-h-11',
-  md: 'h-9 px-3.5 text-sm [@media(pointer:coarse)]:min-h-11',
-  lg: 'h-11 px-5 text-base',
-};
-
-export function Button({
-  variant = 'secondary',
-  size = 'md',
-  loading = false,
-  className,
-  type = 'button',
-  disabled,
-  children,
-  ...rest
-}: ComponentProps<'button'> & { variant?: Variant; size?: Size; loading?: boolean }) {
-  return (
-    <button
-      type={type}
-      disabled={disabled || loading}
-      aria-busy={loading || undefined}
-      className={cx(
-        'inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap transition-colors duration-100 active:translate-y-px disabled:cursor-not-allowed',
-        variant !== 'link' && sizes[size],
-        variants[variant],
-        className,
-      )}
-      {...rest}
-    >
-      {loading && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
-      {children}
-    </button>
-  );
-}
 
 /** A button-shaped router link, for navigation that should look like an action. */
 export function ButtonLink({
@@ -100,9 +57,6 @@ export function ButtonLink({
 }
 
 // ----------------------------------------------------------------- inputs
-
-export const inputCls =
-  'w-full min-h-9 rounded-control border border-control bg-surface px-3 py-1.5 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 disabled:bg-sunken disabled:text-disabled-fg [@media(pointer:coarse)]:min-h-11 aria-[invalid=true]:border-danger';
 
 export function Field({
   label,

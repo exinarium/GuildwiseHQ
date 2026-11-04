@@ -14,6 +14,7 @@ import type { Notifier } from './eventstore/notifier.ts';
 import type { PgEventStore } from './eventstore/pg-event-store.ts';
 import type { ExtensionHost } from './extension.ts';
 import type { Mailer } from './mail/mailer.ts';
+import type { RunnerOfflineHook } from './public-forms/offline-hook.ts';
 import type { PushService } from './push/notifier.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -84,6 +85,8 @@ export interface Services {
   webhookRelay: RelayHub;
   /** The write relay to a firm's own storage: streams a file to the runner that holds the connection and keeps nothing. */
   storage: StorageRelay;
+  /** What a public form does when the firm's runner is offline (the offline flow replaces the default). */
+  publicFormsOffline?: RunnerOfflineHook;
   /** Web Push notifier (only when VAPID is configured). */
   push?: PushService;
 }

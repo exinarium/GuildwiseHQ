@@ -62,7 +62,7 @@ export const ATTACHMENT_KINDS: Record<string, AttachmentKind> = {
 };
 
 /** Named so the refusal can say why. */
-const EXECUTABLE_EXTENSIONS = new Set([
+export const EXECUTABLE_EXTENSIONS = new Set([
   'exe',
   'dll',
   'bat',
@@ -92,7 +92,7 @@ const EXECUTABLE_EXTENSIONS = new Set([
 const startsWith = (b: Uint8Array, sig: number[], at = 0): boolean => sig.every((v, i) => b[at + i] === v);
 
 /** Executable file formats by their first bytes (whatever the file is called). */
-function executableMagic(b: Uint8Array): string | null {
+export function executableMagic(b: Uint8Array): string | null {
   if (startsWith(b, [0x4d, 0x5a])) return 'a Windows executable';
   if (startsWith(b, [0x7f, 0x45, 0x4c, 0x46])) return 'an ELF executable';
   if (
@@ -106,7 +106,7 @@ function executableMagic(b: Uint8Array): string | null {
 }
 
 /** Does the content look like what its extension says? (Magic numbers for binary types, no NUL for text.) */
-function magicMatches(ext: string, b: Uint8Array): boolean {
+export function magicMatches(ext: string, b: Uint8Array): boolean {
   switch (ext) {
     case 'png':
       return startsWith(b, [0x89, 0x50, 0x4e, 0x47]);

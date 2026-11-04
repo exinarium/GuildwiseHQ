@@ -43,6 +43,7 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'connection_id IN (SELECT id FROM storage_connections) AND user_id IN (SELECT id FROM users)',
   },
+  // Submissions of public forms (migration 2830): references only, operational, not an event.
   { table: 'user_totp', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'login_challenges', restoreWhere: 'user_id IN (SELECT id FROM users)' },

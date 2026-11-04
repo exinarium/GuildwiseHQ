@@ -55,6 +55,7 @@ import { registerMediaProxy } from './media-proxy.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
+import { publicFormRoutes } from './public-forms/routes.ts';
 import { registerPushNotifier } from './push/notifier.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentUxRoutes } from './routes/agent-ux.ts';
@@ -97,6 +98,7 @@ import { intakeRoutes } from './routes/intakes.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
+import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
@@ -107,11 +109,11 @@ import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
-import { journeyRoutes } from './routes/journeys.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
+import { publicFormAdminRoutes } from './routes/public-forms-admin.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
@@ -211,11 +213,16 @@ const DESK_LINK_TOKEN =
  * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
  */
 export function redactUrl(url: string): string {
-  return url
-    .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
-    .replace(DESK_LINK_TOKEN, '$1[redacted]')
-    .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
-    .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
+  return (
+    url
+      .replace(/(\/relay\/in\/)[^\s]*/gi, '$1[redacted]')
+      // a published form's public id is a capability to an organization's form
+      .replace(/(\/f\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(DESK_LINK_TOKEN, '$1[redacted]')
+      .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
+      .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+  );
 }
 
 /** pino `req` serializer: the default one with the URL redacted. */
@@ -273,6 +280,13 @@ export const LOG_REDACT = {
     'body.envelope',
     'payload.envelope',
     'err.body.envelope',
+    // Answers of a public form are never logged, whatever object holds them.
+    'req.body.answers',
+    '*.answers',
+    'body.answers',
+    '*.website',
+    '*.x-form-link',
+    '*.x-upload-token',
     // The text of an automation's result for the runner channels never reaches a log line.
     '*.whatsapp.text',
     '*.sheet.row',
@@ -497,6 +511,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(pushRoutes(ctx));
   await app.register(cardAttachmentRoutes(ctx));
   await app.register(formRoutes(ctx));
+  await app.register(publicFormAdminRoutes(ctx));
+  await app.register(publicFormRoutes(ctx, { webRoot: () => (config.serveWeb ? webDistDir(config) : null) }));
   const assistantClient =
     opts.assistantClient !== undefined
       ? opts.assistantClient

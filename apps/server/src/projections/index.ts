@@ -41,6 +41,7 @@ import { playbookProjectors } from './playbooks.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
+import { publicFormProjectors } from './public-forms.ts';
 import { questionFlowProjectors } from './question-flow.ts';
 import { relayProjectors } from './relay.ts';
 import { releaseProjectors } from './release.ts';
@@ -131,6 +132,7 @@ const domains: Array<Record<string, Projector>> = [
   relayProjectors,
   storageProjectors,
   formProjectors,
+  publicFormProjectors,
 ];
 
 /**
@@ -266,6 +268,8 @@ export const PROJECTION_TABLES = [
   'storage_connections',
   'forms',
   'form_versions',
+  'form_publications',
+  'form_client_links',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',
