@@ -7,6 +7,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, paths } from '../support/env.ts';
 import { pairRunner, startRunner } from '../support/runner.ts';
+import { saveJourneyInDesigner } from '../support/ui.ts';
 
 // Journey waits, gates and webhooks: a wait configured in the designer shows its deadline on the instance; a timeout runs
 // its action (elapsed, reminder, move to a step, ask the desk, cancel) and leaves a visible line; a gate is decided on the
@@ -158,8 +159,7 @@ test('designer: a wait is configured with what it waits for, how long and the ti
   await settings.getByLabel('Wait for', { exact: true }).selectOption('duration');
   await settings.getByLabel('Wait at most').fill('10');
   await settings.getByLabel('Unit').selectOption('minutes');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Journey saved')).toBeVisible();
+  await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
 
   let saved = (await (await api.get(`/api/journeys/${id}`)).json()).definition;
   const wait = saved.steps.find((s: { kind: string }) => s.kind === 'wait');
@@ -169,8 +169,7 @@ test('designer: a wait is configured with what it waits for, how long and the ti
   // a webhook wait needs a timeout action: pick "Ask the desk what to do", save, reopen
   await settings.getByLabel('Wait for', { exact: true }).selectOption('webhook');
   await settings.getByLabel('When time runs out').selectOption('escalate');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Journey saved')).toBeVisible();
+  await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
   saved = (await (await api.get(`/api/journeys/${id}`)).json()).definition;
   expect(saved.steps.find((s: { kind: string }) => s.kind === 'wait').onTimeout.action).toBe('escalate');
   await page.reload();
@@ -184,8 +183,7 @@ test('designer: a wait is configured with what it waits for, how long and the ti
   await again.getByLabel('When time runs out').selectOption('goto');
   await expect(again.getByLabel('Step to move to')).toBeVisible();
   await again.getByLabel('Step to move to').selectOption('after');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Journey saved')).toBeVisible();
+  await saveJourneyInDesigner(page, () => page.getByRole('button', { name: 'Save', exact: true }).click());
   saved = (await (await api.get(`/api/journeys/${id}`)).json()).definition;
   expect(saved.steps.find((s: { kind: string }) => s.kind === 'wait').onTimeout).toEqual({
     action: 'goto',
