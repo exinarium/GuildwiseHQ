@@ -149,7 +149,7 @@ export function renderReleaseChangelogInstructions<O extends { id: string; label
   out.push('# Your job in this shift');
   out.push(
     [
-      `Write the public changelog entries for the repository ${task.repoName} from the changes in the prompt. Follow the "Unattended changelog" step of the Release notes playbook. Nobody answers questions in this shift: decide from what the prompt says.`,
+      `Write the public changelog entries for the repository ${task.repoName} from the changes in the prompt. Follow the "Unattended changelog" step of the Release notes playbook (aom skill show playbook:release-notes --file steps/step-changelog-unattended.md). Nobody answers questions in this shift: decide from what the prompt says.`,
       '',
       '- Headings: only Added, Changed, Deprecated, Removed, Fixed, Security. Normally Added (new), Changed (improved or upgrade notes, start an upgrade note with "Upgrade:") and Fixed. Start a breaking change with the word BREAKING under Changed or Removed.',
       '- One entry is one line: a short phrase naming the feature or fix, then one to four plain sentences on what the user can now do or what no longer goes wrong, and why it matters. Between 20 and 900 characters. **Bold** for a screen label and backticks for a setting a self-hoster needs are fine.',

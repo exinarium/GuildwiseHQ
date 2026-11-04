@@ -69,8 +69,9 @@ beforeEach(async () => {
   await capable();
 });
 
+/** 'Write changelog' is off here: its own tests are in release-docs-prep-changelog-flow.test.ts. */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps });
+  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, ...steps } });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -146,7 +147,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -349,6 +350,14 @@ describe('the ship gate', () => {
     await enable();
     await runToPassed();
     expect((await approveShip()).status).toBe(200);
+  });
+
+  it('Analyse changes unticked while Write changelog is on: the run is refused', async () => {
+    await enable({ analyse: false, changelog: true });
+    const res = await owner('POST', `${base()}/runs`);
+    expect(res.status).toBe(409);
+    expect(res.body.error?.code ?? res.body.code).toBe('release_docs_prep_requires');
+    expect(await cmds()).toHaveLength(0);
   });
 
   it('on with Analyse changes unticked: a passed run does not need a recorded base tag', async () => {
