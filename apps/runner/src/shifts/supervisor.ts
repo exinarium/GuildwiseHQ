@@ -2160,10 +2160,22 @@ export class ShiftSupervisor {
       msg.agent.roleKey === 'architect' && inv && inv.location === 'repo'
         ? [...(inv.folder ? [`${inv.folder}/**`] : []), inv.reportPath]
         : [];
+    const protectedBranches = [
+      ...new Set(
+        [
+          msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch,
+          msg.brief.project.workingBranch,
+          s.worktree?.baseBranch,
+        ].filter((b): b is string => typeof b === 'string' && b.length > 0),
+      ),
+    ];
     return {
       worktree,
       roleKey: msg.agent.roleKey,
       permissions: msg.agent.permissions,
+      cardRef: msg.brief.card.ref,
+      projectKey: msg.brief.project.key,
+      ...(protectedBranches.length ? { protectedBranches } : {}),
       branchName: s.worktree?.branchName ?? '',
       startSha,
       branchesAtStart: s.branchesAtStart,

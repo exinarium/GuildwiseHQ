@@ -1,4 +1,4 @@
-import { type AgentPermissions, type GuardViolation, isRunnerOwnedBranch } from '@aom/shared';
+import { type AgentPermissions, type GuardViolation, CARD_BRANCH_PREFIXES, isRunnerOwnedBranch } from '@aom/shared';
 import picomatch from 'picomatch';
 import {
   statusLinesWithoutStubs,
@@ -82,6 +82,11 @@ export interface GuardInput {
    * shift start: a revert of an e2e file to its base content is not an edit. Absent: every changed e2e path counts.
    */
   baseBranch?: string;
+  /** The card's ref (`GWP-85`) and the project key (`GWP`): name a branch's card. Absent: no name-based attribution. */
+  cardRef?: string;
+  projectKey?: string;
+  /** Main, the project working branch and the base branch: strict unless checked out in a sibling worktree. */
+  protectedBranches?: string[];
 }
 
 /**
@@ -360,6 +365,33 @@ export interface DiscardResult {
   skipped?: { reason: 'head_moved'; from: string; to: string };
 }
 
+interface HeadReflogEntry {
+  sha: string;
+  ts: number;
+  subject: string;
+}
+
+/**
+ * This worktree's HEAD reflog entries since the shift started (`startedAtMs`, one second of slack); every entry when
+ * `startedAtMs` is absent. Null when the reflog cannot be read.
+ */
+async function headReflogSince(
+  worktree: string,
+  startedAtMs: number | undefined,
+): Promise<HeadReflogEntry[] | null> {
+  const rl = await git(worktree, ['reflog', 'show', '--date=unix', '--format=%H%x09%gd%x09%gs', 'HEAD']);
+  if (rl.exitCode !== 0) return null;
+  const since = startedAtMs === undefined ? undefined : Math.floor(startedAtMs / 1000) - 1;
+  const out: HeadReflogEntry[] = [];
+  for (const line of lines(rl.stdout)) {
+    const [sha, sel, subject = ''] = line.split('\t');
+    const ts = Number(/@\{(\d+)\}/.exec(sel ?? '')?.[1]);
+    if (!sha || !Number.isFinite(ts) || (since !== undefined && ts < since)) continue;
+    out.push({ sha, ts, subject });
+  }
+  return out;
+}
+
 /** Paths of the commits this worktree created since the shift started (HEAD reflog), or of its non-merge commits. */
 async function ownCommitPaths(input: GuardInput): Promise<Set<string>> {
   const out = new Set<string>();
@@ -369,13 +401,9 @@ async function ownCommitPaths(input: GuardInput): Promise<Set<string>> {
     if (d.exitCode === 0) for (const p of lines(d.stdout)) out.add(p);
   };
   if (input.startedAtMs !== undefined) {
-    const rl = await git(wt, ['reflog', 'show', '--date=unix', '--format=%H%x09%gd%x09%gs', 'HEAD']);
-    if (rl.exitCode === 0) {
-      const since = Math.floor(input.startedAtMs / 1000) - 1;
-      for (const line of lines(rl.stdout)) {
-        const [sha, sel, subject = ''] = line.split('\t');
-        const ts = Number(/@\{(\d+)\}/.exec(sel ?? '')?.[1]);
-        if (!sha || !Number.isFinite(ts) || ts < since) continue;
+    const entries = await headReflogSince(wt, input.startedAtMs);
+    if (entries) {
+      for (const { sha, subject } of entries) {
         const own =
           /^(commit|cherry-pick|revert)\b/.test(subject) || /^merge .*: Merge made by/.test(subject);
         if (!own) continue;
@@ -511,20 +539,83 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
       detail: `The worktree must stay on ${input.branchName} but is on ${branch ?? 'a detached HEAD'}`,
     });
   }
+  const other = await otherBranchViolation(input);
+  if (other) violations.push(other);
+  return violations;
+}
+
+/** The card ref a branch name carries (`backup/gwp-63-x` -> `GWP-63`), for the project's key only; null when none. */
+export function cardRefOfBranch(name: string, projectKey: string | undefined): string | null {
+  if (!projectKey) return null;
+  const key = projectKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`(?:^|/)(${key}-\\d+)(?=$|[-/_.])`, 'i').exec(name);
+  return m?.[1] ? m[1].toUpperCase() : null;
+}
+
+/** Heads this worktree's HEAD pointed at through a commit-creating action since the shift began; null: unknown. */
+async function shiftHeadShas(input: GuardInput): Promise<Set<string> | null> {
+  const cfg = await git(input.worktree, ['config', '--get', 'core.logAllRefUpdates']);
+  if (cfg.stdout.trim() === 'false') return null;
+  const entries = await headReflogSince(input.worktree, input.startedAtMs);
+  if (!entries) return null;
+  return new Set(entries.filter((e) => !/^(checkout|reset):/.test(e.subject)).map((e) => e.sha));
+}
+
+/** The moved branch's tip, or one of its new commits that is not on the card branch, was created by this shift. */
+async function madeByThisShift(
+  input: GuardInput,
+  tip: string,
+  before: string | undefined,
+  shas: Set<string>,
+): Promise<boolean> {
+  if (shas.has(tip)) return true;
+  const args = ['rev-list', tip, '--not', '--remotes', `refs/heads/${input.branchName}`];
+  if (before) args.push(before);
+  const r = await git(input.worktree, args);
+  return lines(r.stdout).some((c) => shas.has(c.trim()));
+}
+
+/**
+ * commits_on_other_branch. Main, the working and base branch, the card's own other branches and non-card branches are
+ * refused whenever they gain local commits. A branch of another card (its ref in the name, a card branch prefix, or
+ * checked out in a sibling worktree) is refused only when this shift made the move (its commits are in this worktree's
+ * HEAD reflog since the shift started); without a HEAD reflog it is refused too.
+ */
+export async function otherBranchViolation(input: GuardInput): Promise<GuardViolation | null> {
   const now = await snapshotBranches(input.worktree);
   const siblings = await siblingWorktreeBranches(input.worktree);
+  const protectedSet = new Set(input.protectedBranches ?? []);
+  if (input.baseBranch) protectedSet.add(input.baseBranch);
+  const head = await git(input.worktree, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+  if (head.exitCode === 0 && head.stdout.trim()) protectedSet.add(head.stdout.trim().replace(/^origin\//, ''));
+  const ownRef = input.cardRef?.toUpperCase();
+  let shas: Set<string> | null | undefined;
   const moved: string[] = [];
   for (const b of Object.keys(now)) {
-    if (b === input.branchName || siblings.has(b) || input.branchesAtStart[b] === now[b]) continue;
+    const tip = now[b] as string;
+    const before = input.branchesAtStart[b];
+    if (b === input.branchName || before === tip) continue;
     if (isRunnerOwnedBranch(b)) continue;
-    if (await isSyncOnly(input.worktree, now[b] as string, input.branchesAtStart[b])) continue;
-    moved.push(b);
+    if (await isSyncOnly(input.worktree, tip, before)) continue;
+    let provenance: boolean;
+    if (protectedSet.has(b)) provenance = siblings.has(b);
+    else if (siblings.has(b)) provenance = true;
+    else {
+      const ref = cardRefOfBranch(b, input.projectKey);
+      if (ref && ref === ownRef) provenance = false;
+      else provenance = ref !== null || CARD_BRANCH_PREFIXES.some((p) => b.startsWith(p));
+    }
+    if (!provenance) {
+      moved.push(b);
+      continue;
+    }
+    if (shas === undefined) shas = await shiftHeadShas(input);
+    if (shas === null) moved.push(`${b} (provenance unknown: this worktree keeps no HEAD reflog)`);
+    else if (await madeByThisShift(input, tip, before, shas)) moved.push(`${b} (commits made in this worktree)`);
   }
-  if (moved.length > 0) {
-    violations.push({
-      rule: 'commits_on_other_branch',
-      detail: `Branches other than ${input.branchName} changed: ${moved.join(', ')}`,
-    });
-  }
-  return violations;
+  if (moved.length === 0) return null;
+  return {
+    rule: 'commits_on_other_branch',
+    detail: `Branches other than ${input.branchName} changed: ${moved.join(', ')}`,
+  };
 }
