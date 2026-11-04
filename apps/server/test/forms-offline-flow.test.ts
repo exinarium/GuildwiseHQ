@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { sweepFormsOffline } from '../src/commands/forms-offline.ts';
 import { journeyTick } from '../src/journeys/tick.ts';
 import { toDeskDto } from '../src/queries/desk.ts';
-import { q } from './helpers/db.ts';
+import { q as rawQ } from './helpers/db.ts';
 import { messagesTo, messageText, waitForMessages } from './helpers/mailpit.ts';
 import { PNG, serveStorage, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { ok } from './helpers/world.ts';
+
+const q = (sql: string, params?: unknown[]) => rawQ(sql, params) as Promise<any[]>;
 
 /**
  * GWP-68: the firm's runner is offline when a client opens a public form. The page asks for an email address only, the
@@ -49,10 +51,11 @@ async function askForLink(publicId: string, email: string, link?: string, ip?: s
     ip,
   );
 }
-const caseOf = async (email: string) => {
-  // find by decrypting nothing: the newest case of the form
-  return (await q('SELECT * FROM form_offline_requests ORDER BY created_at DESC LIMIT 1'))[0] as any;
-};
+/** The newest case of a form (each test uses its own form, so files can run side by side). */
+const caseOf = async (formId: string) =>
+  (
+    await q('SELECT * FROM form_offline_requests WHERE form_id=$1 ORDER BY created_at DESC LIMIT 1', [formId])
+  )[0] as any;
 const linkFromMail = async (email: string, count = 1) => {
   const msgs = await waitForMessages(email, count);
   const text = await messageText(msgs[0]!.ID);
@@ -118,7 +121,7 @@ describe('public-URL case: the runner is offline, then back', () => {
     const res = await askForLink(publicId, email);
     expect(res.status).toBe(202);
     expect(res.json).toEqual({ status: 'pending' });
-    const c = await caseOf(email);
+    const c = await caseOf(formId);
     expect(c).toMatchObject({ status: 'held', form_id: formId, origin_link_id: null, journey_wait_id: null });
     expect(c.email_enc).toMatch(/^v1:/);
     expect(c.email_enc).not.toContain(email);
@@ -151,7 +154,7 @@ describe('public-URL case: the runner is offline, then back', () => {
     // only the firm name and the link: no form title, no answer, no client reference
     expect(mail.text).not.toContain('Offline public');
     expect(mail.text).not.toContain(ANSWER);
-    const after = await caseOf(email);
+    const after = await caseOf(formId);
     expect(after).toMatchObject({ status: 'sent' });
     expect(after.link_sent_at).not.toBeNull();
     expect(after.email_enc).toMatch(/^v1:/); // kept until the case closes (A2)
@@ -166,7 +169,7 @@ describe('public-URL case: the runner is offline, then back', () => {
     expect(items[0].data).toMatchObject({ requestId: c.id, formTitle: 'Offline public' });
     expect(items[0].data.attemptedAt).toBeTruthy();
     expect(items[0].data.linkSentAt).toBeTruthy();
-    const view = toDeskDto(items[0], pf.w.owner.id, new Map());
+    const view = toDeskDto(items[0], pf.w.owner.id, new Map(), new Map());
     expect((view as any).data).toMatchObject({ requestId: c.id, linkSentAt: items[0].data.linkSentAt });
 
     // submitting through the secure link writes to the firm's storage and closes the case
@@ -183,7 +186,7 @@ describe('public-URL case: the runner is offline, then back', () => {
     expect(s.complete?.status).toBe(200);
     expect(pf.stub.files().length).toBeGreaterThan(0);
     await sweep();
-    const closed = await caseOf(email);
+    const closed = await caseOf(formId);
     expect(closed).toMatchObject({ status: 'submitted', email_enc: null, email_key: null });
     expect(closed.submission_id).toBe(s.sid);
     expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [items[0].id]))[0].status).not.toBe('open');
@@ -243,7 +246,7 @@ describe('runner flapping sends one link per case', () => {
     await askForLink(publicId, email);
     await goOnline();
     await sweep();
-    const first = await caseOf(email);
+    const first = await caseOf(formId);
     const m1 = await linkFromMail(email);
     // a crash after the mail, before "sent": the row is back in "sending" and stale
     await q(
@@ -275,7 +278,7 @@ describe('journey case: documents pending, runner offline', () => {
     const view = await ok<any>(pf.api('GET', `/api/journey-instances/${id}/waits`));
     const w = view.waits[0];
     expect(w.status).toBe('open');
-    const c = await caseOf(email);
+    const c = await caseOf(formId);
     expect(w.offline).toMatchObject({ requestId: c.id, status: 'held', linkSentAt: null });
     expect(new Date(w.offline.since).toISOString()).toBe(new Date(c.attempted_at).toISOString());
     expect(w.events.map((e: any) => e.text)).toContain('Documents pending, runner offline');
@@ -287,7 +290,7 @@ describe('journey case: documents pending, runner offline', () => {
     const mail = await linkFromMail(email);
     const after = (await q('SELECT * FROM journey_waits WHERE id=$1', [wait.id]))[0] as any;
     expect(after.link_id).not.toBe(wait.link_id);
-    expect(after.link_id).toBe((await caseOf(email)).link_id);
+    expect(after.link_id).toBe((await caseOf(formId)).link_id);
     // the old personal link is revoked
     const old = (await q('SELECT revoked_at FROM form_client_links WHERE id=$1', [wait.link_id]))[0] as any;
     expect(old.revoked_at).not.toBeNull();
@@ -306,7 +309,7 @@ describe('journey case: documents pending, runner offline', () => {
     await tick();
     expect(await instStep(id)).toBe('screening');
     await sweep();
-    expect((await caseOf(email)).status).toBe('submitted');
+    expect((await caseOf(formId)).status).toBe('submitted');
     // the notice closed with the wait
     expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [notice.id]))[0].status).not.toBe('open');
   });
@@ -329,7 +332,7 @@ describe('journey case: documents pending, runner offline', () => {
     expect(JSON.stringify(again.body)).toContain('wait_not_open');
 
     await sweep();
-    expect(await caseOf(email)).toMatchObject({ status: 'continued', email_enc: null });
+    expect(await caseOf(formId)).toMatchObject({ status: 'continued', email_enc: null });
     const gone = await pf.load(publicId, mail.token);
     expect(gone.status).toBe(410);
     expect(gone.json.error.code).toBe('link_revoked');
@@ -366,7 +369,7 @@ describe('secure link refusals', () => {
       formId,
     ]);
     await sweep();
-    expect(await caseOf(email)).toMatchObject({ status: 'expired', email_enc: null, email_key: null });
+    expect(await caseOf(formId)).toMatchObject({ status: 'expired', email_enc: null, email_key: null });
     const notices = await q(
       `SELECT title FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`,
       [formId],
@@ -385,7 +388,7 @@ describe('secure link refusals', () => {
     );
     await sweep();
     await sweep();
-    expect(await caseOf(email)).toMatchObject({ status: 'expired', email_enc: null });
+    expect(await caseOf(formId)).toMatchObject({ status: 'expired', email_enc: null });
     const n = await q(
       `SELECT 1 FROM desk_items WHERE subkind='form_offline_hold_expired' AND data->>'formId'=$1`,
       [formId],

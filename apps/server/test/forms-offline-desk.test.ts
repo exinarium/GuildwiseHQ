@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { sweepFormsOffline } from '../src/commands/forms-offline.ts';
-import { q } from './helpers/db.ts';
+import { q as rawQ } from './helpers/db.ts';
 import { messagesTo, waitForMessages } from './helpers/mailpit.ts';
 import { serveStorage, usePublicFormsWorld } from './helpers/public-forms.ts';
 import { ok } from './helpers/world.ts';
+
+const q = (sql: string, params?: unknown[]) => rawQ(sql, params) as Promise<any[]>;
 
 /** GWP-68 option A2: the desk can show the held address (audited) and resend the same link, until the case closes. */
 const pf = usePublicFormsWorld({
