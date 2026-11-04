@@ -1587,8 +1587,34 @@ cannot loosen anything.
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the copied `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
-| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the other cards' `.git/worktrees/<other>` admin folders, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git; see "Git metadata in the shift sandbox" below |
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+
+**Git metadata in the shift sandbox.** A card worktree is a linked worktree: git keeps its index, `HEAD`, `logs`,
+`ORIG_HEAD` and `MERGE_*` files in the main clone's `.git/worktrees/<card>` admin folder, and its commits in the clone's
+`objects`, `refs` and `logs`. What the shell may write there depends on the role:
+
+| Path (card worktree of clone `R`) | Role that may edit or commit (builder, architect, tester, ...) | Read-only role (no `edit`, no commit: reviewer, ...) | Read-only checkout (design before dependencies land), chats |
+| --- | --- | --- | --- |
+| the worktree | writable (the Edit tool only within the role's globs) | read-only | read-only folder |
+| `R/.git/worktrees/<card>` (`index`, `index.lock`, `HEAD`, `logs`, `ORIG_HEAD`, `MERGE_*`) | writable | as before: writable with the common `.git`, except where a read-only folder covers it | not writable (no git dir is opened) |
+| `R/.git/objects`, `refs`, `logs`, `packed-refs` | writable | as before | not writable |
+| the worktree's `.git` file; `commondir`, `gitdir`, `config`, `config.worktree`, `hooks` of its admin folder | read-only | read-only | read-only |
+| `R/.git/hooks`, `R/.git/config` | read-only | read-only | read-only |
+| `R/.git/worktrees/<other card>` | read-only | read-only | read-only |
+| `R`'s own working tree (the owner's checkout) | not writable; not opened to the Read tool; its secret files stay masked | read-only folder | read-only folder |
+
+Claude Code's sandbox binds every `denyWrite` path after every `allowWrite` path, so a read-only folder that *contains*
+a writable path covers it. This was the cause of `index.lock: Read-only file system` in architect shifts: the
+organization source folder (and sometimes a reference repository with a different id) opened the card's own main clone
+as a read-only folder, and its read-only bind covered the writable `.git` beneath it. A read-only folder that holds the
+shift's working folder or git dir is therefore split off for roles that may edit or commit. It gets no `--add-dir`, no
+`additionalDirectories`, no `allowRead`, no `denyWrite` and no `Edit` deny. Only its secret-file `Read` denies stay.
+It cannot be written anyway, because the sandbox's write list is allow-only. Other cards' admin folders are denied entry
+by entry (a worktree added after the shift started is not covered). The runner logs a warning when a generated
+`denyWrite` entry is a parent of an `allowWrite` entry or of the working folder. Codex and the harness box are not
+affected: Codex resolves the most specific path, and the harness box mounts parents before children. A read-only role is
+told in its instructions that a "Read-only file system" error from a write in its worktree is by design.
 
 **Bash "denied in don't ask mode".** Roles with a shell get the bare `Bash` allow, so any command is approved except the
 deny list (`git push`, `git reset --hard`, `sudo`, `rm -rf /*`, the role's own patterns). One thing the rules cannot
@@ -1758,6 +1784,10 @@ is no config key that does: what an agent may read beyond its own work folder co
   worktree on this workstation (a chat about a project, or about a card not started here), the project's own clones
   (`kind: 'project'`). A chat about a card whose worktree is here keeps its read-only worktree as working directory. The
   DevOps engineer is unsandboxed and reads anywhere, so it gets none of this.
+- **The card's own clone is not a read-only folder for a role that edits or commits.** When a read-only folder contains
+  the shift's worktree or its git dir (the organization folder or a reference repository can name the card's own main
+  clone), only its secret-file deny rules are kept. A read-only bind over it would cover the writable `.git` (see "Git
+  metadata in the shift sandbox").
 - **How it is enforced** (`ClaudePolicyContext.readDirs`, `claude-policy.ts`): the folders are passed with `--add-dir` and
   listed in `permissions.additionalDirectories` (the Read, Grep and Glob tools); `Edit(//<dir>/**)` (which covers Write
   and NotebookEdit) is denied, and the folder is in the sandbox's `denyWrite`, so a shell cannot write there either; the
