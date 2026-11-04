@@ -1,45 +1,49 @@
 WEBVTT
 
 1
-00:00:00.735 --> 00:00:09.567
+00:00:00.354 --> 00:00:09.186
 The Agents page is your team. Every agent has a card with its role, model, current work and how it performs against the others in its role.
 
 2
-00:00:10.277 --> 00:00:13.477
+00:00:09.891 --> 00:00:13.091
 Open Agents in the sidebar, then choose Hire agent.
 
 3
-00:00:14.176 --> 00:00:20.299
+00:00:13.790 --> 00:00:19.913
 Pick the role and the seniority. The runtime and the effort come from the role, and you can change them here.
 
 4
-00:00:21.001 --> 00:00:28.446
+00:00:20.612 --> 00:00:28.057
 Under Where may this agent work, tick the projects it is allowed on. Give it a name, and Hire. It appears on the page at once.
 
 5
-00:00:29.164 --> 00:00:35.351
+00:00:28.760 --> 00:00:34.947
 Pause stops an agent from taking new work; a running shift still finishes. Resume puts it back to work.
 
 6
-00:00:36.050 --> 00:00:43.901
+00:00:35.646 --> 00:00:43.497
 Change model switches an agent to another model or effort. It applies from its next shift, and the agent keeps its name and history.
 
 7
-00:00:44.649 --> 00:00:52.777
+00:00:44.209 --> 00:00:52.337
 Recommendations are rule-based suggestions with their evidence. Here two builders have been idle for ten days while the queue is empty.
 
 8
-00:00:53.477 --> 00:00:58.192
+00:00:53.037 --> 00:00:57.752
 Apply one with its button: Fire retires Cleo, and the card says what was done.
 
 9
-00:00:58.894 --> 00:01:07.235
+00:00:58.451 --> 00:01:06.792
 Dismiss the other if you disagree. It will not be suggested again for thirty days. With several open, Dismiss all clears them in one go.
 
 10
-00:01:07.942 --> 00:01:14.875
+00:01:07.495 --> 00:01:14.428
 The Project filter shows only the agents allowed on one project, and the Department filter does the same for a department.
 
 11
-00:01:15.575 --> 00:01:20.951
+00:01:15.132 --> 00:01:25.116
+An agent can also move to another workstation. Choose Move on its card, pick the workstation, and choose Move. Its name, history and track record go with it.
+
+12
+00:01:25.815 --> 00:01:31.191
 That is the Agents page. Hire the team you need, and keep it tuned with the recommendations.

@@ -135,11 +135,11 @@ export const BA_ANSWER =
   '3. A simple order-confirmation email.\n\n' +
   'Shall I turn these into cards for the team? I would start with the search box.';
 
-/** The planner's question on the Desk (the mock agent asks a fixed sentence; the spec gives it these words). */
+/** The builder's question on the Desk (the mock agent asks a fixed sentence; the spec gives it these words). */
 export const DESK_QUESTION = {
   title: 'Should the welcome banner show on every page, or only on the home page?',
   body: 'The card says "on the home page", but visitors often land on a product page first.',
-  doing: 'Planning the welcome banner',
+  doing: 'Building the welcome banner',
   options: [
     ['Only on the home page', 'As the card says'],
     ['On every page', 'Also greets visitors who land on a product page'],

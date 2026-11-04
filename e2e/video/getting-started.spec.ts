@@ -10,7 +10,7 @@ import { demoApi, pairWorkstation } from './seed.ts';
  * The "Getting started" video (plan entry G in docs/guide/VIDEO-PLAN.md): from an empty organization to a team at work.
  * The Get started checklist, the Add a workstation wizard (shown, not waited on: the demo workstation is already
  * paired), a project and its repository, the lean team, a card from the sidebar's New card button, a talk with the
- * business analyst, answering the planner's question on the Desk, the card moving on the Board by itself, and where
+ * business analyst, answering the first agent's question on the Desk, the card moving on the Board by itself, and where
  * Help, the tour and Ctrl K are. A fresh local stack and the mock agent runtime (no real Claude, GitHub or Jira).
  *
  *   e2e/video/setup-voice.sh            once: Kokoro, the voice and a static ffmpeg into ~/.cache/aom-video
@@ -20,8 +20,11 @@ import { demoApi, pairWorkstation } from './seed.ts';
  */
 const SLUG = 'getting-started';
 
-/** What the mock agents do with the card made on camera: the planner asks once (the BA passes it on), then all is ok. */
-const MOCK_SCRIPT = { planning: ['question', 'ok'], question: ['escalate', 'escalate'] };
+/**
+ * What the mock agents do with the card made on camera: the first agent to pick it up asks once (the BA passes it on),
+ * then all is ok. A card with a complete brief goes from Specify straight to Build, so the builder is that agent.
+ */
+const MOCK_SCRIPT = { build: ['question', 'ok'], question: ['escalate', 'escalate'] };
 
 /** What the BA's step on the escalation trail says (the mock BA passes questions on with "mock ba: cannot settle ..."). */
 const BA_TRAIL_NOTE = 'a product decision for the owner';
@@ -58,12 +61,12 @@ const nav = (page: Page, name: string | RegExp) =>
   page.getByRole('link', { name, exact: typeof name === 'string' }).first();
 
 /**
- * The mock agent asks a fixed sentence ("Mock question for SHOP-1?"): as soon as the planner's question exists, give it
- * the words a real planner would use (the same rewording the guide screenshots do). Returns the desk item id.
+ * The mock agent asks a fixed sentence ("Mock question for SHOP-1?"): as soon as the question exists, give it
+ * the words a real agent would use (the same rewording the guide screenshots do). Returns the desk item id.
  */
 async function rewordQuestion(): Promise<string> {
   const item = await waitFor(
-    "the planner's question",
+    "the agent's question",
     () =>
       q<{ id: string }>(
         `SELECT d.id FROM desk_items d JOIN cards c ON c.id = d.card_id
@@ -175,6 +178,11 @@ test('record the getting-started video', async ({ browser }) => {
     await click(page, dlg.getByRole('button', { name: 'Create project' }));
     await expect(page.getByRole('link', { name: 'Settings for SHOP' })).toBeVisible();
   });
+  // Manual QA is on for a new project and would park the finished card for the Owner to test: this video follows the
+  // card on the Board, so it is switched off (the project setting; the Owner can switch it on again)
+  const shop = (await q<{ id: string }>(`SELECT id FROM projects WHERE key='SHOP'`))[0]?.id as string;
+  const noQa = await api.put(`/api/projects/${shop}/manual-qa`, { data: { enabled: false } });
+  expect(noQa.ok(), await noQa.text()).toBe(true);
   await narrate('c3-b', async () => {
     await click(page, page.getByRole('link', { name: 'Settings for SHOP' }));
     const add = page.getByRole('form', { name: 'Add repository' });
@@ -236,7 +244,7 @@ test('record the getting-started video', async ({ browser }) => {
     await click(page, form.getByRole('button', { name: 'Specify', exact: true }));
     await expect(page).toHaveURL(/\/cards\/SHOP-1$/);
   });
-  // the planner picks the card up and asks; give the question its words while the BA talks
+  // the builder picks the card up and asks; give the question its words while the BA talks
   const reworded = rewordQuestion();
   const drawer = page.getByRole('dialog', { name: 'Chat' });
   await narrate('c5-b', async () => {
@@ -289,11 +297,11 @@ test('record the getting-started video', async ({ browser }) => {
     await expect(tile).toBeVisible();
     const box = await tile.boundingBox();
     if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 20 });
-    // the planner finishes and the card moves on to Investigate & design while the viewer watches
+    // the builder carries on after the answer and the card moves on to review while the viewer watches
     await waitFor(
-      'SHOP-1 leaves Planning',
+      'SHOP-1 leaves Build',
       () => q<{ stage: string }>(`SELECT stage FROM cards WHERE ref='SHOP-1'`),
-      (r) => !!r[0] && r[0].stage !== 'planning' && r[0].stage !== 'spec',
+      (r) => !!r[0] && r[0].stage !== 'build' && r[0].stage !== 'spec',
       120_000,
     );
   });

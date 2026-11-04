@@ -99,7 +99,7 @@ test('record the org-chart video', async ({ browser }) => {
   await narrate('c3-a', async () => {
     const panel = page.getByTestId('org-devops');
     await panel.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-    await expect(panel.getByTestId('org-workstation')).toHaveCount(1);
+    await expect(panel.getByTestId('org-workstation')).toHaveCount(2);
     await pause(1000);
   });
   await narrate('outro-1');

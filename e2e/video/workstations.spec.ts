@@ -24,11 +24,11 @@ test('record the workstations video', async ({ browser }) => {
   const api = await demoApi();
   await createProject(api, 'SHOP', 'Web shop');
   const studioHome = paths.runnerHome('video-studio');
-  const studioId = await pairWorkstation(api, 'Studio Mac mini', studioHome);
-  await hireAgent(api, { name: 'Max', roleKey: 'builder', workstationId: studioId });
-  await hireAgent(api, { name: 'Ben', roleKey: 'builder', workstationId: studioId });
+  await pairWorkstation(api, 'Studio Mac mini', studioHome);
   killRunner('SIGKILL', studioHome); // the second machine is switched off: it stays paired but offline
-  await pairWorkstation(api, "Alex's laptop");
+  const laptopId = await pairWorkstation(api, "Alex's laptop");
+  await hireAgent(api, { name: 'Max', roleKey: 'builder', workstationId: laptopId });
+  await hireAgent(api, { name: 'Ben', roleKey: 'builder', workstationId: laptopId });
 
   const prepared = prepareVideo({
     slug: SLUG,
@@ -130,13 +130,14 @@ test('record the workstations video', async ({ browser }) => {
 
   await chapter(5);
   await narrate('c5-a', async () => {
-    await click(page, studio.getByRole('button', { name: 'Retire Studio Mac mini', exact: true }));
+    await laptop.scrollIntoViewIfNeeded();
+    await click(page, laptop.getByRole('button', { name: "Retire Alex's laptop", exact: true }));
     const form = page.getByRole('form', { name: 'Retire workstation' });
     await expect(form).toBeVisible();
     await expect(form.getByTestId('retire-agents')).toContainText('Max');
     await pause(2500);
     await click(page, form.getByRole('radio', { name: /Move its agents to another workstation/ }));
-    await expect(form.getByLabel('Move to')).toBeVisible();
+    await expect(form.getByLabel('Move to', { exact: true })).toBeVisible();
     await pause(2500);
     await click(page, form.getByRole('button', { name: 'Cancel' }));
     await expect(form).toHaveCount(0);
