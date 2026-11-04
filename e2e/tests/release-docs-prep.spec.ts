@@ -280,7 +280,7 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
   const panel = page.getByTestId('release-docs-prep-settings');
   await expect(panel.getByTestId('release-docs-prep-readonly')).toHaveCount(0);
   const labels = (await panel.locator('fieldset label').allInnerTexts()).map((t) => t.split('\n')[0]!.trim());
-  expect(labels).toEqual(['Analyse changes', 'Update user guide', 'Commit results']);
+  expect(labels).toEqual(['Analyse changes', 'Write changelog', 'Update user guide', 'Commit results']);
   const sw = panel.getByRole('switch', { name: 'Run release prep before a release ships' });
   await expect(sw).not.toBeChecked();
   await sw.check();
@@ -295,10 +295,10 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
       )[0]!.release_docs_prep,
     (s) => s.enabled === true,
     15_000,
-  ).then((s) => expect(s.steps).toEqual({ analyse: true, guide: true, commit: true }));
+  ).then((s) => expect(s.steps).toEqual({ analyse: true, changelog: true, guide: true, commit: true }));
   // the runs below use Analyse and Commit only (the mock runner has no writer agent for the guide)
   const narrow = await owner.put(`/api/projects/${projectId}/release-docs-prep/settings`, {
-    data: { enabled: true, steps: { analyse: true, guide: false, commit: true } },
+    data: { enabled: true, steps: { analyse: true, changelog: false, guide: false, commit: true } },
   });
   expect(narrow.status()).toBe(200);
   const ev = await q<{ actor_id: string }>(
