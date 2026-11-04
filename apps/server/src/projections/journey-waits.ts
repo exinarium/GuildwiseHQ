@@ -81,7 +81,7 @@ export const journeyWaitProjectors: Record<string, Projector> = {
     const p = ev<'JourneyWaitReminded'>(e).payload;
     const r = await exec(
       tx,
-      `UPDATE journey_waits SET reminders_sent=$2, next_fire_at=$3, deadline_at=$3, link_id=COALESCE($5, link_id),
+      `UPDATE journey_waits SET reminders_sent=$2, next_fire_at=$3, deadline_at=$3, link_id=COALESCE($5, link_id), desk_item_id=COALESCE($7, desk_item_id),
          events = events || $6::jsonb
         WHERE id=$1 AND status='open' AND next_fire_at=$4::timestamptz`,
       [
@@ -91,6 +91,7 @@ export const journeyWaitProjectors: Record<string, Projector> = {
         p.firedFor,
         p.linkId ?? null,
         JSON.stringify([{ at: new Date(e.createdAt).toISOString(), type: 'reminded', text: `Reminder ${p.n} of ${p.of}` }]),
+        p.deskItemId ?? null,
       ],
     );
     void r;

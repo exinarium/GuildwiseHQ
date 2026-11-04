@@ -56,6 +56,8 @@ export const journeyWaitEvents = [
       of: z.number().int().min(1),
       nextFireAt: z.string(),
       linkId: z.string().optional(),
+      /** A gate reminder raises a fresh desk question for the approver; it replaces the one the wait pointed at. */
+      deskItemId: Id.optional(),
     }),
   ),
   defineEvent(

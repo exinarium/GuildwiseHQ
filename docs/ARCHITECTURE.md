@@ -3001,3 +3001,15 @@ A firm publishes a form built in the forms builder. Clients fill it in at `/f/<i
 - **Kept**: `form_submissions` (migration 2830, saved over a projection rebuild): ids, status, timestamps, form version, link id, per file declared size, checksum and storage reference, the two answers references. `form_publications` and `form_client_links` are projections of `FormPublished`, `FormUnpublished`, `FormPublicLinkReset`, `FormClientLink*`. Expired submissions are marked and deleted after 30 days by the scheduler.
 - **Offline hook**: `ctx.services.publicFormsOffline` (`RunnerOfflineHook`) is called when a destination's workstation is offline. The default answers `503 runner_offline`; the offline flow replaces it and may answer `202 link_later`.
 - **Limits**: token buckets per client address (salted hash, never stored) and per form, in memory; `AOM_FORMS_*` variables (docs/SELF-HOSTING.md).
+
+## 44. Journey waits, gates and webhooks (design: `docs/investigations/GWP-67-journey-waits-gates-and-webhooks-timed-waits-with.md`)
+
+Three server-run journey steps: `wait`, `gate` and `webhook_call` (schemas in `packages/shared/src/journeys/steps-wait.ts`; code in `apps/server/src/journeys/`). A configured wait or gate replaces the placeholder; an unconfigured one still waits for Continue (a validation warning). Handoffs may match `approved`, `rejected` and `failed`.
+
+- **Timers are rows**: `journey_waits` (migration 2840) holds `next_fire_at`; `journeyTick` (after `sweepJourneys` in the scheduler) enters steps, resolves form waits, fires due waits and sends due calls. A wait fires under `FOR UPDATE SKIP LOCKED` and the event carries `firedFor`, so two passes or a restart fire it once. The pass keeps no state in memory.
+- **Never silent**: every timeout writes an event on the wait (`remind`, `goto`, `escalate`, `cancel`); `escalate` raises a desk question; a gate reminder raises a fresh question for the approver and dismisses the old one.
+- **Wait for a form**: a personal link (`createClientLinkIn`) is shown on the desk or handed to a webhook; the wait ends when `form_client_links.used_by_submission` is set. No e-mail is sent by the server.
+- **Date waits** read a field of the last workflow step's card and use UTC (not the organization time zone yet).
+- **Inbound hooks** (`POST /hooks/in/:token`): the HMAC is checked on the raw bytes, a bad signature is 401, the payload is mapped in memory (record id and name only) and never stored; calls are rate limited and logged without the payload. The `jhsec_` secret is encrypted on the server and shown once.
+- **Outbound calls**: the runner sends `journey.webhook.call`; credentials are named on the step and live sealed on the workstation. Retries back off 1, 5, 30 and 120 minutes; the result stays on the instance.
+- **Web**: `StepSettings`, `InstanceWaitPanel`, `HookTriggerPanel` and the desk items in `JourneyDeskItem`.

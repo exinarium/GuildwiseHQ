@@ -2893,6 +2893,10 @@ policy) and `integration.session` (progress of a sign-in; acked), `hello.integra
 fixtures under `apps/runner/test/fixtures/integrations/`; Claude's screens can change between versions, so the matchers live in
 one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump should re-run `claude setup-token` once to check them.
 
+### Journey webhook calls
+
+The runner command `journey.webhook.call` (`apps/runner/src/outbound-delivery/journey-webhook.ts`) sends the outbound call of a journey `webhook_call` step. Header values and signing secrets are not in the journey: the step names a credential and the runner reads it from the sealed file `secrets/webhooks.json` on the workstation. The server never holds them. The call has a timeout, follows no redirects to other hosts and answers the status and a short error to the server, never the response body. There is no screen yet that writes `secrets/webhooks.json`.
+
 ## Credentials and secrets
 
 **Credentials stay on the machine:**

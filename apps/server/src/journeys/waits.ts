@@ -37,6 +37,11 @@ export async function defaultAddressee(db: Tx, inst: Row, to?: JourneyApprover):
   return r.userIds[0] as string;
 }
 
+const GATE_REMINDER_OPTIONS = [
+  { id: 'approve', label: 'Approve', description: 'Let the journey go on.' },
+  { id: 'reject', label: 'Reject', description: 'Stop here: the journey follows its reject handoff. A note is required.' },
+];
+
 /** The longest time a wait with reminders can last, for the link's expiry. */
 function lastDeadline(startedAt: Date, step: JourneyWaitStep): Date {
   const d = step.duration ? durationMs(step.duration) : 0;
@@ -450,10 +455,41 @@ async function fireOne(ctx: Ctx, waitId: string): Promise<boolean> {
           const sent = l.find((e) => e.event.type === 'JourneyWaitLinkSent');
           linkId = sent ? (sent.event as { payload: { linkId: string } }).payload.linkId : undefined;
         }
+        let deskItemId: string | undefined;
+        if (w.kind === 'gate') {
+          // A reminder must be seen: the approver gets a fresh question on the desk and the old one is dismissed.
+          const approver = (w.config as { approver?: Parameters<typeof resolveJourneyApprover>[2] }).approver;
+          if (approver) {
+            const r = await resolveJourneyApprover(tx, inst, approver);
+            const record = (await one(tx, 'SELECT display_name FROM journey_records WHERE id=$1', [inst.record_id])) as Row;
+            const cfg = w.config as { question?: string };
+            deskItemId = randomUUID();
+            if (w.desk_item_id) out.push(resolveDeskEvent(inst, w.desk_item_id, 'dismissed', `Reminder ${d.n} of ${d.of} sent.`));
+            out.push(
+              deskQuestion(inst, {
+                deskItemId,
+                subkind: 'journeyGate',
+                doing: `Reminder ${d.n} of ${d.of}: the journey for ${record.display_name} still waits at "${w.step_id}".`,
+                question: cfg.question ?? `Approve "${w.step_id}" for ${record.display_name}?`,
+                options: GATE_REMINDER_OPTIONS,
+                addresseeUserId: r.userIds[0] as string,
+                data: { waitId, instanceId: inst.id, recordId: inst.record_id, stepId: w.step_id, ...(r.role ? { role: r.role } : {}) },
+              }),
+            );
+          }
+        }
         out.push(
           ev(inst, {
             type: 'JourneyWaitReminded',
-            payload: { waitId, firedFor, n: d.n, of: d.of, nextFireAt: iso(d.nextFireAt), ...(linkId ? { linkId } : {}) },
+            payload: {
+              waitId,
+              firedFor,
+              n: d.n,
+              of: d.of,
+              nextFireAt: iso(d.nextFireAt),
+              ...(linkId ? { linkId } : {}),
+              ...(deskItemId ? { deskItemId } : {}),
+            },
           }),
         );
         await ctx.store.append(out, { tx });
