@@ -10,6 +10,7 @@ import { formatDate } from '../../lib/time.ts';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Callout, ErrorBox, Panel, Spinner } from '../ui.tsx';
 import { ChangelogStepOutput } from './ChangelogStepOutput.tsx';
+import { GuideStepOutput } from './GuideStepOutput.tsx';
 
 const TONE = {
   off: 'neutral',
@@ -174,6 +175,7 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
                 </span>{' '}
                 <span className="text-subtle">{s.state}</span>
                 {s.error && <span className="block text-danger-soft-fg">{s.error}</span>}
+                {s.step === 'guide' && s.output != null && <GuideStepOutput output={s.output} />}
                 {s.step === 'changelog' && !s.error && (
                   <ChangelogStepOutput repoName={repo.repoName} state={s.state} output={s.output} />
                 )}

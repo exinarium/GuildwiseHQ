@@ -211,7 +211,11 @@ const tocMd = toc
   .map((t) => `${t.level === 2 ? '' : '  '}- [${t.text}](#${t.mdSlug})`)
   .join('\n');
 let md = fs.readFileSync(MD, 'utf8');
-md = md.replace(/<!-- toc -->[\s\S]*?(<!-- \/toc -->|(?=\n## ))/, `<!-- toc -->\n**Contents**\n\n${tocMd}\n\n<!-- /toc -->\n`);
+// The block and the blank lines after it are replaced, so running this twice gives the same file.
+md = md.replace(
+  /<!-- toc -->[\s\S]*?(?:<!-- \/toc -->\n*|\n+(?=## ))/,
+  `<!-- toc -->\n**Contents**\n\n${tocMd}\n\n<!-- /toc -->\n\n`,
+);
 fs.writeFileSync(MD, md);
 
 const tocHtml = toc

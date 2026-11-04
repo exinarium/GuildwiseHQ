@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ForgeKindSchema } from '../forge/index.ts';
+import { AgentRuntimeSpecSchema } from '../protocol/agent-runtime.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
 import { ReleasePrepChangelogPayloadSchema } from './changelog-entries.ts';
@@ -115,7 +116,7 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
           finishedAt: z.string().nullable(),
           error: z.string().nullable(),
           files: z.array(z.string()),
-          /** What the step reports (per step id; 'changelog': ReleaseChangelogOutput). */
+          /** What the step reports (per step id; 'changelog': ReleaseChangelogOutput, 'guide': ReleaseDocsPrepGuideOutput). */
           output: z.unknown().optional(),
         }),
       ),
@@ -165,6 +166,10 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   message: z.string().max(500).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
   signOff: z.boolean().optional(),
+  /** Input of a content step, checked by the step's own schema on the runner. */
+  stepInput: z.record(z.string(), z.unknown()).optional(),
+  /** The agent that writes the step's text (model-backed steps only). */
+  writer: AgentRuntimeSpecSchema.optional(),
   /** Step 'changelog': the checked entries to merge into Unreleased. */
   changelog: ReleasePrepChangelogPayloadSchema.optional(),
 });

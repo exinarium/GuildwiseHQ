@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   componentRuleApplies,
@@ -10,7 +12,11 @@ import { detectSignOff } from './dco.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
-import { DOCS_PREP_STEP_HANDLERS } from './release-docs-prep-steps.ts';
+import {
+  DOCS_PREP_STEP_HANDLERS,
+  type DocsPrepExec,
+  type DocsPrepStepContext,
+} from './release-docs-prep-steps.ts';
 import { lastReleaseTagAt } from './release-facts.ts';
 import { pushFastForward } from './release-ship.ts';
 import { withRepoLock } from './repo-lock.ts';
@@ -23,7 +29,22 @@ export interface ReleaseDocsPrepInput {
   /** Folder of the throwaway integration worktrees. */
   integrationDir: string;
   auth?: GitAuth;
+  /** The model call of model-backed steps. Absent: those steps fail with the reason. */
+  runModel?: DocsPrepStepContext['runModel'];
+  /** Runs the repository's own build scripts (the PDF guide). Absent: such a build fails with the reason. */
+  exec?: DocsPrepExec;
 }
+
+const noModel: DocsPrepStepContext['runModel'] = async () => ({
+  ok: false,
+  error: 'no agent on this workstation can write the release documentation',
+});
+const noExec: DocsPrepExec = async () => ({
+  exitCode: 127,
+  stdout: '',
+  stderr: 'this runner cannot run build scripts for release prep',
+  timedOut: false,
+});
 
 const COMMITS_KEPT = 300;
 const MERGES_KEPT = 300;
@@ -285,8 +306,17 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
       startPoint: start,
     },
     async (wt): Promise<ReleaseDocsPrepResult> => {
-      const out = await handler({ worktree: wt, payload: p, summary: p.summary });
-      if (!out.ok) return failed(out.error);
+      const outDir = await mkdtemp(join(tmpdir(), `docs-prep-${p.step}-`));
+      const out = await handler({
+        worktree: wt,
+        payload: p,
+        summary: p.summary,
+        outDir,
+        runModel: input.runModel ?? noModel,
+        exec: input.exec ?? noExec,
+      }).finally(() => rm(outDir, { recursive: true, force: true }));
+      const output = out.output === undefined ? {} : { output: out.output };
+      if (!out.ok) return failed(out.error, output);
       if (out.files.length > 0) {
         const add = await git(wt, ['add', '--', ...out.files]);
         if (add.exitCode !== 0) return failed(`git add failed: ${(add.stderr || add.stdout).trim()}`);
@@ -296,8 +326,7 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
         .map((l) => l.slice(3).trim())
         .filter(Boolean);
       const extra = status.filter((f) => !out.files.includes(f));
-      if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`);
-      const output = out.output === undefined ? {} : { output: out.output };
+      if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, output);
       if (status.length === 0) return passed({ notices: ['no changes'], ...output });
       const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], {
         env: commitEnv(identity),

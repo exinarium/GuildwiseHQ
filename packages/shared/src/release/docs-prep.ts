@@ -56,8 +56,19 @@ export const CHANGELOG_STEP: ReleaseDocsPrepStepDef = {
   requires: ['analyse'],
 };
 
+export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
+  id: 'guide',
+  label: 'Update user guide',
+  description:
+    'Updates the user guide sections for the changed features and rebuilds the PDF guide when the text changed. Needs Analyse changes.',
+  order: 30,
+  defaultOn: true,
+  producesFiles: true,
+  requires: ['analyse'],
+};
+
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, COMMIT_STEP];
+const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, COMMIT_STEP];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {

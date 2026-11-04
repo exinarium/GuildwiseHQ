@@ -3,8 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepResult } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { changelogStep } from '../src/git/release-docs-prep-changelog.ts';
 import { runReleaseDocsPrep } from '../src/git/release-docs-prep.ts';
+import { changelogStep } from '../src/git/release-docs-prep-changelog.ts';
 import { DOCS_PREP_STEP_HANDLERS } from '../src/git/release-docs-prep-steps.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -174,12 +174,20 @@ describe('release.docs_prep changelog', () => {
     expect(file).toBe(UNDATED);
   });
 
+  /** The parts of the step context the changelog step does not use (no model call, no process). */
+  const ctxStubs = () => ({
+    outDir: tmp('aom-cl-out-'),
+    runModel: async () => ({ ok: false as const, error: 'not used' }),
+    exec: async () => ({ exitCode: 1, stdout: '', stderr: 'not used', timedOut: false }),
+  });
+
   it('fails when the server sent no entries', async () => {
     const wt = tmp('aom-cl-');
     const r = await changelogStep({
       worktree: wt,
       payload: { step: 'changelog' } as never,
       summary: undefined,
+      ...ctxStubs(),
     });
     expect(r).toEqual({ ok: false, error: 'the server sent no changelog entries: update the server' });
   });
@@ -193,6 +201,7 @@ describe('release.docs_prep changelog', () => {
       worktree: wt,
       payload: { step: 'changelog', changelog: { projectName: 'P', entries: ENTRIES } } as never,
       summary: undefined,
+      ...ctxStubs(),
     });
     expect(r.ok).toBe(true);
     const md = readFileSync(join(wt, 'CHANGELOG.md'), 'utf8');

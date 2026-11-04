@@ -93,7 +93,7 @@ const outside = (md: string) => {
 
 describe('registry: Write changelog', () => {
   it('sits between analyse and commit, on by default, requires analyse', () => {
-    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'changelog', 'commit']);
+    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'changelog', 'guide', 'commit']);
     expect(CHANGELOG_STEP).toMatchObject({
       order: 20,
       defaultOn: true,
@@ -104,6 +104,7 @@ describe('registry: Write changelog', () => {
   it('can be unticked, and a run without it has no changelog step', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: { changelog: false } }).map((s) => s.id)).toEqual([
       'analyse',
+      'guide',
       'commit',
     ]);
   });

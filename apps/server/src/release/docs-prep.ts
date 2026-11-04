@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import {
   type CommitPhase,
   enabledReleaseDocsPrepSteps,
-  missingReleaseDocsPrepRequirement,
   isOrgManager,
   isReleaseDocsPrepStep,
   isResearchStage,
+  missingReleaseDocsPrepRequirement,
   nextReleaseDocsPrepAction,
   RELEASE_DOCS_PREP_CAPABILITY,
   type ReleaseDocsPrepGateInput,
@@ -35,6 +35,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
+import { DOCS_PREP_STEP_HOOKS, docsPrepWriter } from './docs-prep-steps.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -411,26 +412,7 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
     if (action.step === 'changelog') {
       const d = await changelogDispatchFor(tx, run, repo, summary?.success ? summary.data : null);
       if (d.kind === 'fail') {
-        await ctx.store.append(
-          [
-            {
-              streamId: streamId.releaseDocsPrep(runId),
-              event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId, repoId, step: action.step } },
-              actor,
-              scope,
-            },
-            {
-              streamId: streamId.releaseDocsPrep(runId),
-              event: {
-                type: 'ReleaseDocsPrepStepFinished',
-                payload: { runId, repoId, step: action.step, state: 'failed', error: d.error, files: [] },
-              },
-              actor,
-              scope,
-            },
-          ],
-          { tx },
-        );
+        await failStepBeforeDispatch(ctx, tx, run, repoId, action.step, d.error);
         failedHere = true;
         continue;
       }
@@ -441,6 +423,25 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
       }
       changelog = { projectName: project?.name ?? '', entries: [] };
     }
+    const hook = action.phase ? undefined : DOCS_PREP_STEP_HOOKS[action.step];
+    let writer: ReleaseDocsPrepPayload['writer'] | null = null;
+    if (hook?.needsWriter) {
+      writer = await docsPrepWriter(ctx, tx, run, repo);
+      if (!writer) {
+        // Not dispatched: the step fails here with the reason (Retry or Skip), as for 'changelog' above.
+        await failStepBeforeDispatch(
+          ctx,
+          tx,
+          run,
+          repoId,
+          action.step,
+          `no agent on the workstation that has ${repo.name} can write the release documentation`,
+        );
+        failedHere = true;
+        continue;
+      }
+    }
+    const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
     deliver.push(
       await sendDocsPrepStepCommand(ctx, tx, run, repo, {
         step: action.step,
@@ -448,12 +449,48 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
         projectKey: project?.key ?? '',
         commitAs: commitAs ?? null,
         ...(changelog ? { changelog } : {}),
+        ...(stepInput ? { stepInput } : {}),
+        ...(writer ? { writer } : {}),
       }),
     );
   }
   // A step that failed before anything was sent finishes the run now (nothing is committed).
   if (failedHere) deliver.push(...(await advance(ctx, tx, runId)));
   return deliver;
+}
+
+/** A (step, repository) that fails before a command is sent: started and failed at once, with the reason. */
+async function failStepBeforeDispatch(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  repoId: string,
+  step: string,
+  error: string,
+): Promise<void> {
+  const runId: string = run.id;
+  const scope = projectScope(run.org_id, run.project_id);
+  const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.releaseDocsPrep(runId),
+        event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId, repoId, step } },
+        actor,
+        scope,
+      },
+      {
+        streamId: streamId.releaseDocsPrep(runId),
+        event: {
+          type: 'ReleaseDocsPrepStepFinished',
+          payload: { runId, repoId, step, state: 'failed', error, files: [] },
+        },
+        actor,
+        scope,
+      },
+    ],
+    { tx },
+  );
 }
 
 /**
@@ -471,6 +508,8 @@ export async function sendDocsPrepStepCommand(
     projectKey: string;
     commitAs: ReleaseDocsPrepPayload['commitAs'];
     changelog?: ReleaseDocsPrepPayload['changelog'];
+    stepInput?: ReleaseDocsPrepPayload['stepInput'];
+    writer?: ReleaseDocsPrepPayload['writer'];
   },
 ): Promise<string> {
   const runId: string = run.id;
@@ -493,6 +532,8 @@ export async function sendDocsPrepStepCommand(
     message: `docs(release): prepare the release documentation for ${repo.branch}`,
     commitAs: o.commitAs ?? null,
     ...(o.changelog ? { changelog: o.changelog } : {}),
+    ...(o.stepInput ? { stepInput: o.stepInput } : {}),
+    ...(o.writer ? { writer: o.writer } : {}),
   };
   const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
   await ctx.store.append(

@@ -78,7 +78,7 @@ beforeEach(async () => {
   await q(`TRUNCATE runner_commands CASCADE`);
   await q(`DELETE FROM ba_tasks WHERE kind='release_changelog'`);
   await q(
-    `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {}}'::jsonb, working_branch='release/1.5.0' WHERE id=$1`,
+    `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"guide": false}}'::jsonb, working_branch='release/1.5.0' WHERE id=$1`,
     [w.projectId],
   );
   await q(`UPDATE project_repos SET main_branch='main', working_branch=NULL WHERE id=$1`, [w.repoId]);
@@ -268,7 +268,7 @@ describe('Write changelog: the report', () => {
 describe('Write changelog off', () => {
   it('never queues a task or sends a changelog command', async () => {
     await q(
-      `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"changelog": false}}'::jsonb WHERE id=$1`,
+      `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"changelog": false, "guide": false}}'::jsonb WHERE id=$1`,
       [w.projectId],
     );
     await startToChangelog();

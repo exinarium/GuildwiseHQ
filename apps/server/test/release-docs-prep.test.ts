@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
@@ -69,9 +70,12 @@ beforeEach(async () => {
   await capable();
 });
 
-/** 'Write changelog' is off here: its own tests are in release-docs-prep-changelog-flow.test.ts. */
+/**
+ * 'Write changelog' and 'Update user guide' are on by default but need a BA task and a writer agent: these tests untick
+ * both unless they ask for one ('Write changelog' has its own tests in release-docs-prep-changelog-flow.test.ts).
+ */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, ...steps } });
+  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false, ...steps } });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -147,7 +151,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -297,6 +301,111 @@ describe('prep run', () => {
     const r = await owner('POST', `${base()}/runs`);
     expect(r.status).toBe(409);
     expect(JSON.stringify(r.body)).toContain('release_shipping');
+  });
+});
+
+describe('the Update user guide step', () => {
+  const lastPayload = async () => (await cmds()).at(-1)!.payload;
+
+  it('refuses a run when the guide step is on but Analyse changes is unticked (409 release_docs_prep_requires)', async () => {
+    await enable({ analyse: false, guide: true });
+    const res = await owner('POST', `${base()}/runs`);
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toContain('release_docs_prep_requires');
+    expect(JSON.stringify(res.body)).toContain(
+      'Update user guide needs Analyse changes. Turn it on in the project settings.',
+    );
+  });
+
+  it('with no writer agent on the workstation the guide step fails the run before any commit', async () => {
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    const guide = run.repos[0].steps.find((s: any) => s.step === 'guide');
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toContain('can write the release documentation');
+    expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse']);
+  });
+
+  it('with no writer agent and two repositories the guide step fails in both and the run fails', async () => {
+    const second = randomUUID();
+    await q(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, main_branch)
+       VALUES ($1,$2,'zcloud','git@github.com:acme/zcloud.git','github.com/acme/zcloud','main')`,
+      [second, w.projectId],
+    );
+    try {
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId, second] });
+      await enable({ guide: true });
+      expect((await owner('POST', `${base()}/runs`)).status).toBeLessThan(300);
+      const analyse = await cmds();
+      expect(analyse.map((c: any) => c.payload.repoId).sort()).toEqual([w.repoId, second].sort());
+      for (const c of analyse)
+        await applyReleaseDocsPrepResult(
+          w.t.app.ctx,
+          w.workstationId,
+          c.payload,
+          true,
+          passedAnalyse,
+          undefined,
+        );
+      const run = await latest();
+      expect(run.status).toBe('failed');
+      expect(run.repos).toHaveLength(2);
+      for (const repo of run.repos) {
+        const guide = repo.steps.find((s: any) => s.step === 'guide');
+        expect(guide.state).toBe('failed');
+        expect(guide.error).toMatch(
+          /^no agent on the workstation that has .+ can write the release documentation$/,
+        );
+      }
+      expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse', 'analyse']);
+    } finally {
+      await q(`TRUNCATE release_docs_prep_runs CASCADE`);
+      await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
+    }
+  });
+
+  it('dispatches the guide step with the preferred writer (architect before builder) and then the commit', async () => {
+    await w.hire('Zed', 'builder', 'junior');
+    const architect = await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const payload = await lastPayload();
+    expect(payload.step).toBe('guide');
+    expect(payload.writer).toBeTruthy();
+    expect(JSON.stringify(payload.writer)).toContain(architect.agent?.id ?? architect.id);
+    expect(payload.stepInput.coveredSources).toEqual([]);
+    await answer({ ok: true, state: 'passed', files: [], notices: [], output: { status: 'passed' } });
+    expect((await lastPayload()).step).toBe('commit');
+  });
+
+  it('stores the step output, shows it in the run view, and hands its sources to the next run as coveredSources', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const output = {
+      status: 'passed',
+      changed: [{ section: '4.2 Cards', sources: ['card:TOY-1'] }],
+      covered: [{ source: 'merge:' + 'c'.repeat(40), section: '4.3 Releases' }],
+    };
+    await answer({ ok: true, state: 'passed', files: ['docs/G.md'], notices: [], output });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    const first = await latest();
+    expect(first.status).toBe('passed');
+    const guide = first.repos[0].steps.find((s: any) => s.step === 'guide');
+    expect(guide.output).toMatchObject({ status: 'passed', changed: [{ section: '4.2 Cards' }] });
+
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const next = await lastPayload();
+    expect(next.step).toBe('guide');
+    expect(next.stepInput.coveredSources).toEqual(['card:TOY-1', 'merge:' + 'c'.repeat(40)]);
   });
 });
 

@@ -1,6 +1,6 @@
 import type { DeskItemDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -293,5 +293,97 @@ describe('live updates', () => {
     expect(
       keysForEvent({ type: 'ReleaseDocsPrepSettingsSet', streamId: `project-${ID(1)}`, projectId: ID(1) }),
     ).toContainEqual(['release-docs-prep']);
+  });
+});
+
+describe("Releases > Release prep tab > 'Update user guide' output", () => {
+  const guideRepo = (repoName: string, output: unknown) => ({
+    repoId: repoName === 'GuildwiseHQ' ? ID(10) : ID(11),
+    repoName,
+    branch: 'release/1.5.0',
+    state: 'passed',
+    baseTag: 'v1.4.0',
+    headSha: 'a'.repeat(40),
+    commitSha: null,
+    pushed: false,
+    summary: null,
+    steps: [
+      {
+        step: 'guide',
+        phase: '',
+        state: 'passed',
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        files: [],
+        output,
+      },
+    ],
+  });
+
+  it('names the sections changed and added per repository, and the repository skipped without a guide', async () => {
+    const r = run('passed', {
+      steps: ['analyse', 'guide', 'commit'],
+      repos: [
+        guideRepo('GuildwiseHQ', {
+          status: 'passed',
+          changed: [{ section: '4.28 Releases', sources: ['card:GWP-89'] }],
+          added: [{ section: '4.28a Release prep', after: '4.28 Releases', sources: ['card:GWP-89'] }],
+          covered: [],
+          skippedChanges: [{ source: 'card:GWP-12', reason: 'tests only' }],
+          duplicates: 0,
+          pdf: 'rebuilt',
+          errors: [],
+          warnings: [],
+          notes: [],
+        }),
+        guideRepo('guildwise-cloud', {
+          status: 'passed',
+          skipped: 'no user guide',
+          changed: [],
+          added: [],
+          covered: [],
+          skippedChanges: [],
+          errors: [],
+          warnings: [],
+          notes: [],
+        }),
+      ],
+    });
+    routes = () => json(overview('passed', {}, r));
+    wrap(<ReleaseDocsPrepTab />);
+    const hq = await screen.findByTestId('prep-repo-GuildwiseHQ');
+    expect(within(hq).getByTestId('guide-output-changed')).toHaveTextContent('4.28 Releases');
+    expect(within(hq).getByTestId('guide-output-added')).toHaveTextContent(
+      '4.28a Release prep (after 4.28 Releases)',
+    );
+    expect(within(hq).getByText('PDF guide rebuilt.')).toBeInTheDocument();
+    expect(within(hq).getByText('1 change is not user-visible.')).toBeInTheDocument();
+    const cloud = screen.getByTestId('prep-repo-guildwise-cloud');
+    expect(within(cloud).getByTestId('guide-output-skipped')).toHaveTextContent('skipped: no user guide');
+  });
+
+  it('says when no guide change was needed and ignores an output it cannot read', async () => {
+    const r = run('passed', {
+      steps: ['analyse', 'guide', 'commit'],
+      repos: [
+        guideRepo('GuildwiseHQ', {
+          status: 'passed',
+          nothing: 'no new changes',
+          changed: [],
+          added: [],
+          covered: [],
+          skippedChanges: [],
+          errors: [],
+          warnings: [],
+          notes: [],
+        }),
+        guideRepo('guildwise-cloud', { something: 'else' }),
+      ],
+    });
+    routes = () => json(overview('passed', {}, r));
+    wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByText('No guide change: no new changes.')).toBeInTheDocument();
+    expect(within(screen.getByTestId('prep-repo-guildwise-cloud')).queryByTestId('guide-output')).toBeNull();
   });
 });
