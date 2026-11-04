@@ -65,7 +65,7 @@ describe('regression #76: the shift limit of a workstation', () => {
     const dto = await put(3);
     expect(dto.shifts).toMatchObject({ setting: 3, limit: 3, unlimited: false, supported: true });
     const cmd = await r.waitFor('command', (f) => f.command === 'shifts.limit', 5000, from);
-    expect(cmd.payload).toEqual({ shiftLimit: 3, maxConcurrentShifts: 3 });
+    expect(cmd.payload).toEqual({ shiftLimit: 3, maxConcurrentShifts: 3, source: 'workstation_setting' });
     expect(w.t.app.ctx.services.runners.get(w.workstationId)?.maxShifts).toBe(3);
     expect(
       (
@@ -173,6 +173,98 @@ describe('regression #76: the dispatcher and the shift limit', () => {
     } finally {
       ctxConfig().maxShiftsPerWorkstation = 16;
     }
+    await hangUp(r);
+  });
+});
+
+// GWP-95: the page shows what the runner enforces, its source and who holds the slots; one rule for what counts.
+describe('GWP-95: the effective shift limit, its source and the running count', () => {
+  const V2 = ['shift-limit:1', 'shift-limit:2'];
+  const starts = (r: FakeRunner) => r.received.filter((f) => f.type === 'shift.start');
+  const beat = (r: FakeRunner, maxShifts: number, limitSource: string, active: string[] = []) =>
+    r.send('heartbeat', { activeShifts: active, load: { runningShifts: active.length, maxShifts, limitSource } });
+
+  it('the push and the welcome carry the source; Unlimited under the platform cap names it', async () => {
+    const { r } = await connect({ capabilities: V2 });
+    const from = r.received.length;
+    await put('unlimited');
+    const cmd = await r.waitFor('command', (f) => f.command === 'shifts.limit', 5000, from);
+    expect(cmd.payload).toEqual({ shiftLimit: 'unlimited', maxConcurrentShifts: 16, source: 'platform_cap' });
+    await hangUp(r);
+    const again = await connect({ capabilities: V2 });
+    expect(again.welcome.limits).toMatchObject({ maxConcurrentShifts: 16, shiftLimit: 'unlimited', source: 'platform_cap' });
+    expect((await shifts()).source).toBe('platform_cap');
+    await hangUp(again.r);
+  });
+
+  it('applying until the runner reports, then in sync; a different enforced value is a mismatch', async () => {
+    await put(5);
+    const { r } = await connect({ capabilities: V2 });
+    expect(await shifts()).toMatchObject({ limit: 5, source: 'workstation_setting', enforced: null, sync: 'applying' });
+    beat(r, 5, 'workstation_setting');
+    await until(async () => (await shifts()).sync === 'in_sync', 3000, 'in sync');
+    expect((await shifts()).enforced).toEqual({ limit: 5, source: 'workstation_setting' });
+    beat(r, 4, 'pairing_budget');
+    await until(async () => (await shifts()).sync === 'mismatch', 3000, 'mismatch');
+    expect((await shifts()).enforced).toEqual({ limit: 4, source: 'pairing_budget' });
+    // a source the server does not know does not break the heartbeat
+    beat(r, 5, 'something_new');
+    await until(async () => (await shifts()).enforced?.limit === 5, 3000, 'unknown source parsed');
+    await hangUp(r);
+  });
+
+  it('an old runner without shift-limit:2 is unknown, and its heartbeat still works', async () => {
+    const { r } = await connect({ capabilities: ['shift-limit:1'] });
+    r.heartbeat();
+    await new Promise((res) => setTimeout(res, 150));
+    expect(await shifts()).toMatchObject({ enforced: null, sync: 'unknown' });
+    await hangUp(r);
+    expect((await shifts()).sync).toBe('unknown');
+  });
+
+  it('the dispatcher does not offer more than the runner reports it enforces', async () => {
+    await q(
+      'TRUNCATE cards, card_dependencies, card_handoffs, card_transitions, shifts, threads, thread_messages, agents CASCADE',
+    );
+    await q('UPDATE projects SET next_card_number = 1');
+    for (const n of ['Ann', 'Bob', 'Cid']) await w.hire(n, 'builder', 'junior');
+    for (let i = 0; i < 3; i++) await w.card();
+    await put(5);
+    const { r } = await connect({ capabilities: V2 });
+    beat(r, 1, 'pairing_budget');
+    await until(
+      async () => w.t.app.ctx.services.runners.get(w.workstationId)?.enforcedMaxShifts === 1,
+      3000,
+      'reported',
+    );
+    await w.t.app.ctx.services.dispatcher.run();
+    await until(async () => starts(r).length >= 1, 3000, 'first shift');
+    await new Promise((res) => setTimeout(res, 200));
+    expect(starts(r)).toHaveLength(1);
+    await hangUp(r);
+  });
+
+  it('chat and CEO shifts take no slot: running counts card shifts, otherRunning the rest, holders name the cards', async () => {
+    await q('TRUNCATE shifts, threads, thread_messages CASCADE');
+    const { r } = await connect({ capabilities: V2 });
+    const agent = (await q(`SELECT id, name FROM agents WHERE status='active' LIMIT 1`))[0] as { id: string; name: string };
+    const card = (await q('SELECT id, ref FROM cards LIMIT 1'))[0] as { id: string; ref: string };
+    const ws = w.workstationId;
+    const ins = (id: string, kind: string, cardId: string | null) =>
+      q(
+        `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, status, runtime, model, started_at)
+         SELECT $1, w.user_id, $2, w.id, $3, $4, 'running', 'mock', 'mock', now() FROM workstations w WHERE w.id=$5`,
+        [id, agent.id, cardId, kind, ws],
+      );
+    await ins('019e3f6a-7b1c-7a2d-8c3e-00000000c001', 'card', card.id);
+    await ins('019e3f6a-7b1c-7a2d-8c3e-00000000c002', 'chat', null);
+    await ins('019e3f6a-7b1c-7a2d-8c3e-00000000c003', 'ceo', null);
+    const dto = await shifts();
+    expect(dto).toMatchObject({ running: 1, otherRunning: 2 });
+    expect(dto.holders).toEqual([
+      { shiftId: '019e3f6a-7b1c-7a2d-8c3e-00000000c001', kind: 'card', cardRef: card.ref, agentName: agent.name },
+    ]);
+    await q('TRUNCATE shifts CASCADE');
     await hangUp(r);
   });
 });

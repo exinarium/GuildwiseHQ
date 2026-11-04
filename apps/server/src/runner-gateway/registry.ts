@@ -1,4 +1,4 @@
-import { makeEnvelope, type RepoReport, type ServerToRunner } from '@aom/shared';
+import { makeEnvelope, type RepoReport, type ServerToRunner, type ShiftLimitSource } from '@aom/shared';
 import type { WebSocket } from 'ws';
 
 export interface RunnerConn {
@@ -23,6 +23,16 @@ export interface RunnerConn {
   maxShifts: number;
   /** The runner's own configured `maxConcurrentShifts` from `hello` (the fallback when the owner set none). */
   reportedMaxShifts?: number;
+  /** Where `maxShifts` comes from (workstation setting, platform cap or runner config). */
+  limitSource?: ShiftLimitSource;
+  /** When `maxShifts` last changed (hello, `setShiftLimit`): a heartbeat older than this has not applied it yet. */
+  limitChangedAt?: Date;
+  /** What the runner reports it enforces (heartbeat `load.maxShifts`, `shift-limit:2`; in memory only). */
+  enforcedMaxShifts?: number;
+  enforcedSource?: ShiftLimitSource;
+  enforcedAt?: Date;
+  /** The runner announced `shift-limit:2` in `hello` (it reports the limit it enforces). */
+  reportsShiftLimit?: boolean;
   /**
    * The runner can prepare toolchains, check rights and keep a sudo password (it announced a `sudoKey` in `hello`).
    * An older runner answers those commands with an error, and holding its cards back for that would be wrong.

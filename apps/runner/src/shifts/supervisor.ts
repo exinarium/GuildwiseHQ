@@ -39,8 +39,13 @@ import {
   renderReadableFolders,
   type ServerToRunnerOf,
   type ShiftBrief,
+  type ShiftCapacity,
+  type ShiftLimitSource,
   type ShiftReport,
   ShiftReportSchema,
+  SHIFT_LIMIT_SOURCE_LABEL,
+  takesShiftSlot,
+  UNLIMITED_SHIFTS,
   type ShiftVault,
   scanReportForSecrets,
   splitBackendModel,
@@ -190,6 +195,43 @@ type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 type ReportResultMsg = ServerToRunnerOf<'shift.report.result'>;
 type StopReason = ServerToRunnerOf<'shift.stop'>['reason'];
 
+/** The shift limit in force (`UNLIMITED_SHIFTS` or more: none) and where it comes from. */
+export interface ShiftCap {
+  max: number;
+  source: ShiftLimitSource;
+}
+
+/** The `capacity` of a `busy` rejection: the limit, its source and the shifts holding the slots (identifiers only). */
+export function capacityOf(
+  cap: ShiftCap,
+  holders: ReadonlyArray<{ msg: Pick<ShiftStartMsg, 'shiftId' | 'kind' | 'brief' | 'agent'> }>,
+): ShiftCapacity {
+  return {
+    limit: cap.max,
+    source: cap.source,
+    running: holders.length,
+    holders: holders.slice(0, 50).map((h) => ({
+      shiftId: h.msg.shiftId,
+      kind: h.msg.kind,
+      ...(h.msg.kind === 'card' && h.msg.brief.card?.ref ? { cardRef: h.msg.brief.card.ref.slice(0, 40) } : {}),
+      ...(h.msg.agent.name ? { agentName: h.msg.agent.name.slice(0, 80) } : {}),
+    })),
+  };
+}
+
+/** The text of a `busy` rejection: "4 shifts already running (limit 4, workstation setting): GWP-94 (Ada), devops (Anvil)". */
+export function busyDetail(capacity: ShiftCapacity): string {
+  const label = SHIFT_LIMIT_SOURCE_LABEL[capacity.source as ShiftLimitSource] ?? capacity.source;
+  const limit = capacity.limit >= UNLIMITED_SHIFTS ? 'none' : String(capacity.limit);
+  const refs = capacity.holders
+    .map((h) => `${h.cardRef ?? h.kind}${h.agentName ? ` (${h.agentName})` : ''}`)
+    .join(', ');
+  return `${capacity.running} shifts already running (limit ${limit}, ${label})${refs ? `: ${refs}` : ''}`.slice(
+    0,
+    500,
+  );
+}
+
 export interface ShiftTransport {
   /** Acked types are persisted and retried; best-effort types are dropped while offline. */
   send(type: string, payload: Record<string, unknown>): string;
@@ -229,7 +271,8 @@ export interface SupervisorDeps {
   writeVault?: (
     cmd: VaultWriteCommand,
   ) => Promise<{ written: boolean; committed: boolean; pushed: boolean; paused: boolean }>;
-  maxConcurrentShifts?: () => number;
+  /** The shift limit in force and its source (default: `config.json`'s `maxConcurrentShifts`, source runner config). */
+  shiftCap?: () => ShiftCap;
   /** Runs before a shift is put back for an expired login: the runner tells the server the runtime is paused first. */
   beforeAuthReject?: () => Promise<void>;
   /** Text for the agent's instructions about granted MCP servers that need a sign-in here (empty: none). */
@@ -486,6 +529,18 @@ export class ShiftSupervisor {
     return this.active.size;
   }
 
+  /** Shifts that take a slot of the shift limit (`takesShiftSlot`: the CEO shift does not; chats run elsewhere). */
+  get slotCount(): number {
+    let n = 0;
+    for (const a of this.active.values()) if (takesShiftSlot(a.msg.kind)) n++;
+    return n;
+  }
+
+  /** The shift limit in force for the next start and where it comes from. */
+  shiftCap(): ShiftCap {
+    return this.deps.shiftCap?.() ?? { max: this.deps.config.maxConcurrentShifts, source: 'runner_config' };
+  }
+
   /** Worktree paths of the shifts that are running or starting (the stale-worktree sweep leaves them alone). */
   worktreePaths(): string[] {
     const out: string[] = [];
@@ -509,18 +564,32 @@ export class ShiftSupervisor {
     resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[] },
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
-    const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
     // The CEO's management shift has a slot of its own (one at a time, outside the owner's limit like a chat): a
-    // workstation full of card shifts used to refuse it every time and nothing was logged (backlog #79).
-    const isCeo = msg.kind === 'ceo';
-    const sameKind = [...this.active.values()].filter((a) => (a.msg.kind === 'ceo') === isCeo).length;
-    if (isCeo ? sameKind >= 1 : sameKind >= max) {
-      this.reject(
-        msg.shiftId,
-        'busy',
-        isCeo ? 'a CEO shift is already running' : `${sameKind} shifts already running (limit ${max})`,
-      );
-      return;
+    // workstation full of card shifts used to refuse it every time and nothing was logged (backlog #79). Which kinds
+    // take a slot is one rule shared with the server and the Workstations page (`takesShiftSlot`).
+    if (msg.kind === 'ceo') {
+      if ([...this.active.values()].some((a) => a.msg.kind === 'ceo')) {
+        this.reject(msg.shiftId, 'busy', 'a CEO shift is already running');
+        return;
+      }
+    } else {
+      const cap = this.shiftCap();
+      const holders = [...this.active.values()].filter((a) => takesShiftSlot(a.msg.kind));
+      if (holders.length >= cap.max) {
+        const capacity = capacityOf(cap, holders);
+        this.reject(
+          msg.shiftId,
+          'busy',
+          busyDetail(capacity),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          capacity,
+        );
+        return;
+      }
     }
     const shift: ActiveShift = {
       msg,
@@ -760,6 +829,7 @@ export class ShiftSupervisor {
     branchProblem?: { base: string; defaultBranch?: string; branches: string[] },
     limitedUntil?: string,
     accountKey?: string,
+    capacity?: ShiftCapacity,
   ): void {
     // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
     // searching (backlog #79).
@@ -774,6 +844,7 @@ export class ShiftSupervisor {
       ...(branchProblem ? { branchProblem } : {}),
       ...(limitedUntil ? { limitedUntil } : {}),
       ...(accountKey ? { accountKey } : {}),
+      ...(capacity ? { capacity } : {}),
     });
   }
 

@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
+  SHIFT_LIMIT_SOURCE_LABEL,
+  type ShiftCapacity,
+  shiftLimitSourceOf,
+  UNLIMITED_SHIFTS,
   allowedOutcomes,
   BRIEF_STAGE_ID,
   BuildEvidenceInputSchema,
@@ -1265,13 +1269,30 @@ export async function applyShiftRejected(
           ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
           : msg.reason === 'auth_expired'
             ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-            : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+            : msg.reason === 'busy' && msg.capacity
+              ? await shiftCapMessage(tx, ws.id, msg.capacity)
+              : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
   // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
   for (const ev of released)
     if (ev.event.type === 'ShiftEnded' && ev.event.payload.shiftId === s.id)
       ev.event.payload.rejectionReason = `${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}`.slice(0, 600);
   await ctx.store.append(released, { tx });
+}
+
+/**
+ * The card message for a shift the runner turned away at its shift limit: the limit, its source and the shifts that
+ * hold the slots (identifiers only, no paths).
+ */
+export async function shiftCapMessage(tx: Tx, workstationId: string, capacity: ShiftCapacity): Promise<string> {
+  const ws = await one(tx, 'SELECT name FROM workstations WHERE id=$1', [workstationId]);
+  const source = shiftLimitSourceOf(capacity.source);
+  const label = source ? SHIFT_LIMIT_SOURCE_LABEL[source] : capacity.source.slice(0, 40);
+  const limit = capacity.limit >= UNLIMITED_SHIFTS ? 'no limit' : String(capacity.limit);
+  const holders = capacity.holders
+    .map((h) => `${h.cardRef ?? h.kind}${h.agentName ? ` (${h.agentName})` : ''}`)
+    .join(', ');
+  return `Waiting: workstation ${ws?.name ?? workstationId} is at its shift limit (${limit}, ${label}; ${capacity.running} running).${holders ? ` Slots held by ${holders}.` : ''} The card is back in the queue.`;
 }
 
 /** How many identical rejections of one card in a row raise a desk item. */

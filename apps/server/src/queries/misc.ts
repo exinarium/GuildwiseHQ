@@ -33,7 +33,14 @@ import { conflict, notFound } from '../errors.ts';
 import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
 import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
-import { effectiveShiftLimit, platformShiftCap, shiftLimitSettingOf } from '../runner-gateway/shift-limit.ts';
+import {
+  effectiveShiftLimit,
+  platformShiftCap,
+  SLOT_KINDS_SQL,
+  shiftLimitSettingOf,
+  shiftLimitSourceFor,
+  shiftLimitSync,
+} from '../runner-gateway/shift-limit.ts';
 import {
   referenceWorkstationRepoDtos,
   type StoredWorkstationRepo,
@@ -473,11 +480,14 @@ export function syncDto(r: Row | undefined) {
  * Shifts running now and the limit in force (backlog #76): the owner's setting, else the runner's own value, under the
  * platform ceiling. Offline, only an explicit setting is known.
  */
-function shiftsDto(
+type ShiftHolderDto = NonNullable<WorkstationDto['shifts']>['holders'][number];
+
+export function shiftsDto(
   ctx: Ctx,
   w: Row,
   running: number,
   caps: Row | undefined,
+  extra: { otherRunning?: number; holders?: ShiftHolderDto[] } = {},
 ): NonNullable<WorkstationDto['shifts']> {
   const conn = ctx.services.runners.isOnline(w.id) ? ctx.services.runners.get(w.id) : undefined;
   const setting = shiftLimitSettingOf(w);
@@ -487,6 +497,15 @@ function shiftsDto(
       ? effectiveShiftLimit(ctx, setting, undefined)
       : null;
   const unlimited = effective !== null && effective >= UNLIMITED_SHIFTS;
+  const source = conn ? (conn.limitSource ?? shiftLimitSourceFor(ctx, setting)) : setting !== null ? shiftLimitSourceFor(ctx, setting) : null;
+  const sync = shiftLimitSync(conn);
+  const enforced =
+    conn?.reportsShiftLimit && conn.enforcedMaxShifts !== undefined && conn.enforcedAt
+      ? {
+          limit: conn.enforcedMaxShifts >= UNLIMITED_SHIFTS ? null : conn.enforcedMaxShifts,
+          source: conn.enforcedSource ?? ('local_fallback' as const),
+        }
+      : null;
   return {
     running,
     limit: effective === null || unlimited ? null : effective,
@@ -495,6 +514,11 @@ function shiftsDto(
     platformCap: platformShiftCap(ctx),
     runnerLimit: conn?.reportedMaxShifts ?? null,
     supported: caps ? ((caps.capabilities ?? []) as string[]).includes(SHIFT_LIMIT_CAPABILITY) : null,
+    source,
+    enforced,
+    sync,
+    otherRunning: extra.otherRunning ?? 0,
+    holders: extra.holders ?? [],
   };
 }
 
@@ -554,12 +578,33 @@ export async function workstationDtos(
     `SELECT * FROM repo_sync_status WHERE workstation_id = ANY($1::uuid[])`,
     [list.map((w) => w.id)],
   );
+  // One rule for what takes a slot (`takesShiftSlot`), as on the runner and in the dispatcher: chat and CEO turns are
+  // counted apart.
   const running = await rows(
     ctx.pool,
-    `SELECT workstation_id, count(*)::int AS n FROM shifts
+    `SELECT workstation_id, count(*) FILTER (WHERE ${SLOT_KINDS_SQL()})::int AS n,
+            count(*) FILTER (WHERE NOT (${SLOT_KINDS_SQL()}))::int AS other FROM shifts
       WHERE workstation_id = ANY($1::uuid[]) AND status <> 'ended' GROUP BY workstation_id`,
     [list.map((w) => w.id)],
   );
+  const holderRows = await rows(
+    ctx.pool,
+    `SELECT s.workstation_id, s.id AS shift_id, s.kind, c.ref AS card_ref, a.name AS agent_name
+       FROM shifts s LEFT JOIN cards c ON c.id = s.card_id LEFT JOIN agents a ON a.id = s.agent_id
+      WHERE s.workstation_id = ANY($1::uuid[]) AND s.status <> 'ended' AND ${SLOT_KINDS_SQL('s')}
+      ORDER BY s.started_at NULLS LAST, s.id`,
+    [list.map((w) => w.id)],
+  );
+  const holdersOf = (id: string): ShiftHolderDto[] =>
+    holderRows
+      .filter((r) => r.workstation_id === id)
+      .slice(0, 50)
+      .map((r) => ({
+        shiftId: r.shift_id,
+        kind: r.kind,
+        cardRef: r.kind === 'card' ? (r.card_ref ?? null) : null,
+        agentName: r.agent_name ?? null,
+      }));
   const hygiene = await hygieneDtos(ctx.pool, list as never);
   const caps = new Map<string, Row>(
     (
@@ -664,7 +709,10 @@ export async function workstationDtos(
       setAt: iso(w.devops_sudo_set_at),
       works: w.devops_sudo_works ?? null,
     },
-    shifts: shiftsDto(ctx, w, running.find((r) => r.workstation_id === w.id)?.n ?? 0, caps.get(w.id)),
+    shifts: shiftsDto(ctx, w, running.find((r) => r.workstation_id === w.id)?.n ?? 0, caps.get(w.id), {
+      otherRunning: running.find((r) => r.workstation_id === w.id)?.other ?? 0,
+      holders: holdersOf(w.id),
+    }),
     git: { connections: w.git_connections ?? [], checkedAt: iso(w.git_checked_at) },
     jira: { status: w.jira_status ?? null, checkedAt: iso(w.jira_checked_at) },
     mcpServers: ((w.mcp_servers ?? []) as Array<Record<string, unknown>>).flatMap((s) => {

@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from '../src/config.ts';
 import { RunnerHost } from '../src/host.ts';
 import { nullLogger } from '../src/log.ts';
 import { addPairing, findPairing, loadIndex, removePairing } from '../src/pairings.ts';
+import type { Runner } from '../src/runner.ts';
 import { FakeServer } from './fake-server.ts';
 import { cleanupTmp, makeConfig, tmp, waitUntil } from './helpers.ts';
 
@@ -283,9 +284,40 @@ describe('runner host', () => {
       const cap = (id: string) => (host as unknown as { capFor(id: string): number }).capFor(id);
       expect(cap(p1.entry.id)).toBe(2);
       // pretend pairing 2 runs one shift
-      Object.defineProperty((r2 as NonNullable<typeof r2>).supervisor, 'size', { get: () => 1 });
+      Object.defineProperty((r2 as NonNullable<typeof r2>).supervisor, 'slotCount', { get: () => 1 });
       expect(cap(p1.entry.id)).toBe(1);
       expect(cap(p2.entry.id)).toBe(2);
+    } finally {
+      await host.stop();
+      await Promise.all([s1.close(), s2.close()]);
+    }
+  }, 60_000);
+
+  it('GWP-95: pairings.json maxConcurrentShifts no longer caps an Unlimited grant; the budget is the largest grant', async () => {
+    const s1 = await FakeServer.start({ token: 'aomr_one', shiftLimit: 'unlimited', maxConcurrentShifts: 16 });
+    const s2 = await FakeServer.start({ token: 'aomr_two', shiftLimit: 6, maxConcurrentShifts: 6 });
+    const root = tmp();
+    const p1 = await pairTo(root, s1, 'Acme', WS_A);
+    const p2 = await pairTo(root, s2, 'Globex', WS_B);
+    // the retired hand-written key that held 4 on 2 Nov
+    const indexFile = join(root, 'pairings.json');
+    writeFileSync(indexFile, JSON.stringify({ ...JSON.parse(readFileSync(indexFile, 'utf8')), maxConcurrentShifts: 4 }));
+    const host = new RunnerHost({ root, log: nullLogger, mock: true, ...quick });
+    try {
+      await host.start();
+      await waitUntil(() => s1.helloCount > 0 && s2.helloCount > 0, 15_000, 'both connected');
+      const r1 = host.running.get(p1.entry.id)?.runner as Runner;
+      const r2 = host.running.get(p2.entry.id)?.runner as Runner;
+      await waitUntil(() => r1.shiftLimit() === 16 && r2.shiftLimit() === 6, 10_000, 'grants applied');
+      expect(host.machineLimit()).toBe(16);
+      expect(host.capFor(p1.entry.id)).toBe(16);
+      expect(r1.effectiveShiftLimit()).toEqual({ max: 16, source: 'platform_cap' });
+      expect(r2.effectiveShiftLimit()).toEqual({ max: 6, source: 'workstation_setting' });
+      // the other pairing holds 12 slots: the budget left is smaller than this pairing's grant
+      Object.defineProperty(r1.supervisor, 'slotCount', { get: () => 12 });
+      expect(r2.effectiveShiftLimit()).toEqual({ max: 4, source: 'pairing_budget' });
+      // the file is left alone
+      expect(JSON.parse(readFileSync(indexFile, 'utf8')).maxConcurrentShifts).toBe(4);
     } finally {
       await host.stop();
       await Promise.all([s1.close(), s2.close()]);

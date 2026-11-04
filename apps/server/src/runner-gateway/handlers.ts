@@ -15,6 +15,7 @@ import {
   type RunnerToServer,
   type RunnerToServerOf,
   type ServerToRunner,
+  SHIFT_LIMIT_REPORT_CAPABILITY,
   streamId,
 } from '@aom/shared';
 import { applyCapabilitiesReport } from '../capabilities/registry.ts';
@@ -153,7 +154,13 @@ import {
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
-import { dropStaleShiftLimitCommands, effectiveShiftLimit, shiftLimitSettingOf } from './shift-limit.ts';
+import {
+  dropStaleShiftLimitCommands,
+  effectiveShiftLimit,
+  recordEnforcedLimit,
+  shiftLimitSettingOf,
+  shiftLimitSourceFor,
+} from './shift-limit.ts';
 import { recordRepoCatalog } from './workstation-repos.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -963,6 +970,9 @@ export class RunnerHandlers {
       ])) ?? {},
     );
     conn.maxShifts = effectiveShiftLimit(ctx, setting, msg.maxConcurrentShifts);
+    conn.limitSource = shiftLimitSourceFor(ctx, setting);
+    conn.limitChangedAt = now;
+    conn.reportsShiftLimit = (msg.capabilities ?? []).includes(SHIFT_LIMIT_REPORT_CAPABILITY);
     conn.lastRepos = msg.repos;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     conn.helloChatIds = msg.activeChats ?? [];
@@ -1070,7 +1080,11 @@ export class RunnerHandlers {
       workstationId: conn.workstationId,
       serverTime: now.toISOString(),
       heartbeatSec: HEARTBEAT_SEC,
-      limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
+      limits: {
+        maxConcurrentShifts: conn.maxShifts,
+        shiftLimit: setting,
+        ...(conn.limitSource ? { source: conn.limitSource } : {}),
+      },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
       features: [
@@ -1278,6 +1292,7 @@ export class RunnerHandlers {
     const { ctx } = this;
     const now = ctx.clock.now();
     const reported = new Set(msg.activeShifts);
+    recordEnforcedLimit(conn, msg.load, now);
     await exec(ctx.pool, 'UPDATE workstations SET last_seen_at=$2 WHERE id=$1', [conn.workstationId, now]);
     if (msg.activeShifts.length) {
       await exec(
