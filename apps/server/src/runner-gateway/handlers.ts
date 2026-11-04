@@ -138,6 +138,7 @@ import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
 import { applyReleaseDocsPrepResult } from '../release/docs-prep.ts';
+import { endReleasePrepShift } from '../release/docs-prep-tasks.ts';
 import { applyReleaseFactsResult } from '../release/facts.ts';
 import { applyReleasePublishResult } from '../release/publish.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
@@ -1221,14 +1222,16 @@ export class RunnerHandlers {
     const { ctx } = this;
     const open = await rows(
       ctx.pool,
-      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='ba_task' AND status <> 'ended' AND started_at <= $2`,
+      `SELECT id, kind FROM shifts WHERE workstation_id=$1 AND kind IN ('ba_task','release_prep') AND status <> 'ended' AND started_at <= $2`,
       [conn.workstationId, helloAt],
     );
     for (const s of open) {
       if (known.has(s.id)) continue;
       await withAppendTx(ctx.pool, async (tx) => {
         const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
-        if (shift) await ctx.store.append(await endBaTaskShift(tx, shift, 'lost'), { tx });
+        if (!shift) return;
+        if (shift.kind === 'release_prep') await endReleasePrepShift(ctx, tx, shift, 'lost');
+        else await ctx.store.append(await endBaTaskShift(tx, shift, 'lost'), { tx });
       });
     }
   }
@@ -1266,11 +1269,11 @@ export class RunnerHandlers {
       (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
         shiftId,
       ])) ??
-      // Question, BA task and CEO shifts are held while they have not ended (a CEO shift has no card: without this the
-      // first heartbeat told the runner to stop it as "claim lost", backlog #79).
+      // Question, BA task, CEO and release prep shifts are held while they have not ended (they have no card claim:
+      // without this the first heartbeat told the runner to stop them as "claim lost", backlog #79).
       (await one(
         this.ctx.pool,
-        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task','ceo') AND status <> 'ended'`,
+        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task','ceo','release_prep') AND status <> 'ended'`,
         [shiftId],
       ));
     if (holder) return;
@@ -1528,6 +1531,9 @@ export class RunnerHandlers {
         return reply(...(await addBacklogSuggestionRpc(ctx, shift, msg.params)));
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
+      // A release prep task shift writes the files it was given and ends with `aom prep done|fail`: nothing else.
+      if (shift.kind === 'release_prep')
+        return reply(false, undefined, `${msg.method} is not available in a release prep task`);
       // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).
       if (shift.kind === 'devops' && DEVOPS_CARD_METHODS.has(msg.method))
         return reply(...(await devopsCardRpc(ctx, shift, msg.method, msg.params)));

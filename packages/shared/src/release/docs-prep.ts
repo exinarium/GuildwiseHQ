@@ -7,6 +7,8 @@
  * Pure: the step registry, the run state machine, the next-action planner and the ship gate. No I/O.
  */
 
+import { VIDEOS_STEP } from './docs-prep-videos.ts';
+
 export type ReleaseDocsPrepStepId = string;
 
 export interface ReleaseDocsPrepStepDef {
@@ -22,6 +24,10 @@ export interface ReleaseDocsPrepStepDef {
   last?: true;
   /** Steps that must be enabled too (a run that misses one is refused at start). */
   requires?: string[];
+  /** Run in this order, each phase in every repo before the next phase. Default: one unnamed phase (''). */
+  phases?: readonly string[];
+  /** Phases the server runs itself (an agent shift), not a runner command. */
+  serverPhases?: readonly string[];
 }
 
 export const ANALYSE_STEP: ReleaseDocsPrepStepDef = {
@@ -43,6 +49,7 @@ export const COMMIT_STEP: ReleaseDocsPrepStepDef = {
   defaultOn: true,
   producesFiles: false,
   last: true,
+  phases: ['prepare', 'push'],
 };
 
 export const CHANGELOG_STEP: ReleaseDocsPrepStepDef = {
@@ -68,7 +75,13 @@ export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
 };
 
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, COMMIT_STEP];
+const STEPS: ReleaseDocsPrepStepDef[] = [
+  ANALYSE_STEP,
+  CHANGELOG_STEP,
+  GUIDE_STEP,
+  VIDEOS_STEP,
+  COMMIT_STEP,
+];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {
@@ -80,6 +93,19 @@ export const isReleaseDocsPrepStep = (id: string): boolean => STEPS.some((s) => 
 
 export const releaseDocsPrepStep = (id: string): ReleaseDocsPrepStepDef | undefined =>
   STEPS.find((s) => s.id === id);
+
+/** The phases of a step in run order; '' alone for a single-phase step. */
+export const stepPhases = (id: string): readonly string[] => releaseDocsPrepStep(id)?.phases ?? [''];
+
+/** Whether the server runs this phase itself (instead of a runner command). */
+export const isServerPhase = (id: string, phase: string): boolean =>
+  !!phase && (releaseDocsPrepStep(id)?.serverPhases ?? []).includes(phase);
+
+/** Index of a phase in its step (for ordering); unknown phases sort last. */
+export const stepPhaseIndex = (id: string, phase: string): number => {
+  const i = stepPhases(id).indexOf(phase);
+  return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+};
 
 export interface ReleaseDocsPrepSettings {
   enabled: boolean;
@@ -147,8 +173,8 @@ export interface RunSnapshotRepo {
   repoName?: string;
   /** `skipped` when the release branch does not exist on origin: skipped for every later step. */
   state: ReleaseDocsPrepStepState;
-  /** The steps of this repo by `step` (and `phase` for commit). */
-  steps: { step: string; phase?: CommitPhase | ''; state: ReleaseDocsPrepStepState; error?: string | null }[];
+  /** The steps of this repo by `step` (and `phase` for a step with phases). */
+  steps: { step: string; phase?: string; state: ReleaseDocsPrepStepState; error?: string | null }[];
 }
 
 export interface RunSnapshot {
@@ -159,22 +185,24 @@ export interface RunSnapshot {
 }
 
 export type ReleaseDocsPrepAction =
-  | { kind: 'dispatch'; step: string; phase?: CommitPhase; repoIds: string[] }
+  | { kind: 'dispatch'; step: string; phase?: string; repoIds: string[]; by?: 'server' }
+  /** An earlier phase of this step was skipped in these repos: the later phase is skipped too, with the same note. */
+  | { kind: 'skip'; step: string; phase: string; repoIds: string[]; notes: Record<string, string> }
   | { kind: 'wait' }
   | { kind: 'finish'; status: 'passed' }
   | { kind: 'finish'; status: 'failed'; step: string; repoId: string; error: string };
 
-const stepStateOf = (
-  r: RunSnapshotRepo,
-  step: string,
-  phase: CommitPhase | '' = '',
-): ReleaseDocsPrepStepState =>
-  r.steps.find((s) => s.step === step && (s.phase ?? '') === phase)?.state ?? 'pending';
+const stepRowOf = (r: RunSnapshotRepo, step: string, phase = '') =>
+  r.steps.find((s) => s.step === step && (s.phase ?? '') === phase);
+
+const stepStateOf = (r: RunSnapshotRepo, step: string, phase = ''): ReleaseDocsPrepStepState =>
+  stepRowOf(r, step, phase)?.state ?? 'pending';
 
 /**
  * What to do next for a run. The first step (in run order) that is not finished in every active repo is dispatched to
  * the repos that have not started it; any failed repo ends the run as failed (the later steps stay pending, so nothing
- * is committed). `commit` runs `prepare` in every repo, and only when all prepared, `push` in every repo.
+ * is committed). A step with phases runs each phase in every repo before the next (`commit`: `prepare`, then `push`).
+ * When the first phase of a step was skipped in a repo, its later phases are skipped there too (`skip`), with its note.
  */
 export function nextReleaseDocsPrepAction(run: RunSnapshot): ReleaseDocsPrepAction {
   if (run.status !== 'running') return { kind: 'wait' };
@@ -191,18 +219,30 @@ export function nextReleaseDocsPrepAction(run: RunSnapshot): ReleaseDocsPrepActi
       };
   }
   for (const step of run.steps) {
-    const phases: (CommitPhase | '')[] = step === 'commit' ? ['prepare', 'push'] : [''];
-    for (const phase of phases) {
+    const phases = stepPhases(step);
+    for (const [k, phase] of phases.entries()) {
       const states = active.map((r) => stepStateOf(r, step, phase));
       if (states.some((s) => s === 'running')) return { kind: 'wait' };
       const todo = active.filter((r) => stepStateOf(r, step, phase) === 'pending');
-      if (todo.length > 0)
-        return {
-          kind: 'dispatch',
-          step,
-          ...(phase ? { phase } : {}),
-          repoIds: todo.map((r) => r.repoId),
-        };
+      if (todo.length === 0) continue;
+      const notes: Record<string, string> = {};
+      // Only the first phase decides that a step does not apply to a repo (videos: no harness). A later phase that had
+      // nothing to do (videos author: no new videos) is skipped on its own and does not skip the phases after it.
+      const first = phases[0] ?? '';
+      if (k > 0)
+        for (const r of todo) {
+          const row = stepRowOf(r, step, first);
+          if (row?.state === 'skipped') notes[r.repoId] = row.error?.trim() || `${step} skipped`;
+        }
+      const skipIds = Object.keys(notes);
+      if (skipIds.length > 0) return { kind: 'skip', step, phase, repoIds: skipIds, notes };
+      return {
+        kind: 'dispatch',
+        step,
+        ...(phase ? { phase } : {}),
+        repoIds: todo.map((r) => r.repoId),
+        ...(isServerPhase(step, phase) ? { by: 'server' as const } : {}),
+      };
     }
   }
   return { kind: 'finish', status: 'passed' };

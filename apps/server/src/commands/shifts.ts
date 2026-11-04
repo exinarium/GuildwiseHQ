@@ -47,6 +47,7 @@ import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { applyReleasePrepReport, endReleasePrepShift } from '../release/docs-prep-tasks.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { checkBriefNote } from './brief-check.ts';
@@ -204,6 +205,7 @@ export async function applyShiftReport(
   if (shift.kind === 'question') return applyQuestionReport(ctx, tx, ws, msg.report, shift);
   if (shift.kind === 'ba_task') return applyBaTaskReport(ctx, tx, ws, msg, shift);
   if (shift.kind === 'ceo') return applyCeoReport(ctx, tx, ws, msg, shift);
+  if (shift.kind === 'release_prep') return applyReleasePrepReport(ctx, tx, msg, shift);
   if (!shift.card_id) return { accepted: false, error: 'this shift has no card to report on' };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id]);
   if (!card) return { accepted: false, error: 'card not found' };
@@ -1193,6 +1195,12 @@ export async function applyShiftRejected(
     await ctx.store.append(await endBaTaskShift(tx, s, 'rejected'), { tx });
     return;
   }
+  if (s.kind === 'release_prep') {
+    await endReleasePrepShift(ctx, tx, s, 'rejected', {
+      rejection: { reason: msg.reason, ...(msg.detail ? { detail: msg.detail } : {}) },
+    });
+    return;
+  }
   if (s.kind === 'ceo') {
     const error = rejectionText(msg.reason, msg.detail);
     ctx.log.warn(
@@ -1450,6 +1458,15 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
       }),
       { tx },
     );
+    return;
+  }
+  if (s.kind === 'release_prep') {
+    await endReleasePrepShift(ctx, tx, s, msg.outcome, {
+      durationMs: msg.durationMs,
+      usage: msg.usage,
+      exitCode: msg.exitCode,
+      guardViolations: msg.guardViolations,
+    });
     return;
   }
   if (s.kind === 'ba_task') {

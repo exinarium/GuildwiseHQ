@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import {
-  type CommitPhase,
   enabledReleaseDocsPrepSteps,
   isOrgManager,
   isReleaseDocsPrepStep,
@@ -8,6 +7,7 @@ import {
   missingReleaseDocsPrepRequirement,
   nextReleaseDocsPrepAction,
   RELEASE_DOCS_PREP_CAPABILITY,
+  type ReleaseDocsPrepAction,
   type ReleaseDocsPrepGateInput,
   type ReleaseDocsPrepGateView,
   type ReleaseDocsPrepOverviewItem,
@@ -21,6 +21,8 @@ import {
   releaseDocsPrepGate,
   releaseDocsPrepLink,
   releaseDocsPrepSteps,
+  stepPhaseIndex,
+  stepPhases,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -36,6 +38,13 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
 import { DOCS_PREP_STEP_HOOKS, docsPrepWriter } from './docs-prep-steps.ts';
+import {
+  PHASE_FAILURE_HOOKS,
+  PHASE_INPUTS,
+  REPORT_MAX_BYTES,
+  SERVER_PHASES,
+  type ServerPhaseOutcome,
+} from './docs-prep-videos.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -357,7 +366,7 @@ async function snapshot(tx: Queryable, runId: string): Promise<{ run: Row; snap:
         state: r.state,
         steps: steps
           .filter((s) => s.repo_id === r.repo_id)
-          .map((s) => ({ step: s.step, phase: s.phase as CommitPhase | '', state: s.state, error: s.error })),
+          .map((s) => ({ step: s.step, phase: s.phase as string, state: s.state, error: s.error })),
       })),
     },
   };
@@ -368,12 +377,90 @@ async function snapshot(tx: Queryable, runId: string): Promise<{ run: Row; snap:
  * Runs in the transaction that changed the run.
  */
 export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]> {
-  const s = await snapshot(tx, runId);
-  if (!s || s.run.status !== 'running') return [];
-  const { run } = s;
+  // Skipped later phases and server phases finish in this transaction; then plan again. Bounded by the step rows.
+  for (let guard = 0; guard < 500; guard++) {
+    const s = await snapshot(tx, runId);
+    if (!s || s.run.status !== 'running') return [];
+    const action = nextReleaseDocsPrepAction(s.snap);
+    if (action.kind === 'skip') {
+      for (const repoId of action.repoIds)
+        await finishInline(ctx, tx, s.run, repoId, action.step, action.phase, {
+          state: 'skipped',
+          error: action.notes[repoId] ?? `${action.step} skipped`,
+        });
+      continue;
+    }
+    if (action.kind === 'dispatch' && action.by === 'server') {
+      const handler = SERVER_PHASES[`${action.step}/${action.phase ?? ''}`];
+      for (const repoId of action.repoIds) {
+        const out = handler
+          ? await handler(ctx, tx, s.run, repoId)
+          : { state: 'failed' as const, error: `no server phase ${action.step}/${action.phase}` };
+        await finishInline(ctx, tx, s.run, repoId, action.step, action.phase ?? '', out);
+      }
+      continue;
+    }
+    return dispatchAction(ctx, tx, s.run, action);
+  }
+  return [];
+}
+
+/** A phase the server finishes itself (skipped after a skipped earlier phase, or a server phase): started, then done. */
+async function finishInline(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  repoId: string,
+  step: string,
+  phase: string,
+  out: ServerPhaseOutcome,
+): Promise<void> {
   const scope = projectScope(run.org_id, run.project_id);
   const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
-  const action = nextReleaseDocsPrepAction(s.snap);
+  const base = { runId: run.id as string, repoId, step, ...(phase ? { phase } : {}) };
+  const started = {
+    streamId: streamId.releaseDocsPrep(run.id),
+    event: { type: 'ReleaseDocsPrepStepStarted' as const, payload: base },
+    actor,
+    scope,
+  };
+  // A phase waiting for its tasks stays running; the last task's end finishes it (docs-prep-tasks.ts).
+  if (out.state === 'running') {
+    await ctx.store.append([started], { tx });
+    return;
+  }
+  await ctx.store.append(
+    [
+      started,
+      {
+        streamId: streamId.releaseDocsPrep(run.id),
+        event: {
+          type: 'ReleaseDocsPrepStepFinished',
+          payload: {
+            ...base,
+            state: out.state,
+            ...(out.error ? { error: out.error.slice(0, 4000) } : {}),
+            files: [],
+            ...(out.report ? { report: out.report } : {}),
+          },
+        },
+        actor,
+        scope,
+      },
+    ],
+    { tx },
+  );
+}
+
+async function dispatchAction(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  action: Exclude<ReleaseDocsPrepAction, { kind: 'skip' }>,
+): Promise<string[]> {
+  const runId: string = run.id;
+  const scope = projectScope(run.org_id, run.project_id);
+  const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
   if (action.kind === 'wait') return [];
   if (action.kind === 'finish') {
     await ctx.store.append(
@@ -442,6 +529,8 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
       }
     }
     const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
+    const inputOf = PHASE_INPUTS[`${action.step}/${action.phase ?? ''}`];
+    const input = inputOf ? await inputOf(tx, runId, repoId) : undefined;
     deliver.push(
       await sendDocsPrepStepCommand(ctx, tx, run, repo, {
         step: action.step,
@@ -451,6 +540,7 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
         ...(changelog ? { changelog } : {}),
         ...(stepInput ? { stepInput } : {}),
         ...(writer ? { writer } : {}),
+        ...(input ? { input } : {}),
       }),
     );
   }
@@ -504,12 +594,13 @@ export async function sendDocsPrepStepCommand(
   repo: Row,
   o: {
     step: string;
-    phase?: CommitPhase;
+    phase?: string;
     projectKey: string;
     commitAs: ReleaseDocsPrepPayload['commitAs'];
     changelog?: ReleaseDocsPrepPayload['changelog'];
     stepInput?: ReleaseDocsPrepPayload['stepInput'];
     writer?: ReleaseDocsPrepPayload['writer'];
+    input?: ReleaseDocsPrepPayload['input'];
   },
 ): Promise<string> {
   const runId: string = run.id;
@@ -534,6 +625,7 @@ export async function sendDocsPrepStepCommand(
     ...(o.changelog ? { changelog: o.changelog } : {}),
     ...(o.stepInput ? { stepInput: o.stepInput } : {}),
     ...(o.writer ? { writer: o.writer } : {}),
+    ...(o.input ? { input: o.input } : {}),
   };
   const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
   await ctx.store.append(
@@ -567,7 +659,8 @@ export async function applyReleaseDocsPrepResult(
   const runId = String(payload.runId ?? '');
   const repoId = String(payload.repoId ?? '');
   const step = String(payload.step ?? '');
-  const phase = payload.phase === 'prepare' || payload.phase === 'push' ? payload.phase : undefined;
+  const asked = typeof payload.phase === 'string' ? payload.phase : '';
+  const phase = asked && stepPhases(step).includes(asked) ? asked : undefined;
   const parsed = ReleaseDocsPrepResultSchema.safeParse(result);
   const r = ok && parsed.success ? parsed.data : undefined;
   const deliver: string[] = [];
@@ -587,7 +680,12 @@ export async function applyReleaseDocsPrepResult(
     );
     if (!row || row.state !== 'running' || row.workstation_id !== workstationId) return;
     const state = r ? r.state : 'failed';
-    const message = r ? r.error : (error ?? (parsed.success ? parsed.data.error : undefined));
+    let message = r ? r.error : (error ?? (parsed.success ? parsed.data.error : undefined));
+    let report = r?.report;
+    if (report && JSON.stringify(report).length > REPORT_MAX_BYTES) {
+      report = { truncated: true };
+      message = `${message ?? ''} (report too large)`.trim();
+    }
     await ctx.store.append(
       [
         {
@@ -616,6 +714,7 @@ export async function applyReleaseDocsPrepResult(
                 const output = r ? storedStepOutput(step, r.output, payload.changelog) : undefined;
                 return output === undefined ? {} : { output };
               })(),
+              ...(report ? { report } : {}),
             },
           },
           actor: run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR,
@@ -624,6 +723,9 @@ export async function applyReleaseDocsPrepResult(
       ],
       { tx },
     );
+    // A failed phase may get one more round (videos: a newly written script whose render failed) instead of failing.
+    const onFailure = PHASE_FAILURE_HOOKS[`${step}/${phase ?? ''}`];
+    if (state === 'failed' && onFailure) await onFailure(ctx, tx, run, repoId);
     deliver.push(...(await advance(ctx, tx, runId)));
     const after = await one(tx, 'SELECT status FROM release_docs_prep_runs WHERE id=$1', [runId]);
     if (after?.status === 'passed') {
@@ -782,7 +884,9 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
         steps: steps
           .filter((s) => s.repo_id === r.repo_id)
           .sort(
-            (a, b) => (order.get(a.step) ?? 99) - (order.get(b.step) ?? 99) || (a.phase < b.phase ? 1 : -1),
+            (a, b) =>
+              (order.get(a.step) ?? 99) - (order.get(b.step) ?? 99) ||
+              stepPhaseIndex(a.step, a.phase) - stepPhaseIndex(b.step, b.phase),
           )
           .map((s) => ({
             step: s.step,
@@ -793,6 +897,7 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
             error: s.error ?? null,
             files: s.files ?? [],
             ...(s.output != null ? { output: s.output } : {}),
+            report: s.report ?? null,
           })),
       };
     }),

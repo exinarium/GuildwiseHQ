@@ -55,7 +55,7 @@ const BA_PHASES = ['Phases (background)'];
 const BA_REPORTING = ['Reviews for the CEO'];
 const BA_NEW_REPOS = ['New repositories'];
 
-export type ShiftKindName = 'card' | 'question' | 'devops' | 'ba_task' | 'ceo';
+export type ShiftKindName = 'card' | 'question' | 'devops' | 'ba_task' | 'ceo' | 'release_prep';
 
 /** The `##` sections of a role's instructions the shift does not use. Only the BA's long role text is trimmed. */
 export function roleSectionsToDrop(

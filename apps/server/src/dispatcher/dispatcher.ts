@@ -12,6 +12,7 @@ import { deliveryPass } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { orgCapPaused, type ProviderCapState } from '../provider-keys/caps.ts';
+import { releasePrepTaskPass } from '../release/docs-prep-tasks.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { SLOT_KINDS_SQL } from '../runner-gateway/shift-limit.ts';
 import { delegationSpecFor } from '../sessions/delegate-grants.ts';
@@ -373,6 +374,7 @@ export class Dispatcher {
     await this.safely('blocked-questions', () => blockedQuestionPass(this.ctx), undefined);
     counted(await this.safely('question', () => questionPass(this.ctx, cooling, full), []));
     counted(await this.safely('ba-task', () => baTaskPass(this.ctx, cooling, full), []));
+    counted(await this.safely('release-prep-task', () => releasePrepTaskPass(this.ctx, cooling, full), []));
     await this.safely('ceo', () => ceoPass(this.ctx), undefined);
     // Delivery: merge triggers that are due become deploy requests; deploys nobody collected expire (never throws).
     await deliveryPass(this.ctx).catch((err) => this.ctx.log.error({ err }, 'delivery pass failed'));

@@ -14,6 +14,8 @@ import {
   renderInstructions,
   renderQuestionInstructions,
   renderQuestionPrompt,
+  renderReleasePrepInstructions,
+  renderReleasePrepPrompt,
   renderShiftPrompt,
   roleSectionsToDrop,
   type ServerToRunnerOf,
@@ -61,6 +63,11 @@ function rawShiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instructions: s
   if (baTask) {
     return { instructions: renderBaTaskInstructions(brief, baTask), prompt: renderBaTaskPrompt(baTask) };
   }
+  if (msg.kind === 'release_prep' && msg.releasePrep)
+    return {
+      instructions: renderReleasePrepInstructions(brief.agent, brief.project, msg.releasePrep),
+      prompt: renderReleasePrepPrompt(msg.releasePrep),
+    };
   const question = questionOf(msg);
   if (question) {
     return {

@@ -93,7 +93,13 @@ const outside = (md: string) => {
 
 describe('registry: Write changelog', () => {
   it('sits between analyse and commit, on by default, requires analyse', () => {
-    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'changelog', 'guide', 'commit']);
+    expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual([
+      'analyse',
+      'changelog',
+      'guide',
+      'videos',
+      'commit',
+    ]);
     expect(CHANGELOG_STEP).toMatchObject({
       order: 20,
       defaultOn: true,

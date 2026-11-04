@@ -17,6 +17,7 @@ import {
   type IpcReportResponse,
   type IpcRpcResponse,
   type LedgerMatch,
+  PREP_OUTCOME,
   parseCommandLine,
   parseRunHealth,
   parseRunPort,
@@ -502,12 +503,19 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
     case 'release-changelog-fail':
       return report(
         ctx,
-        outcome('release_changelog_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
+        outcome(
+          'release_changelog_fail',
+          (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500),
+          {},
+        ),
       );
     default:
       throw new UsageError(REPORT_USAGE);
   }
 }
+
+const PREP_USAGE = `usage: aom prep done --summary "<what you wrote>"
+       aom prep fail --reason "<why it could not be written>"`;
 
 const PHASE_USAGE = `usage: aom phase list [--project <KEY>]
        aom phase propose --name "<name>" [--project <KEY>] [--description "<text>"] [--followups-file <json>]
@@ -2302,6 +2310,21 @@ const VERBS: Record<string, Verb> = {
   },
   org: async (ctx, p) => orgDesign(ctx, p),
   phase: async (ctx, p) => phaseVerb(ctx, p),
+  /** `aom prep done|fail` (a release prep task shift): the work is written, or it could not be (terminal). */
+  prep: async (ctx, p) => {
+    const sub = p.positionals[0];
+    if (sub === 'done') {
+      const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
+      if (!summary) throw new UsageError(PREP_USAGE);
+      return report(ctx, outcome(PREP_OUTCOME.done, summary, { summary }));
+    }
+    if (sub === 'fail') {
+      const reason = (textFlag(ctx, p, 'reason', true) as string).trim();
+      if (!reason) throw new UsageError(PREP_USAGE);
+      return report(ctx, outcome(PREP_OUTCOME.failed, reason, { reason }));
+    }
+    throw new UsageError(PREP_USAGE);
+  },
   report: async (ctx, p) => reportVerb(ctx, p),
   /** `aom sudo -- <command> [args...]` (DevOps engineer): the runner runs it with administrator rights. */
   sudo: async (ctx, p) => {
@@ -2840,6 +2863,7 @@ export const USAGE = `usage: aom <verb> [options]
   phase report --summary-file <md> [--outstanding "<item>"]...   BA task (phase done): report it to the manager (terminal)
   phase followup done|fail <n> --summary "<t>" [--link <url>]...   BA task (custom follow-up): you did it, or could not (terminal)
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
+  prep done --summary "<t>" | prep fail --reason "<t>"   release prep task: the files are written, or they could not be (terminal)
   report brief --summary-file <md>   the CEO's analysis request (report triage|notes|signals|floor are retired)
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
   report spec-card --file <json>   report release-changelog --file <json> | report release-changelog-fail --note "<why>"   BA release prep task: propose the public changelog entries for one repository (terminal)

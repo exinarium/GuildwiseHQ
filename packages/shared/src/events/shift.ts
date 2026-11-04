@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AccountKeySchema } from '../claude/accounts.ts';
 import { defineEvent, Id, Stage, Usage } from './define.ts';
 
-export const ShiftKind = z.enum(['card', 'chat', 'question', 'devops', 'ba_task', 'ceo']);
+export const ShiftKind = z.enum(['card', 'chat', 'question', 'devops', 'ba_task', 'ceo', 'release_prep']);
 export type ShiftKind = z.infer<typeof ShiftKind>;
 
 export const ShiftEndOutcome = z.enum([

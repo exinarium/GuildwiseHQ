@@ -13,9 +13,11 @@ import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import {
-  DOCS_PREP_STEP_HANDLERS,
   type DocsPrepExec,
   type DocsPrepStepContext,
+  type DocsPrepStepOutcome,
+  type DocsPrepStepSpec,
+  stepSpecOf,
 } from './release-docs-prep-steps.ts';
 import { lastReleaseTagAt } from './release-facts.ts';
 import { pushFastForward } from './release-ship.ts';
@@ -33,6 +35,8 @@ export interface ReleaseDocsPrepInput {
   runModel?: DocsPrepStepContext['runModel'];
   /** Runs the repository's own build scripts (the PDF guide). Absent: such a build fails with the reason. */
   exec?: DocsPrepExec;
+  /** The runner's data folder (the videos render cache). */
+  dataDir?: string;
 }
 
 const noModel: DocsPrepStepContext['runModel'] = async () => ({
@@ -82,48 +86,71 @@ const passed = (extra: Partial<ReleaseDocsPrepResult> = {}): ReleaseDocsPrepResu
  *   `.../commit`); `commit` / `push` pushes it without force, only once every repository prepared.
  */
 export async function runReleaseDocsPrep(input: ReleaseDocsPrepInput): Promise<ReleaseDocsPrepResult> {
+  const p = input.payload;
+  // Single flight: a command handed out again after a reconnect joins the one already running (a render can take an
+  // hour) instead of starting it a second time.
+  const key = `${p.runId}:${p.repoId}:${p.step}:${p.phase ?? ''}`;
+  const running = inFlight.get(key);
+  if (running) return running;
+  const job = (async () => {
+    try {
+      const spec = stepSpecOf(p.step);
+      if (spec?.unlocked?.includes(p.phase ?? '')) return await runUnlocked(input, spec);
+      return await withRepoLock(input.repoPath, () => runLocked(input));
+    } catch (err) {
+      return failed(errMsg(err));
+    }
+  })();
+  inFlight.set(key, job);
   try {
-    return await withRepoLock(input.repoPath, () => runLocked(input));
-  } catch (err) {
-    return failed(errMsg(err));
+    return await job;
+  } finally {
+    inFlight.delete(key);
   }
 }
 
-async function runLocked(input: ReleaseDocsPrepInput): Promise<ReleaseDocsPrepResult> {
+const inFlight = new Map<string, Promise<ReleaseDocsPrepResult>>();
+
+type Auth = { args: string[]; env: Record<string, string> };
+
+/** Branch checks, fetch and the release branch tip: either the answer (refused or skipped) or the tip to work on. */
+async function prelude(
+  input: ReleaseDocsPrepInput,
+): Promise<{ result: ReleaseDocsPrepResult } | { tip: string; a: Auth }> {
   const { payload: p, repoPath } = input;
   const b = p.releaseBranch;
-  if (!isSafeGitRef(b)) return failed(`refusing unsafe branch name ${JSON.stringify(b)}`);
+  const stop = (result: ReleaseDocsPrepResult) => ({ result });
+  if (!isSafeGitRef(b)) return stop(failed(`refusing unsafe branch name ${JSON.stringify(b)}`));
   if (p.mainBranch !== undefined && !isSafeGitRef(p.mainBranch))
-    return failed(`refusing unsafe branch name ${JSON.stringify(p.mainBranch)}`);
+    return stop(failed(`refusing unsafe branch name ${JSON.stringify(p.mainBranch)}`));
   if (p.mainBranch && p.mainBranch === b)
-    return failed(`the release branch is the main branch (${b}): there is nothing to prepare`);
-  if (!(await hasRemote(repoPath))) return failed('the repository has no origin remote');
+    return stop(failed(`the release branch is the main branch (${b}): there is nothing to prepare`));
+  if (!(await hasRemote(repoPath))) return stop(failed('the repository has no origin remote'));
   const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-
+  const missing = (): ReleaseDocsPrepResult => ({
+    ok: true,
+    state: 'skipped',
+    error: `the release branch '${b}' does not exist on origin`,
+    files: [],
+    notices: [],
+  });
   const fetched = await git(repoPath, [...a.args, 'fetch', '--', 'origin', b], { env: a.env });
   if (fetched.exitCode !== 0) {
     const why = (fetched.stderr || fetched.stdout).trim();
-    if (/couldn't find remote ref|no such remote ref/i.test(why))
-      return {
-        ok: true,
-        state: 'skipped',
-        error: `the release branch '${b}' does not exist on origin`,
-        files: [],
-        notices: [],
-      };
-    return failed(`could not fetch ${b}: ${why}`);
+    if (/couldn't find remote ref|no such remote ref/i.test(why)) return stop(missing());
+    return stop(failed(`could not fetch ${b}: ${why}`));
   }
   const tip = await revParse(repoPath, `refs/remotes/origin/${b}`);
-  if (!tip)
-    return {
-      ok: true,
-      state: 'skipped',
-      error: `the release branch '${b}' does not exist on origin`,
-      files: [],
-      notices: [],
-    };
+  if (!tip) return stop(missing());
+  return { tip, a };
+}
 
+async function runLocked(input: ReleaseDocsPrepInput): Promise<ReleaseDocsPrepResult> {
+  const p = input.payload;
+  const pre = await prelude(input);
+  if ('result' in pre) return pre.result;
+  const { tip, a } = pre;
   if (p.step === 'analyse') return analyse(input, a, tip);
   if (p.step === 'commit') return p.phase === 'push' ? commitPush(input, a) : commitPrepare(input, tip);
   return contentStep(input, tip);
@@ -283,62 +310,152 @@ const commitRef = (runId: string): string => `${KEPT}/${runId}/commit`;
 /** Where the work chain was started: the base of the squash commit when there is no analysis to name it. */
 const startRef = (runId: string): string => `${KEPT}/${runId}/start`;
 
-async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<ReleaseDocsPrepResult> {
+type Identity = Awaited<ReturnType<typeof requireCommitIdentity>>;
+
+/** The commit identity and the commit the step's worktree starts from (recording where the work chain starts). */
+async function workStart(
+  input: ReleaseDocsPrepInput,
+  tip: string,
+): Promise<{ result: ReleaseDocsPrepResult } | { identity: Identity; start: string }> {
   const { payload: p, repoPath } = input;
-  const handler = DOCS_PREP_STEP_HANDLERS[p.step];
-  if (!handler) return failed(`this runner has no handler for the step '${p.step}': update the runner`);
-  let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
+  let identity: Identity;
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs);
   } catch (err) {
-    return failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err));
+    return { result: failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err)) };
   }
   const kept = await revParse(repoPath, workRef(p.runId));
   const start = kept ?? p.summary?.headSha ?? tip;
   if (!kept && !(await revParse(repoPath, startRef(p.runId))))
     await git(repoPath, ['update-ref', startRef(p.runId), start]);
+  return { identity, start };
+}
+
+/** Runs a step's handler in `wt` with a scratch folder that is removed afterwards. */
+async function runSpec(
+  input: ReleaseDocsPrepInput,
+  spec: DocsPrepStepSpec,
+  wt: string,
+  start: string,
+): Promise<DocsPrepStepOutcome> {
+  const outDir = await mkdtemp(join(tmpdir(), `docs-prep-${input.payload.step}-`));
+  try {
+    return await spec.run({
+      worktree: wt,
+      payload: input.payload,
+      summary: input.payload.summary,
+      outDir,
+      runModel: input.runModel ?? noModel,
+      exec: input.exec ?? noExec,
+      phase: input.payload.phase ?? '',
+      input: input.payload.input,
+      repoPath: input.repoPath,
+      dataDir: input.dataDir,
+      start,
+    });
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
+  }
+}
+
+/** Turns a handler's outcome into the answer, keeping its files as a local commit on the work ref. */
+async function keepWork(
+  input: ReleaseDocsPrepInput,
+  wt: string,
+  out: DocsPrepStepOutcome,
+  identity: Identity,
+): Promise<ReleaseDocsPrepResult> {
+  const { payload: p, repoPath } = input;
+  const report = {
+    ...(out.report ? { report: out.report } : {}),
+    ...(out.output !== undefined ? { output: out.output } : {}),
+  };
+  if (!out.ok) return failed(out.error, report);
+  if (out.state === 'skipped')
+    return {
+      ok: true,
+      state: 'skipped',
+      error: out.note ?? `${p.step} skipped`,
+      files: [],
+      notices: [],
+      ...report,
+    };
+  if (out.files.length > 0) {
+    const add = await git(wt, ['add', '--', ...out.files]);
+    if (add.exitCode !== 0) return failed(`git add failed: ${(add.stderr || add.stdout).trim()}`, report);
+  }
+  const status = (await git(wt, ['status', '--porcelain'])).stdout
+    .split('\n')
+    .map((l) => l.slice(3).trim())
+    .filter(Boolean);
+  const extra = status.filter((f) => !out.files.includes(f));
+  if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, report);
+  if (status.length === 0) return passed({ notices: ['no changes'], ...report });
+  const label = p.phase ? `${p.step} ${p.phase}` : p.step;
+  const commit = await git(wt, ['commit', '-m', `docs(release): ${label}`], { env: commitEnv(identity) });
+  if (commit.exitCode !== 0)
+    return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`, report);
+  const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+  await git(repoPath, ['update-ref', workRef(p.runId), sha]);
+  return passed({ files: status, ...report });
+}
+
+async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<ReleaseDocsPrepResult> {
+  const { payload: p, repoPath } = input;
+  const spec = stepSpecOf(p.step);
+  if (!spec) return failed(`this runner has no handler for the step '${p.step}': update the runner`);
+  const ws = await workStart(input, tip);
+  if ('result' in ws) return ws.result;
   const made = await withIntegrationWorktree(
     {
       repoPath,
       dir: join(input.integrationDir, `docs-prep-${p.repoId}`),
       root: input.integrationDir,
       tempBranch: integrationBranchName(`docs-prep-${p.runId.slice(0, 8)}-${p.step}`),
-      startPoint: start,
+      startPoint: ws.start,
     },
-    async (wt): Promise<ReleaseDocsPrepResult> => {
-      const outDir = await mkdtemp(join(tmpdir(), `docs-prep-${p.step}-`));
-      const out = await handler({
-        worktree: wt,
-        payload: p,
-        summary: p.summary,
-        outDir,
-        runModel: input.runModel ?? noModel,
-        exec: input.exec ?? noExec,
-      }).finally(() => rm(outDir, { recursive: true, force: true }));
-      const output = out.output === undefined ? {} : { output: out.output };
-      if (!out.ok) return failed(out.error, output);
-      if (out.files.length > 0) {
-        const add = await git(wt, ['add', '--', ...out.files]);
-        if (add.exitCode !== 0) return failed(`git add failed: ${(add.stderr || add.stdout).trim()}`);
-      }
-      const status = (await git(wt, ['status', '--porcelain'])).stdout
-        .split('\n')
-        .map((l) => l.slice(3).trim())
-        .filter(Boolean);
-      const extra = status.filter((f) => !out.files.includes(f));
-      if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, output);
-      if (status.length === 0) return passed({ notices: ['no changes'], ...output });
-      const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], {
-        env: commitEnv(identity),
-      });
-      if (commit.exitCode !== 0)
-        return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`);
-      const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-      await git(repoPath, ['update-ref', workRef(p.runId), sha]);
-      return passed({ files: status, ...output });
-    },
+    async (wt): Promise<ReleaseDocsPrepResult> =>
+      keepWork(input, wt, await runSpec(input, spec, wt, ws.start), ws.identity),
   );
   return made.ok ? made.value : failed(made.error);
+}
+
+/**
+ * A long phase (videos render): the lock is held only to fetch and add a detached worktree, and again to keep the work
+ * and remove the worktree, so card shifts on the clone are not stalled for the length of the render.
+ */
+async function runUnlocked(
+  input: ReleaseDocsPrepInput,
+  spec: DocsPrepStepSpec,
+): Promise<ReleaseDocsPrepResult> {
+  const { payload: p, repoPath } = input;
+  const dir = join(input.integrationDir, `docs-prep-${p.repoId}-${p.step}-${p.phase ?? ''}`);
+  const ready = await withRepoLock(repoPath, async () => {
+    const pre = await prelude(input);
+    if ('result' in pre) return pre;
+    const ws = await workStart(input, pre.tip);
+    if ('result' in ws) return ws;
+    await git(repoPath, ['worktree', 'remove', '--force', dir]);
+    const add = await git(repoPath, ['worktree', 'add', '--detach', dir, ws.start]);
+    if (add.exitCode !== 0)
+      return { result: failed(`could not add a worktree: ${(add.stderr || add.stdout).trim()}`) };
+    return ws;
+  });
+  if ('result' in ready) return ready.result;
+  let out: DocsPrepStepOutcome;
+  try {
+    out = await runSpec(input, spec, dir, ready.start);
+  } catch (err) {
+    out = { ok: false, error: errMsg(err) };
+  }
+  return withRepoLock(repoPath, async () => {
+    try {
+      return await keepWork(input, dir, out, ready.identity);
+    } finally {
+      await git(repoPath, ['worktree', 'remove', '--force', dir]);
+      await git(repoPath, ['worktree', 'prune']);
+    }
+  });
 }
 
 // ----------------------------------------------------------------------------------------------------- commit

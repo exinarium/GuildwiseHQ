@@ -1,5 +1,5 @@
 import type { ReleaseDocsPrepOverviewItem, ReleaseDocsPrepRunDto } from '@aom/shared';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import {
   useReleaseDocsPrepOverview,
   useRetryReleaseDocsPrep,
@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Callout, ErrorBox, Panel, Spinner } from '../ui.tsx';
 import { ChangelogStepOutput } from './ChangelogStepOutput.tsx';
 import { GuideStepOutput } from './GuideStepOutput.tsx';
+import { VideoStepReport } from './VideoStepReport.tsx';
 
 const TONE = {
   off: 'neutral',
@@ -124,6 +125,25 @@ function ProjectPrep({ item }: { item: ReleaseDocsPrepOverviewItem }) {
   );
 }
 
+type StepRow = ReleaseDocsPrepRunDto['repos'][number]['steps'][number];
+
+/** A step's own report renderer, by step id. Steps without one look as before. */
+const STEP_REPORTS: Record<string, (p: { report: Record<string, unknown> }) => ReactNode> = {
+  videos: VideoStepReport,
+};
+/** Which phase reports a renderer reads (videos: the plan and render reports, not the author's bookkeeping). */
+const SHOWS: Record<string, (r: Record<string, unknown>) => boolean> = {
+  videos: (r) => typeof r.harness === 'boolean',
+};
+
+/** One report per step: the one of its latest phase that has one (videos: render, else plan). */
+export function stepReports(steps: StepRow[]): { step: string; report: Record<string, unknown> }[] {
+  const out = new Map<string, Record<string, unknown>>();
+  for (const s of steps)
+    if (s.report && STEP_REPORTS[s.step] && (SHOWS[s.step]?.(s.report) ?? true)) out.set(s.step, s.report);
+  return [...out.entries()].map(([step, report]) => ({ step, report }));
+}
+
 function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
   return (
     <div className="flex flex-col gap-3" data-testid="release-docs-prep-run">
@@ -174,7 +194,14 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
                   {s.phase ? ` (${s.phase})` : ''}
                 </span>{' '}
                 <span className="text-subtle">{s.state}</span>
-                {s.error && <span className="block text-danger-soft-fg">{s.error}</span>}
+                {s.error && (
+                  <span
+                    className={`block ${s.state === 'failed' ? 'text-danger-soft-fg' : 'text-subtle'}`}
+                    data-testid={`prep-step-note-${s.step}-${s.phase}`}
+                  >
+                    {s.error}
+                  </span>
+                )}
                 {s.step === 'guide' && s.output != null && <GuideStepOutput output={s.output} />}
                 {s.step === 'changelog' && !s.error && (
                   <ChangelogStepOutput repoName={repo.repoName} state={s.state} output={s.output} />
@@ -182,6 +209,10 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
               </li>
             ))}
           </ul>
+          {stepReports(repo.steps).map(({ step, report }) => {
+            const Render = STEP_REPORTS[step];
+            return Render ? <Render key={step} report={report} /> : null;
+          })}
           {repo.commitSha ? (
             <p className="mt-2 text-xs" data-testid="prep-commit">
               Commit <span className="font-mono">{short(repo.commitSha)}</span>

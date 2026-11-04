@@ -10,6 +10,7 @@ import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { endReleasePrepShift } from '../release/docs-prep-tasks.ts';
 import { pruneRunnerInbox } from '../runner-gateway/inbox-prune.ts';
 import { pruneRelayRequests } from '../webhook-relay/hub.ts';
 
@@ -120,6 +121,16 @@ export class Reaper {
         if (shift.kind === 'ba_task') {
           ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
           await ctx.store.append(await endBaTaskShift(tx, shift, 'rejected'), { tx });
+          return;
+        }
+        if (shift.kind === 'release_prep') {
+          ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
+          await endReleasePrepShift(ctx, tx, shift, 'rejected', {
+            rejection: {
+              reason: 'not_accepted',
+              detail: 'the runner did not accept the shift within 30 seconds',
+            },
+          });
           return;
         }
         if (shift.kind === 'ceo') {
