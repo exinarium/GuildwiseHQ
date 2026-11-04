@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { checkAgentMove } from '../src/commands/sharing.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, markOnline, ok, pairWorkstation, type Session, type World } from './helpers/world.ts';
@@ -226,5 +227,51 @@ describe('move an active agent (hiring manager, claims, DevOps)', () => {
       chart.agents.find((x: any) => x.workstation && x.workstation.id === w.workstationId).workstation
         .unpaired,
     ).toBe(false);
+  });
+});
+
+describe('held claims on the paths that release nothing', () => {
+  const holdClaim = async (agentId: string, wsId: string) => {
+    const card = await w.card();
+    await q(
+      `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=$4, claim_shift_id=gen_random_uuid(),
+              claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
+      [card.id, crypto.randomUUID(), agentId, wsId],
+    );
+    return card;
+  };
+
+  it('M1: a bulk move skips a claim-holding agent as running_shift and leaves claim and workstation', async () => {
+    const src = (await pairWorkstation(w.t, w.owner, 'bulk-src')).workstationId;
+    await markOnline(w.t, src);
+    const a = await hire();
+    await q('UPDATE agents SET workstation_id=$2 WHERE id=$1', [a.id, src]);
+    const card = await holdClaim(a.id, src);
+    const r = await owner().post(`/api/workstations/${src}/move-agents`, { targetWorkstationId: second });
+    expect(r.status).toBe(200);
+    expect(r.body.skipped).toEqual(
+      expect.arrayContaining([expect.objectContaining({ agentId: a.id, reason: 'running_shift' })]),
+    );
+    expect((await agentRow(a.id)).workstation_id).toBe(src);
+    expect((await q('SELECT * FROM cards WHERE id=$1', [card.id]))[0]!.claimed_by_agent_id).toBe(a.id);
+    expect(await events(a.id, 'AgentRehomed')).toHaveLength(0);
+  });
+
+  it('M2: checkAgentMove refuses a held claim by default and passes with releaseHeldClaims', async () => {
+    const a = await hire();
+    const card = await holdClaim(a.id, w.workstationId);
+    const row = await agentRow(a.id);
+    const rq = { workstationId: second, runtime: 'mock', model: 'mock', acknowledgeUnsandboxed: false };
+    const ctx = w.t.app.ctx;
+    await expect(checkAgentMove(ctx, ctx.pool, { userId: w.owner.id }, row, rq)).rejects.toMatchObject({
+      code: 'agent_busy',
+    });
+    await expect(
+      checkAgentMove(ctx, ctx.pool, { userId: w.owner.id }, row, rq, { releaseHeldClaims: true }),
+    ).resolves.toBeTruthy();
+    await q(
+      `UPDATE cards SET claim_id=NULL, claimed_by_agent_id=NULL, status='queued' WHERE id=$1`,
+      [card.id],
+    );
   });
 });

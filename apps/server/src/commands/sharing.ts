@@ -406,7 +406,7 @@ export async function checkAgentMove(
   by: { userId: string },
   a: Row,
   req: RehomeAgentRequest,
-  opts: { skipLimitCheck?: boolean } = {},
+  opts: { skipLimitCheck?: boolean; releaseHeldClaims?: boolean } = {},
 ): Promise<AgentMovePlan> {
   if (a.status === 'retired')
     throw conflict('agent_retired', `${a.name} was fired; a fired agent cannot be moved`);
@@ -422,6 +422,19 @@ export async function checkAgentMove(
       'agent_busy',
       `${a.name} is in a running shift: wait until it ends or stop it, then move ${a.name}.`,
     );
+  if (!opts.releaseHeldClaims) {
+    // The caller releases nothing: a claim the agent holds would stay stranded on the old workstation.
+    const claim = await one(
+      tx,
+      `SELECT ref FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`,
+      [a.id],
+    );
+    if (claim)
+      throw conflict(
+        'agent_busy',
+        `${a.name} is working on ${claim.ref}: release the card or wait until the shift ends.`,
+      );
+  }
   const w = await one(
     tx,
     `SELECT w.id, w.name, w.status, w.user_id, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
@@ -497,7 +510,7 @@ export async function prepareAgentMove(
   by: { userId: string; actor: Actor },
   a: Row,
   req: RehomeAgentRequest,
-  opts: { skipLimitCheck?: boolean } = {},
+  opts: { skipLimitCheck?: boolean; releaseHeldClaims?: boolean } = {},
 ): Promise<{
   append: AppendInput;
   fromWorkstationId: string | null;
@@ -540,7 +553,7 @@ export async function rehomeAgentIn(
   a: Row,
   req: RehomeAgentRequest,
 ): Promise<{ fromWorkstationId: string | null; toWorkstationId: string; releasedCardIds: string[] }> {
-  const p = await prepareAgentMove(ctx, tx, by, a, req);
+  const p = await prepareAgentMove(ctx, tx, by, a, req, { releaseHeldClaims: true });
   // Work the agent still holds without an open shift (a lost shift whose lease has not expired) goes back to the queue.
   const claims = await rows(tx, `SELECT * FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL`, [
     a.id,
