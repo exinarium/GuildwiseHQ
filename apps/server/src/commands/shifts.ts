@@ -1196,7 +1196,9 @@ export async function applyShiftRejected(
     return;
   }
   if (s.kind === 'release_prep') {
-    await endReleasePrepShift(ctx, tx, s, 'rejected');
+    await endReleasePrepShift(ctx, tx, s, 'rejected', {
+      rejection: { reason: msg.reason, ...(msg.detail ? { detail: msg.detail } : {}) },
+    });
     return;
   }
   if (s.kind === 'ceo') {

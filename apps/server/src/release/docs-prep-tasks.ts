@@ -37,6 +37,10 @@ const ONLINE_WINDOW_MS = 45_000;
 export const RELEASE_PREP_QUEUE_LIMIT_MS = 2 * 3_600_000;
 /** A shift that crashed or ended without a report counts; after this many the task fails. */
 export const RELEASE_PREP_MAX_ATTEMPTS = 2;
+/** Starts the workstation refused (or did not accept); after this many the task fails with the last reason. */
+export const RELEASE_PREP_MAX_REJECTIONS = 3;
+/** Rejections that say nothing about the task (the agent or its account is busy for now): requeued, never counted. */
+const PASSING_REJECTIONS: ReadonlySet<string> = new Set(['busy', 'auth_expired', 'usage_limited']);
 
 const runScope = (run: Row) => projectScope(run.org_id, run.project_id);
 const runStream = (runId: string) => streamId.releaseDocsPrep(runId);
@@ -257,7 +261,9 @@ export async function releasePrepTaskPass(
     const label = task.success ? taskLabel(task.data) : 'task';
     const builders = await rows(
       ctx.pool,
-      `SELECT a.*, ws.id AS ws_id, ws.connected, ws.last_seen_at, ws.name AS ws_name FROM agents a
+      // The workstation's runtimes, owner and sharing are what accountForAgent reads to find a usable account.
+      `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.share_accounts, ws.runner_version, ws.runtimes,
+              ws.connected, ws.last_seen_at, ws.name AS ws_name FROM agents a
          JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
         WHERE a.workstation_id = $1 AND a.org_id = $2 AND a.role_key = 'builder' AND a.status = 'active'
           AND a.paused_at IS NULL AND NOT a.is_devops
@@ -488,8 +494,10 @@ export async function applyReleasePrepReport(
 type EndOutcome = 'rejected' | 'lost' | 'stopped' | 'no_report' | 'crashed' | 'timeout' | 'reported';
 
 /**
- * `ShiftEnded` of a release_prep shift and what it means for its task: a rejected, lost or stopped shift puts the task
- * back in the queue; a crash, timeout or missing report counts, and after RELEASE_PREP_MAX_ATTEMPTS the task fails.
+ * `ShiftEnded` of a release_prep shift and what it means for its task: a lost or stopped shift puts the task back in the
+ * queue; a crash, timeout or missing report counts, and after RELEASE_PREP_MAX_ATTEMPTS the task fails. A rejected start
+ * (`rejection`) is requeued too, but one that is not just a busy agent or account counts towards
+ * RELEASE_PREP_MAX_REJECTIONS, after which the task fails with the rejection's reason and detail.
  */
 export async function endReleasePrepShift(
   ctx: Ctx,
@@ -501,6 +509,8 @@ export async function endReleasePrepShift(
     usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
     exitCode?: number | null;
     guardViolations?: { rule: string; detail: string }[];
+    /** Why the start was rejected (the runner's reason and detail, or the reaper's 'not accepted'). */
+    rejection?: { reason: string; detail?: string };
   } = {},
 ): Promise<void> {
   await ctx.store.append(
@@ -538,6 +548,19 @@ export async function endReleasePrepShift(
   if (!task) return;
   const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [task.run_id]);
   if (!run) return;
+  if (outcome === 'rejected' && extra.rejection && !PASSING_REJECTIONS.has(extra.rejection.reason)) {
+    const rejected = await one(
+      tx,
+      `SELECT count(*)::int AS n FROM shifts WHERE release_prep_task_id=$1 AND kind='release_prep' AND outcome='rejected'`,
+      [task.id],
+    );
+    if ((rejected?.n ?? 1) >= RELEASE_PREP_MAX_REJECTIONS) {
+      const d = (extra.rejection.detail ?? '').replace(/\s+/g, ' ').trim();
+      const why = d ? `${extra.rejection.reason}: ${d}` : extra.rejection.reason.replaceAll('_', ' ');
+      await finishReleasePrepTask(ctx, tx, task, false, `the workstation could not start the task (${why})`);
+      return;
+    }
+  }
   const counted = !(outcome === 'rejected' || outcome === 'lost' || outcome === 'stopped');
   const tries = await one(
     tx,

@@ -1269,11 +1269,11 @@ export class RunnerHandlers {
       (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
         shiftId,
       ])) ??
-      // Question, BA task and CEO shifts are held while they have not ended (a CEO shift has no card: without this the
-      // first heartbeat told the runner to stop it as "claim lost", backlog #79).
+      // Question, BA task, CEO and release prep shifts are held while they have not ended (they have no card claim:
+      // without this the first heartbeat told the runner to stop them as "claim lost", backlog #79).
       (await one(
         this.ctx.pool,
-        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task','ceo') AND status <> 'ended'`,
+        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task','ceo','release_prep') AND status <> 'ended'`,
         [shiftId],
       ));
     if (holder) return;
