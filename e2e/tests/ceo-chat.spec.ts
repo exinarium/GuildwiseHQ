@@ -6,7 +6,8 @@ import { ADMIN, DATABASE_URL, ROOT } from '../support/env.ts';
 
 // The CEO chat page (/ceo-chat): the standing chat, New chat (reuses an empty one, else archives the old one and opens a
 // clean one), the earlier-chats list, and "Archive all" in the chat drawer (never touches the live CEO chat).
-// Runs after chat.spec, which leaves the runner online and a chat with Linus.
+// Runs after chat.spec, which leaves the runner online. Archive all chats with agents that are active when it runs:
+// core-loop fires one of the builders, and which one depends on the run.
 test.describe.configure({ mode: 'serial' });
 
 let page: Page;
@@ -60,28 +61,69 @@ test('New chat on an empty chat keeps the one standing chat and show it in the l
   await expect(page.getByRole('button', { name: 'More chat actions' })).toHaveCount(0);
   expect((await ceoChats()).filter((c) => !c.archived)).toHaveLength(1);
 });
-
 test('Archive all closes the other chats and leaves the live CEO chat open', async () => {
+  // the live CEO chat (test 2 shows there is exactly one open)
+  const liveCeo = (await ceoChats()).filter((c) => !c.archived);
+  expect(liveCeo, 'one open CEO chat').toHaveLength(1);
+  const ceoThreadId = liveCeo[0].threadId as string;
+  const ceoName = liveCeo[0].agentName as string;
+
+  // chat partners chosen by state, not by name: an earlier spec may have fired any one builder
   const agents = (await (await api.get('/api/agents')).json()).agents as any[];
-  for (const name of ['Grace', 'Linus']) {
-    const a = agents.find((x) => x.name === name);
-    expect(a, `agent ${name}`).toBeTruthy();
-    const made = await api.post('/api/chats', { data: { agentId: a.id } });
-    expect(made.ok(), await made.text()).toBe(true);
+  const partners: any[] = [];
+  for (const a of agents) {
+    if (a.status !== 'active' || a.isDevops || a.roleKey === 'ceo') continue;
+    if (partners.some((p) => p.name === a.name)) continue;
+    partners.push(a);
+    if (partners.length === 2) break;
   }
+  expect(
+    partners.length,
+    `two active agents to chat with: ${agents.map((a) => `${a.name}:${a.status}`).join(', ')}`,
+  ).toBe(2);
+
+  const created: { threadId: string; agentName: string }[] = [];
+  for (const a of partners) {
+    const made = await api.post('/api/chats', { data: { agentId: a.id } });
+    expect(made.status(), await made.text()).toBe(201);
+    const { chat } = await made.json();
+    created.push({ threadId: chat.threadId, agentName: chat.agentName });
+  }
+
   await page.goto('/desk');
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Chat' });
   await expect(drawer.getByTestId('chat-list')).toBeVisible();
-  await drawer.getByTestId('archive-all-chats').click();
-  await page.getByRole('button', { name: 'Archive all', exact: true }).last().click();
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`).first()).toBeVisible();
 
+  await drawer.getByTestId('archive-all-chats').click();
+  const archivedResponse = page.waitForResponse(
+    (r) => r.url().endsWith('/api/chats/archive-all') && r.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Archive all', exact: true }).last().click();
+  const res = await archivedResponse;
+  expect(res.status(), await res.text()).toBe(200);
+  // chats that earlier specs left in the admin's view are archived too
+  expect((await res.json()).archived).toBeGreaterThanOrEqual(created.length);
+
+  // the server: the created chats are archived (not deleted), and the only open chat is the live CEO chat
   await expect
-    .poll(async () =>
-      (await (await api.get('/api/chats')).json()).chats
-        .filter((c: any) => !c.archived)
-        .map((c: any) => c.agentRole),
-    )
-    .toEqual(['ceo']);
+    .poll(async () => {
+      const chats = (await (await api.get('/api/chats')).json()).chats as any[];
+      return {
+        created: created.map((c) => chats.find((x) => x.threadId === c.threadId)?.archived ?? 'missing'),
+        open: chats.filter((x) => !x.archived).map((x) => x.threadId),
+      };
+    })
+    .toEqual({ created: created.map(() => true), open: [ceoThreadId] });
+
+  // the drawer shows it without a reload
   await expect(drawer.getByTestId('archive-all-chats')).toHaveCount(0);
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`)).toHaveCount(0);
+  await expect(drawer.getByTestId(`chat-row-${ceoName}`)).toBeVisible();
+  await drawer
+    .getByRole('radiogroup', { name: 'Show chats' })
+    .getByRole('button', { name: /^Archived/ })
+    .click();
+  for (const c of created) await expect(drawer.getByTestId(`chat-row-${c.agentName}`).first()).toBeVisible();
 });
