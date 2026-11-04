@@ -126,8 +126,9 @@ export function JourneyDesigner() {
           role="status"
         >
           <ul className="list-disc pl-5">
-            {[...issues.errors, ...issues.warnings].map((i) => (
-              <li key={`${i.code}|${i.message}`}>{i.message}</li>
+            {[...issues.errors, ...issues.warnings].map((i, n) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: issues are plain text re-derived on every edit; identical issues can repeat, so no content key is unique
+              <li key={`${i.code}-${n}`}>{i.message}</li>
             ))}
           </ul>
         </Callout>
