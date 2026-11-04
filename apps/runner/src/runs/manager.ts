@@ -43,7 +43,7 @@ import { withRepoLock } from '../git/repo-lock.ts';
 import { type GitAuth, removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { cacheEnv, ensureSharedCaches, sharedCacheRoot } from '../sandbox/sandbox.ts';
+import { agentTmpRoot, cacheEnv, ensureSharedCaches, sharedCacheRoot } from '../sandbox/sandbox.ts';
 import { checkEnvVar } from '../toolchain/registry.ts';
 import { discoverExtraGuides, type ExtraGuide, findBuildDoc, guidesHash } from './discovery.ts';
 import { probeHttp, probeTcp } from './health.ts';
@@ -1152,9 +1152,9 @@ export class RunManager {
     return out;
   }
 
-  /** `/tmp/aom-run-<env>`: bound over /tmp inside the sandbox; the services' HOME lives in it. */
+  /** `<agentTmpRoot>/aom-run-<env>` (`/tmp/...` unless overridden): bound over /tmp inside the sandbox; the services' HOME lives in it. */
   private ensureRunTmp(env: EnvState): void {
-    env.runTmp ??= `/tmp/aom-run-${env.envId.slice(0, 8)}`;
+    env.runTmp ??= `${agentTmpRoot()}/aom-run-${env.envId.slice(0, 8)}`;
     mkdirSync(join(env.runTmp, 'home'), { recursive: true, mode: 0o700 });
   }
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { dirname, isAbsolute, join, sep } from 'node:path';
 import { commitEnv } from '../git/identity.ts';
 import type { RunnerPaths } from '../paths.ts';
 
@@ -138,13 +138,23 @@ export async function ensureDotnetShm(): Promise<void> {
   }
 }
 
-/** `/tmp/aom-<hash of runner data dir + agent id>` on POSIX; `<agent dir>/tmp` on Windows. */
+/**
+ * Root of the agents' short tmp dirs on POSIX: `/tmp`, or an absolute `AOM_AGENT_TMP_ROOT`. A runner started inside a
+ * tester shift (the E2E suite's mock runner) gets it from the shift's env, because `/tmp` itself is read-only there.
+ */
+export function agentTmpRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const r = env.AOM_AGENT_TMP_ROOT;
+  const root = r && isAbsolute(r) ? r.replace(/\/+$/, '') : '';
+  return root || '/tmp';
+}
+
+/** `<agentTmpRoot>/aom-<hash of runner data dir + agent id>` on POSIX; `<agent dir>/tmp` on Windows. */
 export function agentTmpDir(paths: RunnerPaths, agentId: string): string {
   if (process.platform === 'win32') return join(paths.agentDir(agentId), 'tmp');
   const h = createHash('sha256')
     .update(`${dirname(paths.agentDir(agentId))}\0${agentId}`)
     .digest('hex');
-  return `/tmp/aom-${h.slice(0, 10)}`;
+  return `${agentTmpRoot()}/aom-${h.slice(0, 10)}`;
 }
 
 /**
