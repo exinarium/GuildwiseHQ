@@ -635,7 +635,7 @@ describe('a reservation only holds a card for an agent that may take it', () => 
     expect(await offered(ben.id)).toContain(card.id);
   });
 
-  it('card affinity to an agent excluded from the card or outside its tier does not block the others', async () => {
+  it('card affinity to an agent outside its tier does not block the others; past work never lapses it', async () => {
     const { bea, ben, offered } = await builders();
     const card = await cardInBuild();
     await q(
@@ -652,9 +652,11 @@ describe('a reservation only holds a card for an agent that may take it', () => 
     );
     expect(await offered(ben.id)).not.toContain(card.id);
     expect(await offered(bea.id)).toContain(card.id);
-    // excluded from the card: the reservation lapses
+    // listed by an earlier review request (a rebase conflict sent the card back to Build): at a build stage the review
+    // guard does not apply, so the reservation still holds for the builder
     await q(`UPDATE cards SET excluded_agent_ids = ARRAY[$2::uuid] WHERE id=$1`, [card.id, bea.id]);
-    expect(await offered(ben.id)).toContain(card.id);
+    expect(await offered(ben.id)).not.toContain(card.id);
+    expect(await offered(bea.id)).toContain(card.id);
   });
 });
 

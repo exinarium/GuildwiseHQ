@@ -119,6 +119,20 @@ describe('card.reassign checks the stage', () => {
     const fine = result(await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Bea' }, { key: 're-2' }));
     expect(fine.status).toBe('executed');
   });
+
+  it('gives a card back for rework to the builder who worked it before', async () => {
+    const card = await w.card({ title: 'Back for rework' });
+    const bea = await agentId('Bea');
+    // a rebase conflict brought it back from review with the review-time list still set
+    await q(
+      `UPDATE cards SET stage='build', status='queued', rework_round=2, original_builder_agent_id=$2, last_agent_id=$2,
+              excluded_agent_ids=ARRAY[$2]::uuid[] WHERE id=$1`,
+      [card.id, bea],
+    );
+    const res = result(await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Bea' }, { key: 're-3' }));
+    expect(res.status).toBe('executed');
+    expect(JSON.stringify(res)).not.toMatch(/excluded/);
+  });
 });
 
 describe('card.raise_model', () => {

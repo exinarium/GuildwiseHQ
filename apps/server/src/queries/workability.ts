@@ -47,7 +47,7 @@ const E = eligibility(AGENT_REFS);
 const AGENTS_SQL = `
 SELECT c.id AS card_id, a.id AS agent_id, ws.id AS workstation_id, a.name, a.capacity,
        (a.seniority = 'senior') AS is_senior,
-       (${E.senior}) AS senior_ok, (${E.notExcluded}) AS not_excluded, (${E.tier}) AS tier_ok,
+       (${E.senior}) AS senior_ok, (${E.reviewGuard}) AS review_guard_ok, (${E.tier}) AS tier_ok,
        (${E.home}) AS home_ok, (${E.worktree}) AS worktree_ok, (${E.repo}) AS repo_ok, (${E.env}) AS env_ok,
        (${E.vault}) AS vault_ok, (${E.caps}) AS caps_ok, (${E.envReady}) AS env_ready,
        (ws.status = 'active' AND wu.status = 'active' AND ws.connected AND ws.last_seen_at > $2
@@ -144,23 +144,24 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
       return blocked(
         `no ${seniorWord}${roleLower} accepts ${c.risk_tier} changes (their risk tiers exclude it). Hire one or widen an agent's risk tiers.`,
       );
-    // 4. Not excluded for this card: the builder never reviews their own work, and a second review is by someone else.
+    // 4. The review guard (review stages only; a build stage never turns a builder away for having worked the card):
+    // the builder never reviews their own work, and a second review is by someone else.
     const required = st.approvals?.[tier] ?? 1;
     const needed = Math.max(1, required - Number(c.review_approvals ?? 0));
-    const free = tierOk.filter((a) => a.not_excluded);
+    const free = tierOk.filter((a) => a.review_guard_ok);
     if (free.length < needed) {
-      const excluded = tierOk.filter((a) => !a.not_excluded);
-      const others = nameList(excluded.map((a) => a.name));
-      const builderIsExcluded = excluded.some((a) => a.agent_id === c.original_builder_agent_id);
+      const guarded = tierOk.filter((a) => !a.review_guard_ok);
+      const others = nameList(guarded.map((a) => a.name));
+      const builtByThem = guarded.some((a) => a.agent_id === c.original_builder_agent_id);
       let why: string;
       if (required > 1 && Number(c.review_approvals ?? 0) > 0)
         why = `this ${tier} change needs a second ${seniorWord}${roleLower} other than ${others}. Hire another ${seniorWord}${roleLower}.`;
       else if (required > 1)
-        why = `this ${tier} change needs ${required} different ${seniorWord}${roleLower}s${builderIsExcluded ? ' (and not its builder)' : ''}, but only ${nameList(tierOk.map((a) => a.name))} can take it. Hire another ${seniorWord}${roleLower}.`;
-      else if (builderIsExcluded)
+        why = `this ${tier} change needs ${required} different ${seniorWord}${roleLower}s${builtByThem ? ' (and not its builder)' : ''}, but only ${nameList(tierOk.map((a) => a.name))} can take it. Hire another ${seniorWord}${roleLower}.`;
+      else if (builtByThem)
         why = `the only ${seniorWord}${roleLower} (${others}) built this card and cannot review their own work. Hire another ${seniorWord}${roleLower}.`;
       else
-        why = `every eligible ${roleLower} (${others}) is excluded from this stage. Hire another ${seniorWord}${roleLower}.`;
+        why = `every eligible ${seniorWord}${roleLower} (${others}) built or already reviewed this card, and nobody reviews their own work. Hire another ${seniorWord}${roleLower}.`;
       return blocked(why);
     }
     // From here on someone is hired who could take it: the rest is where they are and whether they are up.
