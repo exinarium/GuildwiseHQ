@@ -4,6 +4,7 @@ import {
   type DecisionPolicyRequest,
   isOrgManager,
   type MoveAllAgentsRequest,
+  type MoveBlockReason,
   type MoveAllAgentsResponse,
   type OrgRole,
   type ProjectInvitationDto,
@@ -359,7 +360,7 @@ export async function removeMemberIn(
  */
 export async function loadMovableAgent(
   tx: Queryable,
-  user: AuthSession['user'],
+  user: Pick<AuthSession['user'], 'id'>,
   agentId: string,
 ): Promise<Row> {
   const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
@@ -437,7 +438,7 @@ export async function checkAgentMove(
   }
   const w = await one(
     tx,
-    `SELECT w.id, w.name, w.status, w.user_id, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
+    `SELECT w.id, w.name, w.status, w.user_id, w.runtimes, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
        FROM workstations w WHERE w.id=$1`,
     [req.workstationId, a.org_id],
   );
@@ -480,6 +481,7 @@ export async function checkAgentMove(
     req.acknowledgeUnsandboxed,
     { roleKey: a.role_key, isDevops: a.is_devops, permissions: a.permissions, model: req.model },
   );
+  assertTargetRuntime(w, { name: a.name, runtime: req.runtime });
   // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4);
   // the one this agent leaves counts as one less when it was the last agent there.
   const used = await one(
@@ -552,8 +554,12 @@ export async function rehomeAgentIn(
   by: { userId: string; actor: Actor },
   a: Row,
   req: RehomeAgentRequest,
+  opts: { skipLimitCheck?: boolean } = {},
 ): Promise<{ fromWorkstationId: string | null; toWorkstationId: string; releasedCardIds: string[] }> {
-  const p = await prepareAgentMove(ctx, tx, by, a, req, { releaseHeldClaims: true });
+  const p = await prepareAgentMove(ctx, tx, by, a, req, {
+    releaseHeldClaims: true,
+    ...(opts.skipLimitCheck ? { skipLimitCheck: true } : {}),
+  });
   // Work the agent still holds without an open shift (a lost shift whose lease has not expired) goes back to the queue.
   const claims = await rows(tx, `SELECT * FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL`, [
     a.id,
@@ -617,10 +623,10 @@ export async function loadSourceWorkstation(
 }
 
 /**
- * A bulk move keeps each agent's runtime: the target must offer it. A target that has not reported its runtimes yet
- * (an empty list) is not judged here; the sandbox gate still applies.
+ * The target must offer the runtime the agent will run: a target that has not reported its runtimes yet (an empty
+ * list) is not judged here; the sandbox gate still applies. The single move and the bulk move share this check.
  */
-export function assertTargetRuntime(target: Row, a: Row): void {
+export function assertTargetRuntime(target: Row, a: { runtime: string }): void {
   const targetRuntimes = (target.runtimes ?? []) as Array<{ id: string; available?: boolean }>;
   if (targetRuntimes.length > 0 && !targetRuntimes.some((r) => r.id === a.runtime && r.available !== false))
     throw conflict(
@@ -629,32 +635,69 @@ export function assertTargetRuntime(target: Row, a: Row): void {
     );
 }
 
+/** The reason a bulk move shows for the code of the single move's refusal. */
+export function moveBlockReason(code: string): MoveBlockReason {
+  switch (code) {
+    case 'agent_busy':
+      return 'running_shift';
+    case 'devops_stays':
+    case 'one_devops_per_workstation':
+      return 'one_devops';
+    case 'builtin_agent':
+      return 'ceo';
+    case 'limit_reached':
+      return 'workstation_limit';
+    case 'sandbox_unavailable':
+    case 'unsandboxed_ack_required':
+    case 'runtime_not_for_role':
+    case 'runtime_not_for_agents':
+      return 'sandbox_gate';
+    case 'runtime_missing':
+      return 'runtime_missing';
+    default:
+      return 'other';
+  }
+}
+
+/** Refs of the cards an agent holds a claim on (what a move releases). */
+async function heldClaimRefs(db: Queryable, agentId: string): Promise<string[]> {
+  const list = await rows(
+    db,
+    `SELECT ref FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL ORDER BY ref`,
+    [agentId],
+  );
+  return list.map((c) => c.ref as string);
+}
+
 /**
  * Moves every agent of workstation `sourceId` (any status of the workstation, even one that no longer exists as a
- * computer) to `req.targetWorkstationId`, one transaction per agent through the single-move checks. Agents in a running
- * shift (or on a claimed card), the DevOps engineer and the CEO are skipped; an agent the single move refuses is
- * reported as failed. Nothing is rolled back: the agents already moved stay moved. With `dryRun` nothing is written.
+ * computer) to `req.targetWorkstationId`. It repeats none of the single move's rules: every agent goes through
+ * `checkAgentMove` (the preview and the first pass) and `rehomeAgentIn` (one transaction per agent, which releases the
+ * claims it holds and appends one AgentRehomed). An agent the single move refuses is reported blocked with a reason and
+ * stays where it is; nothing is rolled back across agents. An Owner or Admin moves all agents; anyone else only the
+ * non-built-in agents they hired. With `dryRun` nothing is written.
  */
 export async function moveAllAgents(
   ctx: Ctx,
-  who: { userId: string; orgId: string; role: OrgRole },
+  who: { userId: string; orgId: string; role: OrgRole | null },
   sourceId: string,
   req: MoveAllAgentsRequest,
   opts: { dryRun?: boolean } = {},
 ): Promise<MoveAllAgentsResponse> {
-  if (!isOrgManager({ orgRole: who.role }))
-    throw forbidden('only the organization Owner and Admins can move agents to another workstation');
   if (sourceId === req.targetWorkstationId)
     throw badRequest('same_workstation', 'pick another workstation than the one the agents are on');
   const dryRun = opts.dryRun === true;
+  const all = isOrgManager({ orgRole: who.role });
   const notFoundWs = () => notFound('workstation not found in this organization', 'workstation_not_found');
 
-  const src = await loadSourceWorkstation(ctx.pool, who.orgId, sourceId);
-  if (!src) throw notFoundWs();
+  const src = await one(ctx.pool, `SELECT id, name, status, connected FROM workstations WHERE id=$1`, [
+    sourceId,
+  ]);
+  if (!src || !(await loadSourceWorkstation(ctx.pool, who.orgId, sourceId))) throw notFoundWs();
 
   const target = await one(
     ctx.pool,
-    `SELECT w.id, w.name, w.status, w.user_id, w.runtimes, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
+    `SELECT w.id, w.name, w.status, w.user_id, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
        FROM workstations w WHERE w.id = $1`,
     [req.targetWorkstationId, who.orgId],
   );
@@ -671,82 +714,104 @@ export async function moveAllAgents(
 
   const agents = await rows(
     ctx.pool,
-    `SELECT * FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status <> 'retired' ORDER BY lower(name), id`,
+    all
+      ? `SELECT * FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status <> 'retired' ORDER BY lower(name), id`
+      : `SELECT * FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status <> 'retired'
+           AND manager_user_id=$3 AND NOT is_builtin ORDER BY lower(name), id`,
+    all ? [who.orgId, sourceId] : [who.orgId, sourceId, who.userId],
+  );
+  if (!all && agents.length === 0)
+    throw forbidden(
+      'only the organization Owner and Admins, or the hiring manager of these agents, can move them',
+    );
+
+  const moved: MoveAllAgentsResponse['moved'] = [];
+  const blocked: MoveAllAgentsResponse['blocked'] = [];
+  let needsUnsandboxedAck = false;
+  const ref = (a: Row) => ({ agentId: a.id as string, name: a.name as string });
+  const block = (a: Row, e: unknown) => {
+    if (e instanceof HttpError) {
+      if (e.code === 'unsandboxed_ack_required') needsUnsandboxedAck = true;
+      blocked.push({ ...ref(a), reason: moveBlockReason(e.code), code: e.code, message: e.message });
+    } else
+      blocked.push({ ...ref(a), reason: 'other', code: 'internal', message: 'the move failed unexpectedly' });
+  };
+
+  const by = { userId: who.userId, actor: userActor(who.userId) };
+  const reqFor = (a: Row): RehomeAgentRequest => ({
+    workstationId: target.id,
+    runtime: a.runtime,
+    model: a.model,
+    ...(req.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
+  });
+
+  // Pass 1 (reads only): every rule except the workstation limit. When every agent that counts toward the limit passes,
+  // the source empties and the organization's workstation count does not rise, so the limit is not asked.
+  const passed: Row[] = [];
+  for (const a of agents) {
+    try {
+      await checkAgentMove(ctx, ctx.pool, by, a, reqFor(a), { releaseHeldClaims: true, skipLimitCheck: true });
+      passed.push(a);
+    } catch (e) {
+      block(a, e);
+    }
+  }
+  const counting = await one(
+    ctx.pool,
+    `SELECT count(*)::int AS n FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin`,
     [who.orgId, sourceId],
   );
+  const passedCounting = passed.filter((a) => a.status === 'active' && !a.is_builtin).length;
+  const sourceLeaves = (counting?.n ?? 0) === passedCounting;
 
-  const moved: MovedRef[] = [];
-  const skipped: MoveAllAgentsResponse['skipped'] = [];
-  const failed: MoveAllAgentsResponse['failed'] = [];
-  let needsUnsandboxedAck = false;
-  const ref = (a: Row): MovedRef => ({ agentId: a.id, name: a.name });
-
-  const movable: Row[] = [];
-  for (const a of agents) {
-    if (a.is_devops) skipped.push({ ...ref(a), reason: 'workstation_devops' });
-    else if (a.role_key === 'ceo' || a.is_builtin) skipped.push({ ...ref(a), reason: 'ceo' });
-    else movable.push(a);
-  }
-
-  // Only when nothing stays behind does the source stop counting as a workstation of the organization.
-  let emptiesSource = true;
-  for (const a of movable) {
-    const busy =
-      (await one(ctx.pool, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [a.id])) ||
-      (await one(
-        ctx.pool,
-        `SELECT 1 FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`,
-        [a.id],
-      ));
-    if (busy) {
-      emptiesSource = false;
-      break;
+  // Pass 2: with agents staying behind, the target may count as one more workstation.
+  const toMove: Row[] = [];
+  for (const a of passed) {
+    if (sourceLeaves) {
+      toMove.push(a);
+      continue;
+    }
+    try {
+      await checkAgentMove(ctx, ctx.pool, by, a, reqFor(a), { releaseHeldClaims: true });
+      toMove.push(a);
+    } catch (e) {
+      block(a, e);
     }
   }
 
-  const by = { userId: who.userId, actor: userActor(who.userId) };
-  for (const planned of movable) {
-    try {
-      await withAppendTx(ctx.pool, async (tx) => {
-        const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [planned.id]);
-        if (!a || a.status === 'retired' || a.workstation_id !== sourceId) return;
-        assertTargetRuntime(target, a);
-        const p = await prepareAgentMove(
-          ctx,
-          tx,
-          by,
-          a,
-          {
-            workstationId: target.id,
-            runtime: a.runtime,
-            model: a.model,
-            ...(req.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
-          },
-          { skipLimitCheck: emptiesSource },
-        );
-        if (!dryRun) await ctx.store.append([p.append], { tx });
-        moved.push(ref(a));
-      });
-    } catch (e) {
-      if (!(e instanceof HttpError)) {
-        if (moved.length === 0 && failed.length === 0 && skipped.length === 0) throw e;
-        failed.push({ ...ref(planned), code: 'internal', error: 'the move failed unexpectedly' });
-      } else if (e.code === 'agent_busy')
-        skipped.push({ ...ref(planned), reason: 'running_shift', message: e.message });
-      else {
-        if (e.code === 'unsandboxed_ack_required') needsUnsandboxedAck = true;
-        failed.push({ ...ref(planned), code: e.code, error: e.message });
+  if (dryRun) {
+    for (const a of toMove) moved.push({ ...ref(a), releasedClaims: await heldClaimRefs(ctx.pool, a.id) });
+  } else {
+    for (const planned of toMove) {
+      try {
+        const done = await withAppendTx(ctx.pool, async (tx) => {
+          const a = await loadMovableAgent(tx, { id: who.userId }, planned.id);
+          if (a.status === 'retired' || a.workstation_id !== sourceId)
+            throw conflict('moved_meanwhile', `${a.name} is no longer on this workstation`);
+          const releasedClaims = await heldClaimRefs(tx, a.id);
+          await rehomeAgentIn(ctx, tx, by, a, reqFor(a), { skipLimitCheck: sourceLeaves });
+          return { ...ref(a), releasedClaims };
+        });
+        moved.push(done);
+      } catch (e) {
+        if (!(e instanceof HttpError) && moved.length === 0 && blocked.length === 0) throw e;
+        block(planned, e);
       }
     }
   }
 
   return {
     dryRun,
-    source: { id: src.id, name: src.name, status: src.status === 'active' ? 'active' : 'unlinked' },
+    scope: all ? 'all' : 'own',
+    source: {
+      id: src.id,
+      name: src.name,
+      status: src.status === 'active' ? 'active' : 'unlinked',
+      connected: src.connected === true,
+    },
     target: { id: target.id, name: target.name },
     moved,
-    skipped,
-    failed,
+    blocked,
     needsUnsandboxedAck,
   };
 }

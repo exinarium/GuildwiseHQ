@@ -96,7 +96,7 @@ export function Agents() {
   const orgManager = useCanManageOrg();
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
-  const homes = useAgentHomes(orgManager);
+  const homes = useAgentHomes(true);
   const [movingAll, setMovingAll] = useState<AgentHome | null>(null);
   const [changingModel, setChangingModel] = useState<AgentDto | null>(null);
   const [changingRole, setChangingRole] = useState<AgentDto | null>(null);
@@ -158,7 +158,7 @@ export function Agents() {
         }
       />
       {orgManager && <RoleOffers />}
-      {orgManager && <WorkstationsSection homes={homes.data ?? []} onMoveAll={setMovingAll} />}
+      <WorkstationsSection homes={homes.data ?? []} manager={orgManager} onMoveAll={setMovingAll} />
       <FirstRunGallery />
       <div className="mb-4 flex flex-wrap gap-3">
         {(projects.data?.length ?? 0) > 1 && (
@@ -234,6 +234,10 @@ export function Agents() {
               onFire={() => setFiring(h.agent)}
               onRehome={() => setRehoming(h.agent)}
               canMove={canMove(h.agent)}
+              onMoveAll={() => {
+                const home = (homes.data ?? []).find((x) => x.id === h.agent.workstationId);
+                if (home) setMovingAll(home);
+              }}
               onModel={() => setChangingModel(h.agent)}
               onRole={() => setChangingRole(h.agent)}
               onReset={() => reset.mutate(h.agent.id)}
@@ -274,6 +278,11 @@ export function Agents() {
         key={movingAll?.id ?? 'none-all'}
         source={movingAll}
         onClose={() => setMovingAll(null)}
+        onMoveOne={(id) => {
+          const one = agents.data?.find((x) => x.id === id);
+          setMovingAll(null);
+          if (one) setRehoming(one);
+        }}
       />
       <MoveAgentDialog key={rehoming?.id ?? 'none'} agent={rehoming} onClose={() => setRehoming(null)} />
       <AllowedProjectsDialog
@@ -317,6 +326,7 @@ function AgentCard({
   onFire,
   onRehome,
   canMove,
+  onMoveAll,
   onModel,
   onRole,
   onReset,
@@ -337,6 +347,8 @@ function AgentCard({
   onFire: () => void;
   onRehome: () => void;
   canMove: boolean;
+  /** Opens the bulk move for the agent's (offline or removed) workstation. */
+  onMoveAll: () => void;
   onModel: () => void;
   onRole: () => void;
   onReset: () => void;
@@ -421,10 +433,19 @@ function AgentCard({
         {station && ` · ${station}`}
       </p>
       {(a.workstationState === 'offline' || a.workstationState === 'unpaired') && (
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Badge tone="amber" data-testid="agent-workstation-state">
             {a.workstationState === 'unpaired' ? 'workstation unpaired' : 'workstation offline'}
           </Badge>
+          {canMove && (
+            <Button
+              size="sm"
+              className="min-h-11 w-full sm:min-h-0 sm:w-auto"
+              onClick={onMoveAll}
+            >
+              Move all agents from this workstation
+            </Button>
+          )}
         </div>
       )}
       {a.workstationRemoved && (
@@ -587,12 +608,16 @@ function AgentCard({
 /** Owner/Admin: where the organization's agents live, with a bulk move off a workstation (dead, offline or live). */
 function WorkstationsSection({
   homes,
+  manager,
   onMoveAll,
 }: {
   homes: AgentHome[];
+  /** Owner or Admin: sees every workstation; anyone else only the offline or removed ones that hold their agents. */
+  manager: boolean;
   onMoveAll: (h: AgentHome) => void;
 }) {
-  const shown = homes.filter((h) => h.agentCount > 0);
+  const dead = (h: AgentHome) => h.status !== 'active' || !h.connected;
+  const shown = homes.filter((h) => h.agentCount > 0 && (manager || dead(h)));
   if (shown.length === 0) return null;
   const attention = shown.some((h) => h.status !== 'active' || !h.connected);
   return (
@@ -618,7 +643,7 @@ function WorkstationsSection({
               aria-label={`Move all agents from ${h.name}`}
               onClick={() => onMoveAll(h)}
             >
-              Move all agents
+              {dead(h) ? 'Move all agents from this workstation' : 'Move all agents'}
             </Button>
           </li>
         ))}

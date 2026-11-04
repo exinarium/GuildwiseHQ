@@ -161,19 +161,33 @@ export const MoveAllAgentsPreviewQuerySchema = z.object({
   acknowledgeUnsandboxed: z.stringbool().optional(),
 });
 
-export const MoveSkipReasonSchema = z.enum(['running_shift', 'workstation_devops', 'ceo']);
-export type MoveSkipReason = z.infer<typeof MoveSkipReasonSchema>;
+/** Why a bulk move leaves an agent where it is. */
+export const MoveBlockReasonSchema = z.enum([
+  'running_shift',
+  'one_devops',
+  'workstation_limit',
+  'sandbox_gate',
+  'runtime_missing',
+  'ceo',
+  'other',
+]);
+export type MoveBlockReason = z.infer<typeof MoveBlockReasonSchema>;
 const MovedAgentSchema = z.object({ agentId: z.uuid(), name: z.string() });
 export const MoveAllAgentsResponseSchema = z.object({
   dryRun: z.boolean(),
-  source: z.object({ id: z.uuid(), name: z.string(), status: z.enum(['active', 'unlinked']) }),
+  /** `own`: the caller is not an Owner or Admin and sees only the agents they hired. */
+  scope: z.enum(['all', 'own']),
+  source: z.object({
+    id: z.uuid(),
+    name: z.string(),
+    status: z.enum(['active', 'unlinked']),
+    connected: z.boolean(),
+  }),
   target: z.object({ id: z.uuid(), name: z.string() }),
-  /** Moved (dryRun: would move). */
-  moved: z.array(MovedAgentSchema),
-  /** `message`: the single move's text for a running shift or claimed card; absent for the built-in skips. */
-  skipped: z.array(MovedAgentSchema.extend({ reason: MoveSkipReasonSchema, message: z.string().optional() })),
-  /** Refused by the single move (code from the error, e.g. runtime_missing, sandbox_unavailable, limit_reached). */
-  failed: z.array(MovedAgentSchema.extend({ code: z.string(), error: z.string() })),
+  /** Moved (dryRun: would move), with the refs of the cards whose claims the move released (would release). */
+  moved: z.array(MovedAgentSchema.extend({ releasedClaims: z.array(z.string()) })),
+  /** Left where they are: the reason, the single move's code and its message. */
+  blocked: z.array(MovedAgentSchema.extend({ reason: MoveBlockReasonSchema, code: z.string(), message: z.string() })),
   /** True when at least one agent would run unsandboxed on the target and no acknowledgement was sent. */
   needsUnsandboxedAck: z.boolean(),
 });

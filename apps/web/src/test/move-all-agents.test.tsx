@@ -55,11 +55,21 @@ const targets = {
 const ref = (n: number, name: string) => ({ agentId: ID(100 + n), name });
 const preview = (target: string, targetName: string, over: Record<string, unknown> = {}) => ({
   dryRun: true,
-  source: { id: WS_DEAD, name: 'My workstation', status: 'unlinked' },
+  scope: 'all',
+  source: { id: WS_DEAD, name: 'My workstation', status: 'unlinked', connected: false },
   target: { id: target, name: targetName },
-  moved: [ref(1, 'Una'), ref(2, 'Dora')],
-  skipped: [{ ...ref(3, 'Busy'), reason: 'running_shift', message: 'Busy is in a running shift: wait.' }],
-  failed: [],
+  moved: [
+    { ...ref(1, 'Una'), releasedClaims: ['GWP-12'] },
+    { ...ref(2, 'Dora'), releasedClaims: [] },
+  ],
+  blocked: [
+    {
+      ...ref(3, 'Busy'),
+      reason: 'running_shift',
+      code: 'agent_busy',
+      message: 'Busy is in a running shift: wait.',
+    },
+  ],
   needsUnsandboxedAck: false,
   ...over,
 });
@@ -68,14 +78,16 @@ const fetchMock = vi.fn();
 let role = 'owner';
 let posted: { path: string; body: any } | undefined;
 let previewOver: Record<string, unknown> = {};
+let homesOver: unknown = homes;
 beforeEach(() => {
   role = 'owner';
   posted = undefined;
   previewOver = {};
+  homesOver = homes;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const path = url.split('?')[0]!;
-    if (path === '/api/agents/workstations') return json(homes);
+    if (path === '/api/agents/workstations') return json(homesOver);
     if (path === `/api/workstations/${WS_DEAD}/move-targets`) return json(targets);
     if (path === `/api/workstations/${WS_DEAD}/move-agents/preview`) {
       const t = new URL(url, 'http://x').searchParams.get('targetWorkstationId')!;
@@ -86,7 +98,14 @@ beforeEach(() => {
       return json({
         ...preview(posted.body.targetWorkstationId, 'Desk'),
         dryRun: false,
-        failed: [{ ...ref(4, 'Odd'), code: 'runtime_missing', error: 'Desk has no ghost runtime' }],
+        blocked: [
+          {
+            ...ref(4, 'Odd'),
+            reason: 'runtime_missing',
+            code: 'runtime_missing',
+            message: 'Desk has no ghost runtime',
+          },
+        ],
       });
     }
     if (path === '/api/hr/board')
@@ -147,16 +166,36 @@ describe('move all agents from a workstation', () => {
     role = r;
     wrap(<Agents />);
     expect(await screen.findByRole('button', { name: 'Move all agents from My workstation' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Move all agents from My workstation' })).toHaveTextContent(
+      'Move all agents from this workstation',
+    );
     expect(screen.getByTestId('agent-homes')).toHaveTextContent('Unpaired');
     expect(screen.getByTestId('agent-homes')).toHaveTextContent('3 agents');
   });
 
-  it('a member sees no action and never asks for the list', async () => {
+  it('a member with no agents on an offline or removed workstation sees no action', async () => {
     role = 'member';
+    homesOver = { workstations: [] };
     wrap(<Agents />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/hr/board', expect.anything()));
     expect(screen.queryByRole('button', { name: /Move all agents/ })).toBeNull();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/agents/workstations'))).toBe(false);
+  });
+
+  it('a hiring manager sees the action for their own agents and the note that only those are listed', async () => {
+    role = 'member';
+    previewOver = { scope: 'own', moved: [{ ...ref(1, 'Una'), releasedClaims: [] }], blocked: [] };
+    const user = userEvent.setup();
+    wrap(<Agents />);
+    await user.click(await screen.findByRole('button', { name: 'Move all agents from My workstation' }));
+    expect(await screen.findByTestId('move-all-own-note')).toHaveTextContent('Only the agents you hired');
+  });
+
+  it('does not post anything before the confirm click', async () => {
+    const user = userEvent.setup();
+    wrap(<Agents />);
+    await user.click(await screen.findByRole('button', { name: 'Move all agents from My workstation' }));
+    await screen.findByTestId('move-all-count');
+    expect(posted).toBeUndefined();
   });
 
   it('shows how many agents will move, then the moved and skipped lists with reasons', async () => {
@@ -164,7 +203,10 @@ describe('move all agents from a workstation', () => {
     wrap(<Agents />);
     await user.click(await screen.findByRole('button', { name: 'Move all agents from My workstation' }));
     expect(await screen.findByTestId('move-all-count')).toHaveTextContent('2 agents will move to Desk');
-    expect(screen.getByTestId('move-all-preview-skipped')).toHaveTextContent('Busy is in a running shift');
+    expect(screen.getByTestId('move-all-preview-moved')).toHaveTextContent('Una (releases GWP-12)');
+    expect(screen.getByTestId('move-all-preview-blocked')).toHaveTextContent('Busy');
+    expect(screen.getByTestId('move-all-preview-blocked')).toHaveTextContent('In a running shift');
+    expect(screen.getByTestId('move-all-preview-blocked')).toHaveTextContent('Busy is in a running shift');
     await user.selectOptions(screen.getByLabelText('Move to'), WS_HERS);
     await waitFor(() => expect(screen.getByTestId('move-all-count')).toHaveTextContent('to Laptop'));
     await user.selectOptions(screen.getByLabelText('Move to'), WS_MINE);
@@ -175,8 +217,9 @@ describe('move all agents from a workstation', () => {
     const result = await screen.findByTestId('move-all-result');
     expect(within(result).getByTestId('move-all-moved')).toHaveTextContent('Una');
     expect(within(result).getByTestId('move-all-moved')).toHaveTextContent('Dora');
-    expect(within(result).getByTestId('move-all-skipped')).toHaveTextContent('Busy');
-    expect(within(result).getByTestId('move-all-failed')).toHaveTextContent('Odd: Desk has no ghost runtime');
+    expect(within(result).getByTestId('move-all-not-moved')).toHaveTextContent('Odd');
+    expect(within(result).getByTestId('move-all-not-moved')).toHaveTextContent('Desk has no ghost runtime');
+    expect(within(result).getByRole('button', { name: 'Move the rest to another workstation' })).toBeVisible();
   });
 
   it('disables the button when nothing would move', async () => {
@@ -192,12 +235,14 @@ describe('move all agents from a workstation', () => {
     previewOver = {
       needsUnsandboxedAck: true,
       moved: [],
-      failed: [{ ...ref(1, 'Una'), code: 'unsandboxed_ack_required', error: 'no sandbox' }],
+      blocked: [
+        { ...ref(1, 'Una'), reason: 'sandbox_gate', code: 'unsandboxed_ack_required', message: 'no sandbox' },
+      ],
     };
     const user = userEvent.setup();
     wrap(<Agents />);
     await user.click(await screen.findByRole('button', { name: 'Move all agents from My workstation' }));
     expect(await screen.findByLabelText(/without an OS sandbox on Desk/)).toBeInTheDocument();
-    expect(screen.getByTestId('move-all-preview-failed')).toHaveTextContent('Una');
+    expect(screen.getByTestId('move-all-preview-blocked')).toHaveTextContent('Una');
   });
 });

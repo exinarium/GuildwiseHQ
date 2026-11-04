@@ -3,6 +3,7 @@ import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAgentHomes } from '../api/queries/agent-move.ts';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { useMe } from '../api/queries/auth.ts';
 import { useRuns } from '../api/queries/runs.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
@@ -178,6 +179,7 @@ function StrandedWorkstations() {
   const canManage = useCanManageOrg();
   const homes = useAgentHomes(canManage);
   const [retire, setRetire] = useState<{ id: string; name: string } | null>(null);
+  const [movingAll, setMovingAll] = useState<{ id: string; name: string } | null>(null);
   const stranded = (homes.data ?? []).filter((h) => h.status === 'unlinked' && h.agentCount > 0);
   if (!canManage || stranded.length === 0) return null;
   return (
@@ -194,18 +196,33 @@ function StrandedWorkstations() {
             <span>
               {h.name} ({h.ownerName}), {h.agentCount} {h.agentCount === 1 ? 'agent' : 'agents'}
             </span>
-            <Button
-              size="sm"
-              className="max-sm:min-h-11"
-              aria-label={`Hand over agents of ${h.name}`}
-              onClick={() => setRetire({ id: h.id, name: h.name })}
-            >
-              Hand over agents
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Move all agents from ${h.name}`}
+                onClick={() => setMovingAll({ id: h.id, name: h.name })}
+              >
+                Move all agents from this workstation
+              </Button>
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Hand over agents of ${h.name}`}
+                onClick={() => setRetire({ id: h.id, name: h.name })}
+              >
+                Hand over agents
+              </Button>
+            </div>
           </li>
         ))}
       </ul>
       <RetireWorkstationDialog workstation={retire} onClose={() => setRetire(null)} />
+      <MoveAllAgentsDialog
+        key={movingAll?.id ?? 'none-all'}
+        source={movingAll}
+        onClose={() => setMovingAll(null)}
+      />
     </section>
   );
 }
@@ -262,6 +279,9 @@ export function WorkstationCard({
   const [confirm, setConfirm] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
   const canRetire = useCanManageOrg() && !admin;
+  const homes = useAgentHomes(!admin && !w.connected);
+  const holdsAgents = (homes.data ?? []).some((h) => h.id === w.id && h.agentCount > 0);
+  const [moveAllOpen, setMoveAllOpen] = useState(false);
   const [own, setOwn] = useState(false);
   const expanded = expandedProp ?? own;
   const setExpanded = (v: boolean) => (onExpandedChange ? onExpandedChange(v) : setOwn(v));
@@ -345,6 +365,16 @@ export function WorkstationCard({
               >
                 Integrations
               </ButtonLink>
+            )}
+            {!w.connected && holdsAgents && (
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Move all agents from ${w.name}`}
+                onClick={() => setMoveAllOpen(true)}
+              >
+                Move all agents from this workstation
+              </Button>
             )}
             {canRetire && (
               <Button
@@ -461,6 +491,13 @@ export function WorkstationCard({
           </div>
         )}
       </Panel>
+      {holdsAgents && (
+        <MoveAllAgentsDialog
+          key={moveAllOpen ? w.id : 'none-all'}
+          source={moveAllOpen ? { id: w.id, name: w.name } : null}
+          onClose={() => setMoveAllOpen(false)}
+        />
+      )}
       {canRetire && (
         <RetireWorkstationDialog
           workstation={retireOpen ? { id: w.id, name: w.name } : null}

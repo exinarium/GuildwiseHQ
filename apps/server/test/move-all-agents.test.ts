@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { conflict } from '../src/errors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
@@ -85,7 +86,7 @@ describe('move all agents from one workstation to another', () => {
     expect(r.body.source).toMatchObject({ id: s.id, status: 'unlinked' });
     expect(r.body.target).toMatchObject({ id: target, name: 'target' });
     expect(r.body.moved.map((x: any) => x.agentId).sort()).toEqual(s.agents.map((a) => a.id).sort());
-    expect(r.body.failed).toEqual([]);
+    expect(r.body.blocked.every((x: any) => x.reason === 'one_devops')).toBe(true); // only the source's DevOps engineer stays
     for (const a of s.agents) {
       const row = await agentRow(a.id);
       expect(row.workstation_id).toBe(target);
@@ -99,18 +100,19 @@ describe('move all agents from one workstation to another', () => {
     expect(await rehomed(retired.id)).toHaveLength(0);
   });
 
-  it('AC2/AC3: an agent in a running shift is skipped with the reason, the rest move', async () => {
+  it('AC2/AC3: an agent in a running shift is blocked with the reason, the rest move', async () => {
     const s = await station(3);
     await openShift(s.agents[1]!.id, s.id);
     const r = await moveAll(s.id);
     expect(r.status).toBe(200);
     expect(r.body.moved).toHaveLength(2);
-    const shiftSkips = r.body.skipped.filter((x: any) => x.reason === 'running_shift');
-    expect(shiftSkips).toHaveLength(1); // the source's DevOps engineer is skipped too (workstation_devops)
+    const shiftSkips = r.body.blocked.filter((x: any) => x.reason === 'running_shift');
+    expect(shiftSkips).toHaveLength(1); // the source's DevOps engineer is blocked too, as one_devops
     expect(shiftSkips[0]).toMatchObject({
       agentId: s.agents[1]!.id,
       name: s.agents[1]!.name,
       reason: 'running_shift',
+      code: 'agent_busy',
     });
     expect(shiftSkips[0].message).toContain('running shift');
     expect((await agentRow(s.agents[1]!.id)).workstation_id).toBe(s.id);
@@ -118,7 +120,7 @@ describe('move all agents from one workstation to another', () => {
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(target);
   });
 
-  it('skips the DevOps engineer of the source and leaves it there', async () => {
+  it('blocks the DevOps engineer of the source as one_devops and leaves it there', async () => {
     const dev = (
       await q(`SELECT id FROM agents WHERE is_devops AND status='active' AND workstation_id=$1`, [
         w.workstationId,
@@ -127,8 +129,10 @@ describe('move all agents from one workstation to another', () => {
     const a = await hire(); // hired onto the world's workstation, next to its DevOps engineer
     const r = await moveAll(w.workstationId);
     expect(r.status).toBe(200);
-    expect(r.body.skipped).toEqual(
-      expect.arrayContaining([expect.objectContaining({ agentId: dev.id, reason: 'workstation_devops' })]),
+    expect(r.body.blocked).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ agentId: dev.id, reason: 'one_devops', code: 'devops_stays' }),
+      ]),
     );
     expect(r.body.moved.map((x: any) => x.agentId)).toContain(a.id);
     expect((await agentRow(dev.id)).workstation_id).toBe(w.workstationId);
@@ -144,7 +148,7 @@ describe('move all agents from one workstation to another', () => {
     expect(r.status).toBe(200);
     expect(r.body.dryRun).toBe(true);
     expect(r.body.moved.map((x: any) => x.agentId)).toEqual([s.agents[1]!.id]);
-    expect(r.body.skipped.map((x: any) => x.reason)).toContain('running_shift');
+    expect(r.body.blocked.map((x: any) => x.reason)).toContain('running_shift');
     for (const a of s.agents) {
       expect((await agentRow(a.id)).workstation_id).toBe(s.id);
       expect(await rehomed(a.id)).toHaveLength(0);
@@ -181,7 +185,7 @@ describe('move all agents from one workstation to another', () => {
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(s.id);
   });
 
-  it('AC5: a Member gets 403 on every route, an Admin is allowed', async () => {
+  it('a Member with no agents there gets 403 on the bulk routes, an Admin is allowed', async () => {
     const s = await station(1);
     const m = as(memberS.cookie);
     expect(
@@ -191,12 +195,15 @@ describe('move all agents from one workstation to another', () => {
       (await m.get(`/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`)).status,
     ).toBe(403);
     expect((await m.get(`/api/workstations/${s.id}/move-targets`)).status).toBe(403);
-    expect((await m.get('/api/agents/workstations')).status).toBe(403);
+    const homes = await m.get('/api/agents/workstations');
+    expect(homes.status).toBe(200);
+    expect(homes.body.workstations).toEqual([]);
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(s.id);
     const r = await as(adminS.cookie).post(`/api/workstations/${s.id}/move-agents`, {
       targetWorkstationId: target,
     });
     expect(r.status).toBe(200);
+    expect(r.body.scope).toBe('all');
     expect(r.body.moved).toHaveLength(1);
   });
 
@@ -210,7 +217,10 @@ describe('move all agents from one workstation to another', () => {
     const r = await moveAll(s.id);
     expect(r.status).toBe(200);
     expect(r.body.moved.map((x: any) => x.agentId)).toEqual([s.agents[1]!.id]);
-    expect(r.body.failed[0]).toMatchObject({ agentId: s.agents[0]!.id, code: 'runtime_missing' });
+    expect(r.body.blocked.find((x: any) => x.agentId === s.agents[0]!.id)).toMatchObject({
+      reason: 'runtime_missing',
+      code: 'runtime_missing',
+    });
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(s.id);
     expect((await agentRow(s.agents[1]!.id)).workstation_id).toBe(target);
   });
@@ -225,7 +235,10 @@ describe('move all agents from one workstation to another', () => {
     ]);
     const r = await moveAll(s.id);
     expect(r.body.needsUnsandboxedAck).toBe(true);
-    expect(r.body.failed[0].code).toBe('unsandboxed_ack_required');
+    expect(r.body.blocked.find((x: any) => x.agentId === s.agents[0]!.id)).toMatchObject({
+      reason: 'sandbox_gate',
+      code: 'unsandboxed_ack_required',
+    });
     expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(s.id);
     const ok = await moveAll(s.id, target, { acknowledgeUnsandboxed: true });
     expect(ok.body.moved).toHaveLength(1);
@@ -248,5 +261,84 @@ describe('move all agents from one workstation to another', () => {
     expect(t.body.workstations.map((x: any) => x.id)).toContain(target);
     expect(t.body.workstations.map((x: any) => x.id)).not.toContain(s.id);
     expect((await owner().get(`/api/workstations/${outsider.workstationId}/move-targets`)).status).toBe(404);
+  });
+
+  it('AC3: a claim is released in the move, with one AgentRehomed and one ClaimReleased', async () => {
+    const s = await station(2);
+    const a = s.agents[0]!;
+    const card = await w.card();
+    await q(
+      `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=$4, claim_shift_id=gen_random_uuid(),
+              claimed_at=now(), lease_expires_at=now() + interval '1 hour', status='claimed' WHERE id=$1`,
+      [card.id, crypto.randomUUID(), a.id, s.id],
+    );
+    const prev = await owner().get(`/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`);
+    expect(prev.body.moved.find((x: any) => x.agentId === a.id).releasedClaims).toEqual([card.ref]);
+    expect((await agentRow(a.id)).workstation_id).toBe(s.id);
+    const r = await moveAll(s.id);
+    expect(r.body.moved.find((x: any) => x.agentId === a.id).releasedClaims).toEqual([card.ref]);
+    expect((await agentRow(a.id)).workstation_id).toBe(target);
+    expect(await rehomed(a.id)).toHaveLength(1);
+    const c = (await q('SELECT * FROM cards WHERE id=$1', [card.id]))[0]!;
+    expect(c.claimed_by_agent_id).toBeNull();
+    const rel = await q(`SELECT payload FROM events WHERE stream_id=$1 AND type='ClaimReleased'`, [
+      `card-${card.id}`,
+    ]);
+    expect(rel.map((e: any) => e.payload.reason)).toContain('agent_moved');
+  });
+
+  it('AC8: a hiring manager moves and previews only the agents they hired', async () => {
+    const s = await station(1);
+    const mine = (await w.t.req('POST', '/api/agents', {
+      cookie: memberS.cookie,
+      headers: { 'x-aom-org': orgId },
+      body: { name: `Mine${++n}`, roleKey: 'builder', seniority: 'junior', workstationId: s.id },
+    })) as any;
+    if (mine.status !== 201 && mine.status !== 200) {
+      await q(`UPDATE agents SET manager_user_id=$2 WHERE id=$1`, [s.agents[0]!.id, memberS.id]);
+    } else {
+      await q('UPDATE agents SET workstation_id=$2 WHERE id=$1', [mine.body.id, s.id]);
+      await q(`UPDATE agents SET manager_user_id=$2 WHERE id=$1`, [mine.body.id, memberS.id]);
+    }
+    const hired = await q(
+      `SELECT id FROM agents WHERE workstation_id=$1 AND manager_user_id=$2 AND NOT is_builtin`,
+      [s.id, memberS.id],
+    );
+    expect(hired.length).toBeGreaterThan(0);
+    const m = as(memberS.cookie);
+    const prev = await m.get(`/api/workstations/${s.id}/move-agents/preview?targetWorkstationId=${target}`);
+    expect(prev.status).toBe(200);
+    expect(prev.body.scope).toBe('own');
+    const listed = [...prev.body.moved, ...prev.body.blocked].map((x: any) => x.agentId);
+    expect(listed.sort()).toEqual(hired.map((x: any) => x.id).sort());
+    const run = await m.post(`/api/workstations/${s.id}/move-agents`, { targetWorkstationId: target });
+    expect(run.status).toBe(200);
+    expect((await agentRow(s.agents[0]!.id)).workstation_id).toBe(
+      hired.some((x: any) => x.id === s.agents[0]!.id) ? target : s.id,
+    );
+    const homes = await m.get('/api/agents/workstations');
+    expect(homes.body.workstations.find((h: any) => h.id === s.id)).toBeUndefined();
+  });
+
+  it('AC5: a target over the workstation limit blocks the agents that do not fit, nothing moves', async () => {
+    const s = await station(2);
+    await openShift(s.agents[0]!.id, s.id); // the source keeps an agent, so it does not empty
+    const fresh = (await pairWorkstation(w.t, w.owner, `limit${++n}`)).workstationId;
+    await markOnline(w.t, fresh);
+    const planLimits = w.t.app.ctx.ext.planLimits;
+    const orig = planLimits.assertWithin;
+    planLimits.assertWithin = async (_tx: any, _org: any, kind: string) => {
+      if (kind === 'workstations')
+        throw conflict('limit_reached', 'workstation limit reached');
+    };
+    try {
+      const r = await moveAll(s.id, fresh);
+      expect(r.status).toBe(200);
+      const lim = r.body.blocked.find((x: any) => x.agentId === s.agents[1]!.id);
+      expect(lim?.reason).toBe('workstation_limit');
+      expect((await agentRow(s.agents[1]!.id)).workstation_id).toBe(s.id);
+    } finally {
+      planLimits.assertWithin = orig;
+    }
   });
 });

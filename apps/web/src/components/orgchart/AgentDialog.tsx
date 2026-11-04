@@ -22,6 +22,7 @@ export function AgentDialog({
   onClose,
   canMove = false,
   onMove,
+  onMoveAll,
 }: {
   agent: OrgChartAgent | null;
   chart: OrgChart;
@@ -30,6 +31,8 @@ export function AgentDialog({
   canMove?: boolean;
   /** Opens the move dialog (on the page: no nested dialog). */
   onMove?: () => void;
+  /** Opens the bulk move for the agent's workstation; offered when that workstation is offline or removed. */
+  onMoveAll?: () => void;
 }) {
   if (!agent) return null;
   const projects = new Map(chart.projects.map((p) => [p.id, p]));
@@ -112,7 +115,17 @@ export function AgentDialog({
           <Row label="Workstation">
             {station ? (
               <>
-                {station.name} {station.online ? '(online)' : '(offline)'}
+                {station.name}{' '}
+                {station.unpaired ? '(removed)' : station.online ? '(online)' : '(offline)'}
+                {canMove && onMoveAll && (station.unpaired || !station.online) && (
+                  <Button
+                    size="sm"
+                    className="mt-2 min-h-11 w-full sm:min-h-0 sm:w-auto"
+                    onClick={onMoveAll}
+                  >
+                    Move all agents from this workstation
+                  </Button>
+                )}
               </>
             ) : (
               'None'

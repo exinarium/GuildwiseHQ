@@ -3,6 +3,7 @@ import { Network } from 'lucide-react';
 import { useState } from 'react';
 import { useMe } from '../api/queries/auth.ts';
 import { useOrgChart } from '../api/queries/costs.ts';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { type MovableAgent, MoveAgentDialog } from '../components/agents/MoveAgentDialog.tsx';
 import { AgentDialog } from '../components/orgchart/AgentDialog.tsx';
 import { ChartCanvas } from '../components/orgchart/ChartCanvas.tsx';
@@ -25,6 +26,7 @@ export function OrgChartPage() {
   const role = useActiveOrgRole();
   const me = useMe();
   const [moving, setMoving] = useState<MovableAgent | null>(null);
+  const [movingAll, setMovingAll] = useState<{ id: string; name: string } | null>(null);
   const wide = useIsTabletUp();
   const [view, setView] = useState<'chart' | 'list' | null>(null);
   const [project, setProject] = useState('');
@@ -132,6 +134,11 @@ export function OrgChartPage() {
         chart={chart}
         onClose={() => setOpen(null)}
         canMove={!!selected && movable(selected)}
+        onMoveAll={() => {
+          if (!selected?.workstation) return;
+          setMovingAll({ id: selected.workstation.id, name: selected.workstation.name });
+          setOpen(null);
+        }}
         onMove={() => {
           if (!selected) return;
           setMoving({
@@ -146,6 +153,11 @@ export function OrgChartPage() {
         }}
       />
       <MoveAgentDialog key={moving?.id ?? 'none'} agent={moving} onClose={() => setMoving(null)} />
+      <MoveAllAgentsDialog
+        key={movingAll?.id ?? 'none-all'}
+        source={movingAll}
+        onClose={() => setMovingAll(null)}
+      />
     </div>
   );
 }

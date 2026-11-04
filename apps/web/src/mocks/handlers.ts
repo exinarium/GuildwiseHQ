@@ -33,6 +33,7 @@ import {
 import { chatHandlers } from './handlers-chat.ts';
 import { delegationHandlers } from './handlers-delegation.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
+import { agentMoveHandlers } from './handlers-agent-move.ts';
 import { extraHandlers } from './handlers-extra.ts';
 import { governanceHandlers } from './handlers-governance.ts';
 import { packHandlers } from './handlers-packs.ts';
@@ -528,6 +529,7 @@ export const handlers = [
   ...delegationHandlers,
   ...governanceHandlers,
   ...extraHandlers,
+  ...agentMoveHandlers,
 ];
 
 function unlink(id: string) {
