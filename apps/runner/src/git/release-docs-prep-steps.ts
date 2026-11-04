@@ -1,4 +1,5 @@
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepSummary } from '@aom/shared';
+import { changelogStep } from './release-docs-prep-changelog.ts';
 
 /**
  * Handlers of the content steps of Release prep (docs and videos): changelog, user guide, videos. A handler writes files
@@ -18,7 +19,9 @@ export interface DocsPrepStepContext {
 
 export type DocsPrepStepHandler = (
   ctx: DocsPrepStepContext,
-) => Promise<{ ok: true; files: string[] } | { ok: false; error: string }>;
+) => Promise<{ ok: true; files: string[]; output?: unknown } | { ok: false; error: string }>;
 
 /** A sibling card adds one entry here (and one registry entry in the shared package). */
-export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler> = {};
+export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler> = {
+  changelog: changelogStep,
+};

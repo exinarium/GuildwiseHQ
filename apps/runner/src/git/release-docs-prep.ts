@@ -297,7 +297,8 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
         .filter(Boolean);
       const extra = status.filter((f) => !out.files.includes(f));
       if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`);
-      if (status.length === 0) return passed({ notices: ['no changes'] });
+      const output = out.output === undefined ? {} : { output: out.output };
+      if (status.length === 0) return passed({ notices: ['no changes'], ...output });
       const commit = await git(wt, ['commit', '-m', `docs(release): ${p.step}`], {
         env: commitEnv(identity),
       });
@@ -305,7 +306,7 @@ async function contentStep(input: ReleaseDocsPrepInput, tip: string): Promise<Re
         return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`);
       const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
       await git(repoPath, ['update-ref', workRef(p.runId), sha]);
-      return passed({ files: status });
+      return passed({ files: status, ...output });
     },
   );
   return made.ok ? made.value : failed(made.error);
