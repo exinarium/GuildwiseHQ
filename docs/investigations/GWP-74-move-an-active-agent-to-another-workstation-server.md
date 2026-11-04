@@ -318,6 +318,98 @@ Existing tests expected to stay green without edits: `member-removal.test.ts`, `
 (the new props are optional/false by default), `sandbox.test.tsx`, `pack-team.test.tsx`, `ceo-misc.test.tsx`,
 `provider-runtimes.test.tsx`, `e2e/tests/sharing.spec.ts`.
 
+## Rework round 3: merging release/1.5.0 (CHANGELOG conflict and the bulk move paths)
+
+The card branch (head `2eea001f`, merge base `09abc0df`) does not contain `origin/release/1.5.0` (`e7c24241`): 46
+release commits are missing, among them GWP-62 (retire a workstation with agent handover). `aom git merge-main` answers
+"already contains the latest main" because it merges `main`, not the card's base `release/1.5.0`. So the base has to be
+merged by hand: `git merge --no-edit origin/release/1.5.0` (no fetch needed, the ref is local). The git directory was
+read-only during this design shift, so the merge is not done here; it is the first step of the next build.
+
+### Files both sides changed
+
+| File | Three-way result | Action |
+| --- | --- | --- |
+| `CHANGELOG.md` | conflict in `## [Unreleased]` | resolve as below |
+| `apps/server/src/commands/sharing.ts` | clean | apply the fix in "Bulk paths" below |
+| `docs/ARCHITECTURE.md` | clean | none |
+| `docs/USER-GUIDE.md` | clean, wording consistent (Move to workstation, hiring manager, DevOps rules) | none |
+
+### CHANGELOG.md
+
+Both sides added a section at the top of `## [Unreleased]`: this card a `### Changed` "Moving an agent" entry, release a
+`### Added` "Retire a workstation with agent handover" entry. Both must stay, in Keep a Changelog order:
+
+```md
+## [Unreleased]
+
+### Added
+
+- Retire a workstation with agent handover. ...   (release's text, unchanged)
+
+### Changed
+
+- Moving an agent. ...                              (this card's text, unchanged)
+
+## [1.5.0]
+```
+
+The card branch's `CHANGELOG.md` already has this layout (the release entry is copied word for word above `### Changed`).
+The merge still reports a conflict there, but it is one-sided: the release side of the hunk is empty, so **keep the card
+branch's side of that hunk** (or both, which gives the same text). Never take only the release side there, which would
+drop the "Moving an agent" entry. Every other change release made to `CHANGELOG.md` (the `[1.5.0]` runner line,
+storage, public forms) merges in cleanly; check afterwards that `## [1.5.0]` starts with "Runner 0.1.66." and that
+`packages/shared/test/release-changelog.test.ts` passes.
+
+### Bulk paths: the held-claim refusal moved, the bulk callers still need it
+
+This card removed the held-claim refusal from `checkAgentMove` and put the release of those claims into `rehomeAgentIn`
+only. But `checkAgentMove` is also reached, through `prepareAgentMove`, by:
+
+- `moveAllAgents` (GWP-61, already on the card branch, `sharing.ts` ~line 690), and
+- `retireWorkstation` (GWP-62, arrives with the merge, `workstation-retire.ts` ~line 220),
+
+and neither of them releases claims. Before this card a claim-holding agent without a shift was refused there with
+`agent_busy` (bulk: skipped as `running_shift`; retire: listed as failed). After the merge such an agent is moved with
+its card claim (and running BA task) still pointing at it, i.e. exactly the stranded work this card is meant to remove.
+`moveAllAgents` even still counts such agents as busy in its `emptiesSource` pre-check, so the two disagree. No test
+covers it (the bulk tests only open shifts).
+
+Fix (smallest change, keeps GWP-61/62 behaviour as built and tested):
+
+```ts
+// sharing.ts
+export async function checkAgentMove(ctx, tx, by, a, req,
+  opts: { skipLimitCheck?: boolean; releaseHeldClaims?: boolean } = {}) {
+  ...
+  if (shift) throw conflict('agent_busy', ...);                    // unchanged
+  if (!opts.releaseHeldClaims) {                                   // restored for the bulk callers
+    const claim = await one(tx,
+      `SELECT ref FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`, [a.id]);
+    if (claim) throw conflict('agent_busy',
+      `${a.name} is working on ${claim.ref}: release the card or wait until the shift ends.`);
+  }
+  ...
+}
+// prepareAgentMove: same opts type, passed through unchanged.
+// rehomeAgentIn: prepareAgentMove(ctx, tx, by, a, req, { releaseHeldClaims: true }), then the releases as built.
+// ceo/actions7.ts precheck: checkAgentMove(..., req, { releaseHeldClaims: true }), because its execute goes
+//   through rehomeAgent, which releases the claims; otherwise the CEO would refuse a move the UI allows.
+```
+
+`moveAllAgents` and `retireWorkstation` keep calling without the flag, so they skip or fail claim-holding agents as
+before. Moving claim-holding agents in bulk (with the release) belongs to GWP-75, which can then pass the flag and append
+the releases.
+
+Tests to add (unit, `apps/server/test/agent-move-active.test.ts`):
+
+- M1: an agent holds a card claim with no open shift; `POST /api/workstations/:id/move-agents` skips it with reason
+  `running_shift`, the agent stays on the source, the claim is unchanged and it has no `AgentRehomed`.
+- M2: `checkAgentMove(..., { releaseHeldClaims: true })` passes for that agent and the default call gives `agent_busy`.
+- Keep S4 (the single move releases the claim) green.
+- After the merge also run `workstation-retire.test.ts`, `move-all-agents.test.ts`, `agent-move-check.test.ts`,
+  `ceo-actions.test.ts` and the four move suites; they must pass without edits.
+
 ## Follow-ups (outside this change)
 
 - GWP-75 (bulk move), GWP-76 (CEO action): call `rehomeAgentIn` with their own actor and authorization. They get the
