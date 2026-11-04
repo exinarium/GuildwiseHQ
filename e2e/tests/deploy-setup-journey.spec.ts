@@ -14,7 +14,7 @@ import { git } from '../support/vault.ts';
 /**
  * The deploy-setup journey of a person who runs a stack on their own server, against the REAL server, a REAL runner, a REAL sshd
  * (a throwaway container with a fake docker, apps/runner/test/fixtures/fake-flow-docker.sh) and a REAL registry (a throwaway
- * registry:2 container): the stack lives in /home/deploy/app/flow (NOT /opt), has a LITERAL image tag, a published port, no
+ * registry:2 container, on a private docker network with the server, published on 127.0.0.1 only): the stack lives in /home/deploy/app/flow (NOT /opt), has a LITERAL image tag, a published port, no
  * .env variable, and its compose project (demo-flow5-remote) is not the folder's name. Everything goes through the same API the
  * page uses: connect the server (an existing sign-in), let the probe find the stack from its labels, save, try without changing
  * anything, approve, a real release that replaces ONLY the app (the database container keeps its id; the compose file is not
@@ -168,7 +168,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(() => {
-  // AOM_JOURNEY_KEEP=1 leaves the throwaway containers and folder for a look (remove them by hand afterwards)
+  // AOM_JOURNEY_KEEP=1 leaves the throwaway containers and the folder for a look (remove them by hand afterwards)
   if (process.env.AOM_JOURNEY_KEEP === '1') return;
   killRunner('SIGTERM', HOME);
   // the containers are removed by the journey-containers teardown project
@@ -256,7 +256,7 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
       `printf 'cid-db-0001\\npostgres:18\\n${COMPOSE_PROJECT}\\n${files}\\n\\n' > /var/fakedocker/c/postgres`,
       `printf 'portainer-0001\\nportainer/portainer-ce\\n\\n\\n\\n' > /var/fakedocker/c/portainer`,
       `printf %s '${OLD_IMAGE}' > /var/fakedocker/images/${OLD_IMAGE.replace(/[/:@]/g, '_')}`,
-      `printf '127.0.0.1:${regPort}=172.17.0.1:${regPort}\\n' > /var/fakedocker/registry-map`,
+      `printf '127.0.0.1:${regPort}=${REG}:5000\\n' > /var/fakedocker/registry-map`,
       `echo ok > /var/fakedocker/www/ready`,
       `(httpd -f -p 5500 -h /var/fakedocker/www </dev/null >/dev/null 2>&1 &)`,
       // an app that does not run in Docker: a plain folder served by a small web server, restarted by a script of the person's own
