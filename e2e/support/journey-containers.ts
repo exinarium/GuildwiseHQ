@@ -11,6 +11,7 @@ export const NAME_PREFIX = 'aom-e2e-journey-';
 export type JourneyState = {
   registry: string;
   box: string;
+  network: string;
   regPort: number;
   sshPort: number;
   httpPort: number;
@@ -25,18 +26,21 @@ export const realDocker: DockerFn = (...args) =>
 export const NO_DOCKER_MESSAGE =
   'Docker is not reachable here. Tester shifts have no Docker: DevOps runs the Docker projects (README "Docker projects")';
 
-export function registryArgs(name: string, regPort: number): string[] {
+// The registry and the box share a private network: the box reaches the registry by name, so no address of the docker0
+// bridge (which differs between computers) is needed.
+export function registryArgs(name: string, regPort: number, network?: string): string[] {
   return [
     'run', '-d', '--rm', '--name', name,
+    ...(network ? ['--network', network] : []),
     '-p', `127.0.0.1:${regPort}:5000`,
-    '-p', `172.17.0.1:${regPort}:5000`,
     'registry:2',
   ];
 }
 
-export function boxArgs(name: string, p: { sshPort: number; httpPort: number; shopPort: number }): string[] {
+export function boxArgs(name: string, p: { sshPort: number; httpPort: number; shopPort: number }, network?: string): string[] {
   return [
     'run', '-d', '--rm', '--name', name,
+    ...(network ? ['--network', network] : []),
     '-p', `127.0.0.1:${p.sshPort}:22`,
     '-p', `127.0.0.1:${p.httpPort}:5500`,
     '-p', `127.0.0.1:${p.shopPort}:8090`,
@@ -58,14 +62,21 @@ export function startJourneyContainers(docker: DockerFn = realDocker, stateFile 
   const state: JourneyState = {
     registry: `${NAME_PREFIX}registry-${id}`,
     box: `${NAME_PREFIX}box-${id}`,
+    network: `${NAME_PREFIX}net-${id}`,
     regPort: JOURNEY_PORTS.registry,
     sshPort: JOURNEY_PORTS.ssh,
     httpPort: JOURNEY_PORTS.http,
     shopPort: JOURNEY_PORTS.shop,
   };
   docker('build', '-q', '-t', JOURNEY_IMAGE, join(ROOT, 'apps/runner/test/fixtures/sshd'));
-  docker(...registryArgs(state.registry, state.regPort));
-  docker(...boxArgs(state.box, state));
+  try {
+    docker('network', 'rm', state.network);
+  } catch {
+    // no leftover network
+  }
+  docker('network', 'create', state.network);
+  docker(...registryArgs(state.registry, state.regPort, state.network));
+  docker(...boxArgs(state.box, state, state.network));
   mkdirSync(dirname(stateFile), { recursive: true });
   writeFileSync(stateFile, JSON.stringify(state));
   return state;
@@ -91,6 +102,13 @@ export function stopJourneyContainers(docker: DockerFn = realDocker, stateFile =
   for (const n of [s.box, s.registry]) {
     try {
       docker('rm', '-f', n);
+    } catch {
+      // already gone
+    }
+  }
+  if (s.network) {
+    try {
+      docker('network', 'rm', s.network);
     } catch {
       // already gone
     }
