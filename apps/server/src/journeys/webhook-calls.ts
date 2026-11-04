@@ -47,14 +47,15 @@ export async function enterWebhookCallStep(
 type Result = { ok: boolean; httpStatus?: number; error?: string; durationMs: number; retryable: boolean };
 
 /** Sends every call that is due, and closes tries nobody answered. Returns how many tries it started or closed. */
-export async function callDue(ctx: Ctx): Promise<number> {
+export async function callDue(ctx: Ctx, projectId: string | null = null): Promise<number> {
   const now = ctx.clock.now();
   const due = await rows(
     ctx.pool,
     `SELECT id, workstation_id FROM journey_webhook_calls
-      WHERE (status='pending' AND next_attempt_at <= $1) OR (status='dispatched' AND command_deadline <= $1)
+      WHERE ((status='pending' AND next_attempt_at <= $1) OR (status='dispatched' AND command_deadline <= $1))
+        AND ($2::uuid IS NULL OR project_id = $2)
       ORDER BY COALESCE(next_attempt_at, command_deadline), id LIMIT 50`,
-    [now],
+    [now, projectId],
   );
   let n = 0;
   const workstations = new Set<string>();

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { JourneyDefinitionInput } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { journeyTick } from '../src/journeys/tick.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -14,7 +13,7 @@ const ctx = () => w.t.app.ctx;
 const asOwner = (method: string, url: string, body?: unknown, expected = 200) =>
   ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), expected);
 const tick = async (n = 3) => {
-  for (let i = 0; i < n; i++) await journeyTick(ctx());
+  for (let i = 0; i < n; i++) await journeyTick(ctx(), { projectId: w.projectId });
 };
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -43,7 +42,7 @@ const create = async (steps: unknown[], handoffs: unknown[], first = 'a') =>
       '/api/journeys',
       {
         projectId: w.projectId,
-        definition: { name: 'J', recordType: 'client', firstStepId: first, steps, handoffs } satisfies JourneyDefinitionInput,
+        definition: { name: 'J', recordType: 'client', firstStepId: first, steps, handoffs },
       },
       201,
     )
@@ -182,7 +181,7 @@ describe('timers fire once', () => {
     const id = await start(j);
     await tick();
     w.t.clock.advance(11 * MIN);
-    await Promise.all([journeyTick(ctx()), journeyTick(ctx())]);
+    await Promise.all([journeyTick(ctx(), { projectId: w.projectId }), journeyTick(ctx(), { projectId: w.projectId })]);
     await tick();
     const row = await waitRow(id);
     expect(row.reminders_sent).toBe(1);

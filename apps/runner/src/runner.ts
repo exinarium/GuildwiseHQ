@@ -146,6 +146,7 @@ import {
   reportOf,
 } from './mcp/plugins.ts';
 import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-folder.ts';
+import { JourneyWebhookCaller } from './outbound-delivery/journey-webhook.ts';
 import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
@@ -304,6 +305,7 @@ export class Runner {
   readonly outbound: OutboundExecutor;
   private readonly poller: IntegrationPoller;
   private readonly outboundDelivery: OutboundDelivery;
+  private readonly journeyWebhook: JourneyWebhookCaller;
   readonly repoCreator: RepoCreator;
   readonly repoCloner: RepoCloner;
   /** The project graph: indexes repositories into the project vault and answers `aom graph` (docs/design/project-graphs.md). */
@@ -824,6 +826,12 @@ export class Runner {
       secretsDir: this.paths.secrets,
       keyOf: (name) => this.keys.deriveFileKey(name),
       // Channel, run, status and duration only: never the text.
+      log: (line) => this.log.info(line),
+    });
+    this.journeyWebhook = new JourneyWebhookCaller({
+      secretsDir: this.paths.secrets,
+      keyOf: (name) => this.keys.deriveFileKey(name),
+      // Call id, status and duration only: never the URL, a header or the body.
       log: (line) => this.log.info(line),
     });
     this.client.on('message', (m) => this.onMessage(m));
@@ -2229,6 +2237,9 @@ export class Runner {
       } else if (command === 'delivery.send') {
         // A failed send is an answer (ok:true, result.ok:false, retryable): the schedule's history shows the reason.
         done(true, await this.outboundDelivery.run(CommandPayloadSchemas['delivery.send'].parse(payload)));
+      } else if (command === 'journey.webhook.call') {
+        // A failed call is an answer (ok:true, result.ok:false, retryable): the server retries with backoff.
+        done(true, await this.journeyWebhook.run(CommandPayloadSchemas['journey.webhook.call'].parse(payload)));
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));

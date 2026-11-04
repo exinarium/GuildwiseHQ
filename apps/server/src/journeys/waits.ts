@@ -406,11 +406,12 @@ function viewOf(w: Row): WaitView {
 }
 
 /** Fires every due wait once: reads the due ids, then handles each in its own transaction. Returns how many fired. */
-export async function fireDueWaits(ctx: Ctx): Promise<number> {
+export async function fireDueWaits(ctx: Ctx, projectId: string | null = null): Promise<number> {
   const due = await rows(
     ctx.pool,
-    `SELECT id FROM journey_waits WHERE status='open' AND next_fire_at <= $1 ORDER BY next_fire_at, id LIMIT 50`,
-    [ctx.clock.now()],
+    `SELECT id FROM journey_waits WHERE status='open' AND next_fire_at <= $1 AND ($2::uuid IS NULL OR project_id = $2)
+      ORDER BY next_fire_at, id LIMIT 50`,
+    [ctx.clock.now(), projectId],
   );
   let n = 0;
   for (const d of due) {
