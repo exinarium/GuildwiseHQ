@@ -121,22 +121,6 @@ This guide is for people who have never worked with AI agents before. You do not
 
 <!-- /toc -->
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute

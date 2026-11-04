@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, delimiter, join } from 'node:path';
 import {
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
@@ -2162,6 +2162,16 @@ export class Runner {
               repoPath: repo.localPath,
               integrationDir: this.paths.integration,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
+              exec: async (cmd, args, o) => {
+                const tc = this.toolchains.resolve();
+                const r = await this.exec.run(cmd, args, {
+                  cwd: o.cwd,
+                  timeoutMs: o.timeoutMs,
+                  env: { ...tc.env, PATH: [...tc.pathDirs, process.env.PATH ?? ''].join(delimiter) },
+                });
+                return { ...r, timedOut: false };
+              },
             })
           : {
               ok: false,
