@@ -1,8 +1,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { ReleaseDocsPrepPayload, ReleaseDocsPrepResult } from '@aom/shared';
+import { type ReleaseDocsPrepPayload, type ReleaseDocsPrepResult, writableFilesFor } from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runReleaseDocsPrep } from '../src/git/release-docs-prep.ts';
+import { addPrepTaskWorktree, finishPrepTask, removePrepTaskWorktree } from '../src/git/release-prep-task.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -316,5 +317,111 @@ describe('release.docs_prep videos: render', () => {
     // a second plan on the same run starts from the work ref, which holds renders.json
     const again = await run(s);
     expect(videosOf(again)[0]).toMatchObject({ slug: 'backlog', action: 'up_to_date', state: 'skipped' });
+  });
+});
+
+describe('release prep task: a new video script', () => {
+  const task = {
+    kind: 'new_video' as const,
+    slug: 'journey-designer',
+    title: 'Journey designer',
+    pages: ['apps/web/src/pages/JourneyDesigner.tsx'],
+    cards: ['GWP-12'],
+  };
+  const rpOf = (s: Setup, startSha: string) => ({
+    taskId: ID(5),
+    runId: RUN,
+    repoId: ID(3),
+    step: 'videos',
+    phase: 'author',
+    remoteUrlNormalized: s.repo.remoteNormalized,
+    workRef: `refs/guildwise/docs-prep/${RUN}/work`,
+    startSha,
+    task,
+    writable: writableFilesFor(task),
+  });
+  const commitAs = { name: 'Release Owner', email: 'owner@example.test' };
+  const write = (wt: string) => {
+    put(wt, 'e2e/video/journey-designer.spec.ts', 'spec journey\n');
+    put(wt, 'e2e/video/narration/journey-designer.ts', 'export default []\n');
+    const map = JSON.parse(readFileSync(join(wt, 'e2e/video/screens.json'), 'utf8'));
+    map.videos['journey-designer'] = {
+      screens: [{ name: 'Journey designer', files: ['apps/web/src/pages/JourneyDesigner.tsx'] }],
+    };
+    put(wt, 'e2e/video/screens.json', `${JSON.stringify(map, null, 2)}\n`);
+  };
+
+  it('refuses a file outside the task and keeps nothing', async () => {
+    const s = setup({ 'apps/web/src/pages/JourneyDesigner.tsx': 'new\n' });
+    await run(s);
+    const head = sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0']);
+    const rp = rpOf(s, head);
+    const wt = await addPrepTaskWorktree(s.repo.clone, rp, join(tmp('aom-wt-'), 'task'));
+    write(wt.path);
+    put(wt.path, 'e2e/video/harness.ts', 'changed\n');
+    const r = await finishPrepTask(wt, rp, commitAs);
+    expect(r).toEqual({ ok: false, reason: 'changed files outside the task: e2e/video/harness.ts' });
+    await removePrepTaskWorktree(wt);
+    expect(existsSync(wt.path)).toBe(false);
+  });
+
+  it('refuses a task without its spec and narration', async () => {
+    const s = setup({ 'apps/web/src/pages/JourneyDesigner.tsx': 'new\n' });
+    const head = sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0']);
+    const rp = rpOf(s, head);
+    const wt = await addPrepTaskWorktree(s.repo.clone, rp, join(tmp('aom-wt-'), 'task'));
+    put(wt.path, 'e2e/video/journey-designer.spec.ts', 'spec\n');
+    const r = await finishPrepTask(wt, rp, commitAs);
+    expect(r).toEqual({ ok: false, reason: 'missing e2e/video/narration/journey-designer.ts' });
+    await removePrepTaskWorktree(wt);
+  });
+
+  it('an authored spec is committed to the work ref, then rendered and added to media/videos', async () => {
+    const f = fakeRecorder(tmp('aom-fake-'));
+    process.env.AOM_PREP_VIDEO_CMD = f.cmd;
+    const s = setup({ 'apps/web/src/pages/JourneyDesigner.tsx': 'new\n' });
+    const plan = await run(s);
+    expect((plan.report as { needsAuthoring?: { slug: string }[] }).needsAuthoring?.map((n) => n.slug)).toEqual([
+      'journey-designer',
+    ]);
+    const head = sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0']);
+    const rp = rpOf(s, head);
+    const wt = await addPrepTaskWorktree(s.repo.clone, rp, join(tmp('aom-wt-'), 'task'));
+    write(wt.path);
+    // the agent may commit on its own: it is folded into one commit
+    sh(wt.path, 'git', ['add', 'e2e/video/journey-designer.spec.ts']);
+    sh(wt.path, 'git', ['-c', 'user.name=x', '-c', 'user.email=x@example.test', 'commit', '-m', 'wip']);
+    const done = await finishPrepTask(wt, rp, commitAs);
+    await removePrepTaskWorktree(wt);
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.files).toEqual([
+      'e2e/video/journey-designer.spec.ts',
+      'e2e/video/narration/journey-designer.ts',
+      'e2e/video/screens.json',
+    ]);
+    expect(sh(s.repo.clone, 'git', ['rev-parse', rp.workRef])).toBe(done.commit);
+    expect(sh(s.repo.clone, 'git', ['log', '-1', '--format=%an %s', done.commit])).toBe(
+      'Release Owner docs(release): the journey-designer video script',
+    );
+    const render = await run(s, { phase: 'render', input: { plan: plan.report, authored: ['journey-designer'] } });
+    expect(render.state).toBe('passed');
+    expect(runs(f.count)).toEqual(['journey-designer']);
+    const tree = workTree(s);
+    for (const p of [
+      'e2e/video/journey-designer.spec.ts',
+      'media/videos/journey-designer.webm',
+      'media/videos/journey-designer.mp4',
+      'media/videos/journey-designer.vtt',
+      'media/videos/journey-designer.json',
+      'e2e/video/renders.json',
+    ])
+      expect(tree).toContain(p);
+    const map = JSON.parse(
+      sh(s.repo.clone, 'git', ['show', `${rp.workRef}:e2e/video/screens.json`]),
+    ) as { videos: Record<string, unknown> };
+    expect(Object.keys(map.videos)).toContain('journey-designer');
+    // the release branch itself is untouched: only Commit results commits
+    expect(sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0'])).toBe(head);
   });
 });

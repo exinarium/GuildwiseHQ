@@ -26,6 +26,7 @@ import {
   isPublishRequest,
   isSafeGitRef,
   isTerminalReport,
+  PREP_OUTCOME,
   isValidReportPath,
   type LedgerMatch,
   normalizeUrl,
@@ -115,6 +116,12 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
+import {
+  addPrepTaskWorktree,
+  finishPrepTask,
+  type PrepTaskWorktree,
+  removePrepTaskWorktree,
+} from '../git/release-prep-task.ts';
 import { ContextCounter } from '../graph/measure.ts';
 import type { GraphService } from '../graph/service.ts';
 import { diskProblem } from '../health/disk.ts';
@@ -376,6 +383,8 @@ interface ActiveShift {
   worktree?: WorktreeResult;
   /** A design before the dependencies landed: a detached read-only checkout of the working branch, removed at the end. */
   readOnlyCheckout?: { path: string; repoPath: string; baseBranch: string };
+  /** A release prep task: its detached worktree from the release work ref. */
+  prepTask?: PrepTaskWorktree;
   startSha?: string;
   branchesAtStart: BranchSnapshot;
   /** The branches origin had at this shift's fetch (reported on shift.started so the server's branch list is fresh). */
@@ -553,6 +562,7 @@ export class ShiftSupervisor {
     for (const s of this.active.values()) {
       if (s.worktree) out.push(s.worktree.path);
       if (s.readOnlyCheckout) out.push(s.readOnlyCheckout.path);
+      if (s.prepTask) out.push(s.prepTask.path);
       const spec = s.msg.worktree;
       if (spec) {
         if (spec.path) out.push(spec.path);
@@ -627,6 +637,7 @@ export class ShiftSupervisor {
     } finally {
       if (shift.readOnlyCheckout)
         await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
+      if (shift.prepTask) await removePrepTaskWorktree(shift.prepTask);
       if (shift.token) this.deps.ipc.revoke(shift.token);
       this.delegates.endCaller(msg.shiftId, 'the shift ended');
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
@@ -1046,7 +1057,29 @@ export class ShiftSupervisor {
     s.releaseTmp = holdAgentTmp(sandbox);
     let cwd = sandbox.scratch;
 
-    if (msg.worktree?.mode === 'readonly') {
+    if (msg.kind === 'release_prep') {
+      const rp = msg.releasePrep;
+      if (!rp) {
+        this.reject(msg.shiftId, 'internal', 'a release prep shift without its task');
+        return;
+      }
+      const repo = await this.deps.findRepo(rp.remoteUrlNormalized);
+      if (!repo) {
+        this.reject(msg.shiftId, 'repo_missing', `no local clone for ${rp.remoteUrlNormalized}`);
+        return;
+      }
+      try {
+        s.prepTask = await addPrepTaskWorktree(
+          repo.localPath,
+          rp,
+          join(paths.worktrees, `release-prep-${rp.taskId.slice(0, 8)}`),
+        );
+      } catch (err) {
+        this.reject(msg.shiftId, 'worktree_failed', err instanceof Error ? err.message : String(err));
+        return;
+      }
+      cwd = s.prepTask.path;
+    } else if (msg.worktree?.mode === 'readonly') {
       const repo = await this.deps.findRepo(msg.worktree.remoteUrlNormalized);
       if (!repo) {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
@@ -2699,6 +2732,20 @@ export class ShiftSupervisor {
         );
       }
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      // A release prep task: the runner checks the files against the task and keeps them as a local commit; a refusal
+      // reaches the server as the task's failure (the agent cannot work around it by reporting again).
+      if (msg.kind === 'release_prep' && msg.releasePrep && s.prepTask && outcome.id === PREP_OUTCOME.done) {
+        const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+        toSend = done.ok
+          ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
+          : {
+              kind: 'outcome',
+              outcomeId: PREP_OUTCOME.failed,
+              note: done.reason,
+              data: { reason: done.reason, refused: true },
+            };
+      }
 
       // Transcripts (videos and podcasts): the scout must have looked each one up; the runner attaches the reference.
       if (outcome.data === 'candidates') {

@@ -100,6 +100,68 @@ export function missingNewVideoFiles(task: NewVideoTask, changed: readonly strin
   return [`e2e/video/${task.slug}.spec.ts`, `e2e/video/narration/${task.slug}.ts`].filter((p) => !have.has(p));
 }
 
+/** The instructions of a release_prep shift (the role's own text is not used: the task is self-contained). */
+export function renderReleasePrepInstructions(
+  agent: { name: string },
+  project: { key: string; name: string },
+  rp: ReleasePrepShift,
+): string {
+  return [
+    `# Release prep task`,
+    '',
+    `You are ${agent.name}, writing one part of the release preparation of project ${project.key} (${project.name}).`,
+    'You work in a detached checkout of the release work (your working directory). Nothing you do is pushed: the release',
+    'prep commits it later, after every step passed.',
+    '',
+    '# Rules',
+    '',
+    '- Create or change only these files (any other change refuses your work):',
+    ...rp.writable.map((f) => `  - ${f}`),
+    '- Do not render or record anything, do not start servers, do not install anything: the release prep renders the video',
+    '  itself after you finish.',
+    '- Use only the demo data the existing video specs use. Never put real names, e-mail addresses or secrets in a script.',
+    '- Follow the style of the existing files exactly; do not change the harness, the voice or the video look.',
+    '',
+    '# How to finish',
+    '',
+    'Run exactly one of these, on its own:',
+    '- `aom prep done --summary "<what you wrote>"` when the files are written;',
+    '- `aom prep fail --reason "<why not>"` when you cannot write them.',
+    '',
+  ].join('\n');
+}
+
+/** The prompt of a release_prep shift: the task. */
+export function renderReleasePrepPrompt(rp: ReleasePrepShift): string {
+  const t = rp.task;
+  const lines = [
+    `Write the script of a new help video: "${t.title}" (slug \`${t.slug}\`).`,
+    '',
+    'The new screen:',
+    ...(t.pages.length ? t.pages.map((p) => `- ${p}`) : ['- (no page file named; find the screen from the slug)']),
+    ...(t.cards.length ? ['', `Changed by: ${t.cards.join(', ')}.`] : []),
+    '',
+    'Steps:',
+    `1. Copy \`e2e/video/template/slug.spec.ts\` to \`e2e/video/${t.slug}.spec.ts\` and \`e2e/video/narration/slug.ts\` to \`e2e/video/narration/${t.slug}.ts\`, and fill them in.`,
+    '   Use `e2e/video/backlog.spec.ts` with `e2e/video/narration/backlog.ts`, and one spec of a nearby section, as style examples.',
+    '2. Follow the rules in `docs/guide/VIDEO-PLAN.md`: start on the page through the sidebar, about 2.4 words a second, demo data only.',
+    `3. In \`e2e/video/screens.json\` add \`videos.${t.slug}\` with the screens it shows and their page files, and remove its \`planned\` entry if there is one.`,
+    `4. In \`apps/web/src/lib/videos.ts\` add or update the \`${t.slug}\` entry with \`published: true\`, choosing its nav, paths and help from the nav config and the Help articles.`,
+    `5. Add a short entry for the video to \`docs/guide/VIDEO-PLAN.md\`.`,
+  ];
+  if (t.repairOf)
+    lines.push(
+      '',
+      'This is a second try: the script written before failed to record with this error. Fix the script so it records:',
+      '',
+      '```',
+      t.repairOf.error,
+      '```',
+    );
+  lines.push('', 'Then finish with `aom prep done --summary "..."` (or `aom prep fail --reason "..."`).');
+  return lines.join('\n');
+}
+
 /** The author row's error for one video. */
 export const authorFailure = (slug: string, reason: string): string =>
   `${slug}: could not write the video script: ${reason}`;

@@ -5,6 +5,8 @@ import {
   missingNewVideoFiles,
   newVideoWritableFiles,
   ReleasePrepShiftSchema,
+  renderReleasePrepInstructions,
+  renderReleasePrepPrompt,
   ShiftKind,
   ShiftStartSchema,
   writableFilesFor,
@@ -54,6 +56,33 @@ describe('release prep tasks', () => {
     expect(authorFailure('timesheets', 'the agent stopped')).toBe(
       'timesheets: could not write the video script: the agent stopped',
     );
+  });
+
+  it('the prompt names the slug, the pages, the files to write and, in a repair round, the render error', () => {
+    const rp = ReleasePrepShiftSchema.parse({
+      taskId: '0190a1b2-0000-7000-8000-000000000001',
+      runId: '0190a1b2-0000-7000-8000-000000000002',
+      repoId: '0190a1b2-0000-7000-8000-000000000003',
+      step: 'videos',
+      phase: 'author',
+      remoteUrlNormalized: 'github.com/acme/app',
+      workRef: 'refs/guildwise/docs-prep/r/work',
+      startSha: 'a'.repeat(40),
+      task,
+      writable: writableFilesFor(task),
+    });
+    const prompt = renderReleasePrepPrompt(rp);
+    expect(prompt).toContain('e2e/video/timesheets.spec.ts');
+    expect(prompt).toContain('apps/web/src/pages/Timesheets.tsx');
+    expect(prompt).toContain('GWP-200');
+    expect(prompt).not.toContain('second try');
+    expect(renderReleasePrepPrompt({ ...rp, task: { ...task, repairOf: { error: 'locator x' } } })).toContain(
+      'locator x',
+    );
+    const instr = renderReleasePrepInstructions({ name: 'Bea' }, { key: 'GWP', name: 'Platform' }, rp);
+    for (const f of rp.writable) expect(instr).toContain(f);
+    expect(instr).toContain('aom prep done');
+    expect(instr).toContain('aom prep fail');
   });
 
   it('release_prep is a shift kind and shift.start carries the task', () => {
