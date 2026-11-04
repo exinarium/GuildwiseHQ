@@ -8,10 +8,11 @@ import {
   formatFormBytes,
   validateFieldAnswer,
   validateFormAnswers,
-} from '@aom/shared';
+} from '@aom/shared/forms';
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
+import { Button } from '../ui/Button.tsx';
 import { cx } from '../ui/cx.ts';
-import { Button, inputCls } from '../ui.tsx';
+import { inputCls } from '../ui/inputCls.ts';
 
 type Answers = Record<string, FormAnswerValue>;
 

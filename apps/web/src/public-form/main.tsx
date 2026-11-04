@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css';
-import { PUBLIC_FORM_ID_RE } from '@aom/shared';
+import { PUBLIC_FORM_ID_RE } from '@aom/shared/forms';
 import { PublicFormPage, takeLinkToken } from './PublicFormPage.tsx';
 
 const publicId = window.location.pathname.split('/')[2] ?? '';

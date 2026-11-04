@@ -23,9 +23,10 @@ export class KeyedBuckets {
   take(key: string): { ok: true } | { ok: false; retryAfterSec: number } {
     const t = this.now();
     const b = this.map.get(key) ?? { tokens: this.burst, at: t };
-    const refill = ((t - b.at) / 60_000) * this.perMinute;
+    // A clock that stepped back (NTP, a test) must not drain the bucket: no time passed, no refill.
+    const refill = (Math.max(0, t - b.at) / 60_000) * this.perMinute;
     b.tokens = Math.min(this.burst, b.tokens + refill);
-    b.at = t;
+    b.at = Math.max(b.at, t);
     if (b.tokens < 1) {
       this.map.set(key, b);
       return { ok: false, retryAfterSec: Math.max(1, Math.ceil(((1 - b.tokens) / this.perMinute) * 60)) };
@@ -42,7 +43,7 @@ export class KeyedBuckets {
 
   private sweep(t: number): void {
     for (const [k, b] of this.map) {
-      if (b.tokens + ((t - b.at) / 60_000) * this.perMinute >= this.burst) this.map.delete(k);
+      if (b.tokens + (Math.max(0, t - b.at) / 60_000) * this.perMinute >= this.burst) this.map.delete(k);
     }
     // still full of active keys: make room by dropping the oldest entries
     for (const k of this.map.keys()) {

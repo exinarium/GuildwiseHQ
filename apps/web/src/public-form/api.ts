@@ -3,7 +3,7 @@ import type {
   SubmissionCompleteDto,
   SubmissionStartResultDto,
   SubmissionStatusDto,
-} from '@aom/shared';
+} from '@aom/shared/forms';
 
 /** An error answer of the public routes: a code, a sentence and what the page may do next. */
 export class PublicApiError extends Error {

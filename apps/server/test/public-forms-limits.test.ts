@@ -16,6 +16,16 @@ describe('KeyedBuckets', () => {
     expect(b.take('a')).toMatchObject({ ok: false });
   });
 
+  it('a clock that steps back does not drain a bucket', () => {
+    let t = 10 * 60_000;
+    const b = new KeyedBuckets(60, 3, () => t);
+    expect(b.take('a').ok).toBe(true);
+    t = 0;
+    expect(b.take('a').ok).toBe(true);
+    expect(b.take('a').ok).toBe(true);
+    expect(b.take('a').ok).toBe(false);
+  });
+
   it('keeps keys apart', () => {
     const b = new KeyedBuckets(1, 1, () => 0);
     expect(b.take('ip:1').ok).toBe(true);

@@ -1,4 +1,4 @@
-import type { FormAnswerValue, FormFieldErrorCode, PublicFormDto } from '@aom/shared';
+import type { FormAnswerValue, FormFieldErrorCode, PublicFormDto } from '@aom/shared/forms';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 import { PublicApiError, publicApi } from './api.ts';
@@ -177,6 +177,7 @@ export function PublicFormPage({ publicId, linkToken }: { publicId: string; link
           setDone(text);
           return;
         } catch (e) {
+          if (e instanceof LinkLater) throw e;
           const err = e instanceof PublicApiError ? e : new PublicApiError(0, 'network', 'failed', true);
           // The submission ran out, or the page's session was used or is stale: start again with what is kept.
           const again =

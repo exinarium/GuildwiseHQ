@@ -45,7 +45,7 @@ export function call(
           ...(o.ip ? { 'x-forwarded-for': o.ip } : {}),
           ...(isJson ? { 'content-type': 'application/json' } : {}),
           ...(payload ? { 'content-length': String(payload.length) } : {}),
-          ...o.headers,
+          ...Object.fromEntries(Object.entries(o.headers ?? {}).filter(([, v]) => v !== undefined)),
         },
       },
       (res) => {
@@ -213,7 +213,7 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
     self.logs = [];
     self.w = await createWorld({
       logStream: { write: (l: string) => void self.logs.push(l) },
-      env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_FORMS_POW_BITS: '0', AOM_FORMS_MIN_FILL_MS: '0', ...env },
+      env: { AOM_FIRST_RUN_HIRE_CAP: 'false', LOG_LEVEL: 'trace', AOM_FORMS_POW_BITS: '0', AOM_FORMS_MIN_FILL_MS: '0', ...env },
     });
     self.dir = mkdtempSync(join(tmpdir(), 'pf-store-'));
     self.orgId = (await q('SELECT id FROM organizations WHERE owner_user_id=$1', [self.w.owner.id]))[0]?.id as string;
