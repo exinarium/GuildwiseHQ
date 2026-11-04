@@ -1,6 +1,7 @@
 import type {
   AgentDraftDto,
   AgentDto,
+  AgentHome,
   HrAgent,
   McpServerCandidateDto,
   ProjectDto,
@@ -9,6 +10,7 @@ import type {
 import { Dices, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
+import { useAgentHomes } from '../api/queries/agent-move.ts';
 import { useAgents, useFire, usePauseAgent, useRerollFace, useRoles } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
@@ -26,6 +28,7 @@ import { DescribeAgentDialog } from '../components/agents/DescribeAgent.tsx';
 import { HireDialog } from '../components/agents/HireDialog.tsx';
 import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import { AllowedProjectsDialog, WorksOn } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
@@ -92,6 +95,8 @@ export function Agents() {
   const orgManager = useCanManageOrg();
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
+  const homes = useAgentHomes(orgManager);
+  const [movingAll, setMovingAll] = useState<AgentHome | null>(null);
   const [changingModel, setChangingModel] = useState<AgentDto | null>(null);
   const [changingRole, setChangingRole] = useState<AgentDto | null>(null);
   const [allowing, setAllowing] = useState<AgentDto | null>(null);
@@ -147,6 +152,7 @@ export function Agents() {
         }
       />
       {orgManager && <RoleOffers />}
+      {orgManager && <WorkstationsSection homes={homes.data ?? []} onMoveAll={setMovingAll} />}
       <FirstRunGallery />
       <div className="mb-4 flex flex-wrap gap-3">
         {(projects.data?.length ?? 0) > 1 && (
@@ -258,6 +264,11 @@ export function Agents() {
       {draftHire && <HireDialog open onOpenChange={(o) => !o && setDraftHire(null)} draft={draftHire} />}
       {packHireOpen && <PickPackToHire onClose={() => setPackHireOpen(false)} />}
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
+      <MoveAllAgentsDialog
+        key={movingAll?.id ?? 'none-all'}
+        source={movingAll}
+        onClose={() => setMovingAll(null)}
+      />
       <MoveAgentDialog key={rehoming?.id ?? 'none'} agent={rehoming} onClose={() => setRehoming(null)} />
       <AllowedProjectsDialog
         agent={allowing}
@@ -549,6 +560,49 @@ function AgentCard({
         </p>
       )}
     </Panel>
+  );
+}
+
+/** Owner/Admin: where the organization's agents live, with a bulk move off a workstation (dead, offline or live). */
+function WorkstationsSection({
+  homes,
+  onMoveAll,
+}: {
+  homes: AgentHome[];
+  onMoveAll: (h: AgentHome) => void;
+}) {
+  const shown = homes.filter((h) => h.agentCount > 0);
+  if (shown.length === 0) return null;
+  const attention = shown.some((h) => h.status !== 'active' || !h.connected);
+  return (
+    <Disclosure className="mb-4" summary={`Workstations (${shown.length})`} defaultOpen={attention}>
+      <ul className="flex flex-col gap-2" data-testid="agent-homes">
+        {shown.map((h) => (
+          <li
+            key={h.id}
+            className="flex flex-col gap-2 rounded-md border border-line p-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">{h.name}</span>
+              <Badge tone={h.status !== 'active' ? 'danger' : h.connected ? 'success' : 'warning'}>
+                {h.status !== 'active' ? 'Unpaired' : h.connected ? 'Online' : 'Offline'}
+              </Badge>
+              <span className="text-subtle">
+                {h.agentCount} {h.agentCount === 1 ? 'agent' : 'agents'}
+                {h.mine ? '' : ` · ${h.ownerName}`}
+              </span>
+            </div>
+            <Button
+              className="min-h-11 w-full sm:w-auto"
+              aria-label={`Move all agents from ${h.name}`}
+              onClick={() => onMoveAll(h)}
+            >
+              Move all agents
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Disclosure>
   );
 }
 

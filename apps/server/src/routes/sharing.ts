@@ -3,16 +3,21 @@ import {
   DecisionPolicyRequestSchema,
   IdParamsSchema,
   MemberParamsSchema,
+  MoveAllAgentsPreviewQuerySchema,
+  MoveAllAgentsRequestSchema,
   MoveTargetsResponseSchema,
   RehomeAgentRequestSchema,
   ShareProjectRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
+import { whoOf } from '../auth/org-context.ts';
 import {
   answerShare,
   listProjectInvitations,
   loadMovableAgent,
+  loadSourceWorkstation,
+  moveAllAgents,
   previewRemoval,
   rehomeAgent,
   rehomeCard,
@@ -25,7 +30,7 @@ import { notFound } from '../errors.ts';
 import { getAgentDto } from '../queries/agents.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getProjectDetail } from '../queries/misc.ts';
-import { listMoveTargets } from '../queries/move-targets.ts';
+import { agentHomes, listMoveTargets } from '../queries/move-targets.ts';
 import { typed } from './util.ts';
 
 /** Shared projects, member removal, agent re-homing, decision policy and card re-home (M3). */
@@ -97,6 +102,48 @@ export function sharingRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       const a = await loadMovableAgent(ctx.pool, s.user, req.params.id);
       return MoveTargetsResponseSchema.parse(await listMoveTargets(ctx.pool, a, s.user.id));
+    });
+
+    /** Owner/Admin: workstations (any status) that hold the organization's agents. */
+    app.get('/api/agents/workstations', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return { workstations: await agentHomes(ctx.pool, a.orgId, a.session.user.id) };
+    });
+
+    /** Owner/Admin: moves every agent of a workstation to another one (partial success is reported). */
+    app.post(
+      '/api/workstations/:id/move-agents',
+      { schema: { params: IdParamsSchema, body: MoveAllAgentsRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const r = await moveAllAgents(ctx, whoOf(a), req.params.id, req.body);
+        if (r.moved.length > 0) ctx.services.dispatcher.trigger();
+        return r;
+      },
+    );
+
+    /** What the move would do, without writing anything. */
+    app.get(
+      '/api/workstations/:id/move-agents/preview',
+      { schema: { params: IdParamsSchema, querystring: MoveAllAgentsPreviewQuerySchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        return moveAllAgents(ctx, whoOf(a), req.params.id, req.query, { dryRun: true });
+      },
+    );
+
+    /** The workstations the agents of :id can move to (same rule as the single move). */
+    app.get('/api/workstations/:id/move-targets', { schema: { params: IdParamsSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      if (!(await loadSourceWorkstation(ctx.pool, a.orgId, req.params.id)))
+        throw notFound('workstation not found in this organization', 'workstation_not_found');
+      return MoveTargetsResponseSchema.parse(
+        await listMoveTargets(
+          ctx.pool,
+          { org_id: a.orgId, workstation_id: req.params.id },
+          a.session.user.id,
+        ),
+      );
     });
 
     app.post(

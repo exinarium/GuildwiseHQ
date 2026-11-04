@@ -145,6 +145,52 @@ export const MoveTargetsResponseSchema = z.object({
 });
 export type MoveTargetsResponse = z.infer<typeof MoveTargetsResponseSchema>;
 
+/** `POST /api/workstations/:id/move-agents` (and `GET .../move-agents/preview?targetWorkstationId=`). */
+export const MoveAllAgentsRequestSchema = z.object({
+  targetWorkstationId: z.uuid(),
+  /** Required when the target runs an agent's runtime without an OS sandbox (same rule as the single move). */
+  acknowledgeUnsandboxed: z.boolean().optional(),
+});
+export type MoveAllAgentsRequest = z.infer<typeof MoveAllAgentsRequestSchema>;
+export const MoveAllAgentsPreviewQuerySchema = z.object({
+  targetWorkstationId: z.uuid(),
+  acknowledgeUnsandboxed: z.stringbool().optional(),
+});
+
+export const MoveSkipReasonSchema = z.enum(['running_shift', 'workstation_devops', 'ceo']);
+export type MoveSkipReason = z.infer<typeof MoveSkipReasonSchema>;
+const MovedAgentSchema = z.object({ agentId: z.uuid(), name: z.string() });
+export const MoveAllAgentsResponseSchema = z.object({
+  dryRun: z.boolean(),
+  source: z.object({ id: z.uuid(), name: z.string(), status: z.enum(['active', 'unlinked']) }),
+  target: z.object({ id: z.uuid(), name: z.string() }),
+  /** Moved (dryRun: would move). */
+  moved: z.array(MovedAgentSchema),
+  /** `message`: the single move's text for a running shift or claimed card; absent for the built-in skips. */
+  skipped: z.array(MovedAgentSchema.extend({ reason: MoveSkipReasonSchema, message: z.string().optional() })),
+  /** Refused by the single move (code from the error, e.g. runtime_missing, sandbox_unavailable, limit_reached). */
+  failed: z.array(MovedAgentSchema.extend({ code: z.string(), error: z.string() })),
+  /** True when at least one agent would run unsandboxed on the target and no acknowledgement was sent. */
+  needsUnsandboxedAck: z.boolean(),
+});
+export type MoveAllAgentsResponse = z.infer<typeof MoveAllAgentsResponseSchema>;
+
+/** `GET /api/agents/workstations`: workstations (any status) holding this organization's agents (owner/admin). */
+export const AgentHomeSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  status: z.enum(['active', 'unlinked']),
+  connected: z.boolean(),
+  ownerName: z.string(),
+  mine: z.boolean(),
+  /** Non-retired agents of the organization on it, the built-in DevOps engineer and CEO excluded. */
+  agentCount: z.number().int(),
+  runningCount: z.number().int(),
+});
+export type AgentHome = z.infer<typeof AgentHomeSchema>;
+export const AgentHomesResponseSchema = z.object({ workstations: z.array(AgentHomeSchema) });
+export type AgentHomesResponse = z.infer<typeof AgentHomesResponseSchema>;
+
 export const NameSuggestionsQuerySchema = z.object({
   theme: z.string().optional(),
   count: z.coerce.number().int().min(1).max(20).default(5),
