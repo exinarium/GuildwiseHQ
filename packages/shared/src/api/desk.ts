@@ -116,6 +116,14 @@ export const DeskItemDtoSchema = z.object({
       input: z.string().optional(),
       reason: z.string().optional(),
       expiresAt: z.string().optional(),
+      /** Journey items (`journey_gate`, `journey_wait_escalated`, `journey_wait_link`): the wait the desk buttons act on. */
+      waitId: z.string().optional(),
+      instanceId: z.string().optional(),
+      recordId: z.string().optional(),
+      stepId: z.string().optional(),
+      /** `gate` for an escalated gate (the desk hides "Continue the journey"). */
+      waitKind: z.string().optional(),
+      linkId: z.string().optional(),
     })
     .optional(),
   /** The CEO agent (docs/design/ceo-agent-v2.md section 6): the action that answered or handled the item (Undo), and its recommendation. */

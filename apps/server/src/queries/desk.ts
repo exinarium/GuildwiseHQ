@@ -100,6 +100,9 @@ export async function dedupEntriesFor(db: Queryable, ids: string[]) {
   return new Map(found.map((r) => [r.id, { id: r.id, scope: r.scope, title: r.title, body: r.body }]));
 }
 
+const JOURNEY_DESK_SUBKINDS = new Set(['journey_gate', 'journey_wait_escalated', 'journey_wait_link']);
+const JOURNEY_DATA_KEYS = ['waitId', 'instanceId', 'recordId', 'stepId', 'waitKind', 'linkId'] as const;
+
 export function toDeskDto(
   r: Row,
   userId: string,
@@ -143,9 +146,19 @@ export function toDeskDto(
     projectId: r.project_id,
     ...(r.data &&
     typeof r.data === 'object' &&
-    (r.data.workstationId || r.data.key || r.data.askId || r.subkind === 'playbook_input_needed')
+    (r.data.workstationId ||
+      r.data.key ||
+      r.data.askId ||
+      r.subkind === 'playbook_input_needed' ||
+      JOURNEY_DESK_SUBKINDS.has(r.subkind))
       ? {
           data: {
+            // Journey items: the wait (or gate) the desk buttons act on, and the instance "Open the journey" links to.
+            ...(JOURNEY_DESK_SUBKINDS.has(r.subkind)
+              ? Object.fromEntries(
+                  JOURNEY_DATA_KEYS.filter((k) => typeof r.data[k] === 'string').map((k) => [k, r.data[k]]),
+                )
+              : {}),
             ...(typeof r.data.workstationId === 'string' ? { workstationId: r.data.workstationId } : {}),
             ...(typeof r.data.key === 'string' ? { key: r.data.key } : {}),
             ...(r.subkind === 'playbook_input_needed' && typeof r.data.threadId === 'string'
