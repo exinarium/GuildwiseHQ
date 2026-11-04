@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
+import { clearUnpairedState } from './unpaired.ts';
 
 /**
  * Pairings: one runner process on a machine can be paired with several workstations (one per account/organization,
@@ -183,6 +184,8 @@ export function addPairing(root: string, input: AddPairingInput): AddPairingResu
   let entry: PairingEntry;
   let previous: Partial<RunnerConfig>;
   if (existing) {
+    // A new workstation: nothing of the old one (its DevOps engineers' state, queued reports) carries over.
+    if (existing.workstationId !== input.workstationId) clearUnpairedState(entryDir(root, existing));
     entry = { ...existing, workstationId: input.workstationId, disabled: undefined };
     if (!entry.disabled) delete entry.disabled;
     index.pairings = index.pairings.map((p) => (p === existing ? entry : p));

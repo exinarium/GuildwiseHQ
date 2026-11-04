@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
@@ -230,12 +230,24 @@ export function sandboxEnv(
   };
 }
 
+/** Empty file in `agents/<id>/` of a DevOps engineer, written when one of its shifts starts. */
+export const DEVOPS_MARKER = '.devops';
+
 /** `agent.wipe`: removes `agents/<id>` recursively. Idempotent. */
 export async function wipeAgent(paths: RunnerPaths, agentId: string): Promise<{ removed: boolean }> {
   const dir = paths.agentDir(agentId);
   const existed = existsSync(dir);
   await rm(dir, { recursive: true, force: true });
   await rm(agentTmpDir(paths, agentId), { recursive: true, force: true });
+  return { removed: existed };
+}
+
+/** The same as `wipeAgent`, synchronous (used where the caller cannot await, e.g. re-pairing). */
+export function wipeAgentSync(paths: RunnerPaths, agentId: string): { removed: boolean } {
+  const dir = paths.agentDir(agentId);
+  const existed = existsSync(dir);
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(agentTmpDir(paths, agentId), { recursive: true, force: true });
   return { removed: existed };
 }
 

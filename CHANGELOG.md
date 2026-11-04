@@ -20,6 +20,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - The rentals template (lead, viewing, application, wait for forms and documents, screening, approval gate, lease signed, deposit and first-rent invoice, move-in, monthly rent loop) built on the business workflows.
 - The Journeys page lists journeys and running instances with filters by journey, step and status; the instance page shows the current step, the history with times and the references.
 
+### Fixed
+
+- Unpairing a workstation now retires its DevOps engineers in the same step (history is kept and an audit event is written for each), releases the work they held, and flags the other agents on that workstation as needing a new workstation. A one-off data migration (`orphaned-devops-2026-11`) retires DevOps engineers that were already left behind. The runner clears the old workstation's saved shifts, queued reports and DevOps agent folders when it is unpaired or paired again (runner 0.1.66).
+
 ## [1.4.0] - 2026-11-01
 
 Runner 0.1.65. Software and Business views, the six business workflows built in, any workflow as a variant base, releases from start to finish, and a clear way back when a computer is removed. Migrations 2751, 2791, 2800 and 2801. New optional environment variables `AOM_RELAY_MAX_BODY_BYTES`, `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST`, `AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`, `AOM_RELAY_RETRY_AFTER_SEC`, `AOM_RELAY_MAX_IN_FLIGHT` and `AOM_RELAY_RETENTION_DAYS`.

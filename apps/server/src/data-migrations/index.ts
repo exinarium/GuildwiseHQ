@@ -15,6 +15,7 @@ import { migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migrateOrphanedDevops } from './orphaned-devops.ts';
 import { migratePackSkillKeys } from './pack-skill-keys.ts';
 import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
@@ -73,6 +74,11 @@ export {
 } from './no-personal.ts';
 export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
+export {
+  migrateOrphanedDevops,
+  ORPHANED_DEVOPS_MIGRATION,
+  type OrphanedDevopsReport,
+} from './orphaned-devops.ts';
 export {
   migratePackSkillKeys,
   PACK_SKILL_KEYS_MIGRATION,
@@ -141,6 +147,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'guildwisehq-runner-rule-2026-10', run: (env) => migrateGuildwiseRunnerRule(env) },
   { name: 'business-builtin-2026-11', run: (env) => migrateBusinessBuiltin(env) },
   { name: 'deploy-removed-computers-2026-11', run: (env) => migrateDeployRemovedComputers(env) },
+  { name: 'orphaned-devops-2026-11', run: (env) => migrateOrphanedDevops(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

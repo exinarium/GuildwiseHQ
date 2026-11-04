@@ -60,6 +60,8 @@ export const AgentDtoSchema = z.object({
    * HR board shows "hired from <pack>" with no extra code; `packAgent` adds what is specific to a seat.
    */
   packAgent: PackPersonaRefSchema.nullable().optional(),
+  /** Active agent whose workstation was unpaired or removed: it needs a new workstation. */
+  workstationRemoved: z.boolean().optional(),
   provenance: PackProvenanceSchema.extend({
     label: z.string(),
     warning: z.enum(['revoked', 'removed', 'missing']).nullable().default(null),
