@@ -112,6 +112,10 @@ Type **@** in a card's comment box to pick an agent, then ask a small question: 
 
 With integration tests off (the default) the Test step still runs: the tester checks the branch against the test plan with what it can run in its own copy of the code, without a running app. **Environments > Test copies > Tests and settings** (off until you switch it on) makes the tester also run integration and end-to-end suites against a running copy of each card's branch. The card waits in Test while its workstation starts it; the card page lists every suite run (a pass after a failure is marked flaky), and a failed card's copy is kept for the time you set. Switch it off for one card in **Details**. Instead of a copy per card, choose **a deployed target** (opted in under **Environments > ... > Edit > Used for card tests**; production is never tested): the tester then tests what is deployed there, with test accounts you set per workstation.
 
+## Checks before review {#checks}
+
+In the same **Tests and settings** dialog, **Checks** lists the repository's lint, format and typecheck commands. The runner proposes them from what the repository declares; an Owner confirms, edits or removes them. At each handoff the runner runs the confirmed checks on the builder's commit and refuses the handoff while the change fails a check in a file it changed, with the failing lines. Failures only in other files, and checks that could not run, are shown to the reviewers.
+
 ## Backing off {#backing-off}
 
 When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again; every further failure doubles the wait, up to 1 hour.
