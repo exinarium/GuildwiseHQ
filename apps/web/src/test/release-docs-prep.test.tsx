@@ -71,6 +71,15 @@ describe('Release prep (docs and videos) settings', () => {
     expect(screen.getByTestId('release-docs-prep-readonly')).toBeInTheDocument();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
   });
+
+  it('reads as off and read-only, without breaking, when the response has no steps', async () => {
+    routes = () => json({ project: { id: ID(1) } });
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const sw = await screen.findByRole('switch');
+    expect(sw).not.toBeChecked();
+    expect(sw).toBeDisabled();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
 });
 
 const run = (status: string, over: Record<string, unknown> = {}) => ({
@@ -156,7 +165,7 @@ describe('Releases > Release prep tab', () => {
     const failed = run('failed', {
       failed: { step: 'analyse', repoId: ID(10), repoName: 'guildwise-cloud', error: 'could not fetch' },
     });
-    routes = (u, m) => (m === 'GET' ? json(overview('failed', {}, failed)) : json({ runId: ID(8) }));
+    routes = (_u, m) => (m === 'GET' ? json(overview('failed', {}, failed)) : json({ runId: ID(8) }));
     wrap(<ReleaseDocsPrepTab />);
     expect(await screen.findByTestId('release-docs-prep-failed')).toHaveTextContent(
       'Failed at analyse in guildwise-cloud: could not fetch',

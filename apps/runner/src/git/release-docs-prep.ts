@@ -318,10 +318,7 @@ const treeOf = async (repoPath: string, ref: string): Promise<string | null> => 
   return r.exitCode === 0 ? r.stdout.trim() : null;
 };
 
-async function commitPrepare(
-  input: ReleaseDocsPrepInput,
-  tip: string,
-): Promise<ReleaseDocsPrepResult> {
+async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
   // The commit the work chain was built on. The release branch may have moved since; the newer commits are carried
   // over below, never reverted.
@@ -425,5 +422,6 @@ async function commitPush(
 }
 
 async function cleanup(repoPath: string, runId: string): Promise<void> {
-  for (const r of [workRef(runId), commitRef(runId), startRef(runId)]) await git(repoPath, ['update-ref', '-d', r]);
+  for (const r of [workRef(runId), commitRef(runId), startRef(runId)])
+    await git(repoPath, ['update-ref', '-d', r]);
 }

@@ -14,11 +14,15 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
   const save = useSaveReleaseDocsPrepSettings(projectId);
   const [enabled, setEnabled] = useState(false);
   const [steps, setSteps] = useState<Record<string, boolean>>({});
+  // Responses are only schema-checked in dev builds: a body without the expected fields reads as off, read-only and
+  // with no steps rather than breaking the settings page around it.
   const data = q.data;
+  const listed = Array.isArray(data?.steps) ? data.steps : [];
+  const canEdit = data?.canEdit === true;
   useEffect(() => {
     if (!data) return;
-    setEnabled(data.enabled);
-    setSteps(Object.fromEntries(data.steps.map((s) => [s.id, s.enabled])));
+    setEnabled(data.enabled === true);
+    setSteps(Object.fromEntries((Array.isArray(data.steps) ? data.steps : []).map((s) => [s.id, s.enabled])));
   }, [data]);
 
   const title = 'Release prep (docs and videos)';
@@ -29,7 +33,6 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
         <ErrorBox error={q.error} onRetry={() => q.refetch()} />
       </Panel>
     );
-  const d = q.data;
   const change = (next: { enabled: boolean; steps: Record<string, boolean> }) => {
     setEnabled(next.enabled);
     setSteps(next.steps);
@@ -45,7 +48,7 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
           commit the results to the release branch. When this is on, the release cannot be shipped until the
           prep has passed or you skip it for that release. Off by default.
         </p>
-        {!d.canEdit && (
+        {!canEdit && (
           <p className="text-sm text-subtle" data-testid="release-docs-prep-readonly">
             Only the project Owner or an organization Owner or Admin changes this.
           </p>
@@ -57,14 +60,14 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
             aria-checked={enabled}
             className="mt-0.5 size-5"
             checked={enabled}
-            disabled={!d.canEdit || save.isPending}
+            disabled={!canEdit || save.isPending}
             onChange={(e) => change({ enabled: e.target.checked, steps })}
           />
           <span className="text-sm font-medium text-fg">Run release prep before a release ships</span>
         </label>
-        <fieldset className="flex flex-col" disabled={!d.canEdit || save.isPending}>
+        <fieldset className="flex flex-col" disabled={!canEdit || save.isPending}>
           <legend className="text-sm font-medium text-fg">Steps</legend>
-          {d.steps.map((s) => (
+          {listed.map((s) => (
             <label key={s.id} className={row}>
               <input
                 type="checkbox"

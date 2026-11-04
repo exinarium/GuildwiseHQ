@@ -99,8 +99,8 @@ import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { LocalTestServiceSchema } from '../projects/test-services.ts';
 import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } from '../relay/index.ts';
-import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
 import { ReleaseDocsPrepPayloadSchema } from '../release/docs-prep-dto.ts';
+import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
 import { RELEASE_TAG_RE } from '../release/tags.ts';
 import {
   CommitAsSchema,

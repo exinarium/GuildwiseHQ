@@ -6,9 +6,9 @@ import {
   isReleaseDocsPrepStep,
   nextReleaseDocsPrepAction,
   type ReleaseDocsPrepGateInput,
+  type RunSnapshot,
   releaseDocsPrepGate,
   releaseDocsPrepSteps,
-  type RunSnapshot,
 } from '../src/index.ts';
 
 describe('release docs prep step registry', () => {
@@ -83,8 +83,15 @@ describe('nextReleaseDocsPrepAction', () => {
     expect(
       nextReleaseDocsPrepAction({ status: 'running', steps, repos: [prepared('a'), prepared('b')] }),
     ).toEqual({ kind: 'dispatch', step: 'commit', phase: 'push', repoIds: ['a', 'b'] });
-    const pushed = (id: string) => repo(id, [done, { step: 'commit', phase: 'prepare', state: 'passed' }, { step: 'commit', phase: 'push', state: 'passed' }]);
-    expect(nextReleaseDocsPrepAction({ status: 'running', steps, repos: [pushed('a'), pushed('b')] })).toEqual({
+    const pushed = (id: string) =>
+      repo(id, [
+        done,
+        { step: 'commit', phase: 'prepare', state: 'passed' },
+        { step: 'commit', phase: 'push', state: 'passed' },
+      ]);
+    expect(
+      nextReleaseDocsPrepAction({ status: 'running', steps, repos: [pushed('a'), pushed('b')] }),
+    ).toEqual({
       kind: 'finish',
       status: 'passed',
     });
@@ -109,7 +116,9 @@ describe('nextReleaseDocsPrepAction', () => {
     expect(r).toEqual({ kind: 'dispatch', step: 'commit', phase: 'prepare', repoIds: ['a'] });
   });
   it('does nothing for a run that is not running', () => {
-    expect(nextReleaseDocsPrepAction({ status: 'skipped', steps, repos: [repo('a')] })).toEqual({ kind: 'wait' });
+    expect(nextReleaseDocsPrepAction({ status: 'skipped', steps, repos: [repo('a')] })).toEqual({
+      kind: 'wait',
+    });
   });
 });
 
@@ -127,7 +136,9 @@ describe('releaseDocsPrepGate', () => {
 
   it('is a no-op when off, whatever the run says', () => {
     expect(g({ enabled: false, run: null })).toEqual({ allowed: true });
-    expect(g({ enabled: false, run: { id: 'r', status: 'failed', startedAt: '2026-11-04T10:00:00Z' } })).toEqual({
+    expect(
+      g({ enabled: false, run: { id: 'r', status: 'failed', startedAt: '2026-11-04T10:00:00Z' } }),
+    ).toEqual({
       allowed: true,
     });
   });
@@ -143,7 +154,13 @@ describe('releaseDocsPrepGate', () => {
   it('refuses while running and after a failure', () => {
     expect(g({ run: { id: 'r', status: 'running', startedAt: '2026-11-04T10:00:00Z' } }).allowed).toBe(false);
     const f = g({
-      run: { id: 'r', status: 'failed', startedAt: '2026-11-04T10:00:00Z', failedStep: 'analyse', failedRepoName: 'cloud' },
+      run: {
+        id: 'r',
+        status: 'failed',
+        startedAt: '2026-11-04T10:00:00Z',
+        failedStep: 'analyse',
+        failedRepoName: 'cloud',
+      },
     });
     expect(f.allowed).toBe(false);
     if (!f.allowed) expect(f.message).toContain('analyse in cloud');
@@ -160,7 +177,8 @@ describe('releaseDocsPrepGate', () => {
     expect(g({ proposalLastTag: 'v1.5.0' }).allowed).toBe(false);
     // analyse unticked: no base tag was recorded, so it is not compared
     expect(
-      g({ proposalLastTag: 'v1.5.0', repo: { inRun: true, baseTag: null, commitSha: null, analysed: false } }).allowed,
+      g({ proposalLastTag: 'v1.5.0', repo: { inRun: true, baseTag: null, commitSha: null, analysed: false } })
+        .allowed,
     ).toBe(true);
     expect(g({ repo: { inRun: false, baseTag: null, commitSha: null } }).allowed).toBe(false);
   });

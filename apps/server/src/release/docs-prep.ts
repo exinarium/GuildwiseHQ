@@ -316,12 +316,7 @@ export async function skipReleaseDocsPrep(
  * project's repositories belongs to an earlier release and counts as no run (same rule as the ship gate); the gate
  * passes `any` and applies the rule per repository itself.
  */
-async function latestRun(
-  db: Queryable,
-  projectId: string,
-  branch: string,
-  any = false,
-): Promise<Row | null> {
+async function latestRun(db: Queryable, projectId: string, branch: string, any = false): Promise<Row | null> {
   const fresh = any
     ? ''
     : `AND started_at >= COALESCE((SELECT MAX(s.published_at) FROM release_ships s JOIN project_repos pr ON pr.id = s.repo_id

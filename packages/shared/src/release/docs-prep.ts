@@ -67,8 +67,7 @@ export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: fal
 /** The registered steps that are ticked (an unticked-by-default registry entry follows `defaultOn`). */
 export const enabledReleaseDocsPrepSteps = (
   settings: Pick<ReleaseDocsPrepSettings, 'steps'>,
-): ReleaseDocsPrepStepDef[] =>
-  releaseDocsPrepSteps().filter((s) => settings.steps[s.id] ?? s.defaultOn);
+): ReleaseDocsPrepStepDef[] => releaseDocsPrepSteps().filter((s) => settings.steps[s.id] ?? s.defaultOn);
 
 export type ReleaseDocsPrepRunStatus = 'running' | 'passed' | 'failed' | 'skipped';
 export type ReleaseDocsPrepStepState = 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
@@ -123,7 +122,11 @@ export type ReleaseDocsPrepAction =
   | { kind: 'finish'; status: 'passed' }
   | { kind: 'finish'; status: 'failed'; step: string; repoId: string; error: string };
 
-const stepStateOf = (r: RunSnapshotRepo, step: string, phase: CommitPhase | '' = ''): ReleaseDocsPrepStepState =>
+const stepStateOf = (
+  r: RunSnapshotRepo,
+  step: string,
+  phase: CommitPhase | '' = '',
+): ReleaseDocsPrepStepState =>
   r.steps.find((s) => s.step === step && (s.phase ?? '') === phase)?.state ?? 'pending';
 
 /**

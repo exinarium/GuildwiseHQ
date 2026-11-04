@@ -78,7 +78,12 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   failed: z
-    .object({ step: z.string(), repoId: z.string().nullable(), repoName: z.string().nullable(), error: z.string() })
+    .object({
+      step: z.string(),
+      repoId: z.string().nullable(),
+      repoName: z.string().nullable(),
+      error: z.string(),
+    })
     .nullable(),
   skippedBy: z.string().nullable(),
   skippedAt: z.string().nullable(),
