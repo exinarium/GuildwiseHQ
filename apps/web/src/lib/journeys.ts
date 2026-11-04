@@ -95,3 +95,59 @@ export function isLoop(def: JourneyDefinition, h: JourneyHandoff): boolean {
   const to = def.steps.findIndex((s) => s.id === h.to);
   return to >= 0 && from >= 0 && to <= from;
 }
+
+// ------------------------------------------------------------------------- waits, gates and webhook calls
+
+export type WaitKind = 'duration' | 'date' | 'form' | 'webhook';
+export type TimeoutKind = 'remind' | 'goto' | 'escalate' | 'cancel';
+
+/** A fresh `waitFor` of the chosen kind (what the wait step waits for). */
+export function waitForOf(kind: WaitKind): Record<string, unknown> {
+  if (kind === 'date') return { kind, dateFrom: { field: '' }, atTime: '09:00' };
+  if (kind === 'form') return { kind, formId: null, purpose: 'answers', send: { via: 'desk' } };
+  if (kind === 'webhook') return { kind, triggerId: null };
+  return { kind };
+}
+
+/** A fresh timeout action of the chosen kind, with the defaults the server applies. */
+export function timeoutOf(action: TimeoutKind, firstOther?: string): Record<string, unknown> {
+  if (action === 'remind') return { action, maxReminders: 3, afterLast: 'escalate' };
+  if (action === 'goto') return { action, stepId: firstOther ?? '' };
+  return { action };
+}
+
+/** The units a duration is typed in; the server limits it to 5 minutes..365 days. */
+export const DURATION_UNITS = ['minutes', 'hours', 'days', 'weeks'] as const;
+
+const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000, weeks: 604_800_000 } as const;
+/** An error text for a duration that the server would refuse, or null. */
+export function durationError(d: { amount: number; unit: keyof typeof UNIT_MS } | undefined): string | null {
+  if (!d) return 'Pick how long to wait.';
+  const ms = d.amount * UNIT_MS[d.unit];
+  if (!Number.isInteger(d.amount) || ms < 5 * 60_000 || ms > 365 * 86_400_000) return 'Between 5 minutes and 365 days.';
+  return null;
+}
+
+/** "in 2 days", "3 hours ago": the deadline of a wait as one short sentence. */
+export function relativeTime(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return '';
+  const diff = new Date(iso).getTime() - now.getTime();
+  const abs = Math.abs(diff);
+  const [n, unit] =
+    abs < 3_600_000
+      ? [Math.max(1, Math.round(abs / 60_000)), 'minute']
+      : abs < 86_400_000
+        ? [Math.round(abs / 3_600_000), 'hour']
+        : [Math.round(abs / 86_400_000), 'day'];
+  const t = `${n} ${unit}${n === 1 ? '' : 's'}`;
+  return diff >= 0 ? `in ${t}` : `${t} ago`;
+}
+
+/** Plain words for what a wait does when it times out. */
+export function timeoutSummary(a: { action: string; maxReminders?: number; stepId?: string } | undefined, label?: (id: string) => string): string {
+  if (!a) return 'not set';
+  if (a.action === 'remind') return `send up to ${a.maxReminders ?? 3} reminders, then ask the desk`;
+  if (a.action === 'goto') return `go to "${label?.(a.stepId ?? '') ?? a.stepId}"`;
+  if (a.action === 'escalate') return 'ask the desk what to do';
+  return 'cancel the journey';
+}

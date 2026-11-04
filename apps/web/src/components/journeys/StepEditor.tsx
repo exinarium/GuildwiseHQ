@@ -2,6 +2,7 @@ import type { JourneyCondition, JourneyDefinition, JourneyHandoff, JourneyStep }
 import { ArrowDown, ArrowUp, Plus, Repeat, Trash2 } from 'lucide-react';
 import { Badge, Button, Select, TextInput } from '../ui.tsx';
 import { isLoop } from '../../lib/journeys.ts';
+import { StepSettings } from './StepSettings.tsx';
 
 export interface WorkflowOption {
   key: string;
@@ -110,6 +111,13 @@ function HandoffRow({
           <option value="done">done</option>
           <option value="cancelled">cancelled</option>
           <option value="any">either</option>
+          {def.steps.find((x) => x.id === h.from)?.kind === 'gate' && (
+            <>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+            </>
+          )}
+          {def.steps.find((x) => x.id === h.from)?.kind === 'webhook_call' && <option value="failed">failed</option>}
         </Select>
         <Select label="Go to" value={h.to} onChange={(e) => onUpdate({ to: e.target.value })}>
           {def.steps.map((s) => (
@@ -197,9 +205,8 @@ export function StepEditor({
           {index + 1}
         </span>
         <Badge tone={step.kind === 'workflow' ? 'brand' : 'warning'}>
-          {step.kind === 'workflow' ? 'Workflow' : step.kind === 'wait' ? 'Wait' : 'Gate'}
+          {step.kind === 'workflow' ? 'Workflow' : step.kind === 'wait' ? 'Wait' : step.kind === 'gate' ? 'Approval gate' : 'Webhook call'}
         </Badge>
-        {step.kind !== 'workflow' && <Badge tone="neutral">Coming with waits and gates</Badge>}
         {def.firstStepId === step.id && <Badge tone="success">Starts here</Badge>}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -244,6 +251,7 @@ export function StepEditor({
           </Select>
         )}
       </div>
+      <StepSettings def={def} step={step} disabled={disabled} onStep={onStep} />
       {!disabled && (
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" type="button" onClick={() => onMove(-1)} disabled={index === 0}>

@@ -7,6 +7,7 @@ import {
   useJourneyInstance,
   useRunJourneyPlaybook,
 } from '../api/queries/journeys.ts';
+import { InstanceWaitPanel } from '../components/journeys/InstanceWaitPanel.tsx';
 import { InstanceHistory } from '../components/journeys/InstanceHistory.tsx';
 import { Badge, Button, Callout, ErrorBox, PageHeader, PageSkeleton, Panel, useToast } from '../components/ui.tsx';
 
@@ -77,6 +78,10 @@ export function JourneyInstance() {
             </Button>
           )}
         </div>
+      </Panel>
+      <Panel title="Waits, approvals and calls" className="mb-4">
+        <InstanceWaitPanel instanceId={v.id} def={v.definition} active={active} />
+        <p className="text-sm text-muted empty:hidden">Every wait shows its deadline here, and every timeout leaves a line.</p>
       </Panel>
       <Panel title="History" className="mb-4">
         <InstanceHistory history={v.history} />
