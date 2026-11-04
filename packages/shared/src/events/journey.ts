@@ -63,7 +63,7 @@ export const journeyEvents = [
       visit: Visit,
       stepId: z.string().min(1),
       /** `workflow`: a card will be started; otherwise a placeholder that waits for 'Continue'. */
-      kind: z.enum(['workflow', 'wait', 'gate']).default('workflow'),
+      kind: z.enum(['workflow', 'wait', 'gate', 'webhook_call']).default('workflow'),
       fromVisit: Visit.optional(),
       handoffId: z.string().optional(),
     }),
@@ -83,7 +83,7 @@ export const journeyEvents = [
     z.object({
       instanceId: Id,
       visit: Visit,
-      reason: z.enum(['not_enabled', 'not_found', 'not_member', 'invalid_mapping', 'visit_limit']),
+      reason: z.enum(['not_enabled', 'not_found', 'not_member', 'invalid_mapping', 'visit_limit', 'not_published']),
       detail: z.string().max(1000),
       deskItemId: Id.optional(),
     }),
@@ -94,6 +94,7 @@ export const journeyEvents = [
       instanceId: Id,
       visit: Visit,
       result: z.enum(['done', 'cancelled', 'skipped']),
+      outcome: z.enum(['approved', 'rejected', 'failed']).optional(),
       cardId: Id.optional(),
     }),
   ),
@@ -106,5 +107,12 @@ export const journeyEvents = [
     z.object({ instanceId: Id, visit: Visit, reason: z.string().max(1000), deskItemId: Id.optional() }),
   ),
   defineEvent('JourneyInstanceCompleted', z.object({ instanceId: Id, visit: Visit })),
-  defineEvent('JourneyInstanceCancelled', z.object({ instanceId: Id, by: Id })),
+  defineEvent(
+    'JourneyInstanceCancelled',
+    z.object({
+      instanceId: Id,
+      by: Id.optional(),
+      reason: z.enum(['user', 'wait_timeout', 'gate_timeout', 'escalation']).optional(),
+    }),
+  ),
 ] as const;

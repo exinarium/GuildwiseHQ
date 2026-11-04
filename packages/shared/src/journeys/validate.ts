@@ -1,4 +1,5 @@
 import type { JourneyDefinition } from './schema.ts';
+import { serverStepCycle, validateJourneyWaitsAndGates } from './steps-validate.ts';
 
 export interface JourneyIssue {
   code: string;
@@ -16,6 +17,8 @@ export interface ValidateOptions {
   enabledWorkflowKeys?: ReadonlySet<string> | readonly string[];
   /** Runnable playbook keys. Omitted: not checked. */
   playbookKeys?: ReadonlySet<string> | readonly string[];
+  /** Published form ids. Omitted: not checked. */
+  publishedFormIds?: ReadonlySet<string> | readonly string[];
 }
 
 const RECORD_FIELDS = new Set(['type', 'status', 'visits']);
@@ -102,27 +105,17 @@ export function validateJourney(def: JourneyDefinition, opts: ValidateOptions = 
         });
   }
 
-  // A cycle made only of placeholder steps could never do any work.
-  const placeholder = new Set(def.steps.filter((s) => s.kind !== 'workflow').map((s) => s.id));
-  const color = new Map<string, number>();
-  let cyc: string | null = null;
-  const visit = (id: string): void => {
-    color.set(id, 1);
-    for (const h of def.handoffs) {
-      if (h.from !== id || !placeholder.has(h.to) || cyc) continue;
-      const c = color.get(h.to);
-      if (c === 1) cyc = h.to;
-      else if (!c) visit(h.to);
-    }
-    color.set(id, 2);
-  };
-  for (const id of placeholder) if (!color.get(id) && !cyc) visit(id);
+  const cyc = serverStepCycle(def);
   if (cyc)
     errors.push({
-      code: 'placeholder_cycle',
-      message: 'A loop made only of wait and gate steps can never move: add a workflow step to it.',
+      code: 'server_step_cycle',
+      message: 'A loop with no workflow step can never move: add a workflow step, a wait or a gate to it.',
       stepId: cyc,
     });
+
+  const extra = validateJourneyWaitsAndGates(def, opts);
+  errors.push(...extra.errors);
+  warnings.push(...extra.warnings);
 
   return { errors, warnings };
 }
