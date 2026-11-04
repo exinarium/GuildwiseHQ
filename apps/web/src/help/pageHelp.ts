@@ -21,6 +21,8 @@ export const NO_PAGE_HELP = [
 
 /** Routes that show another route's page (the Help centre's articles and glossary): they use its help. */
 export const PAGE_HELP_ALIAS: Record<string, string> = {
+  '/journeys/:id': '/journeys',
+  '/journeys/instances/:id': '/journeys',
   '/workstations/:id/integrations': '/integrations',
   '/ceo-chat/:threadId': '/ceo-chat',
   '/help/glossary': '/help',

@@ -72,6 +72,8 @@ export const DESK_SUBKIND = {
   noArchitect: 'no_architect',
   /** A sub-workflow stage could not start its child card; the parent card is blocked until the manager looks (an alert). */
   subworkflowRefused: 'subworkflow_refused',
+  /** A journey step could not start or no handoff matched; the instance is stuck until the manager looks (an alert). */
+  journeyStepRefused: 'journey_step_refused',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
   /** A card waits at an approval step (workflow `human` step with purpose approval). */

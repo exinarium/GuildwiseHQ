@@ -26,13 +26,14 @@ import { projectRole } from '../authz/scope.ts';
 import { qualifiedSkillKeys } from '../capabilities/agent-skills.ts';
 import { isOthersPrivateRole, loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
+import { orgScope, userActor } from './common.ts';
+import { releaseClaimsOfAgentEvents } from './devops-retire.ts';
 import { mcpServerCandidates } from './mcp-servers.ts';
 
 const NAMES: Record<string, string[]> = {
@@ -226,7 +227,7 @@ export function assertRuntimeFitsRole(
  */
 export async function sandboxGate(
   ctx: Ctx,
-  tx: Tx,
+  tx: Queryable,
   userId: string,
   workstationId: string,
   runtimeId: string,
@@ -698,38 +699,14 @@ export async function fireAgent(
       throw conflict('devops_cannot_be_fired', 'the DevOps engineer cannot be fired; reset it instead');
     if (a.role_key === 'ceo')
       throw conflict('builtin_agent', 'the CEO is built in and cannot be fired: pause it on the CEO page');
-    const cards = await rows(
+    const released = await releaseClaimsOfAgentEvents(
       tx,
-      `SELECT c.*, (SELECT h.id FROM card_handoffs h WHERE h.card_id = c.id ORDER BY h.created_at DESC, h.event_seq DESC LIMIT 1) AS last_handoff_id
-         FROM cards c WHERE c.claimed_by_agent_id=$1 AND c.claim_id IS NOT NULL`,
-      [agentId],
+      { id: agentId },
+      userActor(user.id),
+      `${a.name} was let go; the card is back in the queue with the last handoff attached.`,
     );
-    const events: AppendInput[] = [];
-    for (const c of cards) {
-      events.push({
-        streamId: streamId.card(c.id),
-        event: {
-          type: 'ClaimReleased',
-          payload: {
-            cardId: c.id,
-            claimId: c.claim_id,
-            agentId,
-            reason: 'agent_retired',
-            lastHandoffId: c.last_handoff_id ?? undefined,
-          },
-        },
-        actor: userActor(user.id),
-        scope: projectScope(c.org_id, c.project_id),
-      });
-      events.push(
-        cardMessage(
-          c,
-          { kind: 'system' },
-          'system',
-          `${a.name} was let go; the card is back in the queue with the last handoff attached.`,
-        ),
-      );
-    }
+    const cards = released.cardIds.map((id) => ({ id }));
+    const events: AppendInput[] = [...released.events];
     events.push({
       streamId: streamId.agent(agentId),
       event: {

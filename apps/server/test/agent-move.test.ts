@@ -45,7 +45,7 @@ const body = (workstationId: string) => ({ workstationId, runtime: 'mock', model
 const agentRow = async (id: string) => (await q('SELECT * FROM agents WHERE id=$1', [id]))[0]!;
 const hire = () => w.hire(`Mover${++n}`, 'builder', 'junior');
 const moved = (id: string) =>
-  q(`SELECT actor, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`, [
+  q(`SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`, [
     `agent-${id}`,
   ]);
 
@@ -188,7 +188,7 @@ describe('move any agent to another workstation', () => {
     await ok(owner().post(`/api/agents/${a.id}/rehome`, body(second)));
     const ev = await moved(a.id);
     expect(ev).toHaveLength(1);
-    expect(ev[0]!.actor).toMatchObject({ kind: 'user', id: w.owner.id });
+    expect(ev[0]!).toMatchObject({ actor_kind: 'user', actor_id: w.owner.id });
     expect(ev[0]!.payload).toMatchObject({
       agentId: a.id,
       fromWorkstationId: w.workstationId,

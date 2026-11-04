@@ -58,7 +58,7 @@ Rules that hold everywhere:
 | Lint/format | Biome | Deviation from eslint+prettier: one fast tool, zero plugin config. |
 | IDs | `uuidv7()` (built into Postgres 18) as column default; `uuid` v7 in TS where IDs are minted client-side (message ids) | Time-ordered keys. |
 
-Dev ports: server **4600**, web (Vite) **5173** with proxy `/api` → `http://127.0.0.1:4600` (including WS). Postgres 127.0.0.1:5433, dev Mailpit SMTP 127.0.0.1:1026 (UI 8026; `docker-compose.dev.yml`, host ports `AOM_MAILPIT_SMTP_PORT`/`AOM_MAILPIT_UI_PORT`; the e2e suite uses `AOM_E2E_SMTP_URL`/`AOM_MAILPIT_API`, default 1025/8025). Runner IPC binds `127.0.0.1:0` (ephemeral).
+Dev ports: server **4600**, web (Vite) **5173** with proxy `/api` → `http://127.0.0.1:4600` (including WS; the target is `API_PROXY_TARGET`, see section 22). Postgres 127.0.0.1:5433, dev Mailpit SMTP 127.0.0.1:1026 (UI 8026; `docker-compose.dev.yml`, host ports `AOM_MAILPIT_SMTP_PORT`/`AOM_MAILPIT_UI_PORT`; the e2e suite uses `AOM_E2E_SMTP_URL`/`AOM_MAILPIT_API`, default 1025/8025). Runner IPC binds `127.0.0.1:0` (ephemeral).
 
 ```
 guildwise-hq/
@@ -2120,6 +2120,14 @@ The web client maps event types to TanStack Query keys in `apps/web/src/ws/inval
 Routes: `/login`, `/invite/:token`, `/` (redirect to last board), `/p/:projectKey/board`, `/cards/:ref` (detail: fields, timeline from transitions + handoffs, thread with comment box, current shift live log, manager actions), `/cards/new`, `/projects` + `/projects/:id/settings` (repos, members, vault folder, globs), `/agents` (M1 list + hire/fire form; becomes HR board in M9), `/workstations` (pairing code, connection state, repos/runtimes reported, unlink), `/admin` (users, invitations, all workstations), `/desk` (M2), `/ledger` (M2), `/chat/:threadId` (M2, mobile friendly), `/schedules` (M5), `/p/:projectKey/research` (Research tab: published notes, citations, transcripts; shown for projects with notes or that started as research), the Stage panel and `ConvertProjectDialog` in project settings (and on the research board header), `/interests` (the Interests page, with the quiet cap) and `/interests/:id` (one interest: `?tab=overview|runs|digest|settings|taste`; `/interests?open=<id>`, `/p/:key/feed` and the board of a hidden project redirect to it), `/hr` (M9), `/org` (M10), `/org-chart` (the organization chart, section 26), `/costs` (Owner and Admin, section 26); project and interest settings carry the Monthly budget panel, the board header and project settings a spend line and a `BudgetBanner`. API client: `fetch` wrapper with `credentials:'include'` and JSON; zod-parses responses in dev only. Tailwind; no component library in v1 except Radix primitives for dialogs/menus (`@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`).
 
 ## 22. Configuration, ports and deployment
+
+Web dev/preview env (`apps/web/vite.config.ts`, read at startup by `vite` and `vite preview`; not exposed to client code):
+
+| Var | Default | Notes |
+| --- | --- | --- |
+| `API_PROXY_TARGET` | `http://127.0.0.1:4600` | Full http(s) origin the dev/preview proxy forwards `/api`, `/ws`, `/blog`, `/sitemap.xml`, `/robots.txt` and `/videos` to, e.g. `http://localhost:24150`. Empty = default. Any other value (not an http(s) origin, or with a path, query or credentials) stops startup with an error naming the variable. Only the target is set; the `Origin` header is left as sent, so it matches `AOM_PUBLIC_ORIGIN` |
+| `AOM_API_TARGET` | unset | Older alias used by the screenshot harness; also sets `Origin` to the target. `API_PROXY_TARGET` wins when both are set |
+| `AOM_WEB_PORT` | `5173` | Port of the Vite dev server |
 
 Server env (`apps/server/src/config.ts`, zod-validated):
 

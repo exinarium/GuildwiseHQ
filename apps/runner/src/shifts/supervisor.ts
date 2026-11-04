@@ -122,6 +122,7 @@ import type { RunManager } from '../runs/manager.ts';
 import {
   agentTmpHeld,
   cleanAgentTmp,
+  DEVOPS_MARKER,
   ensureSandbox,
   holdAgentTmp,
   type Sandbox,
@@ -936,6 +937,13 @@ export class ShiftSupervisor {
       accountKey === 'main' ? undefined : accountKey,
     );
     s.sandbox = sandbox;
+    // The DevOps engineer's directory carries a marker, so an unpair can clear it (see unpaired.ts).
+    if (msg.agent.isDevops)
+      try {
+        writeFileSync(join(sandbox.root, DEVOPS_MARKER), '');
+      } catch {
+        // advisory
+      }
     s.releaseTmp = holdAgentTmp(sandbox);
     let cwd = sandbox.scratch;
 

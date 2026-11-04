@@ -1,4 +1,4 @@
-import type { MoveTargetsResponse, RuntimeInfo } from '@aom/shared';
+import type { AgentHome, MoveTargetsResponse, RuntimeInfo } from '@aom/shared';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 
@@ -47,4 +47,32 @@ export async function listMoveTargets(
       runtimes: (w.runtimes ?? []) as RuntimeInfo[],
     })),
   };
+}
+
+/** Workstations (any status) that hold this organization's non-retired agents: where a bulk move can start. */
+export async function agentHomes(db: Queryable, orgId: string, viewerId: string): Promise<AgentHome[]> {
+  const list = await rows(
+    db,
+    `SELECT w.id, w.name, w.status, w.connected, u.display_name AS owner_name, (w.user_id = $2) AS mine,
+            count(DISTINCT a.id) FILTER (WHERE NOT a.is_builtin)::int AS agent_count,
+            count(DISTINCT s.agent_id) FILTER (WHERE NOT a.is_builtin)::int AS running_count
+       FROM agents a
+       JOIN workstations w ON w.id = a.workstation_id
+       JOIN users u ON u.id = w.user_id
+       LEFT JOIN shifts s ON s.agent_id = a.id AND s.status <> 'ended'
+      WHERE a.org_id = $1 AND a.status <> 'retired'
+      GROUP BY w.id, u.display_name
+      ORDER BY w.status, lower(w.name), w.id`,
+    [orgId, viewerId],
+  );
+  return list.map((w) => ({
+    id: w.id,
+    name: w.name,
+    status: w.status === 'active' ? 'active' : 'unlinked',
+    connected: w.connected === true,
+    ownerName: w.owner_name,
+    mine: w.mine === true,
+    agentCount: w.agent_count,
+    runningCount: w.running_count,
+  }));
 }

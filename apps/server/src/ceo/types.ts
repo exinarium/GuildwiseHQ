@@ -61,6 +61,8 @@ export interface Executed {
 
 export interface ActionDef<P = any> {
   cls: ActionClass;
+  /** Refusals (prepare's or the command's) are written to the audit log too, under their own idempotency key. */
+  auditRefusals?: boolean | undefined;
   /** Human sentence for a recommendation: "Pause Ada (3 failed shifts)". */
   describe(p: P, prepared: Prepared): string;
   schema: z.ZodType<P>;

@@ -181,6 +181,28 @@ function auditEvent(
   };
 }
 
+/** A refusal of an action that opted in: its own key, so a retry after the cause clears is not a duplicate. */
+function refusalAudit(
+  env: ActionEnv,
+  origin: CallOrigin,
+  def: ActionDef,
+  rpc: Pick<ActRpc, 'action' | 'reason' | 'confidence' | 'evidence'> & { params: Record<string, unknown> },
+  prepared: Prepared,
+  reason: string,
+  key: string,
+): AppendInput {
+  return auditEvent(
+    env,
+    origin,
+    def,
+    rpc,
+    prepared,
+    'refused',
+    { verdict: 'deny', reason },
+    `${key}:refused:${env.actionId}`,
+  );
+}
+
 export function makeEnv(
   ctx: Ctx,
   ceo: CeoState,
@@ -375,6 +397,9 @@ export async function runAction(
   if (inflight.has(lockKey))
     return { status: 'duplicate', message: 'The same call is being handled right now.' };
   inflight.add(lockKey);
+  let callCtx:
+    | { call: ActRpc & { params: Record<string, unknown> }; prepared: Prepared | undefined }
+    | undefined;
   try {
     const parsed = def.schema.safeParse(rpc.params);
     if (!parsed.success)
@@ -385,8 +410,18 @@ export async function runAction(
     const params = parsed.data as Record<string, unknown>;
     const call = { ...rpc, params };
     env.evidence = rpc.evidence;
+    callCtx = { call, prepared: undefined };
     const prepared = await def.prepare(env, params);
-    if (prepared.refuse) return { status: 'refused', message: prepared.refuse };
+    callCtx.prepared = prepared;
+    if (prepared.refuse) {
+      if (def.auditRefusals && !rpc.dryRun)
+        await ctx.store.append([refusalAudit(env, origin, def, call, prepared, prepared.refuse, key)]);
+      return {
+        status: 'refused',
+        message: prepared.refuse,
+        ...(def.auditRefusals && !rpc.dryRun ? { mode: 'refused' as const, actionId: env.actionId } : {}),
+      };
+    }
     // A project an Owner or Admin paused is benched: the CEO takes no action on its cards, desk items or the project itself
     // (a recommendation the owner accepts is refused too: resume the project first).
     if (await subjectProjectPaused(ctx.pool, prepared.subjectKind, prepared.subjectId))
@@ -480,7 +515,18 @@ export async function runAction(
       result: executed.result,
     };
   } catch (err) {
-    if (err instanceof HttpError) return { status: 'refused', message: err.message };
+    if (err instanceof HttpError) {
+      if (def.auditRefusals && !rpc.dryRun && callCtx?.prepared) {
+        const eff: ActionDef = callCtx.prepared.classOverride
+          ? { ...def, cls: callCtx.prepared.classOverride }
+          : def;
+        await ctx.store.append([
+          refusalAudit(env, origin, eff, callCtx.call, callCtx.prepared, err.message, key),
+        ]);
+        return { status: 'refused', mode: 'refused', actionId: env.actionId, message: err.message };
+      }
+      return { status: 'refused', message: err.message };
+    }
     throw err;
   } finally {
     inflight.delete(lockKey);

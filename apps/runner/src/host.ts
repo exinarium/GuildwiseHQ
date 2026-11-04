@@ -13,6 +13,7 @@ import {
 } from './pairings.ts';
 import { runnerPaths } from './paths.ts';
 import { Runner, type RunnerOptions } from './runner.ts';
+import { clearUnpairedState } from './unpaired.ts';
 import type { UpdateStatus } from './update/updater.ts';
 
 export interface HostOptions {
@@ -254,6 +255,7 @@ export class RunnerHost {
       );
       try {
         setDisabled(this.opts.root, entry.id, 'unpaired');
+        clearUnpairedState(entryDir(this.opts.root, entry));
         this.lastStamp = this.stamp();
       } catch {
         // advisory

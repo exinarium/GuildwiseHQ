@@ -3,10 +3,14 @@ import {
   canManageCard,
   type DecisionPolicyRequest,
   isOrgManager,
+  type MoveAllAgentsRequest,
+  type MoveAllAgentsResponse,
+  type OrgRole,
   type ProjectInvitationDto,
   type RehomeAgentRequest,
   type RemovalPreview,
   streamId,
+  type UnsandboxedAck,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -14,7 +18,7 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { orgWorkstationSql } from '../queries/move-targets.ts';
@@ -378,17 +382,25 @@ export async function rehomeAgent(
   });
 }
 
+/** What the checks of a move found: the target workstation and the unsandboxed acknowledgement to record. */
+export interface AgentMovePlan {
+  w: Row;
+  unsandboxedAck: UnsandboxedAck | undefined;
+}
+
 /**
- * The move itself, inside the caller's append transaction (so the busy check cannot race a claim). The caller has
- * already checked who may move the agent. Every refusal throws before anything is appended: the agent stays where it was.
+ * Every rule of a move, reads only: throws the HttpError the move would throw and returns what the append needs.
+ * `rehomeAgentIn` runs it inside its append transaction; the CEO's move runs it first to refuse early.
+ * `skipLimitCheck` is for a bulk move that empties the source, where the organization's workstation count does not rise.
  */
-export async function rehomeAgentIn(
+export async function checkAgentMove(
   ctx: Ctx,
-  tx: Tx,
-  by: { userId: string; actor: Actor },
+  tx: Queryable,
+  by: { userId: string },
   a: Row,
   req: RehomeAgentRequest,
-): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+  opts: { skipLimitCheck?: boolean } = {},
+): Promise<AgentMovePlan> {
   if (a.status === 'retired')
     throw conflict('agent_retired', `${a.name} was fired; a fired agent cannot be moved`);
   if (a.is_builtin)
@@ -460,29 +472,218 @@ export async function rehomeAgentIn(
     );
     if (!others) delta -= 1;
   }
-  if (delta > 0) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
-  await ctx.store.append(
-    [
-      {
-        streamId: streamId.agent(a.id),
-        event: {
-          type: 'AgentRehomed',
-          payload: {
-            agentId: a.id,
-            workstationId: w.id,
-            fromWorkstationId: a.workstation_id ?? null,
-            runtime: req.runtime,
-            model: req.model,
-            ...(unsandboxedAck ? { unsandboxedAck } : {}),
-          },
-        },
-        actor: by.actor,
-        scope: orgScope(a.org_id),
+  if (delta > 0 && !opts.skipLimitCheck) await assertWithinLimit(ctx, tx, a.org_id, 'workstations');
+  return { w, unsandboxedAck };
+}
+
+/**
+ * Every check of a move, inside the caller's transaction (so the busy check cannot race a claim). Returns what to
+ * append and appends nothing: every refusal throws and the agent stays where it was.
+ */
+export async function prepareAgentMove(
+  ctx: Ctx,
+  tx: Queryable,
+  by: { userId: string; actor: Actor },
+  a: Row,
+  req: RehomeAgentRequest,
+  opts: { skipLimitCheck?: boolean } = {},
+): Promise<{
+  append: AppendInput;
+  fromWorkstationId: string | null;
+  toWorkstationId: string;
+  targetName: string;
+}> {
+  const { w, unsandboxedAck } = await checkAgentMove(ctx, tx, by, a, req, opts);
+  const append: AppendInput = {
+    streamId: streamId.agent(a.id),
+    event: {
+      type: 'AgentRehomed',
+      payload: {
+        agentId: a.id,
+        workstationId: w.id,
+        fromWorkstationId: a.workstation_id ?? null,
+        runtime: req.runtime,
+        model: req.model,
+        ...(unsandboxedAck ? { unsandboxedAck } : {}),
       },
-    ],
-    { tx },
+    },
+    actor: by.actor,
+    scope: orgScope(a.org_id),
+  };
+  return {
+    append,
+    fromWorkstationId: a.workstation_id ?? null,
+    toWorkstationId: w.id,
+    targetName: w.name,
+  };
+}
+
+/**
+ * The move itself, inside the caller's append transaction. The caller has already checked who may move the agent.
+ * Every refusal throws before anything is appended.
+ */
+export async function rehomeAgentIn(
+  ctx: Ctx,
+  tx: Tx,
+  by: { userId: string; actor: Actor },
+  a: Row,
+  req: RehomeAgentRequest,
+): Promise<{ fromWorkstationId: string | null; toWorkstationId: string }> {
+  const p = await prepareAgentMove(ctx, tx, by, a, req);
+  await ctx.store.append([p.append], { tx });
+  return { fromWorkstationId: p.fromWorkstationId, toWorkstationId: p.toWorkstationId };
+}
+
+// ------------------------------------------------------------------------------- move all agents
+
+type MovedRef = { agentId: string; name: string };
+
+/** The workstation the agents of `orgId` are moved from; undefined when it does not exist or is unrelated to the organization. */
+export async function loadSourceWorkstation(
+  db: Queryable,
+  orgId: string,
+  workstationId: string,
+): Promise<Row | undefined> {
+  const w = await one(
+    db,
+    `SELECT w.id, w.name, w.status,
+            (w.simulation_org_id = $2::uuid
+             OR EXISTS (SELECT 1 FROM agents ag WHERE ag.workstation_id = w.id AND ag.org_id = $2 AND ag.status <> 'retired')
+             OR EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = $2 AND om.user_id = w.user_id AND om.status = 'active')) AS known
+       FROM workstations w WHERE w.id = $1`,
+    [workstationId, orgId],
   );
-  return { fromWorkstationId: a.workstation_id ?? null, toWorkstationId: w.id };
+  return w && w.known === true ? w : undefined;
+}
+
+/**
+ * Moves every agent of workstation `sourceId` (any status of the workstation, even one that no longer exists as a
+ * computer) to `req.targetWorkstationId`, one transaction per agent through the single-move checks. Agents in a running
+ * shift (or on a claimed card), the DevOps engineer and the CEO are skipped; an agent the single move refuses is
+ * reported as failed. Nothing is rolled back: the agents already moved stay moved. With `dryRun` nothing is written.
+ */
+export async function moveAllAgents(
+  ctx: Ctx,
+  who: { userId: string; orgId: string; role: OrgRole },
+  sourceId: string,
+  req: MoveAllAgentsRequest,
+  opts: { dryRun?: boolean } = {},
+): Promise<MoveAllAgentsResponse> {
+  if (!isOrgManager({ orgRole: who.role }))
+    throw forbidden('only the organization Owner and Admins can move agents to another workstation');
+  if (sourceId === req.targetWorkstationId)
+    throw badRequest('same_workstation', 'pick another workstation than the one the agents are on');
+  const dryRun = opts.dryRun === true;
+  const notFoundWs = () => notFound('workstation not found in this organization', 'workstation_not_found');
+
+  const src = await loadSourceWorkstation(ctx.pool, who.orgId, sourceId);
+  if (!src) throw notFoundWs();
+
+  const target = await one(
+    ctx.pool,
+    `SELECT w.id, w.name, w.status, w.user_id, w.runtimes, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
+       FROM workstations w WHERE w.id = $1`,
+    [req.targetWorkstationId, who.orgId],
+  );
+  if (target && !target.in_org && target.status !== 'active') {
+    const member = await one(
+      ctx.pool,
+      `SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
+      [who.orgId, target.user_id],
+    );
+    if (member)
+      throw conflict('workstation_unpaired', `${target.name} was unpaired: pick a paired workstation`);
+  }
+  if (!target || !target.in_org) throw notFoundWs();
+  const targetRuntimes = (target.runtimes ?? []) as Array<{ id: string; available?: boolean }>;
+
+  const agents = await rows(
+    ctx.pool,
+    `SELECT * FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status <> 'retired' ORDER BY lower(name), id`,
+    [who.orgId, sourceId],
+  );
+
+  const moved: MovedRef[] = [];
+  const skipped: MoveAllAgentsResponse['skipped'] = [];
+  const failed: MoveAllAgentsResponse['failed'] = [];
+  let needsUnsandboxedAck = false;
+  const ref = (a: Row): MovedRef => ({ agentId: a.id, name: a.name });
+
+  const movable: Row[] = [];
+  for (const a of agents) {
+    if (a.is_devops) skipped.push({ ...ref(a), reason: 'workstation_devops' });
+    else if (a.role_key === 'ceo' || a.is_builtin) skipped.push({ ...ref(a), reason: 'ceo' });
+    else movable.push(a);
+  }
+
+  // Only when nothing stays behind does the source stop counting as a workstation of the organization.
+  let emptiesSource = true;
+  for (const a of movable) {
+    const busy =
+      (await one(ctx.pool, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [a.id])) ||
+      (await one(
+        ctx.pool,
+        `SELECT 1 FROM cards WHERE claimed_by_agent_id=$1 AND claim_id IS NOT NULL LIMIT 1`,
+        [a.id],
+      ));
+    if (busy) {
+      emptiesSource = false;
+      break;
+    }
+  }
+
+  const by = { userId: who.userId, actor: userActor(who.userId) };
+  for (const planned of movable) {
+    try {
+      await withAppendTx(ctx.pool, async (tx) => {
+        const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [planned.id]);
+        if (!a || a.status === 'retired' || a.workstation_id !== sourceId) return;
+        if (
+          targetRuntimes.length > 0 &&
+          !targetRuntimes.some((r) => r.id === a.runtime && r.available !== false)
+        )
+          throw conflict(
+            'runtime_missing',
+            `${target.name} has no ${a.runtime} runtime: move this agent on its own and pick a runtime`,
+          );
+        const p = await prepareAgentMove(
+          ctx,
+          tx,
+          by,
+          a,
+          {
+            workstationId: target.id,
+            runtime: a.runtime,
+            model: a.model,
+            ...(req.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
+          },
+          { skipLimitCheck: emptiesSource },
+        );
+        if (!dryRun) await ctx.store.append([p.append], { tx });
+        moved.push(ref(a));
+      });
+    } catch (e) {
+      if (!(e instanceof HttpError)) {
+        if (moved.length === 0 && failed.length === 0 && skipped.length === 0) throw e;
+        failed.push({ ...ref(planned), code: 'internal', error: 'the move failed unexpectedly' });
+      } else if (e.code === 'agent_busy')
+        skipped.push({ ...ref(planned), reason: 'running_shift', message: e.message });
+      else {
+        if (e.code === 'unsandboxed_ack_required') needsUnsandboxedAck = true;
+        failed.push({ ...ref(planned), code: e.code, error: e.message });
+      }
+    }
+  }
+
+  return {
+    dryRun,
+    source: { id: src.id, name: src.name, status: src.status === 'active' ? 'active' : 'unlinked' },
+    target: { id: target.id, name: target.name },
+    moved,
+    skipped,
+    failed,
+    needsUnsandboxedAck,
+  };
 }
 
 // ------------------------------------------------------------------------------------ card actions
