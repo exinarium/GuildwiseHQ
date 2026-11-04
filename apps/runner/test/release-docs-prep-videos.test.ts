@@ -381,9 +381,9 @@ describe('release prep task: a new video script', () => {
     process.env.AOM_PREP_VIDEO_CMD = f.cmd;
     const s = setup({ 'apps/web/src/pages/JourneyDesigner.tsx': 'new\n' });
     const plan = await run(s);
-    expect((plan.report as { needsAuthoring?: { slug: string }[] }).needsAuthoring?.map((n) => n.slug)).toEqual([
-      'journey-designer',
-    ]);
+    expect(
+      (plan.report as { needsAuthoring?: { slug: string }[] }).needsAuthoring?.map((n) => n.slug),
+    ).toEqual(['journey-designer']);
     const head = sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0']);
     const rp = rpOf(s, head);
     const wt = await addPrepTaskWorktree(s.repo.clone, rp, join(tmp('aom-wt-'), 'task'));
@@ -404,7 +404,10 @@ describe('release prep task: a new video script', () => {
     expect(sh(s.repo.clone, 'git', ['log', '-1', '--format=%an %s', done.commit])).toBe(
       'Release Owner docs(release): the journey-designer video script',
     );
-    const render = await run(s, { phase: 'render', input: { plan: plan.report, authored: ['journey-designer'] } });
+    const render = await run(s, {
+      phase: 'render',
+      input: { plan: plan.report, authored: ['journey-designer'] },
+    });
     expect(render.state).toBe('passed');
     expect(runs(f.count)).toEqual(['journey-designer']);
     const tree = workTree(s);
@@ -417,9 +420,9 @@ describe('release prep task: a new video script', () => {
       'e2e/video/renders.json',
     ])
       expect(tree).toContain(p);
-    const map = JSON.parse(
-      sh(s.repo.clone, 'git', ['show', `${rp.workRef}:e2e/video/screens.json`]),
-    ) as { videos: Record<string, unknown> };
+    const map = JSON.parse(sh(s.repo.clone, 'git', ['show', `${rp.workRef}:e2e/video/screens.json`])) as {
+      videos: Record<string, unknown>;
+    };
     expect(Object.keys(map.videos)).toContain('journey-designer');
     // the release branch itself is untouched: only Commit results commits
     expect(sh(s.repo.clone, 'git', ['rev-parse', 'release/1.4.0'])).toBe(head);

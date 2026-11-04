@@ -503,7 +503,11 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
     case 'release-changelog-fail':
       return report(
         ctx,
-        outcome('release_changelog_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
+        outcome(
+          'release_changelog_fail',
+          (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500),
+          {},
+        ),
       );
     default:
       throw new UsageError(REPORT_USAGE);

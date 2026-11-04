@@ -38,7 +38,12 @@ describe('aom prep: the end of a release prep task', () => {
     const t = await cli();
     expect(await t.run('prep', 'done', '--summary', 'wrote the forms video')).toBe(0);
     expect(t.reports).toEqual([
-      { kind: 'outcome', outcomeId: 'prep_done', note: 'wrote the forms video', data: { summary: 'wrote the forms video' } },
+      {
+        kind: 'outcome',
+        outcomeId: 'prep_done',
+        note: 'wrote the forms video',
+        data: { summary: 'wrote the forms video' },
+      },
     ]);
   });
 

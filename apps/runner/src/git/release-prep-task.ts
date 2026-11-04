@@ -27,7 +27,11 @@ const revParse = async (repoPath: string, ref: string): Promise<string | null> =
 };
 
 /** Adds the worktree under the repository lock (the work ref, else the analysed head). */
-export async function addPrepTaskWorktree(repoPath: string, rp: ReleasePrepShift, path: string): Promise<PrepTaskWorktree> {
+export async function addPrepTaskWorktree(
+  repoPath: string,
+  rp: ReleasePrepShift,
+  path: string,
+): Promise<PrepTaskWorktree> {
   return withRepoLock(repoPath, async () => {
     const base = (await revParse(repoPath, rp.workRef)) ?? (await revParse(repoPath, rp.startSha));
     if (!base) throw new Error(`the release work ${rp.startSha.slice(0, 12)} is not in the clone`);
@@ -56,9 +60,7 @@ export async function changedFiles(wt: PrepTaskWorktree): Promise<string[]> {
   return [...new Set([...committed, ...left].filter(Boolean))].sort();
 }
 
-export type PrepTaskFinish =
-  | { ok: true; commit: string; files: string[] }
-  | { ok: false; reason: string };
+export type PrepTaskFinish = { ok: true; commit: string; files: string[] } | { ok: false; reason: string };
 
 /**
  * At `aom prep done`: refuses any file outside the writable list and a task without its required files, else commits
@@ -86,15 +88,19 @@ export async function finishPrepTask(
     const reset = await git(wt.path, ['reset', '--soft', wt.base]);
     if (reset.exitCode !== 0) return { ok: false, reason: `git reset failed: ${reset.stderr.trim()}` };
     const add = await git(wt.path, ['add', '-A', '--', ...files]);
-    if (add.exitCode !== 0) return { ok: false, reason: `git add failed: ${(add.stderr || add.stdout).trim()}` };
+    if (add.exitCode !== 0)
+      return { ok: false, reason: `git add failed: ${(add.stderr || add.stdout).trim()}` };
     const label = rp.task.kind === 'new_video' ? `the ${rp.task.slug} video script` : rp.task.kind;
-    const commit = await git(wt.path, ['commit', '-m', `docs(release): ${label}`], { env: commitEnv(identity) });
+    const commit = await git(wt.path, ['commit', '-m', `docs(release): ${label}`], {
+      env: commitEnv(identity),
+    });
     if (commit.exitCode !== 0)
       return { ok: false, reason: `git commit failed: ${(commit.stderr || commit.stdout).trim()}` };
     const sha = (await git(wt.path, ['rev-parse', 'HEAD'])).stdout.trim();
     // The work ref moves only if nobody else moved it since this worktree started from it.
     const now = await revParse(wt.repoPath, rp.workRef);
-    if (now && now !== wt.base) return { ok: false, reason: 'the release work moved while the script was written' };
+    if (now && now !== wt.base)
+      return { ok: false, reason: 'the release work moved while the script was written' };
     const upd = await git(wt.repoPath, ['update-ref', rp.workRef, sha]);
     if (upd.exitCode !== 0) return { ok: false, reason: `could not keep the work: ${upd.stderr.trim()}` };
     return { ok: true, commit: sha, files };
