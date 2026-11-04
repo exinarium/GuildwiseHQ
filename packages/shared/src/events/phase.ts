@@ -264,6 +264,9 @@ export const phaseEvents = [
       mailDraftId: Id.optional(),
       /** `spec_card`: the draft card whose missing fields the BA writes. */
       cardId: Id.optional(),
+      /** `release_changelog`: the prep run and the repository the entries are for. */
+      prepRunId: Id.optional(),
+      prepRepoId: Id.optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

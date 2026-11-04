@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
@@ -69,9 +70,12 @@ beforeEach(async () => {
   await capable();
 });
 
-/** The guide step is on by default but needs a writer agent: these tests untick it unless they ask for it. */
+/**
+ * 'Write changelog' and 'Update user guide' are on by default but need a BA task and a writer agent: these tests untick
+ * both unless they ask for one ('Write changelog' has its own tests in release-docs-prep-changelog-flow.test.ts).
+ */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps: { guide: false, ...steps } });
+  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false, ...steps } });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -147,7 +151,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'guide', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -303,11 +307,14 @@ describe('prep run', () => {
 describe('the Update user guide step', () => {
   const lastPayload = async () => (await cmds()).at(-1)!.payload;
 
-  it('refuses a run when the guide step is on but Analyse changes is unticked (409 step_requires)', async () => {
+  it('refuses a run when the guide step is on but Analyse changes is unticked (409 release_docs_prep_requires)', async () => {
     await enable({ analyse: false, guide: true });
     const res = await owner('POST', `${base()}/runs`);
     expect(res.status).toBe(409);
-    expect(JSON.stringify(res.body)).toContain('step_requires');
+    expect(JSON.stringify(res.body)).toContain('release_docs_prep_requires');
+    expect(JSON.stringify(res.body)).toContain(
+      'Update user guide needs Analyse changes. Turn it on in the project settings.',
+    );
   });
 
   it('with no writer agent on the workstation the guide step fails the run before any commit', async () => {
@@ -320,6 +327,45 @@ describe('the Update user guide step', () => {
     expect(guide.state).toBe('failed');
     expect(guide.error).toContain('can write the release documentation');
     expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse']);
+  });
+
+  it('with no writer agent and two repositories the guide step fails in both and the run fails', async () => {
+    const second = randomUUID();
+    await q(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, main_branch)
+       VALUES ($1,$2,'zcloud','git@github.com:acme/zcloud.git','github.com/acme/zcloud','main')`,
+      [second, w.projectId],
+    );
+    try {
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId, second] });
+      await enable({ guide: true });
+      expect((await owner('POST', `${base()}/runs`)).status).toBeLessThan(300);
+      const analyse = await cmds();
+      expect(analyse.map((c: any) => c.payload.repoId).sort()).toEqual([w.repoId, second].sort());
+      for (const c of analyse)
+        await applyReleaseDocsPrepResult(
+          w.t.app.ctx,
+          w.workstationId,
+          c.payload,
+          true,
+          passedAnalyse,
+          undefined,
+        );
+      const run = await latest();
+      expect(run.status).toBe('failed');
+      expect(run.repos).toHaveLength(2);
+      for (const repo of run.repos) {
+        const guide = repo.steps.find((s: any) => s.step === 'guide');
+        expect(guide.state).toBe('failed');
+        expect(guide.error).toMatch(
+          /^no agent on the workstation that has .+ can write the release documentation$/,
+        );
+      }
+      expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse', 'analyse']);
+    } finally {
+      await q(`TRUNCATE release_docs_prep_runs CASCADE`);
+      await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
+    }
   });
 
   it('dispatches the guide step with the preferred writer (architect before builder) and then the commit', async () => {
@@ -413,6 +459,14 @@ describe('the ship gate', () => {
     await enable();
     await runToPassed();
     expect((await approveShip()).status).toBe(200);
+  });
+
+  it('Analyse changes unticked while Write changelog is on: the run is refused', async () => {
+    await enable({ analyse: false, changelog: true });
+    const res = await owner('POST', `${base()}/runs`);
+    expect(res.status).toBe(409);
+    expect(res.body.error?.code ?? res.body.code).toBe('release_docs_prep_requires');
+    expect(await cmds()).toHaveLength(0);
   });
 
   it('on with Analyse changes unticked: a passed run does not need a recorded base tag', async () => {

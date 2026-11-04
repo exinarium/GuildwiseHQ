@@ -226,6 +226,14 @@ const EnvSchema = z.object({
   AOM_FORMS_IP_SUBMIT_BURST: z.coerce.number().int().min(1).max(100000).default(5),
   AOM_FORMS_FORM_SUBMITS_PER_MIN: z.coerce.number().int().min(1).max(100000).default(60),
   AOM_FORMS_FORM_SUBMIT_BURST: z.coerce.number().int().min(1).max(100000).default(30),
+  // Runner offline: the secure link flow (docs/security/public-forms.md, T-off-1..5)
+  AOM_FORMS_OFFLINE_IP_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(3),
+  AOM_FORMS_OFFLINE_IP_BURST: z.coerce.number().int().min(1).max(1000).default(2),
+  AOM_FORMS_OFFLINE_FORM_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(30),
+  AOM_FORMS_OFFLINE_MAX_OPEN: z.coerce.number().int().min(1).max(1000000).default(500),
+  AOM_FORMS_OFFLINE_HOLD_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  AOM_FORMS_OFFLINE_LINK_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  AOM_FORMS_OFFLINE_SETTLE_SEC: z.coerce.number().int().min(0).max(3600).default(30),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -340,6 +348,15 @@ export interface Config {
     ipSubmitBurst: number;
     formSubmitsPerMin: number;
     formSubmitBurst: number;
+    /** Runner offline: requests for a secure link per address and hour (burst), per form and hour, open cases per organization. */
+    offlineIpPerHour: number;
+    offlineIpBurst: number;
+    offlineFormPerHour: number;
+    offlineMaxOpen: number;
+    /** Days a case waits for the runner, days the secure link lasts (a form setting overrides it), seconds a runner must stay connected before links go out. */
+    offlineHoldDays: number;
+    offlineLinkDays: number;
+    offlineSettleSec: number;
   };
   /** Inbound webhook relay (business mode). */
   relay: {
@@ -478,6 +495,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       ipSubmitBurst: e.AOM_FORMS_IP_SUBMIT_BURST,
       formSubmitsPerMin: e.AOM_FORMS_FORM_SUBMITS_PER_MIN,
       formSubmitBurst: e.AOM_FORMS_FORM_SUBMIT_BURST,
+      offlineIpPerHour: e.AOM_FORMS_OFFLINE_IP_PER_HOUR,
+      offlineIpBurst: e.AOM_FORMS_OFFLINE_IP_BURST,
+      offlineFormPerHour: e.AOM_FORMS_OFFLINE_FORM_PER_HOUR,
+      offlineMaxOpen: e.AOM_FORMS_OFFLINE_MAX_OPEN,
+      offlineHoldDays: e.AOM_FORMS_OFFLINE_HOLD_DAYS,
+      offlineLinkDays: e.AOM_FORMS_OFFLINE_LINK_DAYS,
+      offlineSettleSec: e.AOM_FORMS_OFFLINE_SETTLE_SEC,
     },
     relay: {
       maxBodyBytes: e.AOM_RELAY_MAX_BODY_BYTES,

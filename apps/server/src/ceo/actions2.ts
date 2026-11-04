@@ -66,14 +66,16 @@ const REASSIGN_E = eligibility(REASSIGN_REFS);
 
 /**
  * Why `agent` could never take `card` at the stage it is at now, or undefined when it can: the stage's role, a senior-only
- * stage, an exclusion or the risk tier, all through the dispatcher's `eligibility()`. Handing the card to an agent whose role
- * does not work the stage only releases it: the stage's own role takes it again at once (production, GWP-11 and GWP-19).
+ * stage, the review guard (at a review stage: not its builder or an earlier reviewer) or the risk tier, all through the
+ * dispatcher's `eligibility()`. A builder is never refused a build stage for having worked the card before. Handing the
+ * card to an agent whose role does not work the stage only releases it: the stage's own role takes it again at once
+ * (production, GWP-11 and GWP-19).
  */
 async function cannotWorkStage(db: Queryable, card: Row, a: Row): Promise<string | undefined> {
   const r = await one(
     db,
     `SELECT st.claim_role, st.fallback_role, (${REASSIGN_E.role}) AS role_ok, (${REASSIGN_E.senior}) AS senior_ok,
-            (${REASSIGN_E.notExcluded}) AS not_excluded, (${REASSIGN_E.tier}) AS tier_ok
+            (${REASSIGN_E.reviewGuard}) AS review_guard_ok, (${REASSIGN_E.tier}) AS tier_ok
        FROM cards c JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
        JOIN agents a ON a.id = $2
       WHERE c.id = $1`,
@@ -92,7 +94,7 @@ async function cannotWorkStage(db: Queryable, card: Row, a: Row): Promise<string
     return `${a.name} (${a.role_key}) cannot work the stage '${card.stage}' of ${card.ref}: that stage is for the ${r.claim_role ?? 'unassigned'} role. ${where}`;
   }
   if (!r.senior_ok) return `the stage '${card.stage}' is for senior agents only and ${a.name} is not senior`;
-  if (!r.not_excluded) return `${a.name} is excluded from ${card.ref}`;
+  if (!r.review_guard_ok) return `${a.name} built or already reviewed ${card.ref} and cannot review it`;
   if (!r.tier_ok) return `${a.name} may not take ${card.risk_tier} cards`;
   return undefined;
 }

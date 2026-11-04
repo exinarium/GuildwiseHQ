@@ -1,4 +1,5 @@
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepSummary } from '@aom/shared';
+import { changelogStep } from './release-docs-prep-changelog.ts';
 import { runGuideStep } from './release-docs-prep-guide.ts';
 
 /**
@@ -45,5 +46,6 @@ export type DocsPrepStepHandler = (
 
 /** A sibling card adds one entry here (and one registry entry in the shared package). */
 export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler> = {
+  changelog: changelogStep,
   guide: runGuideStep,
 };

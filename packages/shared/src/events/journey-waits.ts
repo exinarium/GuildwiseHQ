@@ -33,11 +33,13 @@ export const journeyWaitEvents = [
     z.object({
       waitId: Id,
       linkId: z.string().min(1),
-      via: z.enum(['desk', 'webhook']),
+      via: z.enum(['desk', 'webhook', 'offline_email']),
       expiresAt: z.string(),
       deskItemId: Id.optional(),
     }),
   ),
+  /** The client tried the form while the firm's runner was offline: a sub-state of the form wait (no email in it). */
+  defineEvent('JourneyWaitOfflinePending', z.object({ waitId: Id, requestId: Id, attemptedAt: z.string() })),
   defineEvent(
     'JourneyWaitTimedOut',
     z.object({
@@ -167,7 +169,10 @@ export const journeyWaitEvents = [
       onNoMatch: z.enum(['create', 'refuse']).optional(),
     }),
   ),
-  defineEvent('JourneyHookTriggerRotated', z.object({ triggerId: Id, tokenHash: z.string().min(1), secretEnc: z.string().min(1) })),
+  defineEvent(
+    'JourneyHookTriggerRotated',
+    z.object({ triggerId: Id, tokenHash: z.string().min(1), secretEnc: z.string().min(1) }),
+  ),
   defineEvent('JourneyHookTriggerDisabled', z.object({ triggerId: Id })),
   defineEvent(
     'JourneyStartedByHook',

@@ -1,70 +1,78 @@
-import type { AgentHome, MoveAllAgentsResponse, MoveSkipReason } from '@aom/shared';
+import { MOVE_BLOCK_LABEL, type MoveAllAgentsResponse } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useBulkMoveTargets, useMoveAllAgents, useMoveAllPreview } from '../../api/queries/agent-move.ts';
 import { Button, Dialog, ErrorBox, Select } from '../ui.tsx';
 
-const SKIP_TEXT: Record<MoveSkipReason, string> = {
-  running_shift: 'in a running shift: move it once the shift ends',
-  workstation_devops: "the workstation's own DevOps engineer stays with it",
-  ceo: 'the CEO moves on the CEO page',
-};
+/** The workstation the agents are moved off: a workstation card, a homes row or an agent's workstation. */
+export interface MoveAllSource {
+  id: string;
+  name: string;
+}
 
-const skipText = (s: MoveAllAgentsResponse['skipped'][number]) =>
-  s.reason === 'running_shift' && s.message ? s.message : SKIP_TEXT[s.reason];
+type Blocked = MoveAllAgentsResponse['blocked'][number];
 
 function Names({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
   return (
     <div data-testid={testId}>
       <p className="text-sm font-medium">{title}</p>
-      <ul className="mt-1 max-h-[50vh] list-disc overflow-auto pl-5 text-sm">{children}</ul>
+      <ul className="mt-1 flex max-h-[50vh] list-disc flex-col gap-1 overflow-auto pl-5 text-sm">
+        {children}
+      </ul>
     </div>
   );
 }
 
-function Lists({ r }: { r: MoveAllAgentsResponse }) {
-  const sameFailure = r.failed.length > 1 && r.failed.every((f) => f.code === r.failed[0]?.code);
+const claimsText = (refs: string[]) => (refs.length > 0 ? ` (releases ${refs.join(', ')})` : '');
+
+function BlockedList({
+  title,
+  testId,
+  list,
+  onMoveOne,
+}: {
+  title: string;
+  testId: string;
+  list: Blocked[];
+  onMoveOne?: (agentId: string) => void;
+}) {
   return (
-    <div className="flex flex-col gap-3">
-      {r.moved.length > 0 && (
-        <Names title={`Moved (${r.moved.length})`} testId="move-all-moved">
-          {r.moved.map((a) => (
-            <li key={a.agentId}>{a.name}</li>
-          ))}
-        </Names>
-      )}
-      {r.skipped.length > 0 && (
-        <Names title={`Skipped (${r.skipped.length})`} testId="move-all-skipped">
-          {r.skipped.map((a) => (
-            <li key={a.agentId}>
-              {a.name}: {skipText(a)}
-            </li>
-          ))}
-        </Names>
-      )}
-      {r.failed.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {sameFailure && (
-            <p className="text-sm" role="alert">
-              {r.failed[0]?.error}
-            </p>
+    <Names title={`${title} (${list.length})`} testId={testId}>
+      {list.map((a) => (
+        <li key={a.agentId}>
+          <span className="font-medium">{a.name}</span>
+          <span className="text-subtle"> · {MOVE_BLOCK_LABEL[a.reason]}</span>
+          <span className="block text-subtle">{a.message}</span>
+          {onMoveOne && (
+            <Button
+              size="sm"
+              className="mt-1 min-h-11 w-full sm:min-h-0 sm:w-auto"
+              aria-label={`Move ${a.name} on its own`}
+              onClick={() => onMoveOne(a.agentId)}
+            >
+              Move…
+            </Button>
           )}
-          <Names title={`Could not move (${r.failed.length})`} testId="move-all-failed">
-            {r.failed.map((a) => (
-              <li key={a.agentId}>
-                {a.name}
-                {sameFailure ? '' : `: ${a.error}`}
-              </li>
-            ))}
-          </Names>
-        </div>
-      )}
-    </div>
+        </li>
+      ))}
+    </Names>
   );
 }
 
-/** Moves every agent of one workstation to another: preview the count, confirm, then see who moved and who did not. */
-export function MoveAllAgentsDialog({ source, onClose }: { source: AgentHome | null; onClose: () => void }) {
+/**
+ * Moves the agents of one workstation (usually offline or removed) to another: pick the target, see for each agent whether
+ * it will move or is blocked and why, confirm, then see who moved and who did not.
+ */
+export function MoveAllAgentsDialog({
+  source,
+  onClose,
+  onMoveOne,
+}: {
+  source: MoveAllSource | null;
+  onClose: () => void;
+  /** Moves one blocked agent on its own (runtime and model can be changed there). */
+  onMoveOne?: (agentId: string) => void;
+}) {
   const targets = useBulkMoveTargets(source?.id);
   const list = targets.data?.workstations ?? [];
   const [pick, setPick] = useState('');
@@ -81,6 +89,10 @@ export function MoveAllAgentsDialog({ source, onClose }: { source: AgentHome | n
     move.reset();
     onClose();
   };
+  const again = () => {
+    move.reset();
+    setPick('');
+  };
   return (
     <Dialog
       open={!!source}
@@ -92,11 +104,32 @@ export function MoveAllAgentsDialog({ source, onClose }: { source: AgentHome | n
         <div className="flex flex-col gap-3" data-testid="move-all-result">
           <p className="text-sm">
             {result.moved.length} moved to {result.target.name}
-            {result.skipped.length ? `, ${result.skipped.length} skipped` : ''}
-            {result.failed.length ? `, ${result.failed.length} could not move` : ''}.
+            {result.blocked.length ? `, ${result.blocked.length} not moved` : ''}.
           </p>
-          <Lists r={result} />
-          <div className="flex justify-end">
+          {result.moved.length > 0 && (
+            <Names title={`Moved (${result.moved.length})`} testId="move-all-moved">
+              {result.moved.map((a) => (
+                <li key={a.agentId}>
+                  {a.name}
+                  {claimsText(a.releasedClaims)}
+                </li>
+              ))}
+            </Names>
+          )}
+          {result.blocked.length > 0 && (
+            <BlockedList
+              title="Not moved"
+              testId="move-all-not-moved"
+              list={result.blocked}
+              {...(onMoveOne ? { onMoveOne } : {})}
+            />
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            {result.blocked.length > 0 && (
+              <Button className="min-h-11 w-full sm:w-auto" onClick={again}>
+                Move the rest to another workstation
+              </Button>
+            )}
             <Button variant="primary" className="min-h-11 w-full sm:w-auto" onClick={close}>
               Done
             </Button>
@@ -132,30 +165,26 @@ export function MoveAllAgentsDialog({ source, onClose }: { source: AgentHome | n
           )}
           {p && (
             <div className="flex flex-col gap-3" data-testid="move-all-preview">
+              {p.scope === 'own' && (
+                <p className="text-sm text-subtle" data-testid="move-all-own-note">
+                  Only the agents you hired are listed.
+                </p>
+              )}
               <p className="text-sm font-medium" data-testid="move-all-count">
                 {n} {n === 1 ? 'agent' : 'agents'} will move to {p.target.name}
               </p>
-              {(p.skipped.length > 0 || p.failed.length > 0) && (
-                <div className="flex flex-col gap-3">
-                  {p.skipped.length > 0 && (
-                    <Names title="Will be skipped" testId="move-all-preview-skipped">
-                      {p.skipped.map((a) => (
-                        <li key={a.agentId}>
-                          {a.name}: {skipText(a)}
-                        </li>
-                      ))}
-                    </Names>
-                  )}
-                  {p.failed.length > 0 && (
-                    <Names title="Will not move" testId="move-all-preview-failed">
-                      {p.failed.map((a) => (
-                        <li key={a.agentId}>
-                          {a.name}: {a.error}
-                        </li>
-                      ))}
-                    </Names>
-                  )}
-                </div>
+              {p.moved.length > 0 && (
+                <Names title={`Will move (${p.moved.length})`} testId="move-all-preview-moved">
+                  {p.moved.map((a) => (
+                    <li key={a.agentId}>
+                      {a.name}
+                      {claimsText(a.releasedClaims)}
+                    </li>
+                  ))}
+                </Names>
+              )}
+              {p.blocked.length > 0 && (
+                <BlockedList title="Blocked" testId="move-all-preview-blocked" list={p.blocked} />
               )}
             </div>
           )}

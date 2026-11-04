@@ -1,4 +1,4 @@
-import type { WorkstationDto } from '@aom/shared';
+import { SHIFT_LIMIT_SOURCE_LABEL, type WorkstationDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useSetShiftLimit } from '../../api/queries/workstations.ts';
 import { Button, ErrorBox, Select, TextInput, useToast } from '../ui.tsx';
@@ -7,6 +7,64 @@ type Mode = 'default' | 'number' | 'unlimited';
 
 const modeOf = (s: NonNullable<WorkstationDto['shifts']>['setting']): Mode =>
   s === null ? 'default' : s === 'unlimited' ? 'unlimited' : 'number';
+
+const UNLIMITED = 100_000;
+const limitText = (n: number | null) => (n === null || n >= UNLIMITED ? 'no limit' : String(n));
+
+/**
+ * The limit the runner enforces, where it comes from, what counts and who holds the slots (GWP-95). Plain visible text,
+ * no hover-only tooltips, so it reads the same on touch devices.
+ */
+export function ShiftLimitStatus({ w }: { w: WorkstationDto }) {
+  const s = w.shifts;
+  if (!s) return null;
+  // an older server sends none of the GWP-95 fields
+  const enforced = s.enforced ?? null;
+  const source = s.source ?? null;
+  const otherRunning = s.otherRunning ?? 0;
+  const shown = enforced ?? (source ? { limit: s.limit, source } : null);
+  const full = shown && shown.limit !== null && s.running >= shown.limit;
+  const holders = (s.holders ?? [])
+    .map((h) => `${h.cardRef ?? h.kind}${h.agentName ? ` (${h.agentName})` : ''}`)
+    .join(', ');
+  return (
+    <div className="mt-1 flex flex-col gap-1 text-xs" data-testid="shift-limit-status">
+      {shown && (
+        <p className="text-muted" data-testid="shift-limit-effective">
+          {shown.limit === null
+            ? `${s.running} · no limit · ${SHIFT_LIMIT_SOURCE_LABEL[shown.source]}`
+            : `${s.running} of ${shown.limit} · ${SHIFT_LIMIT_SOURCE_LABEL[shown.source]}`}
+        </p>
+      )}
+      {otherRunning > 0 && (
+        <p className="text-muted" data-testid="shift-limit-other">
+          +{otherRunning} chat/CEO (not counted)
+        </p>
+      )}
+      {full && (
+        <p className="text-warning" data-testid="shift-limit-full">
+          Full: new shifts wait.{holders ? ` Held by ${holders}.` : ''}
+        </p>
+      )}
+      {s.sync === 'mismatch' && enforced && (
+        <p role="status" className="text-warning" data-testid="shift-limit-mismatch">
+          The runner enforces {limitText(enforced.limit)} ({SHIFT_LIMIT_SOURCE_LABEL[enforced.source]}), not{' '}
+          {s.unlimited ? 'no limit' : limitText(s.limit)} as set here.
+        </p>
+      )}
+      {s.sync === 'unknown' && w.connected && s.supported !== null && source !== null && (
+        <p role="status" className="text-warning" data-testid="shift-limit-unknown">
+          This runner does not report the limit it enforces: update it.
+        </p>
+      )}
+      {s.sync === 'applying' && (
+        <p className="text-muted" data-testid="shift-limit-applying">
+          Applying…
+        </p>
+      )}
+    </div>
+  );
+}
 
 /**
  * How many shifts this workstation runs at once (backlog #76), for its owner: the runner's own value, a number, or

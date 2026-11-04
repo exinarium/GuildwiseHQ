@@ -13,6 +13,7 @@ import {
   useWorkstations,
 } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
+import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.tsx';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
@@ -47,7 +48,7 @@ import { ModelProviders } from '../components/workstations/ModelProviders.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RetireWorkstationDialog } from '../components/workstations/RetireWorkstationDialog.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
-import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
+import { ShiftLimit, ShiftLimitStatus } from '../components/workstations/ShiftLimit.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
 import { useBusinessView } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
@@ -178,8 +179,10 @@ function StrandedWorkstations() {
   const canManage = useCanManageOrg();
   const homes = useAgentHomes(canManage);
   const [retire, setRetire] = useState<{ id: string; name: string } | null>(null);
+  const [movingAll, setMovingAll] = useState<{ id: string; name: string } | null>(null);
   const stranded = (homes.data ?? []).filter((h) => h.status === 'unlinked' && h.agentCount > 0);
-  if (!canManage || stranded.length === 0) return null;
+  if (!canManage || (stranded.length === 0 && !movingAll)) return null;
+  // The dialog stays mounted while a move is open: moving the last worker empties the homes row, and the result must stay.
   return (
     <section className="mt-6" data-testid="stranded-workstations" aria-labelledby="stranded-title">
       <h2 id="stranded-title" className="mb-2 text-sm font-medium">
@@ -194,18 +197,33 @@ function StrandedWorkstations() {
             <span>
               {h.name} ({h.ownerName}), {h.agentCount} {h.agentCount === 1 ? 'agent' : 'agents'}
             </span>
-            <Button
-              size="sm"
-              className="max-sm:min-h-11"
-              aria-label={`Hand over agents of ${h.name}`}
-              onClick={() => setRetire({ id: h.id, name: h.name })}
-            >
-              Hand over agents
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Move all agents from ${h.name}`}
+                onClick={() => setMovingAll({ id: h.id, name: h.name })}
+              >
+                Move all agents from this workstation
+              </Button>
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Hand over agents of ${h.name}`}
+                onClick={() => setRetire({ id: h.id, name: h.name })}
+              >
+                Hand over agents
+              </Button>
+            </div>
           </li>
         ))}
       </ul>
       <RetireWorkstationDialog workstation={retire} onClose={() => setRetire(null)} />
+      <MoveAllAgentsDialog
+        key={movingAll?.id ?? 'none-all'}
+        source={movingAll}
+        onClose={() => setMovingAll(null)}
+      />
     </section>
   );
 }
@@ -262,6 +280,9 @@ export function WorkstationCard({
   const [confirm, setConfirm] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
   const canRetire = useCanManageOrg() && !admin;
+  const homes = useAgentHomes(!admin && !w.connected);
+  const holdsAgents = (homes.data ?? []).some((h) => h.id === w.id && h.agentCount > 0);
+  const [moveAllOpen, setMoveAllOpen] = useState(false);
   const [own, setOwn] = useState(false);
   const expanded = expandedProp ?? own;
   const setExpanded = (v: boolean) => (onExpandedChange ? onExpandedChange(v) : setOwn(v));
@@ -346,6 +367,16 @@ export function WorkstationCard({
                 Integrations
               </ButtonLink>
             )}
+            {!w.connected && holdsAgents && (
+              <Button
+                size="sm"
+                className="max-sm:min-h-11"
+                aria-label={`Move all agents from ${w.name}`}
+                onClick={() => setMoveAllOpen(true)}
+              >
+                Move all agents from this workstation
+              </Button>
+            )}
             {canRetire && (
               <Button
                 variant="danger-ghost"
@@ -418,6 +449,7 @@ export function WorkstationCard({
                         : `${w.shifts.running} (limit shown while connected)`
                     : 'Not reported'}
                 </p>
+                <ShiftLimitStatus w={w} />
                 {!admin && <ShiftLimit w={w} />}
                 {!admin && <CardlessShifts workstationId={w.id} />}
               </div>
@@ -460,6 +492,13 @@ export function WorkstationCard({
           </div>
         )}
       </Panel>
+      {(holdsAgents || moveAllOpen) && (
+        <MoveAllAgentsDialog
+          key={moveAllOpen ? w.id : 'none-all'}
+          source={moveAllOpen ? { id: w.id, name: w.name } : null}
+          onClose={() => setMoveAllOpen(false)}
+        />
+      )}
       {canRetire && (
         <RetireWorkstationDialog
           workstation={retireOpen ? { id: w.id, name: w.name } : null}

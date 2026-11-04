@@ -54,8 +54,8 @@ export const workstationProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'WorkstationConnected'>).payload;
     await exec(
       tx,
-      `UPDATE workstations SET connected=true, runner_version=COALESCE($2, runner_version) WHERE id=$1 AND status='active'`,
-      [p.workstationId, p.runnerVersion ?? null],
+      `UPDATE workstations SET connected=true, connected_at=$3, runner_version=COALESCE($2, runner_version) WHERE id=$1 AND status='active'`,
+      [p.workstationId, p.runnerVersion ?? null, e.createdAt],
     );
   },
   WorkstationDisconnected: async (tx, e) => {

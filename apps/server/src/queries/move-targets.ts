@@ -52,8 +52,13 @@ export async function listMoveTargets(
   };
 }
 
-/** Workstations (any status) that hold this organization's non-retired agents: where a bulk move can start. */
-export async function agentHomes(db: Queryable, orgId: string, viewerId: string): Promise<AgentHome[]> {
+/** Workstations (any status) that hold this organization's non-retired agents: where a bulk move can start. `own`: only the viewer's hired agents. */
+export async function agentHomes(
+  db: Queryable,
+  orgId: string,
+  viewerId: string,
+  opts: { own?: boolean } = {},
+): Promise<AgentHome[]> {
   const list = await rows(
     db,
     `SELECT w.id, w.name, w.status, w.connected, u.display_name AS owner_name, (w.user_id = $2) AS mine,
@@ -64,6 +69,7 @@ export async function agentHomes(db: Queryable, orgId: string, viewerId: string)
        JOIN users u ON u.id = w.user_id
        LEFT JOIN shifts s ON s.agent_id = a.id AND s.status <> 'ended'
       WHERE a.org_id = $1 AND a.status <> 'retired'
+        ${opts.own ? 'AND a.manager_user_id = $2 AND NOT a.is_builtin' : ''}
       GROUP BY w.id, u.display_name
       ORDER BY w.status, lower(w.name), w.id`,
     [orgId, viewerId],

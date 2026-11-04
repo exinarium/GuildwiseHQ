@@ -11,8 +11,15 @@ export interface PublicMessage {
 const msg = (text: string, retry = false, closed = false): PublicMessage => ({ text, retry, closed });
 
 /** An error code as a sentence for a client. No technical detail, nothing the server did not choose to say. */
-export function describePublicError(e: Pick<PublicApiError, 'code' | 'status' | 'retryable'>): PublicMessage {
+export function describePublicError(
+  e: Pick<PublicApiError, 'code' | 'status' | 'retryable'> & { message?: string },
+): PublicMessage {
+  // The sentences about a secure link (the emailed link of the runner-offline flow) are the server's own.
+  if (/^link_(expired|revoked|used)$/.test(e.code) && /secure link/.test(e.message ?? ''))
+    return msg(e.message as string, false, true);
   switch (e.code) {
+    case 'runner_online':
+      return msg('The form can be sent now. Please reload the page.', false, true);
     case 'form_not_available':
       return msg('This form is not available.', false, true);
     case 'link_expired':

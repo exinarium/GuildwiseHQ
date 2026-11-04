@@ -39,8 +39,8 @@ export const publicFormProjectors: Record<string, Projector> = {
     const p = ev<'FormClientLinkCreated'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO form_client_links (id, org_id, form_id, reference, record_kind, record_id, expires_at, created_by, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO form_client_links (id, org_id, form_id, reference, record_kind, record_id, expires_at, created_by, created_at, purpose, offline_request_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.linkId,
@@ -52,6 +52,8 @@ export const publicFormProjectors: Record<string, Projector> = {
         p.expiresAt,
         p.by,
         e.createdAt,
+        p.purpose ?? 'client',
+        p.offlineRequestId ?? null,
       ],
     );
   },

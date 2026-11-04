@@ -48,6 +48,9 @@ export const formEvents = [
       recordId: z.string().max(120).optional(),
       expiresAt: z.iso.datetime(),
       by: Id,
+      /** 'offline': the secure link emailed after the firm's runner came back (the default is a personal client link). */
+      purpose: z.literal('offline').optional(),
+      offlineRequestId: Id.optional(),
     }),
   ),
   defineEvent(
@@ -69,6 +72,44 @@ export const formEvents = [
       linkId: z.string().length(22).optional(),
       answers: z.array(StorageReferenceSchema),
       files: z.array(StorageReferenceSchema),
+    }),
+  ),
+  // Runner offline: a client asked for a secure link. The audit trail only: never an email address or an answer.
+  defineEvent(
+    'FormOfflineRequested',
+    z.object({
+      requestId: Id,
+      formId: Id,
+      orgId: Id,
+      linkId: z.string().length(22).optional(),
+      journeyInstanceId: Id.optional(),
+      waitId: Id.optional(),
+      attemptedAt: z.iso.datetime(),
+    }),
+  ),
+  defineEvent(
+    'FormOfflineLinkSent',
+    z.object({
+      requestId: Id,
+      formId: Id,
+      linkId: z.string().length(22),
+      sentAt: z.iso.datetime(),
+      expiresAt: z.iso.datetime(),
+    }),
+  ),
+  defineEvent(
+    'FormOfflineLinkResent',
+    z.object({ requestId: Id, formId: Id, by: Id, n: z.number().int().min(1) }),
+  ),
+  defineEvent('FormOfflineEmailViewed', z.object({ requestId: Id, formId: Id, by: Id })),
+  defineEvent(
+    'FormOfflineClosed',
+    z.object({
+      requestId: Id,
+      formId: Id,
+      result: z.enum(['submitted', 'continued', 'expired', 'failed', 'cancelled']),
+      submissionId: Id.optional(),
+      by: Id.optional(),
     }),
   ),
 ] as const;

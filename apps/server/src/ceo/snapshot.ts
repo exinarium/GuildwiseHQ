@@ -3,6 +3,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
 import { computeRecommendations } from '../hr/recommendations.ts';
+import { orgWorkstationSql } from '../queries/move-targets.ts';
 import { loadCeo } from './state.ts';
 
 const MAX_CHARS = 22_000; // about 6k tokens
@@ -138,7 +139,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
   if (want('agents')) {
     const as = await rows(
       ctx.pool,
-      `SELECT a.id, a.name, a.role_key, a.seniority, a.model, a.status, a.paused_at, a.is_devops, a.allowed_project_ids, ws.name AS ws_name,
+      `SELECT a.id, a.name, a.role_key, a.seniority, a.model, a.status, a.paused_at, a.is_devops, a.allowed_project_ids, ws.name AS ws_name, ws.status AS ws_status,
               (ws.connected AND ws.last_seen_at > $2) AS online,
               (SELECT count(*) FROM shifts s WHERE s.agent_id=a.id AND s.started_at >= $3::timestamptz - interval '6 days' AND s.kind='card') AS shifts7,
               (SELECT count(*) FROM shifts s WHERE s.agent_id=a.id AND s.started_at >= $3::timestamptz - interval '13 days' AND s.outcome IN ('crashed','timeout','no_report')) AS failed14,
@@ -152,7 +153,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         as
           .map(
             (a) =>
-              `${a.name} id=${a.id} ${a.role_key}/${a.seniority} ${a.model} ${a.paused_at ? 'PAUSED ' : ''}${a.status === 'needs_rehome' ? 'NEEDS_REHOME ' : ''}ws=${a.ws_name ?? '-'}${a.online ? '' : ' (offline)'} shifts7d=${a.shifts7} failed14d=${a.failed14} spend=${money(a.month_micros)}${a.allowed_project_ids && a.allowed_project_ids.length === 0 ? ' BENCHED' : ''}`,
+              `${a.name} id=${a.id} ${a.role_key}/${a.seniority} ${a.model} ${a.paused_at ? 'PAUSED ' : ''}${a.status === 'needs_rehome' ? 'NEEDS_REHOME ' : ''}ws=${a.ws_name ?? '-'}${a.ws_status && a.ws_status !== 'active' ? ' (removed)' : a.online ? '' : ' (offline)'} shifts7d=${a.shifts7} failed14d=${a.failed14} spend=${money(a.month_micros)}${a.allowed_project_ids && a.allowed_project_ids.length === 0 ? ' BENCHED' : ''}`,
           )
           .join('\n') || 'none'
       }`,
@@ -162,11 +163,22 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
   if (want('workstations')) {
     const ws = await rows(
       ctx.pool,
-      `SELECT w.id, w.name, w.connected, w.last_seen_at, w.runtimes, w.runner_version
-         FROM workstations w WHERE w.status='active' AND EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id=w.id AND a.org_id=$1 AND a.status <> 'retired')
+      `SELECT w.id, w.name, w.status, w.connected, w.last_seen_at, w.runtimes, w.runner_version,
+              (SELECT count(*) FROM agents a WHERE a.workstation_id=w.id AND a.org_id=$1 AND a.status <> 'retired' AND NOT a.is_builtin) AS agent_count
+         FROM workstations w WHERE EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id=w.id AND a.org_id=$1 AND a.status <> 'retired')
         ORDER BY w.name`,
       [orgId],
     );
+    // where an agent can be moved: the Owner's own active workstations (what the move actions accept for the CEO)
+    const targets = await rows(
+      ctx.pool,
+      `SELECT w.id, w.name, w.connected FROM workstations w
+        WHERE (w.user_id = (SELECT owner_user_id FROM organizations WHERE id=$1) OR w.simulation_org_id = $1)
+          AND ${orgWorkstationSql('w', '$1::uuid')}
+        ORDER BY lower(w.name)`,
+      [orgId],
+    );
+    const stranded = ws.some((w) => w.status !== 'active' || !w.connected);
     out.push(
       `## Workstations\n${
         ws
@@ -178,9 +190,16 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
                 auth?: string;
                 sandbox?: string;
               }> | null) ?? [];
-            return `${w.name} id=${w.id} ${w.connected ? 'online' : `offline ${ago(w.last_seen_at, now)}`} runner=${w.runner_version ?? '?'} runtimes=${rt.map((r) => `${r.id}:${r.available ? 'ok' : 'unavailable'}${r.auth === 'expired' ? '(sign-in expired)' : ''}${r.sandbox ? `/${r.sandbox}` : ''}`).join(',') || 'none'}`;
+            if (w.status !== 'active') return `${w.name} id=${w.id} REMOVED agents=${w.agent_count}`;
+            return `${w.name} id=${w.id} agents=${w.agent_count} ${w.connected ? 'online' : `offline ${ago(w.last_seen_at, now)}`} runner=${w.runner_version ?? '?'} runtimes=${rt.map((r) => `${r.id}:${r.available ? 'ok' : 'unavailable'}${r.auth === 'expired' ? '(sign-in expired)' : ''}${r.sandbox ? `/${r.sandbox}` : ''}`).join(',') || 'none'}`;
           })
           .join('\n') || 'none'
+      }\nMove targets (the owner's active workstations): ${
+        targets.map((w) => `${w.name} id=${w.id} ${w.connected ? 'online' : 'offline'}`).join(', ') || 'none'
+      }${
+        stranded
+          ? '\nAgents on an offline or removed workstation do not work: move them with move-agents-off (or move-workstation per agent).'
+          : ''
       }`,
     );
   }

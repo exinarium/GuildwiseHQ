@@ -7,7 +7,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../client.ts';
 
-/** Workstations (any status) that hold the organization's agents; owners and admins only. */
+/** Workstations (any status) that hold agents the caller may move (the server scopes it to the hired ones for a member). */
 export function useAgentHomes(enabled: boolean) {
   return useQuery({
     queryKey: ['agent-homes'],
@@ -44,7 +44,7 @@ export function useMoveAllAgents(sourceId: string) {
     mutationFn: (b: MoveAllAgentsRequest) =>
       post(`/workstations/${sourceId}/move-agents`, b, MoveAllAgentsResponseSchema),
     onSuccess: () => {
-      for (const k of ['agents', 'hr', 'agent-homes', 'move-targets', 'workstations'])
+      for (const k of ['agents', 'hr', 'agent-homes', 'move-targets', 'workstations', 'org-chart'])
         qc.invalidateQueries({ queryKey: [k] });
     },
   });

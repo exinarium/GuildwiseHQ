@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { userActor } from '../src/commands/common.ts';
+import { loadMovableAgent, rehomeAgentIn } from '../src/commands/sharing.ts';
+import { withAppendTx } from '../src/db/tx.ts';
+import { conflict } from '../src/errors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
@@ -45,9 +49,10 @@ const body = (workstationId: string) => ({ workstationId, runtime: 'mock', model
 const agentRow = async (id: string) => (await q('SELECT * FROM agents WHERE id=$1', [id]))[0]!;
 const hire = () => w.hire(`Mover${++n}`, 'builder', 'junior');
 const moved = (id: string) =>
-  q(`SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`, [
-    `agent-${id}`,
-  ]);
+  q(
+    `SELECT actor_kind, actor_id, payload FROM events WHERE stream_id=$1 AND type='AgentRehomed' ORDER BY seq`,
+    [`agent-${id}`],
+  );
 
 describe('move any agent to another workstation', () => {
   it('moves an active agent whose workstation is offline, and keeps its projects', async () => {
@@ -215,5 +220,48 @@ describe('move any agent to another workstation', () => {
     expect(r.body.workstations[0].mine).toBe(true);
     expect(r.body.workstations.find((x: any) => x.id === second)).toMatchObject({ connected: true });
     expect(r.body.current).toMatchObject({ id: w.workstationId, state: 'connected' });
+  });
+
+  it('refuses a runtime the target has not reported (runtime_missing) and changes nothing', async () => {
+    const a = await hire();
+    await q(`UPDATE workstations SET runtimes=$2::jsonb WHERE id=$1`, [
+      second,
+      JSON.stringify([{ id: 'other', version: '1', available: true, capabilities: ['shell'] }]),
+    ]);
+    try {
+      const r = await owner().post(`/api/agents/${a.id}/rehome`, body(second));
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toContain('runtime_missing');
+      expect((await agentRow(a.id)).workstation_id).toBe(w.workstationId);
+      expect(await moved(a.id)).toHaveLength(0);
+    } finally {
+      await q(`UPDATE workstations SET runtimes='[]'::jsonb WHERE id=$1`, [second]);
+    }
+  });
+
+  it('rehomeAgentIn with skipLimitCheck moves at the workstation limit, rehomeAgent without it refuses', async () => {
+    const fresh = (await pairWorkstation(w.t, w.owner, `skip${++n}`)).workstationId;
+    await markOnline(w.t, fresh);
+    const refused = await hire();
+    const passes = await hire();
+    const planLimits = w.t.app.ctx.ext.planLimits;
+    const orig = planLimits.assertWithin;
+    planLimits.assertWithin = async (_tx: any, _org: any, kind: string) => {
+      if (kind === 'workstations') throw conflict('limit_reached', 'workstation limit reached');
+    };
+    try {
+      expect((await owner().post(`/api/agents/${refused.id}/rehome`, body(fresh))).status).toBe(409);
+      expect((await agentRow(refused.id)).workstation_id).toBe(w.workstationId);
+      const ctx = w.t.app.ctx;
+      const by = { userId: w.owner.id, actor: userActor(w.owner.id) };
+      await withAppendTx(ctx.pool, async (tx) => {
+        const a = await loadMovableAgent(tx, { id: w.owner.id }, passes.id);
+        await rehomeAgentIn(ctx, tx, by, a, body(fresh) as any, { skipLimitCheck: true });
+      });
+      expect((await agentRow(passes.id)).workstation_id).toBe(fresh);
+      expect(await moved(passes.id)).toHaveLength(1);
+    } finally {
+      planLimits.assertWithin = orig;
+    }
   });
 });

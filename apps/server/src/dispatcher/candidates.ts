@@ -97,7 +97,10 @@ export function eligibility(A: AgentRefs) {
             SELECT 1 FROM agents fa WHERE fa.org_id = c.org_id AND fa.status = 'active' AND fa.role_key = st.claim_role
                AND (fa.allowed_project_ids IS NULL OR c.project_id = ANY (fa.allowed_project_ids)))))`,
     senior: `(NOT st.senior_only OR ${A.senior})`,
-    notExcluded: `NOT (${A.id} = ANY (c.excluded_agent_ids))`,
+    // The review guard: nobody reviews their own work, and a second approval comes from someone else. The list is filled
+    // when review is requested (projections/cards.ts) and may still be set when a card goes back to a build stage (a
+    // rebase conflict): a build stage never reads it, so a builder is never kept from a card because they worked it before.
+    reviewGuard: `(st.claim_role = 'builder' OR NOT (${A.id} = ANY (c.excluded_agent_ids)))`,
     tier: `(c.risk_tier IS NULL OR c.risk_tier = ANY (${A.riskTiers}))`,
     caps: `c.required_capabilities <@ ${A.capabilities}`,
     home: `(c.home_workstation_id IS NULL OR c.home_workstation_id = ${A.workstationId})`,
@@ -149,16 +152,29 @@ const E = eligibility(PARAM_AGENT);
 
 /**
  * A reservation (card affinity, group builder) only holds a card for an agent that may take it: the card's risk tier is
- * one of the agent's tiers and the agent is not excluded from it. Otherwise nobody could claim it: a large card
- * reserved for a junior (small only) waited until the reservation expired while every free builder was turned away.
+ * one of the agent's tiers and, at a review stage, the agent did not build or already review it. Otherwise nobody could
+ * claim it: a large card reserved for a junior (small only) waited until the reservation expired while every free
+ * builder was turned away.
  */
 const reserveHolderCanTake = (a: string): string =>
-  `NOT (${a}.id = ANY (c.excluded_agent_ids))
+  `(st.claim_role = 'builder' OR NOT (${a}.id = ANY (c.excluded_agent_ids)))
    AND (c.risk_tier IS NULL OR c.risk_tier = ANY (ARRAY(SELECT jsonb_array_elements_text(
          COALESCE(${a}.permissions->'riskTiers', '["small","large"]'::jsonb)))))`;
 
+/**
+ * The builder who most recently worked card `c` at a build stage (its card shifts; a shift the runner turned away does
+ * not count), else its original builder (a bug card inherits it). Ordering only: it never makes anyone eligible.
+ */
+export const previousBuilderSql = (c: string): string => `COALESCE((
+  SELECT s.agent_id FROM shifts s
+    JOIN workflow_stages ps ON ps.workflow_version_id = ${c}.workflow_version_id AND ps.stage_id = s.stage
+   WHERE s.card_id = ${c}.id AND s.kind = 'card' AND ps.claim_role = 'builder'
+     AND s.outcome IS DISTINCT FROM 'rejected'
+   ORDER BY s.started_at DESC, s.id DESC LIMIT 1), ${c}.original_builder_agent_id)`;
+
 const CANDIDATES_SQL = (cardFilter: string) => `
-SELECT c.id, c.stage, c.project_id
+SELECT c.id, c.stage, c.project_id,
+       CASE WHEN st.claim_role = 'builder' THEN ${previousBuilderSql('c')} END AS prev_builder_id
 FROM cards c
 JOIN projects p          ON p.id = c.project_id AND p.status = 'active'
 JOIN organizations po   ON po.id = c.org_id AND po.status IN ('trial','active')
@@ -168,7 +184,7 @@ WHERE c.status = 'queued'
   AND ${E.scope}
   AND ${E.role}
   AND ${E.senior}
-  AND ${E.notExcluded}
+  AND ${E.reviewGuard}
   AND ${E.tier}
   AND ${E.caps}
   AND ${E.home}
@@ -228,9 +244,9 @@ ORDER BY
      AND g.group_id = c.group_id AND g.builder_agent_id = $1 AND g.until > $9::timestamptz)) DESC,
   -- 1. scheduled work first: schedules, interest scans and an on-demand "Research this" (they are scheduled cards)
   c.scheduled DESC,
-  -- 2. the agent's own rework, then other rework
+  -- 2. the card this agent built last (it came back to a build stage), then other rework
   CASE
-    WHEN c.is_rework_or_bug AND c.original_builder_agent_id = $1 THEN 0
+    WHEN st.claim_role = 'builder' AND ${previousBuilderSql('c')} = $1 THEN 0
     WHEN c.is_rework_or_bug THEN 1
     ELSE 2
   END,
@@ -272,7 +288,7 @@ export async function candidateCards(
    * account can run). Keeps the 5-card window from filling with cards that cannot start.
    */
   accounts?: { excludeProjectIds?: string[]; onlyProjectIds?: string[] },
-): Promise<Array<{ id: string; stage: string; project_id: string }>> {
+): Promise<Array<{ id: string; stage: string; project_id: string; prev_builder_id: string | null }>> {
   const extra: unknown[] = [];
   let filter = '';
   if (accounts?.excludeProjectIds?.length) {

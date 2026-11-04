@@ -59,6 +59,9 @@ export const publicApi = {
     call<PublicFormDto>('GET', publicId, {
       headers: { accept: 'application/json', ...(link ? { 'x-form-link': link } : {}) },
     }),
+  /** The runner is offline: the client leaves an email address for the secure link. Never the answers or files. */
+  offlineRequest: (publicId: string, body: unknown) =>
+    call<{ status: 'pending' }>('POST', `${publicId}/offline-requests`, jsonInit(body)),
   start: (publicId: string, body: unknown) =>
     call<SubmissionStartResultDto>('POST', `${publicId}/submissions`, jsonInit(body)),
   putPart: (publicId: string, sid: string, index: number, file: File, token: string) =>

@@ -25,10 +25,12 @@ describe('release docs prep step registry', () => {
   it('enables steps by default and honours the checklist', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: {} }).map((s) => s.id)).toEqual([
       'analyse',
+      'changelog',
       'guide',
       'commit',
     ]);
     expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual([
+      'changelog',
       'guide',
       'commit',
     ]);
@@ -36,6 +38,7 @@ describe('release docs prep step registry', () => {
   it("leaves 'Update user guide' out of the run when it is not ticked", () => {
     expect(enabledReleaseDocsPrepSteps({ steps: { guide: false } }).map((s) => s.id)).toEqual([
       'analyse',
+      'changelog',
       'commit',
     ]);
   });

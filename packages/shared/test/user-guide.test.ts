@@ -8,7 +8,7 @@ import {
   guideOutputSources,
   guideSlug,
   locateSections,
-  missingReleaseDocsPrepRequirements,
+  missingReleaseDocsPrepRequirement,
   parseGuide,
   ReleaseDocsPrepPayloadSchema,
   releaseDocsPrepStep,
@@ -297,15 +297,12 @@ describe('the guide step in the registry', () => {
       requires: ['analyse'],
     });
     const commit = releaseDocsPrepStep('commit')!;
-    expect(
-      missingReleaseDocsPrepRequirements([GUIDE_STEP, commit]).map((m) => [
-        m.step.id,
-        m.missing.map((x) => x.id),
-      ]),
-    ).toEqual([['guide', ['analyse']]]);
-    expect(missingReleaseDocsPrepRequirements([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit])).toEqual(
-      [],
-    );
+    expect(missingReleaseDocsPrepRequirement([GUIDE_STEP, commit])).toEqual({
+      step: 'guide',
+      requires: 'analyse',
+      message: 'Update user guide needs Analyse changes. Turn it on in the project settings.',
+    });
+    expect(missingReleaseDocsPrepRequirement([releaseDocsPrepStep('analyse')!, GUIDE_STEP, commit])).toBeNull();
   });
   it('collects the covered sources of an output and ignores bad data', () => {
     expect(

@@ -122,6 +122,8 @@ export const FormSettingsSchema = z.object({
     .default(null),
   answersDestination: FormDestinationSchema,
   confirmationText: z.string().trim().min(1).max(FORM_LIMITS.confirmation),
+  /** Days the secure link stays valid when the firm's runner was offline (1 to 30; the server default applies when unset). */
+  offlineLinkDays: z.number().int().min(1).max(30).optional(),
 });
 export type FormSettings = z.infer<typeof FormSettingsSchema>;
 

@@ -466,11 +466,38 @@ export function withDelegation(policy: CeoPolicy, key: OwnerReservedKey, on: boo
   return next;
 }
 
-/** `aom ceo act move-workstation --agent-id <name|id> --target-workstation-id <name|id>`. */
-export const MoveWorkstationParamsSchema = z
+/** `--agent` and `--to` (the names the other agent actions use) are aliases of `--agent-id` and `--target-workstation-id`. */
+const moveAliases = (v: unknown): unknown => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+  const { agent, to, ...rest } = v as Record<string, unknown>;
+  return {
+    ...rest,
+    ...(agent === undefined ? {} : rest.agentId === undefined ? { agentId: agent } : { agent }),
+    ...(to === undefined
+      ? {}
+      : rest.targetWorkstationId === undefined
+        ? { targetWorkstationId: to }
+        : { to }),
+  };
+};
+
+/** `aom ceo act move-workstation --agent <name|id> --to <name|id>` (also `--agent-id` and `--target-workstation-id`). */
+export const MoveWorkstationParamsSchema = z.preprocess(
+  moveAliases,
+  z
+    .object({
+      agentId: z.string().trim().min(1).max(120),
+      targetWorkstationId: z.string().trim().min(1).max(120),
+    })
+    .strict(),
+) as z.ZodType<{ agentId: string; targetWorkstationId: string }>;
+export type MoveWorkstationParams = z.infer<typeof MoveWorkstationParamsSchema>;
+
+/** `aom ceo act move-agents-off --from <name|id> --to <name|id>`: the offline or removed workstation and the target. */
+export const MoveAgentsOffParamsSchema = z
   .object({
-    agentId: z.string().trim().min(1).max(120),
-    targetWorkstationId: z.string().trim().min(1).max(120),
+    from: z.string().trim().min(1).max(120),
+    to: z.string().trim().min(1).max(120),
   })
   .strict();
-export type MoveWorkstationParams = z.infer<typeof MoveWorkstationParamsSchema>;
+export type MoveAgentsOffParams = z.infer<typeof MoveAgentsOffParamsSchema>;
