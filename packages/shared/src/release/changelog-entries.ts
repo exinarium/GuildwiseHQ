@@ -161,7 +161,10 @@ export type ReleasePrepChangelogPayload = z.infer<typeof ReleasePrepChangelogPay
 export const ReleaseChangelogOutputSchema = z.object({
   created: z.boolean().default(false),
   added: z.array(EntryWithSources).max(60).default([]),
-  duplicates: z.array(z.object({ heading: HeadingSchema, text: z.string().max(2000) })).max(60).default([]),
+  duplicates: z
+    .array(z.object({ heading: HeadingSchema, text: z.string().max(2000) }))
+    .max(60)
+    .default([]),
   covered: ChangelogProposalSchema.shape.covered,
   skipped: ChangelogProposalSchema.shape.skipped,
   warnings: z.array(z.string().max(500)).max(50).default([]),

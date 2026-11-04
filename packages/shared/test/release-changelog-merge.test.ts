@@ -80,7 +80,9 @@ const UNDATED = `# Changelog
 
 const add = (text: string) => ({ heading: 'Added' as const, text });
 const fix = (text: string) => ({ heading: 'Fixed' as const, text });
-const ENTRY_A = add('Release prep on the Releases page. Turn it on to write the changelog before a release ships.');
+const ENTRY_A = add(
+  'Release prep on the Releases page. Turn it on to write the changelog before a release ships.',
+);
 const ENTRY_F = fix('The release page no longer misses entries written under an unknown heading.');
 
 const outside = (md: string) => {
@@ -92,7 +94,12 @@ const outside = (md: string) => {
 describe('registry: Write changelog', () => {
   it('sits between analyse and commit, on by default, requires analyse', () => {
     expect(releaseDocsPrepSteps().map((s) => s.id)).toEqual(['analyse', 'changelog', 'commit']);
-    expect(CHANGELOG_STEP).toMatchObject({ order: 20, defaultOn: true, producesFiles: true, requires: ['analyse'] });
+    expect(CHANGELOG_STEP).toMatchObject({
+      order: 20,
+      defaultOn: true,
+      producesFiles: true,
+      requires: ['analyse'],
+    });
   });
   it('can be unticked, and a run without it has no changelog step', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: { changelog: false } }).map((s) => s.id)).toEqual([
@@ -102,7 +109,9 @@ describe('registry: Write changelog', () => {
   });
   it('reports a missing required step', () => {
     expect(missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps({ steps: {} }))).toBeNull();
-    expect(missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }))).toEqual({
+    expect(
+      missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps({ steps: { analyse: false } })),
+    ).toEqual({
       step: 'changelog',
       requires: 'analyse',
       message: 'Write changelog needs Analyse changes. Turn it on in the project settings.',
@@ -123,12 +132,18 @@ describe('checkChangelog', () => {
     expect(errors[0]).toContain('Move its entries under ## [Unreleased]');
   });
   it('fails a file without Unreleased, with two, or with Unreleased below a version', () => {
-    expect(checkChangelog('# Changelog\n\n## [1.0.0] - 2026-01-01\n').errors[0]).toMatch(/no ## \[Unreleased\]/);
+    expect(checkChangelog('# Changelog\n\n## [1.0.0] - 2026-01-01\n').errors[0]).toMatch(
+      /no ## \[Unreleased\]/,
+    );
     expect(checkChangelog('## [Unreleased]\n\n## [Unreleased]\n').errors[0]).toMatch(/more than one/);
-    expect(checkChangelog('## [1.0.0] - 2026-01-01\n\n## [Unreleased]\n').errors.join(' ')).toMatch(/below the version/);
+    expect(checkChangelog('## [1.0.0] - 2026-01-01\n\n## [Unreleased]\n').errors.join(' ')).toMatch(
+      /below the version/,
+    );
   });
   it('fails an Unreleased bullet outside a ### heading, and a binary file', () => {
-    expect(checkChangelog('## [Unreleased]\n\n- stray\n').errors[0]).toMatch(/line 3 that is not under a ### heading/);
+    expect(checkChangelog('## [Unreleased]\n\n- stray\n').errors[0]).toMatch(
+      /line 3 that is not under a ### heading/,
+    );
     expect(checkChangelog('## [Unreleased]\u0000').errors[0]).toMatch(/not a readable text file/);
   });
   it('warns about an unknown heading without failing', () => {
@@ -143,7 +158,12 @@ describe('checkChangelog', () => {
 
 describe('changelogSkeleton', () => {
   it('is the header newChangelog writes', () => {
-    const md = newChangelog('Guildwise HQ', { version: '0.1.0', date: '2026-11-04', bumps: [], notes: '' }).md;
+    const md = newChangelog('Guildwise HQ', {
+      version: '0.1.0',
+      date: '2026-11-04',
+      bumps: [],
+      notes: '',
+    }).md;
     expect(md.startsWith(changelogSkeleton('Guildwise HQ').replace(/\n$/, ''))).toBe(true);
     expect(changelogSkeleton('Guildwise HQ').endsWith('## [Unreleased]\n')).toBe(true);
   });
@@ -275,7 +295,9 @@ describe('scrubChangelogEntry', () => {
 
   it('passes a plain user-facing entry, settings, paths, versions and public terms', () => {
     expect(scrub(ENTRY_A.text)).toEqual([]);
-    expect(scrub('Storage limits. Set `AOM_STORAGE_MAX_FILE_BYTES` on /delivery/releases to cap uploads.')).toEqual([]);
+    expect(
+      scrub('Storage limits. Set `AOM_STORAGE_MAX_FILE_BYTES` on /delivery/releases to cap uploads.'),
+    ).toEqual([]);
     expect(scrub('Runs on Node.js 22 and upgrades cleanly from 1.4.0 to 1.5.0 without changes.')).toEqual([]);
   });
   it('flags internal and secret content', () => {
@@ -294,12 +316,17 @@ describe('scrubChangelogEntry', () => {
     expect(scrub(ENTRY_A.text, 'Highlights')).toContain('heading');
   });
   it('flags a deny-list name without echoing it', () => {
-    const f = scrubChangelogEntry({ heading: 'Added', text: 'Katherine made the release flow much faster.' }, {
-      publicText,
-      denyList: ['katherine', 'ab'],
-    });
+    const f = scrubChangelogEntry(
+      { heading: 'Added', text: 'Katherine made the release flow much faster.' },
+      {
+        publicText,
+        denyList: ['katherine', 'ab'],
+      },
+    );
     expect(f).toEqual([{ code: 'deny_list' }]);
-    expect(describeEntryFinding(2, f[0] as never)).toBe('entry 3: names an internal person, agent or machine');
+    expect(describeEntryFinding(2, f[0] as never)).toBe(
+      'entry 3: names an internal person, agent or machine',
+    );
     expect(describeEntryFinding(1, { code: 'ticket_key', detail: 'GWP-74' })).toBe(
       "entry 2: contains a ticket key 'GWP-74'",
     );
@@ -321,9 +348,11 @@ describe('schemas', () => {
       changelog: { projectName: 'P', entries: [{ heading: 'Fixed', text: 'A fix.', sources: ['s1'] }] },
     });
     expect(payload.changelog?.entries[0]?.heading).toBe('Fixed');
-    expect(ReleaseDocsPrepResultSchema.parse({ ok: true, state: 'passed', output: { a: 1 } }).output).toEqual({
-      a: 1,
-    });
+    expect(ReleaseDocsPrepResultSchema.parse({ ok: true, state: 'passed', output: { a: 1 } }).output).toEqual(
+      {
+        a: 1,
+      },
+    );
     expect(ReleaseChangelogOutputSchema.parse({ added: [] })).toEqual({
       created: false,
       added: [],

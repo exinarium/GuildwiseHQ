@@ -46,10 +46,12 @@ export const changelogStep: DocsPrepStepHandler = async ({ worktree, payload }) 
 
   const merged = mergeUnreleased(md ?? changelogSkeleton(projectName), entries);
   if (merged.kind === 'error') return { ok: false, error: merged.message };
-  if (merged.kind === 'unchanged') return { ok: true, files: [], output: { ...base, duplicates: merged.duplicates } };
+  if (merged.kind === 'unchanged')
+    return { ok: true, files: [], output: { ...base, duplicates: merged.duplicates } };
 
   await writeFile(path, merged.md, 'utf8');
-  const sourcesOf = (text: string) => entries.find((e) => e.text.replace(/\s+/g, ' ').trim() === text)?.sources ?? [];
+  const sourcesOf = (text: string) =>
+    entries.find((e) => e.text.replace(/\s+/g, ' ').trim() === text)?.sources ?? [];
   return {
     ok: true,
     files: [FILE],

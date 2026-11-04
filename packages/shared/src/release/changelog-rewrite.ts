@@ -164,7 +164,10 @@ const BULLET = /^[-*]\s+(.*)$/;
  * Structural problems that make the file unsafe to edit or unusable by the release commit. `errors` fail the step;
  * `warnings` are shown only. Each message is a full sentence naming the line.
  */
-export function checkChangelog(md: string, opts: { version?: string } = {}): { errors: string[]; warnings: string[] } {
+export function checkChangelog(
+  md: string,
+  opts: { version?: string } = {},
+): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (md.includes('\u0000') || md.includes('�')) {
@@ -350,7 +353,8 @@ export function mergeUnreleased(md: string, entries: readonly ChangelogEntry[]):
   for (const raw of entries) {
     const heading = changelogHeadingOf(raw.heading);
     const text = raw.text.replace(/\s+/g, ' ').trim();
-    if (!heading || text === '') return { kind: 'error', message: `internal: invalid entry '${raw.heading}'` };
+    if (!heading || text === '')
+      return { kind: 'error', message: `internal: invalid entry '${raw.heading}'` };
     const e = { heading, text };
     if ([...existing, ...added.map((a) => a.text)].some((t) => isDuplicateEntry(t, text))) duplicates.push(e);
     else added.push(e);
@@ -414,7 +418,8 @@ export function mergeUnreleased(md: string, entries: readonly ChangelogEntry[]):
   // Guard: nothing outside the block moved, and the result is still a file the release commit can read.
   const after = linesOf(merged);
   const splitAfter = splitUnreleased(merged);
-  const sameHead = after.lines.slice(0, split.start + 1).join('\n') === lines.slice(0, split.start + 1).join('\n');
+  const sameHead =
+    after.lines.slice(0, split.start + 1).join('\n') === lines.slice(0, split.start + 1).join('\n');
   const sameTail = splitAfter !== null && after.lines.slice(splitAfter.end).join('\n') === tail.join('\n');
   if (!sameHead || !sameTail || checkChangelog(merged).errors.length > 0)
     return { kind: 'error', message: 'internal: merge would change text outside Unreleased' };

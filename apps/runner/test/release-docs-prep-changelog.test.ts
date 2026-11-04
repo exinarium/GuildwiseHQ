@@ -30,11 +30,22 @@ All notable changes to Guildwise HQ are documented in this file.
 - An old fix that stays as written.
 `;
 
-const UNDATED = EXISTING.replace('## [1.3.0] - 2026-10-01', '## [1.4.0]\n\n### Added\n\n- Pending.\n\n## [1.3.0] - 2026-10-01');
+const UNDATED = EXISTING.replace(
+  '## [1.3.0] - 2026-10-01',
+  '## [1.4.0]\n\n### Added\n\n- Pending.\n\n## [1.3.0] - 2026-10-01',
+);
 
 const ENTRIES = [
-  { heading: 'Added', text: 'Release prep on the Releases page writes the changelog before a release ships.', sources: ['s1'] },
-  { heading: 'Fixed', text: 'The release page no longer drops entries written under an unknown heading.', sources: ['s2'] },
+  {
+    heading: 'Added',
+    text: 'Release prep on the Releases page writes the changelog before a release ships.',
+    sources: ['s1'],
+  },
+  {
+    heading: 'Fixed',
+    text: 'The release page no longer drops entries written under an unknown heading.',
+    sources: ['s2'],
+  },
 ];
 
 function commit(clone: string, path: string, text: string, message: string) {
@@ -76,8 +87,16 @@ const run = (s: S, over: Partial<ReleaseDocsPrepPayload> = {}): Promise<ReleaseD
 /** analyse, changelog (with `entries`), commit prepare and push. Returns the changelog answer and the pushed file. */
 async function prep(s: S, entries: typeof ENTRIES, runId = RUN) {
   const a = await run(s, { runId });
-  const common = { runId, ...(a.summary ? { summary: a.summary } : {}), base: { sha: a.baseSha as string, tag: a.baseTag ?? null } };
-  const c = await run(s, { ...common, step: 'changelog', changelog: { projectName: 'Guildwise HQ', entries } });
+  const common = {
+    runId,
+    ...(a.summary ? { summary: a.summary } : {}),
+    base: { sha: a.baseSha as string, tag: a.baseTag ?? null },
+  };
+  const c = await run(s, {
+    ...common,
+    step: 'changelog',
+    changelog: { projectName: 'Guildwise HQ', entries },
+  });
   if (c.state === 'passed') {
     await run(s, { ...common, step: 'commit', phase: 'prepare' });
     await run(s, { ...common, step: 'commit', phase: 'push' });
@@ -157,13 +176,18 @@ describe('release.docs_prep changelog', () => {
 
   it('fails when the server sent no entries', async () => {
     const wt = tmp('aom-cl-');
-    const r = await changelogStep({ worktree: wt, payload: { step: 'changelog' } as never, summary: undefined });
+    const r = await changelogStep({
+      worktree: wt,
+      payload: { step: 'changelog' } as never,
+      summary: undefined,
+    });
     expect(r).toEqual({ ok: false, error: 'the server sent no changelog entries: update the server' });
   });
 
   it('applies to a second repository independently', async () => {
     const wt = tmp('aom-cl-');
-    const tight = '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-11-03\n\n### Changed\n\n- one\n- two\n';
+    const tight =
+      '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-11-03\n\n### Changed\n\n- one\n- two\n';
     writeFileSync(join(wt, 'CHANGELOG.md'), tight);
     const r = await changelogStep({
       worktree: wt,
@@ -172,6 +196,8 @@ describe('release.docs_prep changelog', () => {
     });
     expect(r.ok).toBe(true);
     const md = readFileSync(join(wt, 'CHANGELOG.md'), 'utf8');
-    expect(md).toContain(`### Added\n\n- ${ENTRIES[0]?.text}\n\n### Fixed\n\n- ${ENTRIES[1]?.text}\n\n## [0.1.0]`);
+    expect(md).toContain(
+      `### Added\n\n- ${ENTRIES[0]?.text}\n\n### Fixed\n\n- ${ENTRIES[1]?.text}\n\n## [0.1.0]`,
+    );
   });
 });
