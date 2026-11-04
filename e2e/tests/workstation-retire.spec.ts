@@ -24,7 +24,10 @@ const agents = {} as Record<'alder' | 'aspen' | 'cedar' | 'cypress' | 'elm' | 'f
 async function pair(as: APIRequestContext, name: string): Promise<string> {
   const code = (await (await as.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
   pairRunner(BASE_URL, code, name, paths.runnerHome(`retire-${name.replace(/\W+/g, '-').toLowerCase()}`));
-  const list = (await (await as.get('/api/workstations')).json()).workstations as Array<{ id: string; name: string }>;
+  const list = (await (await as.get('/api/workstations')).json()).workstations as Array<{
+    id: string;
+    name: string;
+  }>;
   const id = list.find((w) => w.name === name)?.id;
   expect(id, `paired ${name}`).toBeTruthy();
   return id as string;
@@ -56,7 +59,12 @@ async function join(who: typeof RETMEM, role: 'admin' | 'member'): Promise<APIRe
 }
 
 const agentRow = async (id: string) =>
-  (await q<{ status: string; workstation_id: string | null }>('SELECT status, workstation_id FROM agents WHERE id=$1', [id]))[0]!;
+  (
+    await q<{ status: string; workstation_id: string | null }>(
+      'SELECT status, workstation_id FROM agents WHERE id=$1',
+      [id],
+    )
+  )[0]!;
 const wsStatus = async (id: string) =>
   (await q<{ status: string }>('SELECT status FROM workstations WHERE id=$1', [id]))[0]!.status;
 const leftOn = async (id: string) =>
@@ -69,7 +77,7 @@ const leftOn = async (id: string) =>
     )[0]!.n,
   );
 const eventsOf = (type: string, stream: string) =>
-  q<{ org_id: string; actor_id: string; payload: any }>(
+  q<{ org_id: string; actor_id: string; payload: Record<string, unknown> }>(
     'SELECT org_id, actor_id, payload FROM events WHERE type=$1 AND stream_id=$2 ORDER BY seq',
     [type, stream],
   );
@@ -105,7 +113,9 @@ test.afterAll(async () => {
   await pool.end();
 });
 
-test('AC6: a Member sees no Retire action and gets 403 from the preview and the retirement', async ({ browser }) => {
+test('AC6: a Member sees no Retire action and gets 403 from the preview and the retirement', async ({
+  browser,
+}) => {
   const member = await join(RETMEM, 'member');
   const own = await pair(member, 'Mem Box');
   const mp = await (await browser.newContext({ storageState: await member.storageState() })).newPage();
@@ -176,7 +186,7 @@ test('AC1/AC2/AC5: retire with "move to Y" in the dialog: every agent is on Y, t
   await expect(list).toContainText('Alder');
   await expect(list).toContainText('Aspen');
   await expect(form.getByRole('radio', { name: /Move its agents to another workstation/ })).toBeChecked();
-  const select = form.getByLabel('Move to');
+  const select = form.getByRole('combobox', { name: 'Move to' });
   const offered = (await select.locator('option').allInnerTexts()).join('\n');
   expect(offered).toContain('Ret New');
   expect(offered).not.toContain('Ret Old');
@@ -196,7 +206,7 @@ test('AC1/AC2/AC5: retire with "move to Y" in the dialog: every agent is on Y, t
 test('AC1/AC2/AC5: retire with "needs a new home": every agent is needs_rehome and shows Re-home', async () => {
   const form = await openRetire('Ret Spare');
   await form.getByRole('radio', { name: /Mark its agents as needing a new home/ }).check();
-  await expect(form.getByLabel('Move to')).toHaveCount(0);
+  await expect(form.getByRole('combobox', { name: 'Move to' })).toHaveCount(0);
   await form.getByRole('button', { name: 'Retire', exact: true }).click();
   await expect(page.getByText('Ret Spare retired: 2 agents need a new home')).toBeVisible();
 
@@ -233,7 +243,7 @@ test('a removed workstation that still holds agents is listed and its agents are
   const form = page.getByRole('form', { name: 'Retire workstation' });
   await expect(form.getByTestId('retire-unpair-note')).toHaveCount(0);
   await expect(form.getByTestId('retire-agents')).toContainText('Fir');
-  await form.getByLabel('Move to').selectOption(ws.target);
+  await form.getByRole('combobox', { name: 'Move to' }).selectOption(ws.target);
   await form.getByRole('button', { name: 'Retire', exact: true }).click();
   await expect(page.getByText('Ret Gone retired: 1 agent moved to Ret New')).toBeVisible();
   expect(await agentRow(agents.fir)).toMatchObject({ status: 'active', workstation_id: ws.target });
@@ -244,10 +254,12 @@ test('a removed workstation that still holds agents is listed and its agents are
 test('AC3: retired workstations are no longer offered as targets of the move dialog, the bulk move or a move', async () => {
   const retired = [ws.old, ws.spare, ws.empty, ws.busy, ws.gone];
   const names = ['Ret Old', 'Ret Spare', 'Ret Empty', 'Ret Busy', 'Ret Gone'];
-  const single = (await (await api.get(`/api/agents/${agents.alder}/move-targets`)).json()).workstations as Array<{
+  const single = (await (await api.get(`/api/agents/${agents.alder}/move-targets`)).json())
+    .workstations as Array<{
     id: string;
   }>;
-  const bulk = (await (await api.get(`/api/workstations/${ws.target}/move-targets`)).json()).workstations as Array<{
+  const bulk = (await (await api.get(`/api/workstations/${ws.target}/move-targets`)).json())
+    .workstations as Array<{
     id: string;
   }>;
   for (const id of retired) {
@@ -280,7 +292,11 @@ test('AC7: the retirement and every agent handover are in the audit log', async 
   const moved = await eventsOf('WorkstationRetired', `workstation-${ws.old}`);
   expect(moved).toHaveLength(1);
   expect(moved[0]).toMatchObject({ org_id: orgId });
-  expect(moved[0]!.payload).toMatchObject({ handover: 'move', targetWorkstationId: ws.target, unlinked: true });
+  expect(moved[0]!.payload).toMatchObject({
+    handover: 'move',
+    targetWorkstationId: ws.target,
+    unlinked: true,
+  });
   for (const id of [agents.alder, agents.aspen]) {
     const ev = await eventsOf('AgentRehomed', `agent-${id}`);
     expect(ev.length, `AgentRehomed for ${id}`).toBeGreaterThanOrEqual(1);
@@ -288,7 +304,9 @@ test('AC7: the retirement and every agent handover are in the audit log', async 
   const marked = await eventsOf('WorkstationRetired', `workstation-${ws.spare}`);
   expect(marked).toHaveLength(1);
   expect(marked[0]!.payload).toMatchObject({ handover: 'needs_rehome', targetWorkstationId: null });
-  expect([...marked[0]!.payload.needsRehomeAgentIds].sort()).toEqual([agents.cedar, agents.cypress].sort());
+  expect([...(marked[0]!.payload.needsRehomeAgentIds as string[])].sort()).toEqual(
+    [agents.cedar, agents.cypress].sort(),
+  );
   for (const id of [agents.cedar, agents.cypress]) {
     const ev = await eventsOf('AgentNeedsRehome', `agent-${id}`);
     expect(ev).toHaveLength(1);
@@ -298,6 +316,7 @@ test('AC7: the retirement and every agent handover are in the audit log', async 
   expect(await eventsOf('WorkstationRetired', `workstation-${ws.gone}`)).toHaveLength(1);
   expect(await eventsOf('WorkstationRetired', `workstation-${ws.busy}`)).toHaveLength(1);
   // the actor is the Owner who retired them
-  const ownerId = (await q<{ id: string }>('SELECT id FROM users WHERE lower(email)=$1', [RETIRER.email]))[0]!.id;
+  const ownerId = (await q<{ id: string }>('SELECT id FROM users WHERE lower(email)=$1', [RETIRER.email]))[0]!
+    .id;
   for (const e of [...moved, ...marked]) expect(e.actor_id).toBe(ownerId);
 });
