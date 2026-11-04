@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs } from '../support/api.ts';
 import { pool } from '../support/db.ts';
-import { ADMIN, DATABASE_URL, ROOT } from '../support/env.ts';
+import { ADMIN, DATABASE_URL, ROOT, shotPath } from '../support/env.ts';
 
 // The CEO chat page (/ceo-chat): the standing chat, New chat (reuses an empty one, else archives the old one and opens a
 // clean one), the earlier-chats list, and "Archive all" in the chat drawer (never touches the live CEO chat).
@@ -41,7 +41,7 @@ test('the CEO chat opens as a page on the standing chat', async () => {
   await expect(page).toHaveURL(/\/ceo-chat\/[0-9a-f-]{36}$/);
   await expect(page.getByTestId('ceo-chat-screen')).toBeVisible();
   await expect(page.getByTestId('ceo-chat-list')).toBeVisible();
-  await page.screenshot({ path: '/tmp/aom-e2e-ceo-chat.png' });
+  await page.screenshot({ path: shotPath('ceo-chat.png') });
 });
 
 test('New chat on an empty chat keeps the one standing chat and show it in the list', async () => {

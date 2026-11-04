@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { apiAs, storagePath } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
-import { MEMBER } from '../support/env.ts';
+import { MEMBER, shotPath } from '../support/env.ts';
 import { killRunner, startRunner } from '../support/runner.ts';
 
 // M2: chat with an agent from the desk. Streams through the runner on the agent's workstation (mock adapter echo);
@@ -45,7 +45,7 @@ test('AC1: chat with an agent streams tokens to the browser and saves the conver
   const streaming = drawer.getByTestId('chat-streaming');
   await expect(streaming).toContainText('[mock]', { timeout: 30_000 });
   await expect(streaming).not.toContainText('(turn 1)');
-  await page.screenshot({ path: '/tmp/aom-e2e-chat-streaming.png' });
+  await page.screenshot({ path: shotPath('chat-streaming.png') });
   await expect(drawer.getByTestId('chat-message').last()).toContainText(
     '[mock] Linus heard: hello there (turn 1)',
     {
@@ -70,7 +70,7 @@ test('AC1: chat with an agent streams tokens to the browser and saves the conver
   )[0];
   expect(shift).toMatchObject({ kind: 'chat', outcome: 'reported', card_id: null });
   expect(Number(shift.tokens_output)).toBeGreaterThan(0);
-  await page.screenshot({ path: '/tmp/aom-e2e-chat-done.png' });
+  await page.screenshot({ path: shotPath('chat-done.png') });
 });
 
 test('AC1b: the saved conversation reappears after a reload and continues in the same session', async () => {
@@ -109,7 +109,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   await drawer.getByLabel('Message', { exact: true }).fill('are you there?');
   await drawer.getByRole('button', { name: 'Send' }).click();
   await expect(drawer.getByTestId('chat-error')).toContainText('Nothing is queued');
-  await page.screenshot({ path: '/tmp/aom-e2e-chat-offline.png' });
+  await page.screenshot({ path: shotPath('chat-offline.png') });
   // Not saved, not queued anywhere.
   expect((await q<any>(`SELECT count(*)::int AS n FROM thread_messages`))[0].n).toBe(before);
   expect(await queuedFor()).toBe(queuedBefore);
@@ -133,6 +133,6 @@ test('AC3: a conversation opens as a page on a phone-sized screen', async ({ bro
   await expect(p.getByRole('heading', { name: 'Chat with Linus' })).toBeVisible();
   await expect(p.getByTestId('chat-message')).toHaveCount(6);
   await expect(p.getByLabel('Message', { exact: true })).toBeVisible();
-  await p.screenshot({ path: '/tmp/aom-e2e-chat-phone.png' });
+  await p.screenshot({ path: shotPath('chat-phone.png') });
   await ctx.close();
 });

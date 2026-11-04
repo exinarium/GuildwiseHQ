@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +13,19 @@ export const PG_ADMIN_URL = `postgres://aom:aom@${PG_HOSTPORT}/postgres`;
 export const DATABASE_URL = `postgres://aom:aom@${PG_HOSTPORT}/${DB_NAME}`;
 export const MAILPIT_API = process.env.AOM_MAILPIT_API ?? 'http://127.0.0.1:8025';
 export const SMTP_URL = process.env.AOM_E2E_SMTP_URL ?? 'smtp://127.0.0.1:1025';
+
+/** Port of the local TLS proxy in front of the hosted build. The harness listens on it, so it must not be a declared test service. */
+export const TLS_PORT = Number(process.env.AOM_E2E_TLS_PORT ?? 4711);
+export const HOSTED_URL = process.env.AOM_E2E_HOSTED_URL ?? 'http://localhost:4710';
+/** Host ports of the deploy-setup-journey containers: registry, ssh, http, shop. Docker publishes them (DevOps runs them). */
+const [REG_P = 4720, SSH_P = 4721, HTTP_P = 4722, SHOP_P = 4723] = (
+  process.env.AOM_E2E_JOURNEY_PORTS ?? '4720,4721,4722,4723'
+)
+  .split(',')
+  .map(Number);
+export const JOURNEY_PORTS = { registry: REG_P, ssh: SSH_P, http: HTTP_P, shop: SHOP_P };
+/** Results (json report, traces) live outside E2E_DIR, which the global setup deletes. */
+export const RESULTS_DIR = process.env.AOM_E2E_RESULTS ?? `${E2E_DIR}-results`;
 
 export const ADMIN = { email: 'admin@e2e.test', name: 'E2E Admin', password: 'admin-password-12345' };
 export const MEMBER = { email: 'member@e2e.test', name: 'E2E Member', password: 'member-password-12345' };
@@ -254,3 +268,9 @@ export const MOBILER = {
   name: 'E2E Mobiler',
   password: 'mobiler-password-12345',
 };
+
+/** Where a spec writes a debugging screenshot: the results folder (writable in a tester shift), not a fixed /tmp path. */
+export function shotPath(name: string): string {
+  mkdirSync(join(RESULTS_DIR, 'screenshots'), { recursive: true });
+  return join(RESULTS_DIR, 'screenshots', name);
+}

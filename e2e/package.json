@@ -7,7 +7,16 @@
     "e2e": "pnpm -C .. build && playwright test",
     "e2e:run": "playwright test",
     "video": "playwright test -c video/playwright.video.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "preflight": "node support/preflight.ts",
+    "seed": "node support/seed.ts",
+    "full": "playwright test",
+    "full:shift": "AOM_E2E_NO_DOCKER=1 playwright test",
+    "docker": "playwright test --project=deploy-setup --project=deploy-connect --project=deploy-move --project=deploy-setup-journey",
+    "regression": "playwright test",
+    "summary": "node support/summary.ts",
+    "deps:cache": "bash scripts/copy-cached-deps.sh",
+    "test:unit": "node --test 'support/*.test.ts'"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
