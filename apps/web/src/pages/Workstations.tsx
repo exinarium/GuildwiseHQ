@@ -181,7 +181,8 @@ function StrandedWorkstations() {
   const [retire, setRetire] = useState<{ id: string; name: string } | null>(null);
   const [movingAll, setMovingAll] = useState<{ id: string; name: string } | null>(null);
   const stranded = (homes.data ?? []).filter((h) => h.status === 'unlinked' && h.agentCount > 0);
-  if (!canManage || stranded.length === 0) return null;
+  if (!canManage || (stranded.length === 0 && !movingAll)) return null;
+  // The dialog stays mounted while a move is open: moving the last worker empties the homes row, and the result must stay.
   return (
     <section className="mt-6" data-testid="stranded-workstations" aria-labelledby="stranded-title">
       <h2 id="stranded-title" className="mb-2 text-sm font-medium">
@@ -491,7 +492,7 @@ export function WorkstationCard({
           </div>
         )}
       </Panel>
-      {holdsAgents && (
+      {(holdsAgents || moveAllOpen) && (
         <MoveAllAgentsDialog
           key={moveAllOpen ? w.id : 'none-all'}
           source={moveAllOpen ? { id: w.id, name: w.name } : null}

@@ -86,7 +86,9 @@ describe('move all agents from one workstation to another', () => {
     expect(r.body.source).toMatchObject({ id: s.id, status: 'unlinked' });
     expect(r.body.target).toMatchObject({ id: target, name: 'target' });
     expect(r.body.moved.map((x: any) => x.agentId).sort()).toEqual(s.agents.map((a) => a.id).sort());
-    expect(r.body.blocked.every((x: any) => x.reason === 'one_devops')).toBe(true); // only the source's DevOps engineer stays
+    // only the source's DevOps engineer stays, blocked by the one-DevOps-per-workstation rule
+    expect(r.body.blocked).toHaveLength(1);
+    expect(r.body.blocked[0]).toMatchObject({ reason: 'one_devops', code: 'one_devops_per_workstation' });
     for (const a of s.agents) {
       const row = await agentRow(a.id);
       expect(row.workstation_id).toBe(target);
