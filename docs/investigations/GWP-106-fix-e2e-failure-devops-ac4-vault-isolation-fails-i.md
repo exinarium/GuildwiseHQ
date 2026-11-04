@@ -11,12 +11,19 @@ a vault outside its scope)? Fix it where it sits without loosening the isolation
 
 ## 2. The run log
 
-The log named on the card, `/home/exinarium/devbox-cache/gwp99-run/run.log`, does not exist on this workstation
-(`/home/exinarium/devbox-cache` holds only `gwp-core-caa6a44` and `gwp98-hosted-app`, with no Playwright output).
-DevOps was asked for the log (request `002e135b`) and had not answered by the end of this design session. The
-analysis below comes from the code and history. **The person who runs the fix must paste the AC4 failure block from
-the GWP-99 log on the card** (card AC1). Section 4.3 gives the two failure messages the analysis predicts, so the
-log either confirms the cause or shows that it is something else.
+DevOps posted the GWP-99 full-run log (release/1.5.0, `/home/exinarium/devbox-cache/gwp99-run/run.log`) on the card.
+The AC4 failure in it:
+
+```
+[devops] tests/devops.spec.ts:512 AC4 (30.3s)
+Error: timed out waiting for both vaults cloned; last: 3
+    at waitFor (e2e/support/db.ts:41)
+    at tests/devops.spec.ts:527
+```
+
+So the test fails **in the `'both vaults cloned'` wait itself** (l.527), not at the l.600 assertion that this report
+first predicted. The duration (30.3 s) is the wait's 30 s timeout. The wait asks for a count of exactly 2. It saw 3,
+so rows that do not belong to this test were counted. Section 3.4 explains why that makes the wait time out.
 
 ## 3. Findings
 
@@ -80,11 +87,21 @@ helpers. The defect is the unscoped SQL in the spec.
 
 ### 3.4 How the leak breaks AC4
 
-When AC4 starts, Dev Box already has the WORK clone from AC2 (1 row). With storage's leftover row the count is
-**already 2 before the HOB vault is cloned**, so the wait returns at once. The test then waits only for the HOB
-*repository* and dispatches both cards. If Hal's shift starts before the runner has cloned the HOB vault (sync
-interval 2 s, and the clone comes after vault config delivery), `readVaultContext` skips the vault without an error,
-and Hal's `CLAUDE.md` has no project document.
+When AC4 starts, Dev Box already has the WORK clone from AC2 (1 row). Rows left by earlier specs add to that count.
+The wait asks for `n === 2` exactly, so the test breaks in one of two ways, depending on how many rows were left:
+
+- **Two or more stray rows (what GWP-99 shows).** The count is above 2 before the HOB vault is cloned and climbs
+  further once it is. It never equals 2, so the wait times out: `timed out waiting for both vaults cloned; last: 3`.
+  This is the failure in the log.
+- **Exactly one stray row** (storage.spec's org vault alone). The count is already 2 before the HOB vault is cloned,
+  so the wait returns at once. If Hal's shift then starts before the HOB clone (`readVaultContext` skips a vault with
+  no clone, without an error), the test fails at l.600 (`PERSONAL-MARK`) instead.
+
+storage.spec's `Firm vault` (l.434-436, its own `Office PC` runner) is one stray row that the code shows. The code
+alone does not show where the other one came from in GWP-99. The candidates are another spec that runs before
+devops, or more than one row left by a spec that does. Whichever spec left it, the cause is the same: the wait counts
+rows from the whole database. The fix in section 4.1 works whatever earlier specs leave, because it reads only this
+test's two vault ids on Dev Box.
 
 ### 3.5 Verdict
 
@@ -162,10 +179,9 @@ before it produced those rows. This card changes none of them, so card AC6 is sa
 
 - Reproduce on the base commit: `pnpm -C e2e exec playwright test --project=storage --project=devops`. Storage runs
   first (layer 2), so AC4 sees the leaked row. `--project=devops` alone passes.
-- Predicted signature in the GWP-99 log: an `expect(received).toContain(expected)` failure at `devops.spec.ts:600`
-  with `Expected substring: "PERSONAL-MARK secret hobby notes"` (Hal's shift ran before the HOB clone). If the log
-  instead shows `timed out waiting for both vaults cloned; last: <n ≠ 2>`, the root cause is the same, with more than
-  one leaked row. Option A fixes both. Any other failure means this analysis is wrong for that run: stop and ask.
+- The GWP-99 log shows `timed out waiting for both vaults cloned; last: 3` (db.ts:41, from devops.spec.ts:527): the
+  form with more than one stray row (section 3.4). A run with exactly one stray row would fail at l.600 instead.
+  Option A fixes both forms.
 - architect.spec cannot run before devops through `--project` (it depends on `intake → research → sharing →
   devops`). To show "after architect", run `--project=devops` once after a full run of the projects up to architect
   in the same database, or record that the config order makes architect-before-devops impossible. storage is the
@@ -278,6 +294,7 @@ No skip, no retry, no timeout change, no `>= 2` count, no change under `e2e/supp
 ### 7.6 Runs (DevOps, per standing order)
 
 1. `pnpm -C e2e exec playwright test --project=devops` three times: green.
-2. `pnpm -C e2e exec playwright test --project=storage --project=devops`: fails on the base commit at AC4, green with
-   the change.
+2. `pnpm -C e2e exec playwright test --project=storage --project=devops`: green with the change. On the base commit
+   it can fail (early pass, then l.600) or pass by luck, because storage alone leaves one stray row (section 3.4).
+   The full run is the one that reproduces the GWP-99 timeout.
 3. The full suite on release/1.5.0: AC4 green, no new failures compared with the GWP-99 run.
