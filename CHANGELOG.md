@@ -4,7 +4,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-## [1.5.0] - 2026-11-04
+## [1.5.0] - 2026-11-05
 
 Runner 0.1.68 (capability `checks:1`). Forms builder, storage connections, public forms, journeys with waits, gates and webhooks, retiring a workstation with agent handover, and release prep. Migrations 2810, 2820, 2830, 2840, 2841 and 2850. New optional environment variables `AOM_STORAGE_WRITE_TIMEOUT_MS`, `AOM_STORAGE_MAX_FILE_BYTES`, `AOM_STORAGE_MAX_IN_FLIGHT`, `AOM_STORAGE_MS_TENANT`, `AOM_STORAGE_MS_CLIENT_ID`, `AOM_STORAGE_GOOGLE_CLIENT_ID`, `AOM_STORAGE_GOOGLE_CLIENT_SECRET`, the `AOM_FORMS_*` limits (`AOM_FORMS_POW_BITS`, `AOM_FORMS_MIN_FILL_MS`, `AOM_FORMS_SESSION_TTL_MIN`, `AOM_FORMS_SUBMISSION_TTL_MIN`, `AOM_FORMS_MAX_FILES`, `AOM_FORMS_MAX_SUBMISSION_BYTES`, `AOM_FORMS_IP_PER_MIN`, `AOM_FORMS_IP_BURST`, `AOM_FORMS_IP_SUBMITS_PER_HOUR`, `AOM_FORMS_IP_SUBMIT_BURST`, `AOM_FORMS_FORM_SUBMITS_PER_MIN`, `AOM_FORMS_FORM_SUBMIT_BURST`), the offline-link settings `AOM_FORMS_OFFLINE_LINK_DAYS`, `AOM_FORMS_OFFLINE_HOLD_DAYS`, `AOM_FORMS_OFFLINE_SETTLE_SEC`, `AOM_FORMS_OFFLINE_MAX_OPEN`, `AOM_FORMS_OFFLINE_IP_PER_HOUR`, `AOM_FORMS_OFFLINE_IP_BURST` and `AOM_FORMS_OFFLINE_FORM_PER_HOUR`, and `AOM_JOURNEY_HOOK_MAX_BYTES`, `AOM_JOURNEY_HOOK_PER_MIN`, `AOM_JOURNEY_HOOK_BURST` and `AOM_JOURNEY_HOOK_TOLERANCE_SEC`. Runner capabilities `storage:1` and `shift-limit:2`; new runner commands `storage.*`, `journey.webhook.call` and `release.docs_prep`.
 
