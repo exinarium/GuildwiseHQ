@@ -237,7 +237,9 @@ test('AC2: convert to Code with an existing repository: keep one card, cancel on
   expect(md).toContain('Our reloading notes.');
   expect(md).toContain('Which bullet weight for 6mm ARC?');
   expect(md).toContain('2 citations');
-  expect(git(vault.origin, 'log', '--format=%s', '-1', 'main').trim()).toContain('research notes');
+  expect(
+    git(vault.origin, 'log', '--format=%s', '-1', 'main', '--', 'projects/rld/PROJECT.md').trim(),
+  ).toContain('research notes');
 
   // the working-branch question for the new repository
   await page.goto('/desk');
