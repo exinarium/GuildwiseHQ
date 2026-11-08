@@ -151,7 +151,12 @@ describe('direct uploads to a cloud destination', () => {
     expect(g.json.grant.url).toContain(SECRET);
     expect(g.json.grant).toMatchObject({ method: 'PUT', chunkBytes: null });
     const open = run.seen.find((f) => f.type === 'storage.grant.open');
-    expect(open).toMatchObject({ size: PDF.length, sha256: sha(PDF), ext: 'pdf', contentType: 'application/pdf' });
+    expect(open).toMatchObject({
+      size: PDF.length,
+      sha256: sha(PDF),
+      ext: 'pdf',
+      contentType: 'application/pdf',
+    });
 
     const bad = await s.done({ size: PDF.length, sha256: 'f'.repeat(64) });
     expect(bad.status).toBe(400);
@@ -271,9 +276,9 @@ describe('direct uploads to a cloud destination', () => {
     const b = await begin('Cancel blocked');
     await b.grant();
     expect((await b.cancel('blocked')).json.state).toBe('failed');
-    expect((await one('SELECT status, error_code FROM form_submissions WHERE id=$1', [b.sid])).error_code).toBe(
-      'upload_unavailable',
-    );
+    expect(
+      (await one('SELECT status, error_code FROM form_submissions WHERE id=$1', [b.sid])).error_code,
+    ).toBe('upload_unavailable');
   });
 
   it('resume asks the runner for the offset', async () => {

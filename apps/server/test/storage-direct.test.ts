@@ -23,7 +23,11 @@ describe('upload host rules', () => {
 describe('page rules', () => {
   it('connect-src is self plus the exact reported hosts, sorted and without duplicates', () => {
     expect(publicPageCsp(true)).toContain("connect-src 'self';");
-    const csp = publicPageCsp(false, ['https://b.example.com', 'https://a.example.com', 'https://b.example.com']);
+    const csp = publicPageCsp(false, [
+      'https://b.example.com',
+      'https://a.example.com',
+      'https://b.example.com',
+    ]);
     expect(csp).toContain("connect-src 'self' https://a.example.com https://b.example.com;");
     expect(csp).not.toContain('*');
   });
@@ -42,9 +46,22 @@ describe('DirectUploads', () => {
     return { d, sent };
   };
   const req = {
-    orgId: 'o', formId: 'f', submissionId: 's', index: 0, connectionId: 'c', folder: '', name: 'n', vars: {},
-    ext: 'pdf', contentType: 'application/pdf', size: 1, sha256: 'a'.repeat(64), accepted: ['pdf'],
-    pageOrigin: 'https://p.example', ttlMs: 1000, scan: { field: 'f', fileName: 'x' },
+    orgId: 'o',
+    formId: 'f',
+    submissionId: 's',
+    index: 0,
+    connectionId: 'c',
+    folder: '',
+    name: 'n',
+    vars: {},
+    ext: 'pdf',
+    contentType: 'application/pdf',
+    size: 1,
+    sha256: 'a'.repeat(64),
+    accepted: ['pdf'],
+    pageOrigin: 'https://p.example',
+    ttlMs: 1000,
+    scan: { field: 'f', fileName: 'x' },
   };
 
   it('keeps only valid reported hosts and forgets them when the runner disconnects', () => {
@@ -65,7 +82,9 @@ describe('DirectUploads', () => {
     const none = await d.open(req);
     expect(none).toMatchObject({ ok: false, error: { code: 'invalid' } });
     expect(sent).toEqual([]);
-    d.onReport('ws', () => 's3', [{ connectionId: 'c', uploadOrigin: 'https://s3.example.com', reason: null }]);
+    d.onReport('ws', () => 's3', [
+      { connectionId: 'c', uploadOrigin: 'https://s3.example.com', reason: null },
+    ]);
     const slow = await d.open(req);
     expect(slow).toMatchObject({ ok: false, error: { code: 'timeout', retryable: true } });
   });
@@ -77,7 +96,9 @@ describe('DirectUploads', () => {
 
   it('ignores answers from another workstation', async () => {
     const { d, sent } = make();
-    d.onReport('ws', () => 's3', [{ connectionId: 'c', uploadOrigin: 'https://s3.example.com', reason: null }]);
+    d.onReport('ws', () => 's3', [
+      { connectionId: 'c', uploadOrigin: 'https://s3.example.com', reason: null },
+    ]);
     const p = d.open(req);
     await new Promise((r) => setTimeout(r, 5));
     const id = sent[0]?.payload.grantId;

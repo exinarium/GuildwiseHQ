@@ -37,7 +37,10 @@ export interface DirectOpenRequest {
 
 export interface DirectUploadsDeps {
   /** The workstation holding the active connection of this org, or undefined. */
-  lookup(orgId: string, connectionId: string): Promise<{ kind: StorageKind; workstationId: string } | undefined>;
+  lookup(
+    orgId: string,
+    connectionId: string,
+  ): Promise<{ kind: StorageKind; workstationId: string } | undefined>;
   isOnline(workstationId: string): boolean;
   send(workstationId: string, type: string, payload: Record<string, unknown>): boolean;
   /** One log line: ids, sizes, outcome. Never a URL. */
@@ -66,7 +69,9 @@ export function validUploadOrigin(kind: StorageKind, origin: string): boolean {
       return origin === 'https://www.googleapis.com';
     case 'onedrive':
       return (
-        h.endsWith('.sharepoint.com') || h === 'api.onedrive.com' || h.endsWith('.microsoftpersonalcontent.com')
+        h.endsWith('.sharepoint.com') ||
+        h === 'api.onedrive.com' ||
+        h.endsWith('.microsoftpersonalcontent.com')
       );
     case 's3':
       return true;
@@ -98,7 +103,11 @@ export class DirectUploads {
   onReport(
     workstationId: string,
     kinds: (connectionId: string) => StorageKind | undefined,
-    list: Array<{ connectionId: string; uploadOrigin: string | null; reason: DirectUnavailableReason | null }>,
+    list: Array<{
+      connectionId: string;
+      uploadOrigin: string | null;
+      reason: DirectUnavailableReason | null;
+    }>,
   ): void {
     for (const c of list) {
       const kind = kinds(c.connectionId);
@@ -108,7 +117,11 @@ export class DirectUploads {
         origin = null;
         reason = 'probe_failed';
       }
-      this.origins.set(c.connectionId, { workstationId, origin, reason: origin ? null : (reason ?? 'probe_failed') });
+      this.origins.set(c.connectionId, {
+        workstationId,
+        origin,
+        reason: origin ? null : (reason ?? 'probe_failed'),
+      });
     }
   }
 
@@ -149,11 +162,18 @@ export class DirectUploads {
 
   async open(
     req: DirectOpenRequest,
-  ): Promise<{ ok: true; grantId: string; grant: DirectGrantInfo } | { ok: false; error: StorageWriteError }> {
+  ): Promise<
+    { ok: true; grantId: string; grant: DirectGrantInfo } | { ok: false; error: StorageWriteError }
+  > {
     const start = this.now();
     const conn = await this.deps.lookup(req.orgId, req.connectionId);
     const fail = (e: StorageWriteError) => {
-      this.deps.log({ connectionId: req.connectionId, op: 'grant', outcome: e.code, latencyMs: this.now() - start });
+      this.deps.log({
+        connectionId: req.connectionId,
+        op: 'grant',
+        outcome: e.code,
+        latencyMs: this.now() - start,
+      });
       return { ok: false as const, error: e };
     };
     if (!conn) return fail(storageError('not_found', 'This storage connection does not exist.'));
@@ -200,7 +220,12 @@ export class DirectUploads {
       return fail(storageError('invalid', 'The upload address is not the expected one.'));
     }
     this.grants.set(grantId, { workstationId: conn.workstationId, connectionId: req.connectionId });
-    this.deps.log({ connectionId: req.connectionId, op: 'grant', outcome: 'ok', latencyMs: this.now() - start });
+    this.deps.log({
+      connectionId: req.connectionId,
+      op: 'grant',
+      outcome: 'ok',
+      latencyMs: this.now() - start,
+    });
     return { ok: true, grantId, grant: r.grant };
   }
 
@@ -222,8 +247,15 @@ export class DirectUploads {
   ): Promise<Verified> {
     const g = this.grants.get(grantId);
     const start = this.now();
-    const gone: Verified = { ok: false, error: storageError('runner_offline', "The firm's workstation is offline.") };
-    if (!g) return Promise.resolve({ ok: false, error: storageError('invalid', 'This upload is not open any more.') });
+    const gone: Verified = {
+      ok: false,
+      error: storageError('runner_offline', "The firm's workstation is offline."),
+    };
+    if (!g)
+      return Promise.resolve({
+        ok: false,
+        error: storageError('invalid', 'This upload is not open any more.'),
+      });
     const answer = this.wait(this.verifyWait, grantId, g.workstationId, {
       ok: false,
       error: storageError('timeout', 'The storage did not answer in time.'),
@@ -262,7 +294,12 @@ export class DirectUploads {
   // ------------------------------------------------------------------------------------ frames from the runner
   onResult(
     workstationId: string,
-    m: { grantId: string; ok: boolean; grant?: DirectGrantInfo | undefined; error?: StorageWriteError | undefined },
+    m: {
+      grantId: string;
+      ok: boolean;
+      grant?: DirectGrantInfo | undefined;
+      error?: StorageWriteError | undefined;
+    },
   ): void {
     const w = this.openWait.get(m.grantId);
     if (!w || w.workstationId !== workstationId) return;
@@ -281,7 +318,12 @@ export class DirectUploads {
 
   onVerified(
     workstationId: string,
-    m: { grantId: string; ok: boolean; reference?: StorageReference | undefined; error?: StorageWriteError | undefined },
+    m: {
+      grantId: string;
+      ok: boolean;
+      reference?: StorageReference | undefined;
+      error?: StorageWriteError | undefined;
+    },
   ): void {
     const w = this.verifyWait.get(m.grantId);
     if (!w || w.workstationId !== workstationId) return;
@@ -298,8 +340,10 @@ export class DirectUploads {
     for (const [id, o] of this.origins) if (o.workstationId === workstationId) this.origins.delete(id);
     for (const [id, g] of this.grants) if (g.workstationId === workstationId) this.grants.delete(id);
     const off = storageError('runner_offline', "The firm's workstation is offline.");
-    for (const [, w] of [...this.openWait]) if (w.workstationId === workstationId) w.resolve({ ok: false, error: off });
+    for (const [, w] of [...this.openWait])
+      if (w.workstationId === workstationId) w.resolve({ ok: false, error: off });
     for (const [, w] of [...this.offsetWait]) if (w.workstationId === workstationId) w.resolve(null);
-    for (const [, w] of [...this.verifyWait]) if (w.workstationId === workstationId) w.resolve({ ok: false, error: off });
+    for (const [, w] of [...this.verifyWait])
+      if (w.workstationId === workstationId) w.resolve({ ok: false, error: off });
   }
 }

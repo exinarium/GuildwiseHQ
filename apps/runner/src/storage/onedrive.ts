@@ -9,8 +9,8 @@ import {
   PROBE_BODY,
   PROBE_NAME,
   type Spooled,
-  type StagedInfo,
   STAGING_FOLDER,
+  type StagedInfo,
   type StorageConnector,
   StorageError,
   type StorageTarget,
@@ -246,7 +246,8 @@ export class OneDriveConnector implements StorageConnector, DirectCapable {
       await this.fetchFn(url, { method: 'DELETE', signal }).catch(() => undefined);
       return { origin: new URL(url).origin, reason: null };
     } catch (err) {
-      if (err instanceof StorageError && err.code === 'auth_expired') return { origin: null, reason: 'needs_reauth' };
+      if (err instanceof StorageError && err.code === 'auth_expired')
+        return { origin: null, reason: 'needs_reauth' };
       return { origin: null, reason: 'probe_failed' };
     }
   }
@@ -258,7 +259,14 @@ export class OneDriveConnector implements StorageConnector, DirectCapable {
     _pageOrigin: string,
     signal: AbortSignal,
   ): Promise<DirectGrant> {
-    const parent = await ensureChild(this.fetchFn, this.token, this.cfg.driveId, this.base, STAGING_FOLDER, signal);
+    const parent = await ensureChild(
+      this.fetchFn,
+      this.token,
+      this.cfg.driveId,
+      this.base,
+      STAGING_FOLDER,
+      signal,
+    );
     const url = await this.session(parent, stagingName, file.size, signal);
     return {
       provider: 'onedrive',
@@ -271,7 +279,7 @@ export class OneDriveConnector implements StorageConnector, DirectCapable {
     };
   }
 
-  async offset(g: DirectGrant, signal: AbortSignal): Promise<number | null> {
+  async offset(g: DirectGrant, signal: AbortSignal, _size?: number): Promise<number | null> {
     try {
       const res = await this.fetchFn(g.url, { method: 'GET', signal });
       if (!res.ok) return null;
@@ -294,7 +302,11 @@ export class OneDriveConnector implements StorageConnector, DirectCapable {
       signal,
     );
     if (!res.ok) return null;
-    const j = (await res.json()) as { id?: string; size?: number; file?: { hashes?: { sha256Hash?: string } } };
+    const j = (await res.json()) as {
+      id?: string;
+      size?: number;
+      file?: { hashes?: { sha256Hash?: string } };
+    };
     const sha = j.file?.hashes?.sha256Hash?.toLowerCase();
     return {
       size: j.size ?? -1,

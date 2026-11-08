@@ -24,8 +24,10 @@ function bucket(opts: { checksum?: boolean; cors?: boolean } = {}) {
   const fetchFn = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
     const method = init.method ?? 'GET';
-    const h = new Headers(init.headers as HeadersInit);
-    calls.push(`${method} ${keyOf(u)}${h.get('range') ? ' range' : ''}${u.searchParams.get('list-type') ? ' list' : ''}`);
+    const h = new Headers(init.headers as Record<string, string>);
+    calls.push(
+      `${method} ${keyOf(u)}${h.get('range') ? ' range' : ''}${u.searchParams.get('list-type') ? ' list' : ''}`,
+    );
     const key = keyOf(u);
     if (method === 'OPTIONS')
       return opts.cors === false
@@ -38,7 +40,10 @@ function bucket(opts: { checksum?: boolean; cors?: boolean } = {}) {
       const prefix = u.searchParams.get('prefix') ?? '';
       const xml = [...objs]
         .filter(([k]) => k.startsWith(prefix))
-        .map(([k, v]) => `<Contents><Key>${k}</Key><LastModified>${new Date(v.mod).toISOString()}</LastModified></Contents>`)
+        .map(
+          ([k, v]) =>
+            `<Contents><Key>${k}</Key><LastModified>${new Date(v.mod).toISOString()}</LastModified></Contents>`,
+        )
         .join('');
       return new Response(`<ListBucketResult>${xml}</ListBucketResult>`, { status: 200 });
     }
@@ -61,7 +66,8 @@ function bucket(opts: { checksum?: boolean; cors?: boolean } = {}) {
     if (!o) return new Response('<Error><Code>NoSuchKey</Code></Error>', { status: 404 });
     if (method === 'HEAD') {
       const hd: Record<string, string> = { 'content-length': String(o.body.length), etag: '"e1"' };
-      if (opts.checksum !== false) hd['x-amz-checksum-sha256'] = Buffer.from(sha(o.body), 'hex').toString('base64');
+      if (opts.checksum !== false)
+        hd['x-amz-checksum-sha256'] = Buffer.from(sha(o.body), 'hex').toString('base64');
       return new Response(null, { status: 200, headers: hd });
     }
     const r = /bytes=(\d+)-(\d+)/.exec(h.get('range') ?? '');
@@ -71,14 +77,19 @@ function bucket(opts: { checksum?: boolean; cors?: boolean } = {}) {
   return { objs, calls, fetchFn };
 }
 
-function setup(o: { checksum?: boolean; cors?: boolean; scan?: () => ScanVerdict; kind?: 's3' | 'local' } = {}) {
+function setup(
+  o: { checksum?: boolean; cors?: boolean; scan?: () => ScanVerdict; kind?: 's3' | 'local' } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'gw-grant-'));
   mkdirSync(join(root, 'files'));
   const b = bucket(o);
   const frames: Frame[] = [];
   const logs: string[] = [];
   let clock = Date.now();
-  const scanner: ClamdClient = { scanFile: async () => (o.scan as () => ScanVerdict)(), ping: async () => true };
+  const scanner: ClamdClient = {
+    scanFile: async () => (o.scan as () => ScanVerdict)(),
+    ping: async () => true,
+  };
   const kind = o.kind ?? 's3';
   const svc = new StorageService({
     secretsDir: join(root, 'secrets'),
@@ -111,7 +122,12 @@ function setup(o: { checksum?: boolean; cors?: boolean; scan?: () => ScanVerdict
     log: (l) => logs.push(l),
     logWarn: (l) => logs.push(l),
     logError: (l) => logs.push(l),
-    uploadScan: { enabled: !!o.scan, clamd: '127.0.0.1:1', timeoutMs: 5000, quarantineDir: join(root, 'quarantine') },
+    uploadScan: {
+      enabled: !!o.scan,
+      clamd: '127.0.0.1:1',
+      timeoutMs: 5000,
+      quarantineDir: join(root, 'quarantine'),
+    },
     scanner,
     journalFile: join(root, 'state', 'journal.json'),
     pageOrigin: PAGE,
@@ -121,10 +137,16 @@ function setup(o: { checksum?: boolean; cors?: boolean; scan?: () => ScanVerdict
 type T = ReturnType<typeof setup>;
 
 const connect = async (t: T) => {
-  const r = await t.svc.handle('storage.connect', { requestId: 'r1', connectionId: CONN, kind: t.kind, envelope: {} });
+  const r = await t.svc.handle('storage.connect', {
+    requestId: 'r1',
+    connectionId: CONN,
+    kind: t.kind,
+    envelope: {},
+  });
   expect(r.error).toBeUndefined();
 };
-const last = (t: T, type: string) => t.frames.filter((f) => f.type === type).at(-1)?.payload as Record<string, any>;
+const last = (t: T, type: string) =>
+  t.frames.filter((f) => f.type === type).at(-1)?.payload as Record<string, any>;
 const until = async (t: T, type: string, n: number) => {
   for (let i = 0; i < 300 && t.frames.filter((f) => f.type === type).length < n; i++)
     await new Promise((r) => setTimeout(r, 10));
@@ -159,7 +181,13 @@ async function open(t: T, body: Buffer, over: Record<string, unknown> = {}) {
 const stagedKey = (url: string) => decodeURIComponent(new URL(url).pathname.replace(/^\/bkt\//, ''));
 const finish = async (t: T, grantId: string, body: Buffer, over: Record<string, unknown> = {}) => {
   const n = t.frames.filter((f) => f.type === 'storage.grant.verified').length;
-  t.svc.onMessage({ type: 'storage.grant.finish', grantId, size: body.length, sha256: sha(body), ...over } as never);
+  t.svc.onMessage({
+    type: 'storage.grant.finish',
+    grantId,
+    size: body.length,
+    sha256: sha(body),
+    ...over,
+  } as never);
   return until(t, 'storage.grant.verified', n + 1);
 };
 
@@ -172,7 +200,11 @@ describe('direct upload grants', () => {
     expect(res.grant.method).toBe('PUT');
     expect(stagedKey(res.grant.url)).toBe(`.guildwise-incoming/${grantId}.pdf`);
     expect(res.grant.url).toContain('X-Amz-Expires=300');
-    expect(Object.keys(res.grant.headers).sort()).toEqual(['content-type', 'if-none-match', 'x-amz-checksum-sha256']);
+    expect(Object.keys(res.grant.headers).sort()).toEqual([
+      'content-type',
+      'if-none-match',
+      'x-amz-checksum-sha256',
+    ]);
     expect(res.grant.chunkBytes).toBeNull();
     expect(t.logs.join('\n')).not.toContain(res.grant.url);
     expect(t.logs.join('\n')).not.toContain('X-Amz-Signature');
@@ -192,7 +224,9 @@ describe('direct upload grants', () => {
     expect(t.b.objs.get(v.reference.path)?.body.equals(PDF)).toBe(true);
     // Only the first bytes were read back, not the whole object.
     expect(t.b.calls.some((c) => c.startsWith('GET ') && c.endsWith(' range'))).toBe(true);
-    expect(t.b.calls.some((c) => c.startsWith('GET ') && !c.endsWith(' range') && !c.endsWith(' list'))).toBe(false);
+    expect(t.b.calls.some((c) => c.startsWith('GET ') && !c.endsWith(' range') && !c.endsWith(' list'))).toBe(
+      false,
+    );
     // The submission can be taken back: the journal knows the file.
     const gone = await t.svc.handle('storage.discard', { submissionId: SID });
     expect(gone.discarded).toBe(1);
@@ -206,7 +240,9 @@ describe('direct upload grants', () => {
     t.b.objs.set(stagedKey(res.grant.url), { body: PDF, mod: Date.now() });
     const v = await finish(t, grantId, PDF);
     expect(v.ok).toBe(true);
-    expect(t.b.calls.some((c) => c.startsWith('GET ') && !c.endsWith(' range') && !c.endsWith(' list'))).toBe(true);
+    expect(t.b.calls.some((c) => c.startsWith('GET ') && !c.endsWith(' range') && !c.endsWith(' list'))).toBe(
+      true,
+    );
   });
 
   it('deletes the object when the size is not the declared one', async () => {

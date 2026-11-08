@@ -101,7 +101,8 @@ export function presignV4(i: PresignInput): string {
   const service = i.service ?? 's3';
   const scope = `${date}/${i.region}/${service}/aws4_request`;
   const lower: Record<string, string> = { host: i.host };
-  for (const [k, v] of Object.entries(i.headers ?? {})) lower[k.toLowerCase()] = v.trim().replace(/\s+/g, ' ');
+  for (const [k, v] of Object.entries(i.headers ?? {}))
+    lower[k.toLowerCase()] = v.trim().replace(/\s+/g, ' ');
   const names = Object.keys(lower).sort();
   const signedHeaders = names.join(';');
   const params: Record<string, string> = {
@@ -120,7 +121,10 @@ export function presignV4(i: PresignInput): string {
   const canonicalHeaders = names.map((n) => `${n}:${lower[n]}\n`).join('');
   const canonical = [i.method, i.path, query, canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n');
   const toSign = ['AWS4-HMAC-SHA256', amz, scope, hex(canonical)].join('\n');
-  const kSigning = hmac(hmac(hmac(hmac(`AWS4${i.secretAccessKey}`, date), i.region), service), 'aws4_request');
+  const kSigning = hmac(
+    hmac(hmac(hmac(`AWS4${i.secretAccessKey}`, date), i.region), service),
+    'aws4_request',
+  );
   const signature = createHmac('sha256', kSigning).update(toSign, 'utf8').digest('hex');
   return `${query}&X-Amz-Signature=${signature}`;
 }

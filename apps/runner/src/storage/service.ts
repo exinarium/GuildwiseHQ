@@ -3,13 +3,12 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { type FileHandle, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import {
-  checkUploadHead,
   CommandPayloadSchemas,
+  checkUploadHead,
   type DirectUnavailableReason,
   healthStateForError,
   type RunnerToServer,
   renderStoragePath,
-  UPLOAD_HEAD_BYTES,
   type SealedEnvelope,
   type ServerToRunner,
   STORAGE_DELETE_TIMEOUT_MS,
@@ -20,6 +19,7 @@ import {
   type StorageReference,
   type StorageWriteError,
   storageError,
+  UPLOAD_HEAD_BYTES,
 } from '@aom/shared';
 import type { z } from 'zod';
 import type { ReplayCache } from '../integrations/seen.ts';
@@ -1084,10 +1084,12 @@ export class StorageService {
     await rm(t.file, { force: true });
   }
 
-
   // ------------------------------------------------------------------------------------------------ direct uploads
 
-  private grantLog(gs: Pick<GrantState, 'connectionId' | 'kind' | 'size' | 'startedAt'>, outcome: string): void {
+  private grantLog(
+    gs: Pick<GrantState, 'connectionId' | 'kind' | 'size' | 'startedAt'>,
+    outcome: string,
+  ): void {
     // Never the URL, the staging name, the file name or a header.
     this.log(
       `storage.grant conn=${gs.connectionId} kind=${gs.kind} size=${gs.size} ${outcome} ${this.now() - gs.startedAt}ms`,
@@ -1131,10 +1133,18 @@ export class StorageService {
 
   /** Tells the server which upload host each connection can use (kept in its memory only). */
   async reportDirect(): Promise<void> {
-    const list: Array<{ connectionId: string; uploadOrigin: string | null; reason: DirectUnavailableReason | null }> = [];
+    const list: Array<{
+      connectionId: string;
+      uploadOrigin: string | null;
+      reason: DirectUnavailableReason | null;
+    }> = [];
     for (const [id] of this.store.list()) {
       const r = await this.directOrigin(id);
-      list.push({ connectionId: id, uploadOrigin: r.origin, reason: r.origin ? null : (r.reason ?? 'probe_failed') });
+      list.push({
+        connectionId: id,
+        uploadOrigin: r.origin,
+        reason: r.origin ? null : (r.reason ?? 'probe_failed'),
+      });
     }
     if (list.length) this.deps.send('storage.direct.report', { connections: list.slice(0, 100) });
   }
@@ -1145,13 +1155,19 @@ export class StorageService {
 
   private async grantOpen(m: Extract<ServerToRunner, { type: 'storage.grant.open' }>): Promise<void> {
     const conn = this.store.get(m.connectionId);
-    const meta = { connectionId: m.connectionId, kind: (conn?.kind ?? 'local') as StorageKind, size: m.size, startedAt: this.now() };
+    const meta = {
+      connectionId: m.connectionId,
+      kind: (conn?.kind ?? 'local') as StorageKind,
+      size: m.size,
+      startedAt: this.now(),
+    };
     const fail = (e: StorageWriteError) => {
       this.grantLog(meta, e.code);
       this.grantResult(m.grantId, { ok: false, error: e });
     };
     if (!conn) return fail(storageError('not_found', 'This storage is not set up on this workstation.'));
-    if (conn.needsReauth) return fail(storageError('auth_expired', 'The sign-in expired: reconnect this storage.'));
+    if (conn.needsReauth)
+      return fail(storageError('auth_expired', 'The sign-in expired: reconnect this storage.'));
     const rendered = renderStoragePath({ folder: m.folder, name: m.name }, m.vars, m.ext);
     if (!rendered.ok) return fail(storageError('invalid', rendered.error));
     try {
@@ -1308,7 +1324,8 @@ export class StorageService {
         return await refuse(storageError('invalid', 'The file did not arrive intact: try again.'));
       const c = this.capable(gs.connectionId);
       const conn = this.store.get(gs.connectionId);
-      if (!c || !conn) return await refuse(storageError('not_found', 'This storage is not set up on this workstation.'));
+      if (!c || !conn)
+        return await refuse(storageError('not_found', 'This storage is not set up on this workstation.'));
       const signal = AbortSignal.timeout(10 * 60_000);
       const info = await c.stat(gs.g, signal);
       if (!info) return await refuse(storageError('invalid', 'The file did not arrive: try again.'));

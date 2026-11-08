@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
+import type { DirectUnavailableReason } from '@aom/shared';
 import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { fromHttp } from './errors.ts';
 import { presignV4, signV4, uriEncode } from './s3-sign.ts';
-import type { DirectUnavailableReason } from '@aom/shared';
 import {
   type DirectCapable,
   type DirectGrant,
@@ -12,8 +12,8 @@ import {
   PROBE_BODY,
   PROBE_NAME,
   type Spooled,
-  type StagedInfo,
   STAGING_FOLDER,
+  type StagedInfo,
   type StorageConnector,
   StorageError,
   type StorageTarget,
@@ -281,7 +281,8 @@ export class S3Connector implements StorageConnector, DirectCapable {
     if (res.status === 404) return null;
     if (!res.ok) await this.fail(res);
     const sum = res.headers.get('x-amz-checksum-sha256');
-    const sha = sum && /^[A-Za-z0-9+/]{43}=$/.test(sum) ? Buffer.from(sum, 'base64').toString('hex') : undefined;
+    const sha =
+      sum && /^[A-Za-z0-9+/]{43}=$/.test(sum) ? Buffer.from(sum, 'base64').toString('hex') : undefined;
     const etag = res.headers.get('etag')?.replace(/"/g, '');
     return {
       size: Number(res.headers.get('content-length') ?? -1),
@@ -338,10 +339,18 @@ export class S3Connector implements StorageConnector, DirectCapable {
   async sweep(keep: (name: string, modifiedAt: number) => boolean, signal: AbortSignal): Promise<number> {
     const prefix = this.key([STAGING_FOLDER]);
     const empty = createHash('sha256').update('').digest('hex');
-    const res = await this.call('GET', '', signal, empty, undefined, {}, {
-      'list-type': '2',
-      prefix: `${prefix}/`,
-    });
+    const res = await this.call(
+      'GET',
+      '',
+      signal,
+      empty,
+      undefined,
+      {},
+      {
+        'list-type': '2',
+        prefix: `${prefix}/`,
+      },
+    );
     if (!res.ok) await this.fail(res);
     const xml = await res.text();
     let n = 0;

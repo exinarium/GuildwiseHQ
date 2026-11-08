@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { GDriveConnector } from '../src/storage/gdrive.ts';
+import { LocalConnector } from '../src/storage/local.ts';
 import { OneDriveConnector } from '../src/storage/onedrive.ts';
 import { S3Connector } from '../src/storage/s3.ts';
-import { isDirectCapable, type DirectGrant } from '../src/storage/types.ts';
-import { LocalConnector } from '../src/storage/local.ts';
+import { type DirectGrant, isDirectCapable } from '../src/storage/types.ts';
 
 const sig = new AbortController().signal;
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -44,7 +44,8 @@ describe('OneDrive direct upload', () => {
   it('reads the next expected byte and names the clash -2 on promote', async () => {
     let patches = 0;
     const { c } = make((url, init) => {
-      if (init.method === 'GET' && url.startsWith('https://contoso')) return json({ nextExpectedRanges: ['5242880-'] });
+      if (init.method === 'GET' && url.startsWith('https://contoso'))
+        return json({ nextExpectedRanges: ['5242880-'] });
       if (init.method === 'PATCH') return ++patches === 1 ? json({}, 409) : json({ id: 'FINAL' });
       return json({ id: 'FOLDER' });
     });
@@ -66,18 +67,20 @@ describe('OneDrive direct upload', () => {
 describe('Google Drive direct upload', () => {
   it('starts the session with the page origin and the declared length', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const c = new GDriveConnector(
-      { baseFolder: 'Base', baseFolderId: 'B' },
-      async () => 'tok',
-      (async (url: string, init: RequestInit = {}) => {
-        calls.push({ url, init });
-        if (url.includes('uploadType=resumable'))
-          return new Response(null, { status: 200, headers: { location: 'https://www.googleapis.com/upload/s/1' } });
-        if (url.includes('fields=id,trashed')) return json({ id: 'B' });
-        if (url.includes('q=')) return json({ files: [] });
-        return json({ id: 'STAGE' });
-      }) as never,
-    );
+    const c = new GDriveConnector({ baseFolder: 'Base', baseFolderId: 'B' }, async () => 'tok', (async (
+      url: string,
+      init: RequestInit = {},
+    ) => {
+      calls.push({ url, init });
+      if (url.includes('uploadType=resumable'))
+        return new Response(null, {
+          status: 200,
+          headers: { location: 'https://www.googleapis.com/upload/s/1' },
+        });
+      if (url.includes('fields=id,trashed')) return json({ id: 'B' });
+      if (url.includes('q=')) return json({ files: [] });
+      return json({ id: 'STAGE' });
+    }) as never);
     const g = await c.grant('g1.pdf', file, 60_000, 'https://app.example', sig);
     expect(g.url).toBe('https://www.googleapis.com/upload/s/1');
     const start = calls.find((x) => x.url.includes('uploadType=resumable'));
@@ -93,7 +96,14 @@ describe('Google Drive direct upload', () => {
       async () => 'tok',
       (async () => new Response(null, { status: 308, headers: { range: 'bytes=0-8388607' } })) as never,
     );
-    const g: DirectGrant = { provider: 'google_drive', url: 'https://www.googleapis.com/u', headers: {}, chunkBytes: 1, expiresAt: 1, stagingRef: 'P|g1.pdf' };
+    const g: DirectGrant = {
+      provider: 'google_drive',
+      url: 'https://www.googleapis.com/u',
+      headers: {},
+      chunkBytes: 1,
+      expiresAt: 1,
+      stagingRef: 'P|g1.pdf',
+    };
     expect(await c.offset(g, sig, 20_000_000)).toBe(8388608);
   });
 });
@@ -105,12 +115,23 @@ describe('S3 direct upload', () => {
       { endpoint: 'http://localhost:9000', region: 'us-east-1', bucket: 'b', prefix: '', pathStyle: true },
       keys,
     );
-    expect(await c.uploadOrigin(sig, 'https://app.example')).toEqual({ origin: null, reason: 'http_endpoint' });
-    await expect(c.grant('g.pdf', file, 60_000, 'https://app.example', sig)).rejects.toMatchObject({ code: 'invalid' });
+    expect(await c.uploadOrigin(sig, 'https://app.example')).toEqual({
+      origin: null,
+      reason: 'http_endpoint',
+    });
+    await expect(c.grant('g.pdf', file, 60_000, 'https://app.example', sig)).rejects.toMatchObject({
+      code: 'invalid',
+    });
   });
   it('signs the prefix, the length and the checksum into the grant', async () => {
     const c = new S3Connector(
-      { endpoint: 'https://s3.example.com', region: 'eu-west-1', bucket: 'b', prefix: 'firm', pathStyle: false },
+      {
+        endpoint: 'https://s3.example.com',
+        region: 'eu-west-1',
+        bucket: 'b',
+        prefix: 'firm',
+        pathStyle: false,
+      },
       keys,
       undefined,
       () => new Date('2026-11-08T10:00:00Z'),

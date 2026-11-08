@@ -348,7 +348,10 @@ export interface StorageConnectionDto {
   /** The signed-in user owns the workstation and may connect, test and reconnect from here. */
   canConnect: boolean;
   /** Whether public form files can go straight to this storage. Null for local folders and vaults. */
-  directUploads?: { state: 'ready' | 'unavailable' | 'unknown'; reason: DirectUnavailableReason | null } | null;
+  directUploads?: {
+    state: 'ready' | 'unavailable' | 'unknown';
+    reason: DirectUnavailableReason | null;
+  } | null;
 }
 
 export interface StorageRequestDto {

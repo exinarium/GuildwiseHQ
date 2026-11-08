@@ -7,19 +7,19 @@ import {
   checkPublicAnswers,
   checkUploadHead,
   DESK_SUBKIND,
+  DIRECT_UPLOAD_KINDS,
+  directGrantTtlMs,
   FORM_UPLOAD_TYPES,
   type FormDefinition,
+  GrantCancelSchema,
+  GrantCompleteSchema,
+  type GrantDto,
+  type GrantOffsetDto,
   isOrgOperational,
   PUBLIC_FORM_ID_RE,
   type PublicFormDto,
   publicFormView,
   STORAGE_RETRYABLE,
-  DIRECT_UPLOAD_KINDS,
-  directGrantTtlMs,
-  GrantCancelSchema,
-  GrantCompleteSchema,
-  type GrantDto,
-  type GrantOffsetDto,
   type StorageKind,
   type StorageReference,
   type StorageWriteError,
@@ -429,7 +429,9 @@ export function publicFormRoutes(
       if (!cfg.directUploads) return [];
       const ids = [
         ...new Set(
-          def.fields.flatMap((f) => (f.type === 'file' && f.destination.connectionId ? [f.destination.connectionId] : [])),
+          def.fields.flatMap((f) =>
+            f.type === 'file' && f.destination.connectionId ? [f.destination.connectionId] : [],
+          ),
         ),
       ];
       if (!ids.length) return [];
@@ -766,7 +768,9 @@ export function publicFormRoutes(
 
         // A cloud destination takes the file straight from the browser. With no reported upload host the form refuses
         // here, before anything is sent: there is no relay for a cloud destination (the runner offline was handled above).
-        const kinds = cfg.directUploads ? await kindsOf(pub.orgId, [...wanted]) : new Map<string, StorageKind>();
+        const kinds = cfg.directUploads
+          ? await kindsOf(pub.orgId, [...wanted])
+          : new Map<string, StorageKind>();
         const modeOf = (field: string): 'relay' | 'direct' => {
           const dest = def.fields.find((f) => f.id === field);
           const id = dest?.type === 'file' ? dest.destination.connectionId : null;
@@ -822,7 +826,12 @@ export function publicFormRoutes(
         const out: SubmissionStartResultDto = {
           submissionId: sid,
           uploadToken: await signUpload(ctx, sid, expiresAt),
-          parts: parts.map((p) => ({ field: p.field, index: p.index, needed: true, mode: p.mode ?? 'relay' })),
+          parts: parts.map((p) => ({
+            field: p.field,
+            index: p.index,
+            needed: true,
+            mode: p.mode ?? 'relay',
+          })),
         };
         return reply.code(201).send(out);
       },
@@ -1014,7 +1023,6 @@ export function publicFormRoutes(
       },
     });
 
-
     // ---------------------------------------------------------------------------------- direct uploads (cloud destinations)
     /** The submission, the direct part and its field, with the same expiry rules as the relay PUT. */
     const directPart = async (req: FastifyRequest) => {
@@ -1022,7 +1030,11 @@ export function publicFormRoutes(
       const { sid, index } = req.params as { sid: string; index: string };
       const row = await authorise(req, pub, sid);
       if (new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() || row.status === 'expired')
-        throw new PfError(410, 'submission_expired', 'This submission timed out. Please send the form again.');
+        throw new PfError(
+          410,
+          'submission_expired',
+          'This submission timed out. Please send the form again.',
+        );
       if (row.status === 'complete' || row.status === 'storing')
         throw new PfError(409, 'submission_busy', 'This submission is already being processed.');
       const parts = row.parts as Part[];
@@ -1063,7 +1075,11 @@ export function publicFormRoutes(
         const def = await definitionOf(pub);
         const field = def.fields.find((f) => f.id === part.field);
         if (!field || field.type !== 'file' || !field.destination.connectionId)
-          throw new PfError(409, 'destination_missing', "This form can't accept submissions. Please contact the firm.");
+          throw new PfError(
+            409,
+            'destination_missing',
+            "This form can't accept submissions. Please contact the firm.",
+          );
         const connectionId = field.destination.connectionId;
         // The same size and type rules as the start, again before an address is issued.
         const accepted = acceptedUploadExtensions(field.allowedTypes);
@@ -1071,7 +1087,9 @@ export function publicFormRoutes(
           throw new PfError(413, 'file_too_large', 'A file is too large.');
         const type = FORM_UPLOAD_TYPES[part.ext];
         if (!type || !accepted.includes(part.ext))
-          throw new PfError(415, 'file_type_refused', 'This file type is not accepted.', { retryable: false });
+          throw new PfError(415, 'file_type_refused', 'This file type is not accepted.', {
+            retryable: false,
+          });
 
         const attempts = (part.grantAttempts ?? 0) + 1;
         const next: Part = { ...part, state: 'pending', grantAttempts: attempts };
@@ -1086,7 +1104,9 @@ export function publicFormRoutes(
         }
 
         const linkRow = row.link_id
-          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [row.link_id])
+          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
+              row.link_id,
+            ])
           : undefined;
         const original = 'file';
         const remaining = Math.max(60_000, new Date(row.expires_at).getTime() - ctx.clock.now().getTime());
@@ -1196,11 +1216,7 @@ export function publicFormRoutes(
             if (fresh.state !== 'verifying') return;
             if (v.ok) {
               const r = v.reference;
-              if (
-                r.sha256 !== part.sha256 ||
-                r.size !== part.size ||
-                r.connectionId !== connectionId
-              ) {
+              if (r.sha256 !== part.sha256 || r.size !== part.size || r.connectionId !== connectionId) {
                 await savePart(sid, i, { ...fresh, state: 'failed', error: 'invalid' });
                 return;
               }
@@ -1243,7 +1259,11 @@ export function publicFormRoutes(
         if (grantId)
           ctx.services.direct.cancel(
             grantId,
-            body.data.reason === 'retry' ? 'retry' : body.data.reason === 'blocked' ? 'blocked' : 'client_gone',
+            body.data.reason === 'retry'
+              ? 'retry'
+              : body.data.reason === 'blocked'
+                ? 'blocked'
+                : 'client_gone',
           );
         if (part.state === 'pending' || part.state === 'verifying') {
           if (body.data.reason === 'blocked') {

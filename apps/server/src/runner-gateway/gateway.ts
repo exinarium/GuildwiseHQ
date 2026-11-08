@@ -190,7 +190,11 @@ export class RunnerGateway {
    */
   private storageAnswer(conn: RunnerConn, text: string): boolean {
     const head = text.slice(0, 160);
-    if (!head.includes('"storage.write.') && !head.includes('"storage.grant.') && !head.includes('"storage.direct.'))
+    if (
+      !head.includes('"storage.write.') &&
+      !head.includes('"storage.grant.') &&
+      !head.includes('"storage.direct.')
+    )
       return false;
     let json: unknown;
     try {
