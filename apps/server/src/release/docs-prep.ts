@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import {
+  DEFAULT_GUIDE_PATH,
   enabledReleaseDocsPrepSteps,
   isOrgManager,
   isReleaseDocsPrepStep,
   isResearchStage,
   missingReleaseDocsPrepRequirement,
   nextReleaseDocsPrepAction,
+  normalizeGuidePath,
   RELEASE_DOCS_PREP_CAPABILITY,
+  RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
   type ReleaseDocsPrepAction,
   type ReleaseDocsPrepGateInput,
   type ReleaseDocsPrepGateView,
@@ -37,7 +40,12 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
-import { DOCS_PREP_STEP_HOOKS, docsPrepWriter } from './docs-prep-steps.ts';
+import {
+  configuredGuidePaths,
+  DOCS_PREP_STEP_HOOKS,
+  docsPrepWriter,
+  guidePathFor,
+} from './docs-prep-steps.ts';
 import {
   PHASE_FAILURE_HOOKS,
   PHASE_INPUTS,
@@ -68,11 +76,24 @@ async function canManage(db: Queryable, userId: string, p: Row): Promise<boolean
 
 // ---------------------------------------------------------------------------------------------------------- settings
 
-function settingsOf(p: Row): { enabled: boolean; steps: Record<string, boolean> } {
+function settingsOf(p: Row): {
+  enabled: boolean;
+  steps: Record<string, boolean>;
+  guidePaths: Record<string, string>;
+} {
   const s = (p.release_docs_prep ?? {}) as { enabled?: unknown; steps?: Record<string, unknown> };
   const steps: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(s.steps ?? {})) if (typeof v === 'boolean') steps[k] = v;
-  return { enabled: s.enabled === true, steps };
+  return { enabled: s.enabled === true, steps, guidePaths: configuredGuidePaths(p.release_docs_prep) };
+}
+
+async function liveRepos(db: Queryable, projectId: string): Promise<Array<{ id: string; name: string }>> {
+  const r = await rows(
+    db,
+    'SELECT id, name FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name, id',
+    [projectId],
+  );
+  return r.map((x) => ({ id: String(x.id), name: String(x.name) }));
 }
 
 export async function getReleaseDocsPrepSettings(
@@ -93,6 +114,12 @@ export async function getReleaseDocsPrepSettings(
       ...(d.requires ? { requires: d.requires } : {}),
     })),
     canEdit: await canManage(ctx.pool, user.id, p),
+    repos: (await liveRepos(ctx.pool, projectId)).map((r) => ({
+      id: r.id,
+      name: r.name,
+      guidePath: s.guidePaths[r.id] ?? null,
+    })),
+    defaultGuidePath: DEFAULT_GUIDE_PATH,
   };
 }
 
@@ -100,7 +127,7 @@ export async function setReleaseDocsPrepSettings(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
-  input: { enabled: boolean; steps: Record<string, boolean> },
+  input: { enabled: boolean; steps: Record<string, boolean>; guidePaths?: Record<string, string> },
 ): Promise<void> {
   const unknown = Object.keys(input.steps).filter((id) => !isReleaseDocsPrepStep(id));
   await withAppendTx(ctx.pool, async (tx) => {
@@ -108,10 +135,27 @@ export async function setReleaseDocsPrepSettings(
     if (unknown.length > 0)
       throw badRequest('unknown_step', `unknown release prep step: ${unknown.join(', ')}`);
     const before = settingsOf(p);
+    // Check every path first, so a request applies completely or not at all.
+    const live = new Map((await liveRepos(tx, projectId)).map((r) => [r.id, r.name]));
+    const guidePaths: Record<string, string> = {};
+    for (const [id, path] of Object.entries(before.guidePaths)) if (live.has(id)) guidePaths[id] = path;
+    for (const [id, raw] of Object.entries(input.guidePaths ?? {})) {
+      const name = live.get(id);
+      if (name === undefined) throw badRequest('unknown_repo', `unknown repository: ${id}`);
+      const c = normalizeGuidePath(raw);
+      if (!c.ok)
+        throw badRequest('invalid_guide_path', `The user guide path for ${name} ${c.reason}: ${raw.trim()}`);
+      if (c.path) guidePaths[id] = c.path;
+      else delete guidePaths[id];
+    }
+    const samePaths =
+      Object.keys(guidePaths).length === Object.keys(before.guidePaths).length &&
+      Object.entries(guidePaths).every(([id, v]) => before.guidePaths[id] === v);
     const steps = Object.fromEntries(
       releaseDocsPrepSteps().map((d) => [d.id, input.steps[d.id] ?? before.steps[d.id] ?? d.defaultOn]),
     );
     const same =
+      samePaths &&
       before.enabled === input.enabled &&
       releaseDocsPrepSteps().every((d) => (before.steps[d.id] ?? d.defaultOn) === steps[d.id]);
     if (same) return;
@@ -121,7 +165,7 @@ export async function setReleaseDocsPrepSettings(
           streamId: streamId.project(projectId),
           event: {
             type: 'ReleaseDocsPrepSettingsSet',
-            payload: { projectId, enabled: input.enabled, steps, setBy: user.id },
+            payload: { projectId, enabled: input.enabled, steps, guidePaths, setBy: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
@@ -530,6 +574,28 @@ async function dispatchAction(
         continue;
       }
       changelog = { projectName: project?.name ?? '', entries: [] };
+    }
+    if (action.step === 'guide' && !action.phase) {
+      const configured = await guidePathFor(tx, run.project_id, repoId);
+      if (configured) {
+        const cap = await one(
+          tx,
+          'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+          [repo.workstation_id, RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY],
+        );
+        if (!cap) {
+          await failStepBeforeDispatch(
+            ctx,
+            tx,
+            run,
+            repoId,
+            action.step,
+            `The workstation that has ${repo.name} needs a newer runner to use the user guide path ${configured}. Update the runner and retry.`,
+          );
+          failedHere = true;
+          continue;
+        }
+      }
     }
     const hook = action.phase ? undefined : DOCS_PREP_STEP_HOOKS[action.step];
     let writer: ReleaseDocsPrepPayload['writer'] | null = null;

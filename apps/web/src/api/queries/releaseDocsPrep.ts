@@ -24,7 +24,11 @@ export function useReleaseDocsPrepSettings(projectId: string | undefined) {
 export function useSaveReleaseDocsPrepSettings(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { enabled: boolean; steps: Record<string, boolean> }) =>
+    mutationFn: (v: {
+      enabled: boolean;
+      steps: Record<string, boolean>;
+      guidePaths?: Record<string, string>;
+    }) =>
       put<ReleaseDocsPrepSettingsDto>(
         `/projects/${projectId}/release-docs-prep/settings`,
         v,

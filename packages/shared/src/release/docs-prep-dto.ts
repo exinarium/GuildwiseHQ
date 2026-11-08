@@ -56,6 +56,8 @@ export type ReleaseDocsPrepSummary = z.infer<typeof ReleaseDocsPrepSummarySchema
 export const ReleaseDocsPrepSettingsSchema = z.object({
   enabled: z.boolean(),
   steps: z.record(z.string().max(40), z.boolean()),
+  /** Per repository id: the user guide path; '' clears it. Absent: unchanged. Only the keys sent change. */
+  guidePaths: z.record(z.uuid(), z.string().max(400)).optional(),
 });
 
 export const ReleaseDocsPrepSettingsDtoSchema = z.object({
@@ -70,6 +72,10 @@ export const ReleaseDocsPrepSettingsDtoSchema = z.object({
     }),
   ),
   canEdit: z.boolean(),
+  repos: z
+    .array(z.object({ id: z.string(), name: z.string(), guidePath: z.string().nullable() }))
+    .default([]),
+  defaultGuidePath: z.string().default('docs/USER-GUIDE.md'),
 });
 export type ReleaseDocsPrepSettingsDto = z.infer<typeof ReleaseDocsPrepSettingsDtoSchema>;
 
@@ -206,6 +212,8 @@ export type ReleaseDocsPrepResult = z.infer<typeof ReleaseDocsPrepResultSchema>;
 export const RELEASE_DOCS_PREP_CAPABILITY = 'release-docs-prep:1';
 /** The runner can apply the entries of the step 'changelog'. */
 export const RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY = 'release-docs-prep-changelog:1';
+/** The runner fails a configured, missing user guide instead of skipping it. */
+export const RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY = 'release-docs-prep-guide-path:1';
 
 /** The largest step output stored (serialised JSON). */
 export const RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES = 64 * 1024;

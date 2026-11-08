@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepResult } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -41,10 +41,20 @@ function write(clone: string, path: string, text: string) {
 }
 
 /** main (tagged), then release/1.5.0 with one merge of a feature branch that changes the Releases page. */
-function setup(opts: { guide?: boolean; scripts?: boolean; build?: 'flags' | 'old' } = {}) {
+function setup(
+  opts: {
+    guide?: boolean;
+    scripts?: boolean;
+    build?: 'flags' | 'old';
+    guideAt?: string;
+    alsoDefault?: boolean;
+  } = {},
+) {
   const repo = makeRepo();
   write(repo.clone, 'README.md', 'hello\n');
-  if (opts.guide ?? true) write(repo.clone, 'docs/USER-GUIDE.md', GUIDE);
+  if (opts.guideAt) write(repo.clone, opts.guideAt, GUIDE);
+  if ((opts.guide ?? true) && (!opts.guideAt || opts.alsoDefault))
+    write(repo.clone, 'docs/USER-GUIDE.md', GUIDE);
   if (opts.scripts) write(repo.clone, 'docs/guide/assemble-guide.mjs', '// assemble\n');
   if (opts.build)
     write(
@@ -349,6 +359,71 @@ describe("release prep step 'guide'", () => {
     const o = guide.output as { pdfDate?: string; warnings: string[] };
     expect(o.pdfDate).toBeUndefined();
     expect(o.warnings.join()).toMatch(/takes no --date/);
+  });
+
+  it('edits the configured guide and not docs/USER-GUIDE.md, and skips the PDF for another name', async () => {
+    const s = setup({ scripts: true, build: 'flags', guideAt: 'docs/MANUAL.md', alsoDefault: true });
+    const e = fakeExec();
+    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+      guidePath: 'docs/MANUAL.md',
+      guidePathConfigured: true,
+      repoName: 'GuildwiseHQ',
+    });
+    expect(guide.state).toBe('passed');
+    expect(guide.files).toEqual(['docs/MANUAL.md']);
+    expect(guide.output).toMatchObject({ pdf: 'no PDF build' });
+    expect((guide.output as { notes: string[] }).notes.join()).toMatch(/not rebuilt.*MANUAL\.md/);
+    expect(e.calls).toHaveLength(0);
+  });
+
+  it('fails naming the repository and path when the configured guide is missing', async () => {
+    const s = setup();
+    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+      guidePath: 'docs/guide/MANUAL.md',
+      guidePathConfigured: true,
+      repoName: 'GuildwiseHQ',
+    });
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toContain('docs/guide/MANUAL.md');
+    expect(guide.error).toContain('GuildwiseHQ');
+    expect(guide.error).toContain('release/1.5.0');
+  });
+
+  it('still skips a missing default guide when no path is configured', async () => {
+    const s = setup({ guide: false });
+    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+      guidePath: 'docs/USER-GUIDE.md',
+      guidePathConfigured: false,
+      repoName: 'GuildwiseHQ',
+    });
+    expect(guide.state).toBe('passed');
+    expect(guide.output).toMatchObject({ skipped: 'no user guide' });
+  });
+
+  it('refuses a path outside the repository', async () => {
+    const s = setup();
+    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+      guidePath: '../x.md',
+      guidePathConfigured: true,
+    });
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toMatch(/refusing the user guide path \.\.\/x\.md/);
+  });
+
+  it('refuses a guide that is a symlink to a file outside the worktree', async () => {
+    const s = setup({ guide: false });
+    const outside = join(tmp('aom-outside-'), 'x.md');
+    writeFileSync(outside, GUIDE);
+    symlinkSync(outside, join(s.repo.clone, 'docs-link.md'));
+    sh(s.repo.clone, 'git', ['add', '-A']);
+    sh(s.repo.clone, 'git', ['commit', '-m', 'link']);
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.5.0']);
+    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+      guidePath: 'docs-link.md',
+      guidePathConfigured: true,
+    });
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toMatch(/points outside the repository/);
   });
 
   it('fails when the PDF build fails or touches files outside the guide', async () => {

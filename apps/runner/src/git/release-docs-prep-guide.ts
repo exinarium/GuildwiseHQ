@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize, relative } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import {
   applyGuideEdits,
   builtinPlaybookText,
@@ -11,6 +11,7 @@ import {
   GuideProposalSchema,
   guideOutline,
   locateSections,
+  normalizeGuidePath,
   parseGuide,
   type ReleaseDocsPrepGuideInput,
   ReleaseDocsPrepGuideInputSchema,
@@ -142,12 +143,23 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const wt = ctx.worktree;
   const input = ReleaseDocsPrepGuideInputSchema.safeParse(ctx.payload.stepInput ?? {});
   if (!input.success) return fail('the user guide step got an invalid input from the server');
-  const guidePath = normalize(input.data.guidePath || DEFAULT_GUIDE_PATH);
-  if (isAbsolute(guidePath) || guidePath.startsWith('..'))
-    return fail(`refusing the guide path ${guidePath}`);
+  const checked = normalizeGuidePath(input.data.guidePath);
+  if (!checked.ok) return fail(`refusing the user guide path ${input.data.guidePath}: it ${checked.reason}`);
+  const guidePath = checked.path ?? DEFAULT_GUIDE_PATH;
+  const where = `${guidePath} on ${ctx.payload.releaseBranch}${input.data.repoName ? ` in ${input.data.repoName}` : ''}`;
   const abs = join(wt, guidePath);
-  if (!existsSync(abs) || !statSync(abs).isFile())
+  if (!existsSync(abs) || !statSync(abs).isFile()) {
+    if (input.data.guidePathConfigured)
+      return fail(
+        `the user guide ${where} does not exist. Fix the path in Project settings > Release prep (docs and videos), or add the file.`,
+      );
     return { ok: true, files: [], output: { ...empty('passed'), skipped: 'no user guide' } };
+  }
+  // never leave the worktree, even through a symlink
+  const real = realpathSync(abs);
+  const root = realpathSync(wt);
+  if (real !== root && !real.startsWith(root + sep))
+    return fail(`refusing the user guide ${where}: it points outside the repository`);
   if (!ctx.summary)
     return fail('Update user guide needs Analyse changes: tick it in the release prep settings');
 
@@ -300,8 +312,16 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const scripts = join(guideDir, 'guide');
   const assemble = join(scripts, 'assemble-guide.mjs');
   const build = join(scripts, 'build-guide.mjs');
-  if (!existsSync(join(wt, assemble))) out.pdf = 'no PDF build';
-  else {
+  // The scripts read ../USER-GUIDE.md: they can only rebuild a guide of that name.
+  const pdfReadsThisFile = basename(guidePath) === 'USER-GUIDE.md';
+  if (!pdfReadsThisFile || !existsSync(join(wt, assemble))) {
+    out.pdf = 'no PDF build';
+    if (!pdfReadsThisFile && existsSync(join(wt, assemble)))
+      out.notes = [
+        ...out.notes,
+        `the PDF guide was not rebuilt: its scripts build USER-GUIDE.md, not ${guidePath}`,
+      ];
+  } else {
     // The date and release come from the release being prepared, but only a build script that takes the flags
     // can show them (a release branch cut before the flags existed keeps the date written in it).
     const buildText = existsSync(join(wt, build)) ? readFileSyncSafe(join(wt, build)) : '';

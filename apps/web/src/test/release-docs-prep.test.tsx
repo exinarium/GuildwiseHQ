@@ -64,6 +64,46 @@ describe('Release prep (docs and videos) settings', () => {
     );
   });
 
+  it('shows a user guide path field per repository, saves it on blur and shows the 400 inline', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: null }];
+    routes = (_u, m) =>
+      m === 'PUT'
+        ? json(
+            {
+              error: {
+                code: 'invalid_guide_path',
+                message: "The user guide path for GuildwiseHQ must not contain '..': ../x.md",
+              },
+            },
+            400,
+          )
+        : json(settings({ repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const input = await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    expect(input).toHaveAttribute('placeholder', 'docs/USER-GUIDE.md');
+    const user = userEvent.setup();
+    await user.type(input, '../x.md');
+    await user.tab();
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        enabled: false,
+        steps: { analyse: true, commit: true },
+        guidePaths: { [ID(7)]: '../x.md' },
+      }),
+    );
+    expect(await screen.findByTestId(`prep-guide-error-${ID(7)}`)).toHaveTextContent("must not contain '..'");
+    expect(input).toHaveValue('../x.md');
+  });
+
+  it('shows the saved guide path again and disables the field for a member', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: 'docs/guide/MANUAL.md' }];
+    routes = () => json(settings({ canEdit: false, repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const input = await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    expect(input).toHaveValue('docs/guide/MANUAL.md');
+    expect(input).toBeDisabled();
+  });
+
   it('is read-only for a member', async () => {
     routes = () => json(settings({ canEdit: false }));
     wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);

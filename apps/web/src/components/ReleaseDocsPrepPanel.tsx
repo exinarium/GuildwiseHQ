@@ -14,15 +14,22 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
   const save = useSaveReleaseDocsPrepSettings(projectId);
   const [enabled, setEnabled] = useState(false);
   const [steps, setSteps] = useState<Record<string, boolean>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // The repository whose path save failed: its error is shown under its field, not in the box below.
+  const [failedRepo, setFailedRepo] = useState<string | null>(null);
   // Responses are only schema-checked in dev builds: a body without the expected fields reads as off, read-only and
   // with no steps rather than breaking the settings page around it.
   const data = q.data;
   const listed = Array.isArray(data?.steps) ? data.steps : [];
+  const repos = Array.isArray(data?.repos) ? data.repos : [];
   const canEdit = data?.canEdit === true;
   useEffect(() => {
     if (!data) return;
     setEnabled(data.enabled === true);
     setSteps(Object.fromEntries((Array.isArray(data.steps) ? data.steps : []).map((s) => [s.id, s.enabled])));
+    setDrafts(
+      Object.fromEntries((Array.isArray(data.repos) ? data.repos : []).map((r) => [r.id, r.guidePath ?? ''])),
+    );
   }, [data]);
 
   const title = 'Release prep (docs and videos)';
@@ -36,7 +43,14 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
   const change = (next: { enabled: boolean; steps: Record<string, boolean> }) => {
     setEnabled(next.enabled);
     setSteps(next.steps);
+    setFailedRepo(null);
     save.mutate(next);
+  };
+  const saveGuidePath = (id: string, saved: string | null) => {
+    const draft = (drafts[id] ?? '').trim();
+    if (draft === (saved ?? '')) return;
+    setFailedRepo(id);
+    save.mutate({ enabled, steps, guidePaths: { [id]: draft } });
   };
   const row = 'flex min-h-11 items-start gap-3 py-2';
 
@@ -90,7 +104,59 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
             </label>
           ))}
         </fieldset>
-        <ErrorBox error={save.error} />
+        {repos.length > 0 && (
+          <fieldset className="flex flex-col gap-3" disabled={!canEdit || save.isPending}>
+            <legend className="text-sm font-medium text-fg">User guide</legend>
+            {repos.map((r) => {
+              const err = failedRepo === r.id && save.error instanceof Error ? save.error.message : null;
+              return (
+                <div key={r.id} className="flex flex-col gap-1">
+                  <label htmlFor={`prep-guide-path-${r.id}`} className="text-sm text-fg">
+                    {r.name}
+                  </label>
+                  <input
+                    id={`prep-guide-path-${r.id}`}
+                    data-testid={`prep-guide-path-${r.id}`}
+                    type="text"
+                    className="min-h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
+                    placeholder={data?.defaultGuidePath ?? 'docs/USER-GUIDE.md'}
+                    value={drafts[r.id] ?? ''}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="text"
+                    enterKeyHint="done"
+                    aria-invalid={err ? true : undefined}
+                    aria-describedby={`prep-guide-help-${r.id}${err ? ` prep-guide-error-${r.id}` : ''}`}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [r.id]: e.target.value }))}
+                    onBlur={() => saveGuidePath(r.id, r.guidePath)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveGuidePath(r.id, r.guidePath);
+                      }
+                    }}
+                  />
+                  <span id={`prep-guide-help-${r.id}`} className="text-xs text-subtle">
+                    Relative to the repository, ending in .md. Empty: {data?.defaultGuidePath}. The PDF guide
+                    is rebuilt only for a file named USER-GUIDE.md.
+                  </span>
+                  {err && (
+                    <span
+                      id={`prep-guide-error-${r.id}`}
+                      role="alert"
+                      className="text-xs text-danger-soft-fg"
+                      data-testid={`prep-guide-error-${r.id}`}
+                    >
+                      {err}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </fieldset>
+        )}
+        {failedRepo === null && <ErrorBox error={save.error} />}
       </div>
     </Panel>
   );

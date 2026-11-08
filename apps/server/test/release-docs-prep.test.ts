@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   RELEASE_DOCS_PREP_CAPABILITY,
+  RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type ReleaseFacts,
   ReleaseFactsSchema,
@@ -190,6 +191,93 @@ describe('Release prep (docs and videos) settings', () => {
     expect(
       (await ok<any>(owner('GET', `${base()}/settings`))).steps.find((x: any) => x.id === 'analyse').enabled,
     ).toBe(false);
+  });
+});
+
+describe('the user guide path setting', () => {
+  const lastPayload = async () => (await cmds()).at(-1)!.payload;
+  const put = (guidePaths?: Record<string, string>, over: Record<string, unknown> = {}) =>
+    owner('PUT', `${base()}/settings`, {
+      enabled: true,
+      steps: {},
+      ...(guidePaths ? { guidePaths } : {}),
+      ...over,
+    });
+
+  it('lists the repositories with no path and the default', async () => {
+    const s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.defaultGuidePath).toBe('docs/USER-GUIDE.md');
+    expect(s.repos).toEqual([{ id: w.repoId, name: expect.any(String), guidePath: null }]);
+  });
+
+  it('stores a normalised path, keeps it across a save without guidePaths, and clears it with an empty value', async () => {
+    expect((await put({ [w.repoId]: './docs//guide\\MANUAL.md ' })).status).toBe(200);
+    let s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBe('docs/guide/MANUAL.md');
+    const before = await events('ReleaseDocsPrepSettingsSet');
+    expect((await put({ [w.repoId]: 'docs/guide/MANUAL.md' })).status).toBe(200);
+    expect(await events('ReleaseDocsPrepSettingsSet')).toBe(before); // unchanged: no event
+    expect((await put(undefined, { enabled: false })).status).toBe(200); // a switch toggle keeps the paths
+    s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBe('docs/guide/MANUAL.md');
+    expect((await put({ [w.repoId]: '' })).status).toBe(200);
+    s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBeNull();
+  });
+
+  it('refuses bad paths with a readable 400, an unknown repository, and a member with 403', async () => {
+    for (const bad of ['../x.md', '/x.md', 'docs/x.txt', 'C:\\x.md']) {
+      const r = await put({ [w.repoId]: bad });
+      expect(r.status, bad).toBe(400);
+      expect(JSON.stringify(r.body)).toContain('invalid_guide_path');
+      expect(r.body.error.message).toContain(bad.trim());
+    }
+    const unknown = await put({ '019e3f6a-7b1c-7a2d-8c3e-0123456789ff': 'docs/a.md' });
+    expect(unknown.status).toBe(400);
+    expect(JSON.stringify(unknown.body)).toContain('unknown_repo');
+    const m = await addMember(w);
+    const denied = await w.t.req('PUT', `${base()}/settings`, {
+      cookie: m.cookie,
+      body: { enabled: true, steps: {}, guidePaths: { [w.repoId]: '../x.md' } },
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  it('sends the default and configured=false when unset, and the path with configured=true when set', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const plain = await lastPayload();
+    expect(plain.stepInput).toMatchObject({ guidePath: 'docs/USER-GUIDE.md', guidePathConfigured: false });
+  });
+
+  it('sends the configured path to a runner that has the capability, and fails the step before dispatch without it', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true } });
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text WHERE workstation_id=$1`,
+      [w.workstationId, RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY],
+    );
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const withCap = await lastPayload();
+    expect(withCap.stepInput).toMatchObject({
+      guidePath: 'docs/guide/MANUAL.md',
+      guidePathConfigured: true,
+      repoName: expect.any(String),
+    });
+  });
+
+  it('fails the guide step before dispatch on a workstation without the capability', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true } });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('needs a newer runner');
+    expect(run.failed.error).toContain('docs/guide/MANUAL.md');
   });
 });
 
