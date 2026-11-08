@@ -74,6 +74,16 @@ When unblocked, the build should look like this:
 5. Add a test (for example `packages/shared/test/blog-industry-articles.test.ts`, or a server test if `contentWarnings` is needed from `apps/server/src/commands/blog.ts`). It parses the file with `parseBlogArticle` and asserts no warnings. Leave the launch set, `blog-launch.test.ts` and the migration untouched.
 6. The super admin posts it in Platform > Blog. The tester checks the Help blog list and BlogArticleView.
 
+## Re-check, 2026-11-08 (second design pass)
+
+The card came back to design with nothing new attached. Re-checked against `origin/release/1.6.0` at 285e8e1d:
+
+- `git diff HEAD origin/release/1.6.0` is still empty for the rule packs, journey templates, business roles, brief playbooks, the blog launch set, the launch migration and the shared blog package.
+- `git grep -i "real estate|estate agen"` on release/1.6.0 finds only `packages/shared/src/ledger/rule-packs.ts`, its test and the ledger API type. There is still no real estate playbook or role.
+- There is still no `industry-roadmap.md`, game plan, pilot notes or consent record in either knowledge vault, and the card has no attachments.
+
+The decision on the card (keep blocked until the owner or BA attaches the roadmap, anonymised pilot notes and the consent record) still applies. The findings, placement and build design above are unchanged. The card must not go to build until that material is attached.
+
 ## Acceptance criteria mapping
 
 | AC | Status |
