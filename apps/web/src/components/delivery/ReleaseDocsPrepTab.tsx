@@ -78,6 +78,17 @@ function ProjectPrep({ item }: { item: ReleaseDocsPrepOverviewItem }) {
               Only the project Owner or an organization Owner or Admin runs release prep.
             </p>
           )}
+          {item.autoStart && (
+            <p className="text-sm text-subtle" data-testid="release-docs-prep-auto">
+              Starts automatically when the release is ready on the test site.
+            </p>
+          )}
+          {item.readiness && <Readiness readiness={item.readiness} />}
+          {item.autoStartBlocked && (
+            <Callout tone="warning" data-testid="release-docs-prep-auto-blocked">
+              Release prep did not start by itself: {item.autoStartBlocked}
+            </Callout>
+          )}
           {r && <RunView run={r} />}
           {item.state === 'not_run' && (
             <p className="text-sm text-subtle">Release prep has not run for this release yet.</p>
@@ -155,11 +166,44 @@ export function stepReports(steps: StepRow[]): { step: string; report: Record<st
   return [...out.entries()].map(([step, report]) => ({ step, report }));
 }
 
+function Readiness({ readiness }: { readiness: NonNullable<ReleaseDocsPrepOverviewItem['readiness']> }) {
+  const unchecked = readiness.repos.filter((x) => x.state === 'not_checked');
+  return (
+    <div className="flex flex-col gap-1 text-sm" data-testid="release-docs-prep-readiness">
+      {readiness.ready ? (
+        <span className="font-medium text-success">Ready on the test site</span>
+      ) : (
+        <>
+          <span className="font-medium text-fg">Not ready on the test site yet</span>
+          <ul className="flex list-disc flex-col gap-1 pl-5">
+            {readiness.reasons.map((reason) => (
+              <li key={reason} className="break-words">
+                {reason}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {unchecked.map((x) => (
+        <span key={x.repoId} className="text-xs text-subtle break-words">
+          {x.reason}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** "Started automatically" or "Started by <name>". */
+export function startedText(run: Pick<ReleaseDocsPrepRunDto, 'trigger' | 'startedByName'>): string {
+  if (run.trigger === 'auto') return 'Started automatically';
+  return `Started by ${run.startedByName ?? 'someone'}`;
+}
+
 function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
   return (
     <div className="flex flex-col gap-3" data-testid="release-docs-prep-run">
-      <p className="text-xs text-subtle">
-        Started {formatDate(run.startedAt)}
+      <p className="text-xs text-subtle" data-testid="release-docs-prep-started">
+        {startedText(run)} {formatDate(run.startedAt)}
         {run.finishedAt ? ` · finished ${formatDate(run.finishedAt)}` : ''}
         {run.trigger === 'retry' ? ' · a retry' : ''}
         {run.skippedAt ? ` · skipped ${formatDate(run.skippedAt)}` : ''}

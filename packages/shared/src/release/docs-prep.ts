@@ -136,9 +136,15 @@ export interface ReleaseDocsPrepSettings {
   steps: Record<string, boolean>;
   /** Repository id to its user guide path (normalised); absent: the default. */
   guidePaths?: Record<string, string>;
+  /** Start a run by itself when the release is ready on the test site. Absent: off. */
+  autoStart?: boolean;
 }
 
-export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: false, steps: {} };
+export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = {
+  enabled: false,
+  steps: {},
+  autoStart: false,
+};
 
 /** The registered steps that are ticked (an unticked-by-default registry entry follows `defaultOn`). */
 export const enabledReleaseDocsPrepSteps = (

@@ -13,6 +13,7 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
   const q = useReleaseDocsPrepSettings(projectId);
   const save = useSaveReleaseDocsPrepSettings(projectId);
   const [enabled, setEnabled] = useState(false);
+  const [autoStart, setAutoStart] = useState(false);
   const [steps, setSteps] = useState<Record<string, boolean>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // The repository whose path save failed: its error is shown under its field, not in the box below.
@@ -26,6 +27,7 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!data) return;
     setEnabled(data.enabled === true);
+    setAutoStart(data.autoStart === true);
     setSteps(Object.fromEntries((Array.isArray(data.steps) ? data.steps : []).map((s) => [s.id, s.enabled])));
     setDrafts(
       Object.fromEntries((Array.isArray(data.repos) ? data.repos : []).map((r) => [r.id, r.guidePath ?? ''])),
@@ -40,10 +42,12 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
         <ErrorBox error={q.error} onRetry={() => q.refetch()} />
       </Panel>
     );
-  const change = (next: { enabled: boolean; steps: Record<string, boolean> }) => {
+  const change = (next: { enabled: boolean; steps: Record<string, boolean>; autoStart?: boolean }) => {
     setEnabled(next.enabled);
     setSteps(next.steps);
+    if (next.autoStart !== undefined) setAutoStart(next.autoStart);
     setFailedRepo(null);
+    // autoStart is sent only when it changes; the server keeps the saved value otherwise.
     save.mutate(next);
   };
   const saveGuidePath = (id: string, saved: string | null) => {
@@ -79,6 +83,30 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
           />
           <span className="text-sm font-medium text-fg">Run release prep before a release ships</span>
         </label>
+        {Array.isArray(data?.steps) && (
+          <label className={row}>
+            <input
+              type="checkbox"
+              aria-describedby="prep-auto-start-help"
+              data-testid="release-docs-prep-auto-start"
+              className="mt-0.5 size-5"
+              checked={autoStart}
+              disabled={!canEdit || !enabled || save.isPending}
+              onChange={(e) => change({ enabled, steps, autoStart: e.target.checked })}
+            />
+            <span className="flex flex-col">
+              <span className="text-sm font-medium text-fg">
+                Start automatically when the release is ready on the test site
+              </span>
+              <span id="prep-auto-start-help" className="text-xs text-subtle">
+                Release prep starts by itself once the release-branch head of every repository is live and
+                healthy on its test site and meets the live site's release requirements (release hours and
+                freeze do not count). If a run already exists for this release, nothing starts; use Run or
+                Retry.
+              </span>
+            </span>
+          </label>
+        )}
         <fieldset className="flex flex-col" disabled={!canEdit || save.isPending}>
           <legend className="text-sm font-medium text-fg">Steps</legend>
           {listed.map((s) => (

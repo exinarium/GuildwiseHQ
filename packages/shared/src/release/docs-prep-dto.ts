@@ -58,6 +58,8 @@ export const ReleaseDocsPrepSettingsSchema = z.object({
   steps: z.record(z.string().max(40), z.boolean()),
   /** Per repository id: the user guide path; '' clears it. Absent: unchanged. Only the keys sent change. */
   guidePaths: z.record(z.uuid(), z.string().max(400)).optional(),
+  /** Start automatically when the release is ready on the test site. Absent: unchanged. */
+  autoStart: z.boolean().optional(),
 });
 
 export const ReleaseDocsPrepSettingsDtoSchema = z.object({
@@ -72,6 +74,7 @@ export const ReleaseDocsPrepSettingsDtoSchema = z.object({
     }),
   ),
   canEdit: z.boolean(),
+  autoStart: z.boolean().default(false),
   repos: z
     .array(z.object({ id: z.string(), name: z.string(), guidePath: z.string().nullable() }))
     .default([]),
@@ -86,9 +89,11 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
   projectId: z.string(),
   releaseBranch: z.string(),
   status: z.enum(['running', 'passed', 'failed', 'skipped']),
-  trigger: z.enum(['manual', 'retry', 'skip']),
+  trigger: z.enum(['manual', 'retry', 'skip', 'auto']),
   retryOf: z.string().nullable(),
   startedBy: z.string().nullable(),
+  /** Display name of the user who started it; null for an automatic run or an unknown user. */
+  startedByName: z.string().nullable().default(null),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   failed: z
@@ -143,6 +148,27 @@ export const ReleaseDocsPrepOverviewItemSchema = z.object({
   state: z.enum(['off', 'not_run', 'running', 'passed', 'failed', 'skipped']),
   canAct: z.boolean(),
   run: ReleaseDocsPrepRunDtoSchema.nullable(),
+  /** The run starts by itself when the release is ready on the test site. */
+  autoStart: z.boolean().default(false),
+  /** Whether the release is ready on the test site; null when automatic start is off or there is no release branch. */
+  readiness: z
+    .object({
+      ready: z.boolean(),
+      repos: z.array(
+        z.object({
+          repoId: z.string(),
+          repoName: z.string(),
+          state: z.enum(['ready', 'not_ready', 'not_checked']),
+          env: z.string().nullable(),
+          reason: z.string().nullable(),
+        }),
+      ),
+      reasons: z.array(z.string()),
+    })
+    .nullable()
+    .default(null),
+  /** Why the release is ready but the run did not start by itself (the manual start's sentence). */
+  autoStartBlocked: z.string().nullable().default(null),
 });
 export type ReleaseDocsPrepOverviewItem = z.infer<typeof ReleaseDocsPrepOverviewItemSchema>;
 

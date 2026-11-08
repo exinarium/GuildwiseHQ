@@ -39,8 +39,9 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { loadReleaseReadiness } from './docs-prep-auto.ts';
 import { storedStepOutput } from './docs-prep-changelog.ts';
 import {
   PHASE_FAILURE_HOOKS,
@@ -77,11 +78,21 @@ function settingsOf(p: Row): {
   enabled: boolean;
   steps: Record<string, boolean>;
   guidePaths: Record<string, string>;
+  autoStart: boolean;
 } {
-  const s = (p.release_docs_prep ?? {}) as { enabled?: unknown; steps?: Record<string, unknown> };
+  const s = (p.release_docs_prep ?? {}) as {
+    enabled?: unknown;
+    steps?: Record<string, unknown>;
+    autoStart?: unknown;
+  };
   const steps: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(s.steps ?? {})) if (typeof v === 'boolean') steps[k] = v;
-  return { enabled: s.enabled === true, steps, guidePaths: configuredGuidePaths(p.release_docs_prep) };
+  return {
+    enabled: s.enabled === true,
+    steps,
+    guidePaths: configuredGuidePaths(p.release_docs_prep),
+    autoStart: s.autoStart === true,
+  };
 }
 
 async function liveRepos(db: Queryable, projectId: string): Promise<Array<{ id: string; name: string }>> {
@@ -111,6 +122,7 @@ export async function getReleaseDocsPrepSettings(
       ...(d.requires ? { requires: d.requires } : {}),
     })),
     canEdit: await canManage(ctx.pool, user.id, p),
+    autoStart: s.autoStart,
     repos: (await liveRepos(ctx.pool, projectId)).map((r) => ({
       id: r.id,
       name: r.name,
@@ -124,7 +136,12 @@ export async function setReleaseDocsPrepSettings(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
-  input: { enabled: boolean; steps: Record<string, boolean>; guidePaths?: Record<string, string> },
+  input: {
+    enabled: boolean;
+    steps: Record<string, boolean>;
+    guidePaths?: Record<string, string>;
+    autoStart?: boolean;
+  },
 ): Promise<void> {
   const unknown = Object.keys(input.steps).filter((id) => !isReleaseDocsPrepStep(id));
   await withAppendTx(ctx.pool, async (tx) => {
@@ -151,8 +168,10 @@ export async function setReleaseDocsPrepSettings(
     const steps = Object.fromEntries(
       releaseDocsPrepSteps().map((d) => [d.id, input.steps[d.id] ?? before.steps[d.id] ?? d.defaultOn]),
     );
+    const autoStart = input.autoStart ?? before.autoStart;
     const same =
       samePaths &&
+      before.autoStart === autoStart &&
       before.enabled === input.enabled &&
       releaseDocsPrepSteps().every((d) => (before.steps[d.id] ?? d.defaultOn) === steps[d.id]);
     if (same) return;
@@ -162,7 +181,7 @@ export async function setReleaseDocsPrepSettings(
           streamId: streamId.project(projectId),
           event: {
             type: 'ReleaseDocsPrepSettingsSet',
-            payload: { projectId, enabled: input.enabled, steps, guidePaths, setBy: user.id },
+            payload: { projectId, enabled: input.enabled, steps, guidePaths, autoStart, setBy: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
@@ -222,7 +241,7 @@ export function docsPrepReleaseBranch(
   return projectBranch ?? first ?? null;
 }
 
-async function releaseBranchOf(
+export async function releaseBranchOf(
   db: Queryable,
   projectId: string,
   projectBranch: string | null,
@@ -230,7 +249,7 @@ async function releaseBranchOf(
   return docsPrepReleaseBranch(projectBranch, await docsPrepRepos(db, projectId));
 }
 
-async function prepWorkstation(db: Queryable, repoId: string, userId: string): Promise<string | null> {
+async function prepWorkstation(db: Queryable, repoId: string, userId: string | null): Promise<string | null> {
   const ws = await one(
     db,
     `SELECT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
@@ -246,6 +265,176 @@ async function prepWorkstation(db: Queryable, repoId: string, userId: string): P
 
 const timeOf = (d: Date | string): string => new Date(d).toISOString().slice(11, 16);
 
+type Picked = { repoId: string; branch: string; mainBranch: string | null; workstationId: string };
+
+/**
+ * Every check a start makes, in order, with the sentence the manager sees. `p` is the project row (with
+ * `simulation`); the caller holds its lock when it goes on to start. Throws the conflict that blocks the start.
+ */
+async function startChecks(
+  db: Queryable,
+  p: Row,
+  userId: string | null,
+  retryOf?: string,
+): Promise<{ branch: string; picked: Picked[] }> {
+  const projectId = String(p.id);
+  if (!settingsOf(p).enabled)
+    throw conflict('release_docs_prep_off', `${NAME} is switched off for this project.`);
+  const missing = missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps(settingsOf(p)));
+  if (missing) throw conflict('release_docs_prep_requires', missing.message);
+  const repos = isResearchStage(p.workflow_key) || p.simulation ? [] : await docsPrepRepos(db, projectId);
+  const branch: string | null = docsPrepReleaseBranch(p.working_branch ?? null, repos);
+  if (repos.length === 0 || !branch)
+    throw conflict(
+      'no_release_branch',
+      'No repository of this project has a release branch that differs from its main branch, so there is nothing to prepare.',
+    );
+  const running = await one(
+    db,
+    `SELECT started_at FROM release_docs_prep_runs WHERE project_id=$1 AND release_branch=$2 AND status='running'`,
+    [projectId, branch],
+  );
+  if (running)
+    throw conflict(
+      'release_docs_prep_running',
+      `${NAME} is already running for ${branch}, started at ${timeOf(running.started_at)}. Wait for it to finish.`,
+    );
+  if (retryOf) {
+    const latest = await latestRun(db, projectId, branch);
+    if (!latest || latest.status !== 'failed' || latest.id !== retryOf)
+      throw conflict('not_failed', 'Only the latest run, when it failed, can be retried.');
+  }
+  const approved = await one(
+    db,
+    `SELECT 1 FROM release_proposals WHERE project_id=$1 AND state='approved' LIMIT 1`,
+    [projectId],
+  );
+  if (approved)
+    throw conflict(
+      'release_shipping',
+      `A release is being shipped for ${branch}. ${NAME} belongs before the approval.`,
+    );
+  const picked: Picked[] = [];
+  for (const r of repos) {
+    const ws = await prepWorkstation(db, r.id, userId);
+    if (!ws) {
+      const clone = await one(db, 'SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [r.id]);
+      throw clone
+        ? conflict(
+            'runner_too_old',
+            `The workstation that has ${r.name} is offline or needs a newer runner. Start or update the runner and try again.`,
+          )
+        : conflict(
+            'no_clone',
+            `No workstation has ${r.name} yet. Wait for the clone to finish, then try again.`,
+          );
+    }
+    picked.push({ repoId: r.id, branch: r.branch, mainBranch: r.main_branch, workstationId: ws });
+  }
+  return { branch, picked };
+}
+
+/** Loads and locks the project row a start works on. */
+export async function lockProjectForStart(tx: Queryable, projectId: string): Promise<Row> {
+  const p = await one(
+    tx,
+    `SELECT p.*, o.simulation FROM projects p LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id=$1 FOR UPDATE OF p`,
+    [projectId],
+  );
+  if (!p) throw notFound('project not found');
+  return p;
+}
+
+/** Who starts a run: a manager (a start or a retry), or the automatic start when the release is ready. */
+export type DocsPrepStarter =
+  | { kind: 'user'; userId: string; retryOf?: string }
+  | { kind: 'auto'; heads: Record<string, string>; readyKey: string };
+
+/** Runs every check and appends the Started event in the caller's transaction (project row already locked). */
+export async function startRunInTx(
+  ctx: Ctx,
+  tx: Tx,
+  p: Row,
+  starter: DocsPrepStarter,
+): Promise<{ runId: string; deliver: string[] }> {
+  const projectId = String(p.id);
+  const userId = starter.kind === 'user' ? starter.userId : null;
+  const retryOf = starter.kind === 'user' ? starter.retryOf : undefined;
+  const { branch, picked } = await startChecks(tx, p, userId, retryOf);
+  const runId = randomUUID();
+  const heads =
+    starter.kind === 'auto'
+      ? starter.heads
+      : await knownHeads(
+          tx,
+          picked.map((x) => x.repoId),
+        );
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.releaseDocsPrep(runId),
+        event: {
+          type: 'ReleaseDocsPrepStarted',
+          payload: {
+            runId,
+            projectId,
+            releaseBranch: branch,
+            steps: enabledReleaseDocsPrepSteps(settingsOf(p)).map((s) => s.id),
+            repos: picked,
+            trigger: retryOf ? 'retry' : starter.kind === 'auto' ? 'auto' : 'manual',
+            ...(retryOf ? { retryOf } : {}),
+            startedBy: userId,
+            ...(Object.keys(heads).length > 0 ? { heads } : {}),
+            ...(starter.kind === 'auto' ? { readyKey: starter.readyKey } : {}),
+          },
+        },
+        actor: userId ? userActor(userId) : SYSTEM_ACTOR,
+        scope: projectScope(p.org_id, projectId),
+      },
+    ],
+    { tx },
+  );
+  return { runId, deliver: await advance(ctx, tx, runId) };
+}
+
+/** The release-branch heads the facts know for these repositories. */
+async function knownHeads(db: Queryable, repoIds: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const id of repoIds) {
+    const f = await loadFacts(db, id);
+    if (f?.headSha) out[id] = f.headSha;
+  }
+  return out;
+}
+
+/**
+ * Why a start would be refused right now, with the manual start's own sentence; null when it would go ahead.
+ * Read only: nothing is started or locked.
+ */
+export async function startBlocker(
+  db: Queryable,
+  projectId: string,
+): Promise<{ code: string; message: string } | null> {
+  const p = await one(
+    db,
+    `SELECT p.*, o.simulation FROM projects p LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id=$1`,
+    [projectId],
+  );
+  if (!p) return null;
+  try {
+    await startChecks(db, p, null);
+    return null;
+  } catch (err) {
+    if (err instanceof HttpError) return { code: err.code, message: err.message };
+    throw err;
+  }
+}
+
+export function deliverAll(ctx: Ctx, workstations: string[]): void {
+  for (const w of new Set(workstations))
+    void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
+}
+
 /** Starts a run (or a retry of a failed one). One at a time per release; refused while a ship is approved. */
 export async function startReleaseDocsPrep(
   ctx: Ctx,
@@ -253,97 +442,17 @@ export async function startReleaseDocsPrep(
   projectId: string,
   opts: { retryOf?: string } = {},
 ): Promise<{ runId: string }> {
-  const deliver: string[] = [];
-  const runId = randomUUID();
-  await withAppendTx(ctx.pool, async (tx) => {
+  const out = await withAppendTx(ctx.pool, async (tx) => {
     await requireManager(tx, user, projectId);
-    const p = await one(
-      tx,
-      `SELECT p.*, o.simulation FROM projects p LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id=$1 FOR UPDATE OF p`,
-      [projectId],
-    );
-    if (!p) throw notFound('project not found');
-    if (!settingsOf(p).enabled)
-      throw conflict('release_docs_prep_off', `${NAME} is switched off for this project.`);
-    const missing = missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps(settingsOf(p)));
-    if (missing) throw conflict('release_docs_prep_requires', missing.message);
-    const repos = isResearchStage(p.workflow_key) || p.simulation ? [] : await docsPrepRepos(tx, projectId);
-    const branch: string | null = docsPrepReleaseBranch(p.working_branch ?? null, repos);
-    if (repos.length === 0 || !branch)
-      throw conflict(
-        'no_release_branch',
-        'No repository of this project has a release branch that differs from its main branch, so there is nothing to prepare.',
-      );
-    const running = await one(
-      tx,
-      `SELECT started_at FROM release_docs_prep_runs WHERE project_id=$1 AND release_branch=$2 AND status='running'`,
-      [projectId, branch],
-    );
-    if (running)
-      throw conflict(
-        'release_docs_prep_running',
-        `${NAME} is already running for ${branch}, started at ${timeOf(running.started_at)}. Wait for it to finish.`,
-      );
-    if (opts.retryOf) {
-      const latest = await latestRun(tx, projectId, branch);
-      if (!latest || latest.status !== 'failed' || latest.id !== opts.retryOf)
-        throw conflict('not_failed', 'Only the latest run, when it failed, can be retried.');
-    }
-    const approved = await one(
-      tx,
-      `SELECT 1 FROM release_proposals WHERE project_id=$1 AND state='approved' LIMIT 1`,
-      [projectId],
-    );
-    if (approved)
-      throw conflict(
-        'release_shipping',
-        `A release is being shipped for ${branch}. ${NAME} belongs before the approval.`,
-      );
-    const picked: { repoId: string; branch: string; mainBranch: string | null; workstationId: string }[] = [];
-    for (const r of repos) {
-      const ws = await prepWorkstation(tx, r.id, user.id);
-      if (!ws) {
-        const clone = await one(tx, 'SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [r.id]);
-        throw clone
-          ? conflict(
-              'runner_too_old',
-              `The workstation that has ${r.name} is offline or needs a newer runner. Start or update the runner and try again.`,
-            )
-          : conflict(
-              'no_clone',
-              `No workstation has ${r.name} yet. Wait for the clone to finish, then try again.`,
-            );
-      }
-      picked.push({ repoId: r.id, branch: r.branch, mainBranch: r.main_branch, workstationId: ws });
-    }
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.releaseDocsPrep(runId),
-          event: {
-            type: 'ReleaseDocsPrepStarted',
-            payload: {
-              runId,
-              projectId,
-              releaseBranch: branch,
-              steps: enabledReleaseDocsPrepSteps(settingsOf(p)).map((s) => s.id),
-              repos: picked,
-              trigger: opts.retryOf ? 'retry' : 'manual',
-              ...(opts.retryOf ? { retryOf: opts.retryOf } : {}),
-              startedBy: user.id,
-            },
-          },
-          actor: userActor(user.id),
-          scope: projectScope(p.org_id, projectId),
-        },
-      ],
-      { tx },
-    );
-    deliver.push(...(await advance(ctx, tx, runId)));
+    const p = await lockProjectForStart(tx, projectId);
+    return startRunInTx(ctx, tx, p, {
+      kind: 'user',
+      userId: user.id,
+      ...(opts.retryOf ? { retryOf: opts.retryOf } : {}),
+    });
   });
-  for (const w of new Set(deliver))
-    void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
-  return { runId };
+  deliverAll(ctx, out.deliver);
+  return { runId: out.runId };
 }
 
 export const retryReleaseDocsPrep = (
@@ -393,7 +502,12 @@ export async function skipReleaseDocsPrep(
  * project's repositories belongs to an earlier release and counts as no run (same rule as the ship gate); the gate
  * passes `any` and applies the rule per repository itself.
  */
-async function latestRun(db: Queryable, projectId: string, branch: string, any = false): Promise<Row | null> {
+export async function latestRun(
+  db: Queryable,
+  projectId: string,
+  branch: string,
+  any = false,
+): Promise<Row | null> {
   const fresh = any
     ? ''
     : `AND started_at >= COALESCE((SELECT MAX(s.published_at) FROM release_ships s JOIN project_repos pr ON pr.id = s.repo_id
@@ -956,6 +1070,9 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
   const steps = await rows(db, 'SELECT * FROM release_docs_prep_steps WHERE run_id=$1', [run.id]);
   const order = new Map((run.steps as string[]).map((s, i) => [s, i]));
   const failedRepo = run.failed_repo_id ? repos.find((r) => r.repo_id === run.failed_repo_id) : undefined;
+  const starter = run.started_by
+    ? await one(db, 'SELECT display_name FROM users WHERE id=$1', [run.started_by])
+    : null;
   return {
     id: run.id,
     projectId: run.project_id,
@@ -964,6 +1081,7 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
     trigger: run.trigger,
     retryOf: run.retry_of ?? null,
     startedBy: run.started_by ?? null,
+    startedByName: starter?.display_name ?? null,
     startedAt: iso(run.started_at) as string,
     finishedAt: iso(run.finished_at),
     failed: run.failed_step
@@ -1053,8 +1171,13 @@ export async function releaseDocsPrepOverview(
   for (const p of projects) {
     const branch = await releaseBranchOf(ctx.pool, p.id, p.working_branch ?? null);
     const run = branch ? await latestRun(ctx.pool, p.id, branch) : null;
-    const enabled = settingsOf(p).enabled;
+    const settings = settingsOf(p);
+    const enabled = settings.enabled;
     const state: ReleaseDocsPrepState = run ? run.status : enabled ? 'not_run' : 'off';
+    const autoStart = enabled && settings.autoStart;
+    const readiness = autoStart && branch ? await loadReleaseReadiness(ctx.pool, p, ctx.clock.now()) : null;
+    const autoStartBlocked =
+      readiness?.ready && !run ? ((await startBlocker(ctx.pool, p.id))?.message ?? null) : null;
     out.push({
       projectId: p.id,
       key: p.key,
@@ -1064,6 +1187,11 @@ export async function releaseDocsPrepOverview(
       state,
       canAct: enabled && (await canManage(ctx.pool, user.id, p)),
       run: run ? await runDto(ctx.pool, run) : null,
+      autoStart,
+      readiness: readiness
+        ? { ready: readiness.ready, repos: readiness.repos, reasons: readiness.reasons }
+        : null,
+      autoStartBlocked,
     });
   }
   return out;

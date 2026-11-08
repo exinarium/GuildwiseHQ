@@ -706,6 +706,36 @@ function viewsOf(recipe: Row | undefined, targets: Row[]): EnvView[] {
   });
 }
 
+/**
+ * The project's environments with their role (the same rule as the Environments page), whether their place is a
+ * production one, and the recipe environment that holds the gate and the repository (approved recipe first).
+ */
+export async function environmentRoles(
+  db: Queryable,
+  projectId: string,
+): Promise<
+  Array<{
+    name: string;
+    label: string;
+    role: 'test' | 'live' | 'other';
+    production: boolean;
+    recipeEnv: { name: string; gate?: unknown; repo?: string } | null;
+  }>
+> {
+  const recipe = await loadRecipeRow(db, projectId);
+  const targets = await targetRows(db, projectId);
+  const rec = (recipe?.approved_parsed ?? recipe?.parsed) as {
+    environments?: Array<{ name: string; gate?: unknown; repo?: string }>;
+  } | null;
+  return viewsOf(recipe, targets).map((v) => ({
+    name: v.name,
+    label: v.label,
+    role: v.role,
+    production: !!targets.find((t) => lc(t.name) === lc(v.target))?.production,
+    recipeEnv: rec?.environments?.find((e) => e.name === v.name) ?? null,
+  }));
+}
+
 /** Questions of the open deploy proposal that still need an answer, by the environment they belong to. */
 function openQuestionsByEnv(proposals: Array<ReturnType<typeof ProposalDtoSchema.parse>>): {
   total: number;

@@ -28,6 +28,7 @@ export function useSaveReleaseDocsPrepSettings(projectId: string) {
       enabled: boolean;
       steps: Record<string, boolean>;
       guidePaths?: Record<string, string>;
+      autoStart?: boolean;
     }) =>
       put<ReleaseDocsPrepSettingsDto>(
         `/projects/${projectId}/release-docs-prep/settings`,
