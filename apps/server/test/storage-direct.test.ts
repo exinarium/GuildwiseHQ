@@ -34,7 +34,7 @@ describe('page rules', () => {
 });
 
 describe('DirectUploads', () => {
-  const make = (online = true) => {
+  const make = (online = true, verifyTimeoutMs?: number) => {
     const sent: Array<{ type: string; payload: any }> = [];
     const d = new DirectUploads({
       lookup: async () => ({ kind: 's3', workstationId: 'ws' }),
@@ -42,6 +42,7 @@ describe('DirectUploads', () => {
       send: (_ws, type, payload) => (sent.push({ type, payload }), true),
       log: () => undefined,
       answerTimeoutMs: 50,
+      ...(verifyTimeoutMs ? { verifyTimeoutMs } : {}),
     });
     return { d, sent };
   };
@@ -108,5 +109,41 @@ describe('DirectUploads', () => {
       grant: { method: 'PUT', url: 'https://s3.example.com/x', headers: {}, chunkBytes: null, expiresAt: 1 },
     });
     expect(await p).toMatchObject({ ok: false, error: { code: 'timeout' } });
+  });
+  const opened = async (d: DirectUploads, sent: Array<{ type: string; payload: any }>) => {
+    d.onReport('ws', () => 's3', [
+      { connectionId: 'c', uploadOrigin: 'https://s3.example.com', reason: null },
+    ]);
+    const p = d.open(req);
+    await new Promise((r) => setTimeout(r, 5));
+    const grantId = sent[0]?.payload.grantId;
+    d.onResult('ws', {
+      grantId,
+      ok: true,
+      grant: { method: 'PUT', url: 'https://s3.example.com/x', headers: {}, chunkBytes: null, expiresAt: 1 },
+    });
+    await p;
+    return grantId as string;
+  };
+  const ref = { v: 1, connectionId: 'c', kind: 's3', path: 'p', size: 1, sha256: 'a'.repeat(64) } as any;
+
+  it('waits for the check of a big file longer than the control answer wait', async () => {
+    const { d, sent } = make(true, 2000);
+    const id = await opened(d, sent);
+    const v = d.finish(id, { size: 1, sha256: 'a'.repeat(64) });
+    await new Promise((r) => setTimeout(r, 120)); // past the 50 ms answer wait
+    d.onVerified('ws', { grantId: id, ok: true, reference: ref });
+    expect(await v).toMatchObject({ ok: true });
+    expect(sent.some((m) => m.type === 'storage.grant.cancel')).toBe(false);
+  });
+
+  it('tells the runner to drop the staged file when the check never answers', async () => {
+    const { d, sent } = make(true, 40);
+    const id = await opened(d, sent);
+    expect(await d.finish(id, { size: 1, sha256: 'a'.repeat(64) })).toMatchObject({
+      ok: false,
+      error: { code: 'timeout' },
+    });
+    expect(sent.find((m) => m.type === 'storage.grant.cancel')?.payload).toMatchObject({ grantId: id });
   });
 });

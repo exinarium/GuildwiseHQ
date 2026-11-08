@@ -80,10 +80,15 @@ export async function directUpload(file: File, g: DirectGrant, hooks: Hooks): Pr
   let sent = 0;
   let started = false;
   let tries = 0;
+  // Bytes the provider side took (upload progress) show the request got through, so a later drop is an interruption.
+  const seen = (n: number, shown: number) => {
+    if (n > 0) started = true;
+    hooks.onProgress(shown, total);
+  };
   for (;;) {
     try {
       if (g.chunkBytes === null) {
-        const a = await send(g, file, g.headers, (n) => hooks.onProgress(n, total), make);
+        const a = await send(g, file, g.headers, (n) => seen(n, n), make);
         started = true;
         if (a.status >= 200 && a.status < 300) {
           hooks.onProgress(total, total);
@@ -98,7 +103,7 @@ export async function directUpload(file: File, g: DirectGrant, hooks: Hooks): Pr
           g,
           file.slice(sent, end),
           { 'content-range': `bytes ${sent}-${end - 1}/${total}` },
-          (n) => hooks.onProgress(sent + n, total),
+          (n) => seen(n, sent + n),
           make,
         );
         started = true;

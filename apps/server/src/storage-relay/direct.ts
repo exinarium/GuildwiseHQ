@@ -46,6 +46,8 @@ export interface DirectUploadsDeps {
   /** One log line: ids, sizes, outcome. Never a URL. */
   log(entry: { connectionId: string; op: string; outcome: string; latencyMs: number }): void;
   answerTimeoutMs?: number;
+  /** How long the check of a staged object may take (the runner allows 10 minutes; it reads and scans the whole file). */
+  verifyTimeoutMs?: number;
   now?: () => number;
 }
 
@@ -142,12 +144,18 @@ export class DirectUploads {
   }
 
   // ------------------------------------------------------------------------------------ requests to a runner
-  private wait<T>(map: Map<string, Waiter<T>>, id: string, workstationId: string, fallback: T): Promise<T> {
+  private wait<T>(
+    map: Map<string, Waiter<T>>,
+    id: string,
+    workstationId: string,
+    fallback: T,
+    timeoutMs: number = this.deps.answerTimeoutMs ?? 20_000,
+  ): Promise<T> {
     return new Promise<T>((resolve) => {
       const t = setTimeout(() => {
         map.delete(id);
         resolve(fallback);
-      }, this.deps.answerTimeoutMs ?? 20_000);
+      }, timeoutMs);
       t.unref?.();
       map.set(id, {
         workstationId,
@@ -256,10 +264,17 @@ export class DirectUploads {
         ok: false,
         error: storageError('invalid', 'This upload is not open any more.'),
       });
-    const answer = this.wait(this.verifyWait, grantId, g.workstationId, {
+    const timedOut: Verified = {
       ok: false,
       error: storageError('timeout', 'The storage did not answer in time.'),
-    } as Verified);
+    };
+    const answer = this.wait(
+      this.verifyWait,
+      grantId,
+      g.workstationId,
+      timedOut,
+      this.deps.verifyTimeoutMs ?? 11 * 60_000,
+    );
     const sent = this.deps.send(g.workstationId, 'storage.grant.finish', {
       grantId,
       size: body.size,
@@ -274,6 +289,9 @@ export class DirectUploads {
     }
     return answer.then((v) => {
       this.grants.delete(grantId);
+      // Nothing came back in time: tell the runner to drop the staged object, so a late promotion is not left behind.
+      if (v === timedOut)
+        this.deps.send(g.workstationId, 'storage.grant.cancel', { grantId, reason: 'expired' });
       this.deps.log({
         connectionId: g.connectionId,
         op: 'verify',
