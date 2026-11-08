@@ -12,7 +12,7 @@ interface Req {
 
 /** A scripted XMLHttpRequest: each request gets the next answer, or fails like a network error. */
 function fakeXhr(
-  answers: Array<{ status: number; body?: string; range?: string; etag?: string } | 'network'>,
+  answers: Array<{ status: number; body?: string; range?: string; etag?: string } | 'network' | 'dropped'>,
 ) {
   const reqs: Req[] = [];
   const make = () => {
@@ -34,6 +34,10 @@ function fakeXhr(
         reqs.push({ method: this.method, url: this.url, headers: { ...this.headers }, size: blob.size });
         const a = answers.shift();
         queueMicrotask(() => {
+          if (a === 'dropped') {
+            this.upload.onprogress?.({ loaded: Math.floor(blob.size / 2) });
+            return this.onerror();
+          }
           if (a === undefined || a === 'network') return this.onerror();
           this.answer = a;
           this.status = a.status;
@@ -152,6 +156,17 @@ describe('direct upload to the provider', () => {
       }),
     ).rejects.toBeInstanceOf(DirectBlockedError);
     expect(x.reqs).toHaveLength(1);
+  });
+  it('a drop after bytes were accepted on the first request is an interruption and resumes, not "blocked"', async () => {
+    const x = fakeXhr(['dropped', { status: 200, etag: '"E"' }]);
+    const r = await directUpload(file(10), grant(null), {
+      xhr: x.make,
+      wait: noWait,
+      offset: async () => 0,
+      onProgress: () => undefined,
+    });
+    expect(r).toEqual({ etag: 'E' });
+    expect(x.reqs).toHaveLength(2);
   });
 });
 
