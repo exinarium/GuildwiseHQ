@@ -106,3 +106,31 @@ The card came back to design again, and still nothing has changed:
 - There are still no card attachments.
 
 The planner has twice decided to keep the card blocked and not send it back to design (decisions of 2026-11-08). Since the card keeps coming back anyway, the question now goes to the owner, the only person who can change things: attach the inputs, re-scope the card, or close it. Until then, the design above is ready for build as it stands.
+
+## Owner decision and final outcome, 2026-11-08 (fourth design pass)
+
+The owner has now decided for the whole group of industry articles (ledger 75e14977, answer to the GWP-162 question): **close GWP-162, GWP-163 and GWP-164 without an article, or move them back to the backlog until pilots exist.** This is option C in the table above.
+
+Re-check for this pass:
+
+- `origin/release/1.6.0` is still at `5471bd37`. There are no new commits since the third pass.
+- There are still no card attachments, and the vaults still have no `industry-roadmap.md`, pilot notes or consent record.
+
+Outcome:
+
+- **No article is written and no file other than this report changes.** The build stage has nothing to implement. The builder must not create `docs/blog/industry/accounting.md` or the shared industry-article test for this card.
+- The card should be closed, or returned to the backlog, as the owner decided. The builder hands it on with no code change, and the BA or owner closes it at finalize.
+- If pilots run later, the card can be raised again from the backlog. The design under "Recommendation and design" (source at `docs/blog/industry/accounting.md`, tags from `BLOG_TAGS`, manual post in Platform > Blog, names limited to the pieces in table (a)) still applies then, and must be re-checked against the release at that time.
+
+### Acceptance criteria under this outcome
+
+| AC | Status |
+| --- | --- |
+| Findings recorded on the card | Met: this report, the handoff summary and the Card Brief |
+| Close if an article exists | No article exists. The card closes anyway, on the owner's decision (75e14977) |
+| Exactly one new article, parses clean | Not met, on purpose: the owner withdrew it |
+| Every named piece exists | Not applicable: no article |
+| Recommendation framing + pilot walk-through | Not met: no pilot material exists, and the owner closed the card |
+| No customer or pilot data | Met trivially: nothing is published |
+| Appears in the Help blog | Not applicable |
+| Launch articles unchanged, blog-launch.test.ts passes | Met: nothing in the launch set or tests changes |
