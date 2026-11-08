@@ -29,7 +29,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import { orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { type Tx, withAppendTx } from '../db/tx.ts';
+import { afterCommit, type Tx, withAppendTx } from '../db/tx.ts';
 import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
@@ -205,19 +205,13 @@ async function afterTaskFinished(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
     { tx },
   );
   const { advance } = await import('./docs-prep.ts');
-  scheduleDelivery(ctx, await advance(ctx, tx, run.id));
+  scheduleDelivery(ctx, tx, await advance(ctx, tx, run.id));
 }
 
-/** Commands queued inside a transaction are delivered once it has committed (the pass flushes too). */
-const toDeliver = new Set<string>();
-function scheduleDelivery(ctx: Ctx, workstations: string[]): void {
-  for (const w of workstations) toDeliver.add(w);
-  if (workstations.length > 0) setTimeout(() => flushDelivery(ctx), 250).unref?.();
-}
-function flushDelivery(ctx: Ctx): void {
-  const ws = [...toDeliver];
-  toDeliver.clear();
-  for (const w of ws) void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
+/** Commands queued inside a transaction are delivered once it has committed (never when it rolls back). */
+function scheduleDelivery(ctx: Ctx, tx: Tx, workstations: string[]): void {
+  for (const w of new Set(workstations))
+    afterCommit(tx, () => Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined));
 }
 
 function taskFinished(
@@ -290,7 +284,6 @@ export async function releasePrepTaskPass(
   skipAgent: (agentId: string) => boolean = () => false,
   workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<ReleasePrepDispatch[]> {
-  flushDelivery(ctx);
   const now = ctx.clock.now();
   const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
