@@ -575,7 +575,9 @@ describe('connections and the token store', () => {
     const s = new FileTokenStore(file, key);
     s.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'abc', organization: 'acme' });
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(new FileTokenStore(file, key).get('azure-devops', 'dev.azure.com', 'acme')?.organization).toBe('acme');
+    expect(new FileTokenStore(file, key).get('azure-devops', 'dev.azure.com', 'acme')?.organization).toBe(
+      'acme',
+    );
     expect(JSON.stringify(s.list())).not.toContain('abc');
     const raw = readFileSync(file, 'utf8');
     expect(raw).not.toContain('abc');

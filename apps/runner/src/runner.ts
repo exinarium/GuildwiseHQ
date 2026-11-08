@@ -429,9 +429,13 @@ export class Runner {
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
-      tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json'), (n) => this.keys.deriveFileKey(n), {
-        warn: (m) => this.log.warn(m),
-      }),
+      tokens: new FileTokenStore(
+        join(this.paths.secrets, 'git-tokens.json'),
+        (n) => this.keys.deriveFileKey(n),
+        {
+          warn: (m) => this.log.warn(m),
+        },
+      ),
       ssh: {
         settings: new SshSettingsStore(join(this.paths.secrets, 'git-ssh.json')),
         knownHosts: join(this.paths.secrets, 'known_hosts'),

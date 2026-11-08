@@ -67,7 +67,9 @@ const StoredTokenSchema = z
     savedAt: z.string(),
   })
   .passthrough();
-const StoredTokensSchema = z.record(z.string(), StoredTokenSchema) as unknown as ZodType<Record<string, StoredToken>>;
+const StoredTokensSchema = z.record(z.string(), StoredTokenSchema) as unknown as ZodType<
+  Record<string, StoredToken>
+>;
 
 /** The old plaintext file: keep every entry that has the token shape, drop the rest (one bad entry never fails it). */
 function legacyTokens(raw: unknown): Record<string, StoredToken> | undefined {
@@ -94,7 +96,9 @@ export class FileTokenStore implements TokenStore {
     keyOf: (fileName: string) => Buffer,
     private readonly opts: { warn?: (message: string) => void } = {},
   ) {
-    this.sealed = new SealedFile(file, keyOf, StoredTokensSchema, (v) => Object.values(v).map((t) => t.token));
+    this.sealed = new SealedFile(file, keyOf, StoredTokensSchema, (v) =>
+      Object.values(v).map((t) => t.token),
+    );
   }
 
   private read(): Record<string, StoredToken> {
@@ -115,7 +119,9 @@ export class FileTokenStore implements TokenStore {
     // never overwrite a file that cannot be read: it may hold every other token, sealed with an older key
     if (this.sealed.open({ legacy: legacyTokens }).state === 'unreadable') {
       const moved = this.sealed.quarantine();
-      this.opts.warn?.(`${TOKENS_UNREADABLE} The unreadable file was kept as ${moved ? basename(moved) : 'it was'}.`);
+      this.opts.warn?.(
+        `${TOKENS_UNREADABLE} The unreadable file was kept as ${moved ? basename(moved) : 'it was'}.`,
+      );
     }
     this.sealed.save(data);
   }

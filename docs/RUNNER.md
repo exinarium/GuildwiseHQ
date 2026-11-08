@@ -561,7 +561,7 @@ How git runs over SSH: for an ssh remote the runner sets `GIT_SSH_COMMAND="ssh -
 
 What SSH does not cover: pull requests, branch rules and the repository list use the host's REST API and so still need the token or CLI login. With SSH only, finishing a card pushes the branch and the notice says the pull request must be opened by hand (the manager does it); a merge straight into the working branch works as long as the branch is not protected. The Workstations page (Git hosts, SSH) shows the public key to add on the host, the default and the last check (`SSH works`, `The host refused the key`, `Host key changed`, `Host not reachable`, `No key yet`, `ssh is not installed`); the same button queues the runner command `git.ssh` (`prepare`, `save`, `check`).
 
-The command prints the steps, reads a token without echoing it and checks it against the provider before saving it. Tokens live in `<data dir>/secrets/git-tokens.json` (mode 0600, directory 0700; agents cannot read the data directory) and reach git only through the environment of the git process. A running runner reports `connected` / `not connected` (never the secret) to the server within a minute; the Workstations page and the repository settings show it with a Connect helper that gives the same command. Plain git needs no connection: it uses your SSH keys or Git Credential Manager as before.
+The command prints the steps, reads a token without echoing it and checks it against the provider before saving it. Tokens live in `<data dir>/secrets/git-tokens.json`, encrypted with this runner's key (mode 0600, directory 0700; agents cannot read the data directory; see "Sealed credential files" below) and reach git only through the environment of the git process. A running runner reports `connected` / `not connected` (never the secret) to the server within a minute; the Workstations page and the repository settings show it with a Connect helper that gives the same command. Plain git needs no connection: it uses your SSH keys or Git Credential Manager as before.
 
 **Azure DevOps sign-in: Microsoft Entra service principal first.** Azure DevOps personal access tokens that are not scoped to one organization stop working on **2026-12-01**, and Microsoft is steering teams to Entra ID (service principals and workload identity) instead. The Azure adapter (`apps/runner/src/forge/azure.ts`) uses, in this order: (1) a PAT saved by `git-connect azure-devops --organization <name>`; (2) a **service principal in the runner's environment**; (3) the Azure CLI sign-in (`az account get-access-token`, which also covers `az login --service-principal`). The exact steps for (2):
 
@@ -1887,10 +1887,29 @@ guildwise-runner jira-connect --base-url https://yourcompany.atlassian.net --ema
 Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and use your Atlassian
 e-mail. Jira Data Center: leave the e-mail empty and use a personal access token. The command checks the credentials
 with `GET /rest/api/2/myself` and saves nothing when Jira refuses them. Use the classic "Create API token", not "with scopes" (a scoped token must be called through `api.atlassian.com`, which is not done yet). The Integrations page connects Jira the same way. The token is stored in
-`<data dir>/secrets/jira.json` (mode 0600, directory 0700), like the git tokens, never in `config.json`; a `jira` block in
-`config.json` (the older form) is still read when there is no secrets file, and the secrets file wins. With several
+`<data dir>/secrets/jira.json`, encrypted with this runner's key (mode 0600, directory 0700), like the git tokens, never
+in `config.json`; a `jira` block in `config.json` (the older form) is still read when there is no secrets file, and the
+secrets file wins. It is not read when the secrets file exists but cannot be opened (see "Sealed credential files"
+below). With several
 pairings the credentials go to all of them unless `--pairing` names one. A running runner picks the change up within
 the minute (no restart); the same file posts the approved updates to Jira.
+
+### Sealed credential files
+
+`secrets/jira.json` and `secrets/git-tokens.json` are sealed like the storage, WhatsApp and Google Sheets secrets:
+AES-256-GCM with a key derived from `secrets/runner-key.pem` (`{ v: 1, alg: 'A256GCM', iv, ct, tag }`). A copy of
+`secrets/` without `runner-key.pem` is useless.
+
+- **Upgrade.** A plaintext file written by an older runner is sealed in place on first read, with no action needed: the
+  sealed copy is written to a 0600 temp file and renamed over the plaintext one, and the old `git-tokens.json.tmp` is
+  deleted. The old disk blocks are not scrubbed (zero-filling does not reliably reach them on SSDs, journaling or
+  copy-on-write file systems).
+- **Runner key lost or replaced.** Deleting or replacing `runner-key.pem` means connecting Jira and GitLab, Bitbucket or
+  Azure DevOps again. A file that cannot be opened (another key, or a damaged file) shows as *Not connected* with a
+  "connect again" message and is logged once; the runner keeps running and the other integrations are not affected.
+  The next connect moves the unreadable file aside as `<name>.unreadable-<timestamp>` (still sealed) instead of
+  overwriting it. Rename it back if the old key returns.
+- **Downgrade.** An older runner cannot read the sealed files and shows these integrations as not connected.
 
 The Workstations page shows a **Jira** line for the workstation: *Connected as ...*, *Not connected* (with the command
 to run) or *Refused* (Jira rejected the saved token: connect again). The runner sends `jira.report` with the state, the
@@ -2947,8 +2966,8 @@ The runner command `journey.webhook.call` (`apps/runner/src/outbound-delivery/jo
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
 - Claude token or API key: `secrets/claude.json` (mode 0600; written by the Integrations page and `guildwise-runner auth`; `config.json` is the fallback)
 - Claude credentials: stored in the agent's `CLAUDE_CONFIG_DIR` (mode 0700) as a copy of your `~/.claude/.credentials.json` (or of an additional account's `<configDir>/.credentials.json`; the sandbox denies reading the real file to shell commands; Claude Code itself reads it). Token accounts keep their token in `secrets/claude-accounts/<key>.json` (mode 0600)
-- Jira token: stored by `guildwise-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
-- Git hosts: the `gh` / `glab` logins, or tokens saved by `guildwise-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
+- Jira token: stored by `guildwise-runner jira-connect` in `secrets/jira.json`, sealed with the runner key (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
+- Git hosts: the `gh` / `glab` logins, or tokens saved by `guildwise-runner git-connect` in `secrets/git-tokens.json` (sealed with the runner key, 0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
 
 - Values typed on the Integrations page travel sealed (see below); `secrets/integration-seen.json` holds the refs of used envelopes (no values); `logs/integrations.jsonl` records who changed what (time, kind, operation, result; no values)

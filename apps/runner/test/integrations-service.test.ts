@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAccountRegistry } from '../src/adapters/claude-accounts.ts';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
 import { loadConfig, RunnerConfigSchema, saveConfig } from '../src/config.ts';
+import { JiraCredentialStore, jiraFile } from '../src/external/jira-store.ts';
 import { MemoryTokenStore } from '../src/forge/index.ts';
 import {
   ClaudeCredentialStore,
@@ -21,7 +22,6 @@ import { buildIntegrationAdapters, IntegrationService } from '../src/integration
 import type { AdapterEnv } from '../src/integrations/types.ts';
 import type { PluginMcpServer } from '../src/mcp/plugins.ts';
 import { runnerPaths } from '../src/paths.ts';
-import { JiraCredentialStore, jiraFile } from '../src/external/jira-store.ts';
 import { fileKeyOf, RunnerKeys } from '../src/secrets/keys.ts';
 import { redact, unregisterSecret } from '../src/secrets/redact.ts';
 import { cleanupTmp, tmp } from './helpers.ts';

@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -18,8 +27,19 @@ const keyA = () => Buffer.alloc(32, 7);
 const keyB = () => Buffer.alloc(32, 8);
 const secretsDir = () => join(mkdtempSync(join(tmp(), 'sealed-')), 'secrets');
 const tokensFile = (dir: string) => join(dir, 'git-tokens.json');
-const JIRA = { baseUrl: 'https://acme.atlassian.net', email: 'jira-user@acme.com', apiToken: 'JIRA-TOKEN-123' };
-const TOKENS = ['GL-TOKEN-1', 'BB-TOKEN-2', 'AZ-TOKEN-ACME', 'AZ-TOKEN-OTHER', 'OLD-AZ-TOKEN', 'OLD-GL-TOKEN'];
+const JIRA = {
+  baseUrl: 'https://acme.atlassian.net',
+  email: 'jira-user@acme.com',
+  apiToken: 'JIRA-TOKEN-123',
+};
+const TOKENS = [
+  'GL-TOKEN-1',
+  'BB-TOKEN-2',
+  'AZ-TOKEN-ACME',
+  'AZ-TOKEN-OTHER',
+  'OLD-AZ-TOKEN',
+  'OLD-GL-TOKEN',
+];
 
 afterEach(() => {
   for (const t of [JIRA.apiToken, ...TOKENS]) unregisterSecret(t);
@@ -66,7 +86,12 @@ describe('git host tokens are sealed at rest', () => {
     s.set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
     s.set({ provider: 'bitbucket-cloud', host: 'bitbucket.org', token: 'BB-TOKEN-2', user: 'me@acme.com' });
     s.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'AZ-TOKEN-ACME', organization: 'acme' });
-    s.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'AZ-TOKEN-OTHER', organization: 'other' });
+    s.set({
+      provider: 'azure-devops',
+      host: 'dev.azure.com',
+      token: 'AZ-TOKEN-OTHER',
+      organization: 'other',
+    });
     isEnvelope(tokensFile(dir));
     const raw = readFileSync(tokensFile(dir), 'utf8');
     for (const t of TOKENS.slice(0, 4)) expect(raw).not.toContain(t);
@@ -135,7 +160,11 @@ describe('plaintext files from an older runner are migrated on first read', () =
 describe('a sealed file that cannot be opened', () => {
   it('git tokens: reports a reconnect problem, never throws, never wipes and keeps the old file aside', () => {
     const dir = secretsDir();
-    new FileTokenStore(tokensFile(dir), keyA).set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
+    new FileTokenStore(tokensFile(dir), keyA).set({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      token: 'GL-TOKEN-1',
+    });
     new JiraCredentialStore(jiraFile(dir), keyA).save(JIRA);
     const before = readFileSync(tokensFile(dir), 'utf8');
 
@@ -156,9 +185,10 @@ describe('a sealed file that cannot be opened', () => {
     expect(readFileSync(join(dir, aside[0] as string), 'utf8')).toBe(before);
     expect(wrong.problem()).toBeUndefined();
     expect(wrong.list().map((t) => t.provider)).toEqual(['bitbucket-cloud']);
-    // the old file still opens with the old key
-    const old = new FileTokenStore(join(dir, aside[0] as string), keyA);
-    expect(old.get('gitlab', 'gitlab.com')?.token).toBe('GL-TOKEN-1');
+    // the old file still opens with the old key once it is put back under its name
+    const restored = join(mkdtempSync(join(tmp(), 'restore-')), 'git-tokens.json');
+    copyFileSync(join(dir, aside[0] as string), restored);
+    expect(new FileTokenStore(restored, keyA).get('gitlab', 'gitlab.com')?.token).toBe('GL-TOKEN-1');
 
     // the Jira store is not affected
     expect(new JiraCredentialStore(jiraFile(dir), keyA).load()).toEqual(JIRA);
@@ -170,7 +200,11 @@ describe('a sealed file that cannot be opened', () => {
 
   it('gitlab status shows the reconnect message', async () => {
     const dir = secretsDir();
-    new FileTokenStore(tokensFile(dir), keyA).set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
+    new FileTokenStore(tokensFile(dir), keyA).set({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      token: 'GL-TOKEN-1',
+    });
     const env: ForgeEnv = {
       exec: { run: async () => ({ exitCode: 127, stdout: '', stderr: '' }) },
       fetch: (async () => new Response('{}', { status: 200 })) as typeof fetch,
@@ -185,7 +219,11 @@ describe('a sealed file that cannot be opened', () => {
   it('Jira: no fallback to config.json, a reconnect status, and a new connect keeps the old file aside', async () => {
     const dir = secretsDir();
     new JiraCredentialStore(jiraFile(dir), keyA).save(JIRA);
-    new FileTokenStore(tokensFile(dir), keyA).set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
+    new FileTokenStore(tokensFile(dir), keyA).set({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      token: 'GL-TOKEN-1',
+    });
     const fromConfig = { baseUrl: 'https://old.example', apiToken: 'OLD-CONFIG-TOKEN' };
 
     const wrong = new JiraCredentialStore(jiraFile(dir), keyB);
@@ -229,7 +267,11 @@ describe.skipIf(process.platform === 'win32')('permissions', () => {
     new JiraCredentialStore(jiraFile(dir), keyA).save(JIRA);
     const s = new FileTokenStore(tokensFile(dir), keyA);
     s.set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
-    new FileTokenStore(tokensFile(dir), keyB).set({ provider: 'gitlab', host: 'gitlab.com', token: 'OLD-GL-TOKEN' });
+    new FileTokenStore(tokensFile(dir), keyB).set({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      token: 'OLD-GL-TOKEN',
+    });
     for (const f of readdirSync(dir)) expect(statSync(join(dir, f)).mode & 0o777).toBe(0o600);
     expect(readdirSync(dir).some((f) => f.includes('.unreadable-'))).toBe(true);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
@@ -240,7 +282,11 @@ describe('tokens loaded from the sealed files are redacted', () => {
   it('after a sealed read', () => {
     const dir = secretsDir();
     new JiraCredentialStore(jiraFile(dir), keyA).save(JIRA);
-    new FileTokenStore(tokensFile(dir), keyA).set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL-TOKEN-1' });
+    new FileTokenStore(tokensFile(dir), keyA).set({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      token: 'GL-TOKEN-1',
+    });
     unregisterSecret(JIRA.apiToken);
     unregisterSecret('GL-TOKEN-1');
     expect(redact(`x ${JIRA.apiToken} y`)).toContain(JIRA.apiToken); // nothing registered yet
@@ -257,7 +303,9 @@ describe('tokens loaded from the sealed files are redacted', () => {
     writeFileSync(jiraFile(dir), JSON.stringify(JIRA));
     writeFileSync(
       tokensFile(dir),
-      JSON.stringify({ 'gitlab@gitlab.com': { provider: 'gitlab', host: 'gitlab.com', token: 'OLD-GL-TOKEN', savedAt: 'x' } }),
+      JSON.stringify({
+        'gitlab@gitlab.com': { provider: 'gitlab', host: 'gitlab.com', token: 'OLD-GL-TOKEN', savedAt: 'x' },
+      }),
     );
     resolveJira(dir, undefined, keyA);
     new FileTokenStore(tokensFile(dir), keyA).list();
