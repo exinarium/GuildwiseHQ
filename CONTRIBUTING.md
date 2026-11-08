@@ -100,7 +100,7 @@ The line uses the name and email in your Git configuration and looks like this:
 Signed-off-by: Your Name <you@example.com>
 ```
 
-Every commit in a pull request needs one. The DCO check on each pull request fails when a commit is missing it.
+Every commit in a pull request needs one. The DCO check on each pull request fails when a commit is missing it. The only exception is commits made by Dependabot on its own pull requests.
 
 **Fix commits you already made**
 
