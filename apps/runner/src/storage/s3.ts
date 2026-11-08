@@ -3,12 +3,17 @@ import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { fromHttp } from './errors.ts';
-import { signV4, uriEncode } from './s3-sign.ts';
+import { presignV4, signV4, uriEncode } from './s3-sign.ts';
+import type { DirectUnavailableReason } from '@aom/shared';
 import {
+  type DirectCapable,
+  type DirectGrant,
   type FetchLike,
   PROBE_BODY,
   PROBE_NAME,
   type Spooled,
+  type StagedInfo,
+  STAGING_FOLDER,
   type StorageConnector,
   StorageError,
   type StorageTarget,
@@ -47,7 +52,7 @@ export function checkS3Endpoint(endpoint: string): URL {
 }
 
 /** S3-compatible object storage (AWS, MinIO, Backblaze, Wasabi, R2...). */
-export class S3Connector implements StorageConnector {
+export class S3Connector implements StorageConnector, DirectCapable {
   constructor(
     private readonly cfg: S3Config,
     private readonly keys: S3Keys,
@@ -69,18 +74,26 @@ export class S3Connector implements StorageConnector {
   }
 
   private async call(
-    method: 'PUT' | 'HEAD' | 'DELETE',
+    method: 'PUT' | 'HEAD' | 'DELETE' | 'GET',
     key: string,
     signal: AbortSignal,
     payloadHash: string,
     body?: RequestInit['body'],
     extra: Record<string, string> = {},
+    query?: Record<string, string>,
   ): Promise<Response> {
-    const { url, host, path } = this.url(key);
+    const { url: base, host, path } = this.url(key);
+    const qs = query
+      ? `?${Object.entries(query)
+          .map(([k, v]) => `${uriEncode(k)}=${uriEncode(v)}`)
+          .join('&')}`
+      : '';
+    const url = `${base}${qs}`;
     const headers = signV4({
       method,
       host,
       path,
+      ...(query ? { query } : {}),
       headers: extra,
       payloadHash,
       region: this.cfg.region,
@@ -172,5 +185,176 @@ export class S3Connector implements StorageConnector {
     if (!del.ok) await this.fail(del);
     await del.arrayBuffer().catch(() => undefined);
     return 'deleted';
+  }
+
+  // ------------------------------------------------------------------------------------------ direct uploads
+
+  private stagingKey(name: string): string {
+    return this.key([STAGING_FOLDER, name]);
+  }
+
+  async uploadOrigin(
+    signal: AbortSignal,
+    pageOrigin?: string,
+  ): Promise<{ origin: string | null; reason: DirectUnavailableReason | null }> {
+    const u = checkS3Endpoint(this.cfg.endpoint);
+    if (u.protocol !== 'https:') return { origin: null, reason: 'http_endpoint' };
+    const { url } = this.url(this.stagingKey('cors-check'));
+    const origin = new URL(url).origin;
+    if (!pageOrigin) return { origin, reason: null };
+    try {
+      const res = await this.fetchFn(url, {
+        method: 'OPTIONS',
+        headers: {
+          origin: pageOrigin,
+          'access-control-request-method': 'PUT',
+          'access-control-request-headers': 'content-type,if-none-match,x-amz-checksum-sha256',
+        },
+        signal,
+      });
+      await res.arrayBuffer().catch(() => undefined);
+      const allow = res.headers.get('access-control-allow-origin');
+      const methods = (res.headers.get('access-control-allow-methods') ?? '').toUpperCase();
+      if (res.ok && (allow === pageOrigin || allow === '*') && methods.includes('PUT'))
+        return { origin, reason: null };
+      return { origin: null, reason: 'cors_missing' };
+    } catch {
+      return { origin: null, reason: 'probe_failed' };
+    }
+  }
+
+  async grant(
+    stagingName: string,
+    file: { size: number; contentType: string; sha256: string },
+    ttlMs: number,
+    _pageOrigin: string,
+    _signal: AbortSignal,
+  ): Promise<DirectGrant> {
+    const ep = checkS3Endpoint(this.cfg.endpoint);
+    if (ep.protocol !== 'https:')
+      throw new StorageError('invalid', 'This storage cannot take direct uploads over http.');
+    const key = this.stagingKey(stagingName);
+    const { url, host, path } = this.url(key);
+    const checksum = Buffer.from(file.sha256, 'hex').toString('base64');
+    const headers: Record<string, string> = {
+      'content-type': file.contentType,
+      'if-none-match': '*',
+      'x-amz-checksum-sha256': checksum,
+    };
+    const expires = Math.max(1, Math.ceil(ttlMs / 1000));
+    const now = this.now();
+    const query = presignV4({
+      method: 'PUT',
+      host,
+      path,
+      headers: { ...headers, 'content-length': String(file.size) },
+      region: this.cfg.region,
+      accessKeyId: this.keys.accessKeyId,
+      secretAccessKey: this.keys.secretAccessKey,
+      ...(this.keys.sessionToken ? { sessionToken: this.keys.sessionToken } : {}),
+      expires,
+      now,
+    });
+    return {
+      provider: 's3',
+      url: `${url}?${query}`,
+      headers,
+      chunkBytes: null,
+      expiresAt: now.getTime() + expires * 1000,
+      stagingRef: key,
+    };
+  }
+
+  async offset(): Promise<number | null> {
+    return null;
+  }
+
+  async stat(g: DirectGrant, signal: AbortSignal): Promise<StagedInfo | null> {
+    const res = await this.call(
+      'HEAD',
+      g.stagingRef,
+      signal,
+      createHash('sha256').update('').digest('hex'),
+      undefined,
+      { 'x-amz-checksum-mode': 'ENABLED' },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) await this.fail(res);
+    const sum = res.headers.get('x-amz-checksum-sha256');
+    const sha = sum && /^[A-Za-z0-9+/]{43}=$/.test(sum) ? Buffer.from(sum, 'base64').toString('hex') : undefined;
+    const etag = res.headers.get('etag')?.replace(/"/g, '');
+    return {
+      size: Number(res.headers.get('content-length') ?? -1),
+      ...(sha ? { sha256: sha } : {}),
+      ...(etag ? { providerId: etag.slice(0, 300) } : {}),
+    };
+  }
+
+  async read(
+    g: DirectGrant,
+    range: { start: number; end: number } | null,
+    signal: AbortSignal,
+  ): Promise<ReadableStream<Uint8Array>> {
+    const res = await this.call(
+      'GET',
+      g.stagingRef,
+      signal,
+      createHash('sha256').update('').digest('hex'),
+      undefined,
+      range ? { range: `bytes=${range.start}-${range.end}` } : {},
+    );
+    if (!res.ok || !res.body) await this.fail(res);
+    return res.body as ReadableStream<Uint8Array>;
+  }
+
+  async promote(
+    g: DirectGrant,
+    info: StagedInfo,
+    target: StorageTarget,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }> {
+    const empty = createHash('sha256').update('').digest('hex');
+    for (let n = 1; n <= STORAGE_MAX_CLASH; n++) {
+      const name = n === 1 ? target.name : storageClashName(target.name, n);
+      const key = this.key([...target.folder, name]);
+      const head = await this.call('HEAD', key, signal, empty);
+      if (head.status === 200) continue;
+      if (head.status !== 404) await this.fail(head);
+      const copy = await this.call('PUT', key, signal, empty, undefined, {
+        'x-amz-copy-source': `/${this.cfg.bucket}/${uriEncode(g.stagingRef, true)}`,
+      });
+      if (copy.status === 412) continue;
+      if (!copy.ok) await this.fail(copy);
+      await copy.arrayBuffer().catch(() => undefined);
+      return { path: key, ...(info.providerId ? { providerId: info.providerId } : {}) };
+    }
+    throw new StorageError('conflict', 'Too many files with the same name.');
+  }
+
+  async cancel(g: DirectGrant, signal: AbortSignal): Promise<void> {
+    await this.delete(g.stagingRef, signal);
+  }
+
+  async sweep(keep: (name: string, modifiedAt: number) => boolean, signal: AbortSignal): Promise<number> {
+    const prefix = this.key([STAGING_FOLDER]);
+    const empty = createHash('sha256').update('').digest('hex');
+    const res = await this.call('GET', '', signal, empty, undefined, {}, {
+      'list-type': '2',
+      prefix: `${prefix}/`,
+    });
+    if (!res.ok) await this.fail(res);
+    const xml = await res.text();
+    let n = 0;
+    for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const body = m[1] ?? '';
+      const key = /<Key>([^<]+)<\/Key>/.exec(body)?.[1];
+      const mod = Date.parse(/<LastModified>([^<]+)<\/LastModified>/.exec(body)?.[1] ?? '');
+      if (!key || !key.startsWith(`${prefix}/`)) continue;
+      const name = key.slice(prefix.length + 1);
+      if (keep(name, Number.isFinite(mod) ? mod : 0)) continue;
+      await this.delete(key, signal).catch(() => undefined);
+      n++;
+    }
+    return n;
   }
 }

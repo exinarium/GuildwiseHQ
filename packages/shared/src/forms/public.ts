@@ -45,6 +45,8 @@ export const PUBLIC_FORM_ERROR_CODES = [
   'submission_busy',
   'malware_detected',
   'scan_unavailable',
+  'upload_unavailable',
+  'upload_mode',
 ] as const;
 export type PublicFormErrorCode = (typeof PUBLIC_FORM_ERROR_CODES)[number];
 
@@ -281,17 +283,49 @@ export interface PublicFormDto {
   /** `offline`: the firm's runner cannot receive a form now; the page offers the secure link instead of the fields. */
   availability: 'open' | 'offline';
   link: null | { state: 'valid'; expiresAt: string; purpose: 'client' | 'offline' };
+  /** The exact upload hosts this page may send files to (the page CSP lists the same). Empty: everything relays. */
+  uploadOrigins?: string[];
 }
 
 export interface SubmissionStartResultDto {
   submissionId: string;
   uploadToken: string;
-  parts: Array<{ field: string; index: number; needed: boolean }>;
+  parts: Array<{ field: string; index: number; needed: boolean; mode?: 'relay' | 'direct' }>;
 }
 
 export interface SubmissionStatusDto {
   status: 'receiving' | 'storing' | 'failed' | 'complete' | 'expired';
-  parts: Array<{ field: string; index: number; state: 'pending' | 'stored' | 'failed' }>;
+  parts: Array<{
+    field: string;
+    index: number;
+    state: 'pending' | 'verifying' | 'stored' | 'failed';
+    error?: string;
+  }>;
+}
+
+/** The browser reports a finished direct upload. Size and sha256 must equal the announced manifest. */
+export const GrantCompleteSchema = z.object({
+  size: z.number().int().min(1),
+  sha256: Sha256,
+  providerId: z.string().max(300).optional(),
+  etag: z.string().max(300).optional(),
+});
+export type GrantCompleteBody = z.infer<typeof GrantCompleteSchema>;
+export const GrantCancelSchema = z.object({ reason: z.enum(['retry', 'blocked', 'abandoned']) });
+export type GrantCancelBody = z.infer<typeof GrantCancelSchema>;
+
+/** A short-lived, single-use upload grant. The URL is a secret: never logged, never stored. */
+export interface GrantDto {
+  grant: {
+    method: 'PUT';
+    url: string;
+    headers: Record<string, string>;
+    chunkBytes: number | null;
+    expiresAt: string;
+  };
+}
+export interface GrantOffsetDto {
+  offset: number | null;
 }
 
 export interface SubmissionCompleteDto {

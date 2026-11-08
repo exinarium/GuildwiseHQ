@@ -24,6 +24,7 @@ export const STORAGE_ERROR_CODES = [
   'timeout',
   'malware_detected',
   'scan_unavailable',
+  'type_refused',
 ] as const;
 export const StorageErrorCodeSchema = z.enum(STORAGE_ERROR_CODES);
 export type StorageErrorCode = z.infer<typeof StorageErrorCodeSchema>;
@@ -42,6 +43,7 @@ export const STORAGE_RETRYABLE: Record<StorageErrorCode, boolean> = {
   too_large: false,
   malware_detected: false,
   scan_unavailable: true,
+  type_refused: false,
 };
 
 /** Announced in `hello.capabilities` by a runner that holds storage connections. */
@@ -310,6 +312,25 @@ export const StorageAuthBodySchema = z.object({
 });
 export const StorageTestBodySchema = z.object({ requestId: z.string().min(1).max(64) });
 
+/** Why a cloud storage cannot take public form files directly (reported by the runner, shown to the firm only). */
+export const DIRECT_UNAVAILABLE_REASONS = [
+  'unsupported_kind',
+  'http_endpoint',
+  'cors_missing',
+  'probe_failed',
+  'needs_reauth',
+] as const;
+export type DirectUnavailableReason = (typeof DIRECT_UNAVAILABLE_REASONS)[number];
+
+/** Kinds whose public form files go browser to storage. */
+export const DIRECT_UPLOAD_KINDS: readonly StorageKind[] = ['onedrive', 'google_drive', 's3'];
+
+/** TTL of an upload grant: 5 min plus the time a 128 KiB/s link needs, clamped to 5..30 min. */
+export function directGrantTtlMs(size: number): number {
+  const ms = 5 * 60_000 + Math.ceil(size / (128 * 1024)) * 1000;
+  return Math.min(30 * 60_000, Math.max(5 * 60_000, ms));
+}
+
 /** What the list shows. No endpoint, bucket, path, account or token: the server does not know them. */
 export interface StorageConnectionDto {
   id: string;
@@ -326,6 +347,8 @@ export interface StorageConnectionDto {
   createdAt: string;
   /** The signed-in user owns the workstation and may connect, test and reconnect from here. */
   canConnect: boolean;
+  /** Whether public form files can go straight to this storage. Null for local folders and vaults. */
+  directUploads?: { state: 'ready' | 'unavailable' | 'unknown'; reason: DirectUnavailableReason | null } | null;
 }
 
 export interface StorageRequestDto {

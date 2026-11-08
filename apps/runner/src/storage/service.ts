@@ -3,10 +3,13 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { type FileHandle, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import {
+  checkUploadHead,
   CommandPayloadSchemas,
+  type DirectUnavailableReason,
   healthStateForError,
   type RunnerToServer,
   renderStoragePath,
+  UPLOAD_HEAD_BYTES,
   type SealedEnvelope,
   type ServerToRunner,
   STORAGE_DELETE_TIMEOUT_MS,
@@ -43,7 +46,10 @@ import { checkS3Endpoint, S3Connector } from './s3.ts';
 import { type ClamdClient, clamdClient, quarantine, type ScanVerdict } from './scan.ts';
 import { KeyedMutex, StorageStore } from './store.ts';
 import {
+  type DirectCapable,
+  type DirectGrant,
   type FetchLike,
+  isDirectCapable,
   type Spooled,
   type StorageConnector,
   StorageError,
@@ -81,6 +87,8 @@ export interface StorageServiceDeps {
   pdf?: PdfRenderer;
   /** Bound for the probe of "Test connection". */
   probeTimeoutMs?: number;
+  /** Origin of the public pages (for the S3 CORS check). Absent: the check is skipped. */
+  pageOrigin?: string;
 }
 
 interface Transfer {
@@ -105,7 +113,32 @@ interface Transfer {
   scan?: { field: string; fileName: string };
   derive?: { pdf: true };
   derivedWritten?: { path: string; providerId?: string };
+  /** A direct-upload verification stands in for a transfer: its answer goes out as `storage.grant.verified`. */
+  reply?: (r: { reference: StorageReference } | { error: StorageWriteError }) => void;
 }
+
+interface GrantState {
+  id: string;
+  connectionId: string;
+  kind: StorageKind;
+  g: DirectGrant;
+  size: number;
+  sha256: string;
+  contentType: string;
+  ext: string;
+  accepted: string[];
+  target: { folder: string[]; name: string };
+  submission: { orgId: string; formId: string; submissionId: string };
+  scan: { field: string; fileName: string };
+  startedAt: number;
+  used: boolean;
+  closed: boolean;
+  timer?: NodeJS.Timeout;
+}
+
+const GRANT_SWEEP_MS = 10 * 60_000;
+const GRANT_KEEP_MS = 31 * 60_000;
+const ORIGIN_TTL_MS = 10 * 60_000;
 
 type Derived = NonNullable<Extract<RunnerToServer, { type: 'storage.write.result' }>['derived']>;
 
@@ -134,6 +167,12 @@ export class StorageService {
   private readonly store: StorageStore;
   private readonly mutex = new KeyedMutex();
   private readonly transfers = new Map<string, Transfer>();
+  private readonly grants = new Map<string, GrantState>();
+  private readonly origins = new Map<
+    string,
+    { at: number; origin: string | null; reason: DirectUnavailableReason | null }
+  >();
+  private sweepTimer?: NodeJS.Timeout;
   private readonly flows = new Map<
     string,
     { sessionId: string; connectionId: string; ctl: AbortController }
@@ -391,7 +430,10 @@ export class StorageService {
       if (probe)
         return { health: this.report(p.connectionId, healthStateForError(probe.code), probe), error: probe };
       this.store.put(p.connectionId, conn);
-      return { health: await this.reportWithScan(p.connectionId) };
+      this.origins.delete(p.connectionId);
+      const health = await this.reportWithScan(p.connectionId);
+      void this.reportDirect().catch(() => undefined);
+      return { health };
     } catch (err) {
       const e = this.typed(err);
       return { health: this.report(p.connectionId, healthStateForError(e.code), e), error: e };
@@ -443,13 +485,20 @@ export class StorageService {
     }
     const err = await this.probeOf(id, conn);
     if (err) return { health: this.report(id, healthStateForError(err.code), err), error: err };
-    return { health: await this.reportWithScan(id) };
+    this.origins.delete(id);
+    const health = await this.reportWithScan(id);
+    void this.reportDirect().catch(() => undefined);
+    return { health };
   }
 
   private async remove(id: string): Promise<Record<string, unknown>> {
     for (const f of this.flows.values()) if (f.connectionId === id) f.ctl.abort();
     for (const t of [...this.transfers.values()])
       if (t.connectionId === id) void this.abortTransfer(t, 'shutdown');
+    await Promise.all(
+      [...this.grants.values()].filter((g) => g.connectionId === id).map((g) => this.cancelStaged(g)),
+    );
+    this.origins.delete(id);
     const conn = this.store.get(id);
     const removed = this.store.remove(id);
     this.health.delete(id);
@@ -606,6 +655,18 @@ export class StorageService {
       case 'storage.delete':
         void this.deleteStored(msg);
         break;
+      case 'storage.grant.open':
+        void this.grantOpen(msg);
+        break;
+      case 'storage.grant.status':
+        void this.grantStatus(msg.grantId);
+        break;
+      case 'storage.grant.finish':
+        void this.grantFinish(msg);
+        break;
+      case 'storage.grant.cancel':
+        void this.grantCancel(msg.grantId);
+        break;
       default:
         break;
     }
@@ -652,6 +713,11 @@ export class StorageService {
       ok: 'reference' in r,
       ...r,
     });
+  }
+
+  private answer(t: Transfer, r: { reference: StorageReference } | { error: StorageWriteError }): void {
+    if (t.reply) t.reply(r);
+    else this.result(t.id, r);
   }
 
   private async open(m: Extract<ServerToRunner, { type: 'storage.write.open' }>): Promise<void> {
@@ -973,12 +1039,12 @@ export class StorageService {
       this.logWarn(
         `storage.scan infected conn=${t.connectionId} form=${sub.formId} submission=${sub.submissionId} transfer=${t.id} org=${sub.orgId} field=${scan.field} name=${scan.fileName} size=${t.bytes} sha256=${sha} signature=${v.signature} quarantined=${kept}`,
       );
-      this.result(t.id, { error: storageError('malware_detected', 'The file failed the security check.') });
+      this.answer(t, { error: storageError('malware_detected', 'The file failed the security check.') });
     } else {
       this.logError(
         `storage.scan failed conn=${t.connectionId} submission=${sub.submissionId} transfer=${t.id} reason=${v.reason}`,
       );
-      this.result(t.id, { error: storageError('scan_unavailable', 'The file could not be scanned.') });
+      this.answer(t, { error: storageError('scan_unavailable', 'The file could not be scanned.') });
     }
     this.log(
       `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} ${code} ${this.now() - t.startedAt}ms`,
@@ -1018,12 +1084,343 @@ export class StorageService {
     await rm(t.file, { force: true });
   }
 
+
+  // ------------------------------------------------------------------------------------------------ direct uploads
+
+  private grantLog(gs: Pick<GrantState, 'connectionId' | 'kind' | 'size' | 'startedAt'>, outcome: string): void {
+    // Never the URL, the staging name, the file name or a header.
+    this.log(
+      `storage.grant conn=${gs.connectionId} kind=${gs.kind} size=${gs.size} ${outcome} ${this.now() - gs.startedAt}ms`,
+    );
+  }
+
+  private capable(id: string): (StorageConnector & DirectCapable) | undefined {
+    const conn = this.store.get(id);
+    if (!conn || conn.needsReauth) return undefined;
+    try {
+      const c = this.connector(id, conn);
+      return isDirectCapable(c) ? c : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The upload host of a connection (cached for ten minutes) and the reason when it cannot take direct uploads. */
+  private async directOrigin(
+    id: string,
+    force = false,
+  ): Promise<{ origin: string | null; reason: DirectUnavailableReason | null }> {
+    const conn = this.store.get(id);
+    if (!conn || (conn.kind !== 'onedrive' && conn.kind !== 'google_drive' && conn.kind !== 's3'))
+      return { origin: null, reason: 'unsupported_kind' };
+    if (conn.needsReauth) return { origin: null, reason: 'needs_reauth' };
+    const hit = this.origins.get(id);
+    if (!force && hit && this.now() - hit.at < ORIGIN_TTL_MS) return hit;
+    let r: { origin: string | null; reason: DirectUnavailableReason | null };
+    try {
+      const c = this.capable(id);
+      r = c
+        ? await c.uploadOrigin(AbortSignal.timeout(15_000), this.deps.pageOrigin)
+        : { origin: null, reason: 'probe_failed' };
+    } catch {
+      r = { origin: null, reason: 'probe_failed' };
+    }
+    this.origins.set(id, { at: this.now(), ...r });
+    return r;
+  }
+
+  /** Tells the server which upload host each connection can use (kept in its memory only). */
+  async reportDirect(): Promise<void> {
+    const list: Array<{ connectionId: string; uploadOrigin: string | null; reason: DirectUnavailableReason | null }> = [];
+    for (const [id] of this.store.list()) {
+      const r = await this.directOrigin(id);
+      list.push({ connectionId: id, uploadOrigin: r.origin, reason: r.origin ? null : (r.reason ?? 'probe_failed') });
+    }
+    if (list.length) this.deps.send('storage.direct.report', { connections: list.slice(0, 100) });
+  }
+
+  private grantResult(grantId: string, r: Record<string, unknown>): void {
+    this.deps.send('storage.grant.result', { grantId, ...r });
+  }
+
+  private async grantOpen(m: Extract<ServerToRunner, { type: 'storage.grant.open' }>): Promise<void> {
+    const conn = this.store.get(m.connectionId);
+    const meta = { connectionId: m.connectionId, kind: (conn?.kind ?? 'local') as StorageKind, size: m.size, startedAt: this.now() };
+    const fail = (e: StorageWriteError) => {
+      this.grantLog(meta, e.code);
+      this.grantResult(m.grantId, { ok: false, error: e });
+    };
+    if (!conn) return fail(storageError('not_found', 'This storage is not set up on this workstation.'));
+    if (conn.needsReauth) return fail(storageError('auth_expired', 'The sign-in expired: reconnect this storage.'));
+    const rendered = renderStoragePath({ folder: m.folder, name: m.name }, m.vars, m.ext);
+    if (!rendered.ok) return fail(storageError('invalid', rendered.error));
+    try {
+      const c = this.capable(m.connectionId);
+      if (!c) return fail(storageError('invalid', 'This storage cannot take direct uploads.'));
+      const o = await this.directOrigin(m.connectionId);
+      if (!o.origin) return fail(storageError('invalid', 'This storage cannot take direct uploads.'));
+      const ttl = Math.min(m.ttlMs, 30 * 60_000);
+      const ext = (m.ext ?? '').toLowerCase();
+      const stagingName = ext ? `${m.grantId}.${ext}` : m.grantId;
+      const g = await c.grant(
+        stagingName,
+        { size: m.size, contentType: m.contentType, sha256: m.sha256 },
+        ttl,
+        m.pageOrigin,
+        AbortSignal.timeout(30_000),
+      );
+      registerSecret(g.url);
+      if (g.cancelUrl) registerSecret(g.cancelUrl);
+      const gs: GrantState = {
+        id: m.grantId,
+        connectionId: m.connectionId,
+        kind: conn.kind,
+        g,
+        size: m.size,
+        sha256: m.sha256,
+        contentType: m.contentType,
+        ext,
+        accepted: m.accepted,
+        target: { folder: rendered.folder, name: rendered.name },
+        submission: m.submission,
+        scan: m.scan,
+        startedAt: this.now(),
+        used: false,
+        closed: false,
+      };
+      gs.timer = setTimeout(() => void this.cancelStaged(gs), ttl);
+      gs.timer.unref?.();
+      this.grants.set(gs.id, gs);
+      this.ensureSweepTimer();
+      this.grantLog(gs, 'granted');
+      this.grantResult(m.grantId, {
+        ok: true,
+        grant: {
+          provider: g.provider,
+          method: 'PUT',
+          url: g.url,
+          headers: g.headers,
+          chunkBytes: g.chunkBytes,
+          expiresAt: g.expiresAt,
+        },
+      });
+    } catch (err) {
+      fail(this.typed(err));
+    }
+  }
+
+  private async grantStatus(grantId: string): Promise<void> {
+    const gs = this.grants.get(grantId);
+    const c = gs && !gs.closed ? this.capable(gs.connectionId) : undefined;
+    let offset: number | null = null;
+    if (gs && c && !gs.used) {
+      try {
+        offset = await c.offset(gs.g, AbortSignal.timeout(15_000), gs.size);
+      } catch {
+        offset = null;
+      }
+    }
+    this.deps.send('storage.grant.offset', { grantId, offset });
+  }
+
+  private async grantCancel(grantId: string): Promise<void> {
+    const gs = this.grants.get(grantId);
+    if (gs) await this.cancelStaged(gs);
+  }
+
+  /** Ends a grant and deletes what the provider holds for it (best effort). */
+  private async cancelStaged(gs: GrantState): Promise<void> {
+    if (gs.closed) return;
+    gs.closed = true;
+    if (gs.timer) clearTimeout(gs.timer);
+    this.grants.delete(gs.id);
+    unregisterSecret(gs.g.url);
+    if (gs.g.cancelUrl) unregisterSecret(gs.g.cancelUrl);
+    const c = this.capable(gs.connectionId);
+    if (c) await c.cancel(gs.g, AbortSignal.timeout(15_000)).catch(() => undefined);
+  }
+
+  private async drain(
+    stream: ReadableStream<Uint8Array>,
+    o: { spool?: string; limit: number; head: number; hash: boolean },
+  ): Promise<{ sha256: string; bytes: number; head: Buffer }> {
+    const hash = createHash('sha256');
+    const fh = o.spool ? await open(o.spool, 'w', 0o600) : undefined;
+    let bytes = 0;
+    const head: Buffer[] = [];
+    let headLen = 0;
+    try {
+      for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+        const buf = Buffer.from(chunk);
+        bytes += buf.length;
+        if (bytes > o.limit) throw new StorageError('invalid', 'The file did not arrive intact: try again.');
+        if (o.hash) hash.update(buf);
+        if (headLen < o.head) {
+          head.push(buf.subarray(0, o.head - headLen));
+          headLen += Math.min(buf.length, o.head - headLen);
+        }
+        await fh?.write(buf);
+      }
+    } finally {
+      await fh?.close();
+    }
+    return { sha256: o.hash ? hash.digest('hex') : '', bytes, head: Buffer.concat(head) };
+  }
+
+  /** The browser says the upload is done: check the staged object, then move it into place. */
+  private async grantFinish(m: Extract<ServerToRunner, { type: 'storage.grant.finish' }>): Promise<void> {
+    const gs = this.grants.get(m.grantId);
+    const verified = (r: { reference: StorageReference } | { error: StorageWriteError }) =>
+      this.deps.send('storage.grant.verified', { grantId: m.grantId, ok: 'reference' in r, ...r });
+    if (!gs || gs.used || gs.closed)
+      return verified({ error: storageError('invalid', 'This upload is not open any more.') });
+    gs.used = true;
+    if (gs.timer) clearTimeout(gs.timer);
+    const spool = join(this.deps.spoolDir, `${gs.id}.part`);
+    const t: Transfer = {
+      id: gs.id,
+      connectionId: gs.connectionId,
+      kind: gs.kind,
+      file: spool,
+      hash: createHash('sha256'),
+      bytes: gs.size,
+      chunks: 0,
+      size: gs.size,
+      contentType: gs.contentType,
+      target: gs.target,
+      deadline: this.now() + 10 * 60_000,
+      controller: new AbortController(),
+      chain: Promise.resolve(),
+      startedAt: gs.startedAt,
+      finished: false,
+      submission: gs.submission,
+      scan: gs.scan,
+      reply: verified,
+    };
+    const refuse = async (e: StorageWriteError) => {
+      await this.cancelStaged(gs);
+      this.grantLog(gs, e.code);
+      await rm(spool, { force: true });
+      verified({ error: e });
+    };
+    try {
+      if (m.size !== gs.size || m.sha256 !== gs.sha256)
+        return await refuse(storageError('invalid', 'The file did not arrive intact: try again.'));
+      const c = this.capable(gs.connectionId);
+      const conn = this.store.get(gs.connectionId);
+      if (!c || !conn) return await refuse(storageError('not_found', 'This storage is not set up on this workstation.'));
+      const signal = AbortSignal.timeout(10 * 60_000);
+      const info = await c.stat(gs.g, signal);
+      if (!info) return await refuse(storageError('invalid', 'The file did not arrive: try again.'));
+      if (info.size !== gs.size)
+        return await refuse(storageError('invalid', 'The file did not arrive intact: try again.'));
+      const needFull = this.scanOn() || !info.sha256;
+      let head: Buffer;
+      if (needFull) {
+        mkdirSync(this.deps.spoolDir, { recursive: true, mode: 0o700 });
+        const r = await this.drain(await c.read(gs.g, null, signal), {
+          spool,
+          limit: gs.size,
+          head: UPLOAD_HEAD_BYTES,
+          hash: true,
+        });
+        if (r.bytes !== gs.size || r.sha256 !== gs.sha256)
+          return await refuse(storageError('invalid', 'The file did not arrive intact: try again.'));
+        head = r.head;
+      } else {
+        if (info.sha256 !== gs.sha256)
+          return await refuse(storageError('invalid', 'The file did not arrive intact: try again.'));
+        const r = await this.drain(await c.read(gs.g, { start: 0, end: UPLOAD_HEAD_BYTES - 1 }, signal), {
+          limit: UPLOAD_HEAD_BYTES,
+          head: UPLOAD_HEAD_BYTES,
+          hash: false,
+        });
+        head = r.head;
+      }
+      const sniff = checkUploadHead(gs.ext, head, gs.accepted);
+      if (!sniff.ok)
+        return await refuse(storageError('type_refused', 'The content of the file is not an accepted type.'));
+      if (needFull && this.scanOn()) {
+        const cfg = this.deps.uploadScan as NonNullable<StorageServiceDeps['uploadScan']>;
+        const unusable = this.quarantineInsideDestination(cfg.quarantineDir);
+        const v: ScanVerdict = unusable
+          ? { kind: 'failed', reason: unusable }
+          : await this.scanner.scanFile(spool, abortAfter(cfg.timeoutMs, t.controller.signal));
+        if (v.kind !== 'clean') {
+          await this.cancelStaged(gs);
+          await this.reject(
+            t,
+            v.kind === 'infected' ? 'malware_detected' : 'scan_unavailable',
+            v,
+            gs.sha256,
+            cfg.quarantineDir,
+          );
+          return;
+        }
+      }
+      const written = await c.promote(gs.g, info, gs.target, signal);
+      this.journal.add({
+        submissionId: gs.submission.submissionId,
+        connectionId: gs.connectionId,
+        path: written.path,
+        ...(written.providerId ? { providerId: written.providerId } : {}),
+      });
+      gs.closed = true;
+      this.grants.delete(gs.id);
+      unregisterSecret(gs.g.url);
+      if (gs.g.cancelUrl) unregisterSecret(gs.g.cancelUrl);
+      this.grantLog(gs, 'ok');
+      await rm(spool, { force: true });
+      verified({
+        reference: {
+          v: 1,
+          connectionId: gs.connectionId,
+          kind: gs.kind,
+          path: written.path,
+          ...(written.providerId ? { providerId: written.providerId } : {}),
+          size: gs.size,
+          sha256: gs.sha256,
+          contentType: gs.contentType,
+          writtenAt: new Date(this.now()).toISOString(),
+        },
+      });
+    } catch (err) {
+      await refuse(this.typed(err));
+    }
+  }
+
+  private ensureSweepTimer(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setInterval(() => void this.sweepStaging(), GRANT_SWEEP_MS);
+    this.sweepTimer.unref?.();
+  }
+
+  /** Deletes staged entries nobody can finish: no open grant, and older than the longest grant. */
+  async sweepStaging(): Promise<number> {
+    let n = 0;
+    for (const [id] of this.store.list()) {
+      const c = this.capable(id);
+      if (!c) continue;
+      try {
+        n += await c.sweep((name, modifiedAt) => {
+          const gid = name.split('.')[0] ?? '';
+          return this.grants.has(gid) || this.now() - modifiedAt < GRANT_KEEP_MS;
+        }, AbortSignal.timeout(60_000));
+      } catch {
+        // best effort; the next sweep tries again
+      }
+    }
+    return n;
+  }
+
   /** Transfers in progress (for tests and shutdown). */
   activeTransfers(): number {
     return this.transfers.size;
   }
 
   close(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    for (const gs of [...this.grants.values()]) void this.cancelStaged(gs);
     for (const f of this.flows.values()) f.ctl.abort();
     for (const t of [...this.transfers.values()]) void this.abortTransfer(t, 'shutdown');
   }
