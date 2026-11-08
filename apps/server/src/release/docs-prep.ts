@@ -278,7 +278,8 @@ async function startChecks(
   retryOf?: string,
 ): Promise<{ branch: string; picked: Picked[] }> {
   const projectId = String(p.id);
-  if (!settingsOf(p).enabled) throw conflict('release_docs_prep_off', `${NAME} is switched off for this project.`);
+  if (!settingsOf(p).enabled)
+    throw conflict('release_docs_prep_off', `${NAME} is switched off for this project.`);
   const missing = missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps(settingsOf(p)));
   if (missing) throw conflict('release_docs_prep_requires', missing.message);
   const repos = isResearchStage(p.workflow_key) || p.simulation ? [] : await docsPrepRepos(db, projectId);
@@ -309,7 +310,10 @@ async function startChecks(
     [projectId],
   );
   if (approved)
-    throw conflict('release_shipping', `A release is being shipped for ${branch}. ${NAME} belongs before the approval.`);
+    throw conflict(
+      'release_shipping',
+      `A release is being shipped for ${branch}. ${NAME} belongs before the approval.`,
+    );
   const picked: Picked[] = [];
   for (const r of repos) {
     const ws = await prepWorkstation(db, r.id, userId);
@@ -320,7 +324,10 @@ async function startChecks(
             'runner_too_old',
             `The workstation that has ${r.name} is offline or needs a newer runner. Start or update the runner and try again.`,
           )
-        : conflict('no_clone', `No workstation has ${r.name} yet. Wait for the clone to finish, then try again.`);
+        : conflict(
+            'no_clone',
+            `No workstation has ${r.name} yet. Wait for the clone to finish, then try again.`,
+          );
     }
     picked.push({ repoId: r.id, branch: r.branch, mainBranch: r.main_branch, workstationId: ws });
   }
@@ -356,7 +363,12 @@ export async function startRunInTx(
   const { branch, picked } = await startChecks(tx, p, userId, retryOf);
   const runId = randomUUID();
   const heads =
-    starter.kind === 'auto' ? starter.heads : await knownHeads(tx, picked.map((x) => x.repoId));
+    starter.kind === 'auto'
+      ? starter.heads
+      : await knownHeads(
+          tx,
+          picked.map((x) => x.repoId),
+        );
   await ctx.store.append(
     [
       {
@@ -399,7 +411,10 @@ async function knownHeads(db: Queryable, repoIds: string[]): Promise<Record<stri
  * Why a start would be refused right now, with the manual start's own sentence; null when it would go ahead.
  * Read only: nothing is started or locked.
  */
-export async function startBlocker(db: Queryable, projectId: string): Promise<{ code: string; message: string } | null> {
+export async function startBlocker(
+  db: Queryable,
+  projectId: string,
+): Promise<{ code: string; message: string } | null> {
   const p = await one(
     db,
     `SELECT p.*, o.simulation FROM projects p LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id=$1`,
@@ -487,7 +502,12 @@ export async function skipReleaseDocsPrep(
  * project's repositories belongs to an earlier release and counts as no run (same rule as the ship gate); the gate
  * passes `any` and applies the rule per repository itself.
  */
-export async function latestRun(db: Queryable, projectId: string, branch: string, any = false): Promise<Row | null> {
+export async function latestRun(
+  db: Queryable,
+  projectId: string,
+  branch: string,
+  any = false,
+): Promise<Row | null> {
   const fresh = any
     ? ''
     : `AND started_at >= COALESCE((SELECT MAX(s.published_at) FROM release_ships s JOIN project_repos pr ON pr.id = s.repo_id

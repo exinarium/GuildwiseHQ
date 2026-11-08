@@ -140,7 +140,11 @@ export interface ReleaseDocsPrepSettings {
   autoStart?: boolean;
 }
 
-export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: false, steps: {}, autoStart: false };
+export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = {
+  enabled: false,
+  steps: {},
+  autoStart: false,
+};
 
 /** The registered steps that are ticked (an unticked-by-default registry entry follows `defaultOn`). */
 export const enabledReleaseDocsPrepSteps = (

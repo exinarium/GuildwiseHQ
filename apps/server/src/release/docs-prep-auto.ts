@@ -53,7 +53,10 @@ async function envDeploys(
       break;
     }
     if (r.status === 'queued' || r.status === 'running') updating = true;
-    else if (!finishedSeen && (r.status === 'failed' || (r.status === 'refused' && r.refusal === 'expired'))) {
+    else if (
+      !finishedSeen &&
+      (r.status === 'failed' || (r.status === 'refused' && r.refusal === 'expired'))
+    ) {
       lastFailed = true;
       finishedSeen = true;
     } else if (r.status !== 'waiting_release') finishedSeen = true;
@@ -96,7 +99,11 @@ export async function loadReleaseReadiness(
     }
     const testReady = tests.some(
       (t) =>
-        !t.updating && !t.lastFailed && t.current?.healthy !== false && sameCommit(t.current?.commit, head) && t.gate?.satisfied,
+        !t.updating &&
+        !t.lastFailed &&
+        t.current?.healthy !== false &&
+        sameCommit(t.current?.commit, head) &&
+        t.gate?.satisfied,
     );
     const live: ReadinessRepoInput['live'] = [];
     for (const e of envs.filter((x) => x.role === 'live' && repoOf.get(x.name) === r.id)) {

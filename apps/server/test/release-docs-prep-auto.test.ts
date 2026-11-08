@@ -3,7 +3,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadReleaseReadiness, releaseDocsPrepAutoStart } from '../src/release/docs-prep-auto.ts';
 import { keepOnline } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { advance, type DeliveryWorld, deliveryWorld, healthyRun, parseFixture, setWeekday } from './helpers/delivery.ts';
+import {
+  advance,
+  type DeliveryWorld,
+  deliveryWorld,
+  healthyRun,
+  parseFixture,
+  setWeekday,
+} from './helpers/delivery.ts';
 import { addMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
 import { markOnline, ok } from './helpers/world.ts';
@@ -21,14 +28,19 @@ const ctx = () => d.w.t.app.ctx;
 const base = () => `/api/projects/${d.w.projectId}/release-docs-prep`;
 const owner = (method: string, u: string, body?: unknown, cookie = d.w.owner.cookie) =>
   d.w.t.req(method, u, { cookie, body });
-const runs = () => q2(`SELECT * FROM release_docs_prep_runs WHERE project_id=$1 ORDER BY started_at`, [d.w.projectId]);
+const runs = () =>
+  q2(`SELECT * FROM release_docs_prep_runs WHERE project_id=$1 ORDER BY started_at`, [d.w.projectId]);
 const pass = () => releaseDocsPrepAutoStart(ctx(), { force: true });
 const project = async () => (await q2('SELECT * FROM projects WHERE id=$1', [d.w.projectId]))[0];
 
 /** The live site's gate (fixture) needs the test copy healthy for 30 minutes and a passed regression run. */
 const RECIPE = parseFixture();
 for (const e of RECIPE.environments)
-  if (e.name === 'production') (e as { gate: unknown }).gate = { requires: [{ envHealthy: 'local', sameCommit: true, forMinutes: 30 }], freeze: true };
+  if (e.name === 'production')
+    (e as { gate: unknown }).gate = {
+      requires: [{ envHealthy: 'local', sameCommit: true, forMinutes: 30 }],
+      freeze: true,
+    };
 
 beforeAll(async () => {
   d = await deliveryWorld();
@@ -52,7 +64,12 @@ async function setHead(sha: string) {
 }
 
 const settings = (body: Record<string, unknown>, cookie?: string) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false }, ...body }, cookie);
+  owner(
+    'PUT',
+    `${base()}/settings`,
+    { enabled: true, steps: { changelog: false, guide: false }, ...body },
+    cookie,
+  );
 
 beforeEach(async () => {
   await freshState();
@@ -122,7 +139,9 @@ describe('the automatic start', () => {
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ trigger: 'auto', started_by: null, ready_key: `${d.w.repoId}@${HEAD}` });
     expect(all[0].heads).toEqual({ [d.w.repoId]: HEAD });
-    const ev = (await q2(`SELECT actor_kind FROM events WHERE type='ReleaseDocsPrepStarted' ORDER BY seq DESC LIMIT 1`))[0];
+    const ev = (
+      await q2(`SELECT actor_kind FROM events WHERE type='ReleaseDocsPrepStarted' ORDER BY seq DESC LIMIT 1`)
+    )[0];
     expect(ev.actor_kind).toBe('system');
     expect(await q2(`SELECT * FROM runner_commands WHERE type='release.docs_prep'`)).toHaveLength(1);
     const view = (await owner('GET', `${base()}/runs/latest`)).body;
@@ -182,6 +201,8 @@ describe('the automatic start', () => {
     const item = ((await owner('GET', '/api/release-docs-prep')).body as any[]).find(
       (o) => o.projectId === d.w.projectId,
     );
-    expect(item.autoStartBlocked).toMatch(/^No workstation has .+ yet\. Wait for the clone to finish, then try again\.$/);
+    expect(item.autoStartBlocked).toMatch(
+      /^No workstation has .+ yet\. Wait for the clone to finish, then try again\.$/,
+    );
   });
 });

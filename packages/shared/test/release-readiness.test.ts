@@ -61,7 +61,10 @@ describe('releaseReadiness', () => {
     [{ updating: true }, 'app: an update of Test copy is running'],
     [{ lastFailed: true }, 'app: the last update of Test copy failed'],
     [{ current: { commit: HEAD, healthy: false } }, 'app: Test copy is not healthy on abcdef1'],
-    [{ gate: { satisfied: false, missing: ['checks passed', 'phase done'] } }, 'app: Test copy gate not met: checks passed; phase done'],
+    [
+      { gate: { satisfied: false, missing: ['checks passed', 'phase done'] } },
+      'app: Test copy gate not met: checks passed; phase done',
+    ],
   ] as Array<[Partial<Env>, string]>)('not ready: %o', (over, reason) => {
     const r = releaseReadiness([repo({ envs: [env(over)] })]);
     expect(r.ready).toBe(false);
@@ -79,7 +82,10 @@ describe('releaseReadiness', () => {
     const both = releaseReadiness([repo(), lib]);
     expect(both.ready).toBe(true);
     expect(both.key).toBe(`${R1}@${HEAD}`);
-    expect(both.repos[1]).toMatchObject({ state: 'not_checked', reason: 'lib: no test site deploys it, not checked' });
+    expect(both.repos[1]).toMatchObject({
+      state: 'not_checked',
+      reason: 'lib: no test site deploys it, not checked',
+    });
     const alone = releaseReadiness([lib]);
     expect(alone.ready).toBe(false);
     expect(alone.reasons).toEqual([NO_CHECKED_REPO]);
@@ -93,7 +99,10 @@ describe('releaseReadiness', () => {
           {
             name: 'prod2',
             label: 'Live EU',
-            requires: { satisfied: false, missing: ['the test copy has been healthy on abcdef1 for 10 minutes'] },
+            requires: {
+              satisfied: false,
+              missing: ['the test copy has been healthy on abcdef1 for 10 minutes'],
+            },
           },
         ],
       }),
@@ -102,16 +111,22 @@ describe('releaseReadiness', () => {
     expect(missing.reasons).toEqual([
       'app: not ready to go out on Live EU: the test copy has been healthy on abcdef1 for 10 minutes',
     ]);
-    const unchecked = releaseReadiness([repo({ live: [{ name: 'prod', label: 'Live site', requires: null }] })]);
+    const unchecked = releaseReadiness([
+      repo({ live: [{ name: 'prod', label: 'Live site', requires: null }] }),
+    ]);
     expect(unchecked.ready).toBe(false);
-    expect(releaseReadiness([repo({ live: [{ name: 'prod', label: 'Live site', requires: ok }] })]).ready).toBe(
-      true,
-    );
+    expect(
+      releaseReadiness([repo({ live: [{ name: 'prod', label: 'Live site', requires: ok }] })]).ready,
+    ).toBe(true);
   });
 
   it('one ready test environment of several is enough; the key is sorted and stable', () => {
     const r = releaseReadiness([
-      repo({ repoId: R2, repoName: 'b', envs: [env({ updating: true }), env({ name: 'uat', label: 'UAT' })] }),
+      repo({
+        repoId: R2,
+        repoName: 'b',
+        envs: [env({ updating: true }), env({ name: 'uat', label: 'UAT' })],
+      }),
       repo(),
     ]);
     expect(r.ready).toBe(true);
@@ -132,20 +147,40 @@ const ev = (type: string) => releaseDocsPrepEvents.find((e) => e.shape.type.valu
 describe('release prep automatic start: schemas', () => {
   it('the settings body accepts a missing autoStart; the DTO defaults it to off', () => {
     expect(ReleaseDocsPrepSettingsSchema.parse({ enabled: true, steps: {} }).autoStart).toBeUndefined();
-    expect(ReleaseDocsPrepSettingsSchema.parse({ enabled: true, steps: {}, autoStart: true }).autoStart).toBe(true);
-    expect(ReleaseDocsPrepSettingsDtoSchema.parse({ enabled: true, steps: [], canEdit: true }).autoStart).toBe(false);
+    expect(ReleaseDocsPrepSettingsSchema.parse({ enabled: true, steps: {}, autoStart: true }).autoStart).toBe(
+      true,
+    );
+    expect(
+      ReleaseDocsPrepSettingsDtoSchema.parse({ enabled: true, steps: [], canEdit: true }).autoStart,
+    ).toBe(false);
   });
 
   it('old and new events parse', () => {
     const set = ev('ReleaseDocsPrepSettingsSet');
-    expect(set?.safeParse({ type: 'ReleaseDocsPrepSettingsSet', payload: { projectId: R1, enabled: true, steps: {}, setBy: R2 } }).success).toBe(true);
+    expect(
+      set?.safeParse({
+        type: 'ReleaseDocsPrepSettingsSet',
+        payload: { projectId: R1, enabled: true, steps: {}, setBy: R2 },
+      }).success,
+    ).toBe(true);
     const started = ev('ReleaseDocsPrepStarted');
     const base = { runId: R1, projectId: R2, releaseBranch: 'release/1', steps: ['analyse'], repos: [] };
-    expect(started?.safeParse({ type: 'ReleaseDocsPrepStarted', payload: { ...base, trigger: 'manual', startedBy: R1 } }).success).toBe(true);
     expect(
       started?.safeParse({
         type: 'ReleaseDocsPrepStarted',
-        payload: { ...base, trigger: 'auto', startedBy: null, heads: { [R1]: HEAD }, readyKey: `${R1}@${HEAD}` },
+        payload: { ...base, trigger: 'manual', startedBy: R1 },
+      }).success,
+    ).toBe(true);
+    expect(
+      started?.safeParse({
+        type: 'ReleaseDocsPrepStarted',
+        payload: {
+          ...base,
+          trigger: 'auto',
+          startedBy: null,
+          heads: { [R1]: HEAD },
+          readyKey: `${R1}@${HEAD}`,
+        },
       }).success,
     ).toBe(true);
   });

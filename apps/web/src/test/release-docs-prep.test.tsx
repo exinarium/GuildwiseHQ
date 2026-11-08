@@ -284,6 +284,118 @@ describe('Releases > Release prep tab', () => {
   });
 });
 
+describe('Release prep automatic start', () => {
+  it('the panel shows the switch, saves autoStart and keeps it when another setting changes', async () => {
+    routes = (_u, m) =>
+      json(m === 'PUT' ? settings({ enabled: true, autoStart: true }) : settings({ enabled: true }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const auto = await screen.findByTestId('release-docs-prep-auto-start');
+    expect(auto).not.toBeChecked();
+    expect(auto).toBeEnabled();
+    expect(
+      screen.getByText('Start automatically when the release is ready on the test site'),
+    ).toBeInTheDocument();
+    await userEvent.setup().click(auto);
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({
+        enabled: true,
+        autoStart: true,
+      }),
+    );
+  });
+
+  it('the switch is disabled while prep is off and for a member', async () => {
+    routes = () => json(settings({ enabled: false }));
+    const a = wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    expect(await screen.findByTestId('release-docs-prep-auto-start')).toBeDisabled();
+    a.unmount();
+    routes = () => json(settings({ enabled: true, canEdit: false, autoStart: true }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    await waitFor(() => expect(screen.getByTestId('release-docs-prep-auto-start')).toBeChecked());
+    expect(screen.getByTestId('release-docs-prep-auto-start')).toBeDisabled();
+  });
+
+  it('the tab shows not ready with the reasons and a repository that is not checked', async () => {
+    routes = () =>
+      json(
+        overview(
+          'not_run',
+          {
+            autoStart: true,
+            readiness: {
+              ready: false,
+              repos: [
+                {
+                  repoId: ID(10),
+                  repoName: 'app',
+                  state: 'not_ready',
+                  env: 'test',
+                  reason: 'app: an update of Test copy is running',
+                },
+                {
+                  repoId: ID(11),
+                  repoName: 'lib',
+                  state: 'not_checked',
+                  env: null,
+                  reason: 'lib: no test site deploys it, not checked',
+                },
+              ],
+              reasons: ['app: an update of Test copy is running'],
+            },
+            autoStartBlocked: null,
+          },
+          null,
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    const box = await screen.findByTestId('release-docs-prep-readiness');
+    expect(box).toHaveTextContent('Not ready on the test site yet');
+    expect(box).toHaveTextContent('app: an update of Test copy is running');
+    expect(box).toHaveTextContent('lib: no test site deploys it, not checked');
+    expect(screen.getByTestId('release-docs-prep-auto')).toHaveTextContent('Starts automatically');
+    expect(screen.queryByTestId('release-docs-prep-auto-blocked')).not.toBeInTheDocument();
+  });
+
+  it('the tab shows ready and why the run did not start by itself', async () => {
+    routes = () =>
+      json(
+        overview(
+          'not_run',
+          {
+            autoStart: true,
+            readiness: { ready: true, repos: [], reasons: [] },
+            autoStartBlocked: 'No workstation has app yet. Wait for the clone to finish, then try again.',
+          },
+          null,
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByTestId('release-docs-prep-readiness')).toHaveTextContent(
+      'Ready on the test site',
+    );
+    expect(screen.getByTestId('release-docs-prep-auto-blocked')).toHaveTextContent(
+      'Release prep did not start by itself: No workstation has app yet.',
+    );
+  });
+
+  it("a run reads 'Started automatically' or 'Started by <name>'", async () => {
+    routes = () =>
+      json(
+        overview('running', {}, run('running', { trigger: 'auto', startedBy: null, startedByName: null })),
+      );
+    const a = wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByTestId('release-docs-prep-started')).toHaveTextContent(
+      /^Started automatically /,
+    );
+    a.unmount();
+    routes = () => json(overview('running', {}, run('running', { startedByName: 'Pat Doe' })));
+    wrap(<ReleaseDocsPrepTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('release-docs-prep-started')).toHaveTextContent(/^Started by Pat Doe /),
+    );
+  });
+});
+
 describe('Ship release item with release prep', () => {
   const view = (docsPrep?: unknown) => ({
     proposalId: ID(9),
