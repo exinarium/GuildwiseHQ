@@ -315,6 +315,11 @@ describe('public release pages', () => {
     expect(idx.headers['content-type']).toContain('text/html');
     expect(idx.body).toContain('Guildwise HQ 1.9.0');
     expect(idx.body).toContain('/releases/1.9.0');
+    expect(idx.body).toContain('class="releases-index"');
+    expect(idx.body).toContain('class="rel-card"');
+    expect(idx.body).toContain(
+      'href="/releases/1.9.0">Read more<span class="vh"> about Guildwise HQ 1.9.0</span>',
+    );
     const page = await get('/releases/1.9.0');
     expect(page.statusCode).toBe(200);
     expect(page.body).toContain('<h1>Guildwise HQ 1.9.0</h1>');
