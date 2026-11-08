@@ -104,6 +104,20 @@ describe('Release prep (docs and videos) settings', () => {
     expect(input).toBeDisabled();
   });
 
+  it('keeps the step checklist the only fieldset labels when the user guide fields are shown', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: null }];
+    routes = () => json(settings({ repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    const { container } = wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    const labels = [...container.querySelectorAll('fieldset label')].map((l) => (l.textContent ?? '').trim());
+    expect(labels.map((t) => t.startsWith('Analyse changes') || t.startsWith('Commit results'))).toEqual([
+      true,
+      true,
+    ]);
+    expect(screen.getByRole('group', { name: 'User guide' })).toBeInTheDocument();
+    expect(screen.getByLabelText('GuildwiseHQ')).toBe(screen.getByTestId(`prep-guide-path-${ID(7)}`));
+  });
+
   it('is read-only for a member', async () => {
     routes = () => json(settings({ canEdit: false }));
     wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);

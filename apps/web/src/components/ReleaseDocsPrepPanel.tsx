@@ -105,8 +105,15 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
           ))}
         </fieldset>
         {repos.length > 0 && (
-          <fieldset className="flex flex-col gap-3" disabled={!canEdit || save.isPending}>
-            <legend className="text-sm font-medium text-fg">User guide</legend>
+          <div
+            role="group"
+            aria-labelledby="prep-guide-heading"
+            className="flex flex-col gap-3"
+            data-testid="prep-guide-paths"
+          >
+            <span id="prep-guide-heading" className="text-sm font-medium text-fg">
+              User guide
+            </span>
             {repos.map((r) => {
               const err = failedRepo === r.id && save.error instanceof Error ? save.error.message : null;
               return (
@@ -118,6 +125,7 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
                     id={`prep-guide-path-${r.id}`}
                     data-testid={`prep-guide-path-${r.id}`}
                     type="text"
+                    disabled={!canEdit || save.isPending}
                     className="min-h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
                     placeholder={data?.defaultGuidePath ?? 'docs/USER-GUIDE.md'}
                     value={drafts[r.id] ?? ''}
@@ -154,7 +162,7 @@ export function ReleaseDocsPrepPanel({ projectId }: { projectId: string }) {
                 </div>
               );
             })}
-          </fieldset>
+          </div>
         )}
         {failedRepo === null && <ErrorBox error={save.error} />}
       </div>
