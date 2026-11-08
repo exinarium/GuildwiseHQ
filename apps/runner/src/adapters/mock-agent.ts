@@ -50,6 +50,9 @@ interface Brief {
   ledger?: Array<{ title: string; body: string }>;
   card: {
     ref: string;
+    /** The client ticket of an intake card (with isClientRef); absent from older servers. */
+    workRef?: string;
+    isClientRef?: boolean;
     title: string;
     cardType: string;
     reworkRound: number;
@@ -89,6 +92,10 @@ function sh(cmd: string, args: string[]): void {
 }
 
 /** How many shifts of this card+stage ran before this one (persisted so crashed shifts still count). */
+/** What commit messages call the card: its client ticket on an intake card (never the internal ref), else its ref. */
+const commitRef = (brief: Brief): string =>
+  brief.card.isClientRef && brief.card.workRef ? brief.card.workRef : brief.card.ref;
+
 function attemptIndex(brief: Brief): number {
   const dir = process.env.AOM_MOCK_STATE_DIR;
   if (!dir) return (brief.handoffs ?? []).filter((h) => h.stage === brief.shift.stage).length;
@@ -122,7 +129,7 @@ function buildWork(brief: Brief): void {
     `unit-test-like file for ${brief.card.ref}, round ${round}\n`,
   );
   sh('git', ['add', '-A']);
-  sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${brief.card.ref}`]);
+  sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${commitRef(brief)}`]);
 }
 
 async function report(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
@@ -298,7 +305,7 @@ async function architectWork(
     if (!vault) {
       sh('git', ['add', '-A']);
       // (empty when a retried shift writes the same report again)
-      sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock investigation: ${brief.card.ref}`]);
+      sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock investigation: ${commitRef(brief)}`]);
     }
   };
   const verb = brief.shift.outcomes.some((o) => o.id === 'report') ? 'investigate' : 'design';

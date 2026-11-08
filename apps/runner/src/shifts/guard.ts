@@ -2,7 +2,9 @@ import {
   type AgentPermissions,
   CARD_BRANCH_PREFIXES,
   type GuardViolation,
+  guardsInternalRef,
   isRunnerOwnedBranch,
+  mentionsInternalRef,
   workRefBranchPart,
 } from '@aom/shared';
 import picomatch from 'picomatch';
@@ -12,6 +14,7 @@ import {
   withoutSandboxStubs,
 } from '../adapters/sandbox-placeholders.ts';
 import { currentBranch, git } from '../git/git.ts';
+import { commitsWithInternalRef, describeCommits } from '../git/internal-ref.ts';
 import { baseTarget } from '../git/rebase.ts';
 
 export interface BranchSnapshot {
@@ -97,6 +100,11 @@ export interface GuardInput {
   ownTicketBranchPart?: string;
   /** The project's card branch prefix (brief.project.branchPrefix): branches under it are card branches. */
   cardBranchPrefix?: string;
+  /**
+   * The card's client ticket (`ABC-1`, brief.card.workRef with isClientRef) when it differs from the card ref. Set: the
+   * shift's commits and branches must not name the card's internal ref (`cardRef`).
+   */
+  clientRef?: string;
 }
 
 /**
@@ -551,21 +559,74 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
   const other = await otherBranchViolation(input);
   if (other) violations.push(other);
+  if (input.clientRef && input.cardRef && input.permissions.mayCommit)
+    violations.push(...(await internalRefViolations(input)));
   return violations;
+}
+
+/**
+ * An intake card's commits and branches use its client ticket, never its internal ref. internal_ref_in_commits: the
+ * commits this shift added that are not on the base branch name the card's own ref. internal_ref_in_branch: the current
+ * branch (when it is not the assigned one) or a branch this shift created or moved names it. The assigned card branch
+ * is the runner's choice (an in-flight card's legacy name, or the fallback for an unusable ticket) and is never flagged.
+ */
+export async function internalRefViolations(input: GuardInput): Promise<GuardViolation[]> {
+  const cardRef = input.cardRef;
+  const clientRef = input.clientRef;
+  if (!cardRef || !clientRef || !guardsInternalRef({ ref: clientRef, isClientRef: true }, cardRef)) return [];
+  const out: GuardViolation[] = [];
+  const base = input.baseBranch ? await baseTarget(input.worktree, input.baseBranch) : null;
+  const commits = await commitsWithInternalRef(
+    input.worktree,
+    ['HEAD', '--not', input.startSha, ...(base ? [base] : [])],
+    cardRef,
+  );
+  if (commits.length > 0) {
+    const mergeBase = base ? `$(git merge-base HEAD ${base})` : '<the commit before your first one>';
+    out.push({
+      rule: 'internal_ref_in_commits',
+      detail: `Commit messages on this card must use ${clientRef}, not ${cardRef}: ${describeCommits(commits)}. Reword them (the branch is not pushed): the last one with git commit --amend -m "${clientRef}: ..."; older ones with git reset --soft ${mergeBase} and one new commit`,
+    });
+  }
+  const names = new Set<string>();
+  const current = await currentBranch(input.worktree);
+  if (current && current !== input.branchName) names.add(current);
+  const now = await snapshotBranches(input.worktree);
+  for (const b of Object.keys(now)) {
+    const tip = now[b] as string;
+    const before = input.branchesAtStart[b];
+    if (b === input.branchName || before === tip || isRunnerOwnedBranch(b)) continue;
+    if (await isSyncOnly(input.worktree, tip, before)) continue;
+    names.add(b);
+  }
+  names.delete(input.branchName);
+  const bad = [...names].filter((b) => mentionsInternalRef(b, cardRef)).sort();
+  if (bad.length > 0)
+    out.push({
+      rule: 'internal_ref_in_branch',
+      detail: `Branches of this card must use ${clientRef}, not ${cardRef}: ${bad.slice(0, 10).join(', ')}. Work on ${input.branchName} and delete ${bad.length === 1 ? 'that branch' : 'those branches'}`,
+    });
+  return out;
 }
 
 /**
  * What the brief adds to the other-branch guard: the branch part of the card's client ticket (its ticket-named branches
  * are its own) and the project's card branch prefix (branches under it are card branches). Older servers send neither.
+ * With the card ref: the client ticket that turns on the internal-ref checks (only when it differs from the card ref).
  */
 export function workRefGuardInput(
-  card: { workRef?: string; isClientRef?: boolean },
+  card: { ref?: string; workRef?: string; isClientRef?: boolean },
   project: { branchPrefix?: string },
-): Pick<GuardInput, 'ownTicketBranchPart' | 'cardBranchPrefix'> {
+): Pick<GuardInput, 'ownTicketBranchPart' | 'cardBranchPrefix' | 'clientRef'> {
   const part = card.isClientRef && card.workRef ? workRefBranchPart(card.workRef) : null;
+  const client =
+    card.isClientRef && card.workRef && card.ref && guardsInternalRef({ ref: card.workRef, isClientRef: true }, card.ref)
+      ? card.workRef
+      : null;
   return {
     ...(part ? { ownTicketBranchPart: part } : {}),
     ...(project.branchPrefix ? { cardBranchPrefix: project.branchPrefix } : {}),
+    ...(client ? { clientRef: client } : {}),
   };
 }
 
