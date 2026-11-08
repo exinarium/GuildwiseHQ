@@ -41,6 +41,8 @@ Out of scope:
 
 Published forms are open to the public by design. Their threat model and controls are in [docs/security/public-forms.md](docs/security/public-forms.md).
 
+The GitHub security settings this repository expects (Dependabot, code scanning, secret scanning) are listed in [docs/security/github-settings.md](docs/security/github-settings.md).
+
 ## Safe testing
 
 Test only against systems you own or are allowed to test. Do not run tests against Guildwise Cloud data belonging to other people.

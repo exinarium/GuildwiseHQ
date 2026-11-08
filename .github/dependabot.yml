@@ -1,0 +1,92 @@
+# Dependabot version updates.
+#
+# Security updates are switched on in the repository settings (see docs/security/github-settings.md) and work apart from
+# this file: they open as soon as an alert is raised and ignore the schedule, the groups and the cooldown below.
+#
+# Minor and patch updates are grouped into one pull request per ecosystem so the queue stays reviewable; a major update
+# gets its own pull request. The cooldown keeps version updates clear of pnpm's minimum release age.
+version: 2
+
+updates:
+  # The pnpm workspace: the root package.json, pnpm-workspace.yaml and pnpm-lock.yaml cover every workspace package.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # The workflows in .github/workflows. Actions are pinned by commit SHA with the version in a comment; Dependabot
+  # updates both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # Base images: the server image (Dockerfile), the media image (media/Dockerfile) and the ssh fixtures the runner tests
+  # build (apps/runner/test/fixtures/{sshd,gitssh}/Dockerfile).
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /media
+      - /apps/runner/test/fixtures/sshd
+      - /apps/runner/test/fixtures/gitssh
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # The service images in docker-compose.dev.yml and docker-compose.prod.yml.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: build(deps)
+    groups:
+      compose-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
