@@ -133,6 +133,40 @@ describe('commit-less test runs and the gate', () => {
     expect(v.satisfied).toBe(false);
     expect(v.missing[0]).toContain('CI results are not collected');
   });
+
+  it('requiresOnly leaves out the release window and the freeze, but still checks the requirements', async () => {
+    await healthyRun(d, 'local', MERGED, 45);
+    const frozen = (requires: unknown[]) =>
+      GateSchema.parse({ requires, freeze: true, window: { days: 'sun', hours: '00-01' } }) as Gate;
+    const run = (gate: Gate, requiresOnly?: boolean) =>
+      evaluateEnvGate(ctx().pool, {
+        orgId: d.orgId,
+        projectId: d.w.projectId,
+        env: { gate },
+        production: false,
+        commit: MERGED,
+        now: ctx().clock.now(),
+        ...(requiresOnly ? { requiresOnly } : {}),
+      });
+    const met = frozen([{ envHealthy: 'local' }]);
+    const full = await run(met);
+    expect(full.satisfied).toBe(false);
+    expect(full.missing).toContain('releases are frozen');
+    expect((await run(met, true)).satisfied).toBe(true);
+    const unmet = await run(frozen([{ checksPassed: 'ci' }]), true);
+    expect(unmet.satisfied).toBe(false);
+    expect(unmet.missing.join(' ')).not.toContain('frozen');
+    const preset = await evaluateEnvGate(ctx().pool, {
+      orgId: d.orgId,
+      projectId: d.w.projectId,
+      env: { gate: 'no-such-preset' } as never,
+      production: false,
+      commit: MERGED,
+      now: ctx().clock.now(),
+      requiresOnly: true,
+    });
+    expect(preset.satisfied).toBe(false);
+  });
 });
 
 describe('phaseDone rests on the phase merge commit', () => {
