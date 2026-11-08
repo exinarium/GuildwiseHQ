@@ -31,9 +31,9 @@ order:
 
 ## Known interactions
 
-- **DCO on Dependabot pull requests.** Dependabot's commits carry no `Signed-off-by:` line, so the DCO check fails on
-  Dependabot pull requests until `.github/workflows/dco.yml` exempts `dependabot[bot]`. Until then, review and merge
-  those pull requests knowing that this one check is red.
+- **DCO on Dependabot pull requests.** Dependabot's commits carry no `Signed-off-by:` line, so `.github/workflows/dco.yml`
+  skips a commit only when the pull request was opened by `dependabot[bot]` and the commit author is Dependabot's exact
+  identity. A human commit pushed onto a Dependabot pull request is still checked and fails without a sign-off.
 - **pnpm minimum release age.** Security updates ignore the cooldown. If one fails on install because the release is
   younger than pnpm's minimum release age, add the exact version to `minimumReleaseAgeExclude` in `pnpm-workspace.yaml`
   in that pull request.

@@ -43,6 +43,10 @@ describe('detectSignOff', () => {
       });
     },
   );
+  it('still detects sign-off for this repository (dco.yml keeps the Signed-off-by text)', async () => {
+    const repoRoot = join(import.meta.dirname, '..', '..', '..');
+    expect(await detectSignOff(repoRoot)).toEqual({ required: true, reason: '.github/workflows/dco.yml' });
+  });
   it('does not ask when nothing mentions it', async () => {
     const d = dirWith({
       'CONTRIBUTING.md': 'Be nice.',
