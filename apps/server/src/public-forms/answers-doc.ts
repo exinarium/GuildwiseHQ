@@ -82,7 +82,7 @@ export function buildAnswersHtml(i: AnswersDocInput): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(i.form.title)}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}th{width:35%}</style>
+<style>body{font-family:system-ui,"Noto Sans","Liberation Sans",Arial,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}th{width:35%}td,th,h1,p{unicode-bidi:plaintext}@page{size:A4;margin:16mm 14mm}@media print{body{max-width:none;margin:0;padding:0}tr{break-inside:auto}h1,h2{break-after:avoid}}</style>
 </head>
 <body>
 <h1>${escapeHtml(i.form.title)}</h1>

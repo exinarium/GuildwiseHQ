@@ -6,6 +6,7 @@ import {
   CompleteSchema,
   checkPublicAnswers,
   checkUploadHead,
+  DESK_SUBKIND,
   FORM_UPLOAD_TYPES,
   type FormDefinition,
   isOrgOperational,
@@ -1026,8 +1027,14 @@ export function publicFormRoutes(
             answers: body.data.answers,
             files,
           };
-          const have = (claimed.answers_refs ?? {}) as { html?: StorageReference; json?: StorageReference };
-          const refs: { html?: StorageReference; json?: StorageReference } = { ...have };
+          type AnswersRefs = {
+            html?: StorageReference;
+            json?: StorageReference;
+            pdf?: StorageReference;
+            pdfError?: string;
+          };
+          const have = (claimed.answers_refs ?? {}) as AnswersRefs;
+          const refs: AnswersRefs = { ...have };
           for (const kind of ['html', 'json'] as const) {
             if (refs[kind]) continue;
             const text = kind === 'html' ? buildAnswersHtml(doc) : buildAnswersJson(doc);
@@ -1045,6 +1052,8 @@ export function publicFormRoutes(
                 yield buf;
               })(),
               submission: { orgId: pub.orgId, formId: pub.formId, submissionId: sid },
+              // Only the answers HTML: the runner makes the PDF copy from it. The server never sees the PDF bytes.
+              ...(kind === 'html' ? { derive: { pdf: true as const } } : {}),
             });
             if (!w.ok) {
               await failWith(w.error);
@@ -1053,6 +1062,16 @@ export function publicFormRoutes(
               throw storageFailure(w.error);
             }
             refs[kind] = w.reference;
+            if (kind === 'html') {
+              // No `derived` at all is an older runner: the copy is missing, which is not an error.
+              if (w.derived?.pdf.ok) {
+                refs.pdf = w.derived.pdf.reference;
+                delete refs.pdfError;
+              } else {
+                delete refs.pdf;
+                refs.pdfError = w.derived?.pdf.ok === false ? w.derived.pdf.code : 'pdf_unavailable';
+              }
+            }
             await ctx.pool.query(
               `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
               [sid, JSON.stringify(refs), ctx.clock.now()],
@@ -1083,7 +1102,7 @@ export function publicFormRoutes(
                 orgId: pub.orgId,
                 version: pub.version,
                 ...(row.link_id ? { linkId: row.link_id } : {}),
-                answers: [html, json],
+                answers: refs.pdf ? [html, json, refs.pdf] : [html, json],
                 files: parts.map((p) => p.reference as StorageReference),
               },
             });
@@ -1096,6 +1115,48 @@ export function publicFormRoutes(
               })),
               { tx },
             );
+            if (!refs.pdf) {
+              // One notice per submission (this runs once, inside the rowCount check). No answer text in it.
+              const deskItemId = randomUUID();
+              const ref = linkRow ? (linkRow.reference as string) : undefined;
+              await ctx.store.append(
+                [
+                  {
+                    streamId: streamId.desk(deskItemId),
+                    event: {
+                      type: 'DeskItemCreated',
+                      payload: {
+                        deskItemId,
+                        kind: 'alert',
+                        subkind: DESK_SUBKIND.formPdfMissing,
+                        title: `PDF copy missing: ${def.settings.title}`,
+                        body: [
+                          "The answers were saved as JSON and HTML, but the PDF copy could not be made on the firm's workstation.",
+                          `Open the HTML copy (${html.path}) and print it if you need a PDF.`,
+                          ...(ref ? [`Client reference: ${ref}`] : []),
+                          `Submission ${sid.slice(0, 8)}`,
+                        ].join('\n'),
+                        options: [{ id: 'dismiss', label: 'Dismiss', description: 'Close this notice.' }],
+                        blocking: false,
+                        pinned: false,
+                        affectedCardIds: [],
+                        askedBy: { kind: 'system' },
+                        subjectKey: `form-pdf-missing:${sid}`,
+                        data: {
+                          formId: pub.formId,
+                          submissionId: sid,
+                          htmlPath: html.path,
+                          reason: refs.pdfError ?? 'pdf_unavailable',
+                        },
+                      },
+                    },
+                    actor: SYSTEM_ACTOR,
+                    scope: orgScope(pub.orgId),
+                  },
+                ],
+                { tx },
+              );
+            }
           });
         } catch (err) {
           // An unexpected error after the claim must not leave the row 'storing': the retry would get submission_busy.

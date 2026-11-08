@@ -72,4 +72,14 @@ describe('answers file', () => {
     expect(html).toContain('Forms/x/id.pdf');
     expect(html).not.toMatch(/<(iframe|object|embed|link|img)\b/i);
   });
+
+  it('has print styling for the PDF copy: A4 page, wrapping long words, plain-text direction, no script', () => {
+    const html = buildAnswersHtml(input({ full_name: 'x' }));
+    expect(html).toContain('@page{size:A4');
+    expect(html).toContain('overflow-wrap:anywhere');
+    expect(html).toContain('unicode-bidi:plaintext');
+    expect(html).toContain('@media print');
+    expect(html).not.toContain('<script');
+    expect(html).not.toMatch(/url\(|@import/i);
+  });
 });

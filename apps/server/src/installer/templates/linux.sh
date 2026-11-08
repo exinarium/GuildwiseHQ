@@ -180,6 +180,18 @@ install_docker() {
   good "Docker installed (log out and in again so your user may use it)"
 }
 
+# The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
+install_pdf_renderer() {
+  note "Installing the browser for PDF copies of form answers (a download of roughly 100 MB) ..."
+  if [ "${PKG}" = apt ] && { [ -n "${SUDO}" ] || [ "$(id -u)" -eq 0 ]; }; then
+    pkg_install fonts-noto-core >/dev/null 2>&1 || true
+    if runner pdf-renderer install --with-deps >/dev/null 2>&1; then good "PDF renderer installed"; return; fi
+  elif runner pdf-renderer install >/dev/null 2>&1; then
+    good "PDF renderer installed"; return
+  fi
+  step_warn "Could not install the PDF renderer. PDF copies of form answers stay off until \`guildwise-runner pdf-renderer install\` succeeds."
+}
+
 xdg_runtime() {
   local dir
   dir="/run/user/$(id -u)"
@@ -284,6 +296,7 @@ main() {
   step "Optional extras"; install_ytdlp; install_docker
   step "Downloading the runner"; install_runner_release
   step "Pairing with ${APP_NAME}"; pair_runner
+  step "Installing the PDF renderer"; install_pdf_renderer
   step "Choosing your code folder"; add_repo_folders
   step "Signing in to Claude"; sign_in_to_claude
   step "Starting the runner and checking everything"

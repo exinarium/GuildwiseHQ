@@ -426,9 +426,14 @@ export async function listSubmissions(
   return {
     submissions: page.map((x) => {
       const stored: FormSubmissionDto['stored'] = [];
-      const refs = x.answers_refs as { html?: StorageReference; json?: StorageReference };
+      const refs = x.answers_refs as {
+        html?: StorageReference;
+        json?: StorageReference;
+        pdf?: StorageReference;
+      };
       if (refs.json) stored.push({ label: 'Answers (JSON)', path: refs.json.path });
       if (refs.html) stored.push({ label: 'Answers (readable)', path: refs.html.path });
+      if (refs.pdf) stored.push({ label: 'Answers (PDF)', path: refs.pdf.path });
       for (const p of x.parts as Array<{ field: string; reference?: StorageReference }>)
         if (p.reference) stored.push({ label: p.field, path: p.reference.path });
       const queued = cleanup.get(x.id);
