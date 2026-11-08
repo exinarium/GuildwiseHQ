@@ -4,6 +4,7 @@ import {
   BLOG_LIMITS,
   BLOG_TAG_KEYS,
   HASHTAG_RE,
+  MANUAL_POST_LIMITS,
   SOCIAL_LIMITS,
   SOCIAL_NETWORKS,
   type SocialNetwork,
@@ -121,3 +122,29 @@ export const BlogContentSchema = z.object({
     .default({}),
 });
 export type BlogContent = z.infer<typeof BlogContentSchema>;
+
+/** Looser than `BlogContentSchema`, for an article a person wrote: no minimum of tags, a short body is fine. */
+export const ManualBlogContentSchema = BlogContentSchema.extend({
+  title: z.string().min(MANUAL_POST_LIMITS.titleMin).max(BLOG_LIMITS.titleMax),
+  summary: z.string().min(MANUAL_POST_LIMITS.summaryMin).max(BLOG_LIMITS.summaryMax),
+  bodyMarkdown: z.string().min(MANUAL_POST_LIMITS.bodyMin).max(BLOG_LIMITS.bodyMax),
+  tags: z.array(z.enum(BLOG_TAG_KEYS)).max(BLOG_LIMITS.tagsMax),
+});
+
+/** The slug of a title: ASCII lowercase words joined by single dashes, 3-80 characters. */
+export function slugifyTitle(title: string): string {
+  let s = title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (s.length > 80) {
+    s = s.slice(0, 80);
+    const cut = s.lastIndexOf('-');
+    if (cut >= 3) s = s.slice(0, cut);
+    s = s.replace(/-+$/g, '');
+  }
+  if (s.length < 3) s = s ? `post-${s}` : 'post';
+  return s.length < 3 ? 'post' : s;
+}
