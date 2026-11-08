@@ -305,6 +305,13 @@ export const ShiftBriefSchema = z.object({
   card: z.object({
     id: z.uuid(),
     ref: z.string(),
+    /**
+     * The card's work reference (workReference): its intake ticket key (`ABC-1`) when it came from a client ticket,
+     * otherwise `ref`. Absent: older servers.
+     */
+    workRef: z.string().optional(),
+    /** `workRef` is the client's ticket, not the internal card ref. Absent: older servers. */
+    isClientRef: z.boolean().optional(),
     title: z.string(),
     cardType: z.string(),
     fields: z.record(z.string(), z.unknown()),
@@ -352,6 +359,8 @@ export const ShiftBriefSchema = z.object({
     /** Legacy (ignored): the server no longer sends it. */
     domain: z.enum(['work', 'personal']).optional(),
     workingBranch: z.string(),
+    /** The project's card branch prefix (`aom/`): branches under it are card branches. Absent: older servers. */
+    branchPrefix: z.string().optional(),
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),

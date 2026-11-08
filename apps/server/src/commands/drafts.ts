@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   BA_ROLE_KEY,
   type CreateOutboundDraftRequest,
+  cardTicketRef,
   DESK_SUBKIND,
   type ExternalRef,
   leakMessage,
   type OutboundAuthor,
   OutboundDraftRpcParamsSchema,
   type OutboundKind,
-  parseExternalRef,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -31,8 +31,7 @@ const KIND_LABEL: Record<OutboundKind, string> = {
 
 /** The ticket a card came from (`fields.externalRef`), or null when it did not come from one. */
 export function cardTicket(card: Row): ExternalRef | null {
-  const raw = (card.fields as { externalRef?: unknown } | null)?.externalRef;
-  return typeof raw === 'string' && raw.trim() ? parseExternalRef(raw) : null;
+  return cardTicketRef(card.fields);
 }
 
 export type DraftOutcome =

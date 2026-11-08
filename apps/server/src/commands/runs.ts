@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  branchName,
+  cardBranchName,
   DEFAULT_MAX_RUN_ENVIRONMENTS,
   DEFAULT_RUN_PORT_RANGE,
   DEFAULT_RUN_TTL_HOURS,
@@ -548,11 +548,13 @@ export async function startRun(
         WHERE pr.project_id=$1 AND pr.removed_at IS NULL ORDER BY pr.name, pr.id`,
       [project.id, ws.id],
     );
-    const cardBranch = card
-      ? ((card.worktree_card_id
-          ? await one(tx, 'SELECT branch_name, ref, title FROM cards WHERE id=$1', [card.worktree_card_id])
-          : card
-        )?.branch_name ?? branchName(project.branch_prefix, card.ref, card.title))
+    const wcard = card?.worktree_card_id
+      ? ((await one(tx, 'SELECT branch_name, ref, title, fields FROM cards WHERE id=$1', [
+          card.worktree_card_id,
+        ])) ?? card)
+      : card;
+    const cardBranch = wcard
+      ? (wcard.branch_name ?? cardBranchName(project.branch_prefix ?? '', wcard as never).name)
       : null;
     const wanted = new Map((req.sources ?? []).map((s) => [s.repoId, s.branch]));
     for (const id of wanted.keys())
