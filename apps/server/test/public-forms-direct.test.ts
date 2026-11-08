@@ -177,6 +177,21 @@ describe('direct uploads to a cloud destination', () => {
     expect(JSON.stringify(await q('SELECT * FROM runner_commands'))).not.toContain(SECRET);
   });
 
+  it('passes the submitter file name from the grant request into the template values and the scan', async () => {
+    await report(ORIGIN);
+    run.grant = () => null;
+    run.seen.length = 0;
+    const s = await begin('Name kept');
+    const base = `/api/public/forms/${s.publicId}/submissions/${s.sid}`;
+    const h = { 'x-upload-token': s.token, 'x-file-name': encodeURIComponent('passport.pdf') };
+    const g = await pf.post(`${base}/parts/0/grant`, {}, h);
+    expect(g.status).toBe(200);
+    const open = run.seen.find((f) => f.type === 'storage.grant.open');
+    expect(open.scan.fileName).toBe('passport');
+    expect(JSON.stringify(open.vars)).toContain('passport');
+    expect(JSON.stringify(open.vars)).not.toContain('"file"');
+  });
+
   it('a failed check marks the part failed and the submission cannot complete', async () => {
     await report(ORIGIN);
     run.grant = () => null;

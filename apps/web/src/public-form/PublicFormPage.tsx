@@ -180,7 +180,7 @@ export function PublicFormPage({
     const ask = async () => {
       for (let n = 0; ; n++) {
         try {
-          return await publicApi.grant(publicId, s.id, index, s.token);
+          return await publicApi.grant(publicId, s.id, index, s.token, f.name);
         } catch (e) {
           const err = e as PublicApiError;
           if (err.code === 'upload_unavailable' && err.retryable && n < 2) {

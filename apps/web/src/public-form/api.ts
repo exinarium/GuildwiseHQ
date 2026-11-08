@@ -75,11 +75,11 @@ export const publicApi = {
       },
       body: file,
     }),
-  grant: (publicId: string, sid: string, index: number, token: string) =>
+  grant: (publicId: string, sid: string, index: number, token: string, fileName = '') =>
     call<GrantDto>(
       'POST',
       `${publicId}/submissions/${sid}/parts/${index}/grant`,
-      jsonInit({}, { 'x-upload-token': token }),
+      jsonInit({}, { 'x-upload-token': token, 'x-file-name': encodeURIComponent(fileName) }),
     ),
   grantOffset: (publicId: string, sid: string, index: number, token: string) =>
     call<GrantOffsetDto>('GET', `${publicId}/submissions/${sid}/parts/${index}/grant`, {

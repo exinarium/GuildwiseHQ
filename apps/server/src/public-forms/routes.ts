@@ -131,6 +131,19 @@ const UPLOAD_UNAVAILABLE_MSG =
 const GRANT_MAX_ATTEMPTS = 3;
 
 /** The CSP of the public page: nothing from anywhere else, no inline script or style. */
+/** The submitter's file name from the x-file-name header, made safe; 'file' when absent. */
+export function uploadNameOf(header: unknown): string {
+  let raw = '';
+  if (typeof header === 'string') {
+    try {
+      raw = decodeURIComponent(header).slice(0, 300);
+    } catch {
+      raw = '';
+    }
+  }
+  return sanitiseUploadName(raw || 'file').base || 'file';
+}
+
 export function publicPageCsp(secure: boolean, uploadOrigins: readonly string[] = []): string {
   const connect = ["'self'", ...[...new Set(uploadOrigins)].sort()].join(' ');
   return [
@@ -969,16 +982,7 @@ export function publicFormRoutes(
             yield n.value as Buffer;
           }
         }
-        let rawName = '';
-        const hdr = req.headers['x-file-name'];
-        if (typeof hdr === 'string') {
-          try {
-            rawName = decodeURIComponent(hdr).slice(0, 300);
-          } catch {
-            rawName = '';
-          }
-        }
-        const original = sanitiseUploadName(rawName || 'file').base || 'file';
+        const original = uploadNameOf(req.headers['x-file-name']);
         const linkRow = row.link_id
           ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
               row.link_id,
@@ -1115,7 +1119,7 @@ export function publicFormRoutes(
               row.link_id,
             ])
           : undefined;
-        const original = 'file';
+        const original = uploadNameOf(req.headers['x-file-name']);
         const remaining = Math.max(60_000, new Date(row.expires_at).getTime() - ctx.clock.now().getTime());
         const r = await ctx.services.direct.open({
           orgId: pub.orgId,
