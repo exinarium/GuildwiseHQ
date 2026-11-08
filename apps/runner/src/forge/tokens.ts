@@ -18,8 +18,7 @@ export interface StoredToken {
 /**
  * Tokens for forges that have no CLI login (Azure DevOps PAT, Bitbucket API token, GitLab PAT without glab). Kept in
  * `<data dir>/secrets/git-tokens.json`, encrypted with this runner's key (mode 0600 in a 0700 directory), on this
- * workstation only. Status reported to
- * the server says connected or not, never the token.
+ * workstation only. Status reported to the server says connected or not, never the token.
  */
 export interface TokenStore {
   /** `organization` is required to find an Azure DevOps token (PATs are organization-scoped); other providers ignore it. */
