@@ -172,13 +172,20 @@ export async function docsPrepRepos(db: Queryable, projectId: string): Promise<P
  * The release branch a run is labelled and keyed with: the branch every included repository releases from when they
  * all agree; otherwise (none, or different branches) the project's working branch, else the first repository's.
  */
-export function docsPrepReleaseBranch(projectBranch: string | null, repos: { branch: string }[]): string | null {
+export function docsPrepReleaseBranch(
+  projectBranch: string | null,
+  repos: { branch: string }[],
+): string | null {
   const first = repos[0]?.branch;
   if (first && repos.every((r) => r.branch === first)) return first;
   return projectBranch ?? first ?? null;
 }
 
-async function releaseBranchOf(db: Queryable, projectId: string, projectBranch: string | null): Promise<string | null> {
+async function releaseBranchOf(
+  db: Queryable,
+  projectId: string,
+  projectBranch: string | null,
+): Promise<string | null> {
   return docsPrepReleaseBranch(projectBranch, await docsPrepRepos(db, projectId));
 }
 

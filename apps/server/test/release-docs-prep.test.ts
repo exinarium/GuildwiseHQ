@@ -888,7 +888,9 @@ describe('the run label and key follow the repositories release branch', () => {
   };
 
   it('helper: shared branch, project branch, first repo branch, different branches', () => {
-    expect(docsPrepReleaseBranch('main', [{ branch: 'release/1' }, { branch: 'release/1' }])).toBe('release/1');
+    expect(docsPrepReleaseBranch('main', [{ branch: 'release/1' }, { branch: 'release/1' }])).toBe(
+      'release/1',
+    );
     expect(docsPrepReleaseBranch('release/9', [])).toBe('release/9');
     expect(docsPrepReleaseBranch(null, [{ branch: 'a' }, { branch: 'b' }])).toBe('a');
     expect(docsPrepReleaseBranch('main', [{ branch: 'a' }, { branch: 'b' }])).toBe('main');
@@ -930,7 +932,35 @@ describe('the run label and key follow the repositories release branch', () => {
     expect(JSON.stringify(again.body)).toContain('release/1.5.0');
     const all = await runs();
     expect(all.length).toBe(before + 1);
-    expect(all.filter((r: any) => r.release_branch === 'main').every((r: any) => r.status === 'running')).toBe(true);
+    expect(
+      all.filter((r: any) => r.release_branch === 'main').every((r: any) => r.status === 'running'),
+    ).toBe(true);
+  });
+
+  it('repositories on different branches: the run is keyed by the project branch and a second start is a duplicate of it', async () => {
+    await mainProject();
+    const second = randomUUID();
+    await q(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, main_branch, working_branch)
+       VALUES ($1,$2,'zother','git@github.com:acme/zother.git','github.com/acme/zother','main','release/2.0.0')`,
+      [second, w.projectId],
+    );
+    try {
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId, second] });
+      await enable();
+      expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+      const analyse = await cmds();
+      expect(analyse.map((c: any) => c.payload.repoId).sort()).toEqual([w.repoId, second].sort());
+      expect((await runs()).map((r: any) => r.release_branch)).toEqual(['main']);
+      expect((await latest()).releaseBranch).toBe('main');
+      const again = await owner('POST', `${base()}/runs`);
+      expect(again.status).toBe(409);
+      expect(JSON.stringify(again.body)).toContain('main');
+      expect((await runs()).length).toBe(1);
+    } finally {
+      await q(`TRUNCATE release_docs_prep_runs CASCADE`);
+      await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
+    }
   });
 
   it('retry, skip and result handling find the same run', async () => {

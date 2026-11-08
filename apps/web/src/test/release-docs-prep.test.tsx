@@ -199,6 +199,20 @@ describe('Releases > Release prep tab', () => {
     expect(screen.queryByRole('button', { name: 'Run release prep' })).not.toBeInTheDocument();
   });
 
+  it("titles the panel with the overview's release branch, not the project working branch", async () => {
+    routes = () =>
+      json(
+        overview(
+          'running',
+          { releaseBranch: 'release/2.3.0' },
+          run('running', { releaseBranch: 'release/2.3.0' }),
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByText('Guildwise · release/2.3.0')).toBeInTheDocument();
+    expect(screen.queryByText('Guildwise · main')).not.toBeInTheDocument();
+  });
+
   it('gives a member no actions', async () => {
     routes = () => json(overview('failed', { canAct: false }, run('failed')));
     wrap(<ReleaseDocsPrepTab />);
