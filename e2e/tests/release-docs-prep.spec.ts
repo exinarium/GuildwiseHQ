@@ -284,6 +284,7 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
     'Analyse changes',
     'Write changelog',
     'Update user guide',
+    'Update Help articles',
     'Generate videos',
     'Commit results',
   ]);
@@ -302,13 +303,13 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
     (s) => s.enabled === true,
     15_000,
   ).then((s) =>
-    expect(s.steps).toEqual({ analyse: true, changelog: true, guide: true, videos: false, commit: true }),
+    expect(s.steps).toEqual({ analyse: true, changelog: true, guide: true, help: true, videos: false, commit: true }),
   );
   // the runs below use Analyse and Commit only (the mock runner has no writer agent for the guide)
   const narrow = await owner.put(`/api/projects/${projectId}/release-docs-prep/settings`, {
     data: {
       enabled: true,
-      steps: { analyse: true, changelog: false, guide: false, videos: false, commit: true },
+      steps: { analyse: true, changelog: false, guide: false, help: false, videos: false, commit: true },
     },
   });
   expect(narrow.status()).toBe(200);
