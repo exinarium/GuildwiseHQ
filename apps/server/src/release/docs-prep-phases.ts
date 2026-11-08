@@ -5,14 +5,16 @@ import { runVideosAuthorPhase, videosRenderInput, videosRepairRound } from './do
 import {
   changelogApplyInput,
   guideApplyInput,
+  helpApplyInput,
   runChangelogWritePhase,
   runGuideWritePhase,
+  runHelpWritePhase,
 } from './docs-prep-writer.ts';
 
 /**
  * The server's side of the phased content steps: which phases the server runs itself, what a runner phase gets from an
- * earlier phase, and what runs after a runner phase failed. One registry for Write changelog, Update user guide and
- * Generate videos, so a new content step registers here and adds no writer path of its own.
+ * earlier phase, and what runs after a runner phase failed. One registry for Write changelog, Update user guide,
+ * Update Help articles and Generate videos, so a new content step registers here and adds no writer path of its own.
  */
 
 export interface ServerPhaseOutcome {
@@ -29,6 +31,7 @@ export const SERVER_PHASES: Record<
 > = {
   'changelog/write': runChangelogWritePhase,
   'guide/write': runGuideWritePhase,
+  'help/write': runHelpWritePhase,
   'videos/author': runVideosAuthorPhase,
 };
 
@@ -45,6 +48,7 @@ export const PHASE_INPUTS: Record<
 > = {
   'changelog/apply': changelogApplyInput,
   'guide/apply': guideApplyInput,
+  'help/apply': helpApplyInput,
   'videos/render': videosRenderInput,
 };
 

@@ -6,14 +6,16 @@ import {
   checkGuideUpdate,
   filesOutsideWritable,
   GuideProposalSchema,
+  HelpProposalSchema,
   PREP_PROPOSAL_FILE,
   type ReleasePrepShift,
 } from '@aom/shared';
 import { guideCheckContext, tryGuideEdits } from './release-docs-prep-guide.ts';
+import { readHelpArticles, safeHelpDir, tryHelpEdits } from './release-docs-prep-help.ts';
 import { changedFiles, type PrepTaskWorktree } from './release-prep-task.ts';
 
 /**
- * The runner's check of a proposal task (`changelog_entries`, `guide_edits`) at `aom prep done`: the shift may change
+ * The runner's check of a proposal task (`changelog_entries`, `guide_edits`, `help_edits`) at `aom prep done`: the shift may change
  * only the proposal file, which must parse against the kind's schema. For the guide the edits are applied to the guide in
  * the shift's worktree and checked with `checkGuideUpdate` (the same helpers as the apply phase), so the writer can fix a
  * refusal in the same shift. Nothing is committed here: the proposal travels to the server in the report.
@@ -52,6 +54,22 @@ export async function finishPrepProposal(
         ok: false,
         findings: tooLong(p.error.issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`)),
       };
+    return { ok: true, proposal: p.data };
+  }
+  if (task.kind === 'help_edits') {
+    const p = HelpProposalSchema.safeParse(raw);
+    if (!p.success)
+      return {
+        ok: false,
+        findings: tooLong(p.error.issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`)),
+      };
+    const helpDir = safeHelpDir(task.helpDir);
+    if (!helpDir) return { ok: false, findings: [`refusing the Help folder ${task.helpDir}`] };
+    const before = readHelpArticles(wt.path, helpDir);
+    if (Object.keys(before).length === 0)
+      return { ok: false, findings: [`the Help articles in ${helpDir} are not in the release work`] };
+    const tried = tryHelpEdits(before, p.data);
+    if (tried.errors.length > 0) return { ok: false, findings: tooLong(tried.errors) };
     return { ok: true, proposal: p.data };
   }
   if (task.kind !== 'guide_edits') return { ok: false, findings: ['this task has no proposal'] };

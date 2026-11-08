@@ -155,11 +155,20 @@ describe('applyHelpEdits', () => {
         id: 'shipping',
         body: 'Ship it.',
       }),
-      edit({ op: 'add_section', article: 'board', after: 'columns', title: 'Lanes', id: 'lanes', body: 'Lanes.' }),
+      edit({
+        op: 'add_section',
+        article: 'board',
+        after: 'columns',
+        title: 'Lanes',
+        id: 'lanes',
+        body: 'Lanes.',
+      }),
     ]);
     expect(r.kind).toBe('changed');
     if (r.kind !== 'changed') return;
-    expect(r.files.phases).toContain('before a release ships.\n\n## Shipping {#shipping}\n\nShip it.\n\n## Notes');
+    expect(r.files.phases).toContain(
+      'before a release ships.\n\n## Shipping {#shipping}\n\nShip it.\n\n## Notes',
+    );
     expect(r.files.board).toBe(`${BOARD}\n## Lanes {#lanes}\n\nLanes.\n`);
   });
 
@@ -190,8 +199,12 @@ describe('applyHelpEdits', () => {
       const r = applyHelpEdits(files(), [edit(e)]);
       return r.kind === 'error' ? r.errors.join('\n') : '';
     };
-    expect(errs({ op: 'append', article: 'nope', section: 'x', text: 'a' })).toContain('unknown article "nope"');
-    expect(errs({ op: 'append', article: 'board', section: 'x', text: 'a' })).toContain('unknown section "board#x"');
+    expect(errs({ op: 'append', article: 'nope', section: 'x', text: 'a' })).toContain(
+      'unknown article "nope"',
+    );
+    expect(errs({ op: 'append', article: 'board', section: 'x', text: 'a' })).toContain(
+      'unknown section "board#x"',
+    );
     expect(
       errs({ op: 'add_section', article: 'phases', after: 'releases', title: 'X', id: 'notes', body: 'a' }),
     ).toContain('the id "notes" is already used in phases');
@@ -217,7 +230,10 @@ describe('checkHelpUpdate', () => {
   });
 
   it('refuses a new heading that shifts a derived id to -2', () => {
-    const after = PHASES.replace('## Setting up {#setting-up}', '## Notes {#notes}\n\nx\n\n## Setting up {#setting-up}');
+    const after = PHASES.replace(
+      '## Setting up {#setting-up}',
+      '## Notes {#notes}\n\nx\n\n## Setting up {#setting-up}',
+    );
     expect(checkHelpUpdate(files(), { ...files(), phases: after }).errors).toContain(
       'the anchor phases#notes would be removed or renamed',
     );
@@ -245,7 +261,9 @@ describe('checkHelpUpdate', () => {
   });
 
   it('refuses a removed or a new article', () => {
-    expect(checkHelpUpdate(files(), { phases: PHASES }).errors).toContain('the article board would be removed');
+    expect(checkHelpUpdate(files(), { phases: PHASES }).errors).toContain(
+      'the article board would be removed',
+    );
     expect(checkHelpUpdate(files(), { ...files(), x: BOARD }).errors).toContain(
       'the update would create the article x',
     );
@@ -254,8 +272,11 @@ describe('checkHelpUpdate', () => {
   it('checks links and scrubs only the written lines; a problem already there is a warning', () => {
     const after = PHASES.replace('Open the **Environments** page.', 'See [x](/help/board#nope) for GWP-12.');
     const line = after.split('\n').indexOf('See [x](/help/board#nope) for GWP-12.');
-    const e = checkHelpUpdate(files(), { ...files(), phases: after }, { changedRanges: { phases: [[line, line + 1]] } })
-      .errors;
+    const e = checkHelpUpdate(
+      files(),
+      { ...files(), phases: after },
+      { changedRanges: { phases: [[line, line + 1]] } },
+    ).errors;
     expect(e).toContain('the Help link /help/board#nope goes nowhere');
     expect(e.some((x) => x.includes('ticket key'))).toBe(true);
     const dupBefore = `${BOARD}\n## A {#columns}\n`;
@@ -266,13 +287,17 @@ describe('checkHelpUpdate', () => {
 
   it('with no before, checks the articles on their own', () => {
     expect(checkHelpUpdate(null, files()).errors).toEqual([]);
-    expect(checkHelpUpdate(null, { x: '## No header\n' }).errors).toContain('the header of x is no longer valid');
+    expect(checkHelpUpdate(null, { x: '## No header\n' }).errors).toContain(
+      'the header of x is no longer valid',
+    );
   });
 });
 
 describe('schemas, hints and the step registry', () => {
   it('an article is a slug, never a path', () => {
-    expect(HelpEditSchema.safeParse({ op: 'append', article: '../x', section: 'a', text: 'b' }).success).toBe(false);
+    expect(HelpEditSchema.safeParse({ op: 'append', article: '../x', section: 'a', text: 'b' }).success).toBe(
+      false,
+    );
     expect(
       HelpEditSchema.safeParse({ op: 'append', article: 'apps/web/x', section: 'a', text: 'b' }).success,
     ).toBe(false);
@@ -322,11 +347,19 @@ describe('schemas, hints and the step registry', () => {
     const task = HelpEditsTaskSchema.parse({
       kind: 'help_edits',
       helpDir: 'apps/web/src/help/articles',
-      changes: [{ sources: ['card:A-1'], title: 'Releases page', hints: [{ article: 'phases', section: 'releases', score: 3, why: 'heading' }] }],
+      changes: [
+        {
+          sources: ['card:A-1'],
+          title: 'Releases page',
+          hints: [{ article: 'phases', section: 'releases', score: 3, why: 'heading' }],
+        },
+      ],
     });
     expect(writableFilesFor(task)).toEqual([PREP_PROPOSAL_FILE]);
     expect(PREP_TASK_KINDS.help_edits.result).toBe('proposal');
-    expect(PREP_TASK_KINDS.help_edits.title(task, 'release/1.6.0')).toBe('Update the Help articles (release/1.6.0)');
+    expect(PREP_TASK_KINDS.help_edits.title(task, 'release/1.6.0')).toBe(
+      'Update the Help articles (release/1.6.0)',
+    );
     const rp = {
       taskId: '0192f3a0-0000-7000-8000-000000000001',
       runId: '0192f3a0-0000-7000-8000-000000000002',

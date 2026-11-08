@@ -236,7 +236,7 @@ export function applyHelpEdits(files: Record<string, string>, edits: readonly He
   const changed: Array<{ article: string; section: string }> = [];
   const added: Array<{ article: string; section: string; after: string }> = [];
 
-  edits.forEach((e, i) => {
+  const applyOne = (e: HelpEdit, i: number): void => {
     const what = `edit ${i + 1} (${e.op})`;
     const doc = docOf(e.article);
     if (!doc) return void errors.push(`${what}: unknown article "${e.article}"`);
@@ -257,7 +257,8 @@ export function applyHelpEdits(files: Record<string, string>, edits: readonly He
         if (replace && text.includes(replace)) return void duplicates.push(e);
         return void errors.push(`${what}: the text to find is not in ${e.article}#${ref}`);
       }
-      if (n > 1) return void errors.push(`${what}: the text to find occurs ${n} times in ${e.article}#${ref}`);
+      if (n > 1)
+        return void errors.push(`${what}: the text to find occurs ${n} times in ${e.article}#${ref}`);
       artBodies.set(s.heading.line, text.replace(find, () => replace).split('\n'));
       if (!changed.some((c) => c.article === e.article && c.section === ref))
         changed.push({ article: e.article, section: ref });
@@ -306,7 +307,8 @@ export function applyHelpEdits(files: Record<string, string>, edits: readonly He
     artInserts.set(pos, [...(artInserts.get(pos) ?? []), block]);
     inserts.set(e.article, artInserts);
     added.push({ article: e.article, section: e.id, after: ref });
-  });
+  };
+  for (const [i, e] of edits.entries()) applyOne(e, i);
   if (errors.length > 0) return { kind: 'error', errors };
   if (changed.length === 0 && added.length === 0) return { kind: 'unchanged', duplicates };
 
@@ -348,7 +350,8 @@ export function applyHelpEdits(files: Record<string, string>, edits: readonly He
     let k = 0;
     for (const h of doc.headings) {
       while (k < res.length && res[k] !== h.raw) k++;
-      if (k >= res.length) return { kind: 'error', errors: [`the update lost the heading "${h.raw}" in ${slug}`] };
+      if (k >= res.length)
+        return { kind: 'error', errors: [`the update lost the heading "${h.raw}" in ${slug}`] };
       k++;
     }
     const md = serialize(doc, res);
@@ -379,8 +382,7 @@ function articleStructure(slug: string, doc: HelpArticleDoc): string[] {
   if (!doc.frontmatter || doc.meta.title === undefined || doc.meta.order === undefined)
     errs.push(`the header of ${slug} is no longer valid`);
   const seen = new Map<string, number>();
-  for (const h of doc.headings)
-    if (h.explicitId) seen.set(h.explicitId, (seen.get(h.explicitId) ?? 0) + 1);
+  for (const h of doc.headings) if (h.explicitId) seen.set(h.explicitId, (seen.get(h.explicitId) ?? 0) + 1);
   for (const [id, n] of seen) if (n > 1) errs.push(`two headings in ${slug} share the anchor #${id}`);
   return errs;
 }
@@ -433,7 +435,8 @@ export function checkHelpUpdate(
         k = j + 1;
       }
       a.headings.forEach((h, j) => {
-        if (!matched.has(j) && !h.explicitId) errors.push(`the new section "${h.text}" in ${slug} has no anchor`);
+        if (!matched.has(j) && !h.explicitId)
+          errors.push(`the new section "${h.text}" in ${slug} has no anchor`);
       });
     }
     const ranges = ctx.changedRanges?.[slug] ?? [];
@@ -505,8 +508,7 @@ export function locateHelpSections(
     .filter((e) => [...e.why].some((w) => !w.startsWith('article:')))
     .map((e) => ({ article: e.article, section: e.section, score: e.score, why: [...e.why].join('; ') }))
     .sort(
-      (a, b) =>
-        b.score - a.score || a.article.localeCompare(b.article) || a.section.localeCompare(b.section),
+      (a, b) => b.score - a.score || a.article.localeCompare(b.article) || a.section.localeCompare(b.section),
     );
 }
 
@@ -548,7 +550,9 @@ export const ReleaseDocsPrepHelpOutputSchema = z.object({
       sources: outSources,
     }),
   ),
-  covered: cap(z.object({ source: z.string().max(80), article: z.string().max(80), section: z.string().max(80) })),
+  covered: cap(
+    z.object({ source: z.string().max(80), article: z.string().max(80), section: z.string().max(80) }),
+  ),
   skippedChanges: cap(z.object({ source: z.string().max(80), reason: z.string().max(300) })),
   duplicates: z.number().int().nonnegative().default(0),
   errors: cap(z.string().max(500)),

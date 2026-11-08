@@ -1,8 +1,11 @@
 import {
   type ChangelogEntriesTask,
   DEFAULT_GUIDE_PATH,
+  DEFAULT_HELP_DIR,
   GuideEditsTaskSchema,
   GuideProposalSchema,
+  HelpEditsTaskSchema,
+  HelpProposalSchema,
   type ReleaseDocsPrepSummary,
   ReleaseDocsPrepSummarySchema,
 } from '@aom/shared';
@@ -11,7 +14,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { changeListFor, changelogDispatchFor, changelogWriterInput } from './docs-prep-changelog.ts';
 import type { ServerPhaseOutcome } from './docs-prep-phases.ts';
-import { guideCoveredSources } from './docs-prep-steps.ts';
+import { guideCoveredSources, helpCoveredSources } from './docs-prep-steps.ts';
 import {
   phaseTasks,
   queueReleasePrepTasks,
@@ -20,7 +23,7 @@ import {
 } from './docs-prep-tasks.ts';
 
 /**
- * Release prep, the writer phases of 'Write changelog' (`write`) and 'Update user guide' (`write`): the server queues one
+ * Release prep, the writer phases of 'Write changelog', 'Update user guide' and 'Update Help articles' (`write`): the server queues one
  * release prep task whose writer proposes the text, and the finisher turns the finished task into the phase's row. The
  * writer is chosen by `releasePrepTaskPass` for every task kind (docs-prep-tasks.ts), not here.
  */
@@ -176,5 +179,53 @@ registerPhaseTasksFinisher('guide/write', async (_tx, _run, _repoId, tasks) => {
   if (bad) return { state: 'failed', error: taskFailureText(bad) };
   const done = tasks[tasks.length - 1] as Row;
   const p = GuideProposalSchema.safeParse((done.result as { proposal?: unknown } | null)?.proposal);
+  return { state: 'passed', report: { edits: p.success ? p.data.edits.length : 0 } };
+});
+
+// ----------------------------------------------------------------------------------------------------------- help
+
+export const NO_HELP_CHANGES_NOTE = 'no changed area is covered by a Help article';
+
+/**
+ * The `write` phase of 'Update Help articles'. Reads the `check` phase's report: no relevant changes means skipped;
+ * otherwise one `help_edits` task is queued for the writer.
+ */
+export async function runHelpWritePhase(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  repoId: string,
+): Promise<ServerPhaseOutcome> {
+  const report = await stepReport(tx, run.id, repoId, 'help', 'check');
+  const changes = Array.isArray(report?.changes) ? (report.changes as unknown[]) : [];
+  if (changes.length === 0) return { state: 'skipped', error: NO_HELP_CHANGES_NOTE, report: {} };
+  const task = HelpEditsTaskSchema.safeParse({
+    kind: 'help_edits',
+    helpDir: typeof report?.helpDir === 'string' ? report.helpDir : DEFAULT_HELP_DIR,
+    changes,
+    coveredSources: await helpCoveredSources(tx, run, repoId),
+  });
+  if (!task.success)
+    return { state: 'failed', error: 'the Help check of this repository has no usable report' };
+  await queueReleasePrepTasks(ctx, tx, run, repoId, 'help', 'write', 0, [task.data]);
+  return { state: 'running' };
+}
+
+/** What the runner's `apply` phase applies: the checked proposal of the writer task, or nothing. */
+export async function helpApplyInput(
+  tx: Queryable,
+  runId: string,
+  repoId: string,
+): Promise<Record<string, unknown>> {
+  const t = await doneTask(tx, runId, repoId, 'help', 'write');
+  const r = (t?.result ?? null) as { proposal?: unknown } | null;
+  return r?.proposal !== undefined ? { proposal: r.proposal } : {};
+}
+
+registerPhaseTasksFinisher('help/write', async (_tx, _run, _repoId, tasks) => {
+  const bad = tasks.find((t) => t.status !== 'done');
+  if (bad) return { state: 'failed', error: taskFailureText(bad) };
+  const done = tasks[tasks.length - 1] as Row;
+  const p = HelpProposalSchema.safeParse((done.result as { proposal?: unknown } | null)?.proposal);
   return { state: 'passed', report: { edits: p.success ? p.data.edits.length : 0 } };
 });

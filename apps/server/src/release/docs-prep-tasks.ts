@@ -4,6 +4,7 @@ import {
   ChangelogProposalSchema,
   checkChangelogProposal,
   GuideProposalSchema,
+  HelpProposalSchema,
   MAIN_ACCOUNT,
   PREP_OUTCOME,
   PREP_TASK_KINDS,
@@ -594,7 +595,7 @@ type ProposalCheck = { ok: true; result: unknown; message?: string } | { ok: fal
 /**
  * The server's check of a proposal task's report. `changelog_entries`: `checkChangelogProposal` (schema, the public-text
  * gate, the deny list of agent, member and workstation names, every change accounted for once), refused with the same text
- * the BA got. `guide_edits`: the schema (the file checks ran on the runner). Either way the accepted proposal is stored.
+ * the BA got. `guide_edits` and `help_edits`: the schema (the file checks ran on the runner). Either way the accepted proposal is stored.
  */
 async function checkPrepProposal(
   tx: Tx,
@@ -625,6 +626,20 @@ async function checkPrepProposal(
       ok: true,
       result: { proposal: p.data },
       message: `${p.data.edits.length} guide edit(s) accepted.`,
+    };
+  }
+  if (parsed.kind === 'help_edits') {
+    const p = HelpProposalSchema.safeParse(proposal);
+    if (!p.success)
+      return {
+        ok: false,
+        error:
+          `the proposal is not valid: ${p.error.issues[0]?.path.join('.') ?? ''} ${p.error.issues[0]?.message ?? ''}`.trim(),
+      };
+    return {
+      ok: true,
+      result: { proposal: p.data },
+      message: `${p.data.edits.length} Help article edit(s) accepted.`,
     };
   }
   if (parsed.kind !== 'changelog_entries') return { ok: false, error: 'this task has no proposal' };

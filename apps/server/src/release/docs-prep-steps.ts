@@ -1,8 +1,11 @@
 import {
   DEFAULT_GUIDE_PATH,
+  DEFAULT_HELP_DIR,
   guideOutputSources,
+  helpOutputSources,
   normalizeGuidePath,
   type ReleaseDocsPrepGuideInput,
+  type ReleaseDocsPrepHelpInput,
   releaseVersionFromBranch,
 } from '@aom/shared';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -18,24 +21,38 @@ export interface DocsPrepStepHook {
 const COVERED_MAX = 2000;
 
 /**
- * The change ids that earlier passed runs of this release already dealt with in a repository's guide: their 'guide'
- * output, in passed runs of the same project, release branch and repository since the last published ship.
+ * The change ids that earlier passed runs of this release already dealt with in one content step of a repository: the
+ * step's output, in passed runs of the same project, release branch and repository since the last published ship.
  */
-export async function guideCoveredSources(db: Queryable, run: Row, repoId: string): Promise<string[]> {
+export async function stepCoveredSources(
+  db: Queryable,
+  run: Row,
+  repoId: string,
+  step: string,
+  sourcesOf: (output: unknown) => string[],
+): Promise<string[]> {
   const found = await rows(
     db,
     `SELECT s.output FROM release_docs_prep_steps s JOIN release_docs_prep_runs u ON u.id = s.run_id
-      WHERE u.project_id=$1 AND u.release_branch=$2 AND s.repo_id=$3 AND s.step='guide' AND s.phase IN ('', 'apply') AND s.state='passed'
+      WHERE u.project_id=$1 AND u.release_branch=$2 AND s.repo_id=$3 AND s.step=$5 AND s.phase IN ('', 'apply') AND s.state='passed'
         AND u.status='passed' AND u.id <> $4 AND s.output IS NOT NULL
         AND u.started_at >= COALESCE((SELECT MAX(x.published_at) FROM release_ships x JOIN project_repos pr ON pr.id = x.repo_id
                                        WHERE pr.project_id = $1 AND x.status='published'), '-infinity'::timestamptz)
       ORDER BY u.started_at DESC`,
-    [run.project_id, run.release_branch, repoId, run.id],
+    [run.project_id, run.release_branch, repoId, run.id, step],
   );
   const out = new Set<string>();
-  for (const r of found) for (const s of guideOutputSources(r.output)) if (out.size < COVERED_MAX) out.add(s);
+  for (const r of found) for (const s of sourcesOf(r.output)) if (out.size < COVERED_MAX) out.add(s);
   return [...out];
 }
+
+/** The change ids earlier passed runs of this release already dealt with in a repository's guide. */
+export const guideCoveredSources = (db: Queryable, run: Row, repoId: string): Promise<string[]> =>
+  stepCoveredSources(db, run, repoId, 'guide', guideOutputSources);
+
+/** The change ids earlier passed runs of this release already dealt with in a repository's Help articles. */
+export const helpCoveredSources = (db: Queryable, run: Row, repoId: string): Promise<string[]> =>
+  stepCoveredSources(db, run, repoId, 'help', helpOutputSources);
 
 /** A Postgres `date` (built at local midnight by pg) or `timestamptz` as YYYY-MM-DD. */
 function isoDay(v: unknown, utc: boolean): string {
@@ -108,5 +125,12 @@ export const DOCS_PREP_STEP_HOOKS: Record<string, DocsPrepStepHook> = {
         release: await guideRelease(db, run, repo),
       };
     },
+  },
+  help: {
+    stepInput: async (db, run, repo): Promise<ReleaseDocsPrepHelpInput> => ({
+      helpDir: DEFAULT_HELP_DIR,
+      coveredSources: await helpCoveredSources(db, run, repo.repo_id),
+      denyList: [],
+    }),
   },
 };
