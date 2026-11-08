@@ -64,7 +64,7 @@
 		}
 		reverse_proxy app:4600
 	}
-	# Inbound webhook relay: the app's own limit (AOM_RELAY_MAX_BODY_BYTES) can be at most 4 MiB, so the proxy caps at
+	# Inbound webhook relay: the app's own limit (AOM_RELAY_MAX_BODY_BYTES) can be at most 4 MiB (also per kind, AOM_RELAY_MAX_BODY_BYTES_BY_KIND), so the proxy caps at
 	# 4 MiB and the app refuses (and records) anything between its setting and that.
 	handle /relay/in/* {
 		request_body {

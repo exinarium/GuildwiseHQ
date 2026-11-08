@@ -260,7 +260,7 @@ If a relay kind of yours sends a secret in another header, add a `request>header
 
 | Route | Proxy limit | How to change |
 | --- | --- | --- |
-| `/relay/in/*` | 4 MiB, fixed | The app's own limit is `AOM_RELAY_MAX_BODY_BYTES` (at most 4 MiB); the app records bodies between its limit and 4 MiB as rejected. |
+| `/relay/in/*` | 4 MiB, fixed | The app's own limit is `AOM_RELAY_MAX_BODY_BYTES` or, per kind, `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` (at most 4 MiB); the app records bodies between its limit and 4 MiB as rejected. A proxy of your own must allow at least 4 MiB on this route. |
 | `/hooks/in/*` | `AOM_JOURNEY_HOOK_MAX_BYTES` (default 64 KiB) | Set it in `.env`. |
 | Public form file part (`PUT /api/public/forms/<id>/submissions/<sid>/parts/<n>`) | `AOM_STORAGE_MAX_FILE_BYTES` (default 25 MiB) | Set it in `.env`. |
 | Rest of `/api/public/forms/*` | 4 MiB, fixed | Same as the app. |
@@ -459,7 +459,8 @@ A Business mode organization can give an outside provider (the WhatsApp Cloud AP
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. The bundled proxy caps this route at 4 MiB. |
+| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. The bundled proxy caps this route at 4 MiB. A `whatsapp_cloud` integration accepts at least 3 MiB whatever this is, because Meta sends payloads of up to 3 MB. |
+| `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` | unset | Per kind body limits, for example `whatsapp_cloud=3145728,generic=2097152`. Each value is 1 to 4194304 (more is capped, zero or less becomes 1); an unknown kind or a non-number is ignored, as in `AOM_RELAY_TIMEOUTS`. An entry overrides the built-in `whatsapp_cloud` 3 MiB. |
 | `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST` | `60`, `20` | Requests per minute and burst, per integration. More is `429`. |
 | `AOM_RELAY_TIMEOUT_MS` | `5000` | How long the server waits for the runner's answer (`504` after that); 1000 to 15000. Keep it below the provider's own timeout. |
 | `AOM_RELAY_TIMEOUTS` | unset | Per kind overrides, for example `whatsapp_cloud=5000,calendar_push=8000`. |

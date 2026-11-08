@@ -200,6 +200,8 @@ const EnvSchema = z.object({
   AOM_RELAY_RATE_BURST: z.coerce.number().int().min(1).max(10000).default(20),
   AOM_RELAY_TIMEOUT_MS: z.coerce.number().int().default(5000),
   AOM_RELAY_TIMEOUTS: z.string().default(''),
+  /** Per kind body limits, `kind=bytes,kind=bytes` (docs/SELF-HOSTING.md). */
+  AOM_RELAY_MAX_BODY_BYTES_BY_KIND: z.string().default(''),
   AOM_RELAY_RETRY_AFTER_SEC: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_RELAY_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(100000).default(200),
   AOM_RELAY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
@@ -367,6 +369,8 @@ export interface Config {
   relay: {
     /** Largest request body forwarded (`AOM_RELAY_MAX_BODY_BYTES`); bigger is a 413. */
     maxBodyBytes: number;
+    /** The body limit of each kind (`AOM_RELAY_MAX_BODY_BYTES_BY_KIND`, whatsapp_cloud at least 3 MiB); bigger is a 413. */
+    maxBodyBytesByKind: Record<RelayKind, number>;
     perMinute: number;
     burst: number;
     /** How long the server waits for the runner's answer, per kind (`AOM_RELAY_TIMEOUT_MS`, `AOM_RELAY_TIMEOUTS`). */
@@ -394,15 +398,37 @@ export interface Config {
 
 const clampMs = (n: number) => Math.min(15_000, Math.max(1000, n));
 
-/** The forward timeout of each relay kind: the default, then `kind=ms,kind=ms` overrides, each clamped to 1..15 s. */
-export function relayTimeouts(fallback: number, overrides: string): Record<RelayKind, number> {
-  const out = Object.fromEntries(RELAY_KINDS.map((k) => [k, clampMs(fallback)])) as Record<RelayKind, number>;
-  for (const part of overrides.split(',')) {
+/** The valid `kind=number` entries of a comma list; an unknown kind or a non-number is skipped. */
+function relayKindEntries(list: string): Array<[RelayKind, number]> {
+  const out: Array<[RelayKind, number]> = [];
+  for (const part of list.split(',')) {
     const [k, v] = part.split('=').map((x) => x.trim());
     const n = Number(v);
     if (k && (RELAY_KINDS as readonly string[]).includes(k) && Number.isFinite(n))
-      out[k as RelayKind] = clampMs(Math.trunc(n));
+      out.push([k as RelayKind, n]);
   }
+  return out;
+}
+
+/** The forward timeout of each relay kind: the default, then `kind=ms,kind=ms` overrides, each clamped to 1..15 s. */
+export function relayTimeouts(fallback: number, overrides: string): Record<RelayKind, number> {
+  const out = Object.fromEntries(RELAY_KINDS.map((k) => [k, clampMs(fallback)])) as Record<RelayKind, number>;
+  for (const [k, n] of relayKindEntries(overrides)) out[k] = clampMs(Math.trunc(n));
+  return out;
+}
+
+/** Meta sends WhatsApp webhook payloads of up to 3 MB. */
+export const WHATSAPP_CLOUD_MIN_BODY_BYTES = 3_145_728;
+
+/**
+ * The body limit of each relay kind: an override (clamped to 1..RELAY_BODY_HARD_MAX_BYTES), else for whatsapp_cloud the
+ * larger of 3 MiB and the global limit, else the global limit.
+ */
+export function relayBodyLimits(global: number, overrides: string): Record<RelayKind, number> {
+  const out = Object.fromEntries(RELAY_KINDS.map((k) => [k, global])) as Record<RelayKind, number>;
+  out.whatsapp_cloud = Math.max(WHATSAPP_CLOUD_MIN_BODY_BYTES, global);
+  for (const [k, n] of relayKindEntries(overrides))
+    out[k] = Math.min(RELAY_BODY_HARD_MAX_BYTES, Math.max(1, Math.trunc(n)));
   return out;
 }
 
@@ -511,6 +537,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     relay: {
       maxBodyBytes: e.AOM_RELAY_MAX_BODY_BYTES,
+      maxBodyBytesByKind: relayBodyLimits(e.AOM_RELAY_MAX_BODY_BYTES, e.AOM_RELAY_MAX_BODY_BYTES_BY_KIND),
       perMinute: e.AOM_RELAY_RATE_PER_MINUTE,
       burst: e.AOM_RELAY_RATE_BURST,
       timeoutMs: relayTimeouts(e.AOM_RELAY_TIMEOUT_MS, e.AOM_RELAY_TIMEOUTS),
