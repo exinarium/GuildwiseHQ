@@ -3,6 +3,7 @@ import {
   DEFAULT_GUIDE_PATH,
   guideOutputSources,
   type ReleaseDocsPrepGuideInput,
+  releaseVersionFromBranch,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -40,6 +41,45 @@ export async function guideCoveredSources(db: Queryable, run: Row, repoId: strin
   return [...out];
 }
 
+/** A Postgres `date` (built at local midnight by pg) or `timestamptz` as YYYY-MM-DD. */
+function isoDay(v: unknown, utc: boolean): string {
+  const d = v instanceof Date ? v : new Date(String(v));
+  if (utc) return d.toISOString().slice(0, 10);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * The release being prepared, for the PDF guide's cover and footer: its version (the live proposal, else the release
+ * branch name), its date and the day the run started. The release only gets a date at approval and docs prep runs
+ * before that, so `date` is normally null here and the runner falls back to `runDate`.
+ */
+export async function guideRelease(
+  db: Queryable,
+  run: Row,
+  repo: Row,
+): Promise<NonNullable<ReleaseDocsPrepGuideInput['release']>> {
+  const p = await one(
+    db,
+    `SELECT COALESCE(version, recommended_version) AS v FROM release_proposals
+      WHERE repo_id=$1 AND state IN ('proposed','approved') ORDER BY updated_at DESC LIMIT 1`,
+    [repo.repo_id],
+  );
+  const version: string | null = p?.v ?? releaseVersionFromBranch(String(repo.branch ?? ''));
+  const ship = version
+    ? await one(
+        db,
+        `SELECT release_date FROM release_ships WHERE repo_id=$1 AND version=$2 AND status <> 'failed'`,
+        [repo.repo_id, version],
+      )
+    : null;
+  return {
+    version,
+    date: ship ? isoDay(ship.release_date, false) : null,
+    runDate: isoDay(run.started_at, true),
+  };
+}
+
 export const DOCS_PREP_STEP_HOOKS: Record<string, DocsPrepStepHook> = {
   guide: {
     needsWriter: true,
@@ -47,6 +87,7 @@ export const DOCS_PREP_STEP_HOOKS: Record<string, DocsPrepStepHook> = {
       guidePath: DEFAULT_GUIDE_PATH,
       coveredSources: await guideCoveredSources(db, run, repo.repo_id),
       denyList: [],
+      release: await guideRelease(db, run, repo),
     }),
   },
 };

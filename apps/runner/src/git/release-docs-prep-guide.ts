@@ -12,6 +12,7 @@ import {
   guideOutline,
   locateSections,
   parseGuide,
+  type ReleaseDocsPrepGuideInput,
   ReleaseDocsPrepGuideInputSchema,
   type ReleaseDocsPrepGuideOutput,
 } from '@aom/shared';
@@ -301,12 +302,35 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const build = join(scripts, 'build-guide.mjs');
   if (!existsSync(join(wt, assemble))) out.pdf = 'no PDF build';
   else {
+    // The date and release come from the release being prepared, but only a build script that takes the flags
+    // can show them (a release branch cut before the flags existed keeps the date written in it).
+    const buildText = existsSync(join(wt, build)) ? readFileSyncSafe(join(wt, build)) : '';
+    const pdf = guidePdfMeta(input.data.release, new Date());
+    const buildArgs = [build];
+    if (buildText.includes('--date')) {
+      buildArgs.push('--date', pdf.date);
+      out.pdfDate = pdf.date;
+      out.pdfDateSource = pdf.source;
+      if (pdf.edition && buildText.includes('--edition')) {
+        buildArgs.push('--edition', pdf.edition);
+        out.pdfEdition = pdf.edition;
+      }
+      if (pdf.source === 'run')
+        out.notes = [
+          ...out.notes,
+          `the release has no date yet, so the PDF shows ${pdf.fromRunner ? 'today on this workstation' : 'the day this prep run started'} (${pdf.date})`,
+        ];
+    } else if (buildText)
+      out.warnings = [
+        ...out.warnings,
+        'the PDF build script takes no --date, so the PDF keeps the date written in it',
+      ];
     const steps: Array<[string, string[], number]> = [
       ['corepack', ['pnpm', 'install', '--frozen-lockfile', '--prefer-offline'], 10 * 60_000],
       ['corepack', ['pnpm', '--filter', '@aom/e2e', 'exec', 'playwright', 'install', 'chromium'], 5 * 60_000],
       ['node', [assemble], 2 * 60_000],
       ...(existsSync(join(wt, build))
-        ? ([['node', [build], 10 * 60_000]] as Array<[string, string[], number]>)
+        ? ([['node', buildArgs, 10 * 60_000]] as Array<[string, string[], number]>)
         : []),
     ];
     for (const [cmd, args, timeoutMs] of steps) {
@@ -329,6 +353,20 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   if (outside.length > 0) return fail(`the guide build changed ${outside.join(', ')}`, out);
   return { ok: true, files: changed, output: capOutput(out) };
 };
+
+/** What the PDF build gets: the release date (else the run date, else today on this runner) and the version. */
+export function guidePdfMeta(
+  release: ReleaseDocsPrepGuideInput['release'],
+  now: Date,
+): { date: string; source: 'release' | 'run'; edition: string | null; fromRunner: boolean } {
+  const date = release?.date ?? release?.runDate ?? now.toISOString().slice(0, 10);
+  return {
+    date,
+    source: release?.date ? 'release' : 'run',
+    edition: release?.version ?? null,
+    fromRunner: !release,
+  };
+}
 
 function readFileSyncSafe(f: string): string {
   try {

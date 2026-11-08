@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds Guildwise-HQ-User-Guide.pdf from guide.html with Playwright Chromium.
 // Uses the Playwright and pdf-parse packages of the e2e workspace package (pnpm install; pnpm --filter @aom/e2e exec playwright install chromium).
-// Usage: node docs/guide/build-guide.mjs [--out <file.pdf>]
+// Usage: node docs/guide/build-guide.mjs [--out <file.pdf>] [--date YYYY-MM-DD] [--edition <text>]
 //
 // The table of contents gets real page numbers in a two-pass build: every heading carries an invisible marker
 // (TOCMARK_<id>_); the PDF text is searched for the markers and the page numbers are written into the contents, then the
@@ -10,19 +10,29 @@ import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { parseGuideArgs, footerTemplate, GuideArgError } from './guide-meta.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Validate the arguments before Playwright is loaded: a bad value stops the build and no PDF is written.
+let meta;
+try {
+  meta = parseGuideArgs(process.argv.slice(2));
+} catch (e) {
+  if (e instanceof GuideArgError) {
+    console.error(`build-guide: ${e.message}`);
+    process.exit(2);
+  }
+  throw e;
+}
 const repo = path.resolve(here, '../..');
 const e2eRequire = createRequire(path.join(repo, 'e2e/package.json'));
 const { chromium } = e2eRequire('@playwright/test');
 const pdfParse = e2eRequire('pdf-parse/lib/pdf-parse.js');
 
-const outArg = process.argv.indexOf('--out');
-const OUT = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : path.join(here, 'Guildwise-HQ-User-Guide.pdf');
+const OUT = meta.out ? path.resolve(meta.out) : path.join(here, 'Guildwise-HQ-User-Guide.pdf');
 
-const footer = `<div style="width:100%;font-family:'Geist','Liberation Sans',Arial,sans-serif;font-size:7.5pt;color:#6b7280;padding:0 15mm;display:flex;justify-content:space-between;">
-  <span>Guildwise HQ &middot; User Guide &middot; 7 October 2026</span>
-  <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
+const footer = footerTemplate(meta.dateText);
 
 const render = (page) => page.pdf({
   format: 'A4', printBackground: true, displayHeaderFooter: true,
@@ -50,14 +60,28 @@ try {
   const page = await browser.newPage();
   await page.goto(pathToFileURL(path.join(here, 'guide.html')).href, { waitUntil: 'load' });
   await page.evaluate(() => document.fonts.ready);
+  // One value feeds the cover and (through the footer template) every page footer.
+  const filled = await page.evaluate(({ dateText, edition }) => {
+    const dates = [...document.querySelectorAll('[data-guide-date]')];
+    for (const el of dates) el.textContent = dateText;
+    const row = document.querySelector('[data-guide-release]');
+    if (row) {
+      if (edition) row.querySelector('[data-guide-edition]').textContent = edition;
+      else row.remove();
+    }
+    return { dates: dates.length, release: Boolean(row) };
+  }, { dateText: meta.dateText, edition: meta.edition });
+  if (meta.given && (filled.dates === 0 || (meta.edition && !filled.release)))
+    throw new Error('guide.html has no date placeholder; run node docs/guide/assemble-guide.mjs first');
   const entries = await page.$$eval('#toc a[data-id]', (as) => as.map((a) => ({ id: a.dataset.id, text: a.querySelector('.t').textContent })));
   const ids = entries.map((e) => e.id);
 
   let pdf;
+  let texts = [];
   let previous = '';
   for (let pass = 1; pass <= 4; pass++) {
     pdf = await render(page);
-    const texts = await pageTexts(pdf);
+    texts = await pageTexts(pdf);
     const numbers = {};
     const squash = (t) => t.replace(/\s+/g, '');
     let from = 0;
@@ -78,6 +102,15 @@ try {
   }
   const missing = Object.entries(JSON.parse(previous)).filter(([, v]) => v === '?');
   if (missing.length) console.warn('TOC markers not found:', missing.map(([k]) => k).join(', '));
+  // Self-check: every page footer shows the date, and the cover shows the edition when one was given.
+  if (filled.dates > 0 || meta.given) {
+    const squash = (t) => t.replace(/\s+/g, '');
+    const want = squash(meta.dateText);
+    const bad = texts.findIndex((t) => !squash(t).includes(want));
+    if (bad >= 0) throw new Error(`the PDF does not show ${meta.dateText} on page ${bad + 1}`);
+    if (meta.edition && !squash(texts[0]).includes(squash(meta.edition)))
+      throw new Error(`the PDF cover does not show the edition ${meta.edition}`);
+  }
   fs.writeFileSync(OUT, pdf);
   console.log(`wrote ${OUT} (${(pdf.length / 1024 / 1024).toFixed(2)} MB)`);
 } finally {

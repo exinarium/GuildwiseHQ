@@ -17,6 +17,7 @@
     "package:runner": "scripts/package-runner.sh",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
+    "test:guide": "node --test docs/guide/*.test.mjs",
     "format": "biome check --write .",
     "db:migrate": "pnpm --filter @aom/server db:migrate"
   },

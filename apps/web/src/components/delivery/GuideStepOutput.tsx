@@ -47,6 +47,16 @@ export function GuideStepOutput({ output }: { output: unknown }) {
         </div>
       )}
       {(o.changed.length > 0 || o.added.length > 0) && <p className="text-subtle">{PDF[o.pdf]}.</p>}
+      {o.pdf === 'rebuilt' && o.pdfDate && (
+        <p className="text-subtle" data-testid="guide-output-pdf-date">
+          PDF dated {o.pdfDate}
+          {o.pdfEdition ? `, release ${o.pdfEdition}` : ''} (
+          {o.pdfDateSource === 'release'
+            ? 'the release date'
+            : 'the day this prep run started; the release has no date yet'}
+          ).
+        </p>
+      )}
       {o.skippedChanges.length > 0 && (
         <p className="text-subtle">
           {o.skippedChanges.length} {o.skippedChanges.length === 1 ? 'change is' : 'changes are'} not
