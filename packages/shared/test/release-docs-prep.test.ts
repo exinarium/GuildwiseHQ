@@ -214,3 +214,55 @@ describe('releaseDocsPrepGate', () => {
     expect(g({ repo, facts: { headSha: 'zzz', commitShas: [], truncated: true } }).allowed).toBe(true);
   });
 });
+
+describe('content steps with a writer phase (GWP-134)', () => {
+  const analysed = { step: 'analyse', state: 'passed' as const };
+  it('the changelog is write (server) then apply; the guide is check, write (server), apply', () => {
+    const c = releaseDocsPrepSteps().find((x) => x.id === 'changelog');
+    const g = releaseDocsPrepSteps().find((x) => x.id === 'guide');
+    expect(c?.phases).toEqual(['write', 'apply']);
+    expect(c?.serverPhases).toEqual(['write']);
+    expect(c?.writerPhase).toBe('write');
+    expect(g?.phases).toEqual(['check', 'write', 'apply']);
+    expect(g?.serverPhases).toEqual(['write']);
+    expect(g?.writerPhase).toBe('write');
+  });
+  it('dispatches changelog write to the server and guide check to the runner', () => {
+    expect(
+      nextReleaseDocsPrepAction({
+        status: 'running',
+        steps: ['analyse', 'changelog'],
+        repos: [repo('a', [analysed])],
+      }),
+    ).toEqual({ kind: 'dispatch', step: 'changelog', phase: 'write', repoIds: ['a'], by: 'server' });
+    expect(
+      nextReleaseDocsPrepAction({
+        status: 'running',
+        steps: ['analyse', 'guide'],
+        repos: [repo('a', [analysed])],
+      }),
+    ).toEqual({ kind: 'dispatch', step: 'guide', phase: 'check', repoIds: ['a'] });
+  });
+  it('a skipped guide check skips write and apply with the same note, so no writer is looked for', () => {
+    const checked = repo('a', [
+      analysed,
+      { step: 'guide', phase: 'check', state: 'skipped', error: 'skipped: no user guide in this repository' },
+    ]);
+    const r = nextReleaseDocsPrepAction({ status: 'running', steps: ['analyse', 'guide'], repos: [checked] });
+    expect(r).toEqual({
+      kind: 'skip',
+      step: 'guide',
+      phase: 'write',
+      repoIds: ['a'],
+      notes: { a: 'skipped: no user guide in this repository' },
+    });
+    const writeSkipped = repo('a', [
+      analysed,
+      { step: 'guide', phase: 'check', state: 'skipped', error: 'skipped: no user guide in this repository' },
+      { step: 'guide', phase: 'write', state: 'skipped', error: 'skipped: no user guide in this repository' },
+    ]);
+    expect(
+      nextReleaseDocsPrepAction({ status: 'running', steps: ['analyse', 'guide'], repos: [writeSkipped] }),
+    ).toMatchObject({ kind: 'skip', step: 'guide', phase: 'apply' });
+  });
+});

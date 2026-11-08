@@ -31,18 +31,12 @@ export interface ReleaseDocsPrepInput {
   /** Folder of the throwaway integration worktrees. */
   integrationDir: string;
   auth?: GitAuth;
-  /** The model call of model-backed steps. Absent: those steps fail with the reason. */
-  runModel?: DocsPrepStepContext['runModel'];
   /** Runs the repository's own build scripts (the PDF guide). Absent: such a build fails with the reason. */
   exec?: DocsPrepExec;
   /** The runner's data folder (the videos render cache). */
   dataDir?: string;
 }
 
-const noModel: DocsPrepStepContext['runModel'] = async () => ({
-  ok: false,
-  error: 'no agent on this workstation can write the release documentation',
-});
 const noExec: DocsPrepExec = async () => ({
   exitCode: 127,
   stdout: '',
@@ -345,7 +339,6 @@ async function runSpec(
       payload: input.payload,
       summary: input.payload.summary,
       outDir,
-      runModel: input.runModel ?? noModel,
       exec: input.exec ?? noExec,
       phase: input.payload.phase ?? '',
       input: input.payload.input,
@@ -391,7 +384,8 @@ async function keepWork(
   const extra = status.filter((f) => !out.files.includes(f));
   if (extra.length > 0) return failed(`unexpected changes in the worktree: ${extra.join(', ')}`, report);
   if (status.length === 0) return passed({ notices: ['no changes'], ...report });
-  const label = p.phase ? `${p.step} ${p.phase}` : p.step;
+  // The writer phases of changelog and guide keep the commit label of the step (`apply` is the one that writes files).
+  const label = p.phase && p.phase !== 'apply' ? `${p.step} ${p.phase}` : p.step;
   const commit = await git(wt, ['commit', '-m', `docs(release): ${label}`], { env: commitEnv(identity) });
   if (commit.exitCode !== 0)
     return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`, report);

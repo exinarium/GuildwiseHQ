@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
   authorFailure,
+  ChangelogProposalSchema,
+  checkChangelogProposal,
+  GuideProposalSchema,
   MAIN_ACCOUNT,
   PREP_OUTCOME,
+  PREP_TASK_KINDS,
+  type PrepWriterFailureCode,
+  prepWriterUnavailable,
   RELEASE_PREP_MAX_SHIFT_MINUTES,
+  ReleaseDocsPrepSummarySchema,
   type ReleasePrepTask,
   ReleasePrepTaskSchema,
   type RunnerToServerOf,
@@ -12,8 +19,10 @@ import {
   type ShiftBrief,
   streamId,
   VideoStepReportSchema,
+  withClientRefs,
   writableFilesFor,
 } from '@aom/shared';
+import { publicText } from '../blog/releases.ts';
 import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import { orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
@@ -24,12 +33,21 @@ import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts'
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
 import { accountOf, agentSpecFor, briefAgent } from '../runner-gateway/brief.ts';
+import {
+  changeListFor,
+  changelogDenyList,
+  changelogWriterInput,
+  storedChangelogResult,
+} from './docs-prep-changelog.ts';
 
 /**
- * Release prep tasks (design GWP-92 5.4/5.7): work inside a prep step that an agent does in a `release_prep` shift. The
- * server phase queues the tasks, `releasePrepTaskPass` gives them, one at a time per repository, to a builder on the
- * repository's workstation, and the shift's `aom prep done|fail` (checked and committed to the work ref by the runner)
- * finishes them. When the last task of a phase is finished the phase row is finished and the run goes on.
+ * Release prep tasks (design GWP-92 5.4/5.7, GWP-134): work inside a prep step that an agent does in a `release_prep`
+ * shift. The server phase queues the tasks, `releasePrepTaskPass` gives them, one at a time per repository, to an agent
+ * on the repository's workstation (the roles per task kind are in PREP_TASK_KINDS: this is the only place a writer is
+ * chosen), and the shift's `aom prep done|fail` finishes them. A files task (videos) is checked and committed to the work
+ * ref by the runner; a proposal task (changelog entries, guide edits) is checked by the runner and again by the server,
+ * which stores the accepted proposal on the task. When the last task of a phase is finished the phase row is finished
+ * and the run goes on.
  */
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -45,7 +63,27 @@ const PASSING_REJECTIONS: ReadonlySet<string> = new Set(['busy', 'auth_expired',
 const runScope = (run: Row) => projectScope(run.org_id, run.project_id);
 const runStream = (runId: string) => streamId.releaseDocsPrep(runId);
 
-export const taskLabel = (task: ReleasePrepTask): string => task.slug;
+export const taskLabel = (task: ReleasePrepTask): string =>
+  task.kind === 'new_video' ? task.slug : PREP_TASK_KINDS[task.kind].what(task);
+
+/** The largest proposal stored on a task (serialised JSON). */
+export const PROPOSAL_MAX_BYTES = 256 * 1024;
+
+const WRITER_CODES: ReadonlySet<string> = new Set(['no_writer', 'writer_unreachable']);
+
+/**
+ * The error a phase row shows for a failed task: the one text of `prepWriterUnavailable`, whatever the step. A task that
+ * failed because no agent could write it already carries that text in its note; a failure of the writer itself is worded here.
+ */
+export function taskFailureText(task: Row): string {
+  const note = String(task.note ?? '').trim();
+  if (WRITER_CODES.has(task.code)) return note;
+  const parsed = ReleasePrepTaskSchema.safeParse(task.task);
+  if (!parsed.success) return note || 'the task cannot be read';
+  const t = parsed.data;
+  if (t.kind === 'new_video') return authorFailure(t.slug, note || 'the agent gave no reason');
+  return prepWriterUnavailable('writer_failed', t.kind, { reason: note || 'the agent gave no reason' });
+}
 
 /** Queue one task per entry (in order); the dispatcher pass gives them out. */
 export async function queueReleasePrepTasks(
@@ -186,7 +224,7 @@ function taskFinished(
   taskId: string,
   ok: boolean,
   note: string,
-  extra: { commit?: string; files?: string[] } = {},
+  extra: { commit?: string; files?: string[]; code?: PrepWriterFailureCode; result?: unknown } = {},
 ): AppendInput {
   return {
     streamId: runStream(run.id),
@@ -198,6 +236,8 @@ function taskFinished(
         note: note.slice(0, 4000),
         ...(extra.commit ? { commit: extra.commit } : {}),
         files: extra.files ?? [],
+        ...(extra.code ? { code: extra.code } : {}),
+        ...(extra.result !== undefined ? { result: extra.result } : {}),
       },
     },
     actor: SYSTEM_ACTOR,
@@ -212,12 +252,18 @@ export async function finishReleasePrepTask(
   task: Row,
   ok: boolean,
   note: string,
-  extra: { commit?: string; files?: string[] } = {},
+  extra: { commit?: string; files?: string[]; code?: PrepWriterFailureCode; result?: unknown } = {},
 ): Promise<void> {
   const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [task.run_id]);
   if (!run) return;
   await ctx.store.append([taskFinished(run, task.id, ok, note, extra)], { tx });
-  await afterTaskFinished(ctx, tx, { ...task, status: ok ? 'done' : 'failed' });
+  await afterTaskFinished(ctx, tx, {
+    ...task,
+    status: ok ? 'done' : 'failed',
+    note,
+    code: extra.code ?? null,
+    result: extra.result ?? null,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------- dispatch
@@ -229,10 +275,14 @@ export interface ReleasePrepDispatch {
   workstationId: string;
 }
 
+/** Why the last pass could not give a queued task to anybody (for the 2-hour message); in memory, per server process. */
+const lastWhy = new Map<string, string>();
+
 /**
- * Gives queued tasks to a builder on the repository's workstation: one task at a time per (run, repository, phase), in
- * order, and one release_prep shift at a time per agent. No builder on the workstation fails the task at once; a task
- * nobody took within RELEASE_PREP_QUEUE_LIMIT_MS fails too.
+ * Gives queued tasks to an agent on the repository's workstation: one task at a time per (run, repository, phase), in
+ * order, and one release_prep shift at a time per agent. The agent's role comes from PREP_TASK_KINDS (the one place a
+ * writer is chosen, for every content step). No such agent on the workstation fails the task at once (`no_writer`); a task
+ * nobody could take within RELEASE_PREP_QUEUE_LIMIT_MS fails too (`writer_unreachable`).
  */
 export async function releasePrepTaskPass(
   ctx: Ctx,
@@ -258,49 +308,81 @@ export async function releasePrepTaskPass(
   const busy = new Set<string>();
   for (const t of queued) {
     const task = ReleasePrepTaskSchema.safeParse(t.task);
-    const label = task.success ? taskLabel(task.data) : 'task';
+    const roles: string[] = task.success ? [...PREP_TASK_KINDS[task.data.kind].roles] : [];
     const builders = await rows(
       ctx.pool,
       // The workstation's runtimes, owner and sharing are what accountForAgent reads to find a usable account.
       `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.share_accounts, ws.runner_version, ws.runtimes,
               ws.connected, ws.last_seen_at, ws.name AS ws_name FROM agents a
          JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
-        WHERE a.workstation_id = $1 AND a.org_id = $2 AND a.role_key = 'builder' AND a.status = 'active'
+        WHERE a.workstation_id = $1 AND a.org_id = $2 AND a.role_key = ANY ($4::text[]) AND a.status = 'active'
           AND a.paused_at IS NULL AND NOT a.is_devops
           AND (a.allowed_project_ids IS NULL OR $3::uuid = ANY (a.allowed_project_ids))
-        ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
-      [t.workstation_id, t.org_id, t.project_id],
+        ORDER BY array_position($4::text[], a.role_key), a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
+      [t.workstation_id, t.org_id, t.project_id, roles],
     );
-    const fail = async (reason: string) =>
+    const fail = async (reason: string, code: PrepWriterFailureCode = 'writer_failed') =>
       withAppendTx(ctx.pool, async (tx) => {
         const cur = await one(
           tx,
           `SELECT * FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`,
           [t.id],
         );
-        if (cur) await finishReleasePrepTask(ctx, tx, cur, false, reason);
+        if (cur) await finishReleasePrepTask(ctx, tx, cur, false, reason, { code });
       });
     if (!task.success) {
       await fail('the task cannot be read');
       continue;
     }
+    const ws = await one(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [t.workstation_id]);
+    const what = taskLabel(task.data);
+    const kindOf = task.data.kind;
+    const whatFor = kindOf === 'new_video' ? `the ${what} video` : what;
     if (builders.length === 0) {
-      const ws = await one(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [t.workstation_id]);
-      await fail(`no builder agent on ${ws?.name ?? 'the workstation'} to write the ${label} video`);
+      await fail(
+        prepWriterUnavailable('no_writer', kindOf, { workstation: ws?.name, what: whatFor }),
+        'no_writer',
+      );
+      lastWhy.delete(t.id);
       continue;
     }
     if (now.getTime() - new Date(t.created_at).getTime() > RELEASE_PREP_QUEUE_LIMIT_MS) {
-      await fail(`no builder agent was free to write the ${label} video within 2 hours`);
+      await fail(
+        prepWriterUnavailable('writer_unreachable', kindOf, {
+          workstation: ws?.name,
+          what: whatFor,
+          reason:
+            lastWhy.get(t.id) ??
+            (builders.some((a) => a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince)
+              ? 'every writer was busy'
+              : 'the runner is offline'),
+        }),
+        'writer_unreachable',
+      );
+      lastWhy.delete(t.id);
       continue;
     }
     const accounts = await loadProjectAccounts(ctx.pool, [t.project_id]);
     for (const a of builders) {
       const account = accountForAgent(accounts, t.project_id, a as never, now);
-      const reachable =
-        a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
-      if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
+      const online = !!(a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince);
+      if (!online) {
+        lastWhy.set(t.id, 'the runner is offline');
+        continue;
+      }
+      if (account === null) {
+        lastWhy.set(t.id, 'no working model account');
+        continue;
+      }
+      if (busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) {
+        lastWhy.set(t.id, 'every writer was busy');
+        continue;
+      }
       const conn = ctx.services.runners.get(a.ws_id);
-      if (!conn || !conn.reconciled) continue;
+      if (!conn || !conn.reconciled) {
+        lastWhy.set(t.id, 'the runner is offline');
+        continue;
+      }
       const shiftId = randomUUID();
       const ok = await withAppendTx(ctx.pool, async (tx) => {
         const cur = await one(
@@ -339,6 +421,7 @@ export async function releasePrepTaskPass(
       });
       busy.add(a.id);
       if (!ok) continue;
+      lastWhy.delete(t.id);
       started.push({ taskId: t.id, shiftId, agentId: a.id, workstationId: a.ws_id });
       const built = await buildReleasePrepShiftStart(ctx, t.id, shiftId);
       if (built) ctx.services.runners.send(a.ws_id, 'shift.start', built, ctx.clock.now());
@@ -371,7 +454,7 @@ export async function buildReleasePrepShiftStart(
   if (!task.success || !agent || !project) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
-  const title = `Write the ${task.data.title} video (${t.release_branch})`;
+  const title = PREP_TASK_KINDS[task.data.kind].title(task.data, t.release_branch);
   const brief: ShiftBrief = {
     shift: {
       id: shiftId,
@@ -477,18 +560,109 @@ export async function applyReleasePrepReport(
       error:
         'a release prep task ends with `aom prep done --summary "..."` or `aom prep fail --reason "..."`',
     };
-  const data = report.data as { commit?: unknown; files?: unknown; refused?: unknown };
+  const data = report.data as { commit?: unknown; files?: unknown; refused?: unknown; proposal?: unknown };
+  const parsed = ReleasePrepTaskSchema.safeParse(task.task);
+  if (!parsed.success) {
+    await finishReleasePrepTask(ctx, tx, task, false, 'the task cannot be read', { code: 'writer_failed' });
+    return { accepted: true };
+  }
+  const kind = parsed.data.kind;
+  if (report.outcomeId === PREP_OUTCOME.failed) {
+    await finishReleasePrepTask(ctx, tx, task, false, report.note, { code: 'writer_failed' });
+    return { accepted: true };
+  }
+  if (PREP_TASK_KINDS[kind].result === 'proposal') {
+    // The runner has checked the proposal against the files; the server checks what only it can (the deny list of names).
+    const checked = await checkPrepProposal(tx, task, parsed.data, data.proposal);
+    if (!checked.ok) return { accepted: false, error: checked.error };
+    await finishReleasePrepTask(ctx, tx, task, true, report.note, { files: [], result: checked.result });
+    return { accepted: true, ...(checked.message ? { message: checked.message } : {}) };
+  }
   const commit =
     typeof data.commit === 'string' && /^[0-9a-f]{40}$/.test(data.commit) ? data.commit : undefined;
   const files = Array.isArray(data.files) ? data.files.map(String).slice(0, 50) : [];
-  if (report.outcomeId === PREP_OUTCOME.done && !commit)
-    await finishReleasePrepTask(ctx, tx, task, false, 'the workstation did not commit the files');
-  else
-    await finishReleasePrepTask(ctx, tx, task, report.outcomeId === PREP_OUTCOME.done, report.note, {
-      ...(commit ? { commit } : {}),
-      files,
+  if (!commit)
+    await finishReleasePrepTask(ctx, tx, task, false, 'the workstation did not commit the files', {
+      code: 'writer_failed',
     });
+  else await finishReleasePrepTask(ctx, tx, task, true, report.note, { commit, files });
   return { accepted: true };
+}
+
+type ProposalCheck = { ok: true; result: unknown; message?: string } | { ok: false; error: string };
+
+/**
+ * The server's check of a proposal task's report. `changelog_entries`: `checkChangelogProposal` (schema, the public-text
+ * gate, the deny list of agent, member and workstation names, every change accounted for once), refused with the same text
+ * the BA got. `guide_edits`: the schema (the file checks ran on the runner). Either way the accepted proposal is stored.
+ */
+async function checkPrepProposal(
+  tx: Tx,
+  task: Row,
+  parsed: ReleasePrepTask,
+  proposal: unknown,
+): Promise<ProposalCheck> {
+  if (proposal === undefined || proposal === null)
+    return {
+      ok: false,
+      error: 'the report has no proposal: write release-prep-proposal.json and run aom prep done again',
+    };
+  const size = JSON.stringify(proposal).length;
+  if (size > PROPOSAL_MAX_BYTES)
+    return {
+      ok: false,
+      error: `the proposal is too large (${Math.ceil(size / 1024)} KB, max ${PROPOSAL_MAX_BYTES / 1024} KB): propose fewer or shorter edits`,
+    };
+  if (parsed.kind === 'guide_edits') {
+    const p = GuideProposalSchema.safeParse(proposal);
+    if (!p.success)
+      return {
+        ok: false,
+        error:
+          `the proposal is not valid: ${p.error.issues[0]?.path.join('.') ?? ''} ${p.error.issues[0]?.message ?? ''}`.trim(),
+      };
+    return {
+      ok: true,
+      result: { proposal: p.data },
+      message: `${p.data.edits.length} guide edit(s) accepted.`,
+    };
+  }
+  if (parsed.kind !== 'changelog_entries') return { ok: false, error: 'this task has no proposal' };
+  const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [task.run_id]);
+  const repo = run ? await repoRowOf(tx, run.id, task.repo_id) : null;
+  const summary = repo?.summary ? ReleaseDocsPrepSummarySchema.safeParse(repo.summary) : null;
+  if (!run || !repo || !summary?.success)
+    return { ok: false, error: 'the change summary of this run is gone: report that nothing can be written' };
+  const { uncovered, existing } = await changelogWriterInput(tx, run, repo, summary.data);
+  const check = checkChangelogProposal(proposal, {
+    uncovered,
+    existingCount: existing.length,
+    publicText,
+    denyList: await changelogDenyList(tx, run.org_id),
+  });
+  if (!check.ok)
+    return {
+      ok: false,
+      error: `The entries were not accepted. Fix these and report again:\n${check.errors.map((e) => `- ${e}`).join('\n')}`,
+    };
+  // The writer never writes keys: the client ticket of each intake card an entry describes is added here.
+  const entries = withClientRefs(check.entries, await changeListFor(tx, run, summary.data, uncovered));
+  return {
+    ok: true,
+    result: storedChangelogResult(entries, check.proposal),
+    message: `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} accepted for ${repo.name}.`,
+  };
+}
+
+async function repoRowOf(db: Queryable, runId: string, repoId: string): Promise<Row | null> {
+  return (
+    (await one(
+      db,
+      `SELECT r.*, pr.remote_url_normalized, pr.forge_kind, pr.name FROM release_docs_prep_repos r
+       JOIN project_repos pr ON pr.id = r.repo_id WHERE r.run_id=$1 AND r.repo_id=$2`,
+      [runId, repoId],
+    )) ?? null
+  );
 }
 
 type EndOutcome = 'rejected' | 'lost' | 'stopped' | 'no_report' | 'crashed' | 'timeout' | 'reported';
@@ -557,7 +731,9 @@ export async function endReleasePrepShift(
     if ((rejected?.n ?? 1) >= RELEASE_PREP_MAX_REJECTIONS) {
       const d = (extra.rejection.detail ?? '').replace(/\s+/g, ' ').trim();
       const why = d ? `${extra.rejection.reason}: ${d}` : extra.rejection.reason.replaceAll('_', ' ');
-      await finishReleasePrepTask(ctx, tx, task, false, `the workstation could not start the task (${why})`);
+      await finishReleasePrepTask(ctx, tx, task, false, `the workstation could not start the task (${why})`, {
+        code: 'writer_failed',
+      });
       return;
     }
   }
@@ -576,6 +752,7 @@ export async function endReleasePrepShift(
       outcome === 'timeout'
         ? 'the agent ran out of time'
         : 'the agent ended without `aom prep done` or `aom prep fail`',
+      { code: 'writer_failed' },
     );
     return;
   }

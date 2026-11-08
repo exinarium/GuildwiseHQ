@@ -17,10 +17,8 @@ export interface DocsPrepStepContext {
   payload: ReleaseDocsPrepPayload;
   /** The analysis of 'Analyse changes' for this repository. */
   summary: ReleaseDocsPrepSummary | undefined;
-  /** A scratch folder for this step (removed afterwards); the model writes only here. */
+  /** A scratch folder for this step (removed afterwards). */
   outDir: string;
-  /** One unattended model call as `payload.writer`: reads `readDirs`, writes only `writeDir`, no shell. */
-  runModel: (req: DocsPrepModelRequest) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** A process with a time limit and the runner's toolchain PATH; output redacted. */
   exec: DocsPrepExec;
   /** The phase of a step with phases; '' for a single-phase step. */
@@ -33,14 +31,6 @@ export interface DocsPrepStepContext {
   dataDir: string | undefined;
   /** The commit the worktree started from. */
   start: string;
-}
-
-export interface DocsPrepModelRequest {
-  instructions: string;
-  prompt: string;
-  readDirs: string[];
-  writeDir: string;
-  timeoutMs: number;
 }
 
 export type DocsPrepExec = (

@@ -2,7 +2,7 @@
 
 Used by the release prep step "Write changelog". Nobody is asked anything: you write the public changelog entries for one
 repository from the change list you are given, and the platform writes them into the Unreleased section of
-`CHANGELOG.md`. You never edit a repository yourself.
+`CHANGELOG.md`. You never edit `CHANGELOG.md` or any other repository file yourself.
 
 Map the groups of this playbook onto the changelog headings:
 
@@ -26,5 +26,6 @@ A change that an existing entry already describes goes into `covered` with that 
 several changes: list all their ids in `sources`. Every change appears exactly once: in an entry's `sources`, in
 `covered` or in `skipped`.
 
-Report the JSON with `aom report release-changelog --file <entries.json>`. If the report is refused, fix exactly what
-it names and report again.
+Write the JSON to the file `release-prep-proposal.json` in your working directory and end with
+`aom prep done --summary "<what you wrote>"`. If it is refused, fix exactly what it names and run `aom prep done` again.
+If no entries can be written at all, end with `aom prep fail --reason "<why>"`.

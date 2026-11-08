@@ -45,6 +45,7 @@ import {
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
   RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
   RELEASE_FACTS_CAPABILITY,
   RELEASE_PUBLISH_CAPABILITY,
   RELEASE_REF_CLEANUP_CAPABILITY,
@@ -128,7 +129,6 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
-import { docsPrepModel } from './git/release-docs-prep-model.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
@@ -1529,6 +1529,7 @@ export class Runner {
         RELEASE_DOCS_PREP_CAPABILITY,
         RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
         RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+        RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
         RELEASE_PUBLISH_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
@@ -2261,11 +2262,6 @@ export class Runner {
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              // The writer of the model-backed steps (the user guide): one headless call as the agent the server chose.
-              runModel: docsPrepModel(
-                { adapters: this.adapters, paths: this.paths, toolchains: this.toolchains },
-                p.writer,
-              ),
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();

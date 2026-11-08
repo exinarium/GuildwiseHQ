@@ -712,3 +712,7 @@ No criterion's design changes; the merge only renames shared pieces.
 | 4 Repo without a guide: skipped, step passes | runner handler | none |
 | 5 PDF regenerated and committed with the text | runner handler (exec faked in tests) | none |
 | 6 Step disabled: no guide change | shared + runner tests | defaults list now includes `changelog`; the unticked-guide test keeps `guide` out |
+
+---
+
+**Superseded by GWP-134 (the writer part).** The writer of Update user guide is now a release prep task (`docs/investigations/GWP-134-release-prep-one-writer-mechanism-for-the-content.md`): the writer is chosen in one place for every content step, and the BA task `release_changelog` and the headless guide call are gone. The checks and the output described above still apply.

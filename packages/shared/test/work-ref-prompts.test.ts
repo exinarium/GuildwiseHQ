@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ChangelogEntriesTask,
   checkOutboundLeaks,
   DevopsShiftSchema,
   devopsBriefOutcomes,
   isPlainTicketKey,
-  type ReleaseChangelogTask,
   renderDevopsInstructions,
   renderDevopsPrompt,
   renderShiftPrompt,
@@ -174,7 +174,7 @@ describe('Outbound leak check: the internal card key', () => {
 });
 
 describe('withClientRefs', () => {
-  const changes: ReleaseChangelogTask['changes'] = [
+  const changes: ChangelogEntriesTask['changes'] = [
     { source: 'a', subject: 'x', cards: [{ key: 'ABC-1', title: 'Login', client: true }], areas: [] },
     { source: 'b', subject: 'y', cards: [{ key: 'GWP-124', title: 'Internal' }], areas: [] },
     { source: 'c', subject: 'z', cards: [{ key: 'ABC-7', title: 'Logout', client: true }], areas: [] },

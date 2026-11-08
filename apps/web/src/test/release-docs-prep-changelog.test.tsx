@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangelogStepOutput, changelogSummary } from '../components/delivery/ChangelogStepOutput.tsx';
+import { showsChangelogOutput } from '../components/delivery/ReleaseDocsPrepTab.tsx';
 import { ReleaseDocsPrepPanel } from '../components/ReleaseDocsPrepPanel.tsx';
 
 const json = (body: unknown) =>
@@ -78,5 +79,15 @@ describe('settings checklist', () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByText('Needs Analyse changes')).toBeInTheDocument();
+  });
+});
+
+describe('where the changelog entries show on the phase rows', () => {
+  it('on the apply row once it ran, on the write row only while the writer works, on a single-phase row always', () => {
+    expect(showsChangelogOutput({ phase: 'apply', state: 'passed' })).toBe(true);
+    expect(showsChangelogOutput({ phase: 'apply', state: 'running' })).toBe(false);
+    expect(showsChangelogOutput({ phase: 'write', state: 'running' })).toBe(true);
+    expect(showsChangelogOutput({ phase: 'write', state: 'passed' })).toBe(false);
+    expect(showsChangelogOutput({ phase: '', state: 'passed' })).toBe(true);
   });
 });

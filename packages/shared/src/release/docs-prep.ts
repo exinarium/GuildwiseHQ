@@ -28,6 +28,8 @@ export interface ReleaseDocsPrepStepDef {
   phases?: readonly string[];
   /** Phases the server runs itself (an agent shift), not a runner command. */
   serverPhases?: readonly string[];
+  /** The phase in which a writer agent writes the step's text (release prep tasks). Gated on the runner capability. */
+  writerPhase?: string;
 }
 
 export const ANALYSE_STEP: ReleaseDocsPrepStepDef = {
@@ -61,6 +63,9 @@ export const CHANGELOG_STEP: ReleaseDocsPrepStepDef = {
   defaultOn: true,
   producesFiles: true,
   requires: ['analyse'],
+  phases: ['write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
 };
 
 export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
@@ -72,6 +77,9 @@ export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
   defaultOn: true,
   producesFiles: true,
   requires: ['analyse'],
+  phases: ['check', 'write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
 };
 
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */

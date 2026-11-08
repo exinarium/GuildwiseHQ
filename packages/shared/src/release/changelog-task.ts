@@ -9,65 +9,47 @@ import {
 import { type ChangelogEntry, changelogHeadingOf } from './changelog-rewrite.ts';
 
 /**
- * The model half of the release prep step 'Write changelog': a `release_changelog` BA task (a background shift, no card,
- * no worktree). The BA reads one repository's analysed changes and the entries already under Unreleased and proposes
- * public changelog entries as JSON. The server checks them; the runner merges them into CHANGELOG.md. The BA never edits
- * a repository. Contract shared by the server, the runner and the prompt.
+ * The model half of the release prep step 'Write changelog': a `changelog_entries` release prep task. The writer reads
+ * one repository's analysed changes and the entries already under Unreleased and proposes public changelog entries as
+ * JSON (`release-prep-proposal.json`). The server checks them; the runner merges them into CHANGELOG.md. The writer
+ * never edits CHANGELOG.md. Contract shared by the server, the runner and the prompt.
  */
 
-export const RELEASE_CHANGELOG_OUTCOME = {
-  done: 'release_changelog_done',
-  fail: 'release_changelog_fail',
-} as const;
-
-/** What the BA is given for one repository. */
-export const ReleaseChangelogTaskSchema = z.object({
-  runId: z.uuid(),
-  repoId: z.uuid(),
-  projectName: z.string(),
-  repoName: z.string(),
-  releaseBranch: z.string(),
+/** What the writer is given for one repository. */
+export const ChangelogEntriesTaskSchema = z.object({
+  kind: z.literal('changelog_entries'),
+  projectName: z.string().max(200),
+  repoName: z.string().max(200),
+  releaseBranch: z.string().max(200),
   /** The changes no earlier prep run wrote, each with its source id (the commit id). */
   changes: z
     .array(
       z.object({
-        source: z.string(),
-        subject: z.string(),
+        source: z.string().max(80),
+        subject: z.string().max(400),
         cards: z
           .array(
             z.object({
-              key: z.string(),
-              title: z.string().nullable(),
+              key: z.string().max(40),
+              title: z.string().max(400).nullable(),
               /** `key` is the client's ticket reference of an intake card (added to the entry by the platform). */
               client: z.boolean().optional(),
             }),
           )
+          .max(50)
           .default([]),
-        areas: z.array(z.string()).default([]),
+        areas: z.array(z.string().max(200)).max(50).default([]),
       }),
     )
+    .max(700)
     .default([]),
   /** The bullets already under ## [Unreleased], numbered from 1 in this order. */
-  existing: z.array(z.object({ heading: z.string(), text: z.string() })).default([]),
+  existing: z
+    .array(z.object({ heading: z.string().max(40), text: z.string().max(2000) }))
+    .max(600)
+    .default([]),
 });
-export type ReleaseChangelogTask = z.infer<typeof ReleaseChangelogTaskSchema>;
-
-export function releaseChangelogBriefOutcomes() {
-  return [
-    {
-      id: RELEASE_CHANGELOG_OUTCOME.done,
-      label: 'The changelog entries are proposed',
-      kind: 'success' as const,
-      data: 'releaseChangelog',
-    },
-    {
-      id: RELEASE_CHANGELOG_OUTCOME.fail,
-      label: 'No changelog entries can be written from these changes',
-      kind: 'failure' as const,
-      data: 'releaseChangelogFail',
-    },
-  ];
-}
+export type ChangelogEntriesTask = z.infer<typeof ChangelogEntriesTaskSchema>;
 
 export type ProposalCheck =
   | { ok: true; entries: (ChangelogEntry & { sources: string[] })[]; proposal: ChangelogProposal }
@@ -150,7 +132,7 @@ const MAX_CLIENT_REFS = 5;
  */
 export function withClientRefs<E extends { text: string; sources: string[] }>(
   entries: readonly E[],
-  changes: ReleaseChangelogTask['changes'],
+  changes: ChangelogEntriesTask['changes'],
 ): E[] {
   const bySource = new Map(changes.map((c) => [c.source, c]));
   return entries.map((e) => {
@@ -166,53 +148,26 @@ export function withClientRefs<E extends { text: string; sources: string[] }>(
   });
 }
 
-export function renderReleaseChangelogInstructions<O extends { id: string; label: string }>(
-  brief: { agent: { name: string }; role: { instructions: string; coreRules: string[] } },
-  task: ReleaseChangelogTask,
-  outcomes: readonly O[],
-  commandFor: (o: O) => string,
-): string {
-  const out: string[] = [];
-  out.push('# Who you are');
-  out.push(
-    `You are ${brief.agent.name}, the business analyst (BA), working in the background for the release of ${task.projectName}. Names are handles, not personas: do not roleplay.`,
-  );
-  out.push('# Role instructions');
-  out.push(brief.role.instructions.trim());
-  if (brief.role.coreRules.length > 0) {
-    out.push('# Core rules');
-    out.push(brief.role.coreRules.map((r) => `- ${r}`).join('\n'));
-  }
-  out.push('# Your job in this shift');
-  out.push(
-    [
-      `Write the public changelog entries for the repository ${task.repoName} from the changes in the prompt. Follow the "Unattended changelog" step of the Release notes playbook (aom skill show playbook:release-notes --file steps/step-05-changelog-unattended.md). Nobody answers questions in this shift: decide from what the prompt says.`,
-      '',
-      '- Headings: only Added, Changed, Deprecated, Removed, Fixed, Security. Normally Added (new), Changed (improved or upgrade notes, start an upgrade note with "Upgrade:") and Fixed. Start a breaking change with the word BREAKING under Changed or Removed.',
-      '- One entry is one line: a short phrase naming the feature or fix, then one to four plain sentences on what the user can now do or what no longer goes wrong, and why it matters. Between 20 and 900 characters. **Bold** for a screen label and backticks for a setting a self-hoster needs are fine.',
-      "- Never write ticket keys (the platform adds the client's ticket reference itself where one applies), commit ids, links, #numbers, @handles, host names, URLs, e-mail or IP addresses, secrets, names of people, agents or machines, or anything about how the work was done (reviews, rework, shifts).",
-      '- Internal-only work (refactoring, build, tests, tooling) is not written: put it in "skipped" with the reason "internal".',
-      '- A change that an existing entry already describes goes into "covered" with that entry\'s number. Do not write it again.',
-      '- One entry may cover several changes: list all their ids in its "sources". Every change in the list must appear exactly once: in an entry\'s sources, in covered or in skipped.',
-      '- Do not read or edit any repository and do not commit: the platform writes the file.',
-    ].join('\n'),
-  );
-  out.push('# How to report');
-  out.push(
-    [
-      'Write the JSON in a file in your scratch directory:',
-      '`{ "entries": [ { "heading": "Added", "text": "...", "sources": ["<change id>"] } ], "covered": [ { "source": "<change id>", "existing": 1 } ], "skipped": [ { "source": "<change id>", "reason": "internal" } ] }`',
-      'If the report is refused, fix exactly what it names and report again in this shift. End the shift with exactly one terminal command:',
-      ...outcomes.map((o) => `- ${o.id}: ${o.label}\n  \`${commandFor(o)}\``),
-    ].join('\n'),
-  );
-  return `${out.join('\n\n')}\n`;
-}
+/** The rules of the changelog writer (shared by the task instructions and the tests). */
+export const CHANGELOG_WRITER_RULES: readonly string[] = [
+  'Write the public changelog entries for the repository from the changes in the prompt. Follow the "Unattended changelog" step of the Release notes playbook (aom skill show playbook:release-notes --file steps/step-05-changelog-unattended.md). Nobody answers questions in this shift: decide from what the prompt says.',
+  'Headings: only Added, Changed, Deprecated, Removed, Fixed, Security. Normally Added (new), Changed (improved or upgrade notes, start an upgrade note with "Upgrade:") and Fixed. Start a breaking change with the word BREAKING under Changed or Removed.',
+  'One entry is one line: a short phrase naming the feature or fix, then one to four plain sentences on what the user can now do or what no longer goes wrong, and why it matters. Between 20 and 900 characters. **Bold** for a screen label and backticks for a setting a self-hoster needs are fine.',
+  "Never write ticket keys (the platform adds the client's ticket reference itself where one applies), commit ids, links, #numbers, @handles, host names, URLs, e-mail or IP addresses, secrets, names of people, agents or machines, or anything about how the work was done (reviews, rework, shifts).",
+  'Internal-only work (refactoring, build, tests, tooling) is not written: put it in "skipped" with the reason "internal".',
+  'A change that an existing entry already describes goes into "covered" with that entry\'s number. Do not write it again.',
+  'One entry may cover several changes: list all their ids in its "sources". Every change in the list must appear exactly once: in an entry\'s sources, in covered or in skipped.',
+  'Do not edit CHANGELOG.md or any other repository file: the platform writes it.',
+];
+
+/** The JSON shape the changelog writer puts in the proposal file. */
+export const CHANGELOG_PROPOSAL_SHAPE =
+  '{ "entries": [ { "heading": "Added", "text": "...", "sources": ["<change id>"] } ], "covered": [ { "source": "<change id>", "existing": 1 } ], "skipped": [ { "source": "<change id>", "reason": "internal" } ] }';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /** The prompt: the numbered changes (commit subjects come from the repository, so they are fenced) and existing entries. */
-export function renderReleaseChangelogPrompt(task: ReleaseChangelogTask): string {
+export function renderReleaseChangelogPrompt(task: ChangelogEntriesTask): string {
   const out: string[] = [`# Changelog entries for ${task.repoName} (${task.releaseBranch})`];
   out.push('## Changes to describe');
   out.push(

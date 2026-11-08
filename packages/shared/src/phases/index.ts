@@ -6,7 +6,6 @@ import { RegressionPlatform } from '../events/testing.ts';
 import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
 import { SpecCardTaskSchema, specCardBriefOutcomes } from '../intake/spec-card.ts';
 import { MailDraftTaskSchema, mailDraftBriefOutcomes } from '../mail/draft.ts';
-import { ReleaseChangelogTaskSchema, releaseChangelogBriefOutcomes } from '../release/changelog-task.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 
@@ -327,7 +326,7 @@ export const BaTaskKind = z.enum([
   'mail_reply_draft',
   // A draft card with empty required fields, sent on by the CEO: the BA writes them (docs/design/ceo-front-door.md 2.4).
   'spec_card',
-  // Release prep 'Write changelog': the public entries for one repository of a prep run.
+  // Retired (GWP-134): release prep 'Write changelog' is now a release prep task. Kept for tasks queued before the upgrade.
   'release_changelog',
 ]);
 export type BaTaskKind = z.infer<typeof BaTaskKind>;
@@ -380,8 +379,6 @@ export const BaTaskShiftSchema = z.object({
   mailDraft: MailDraftTaskSchema.optional(),
   /** `spec_card`: the draft card whose missing fields to write. */
   specCard: SpecCardTaskSchema.optional(),
-  /** `release_changelog`: one repository's changes to write changelog entries for. */
-  releaseChangelog: ReleaseChangelogTaskSchema.optional(),
   cards: z
     .array(
       PhaseCardOutcome.extend({
@@ -572,7 +569,6 @@ export function baTaskBriefOutcomes(kind: BaTaskKind) {
   if (kind === 'batch_intake') return batchBriefOutcomes();
   if (kind === 'mail_reply_draft') return mailDraftBriefOutcomes();
   if (kind === 'spec_card') return specCardBriefOutcomes();
-  if (kind === 'release_changelog') return releaseChangelogBriefOutcomes();
   if (isReporterTaskKind(kind)) return reporterBriefOutcomes(kind as ReporterTaskKind);
   const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
   switch (kind) {

@@ -1,27 +1,22 @@
-import { authorFailure, NO_NEW_VIDEOS_NOTE, streamId, VideoStepReportSchema } from '@aom/shared';
+import { NO_NEW_VIDEOS_NOTE, streamId, VideoStepReportSchema } from '@aom/shared';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import type { ServerPhaseOutcome } from './docs-prep-phases.ts';
 import {
   failedNewVideos,
   newVideoTasks,
   phaseTasks,
   queueReleasePrepTasks,
   registerPhaseTasksFinisher,
+  taskFailureText,
 } from './docs-prep-tasks.ts';
 
 /**
  * Release prep 'Generate videos', the server's side: the `author` phase (between the runner's `plan` and `render`) and
  * the input the `render` phase gets.
  */
-
-export interface ServerPhaseOutcome {
-  /** `running`: the phase waits for its tasks (release_prep shifts); their end finishes the row. */
-  state: 'passed' | 'failed' | 'skipped' | 'running';
-  error?: string;
-  report?: Record<string, unknown>;
-}
 
 async function stepReport(tx: Queryable, runId: string, repoId: string, phase: string) {
   const row = await one(
@@ -74,14 +69,17 @@ registerPhaseTasksFinisher('videos/author', async (tx, run, repoId, tasks) => {
   const bad = tasks.filter((t) => t.status !== 'done');
   const authored = [...new Set([...before, ...done])].sort();
   const repair = tasks.some((t) => t.attempt > 0);
-  if (bad.length > 0)
+  if (bad.length > 0) {
+    // No writer at all: the one sentence every content step shows (prepWriterUnavailable), once.
+    const unavailable = bad.find((t) => t.code === 'no_writer' || t.code === 'writer_unreachable');
     return {
       state: 'failed',
-      error: `${bad.length} new video(s) could not be written: ${bad
-        .map((t) => authorFailure(slugOf(t), t.note || 'the agent gave no reason'))
-        .join('; ')}`,
+      error: unavailable
+        ? taskFailureText(unavailable)
+        : `${bad.length} new video(s) could not be written: ${bad.map((t) => taskFailureText(t)).join('; ')}`,
       report: { authored, failed: bad.map(slugOf), ...(repair ? { repair: true } : {}) },
     };
+  }
   return { state: 'passed', report: { authored, ...(repair ? { repair: true } : {}) } };
 });
 
@@ -121,24 +119,3 @@ export async function videosRenderInput(
   const author = await stepReport(tx, runId, repoId, 'author');
   return { plan: plan ?? {}, authored: authoredOf(author) };
 }
-
-/** Server phases by step and phase. */
-export const SERVER_PHASES: Record<
-  string,
-  (ctx: Ctx, tx: Tx, run: Row, repoId: string) => Promise<ServerPhaseOutcome>
-> = { 'videos/author': runVideosAuthorPhase };
-
-/** Runs after a runner phase failed: true when the step goes on (a repair round) instead of failing the run. */
-export const PHASE_FAILURE_HOOKS: Record<
-  string,
-  (ctx: Ctx, tx: Tx, run: Row, repoId: string) => Promise<boolean>
-> = { 'videos/render': videosRepairRound };
-
-/** Inputs of runner phases that need an earlier phase's report. */
-export const PHASE_INPUTS: Record<
-  string,
-  (tx: Queryable, runId: string, repoId: string) => Promise<Record<string, unknown>>
-> = { 'videos/render': videosRenderInput };
-
-/** Reports above this size (JSON) are not stored; the step's error says so. */
-export const REPORT_MAX_BYTES = 64 * 1024;
