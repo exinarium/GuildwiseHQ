@@ -87,3 +87,37 @@ export function cardBranchName(
     fallbackReason: `The ticket reference ${ticket.key} cannot be used in a branch name`,
   };
 }
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whole-key, case-insensitive match of a card's own internal ref: `GWP-123` and `gwp-123-x` match, `GWP-1234` and
+ * `XGWP-123` do not.
+ */
+export function internalRefPattern(ref: string, flags = 'i'): RegExp {
+  return new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(ref)}(?![0-9])`, flags);
+}
+
+/** The text names the card's own internal ref (whole key, any case). */
+export const mentionsInternalRef = (text: string, ref: string): boolean => internalRefPattern(ref).test(text);
+
+/** The text with every mention of the card's own internal ref replaced by the work reference. */
+export const replaceInternalRef = (text: string, ref: string, workRef: string): string =>
+  text.replace(internalRefPattern(ref, 'gi'), workRef);
+
+/** The internal-ref guard and scrub apply: the card has a client ticket that differs from its internal ref. */
+export const guardsInternalRef = (wr: { ref: string; isClientRef: boolean }, cardRef: string): boolean =>
+  wr.isClientRef && wr.ref.toUpperCase() !== cardRef.toUpperCase();
+
+/**
+ * What clients read as the change's title: `ABC-1: <title>` for an intake card (the own ref in the title becomes the
+ * work ref), the plain title otherwise.
+ */
+export function clientChangeTitle(
+  wr: { ref: string; isClientRef: boolean },
+  cardRef: string,
+  title: string,
+): string {
+  if (!guardsInternalRef(wr, cardRef)) return title;
+  return `${wr.ref}: ${replaceInternalRef(title, cardRef, wr.ref)}`;
+}

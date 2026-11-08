@@ -1,11 +1,18 @@
 import { join } from 'node:path';
-import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
+import {
+  clientChangeTitle,
+  type FinalizeExecutePayload,
+  type FinalizeResult,
+  guardsInternalRef,
+  isSafeGitRef,
+} from '@aom/shared';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
+import { commitsWithInternalRef, describeCommits } from './internal-ref.ts';
 import { baseTarget, RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
@@ -40,13 +47,17 @@ export interface CompletionInput {
 
 /**
  * What clients see of a card in a commit or a pull request: the tracker ticket key when the card came from a ticket
- * (`DCPL-4276`), else just the title. Never the card ref (`P4-12`): internal references are not shown outside.
+ * (`DCPL-4276`), else just the title. Never the card ref (`P4-12`): internal references are not shown outside. The work
+ * reference (`workRef`, sent with `isClientRef`) wins; older servers only send `ticket`.
  */
-const outsideTicket = (p: FinalizeExecutePayload): string | null =>
-  p.ticket && p.ticket !== p.ref ? p.ticket : null;
+const outsideTicket = (p: FinalizeExecutePayload): string | null => {
+  if (p.isClientRef && p.workRef)
+    return guardsInternalRef({ ref: p.workRef, isClientRef: true }, p.ref) ? p.workRef : null;
+  return p.ticket && p.ticket !== p.ref ? p.ticket : null;
+};
 const changeTitle = (p: FinalizeExecutePayload): string => {
   const t = outsideTicket(p);
-  return t ? `${t}: ${p.title}` : p.title;
+  return t ? clientChangeTitle({ ref: t, isClientRef: true }, p.ref, p.title) : p.title;
 };
 const mergeMessage = (p: FinalizeExecutePayload): string => `Merge ${changeTitle(p)}`;
 
@@ -124,6 +135,11 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     if (landed) return { ok: true, action, mergeCommit: landed };
   }
 
+  // An intake card's commits must name its client ticket, never its internal ref. Checked before the rebase, so nothing
+  // has changed, been pushed, merged or opened when the card goes back to the builder.
+  const refused = await internalRefPreflight(p, wt);
+  if (refused) return refused;
+
   try {
     await rebaseOntoBase(wt, p.baseBranch, p.commitAs);
   } catch (err) {
@@ -167,6 +183,22 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   } catch (err) {
     return fail(action, errMsg(err));
   }
+}
+
+/**
+ * For an intake card (`isClientRef`, a work ref other than the card ref): the card's commits not yet on the working
+ * branch whose message names the internal ref. Any found: a refusal listing them; none (or a non-intake card): null.
+ */
+async function internalRefPreflight(p: FinalizeExecutePayload, wt: string): Promise<FinalizeResult | null> {
+  if (!p.isClientRef || !p.workRef || !guardsInternalRef({ ref: p.workRef, isClientRef: true }, p.ref)) return null;
+  const commits = await commitsWithInternalRef(wt, `${await baseTarget(wt, p.baseBranch)}..HEAD`, p.ref);
+  if (!commits.length) return null;
+  return {
+    ok: false,
+    action: p.action,
+    internalRef: { ref: p.ref, workRef: p.workRef, commits },
+    error: `${commits.length} commit(s) on the card branch name ${p.ref}; use ${p.workRef}: ${describeCommits(commits)}`,
+  };
 }
 
 /**

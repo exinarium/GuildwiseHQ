@@ -385,3 +385,106 @@ describe('completion: pull request branch name on origin', () => {
     expect(res.pushedBranch).toBe(BRANCH);
   });
 });
+
+describe('completion: intake card uses the work reference, never the internal ref', () => {
+  const intake = (p: FinalizeExecutePayload): FinalizeExecutePayload => ({
+    ...p,
+    workRef: 'ABC-1',
+    isClientRef: true,
+    ticket: 'ABC-1',
+    prBranchPrefix: 'p',
+  });
+
+  it('opens the pull request with an ABC-1 title, body and branch and no internal ref', async () => {
+    const { repo, path } = await cardWorktree();
+    const pr = new FakePr({ url: 'u' });
+    const res = await run(repo, intake(payload(repo, path, 'pr')), pr);
+    expect(res.ok).toBe(true);
+    expect(pr.calls[0]!.title).toBe('ABC-1: Add thing');
+    expect(pr.calls[0]!.branch).toBe('p/ABC-1');
+    for (const s of [pr.calls[0]!.title, pr.calls[0]!.body, pr.calls[0]!.branch]) expect(s).not.toMatch(/TOY-1/i);
+  });
+
+  it('scrubs the internal ref from the title of the pull request and the merge commit', async () => {
+    const { repo, path } = await cardWorktree();
+    const res = await run(repo, { ...intake(payload(repo, path, 'merge')), title: 'Follow up TOY-1' });
+    expect(res.ok).toBe(true);
+    expect(originLog(repo).split('\n')[0]).toBe('Merge ABC-1: Follow up ABC-1');
+  });
+
+  it('merges with an ABC-1 merge message; the integration branch keeps the internal ref', async () => {
+    const { repo, path } = await cardWorktree();
+    let during = '';
+    const r = await executeCompletion({
+      payload: intake(payload(repo, path, 'merge')),
+      repoPath: repo.clone,
+      worktreePath: path,
+      worktreesDir: '/',
+      integrationDir: join(tmp(), 'integration'),
+      pr: new FakePr({}),
+      auth: async () => {
+        during = sh(repo.clone, 'git', ['worktree', 'list']);
+        return { args: [], env: {} };
+      },
+    });
+    expect(r.ok).toBe(true);
+    const top = originLog(repo).split('\n')[0]!;
+    expect(top).toBe('Merge ABC-1: Add thing');
+    expect(top).not.toMatch(/TOY-1/i);
+    expect(during).toContain('[guildwise/integration/toy-1]');
+  });
+
+  it('refuses to land a branch whose commits name the internal ref: nothing pushed, merged or opened', async () => {
+    const { repo, path } = await cardWorktree();
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'ABC-1: tidy', '-m', 'Follow-up for toy-1']);
+    const bad = sh(path, 'git', ['rev-parse', 'HEAD']);
+    const mainBefore = sh(repo.origin, 'git', ['rev-parse', 'main']);
+    for (const action of ['merge', 'pr'] as const) {
+      const pr = new FakePr({ url: 'u' });
+      const res = await run(repo, intake(payload(repo, path, action)), pr);
+      expect(res.ok).toBe(false);
+      expect(res.internalRef?.ref).toBe('TOY-1');
+      expect(res.internalRef?.workRef).toBe('ABC-1');
+      expect(res.internalRef?.commits.map((c) => c.sha)).toEqual([bad]);
+      expect(res.internalRef?.commits[0]!.subject).toBe('ABC-1: tidy');
+      expect(res.error).toContain(bad.slice(0, 10));
+      expect(res.error).toContain('ABC-1');
+      expect(pr.calls).toHaveLength(0);
+    }
+    expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(mainBefore);
+    expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe('refs/heads/main');
+    expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(bad);
+  });
+
+  it('does not flag a longer key or another card ref', async () => {
+    const { repo, path } = await cardWorktree();
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'ABC-1: tidy, see TOY-12 and TOY-85']);
+    const res = await run(repo, intake(payload(repo, path, 'merge')));
+    expect(res.ok).toBe(true);
+  });
+
+  it('a non-intake card with its own ref in a commit still merges with the plain title', async () => {
+    const { repo, path } = await cardWorktree();
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'TOY-1 tidy']);
+    const res = await run(repo, payload(repo, path, 'merge'));
+    expect(res.ok).toBe(true);
+    expect(originLog(repo).split('\n')[0]).toBe('Merge Add thing');
+  });
+
+  it('an older server (ticket only, no work ref) keeps the ticket title and runs no preflight', async () => {
+    const { repo, path } = await cardWorktree();
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'TOY-1 tidy']);
+    const pr = new FakePr({ url: 'u' });
+    const res = await run(repo, { ...payload(repo, path, 'pr'), ticket: 'DCPL-9', prBranchPrefix: 'p' }, pr);
+    expect(res.ok).toBe(true);
+    expect(pr.calls[0]!.title).toBe('DCPL-9: Add thing');
+  });
+});
