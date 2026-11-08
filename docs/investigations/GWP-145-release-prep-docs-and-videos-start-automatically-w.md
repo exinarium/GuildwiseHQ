@@ -26,7 +26,12 @@ I read the code at `f6b71d8d` (this worktree's HEAD, the same commit as `origin/
 
 **Conclusion:** nothing on this card is already built, so the card is not closed. Only the run's `trigger` column, the nullable `started_by` and the system-actor fallbacks can be reused.
 
-**Sibling card:** GWP-141 is done but is not on this branch yet (`e0f0ae8b`, `634112a3`, `e3503f55`). It adds `docsPrepReleaseBranch()` / `releaseBranchOf()` and keys every run by the branch all included repositories share. This card must build on that: merge it first (`aom git merge-main`) and use `releaseBranchOf` wherever this design says "the release branch".
+**Sibling cards (re-checked on 2026-11-08 against `origin/release/1.6.0` at `02587bc2`):** GWP-141 and GWP-161 have both landed on `release/1.6.0`, but this card branch was cut before them, so the builder's worktree must contain `origin/release/1.6.0` before starting.
+
+- GWP-141 (`3077ba30`) adds `docsPrepReleaseBranch()` and a private `releaseBranchOf()` in `docs-prep.ts`, and keys every run by the branch all included repositories share. Use `releaseBranchOf` wherever this design says "the release branch". Export it (it is private today).
+- GWP-161 (`02587bc2`) adds `guidePaths` to `settingsOf`, to the PUT body (`guidePaths?:`) and to the `ReleaseDocsPrepSettingsSet` payload. Add `autoStart` next to it in the same way: optional in the input, merged with `before`, and part of the `same` comparison.
+- The release branch's `startReleaseDocsPrep` (lines 253-350 there) still has exactly the checks listed in 6.3, so the `startChecks` split below applies unchanged. The highest migration there is still `2860_blog_manual_posts.sql`.
+- `apps/server/src/delivery/**` and `packages/shared/src/delivery/**` are identical on the card branch and on `release/1.6.0`.
 
 ## 3. What a deploy and a test environment are today (facts the design relies on)
 
@@ -41,19 +46,30 @@ Consequences:
 2. A time-based gate (`forMinutes`) and a lagging facts refresh both mean a release can become ready **without any new event**. A hook only inside `applyDeployResult` would miss those cases, so the check must be state-based and re-evaluated on a timer.
 3. A repository that no test environment deploys (a library, docs-only repo) can never be "deployed to UAT". The owner must say whether it blocks.
 
-## 4. Owner decision: the ready signal (open, asked through `aom question`)
+## 4. Owner decision: the ready signal (decided 2026-11-08)
 
-The card says the build waits for this answer. Whatever the owner chooses goes into **one** pure function, `releaseReadiness` (section 6.2), so a change touches one place.
+**Decided by the owner on 2026-11-08: o2, and no new automatic run on a new head.** The confirmed definition, which is the one to build:
+
+> A release is **ready** when, for every repository in the release (`docsPrepRepos`):
+> 1. its release-branch head is the latest successful, healthy, non-trial, non-dry-run deploy of a test environment that deploys that repository; no newer deploy of that environment is queued or running, and its last finished deploy did not fail;
+> 2. that test environment's own gate passes for the head; and
+> 3. the **requirements** (`requires`) of every live environment that deploys the repository hold for the head. That covers the recipe gate and the organization's bindings, for example "test copy healthy on this commit for 10 minutes", regression or e2e passed, or the phase is done. The live gate's release `window` and `freeze` are **not** part of readiness. A missing gate preset blocks.
+>
+> A repository that no test environment deploys is shown as "not checked" and does not block. At least one repository must be checked. A repository that has a test environment but no live environment is judged on 1 and 2 only.
+>
+> Once the release has any docs-prep run in its current cycle (manual, retry, automatic or skipped), a new head never starts another automatic run. The manager uses Retry or Run release prep.
+
+The options the owner chose between are kept below for the record. Whatever the owner chooses goes into **one** pure function, `releaseReadiness` (section 6.2), so a change touches one place.
 
 | Option | Definition per release repository (repositories = `docsPrepRepos`) | Pros | Cons |
 |---|---|---|---|
-| **o1 (recommended): the card's default, with a lenient rule for repos that have no test site** | A test-role environment that deploys this repository has, as its **latest** successful, healthy, non-trial, non-dry-run deploy, the release-branch head; no newer deploy of that environment is queued or running; and that environment's own gate passes for the head. A repository that no test environment deploys is listed as "no test site, not checked" and does not block. At least one repository must be checked. | Starts as early as possible, so the docs are ready long before shipping. Simple to explain. Uses facts the server already has. | "Gate passes" adds little (the test gate is usually `none`). |
-| o2: o1 plus the live site's requirements | o1, and the `requires` of the live environment that deploys the repository (e.g. "test copy healthy for 10 minutes", regression passed, phase done) hold for the head. The live gate's `window` and `freeze` are ignored, so prep is not tied to release hours. | Literally "ready to go out". Reuses the gate the owner approved. | Starts later (it can wait for e2e or a phase to be done), which leaves less time for videos before shipping. More code paths. |
+| o1: the card's default, with a lenient rule for repos that have no test site** | A test-role environment that deploys this repository has, as its **latest** successful, healthy, non-trial, non-dry-run deploy, the release-branch head; no newer deploy of that environment is queued or running; and that environment's own gate passes for the head. A repository that no test environment deploys is listed as "no test site, not checked" and does not block. At least one repository must be checked. | Starts as early as possible, so the docs are ready long before shipping. Simple to explain. Uses facts the server already has. | "Gate passes" adds little (the test gate is usually `none`). |
+| **o2 (chosen by the owner): o1 plus the live site's requirements** | o1, and the `requires` of the live environment that deploys the repository (e.g. "test copy healthy for 10 minutes", regression passed, phase done) hold for the head. The live gate's `window` and `freeze` are ignored, so prep is not tied to release hours. | Literally "ready to go out". Reuses the gate the owner approved. | Starts later (it can wait for e2e or a phase to be done), which leaves less time for videos before shipping. More code paths. |
 | o3: o1, strict | As o1, but a repository with no test environment makes the release not ready. | Matches the card text word for word. | A release with a library repository never becomes ready, so auto-start never fires. |
 
 Second decision, in every option: **a new head after a run exists**. Proposed: **no** new automatic run. Once the release has any run in its current cycle (manual, retry, automatic, or skipped), the automatic start is done for that release, and the manager uses Retry or Run release prep. This is also the only safe choice by default. A passed prep run pushes its own docs commit onto the release branch, which creates a new head. With "yes", every prep run would make the next one possible, and the rule would have to tell prep's own commits apart from new work.
 
-Until the owner answers, this design uses **o1 + no**. If the owner picks o2, only `releaseReadiness` and its loader change (section 6.2, "o2 variant").
+The owner chose **o2 + no**. Section 6 is written for o2.
 
 ## 5. Comparison of how to trigger
 
@@ -107,8 +123,14 @@ export interface ReadinessRepoInput {
     updating: boolean;
     /** The latest finished deploy is a failure newer than `current`. */
     lastFailed: boolean;
-    /** The env's gate for `head` (o2: plus the live env's requires), or null when it was not evaluated. */
+    /** The test env's own gate for `head`, or null when it was not evaluated. */
     gate: { satisfied: boolean; missing: string[] } | null;
+  }>;
+  /** Live-role environments that deploy this repository (empty: none, so only the test check applies). */
+  live: Array<{
+    name: string; label: string;
+    /** The live env's requirements for `head`, window and freeze left out; null when not evaluated (test side not ready). */
+    requires: { satisfied: boolean; missing: string[] } | null;
   }>;
 }
 export interface ReleaseReadiness {
@@ -123,7 +145,11 @@ export interface ReleaseReadiness {
 export function releaseReadiness(repos: ReadinessRepoInput[]): ReleaseReadiness
 ```
 
-Rules (o1). A repository is `ready` when **one** of its test environments meets all of these: `current.commit` matches `head` (same-prefix compare, at least 7 hex characters, like `samePrefix` in `runs.ts`), `healthy !== false`, `!updating`, `!lastFailed`, and `gate?.satisfied !== false`. `not_checked`: `envs` is empty. The release is ready when there is at least one `ready` repository, no `not_ready` one, and no repository with `head === null`.
+Rules (o2, owner-confirmed). A repository is `ready` when:
+- **one** of its test environments meets all of these: `current.commit` matches `head` (same-prefix compare, at least 7 hex characters, like `samePrefix` in `runs.ts`), `healthy !== false`, `!updating`, `!lastFailed`, and `gate?.satisfied === true`; **and**
+- **every** entry in `live` has `requires?.satisfied === true`. A `null` there counts as not ready: the loader always evaluates it once the test side is ready.
+
+`not_checked`: `envs` is empty, whatever `live` holds. The release is ready when there is at least one `ready` repository, no `not_ready` one, and no repository with `head === null`. `key` is the sorted `<repoId>@<head>` list of the `ready` repositories. `heads` holds every repository with a known head.
 
 Reason sentences (short SHA = 7 characters; use the environment label, not its name):
 - `<repo>: the release branch has not been read yet`
@@ -132,11 +158,11 @@ Reason sentences (short SHA = 7 characters; use the environment label, not its n
 - `<repo>: the last update of <Test copy> failed`
 - `<repo>: <Test copy> is not healthy on abc1234`
 - `<repo>: <Test copy> gate not met: <missing joined with "; ">`
+- `<repo>: not ready to go out on <Live site>: <missing joined with "; ">` (for example `the test copy has been healthy on abc1234 for 10 minutes`, using the gate's own `missing` wording)
 - `not_checked`: `<repo>: no test site deploys it, not checked`. This is information, not a blocker.
 - No checked repository: `No test site deploys any repository of this release`.
 
-o2 variant: the loader also evaluates the live environment's `requires` (window and freeze removed) for `head` and merges it into `gate`. `releaseReadiness` stays the same.
-o3 variant: `not_checked` counts as `not_ready`. That is one line.
+If the owner ever changes the definition, only `releaseReadiness` and the loader change. For example "repos with no test site block" (o3) is one line: `not_checked` counts as `not_ready`.
 
 **`packages/shared/src/release/docs-prep-dto.ts`**
 
@@ -165,12 +191,12 @@ autoStartBlocked: z.string().nullable(), // why an automatic start did not happe
 
 **`apps/server/src/projections/release-docs-prep.ts`**
 
-- `ReleaseDocsPrepSettingsSet` writes `{ enabled, steps, autoStart: p.autoStart === true }`.
+- `ReleaseDocsPrepSettingsSet` replaces the whole jsonb. Keep GWP-161's `guidePaths` spread and add `...(p.autoStart ? { autoStart: true } : {})`. An old event without the key replays as off, and the event carries the full settings every time, so a save that leaves out `autoStart` keeps it through `before.autoStart`.
 - `ReleaseDocsPrepStarted` also inserts `heads` (`$9::jsonb`, null when absent) and `ready_key`. `ON CONFLICT (id) DO NOTHING` stays. The unique index rejects a second automatic run for the same key, and the insert error rolls back the whole append transaction, so nothing half-done is left (the backstop).
 
 **`apps/server/src/release/docs-prep.ts`**
 
-1. `settingsOf` returns `autoStart: s.autoStart === true`. `getReleaseDocsPrepSettings` returns it. `setReleaseDocsPrepSettings` computes `autoStart = input.autoStart ?? before.autoStart`, includes it in the `same` comparison, and adds it to the event payload. Permission is unchanged: `requireManager` returns the same 403 `forbidden` for non-managers.
+1. `settingsOf` returns `autoStart: s.autoStart === true` next to GWP-161's `guidePaths`. `getReleaseDocsPrepSettings` returns it. `setReleaseDocsPrepSettings` takes `autoStart?: boolean` in its input (as `guidePaths?`), computes `autoStart = input.autoStart ?? before.autoStart`, includes it in the `same` comparison, and adds it to the event payload. Check that the projection writes the `projects.release_docs_prep` jsonb in a way that keeps `guidePaths` and `autoStart` both. Permission is unchanged: `requireManager` returns the same 403 `forbidden` for non-managers.
 2. Split the start in two. The manual path keeps exactly today's behaviour and error codes:
 
 ```ts
@@ -202,7 +228,11 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx): Promise<void>
 - head per repository: `loadFacts(db, repo.id)`. If `facts.state` is not `ready` or `headSha` is null, the head is null. If `latestMerge(db, projectId, repo.id)` is newer than `facts.at` and a different commit, use the merge commit as the head (the facts are older than the latest merge, so a new merge immediately makes the release not ready, AC "after new commits"). Otherwise use `facts.headSha`.
 - test environments: load the recipe once (`loadRecipeRow`, approved parsed if present, else parsed) and the targets. Use the role rule from `viewsOf`: export a small `envRole(recipeRow, targets, envName)` helper from `delivery/environments.ts` rather than copying the rule. For each environment with role `test`, `envRepo(db, projectId, env.repo)?.id === repo.id`.
 - per environment: one query on `deploy_runs WHERE project_id=$1 AND env=$2 AND NOT trial AND NOT dry_run ORDER BY created_at DESC LIMIT 20`, from which you derive `current` (first `succeeded`), `updating` (a `queued`/`running` row newer than `current`) and `lastFailed` (the first finished row is `failed`, or `refused` with reason `expired`, and newer than `current`). Never use `waiting_release`: it is ignored (constraint "never treat waiting_release on another commit as ready").
-- gate: `evaluateEnvGate(db, { orgId, projectId, env: recipeEnv, production: false, commit: head, now, repoId })`, only when `current.commit` matches `head` (to save queries).
+- test gate: `evaluateEnvGate(db, { orgId, projectId, env: recipeEnv, production: !!target?.production, commit: head, now, repoId })`, only when `current.commit` matches `head` (to save queries).
+- live requirements (o2): the environments with role `live` whose `envRepo(...)` is this repository. Evaluate them only when at least one test environment of the repository is ready, using `evaluateEnvGate(db, { orgId, projectId, env: liveRecipeEnv, production: !!liveTarget?.production, commit: head, now, repoId, requiresOnly: true })`. The `production` flag matters: it pulls in the organization's `env_match='production'` gate bindings, which are part of "ready to go out".
+- Take the recipe environment (`gate`) from `approved_parsed ?? parsed`, as `environmentsStatus` does (`environments.ts:836`), and the role and label from the same `viewsOf` rule. Export the helper (for example `envRoles(recipeRow, targets): Array<{ name, label, role, target }>`) rather than copying the rule.
+
+**`apps/server/src/delivery/gate.ts`**: `evaluateEnvGate` gets an optional `requiresOnly?: boolean` (default false, so every existing caller is unchanged). When it is true, each effective gate is evaluated as `{ requires: g.gate.requires }`, without `window` and `freeze`. `missingPreset` still returns not satisfied. This is the only change to delivery code. Add one unit test for it (window closed and freeze on, but requirements met, gives satisfied with `requiresOnly`, and not satisfied without it).
 
 `releaseDocsPrepAutoStart(ctx)`:
 1. Candidates: `SELECT p.* FROM projects p JOIN organizations o ON o.id=p.org_id WHERE p.status='active' AND p.kind='project' AND o.status IN ('trial','active') AND NOT COALESCE(o.simulation,false) AND COALESCE((p.release_docs_prep->>'enabled')::boolean,false) AND COALESCE((p.release_docs_prep->>'autoStart')::boolean,false)`.
@@ -227,7 +257,7 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx): Promise<void>
 
 ### 6.5 Web
 
-**`apps/web/src/components/ReleaseDocsPrepPanel.tsx`**: a second checkbox under the main switch, "Start automatically when the release is ready on the test site", with help text: "Release prep starts by itself once the release-branch head of every repository is live and healthy on its test site. If a run already exists for this release, nothing starts; use Run or Retry." It is disabled when `!canEdit || !enabled || save.isPending`. Send `autoStart` in `change()`, and keep it in local state like `enabled`. Touch: the label row is at least 44 px high on small screens (`min-h-11 sm:min-h-0`, like the tab's buttons), and the whole label is clickable.
+**`apps/web/src/components/ReleaseDocsPrepPanel.tsx`**: a second checkbox under the main switch, "Start automatically when the release is ready on the test site", with help text: "Release prep starts by itself once the release-branch head of every repository is live and healthy on its test site and meets the live site's release requirements (release hours and freeze do not count). If a run already exists for this release, nothing starts; use Run or Retry." It is disabled when `!canEdit || !enabled || save.isPending`. Send `autoStart` in `change()`, and keep it in local state like `enabled`. Touch: the label row is at least 44 px high on small screens (`min-h-11 sm:min-h-0`, like the tab's buttons), and the whole label is clickable.
 
 **`apps/web/src/api/queries/releaseDocsPrep.ts`**: the settings mutation type includes `autoStart`. No new endpoint.
 
@@ -238,7 +268,7 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx): Promise<void>
 
 `apps/web/src/pages/Releases.tsx` needs no change unless it reads `trigger` exhaustively; check it with the type checker.
 
-**What's new:** `apps/web/src/whats-new/entries/2026-11-<dd>-release-prep-auto-start.md`, front matter as in `2026-11-05-release-prep.md` (`audience: admin`, `help: /help/phases#release-prep`, `release: 1.6.0`), for example: "Release prep can now start by itself. Turn on **Start automatically when the release is ready on the test site** in the release prep settings, and prep begins as soon as the release is live and healthy on the test site. The Release prep tab shows whether the release is ready, why not if it is not, and whether a run was started automatically or by whom."
+**What's new:** `apps/web/src/whats-new/entries/2026-11-<dd>-release-prep-auto-start.md`, front matter as in `2026-11-05-release-prep.md` (`audience: admin`, `help: /help/phases#release-prep`, `release: 1.6.0`), for example: "Release prep can now start by itself. Turn on **Start automatically when the release is ready on the test site** in the release prep settings, and prep begins as soon as the release is live and healthy on the test site and meets what the live site needs before it goes out. The Release prep tab shows whether the release is ready, why not if it is not, and whether a run was started automatically or by whom."
 
 **Docs:** add one paragraph to `docs/USER-GUIDE.md` (the Release prep section near line 1407) and to `docs/ARCHITECTURE.md` 28d ("Automatic start"). The in-app help `/help/phases#release-prep` should mention the switch if that article lists the settings.
 
@@ -251,9 +281,11 @@ No change. `ReleaseDocsPrepPayload` carries neither `trigger` nor `startedBy`, a
 1. **Prep's own commit makes a new head.** A passed run pushes `docs(release): ...` to the release branch, so readiness drops to "not ready" afterwards. That is correct and expected; make sure the tab does not present it as an error. With "no restart on a new head" there is no loop.
 2. **Stale facts.** Facts refresh at most every 30 minutes. The newer-merge rule covers card merges. A hand push only shows up after the next facts read. Accept this and document it.
 3. **Constraint name** in the migration: check it before dropping it (6.1).
-4. **GWP-141 first:** the run key is `releaseBranchOf(...)`, not `p.working_branch`. The overview, the auto step and the gate must all use the same branch, or `latestRun` misses runs.
-5. **GWP-161** (group release-guide) also extends `ReleaseDocsPrepSettings` and its DTO and the settings event. Expect a merge conflict in `settingsOf` / the schemas; keep both fields.
-6. **Gate cost:** `evaluateEnvGate` reads up to 300 deploy runs. Only call it when the commit already matches, and keep the 60 s throttle.
+4. **GWP-141 first:** the run key is `releaseBranchOf(...)`, not `p.working_branch`. The overview, the auto step and the gate must all use the same branch, or `latestRun` misses runs. GWP-141 is on `release/1.6.0`, but this card branch does not contain it yet.
+5. **GWP-161** is on `release/1.6.0` too. It already extends `settingsOf`, the PUT body, the settings event and its projection with `guidePaths`. Add `autoStart` beside it and keep both.
+6. **Gate cost:** `evaluateEnvGate` reads up to 300 deploy runs. Call the test gate only when the commit already matches, and the live requirements only when the test side is ready. Keep the 60 s throttle.
+6a. **Time-based live requirement (o2).** The default live gate needs "test copy healthy on this commit for 10 minutes", so a release usually becomes ready about 10 minutes after the last test deploy, with no new event. The 10 s pass with the 60 s throttle picks this up. Do not rely on the `applyDeployResult` trigger alone. The tab's reason shows the live gate's own `missing` text, so the manager sees why it is waiting.
+6b. **Window and freeze are not readiness.** A frozen live site, or one outside its release window, still counts as ready, so prep runs before the release window opens. This is deliberate: the ship gate still applies when the release goes out.
 7. **Turning the switch on while the release is already ready** starts prep within one pass. That follows from the level-triggered design. The help text says so, and it is consistent with "start once ready".
 8. **Simulation and research projects** are excluded (candidate SQL, and `startRunInTx`'s existing `isResearchStage || simulation` check gives `no_release_branch`).
 
@@ -262,8 +294,8 @@ No change. `ReleaseDocsPrepPayload` carries neither `trigger` nor `startedBy`, a
 | AC | Where it is met |
 |---|---|
 | Architect note on what exists on release/1.6.0 | Section 2 (also posted on the card). Nothing exists, so the card is not closed. |
-| Owner-confirmed definition written on the card before build | Section 4. Asked with `aom question`; the answer is recorded on the card and in the ledger. The builder implements the confirmed option in `releaseReadiness`. |
-| One server function, ready / not ready with a reason per repo | `loadReleaseReadiness` (server) around the pure `releaseReadiness` (shared): `repos[].reason`, `reasons`. |
+| Owner-confirmed definition written on the card before build | Section 4. The owner answered on 2026-11-08 (o2 + no restart on a new head), and the definition is also posted as a note on the card. |
+| One server function, ready / not ready with a reason per repo | `loadReleaseReadiness` (server) around the pure `releaseReadiness` (shared): `repos[].reason`, `reasons`. o2: test head deployed and healthy, test gate passed, and the live env's requirements met (`evaluateEnvGate(..., requiresOnly: true)`). |
 | Auto-start on: the last UAT deploy of the head succeeds, so exactly one run, marked automatic | `applyDeployResult`, then `dispatcher.trigger()`, then the `releaseDocsPrepAutoStart` step, then `startRunInTx` with `trigger:'auto'`, `startedBy:null`, `SYSTEM_ACTOR`; lock, `latestRun` and unique index (6.4). |
 | Auto-start off (default): no run starts on its own; manual works as before | Candidate SQL needs `autoStart=true`. A missing key means off. The manual wrapper keeps the same checks and codes. |
 | No start when a run exists for release and head, when skipped, or when a requirement is missing (and the release shows it) | `latestRun` under the lock. `startRunInTx` conflicts are caught. `autoStartBlocked` comes from `startBlocker`, with the same sentence. |
@@ -276,7 +308,8 @@ No change. `ReleaseDocsPrepPayload` carries neither `trigger` nor `startedBy`, a
 ## 9. Tests (builder)
 
 Unit, which the builder runs:
-- `packages/shared/test/release-readiness.test.ts`: one repo deployed and gate passing gives ready, with a key. One of two not deployed gives not ready, naming that repo. Deploy failed (`lastFailed`), running (`updating`), unhealthy, a different commit, the gate failing, the head unknown: each gives not ready with its sentence. A repo with no test env gives `not_checked` and does not block, but if no repo is checked the release is not ready. o3 variant if chosen.
+- `packages/shared/test/release-readiness.test.ts`: one repo deployed and gate passing gives ready, with a key. One of two not deployed gives not ready, naming that repo. Deploy failed (`lastFailed`), running (`updating`), unhealthy, a different commit, the gate failing, the head unknown: each gives not ready with its sentence. A repo with no test env gives `not_checked` and does not block, but if no repo is checked the release is not ready. o2: the test side ready but a live requirement missing (or `requires: null`) gives not ready with the "not ready to go out on <Live site>" sentence. Two live envs where one fails gives not ready. A repo with a test env and no live env is judged on the test side only.
+- `apps/server` unit, or the existing gate test: `evaluateEnvGate` with `requiresOnly` ignores `window` and `freeze` but still enforces `requires` and a missing preset. Without the flag, behaviour is unchanged.
 - `packages/shared/test/release-docs-prep*.test.ts`: the settings schema accepts a missing `autoStart`. The events parse old payloads (no `autoStart`, `startedBy` as a string) and new ones (`trigger:'auto'`, `startedBy:null`).
 - `apps/web/src/test/release-docs-prep.test.tsx` / `releases.test.tsx`: the panel shows the switch, disabled for non-managers and when prep is off, and saves `autoStart`. The tab shows ready / not ready with the reasons, the blocked callout, "Started automatically" and "Started by <name>".
 
