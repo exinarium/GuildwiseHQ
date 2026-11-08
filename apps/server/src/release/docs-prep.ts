@@ -168,6 +168,20 @@ export async function docsPrepRepos(db: Queryable, projectId: string): Promise<P
   return out;
 }
 
+/**
+ * The release branch a run is labelled and keyed with: the branch every included repository releases from when they
+ * all agree; otherwise (none, or different branches) the project's working branch, else the first repository's.
+ */
+export function docsPrepReleaseBranch(projectBranch: string | null, repos: { branch: string }[]): string | null {
+  const first = repos[0]?.branch;
+  if (first && repos.every((r) => r.branch === first)) return first;
+  return projectBranch ?? first ?? null;
+}
+
+async function releaseBranchOf(db: Queryable, projectId: string, projectBranch: string | null): Promise<string | null> {
+  return docsPrepReleaseBranch(projectBranch, await docsPrepRepos(db, projectId));
+}
+
 async function prepWorkstation(db: Queryable, repoId: string, userId: string): Promise<string | null> {
   const ws = await one(
     db,
@@ -206,7 +220,7 @@ export async function startReleaseDocsPrep(
     const missing = missingReleaseDocsPrepRequirement(enabledReleaseDocsPrepSteps(settingsOf(p)));
     if (missing) throw conflict('release_docs_prep_requires', missing.message);
     const repos = isResearchStage(p.workflow_key) || p.simulation ? [] : await docsPrepRepos(tx, projectId);
-    const branch: string | null = p.working_branch ?? repos[0]?.branch ?? null;
+    const branch: string | null = docsPrepReleaseBranch(p.working_branch ?? null, repos);
     if (repos.length === 0 || !branch)
       throw conflict(
         'no_release_branch',
@@ -302,7 +316,7 @@ export async function skipReleaseDocsPrep(
     await requireManager(tx, user, projectId);
     const p = await one(tx, 'SELECT * FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
     if (!p) throw notFound('project not found');
-    const branch: string | null = p.working_branch ?? (await docsPrepRepos(tx, projectId))[0]?.branch ?? null;
+    const branch: string | null = await releaseBranchOf(tx, projectId, p.working_branch ?? null);
     if (!branch) throw conflict('no_release_branch', 'This project has no release branch.');
     const latest = await latestRun(tx, projectId, branch);
     if (latest && (latest.status === 'passed' || latest.status === 'skipped'))
@@ -771,7 +785,8 @@ export async function loadReleaseDocsPrepGate(
 }
 
 async function gateInput(db: Queryable, proposal: Row, p: Row): Promise<ReleaseDocsPrepGateInput> {
-  const branch: string = p.working_branch ?? p.repo_branch ?? '';
+  const branch: string =
+    (await releaseBranchOf(db, proposal.project_id, p.working_branch ?? null)) ?? p.repo_branch ?? '';
   const run = branch ? await latestRun(db, proposal.project_id, branch, true) : null;
   const repoRow = run
     ? await one(db, 'SELECT * FROM release_docs_prep_repos WHERE run_id=$1 AND repo_id=$2', [
@@ -913,9 +928,10 @@ export async function getReleaseDocsPrepRun(
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   const run =
     runId === 'latest'
-      ? p.working_branch
-        ? await latestRun(ctx.pool, projectId, p.working_branch)
-        : null
+      ? await (async () => {
+          const b = await releaseBranchOf(ctx.pool, projectId, p.working_branch ?? null);
+          return b ? latestRun(ctx.pool, projectId, b) : null;
+        })()
       : await one(ctx.pool, 'SELECT * FROM release_docs_prep_runs WHERE id=$1 AND project_id=$2', [
           runId,
           projectId,
@@ -942,7 +958,7 @@ export async function releaseDocsPrepOverview(
   );
   const out: ReleaseDocsPrepOverviewItem[] = [];
   for (const p of projects) {
-    const branch: string | null = p.working_branch ?? null;
+    const branch = await releaseBranchOf(ctx.pool, p.id, p.working_branch ?? null);
     const run = branch ? await latestRun(ctx.pool, p.id, branch) : null;
     const enabled = settingsOf(p).enabled;
     const state: ReleaseDocsPrepState = run ? run.status : enabled ? 'not_run' : 'off';

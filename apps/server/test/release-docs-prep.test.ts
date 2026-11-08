@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { withAppendTx } from '../src/db/tx.ts';
 import {
   applyReleaseDocsPrepResult,
+  docsPrepReleaseBranch,
   releaseDocsPrepSweep,
   releaseDocsPrepViewFor,
 } from '../src/release/docs-prep.ts';
@@ -875,5 +876,82 @@ describe('Generate videos step', () => {
     const r = run.repos[0].steps.find((s: any) => s.phase === 'render');
     expect(r.report.videos[0].error).toContain('selector not found');
     expect((await cmds()).map(tag)).not.toContain('commit:prepare');
+  });
+});
+
+describe('the run label and key follow the repositories release branch', () => {
+  const runs = () => q2(`SELECT release_branch, status FROM release_docs_prep_runs ORDER BY started_at`);
+  /** Project on main, its one repository on release/1.5.0 (the card's setup). */
+  const mainProject = async () => {
+    await q(`UPDATE projects SET working_branch='main' WHERE id=$1`, [w.projectId]);
+    await q(`UPDATE project_repos SET working_branch='release/1.5.0' WHERE id=$1`, [w.repoId]);
+  };
+
+  it('helper: shared branch, project branch, first repo branch, different branches', () => {
+    expect(docsPrepReleaseBranch('main', [{ branch: 'release/1' }, { branch: 'release/1' }])).toBe('release/1');
+    expect(docsPrepReleaseBranch('release/9', [])).toBe('release/9');
+    expect(docsPrepReleaseBranch(null, [{ branch: 'a' }, { branch: 'b' }])).toBe('a');
+    expect(docsPrepReleaseBranch('main', [{ branch: 'a' }, { branch: 'b' }])).toBe('main');
+    expect(docsPrepReleaseBranch(null, [])).toBeNull();
+  });
+
+  it('project on main, repo on release/1.5.0: the run, latest view and overview use release/1.5.0', async () => {
+    await mainProject();
+    await enable();
+    expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+    expect((await runs())[0].release_branch).toBe('release/1.5.0');
+    expect((await latest()).releaseBranch).toBe('release/1.5.0');
+    const mine = ((await owner('GET', `/api/release-docs-prep`)).body as any[]).find(
+      (o) => o.projectId === w.projectId,
+    );
+    expect(mine.releaseBranch).toBe('release/1.5.0');
+    expect(mine.state).toBe('running');
+  });
+
+  it('no repo override: the project working branch (unchanged)', async () => {
+    await enable();
+    await owner('POST', `${base()}/runs`);
+    expect((await runs())[0].release_branch).toBe('release/1.5.0');
+  });
+
+  it('a second start is a duplicate of release/1.5.0; an older (project, main) run neither blocks nor changes', async () => {
+    await mainProject();
+    await enable();
+    await q(
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, trigger, started_at, updated_at)
+       SELECT gen_random_uuid(), org_id, id, 'main', 'running', 'manual', now() - interval '1 day', now() - interval '1 day'
+         FROM projects WHERE id=$1`,
+      [w.projectId],
+    );
+    const before = (await runs()).length;
+    expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+    const again = await owner('POST', `${base()}/runs`);
+    expect(again.status).toBe(409);
+    expect(JSON.stringify(again.body)).toContain('release/1.5.0');
+    const all = await runs();
+    expect(all.length).toBe(before + 1);
+    expect(all.filter((r: any) => r.release_branch === 'main').every((r: any) => r.status === 'running')).toBe(true);
+  });
+
+  it('retry, skip and result handling find the same run', async () => {
+    await mainProject();
+    await enable();
+    await owner('POST', `${base()}/runs`);
+    await answer({ ok: false, state: 'failed', error: 'boom', files: [], notices: [] });
+    const failed = await latest();
+    expect(failed.status).toBe('failed');
+    expect((await owner('POST', `${base()}/runs/${failed.id}/retry`)).status).toBe(202);
+    await answer({ ok: false, state: 'failed', error: 'again', files: [], notices: [] });
+    expect((await owner('POST', `${base()}/skip`)).status).toBe(204);
+    expect((await latest()).status).toBe('skipped');
+    expect((await runs()).every((r: any) => r.release_branch === 'release/1.5.0')).toBe(true);
+  });
+
+  it('the ship gate sees a passed run stored under release/1.5.0', async () => {
+    await mainProject();
+    await enable();
+    expect((await approveShip()).status).toBe(409);
+    await runToPassed(PREP);
+    expect((await approveShip()).status).toBe(200);
   });
 });
