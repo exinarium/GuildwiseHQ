@@ -1,5 +1,5 @@
-import { type BlogStatus, blogTagLabel } from '@aom/shared';
-import { Newspaper } from 'lucide-react';
+import { type BlogOriginKind, type BlogStatus, blogTagLabel } from '@aom/shared';
+import { Newspaper, PenLine } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useBlogSummary, usePlatformBlog } from '../../api/queries/blog.ts';
 import { BlogSettingsPanel } from '../../components/blog/BlogSettingsPanel.tsx';
@@ -8,6 +8,7 @@ import { ReleasesPanel } from '../../components/blog/ReleasesPanel.tsx';
 import { SocialPanel } from '../../components/blog/SocialPanel.tsx';
 import {
   Badge,
+  ButtonLink,
   EmptyState,
   ErrorBox,
   FilterChip,
@@ -40,7 +41,14 @@ export const statusLabel = (s: BlogStatus) => STATUS.find((x) => x.id === s)?.la
 export function PlatformBlog() {
   const [params, setParams] = useSearchParams();
   const status = (params.get('status') as BlogStatus | null) ?? undefined;
-  const list = usePlatformBlog(status);
+  const origin = (['writer', 'manual'] as const).find((o) => o === params.get('origin'));
+  const list = usePlatformBlog(status, origin);
+  const setOrigin = (v: BlogOriginKind | undefined) => {
+    const next = new URLSearchParams(params);
+    if (v) next.set('origin', v);
+    else next.delete('origin');
+    setParams(next, { replace: true });
+  };
   const set = (v: BlogStatus | undefined) => {
     const next = new URLSearchParams(params);
     if (v) next.set('status', v);
@@ -78,12 +86,31 @@ export function PlatformBlog() {
           </FilterChip>
         ))}
       </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Origin">
+        <FilterChip pressed={!origin} onClick={() => setOrigin(undefined)} data-testid="blog-origin-all">
+          Any origin
+        </FilterChip>
+        <FilterChip
+          pressed={origin === 'writer'}
+          onClick={() => setOrigin('writer')}
+          data-testid="blog-origin-writer"
+        >
+          Writer
+        </FilterChip>
+        <FilterChip
+          pressed={origin === 'manual'}
+          onClick={() => setOrigin('manual')}
+          data-testid="blog-origin-manual"
+        >
+          Written by hand
+        </FilterChip>
+      </div>
       {list.isPending && <ListSkeleton label="Loading posts" rows={4} />}
       {d?.posts.length === 0 && (
         <EmptyState
           icon={Newspaper}
           title="No posts here"
-          description={`${ext.PlatformBlogWriter ? 'Switch the blog writer on under Writer above, or press Write one now. ' : ''}Outside tools can post through the blog API (see API keys).`}
+          description={`Press New article to write one yourself. ${ext.PlatformBlogWriter ? 'Switch the blog writer on under Writer above, or press Write one now. ' : ''}Outside tools can post through the blog API (see API keys).`}
         />
       )}
       {d && d.posts.length > 0 && (
@@ -94,6 +121,7 @@ export function PlatformBlog() {
                 <tr>
                   <th className="px-4 py-2 font-medium">Post</th>
                   <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Origin</th>
                   <th className="px-4 py-2 font-medium">From</th>
                   <th className="px-4 py-2 font-medium">Updated</th>
                 </tr>
@@ -122,6 +150,11 @@ export function PlatformBlog() {
                         </span>
                       )}
                     </td>
+                    <td className="px-4 py-2.5" data-testid={`blog-origin-${p.slug}`}>
+                      <Badge tone={p.originKind === 'manual' ? 'brand' : 'neutral'}>
+                        {p.originKind === 'manual' ? 'Manual' : 'Writer'}
+                      </Badge>
+                    </td>
                     <td className="px-4 py-2.5 text-muted">{p.origin ?? 'Platform'}</td>
                     <td className="px-4 py-2.5 text-muted">{formatDateTime(p.updatedAt)}</td>
                   </tr>
@@ -146,7 +179,13 @@ export function PlatformBlog() {
     <div>
       <PageHeader
         title="Blog"
-        sub="The Guildwise HQ blog: articles from the blog writer (or an outside tool) wait here for your review."
+        sub="The Guildwise HQ blog: articles from the blog writer (or an outside tool) wait here for your review, and you can write your own."
+        actions={
+          <ButtonLink to="/platform/blog/new" variant="primary" size="lg" data-testid="blog-new-article">
+            <PenLine aria-hidden="true" className="size-4" />
+            New article
+          </ButtonLink>
+        }
       />
       <Tabs
         label="Blog sections"
