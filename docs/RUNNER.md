@@ -725,6 +725,28 @@ Storage connections let forms and journeys write documents and answers to the fi
 - **Errors**: `auth_expired` (sign in again with Reconnect), `permission`, `quota`, `not_found` (folder, drive or bucket gone), `unavailable` (network, rate limit, NAS not mounted), `too_large`, `conflict` (too many files with the same name), `timeout`. The log has one line per write (`storage.write conn=<id> kind=<kind> size=<bytes> ok|<code> <ms>ms`) and never a path, a file name, a token or content (the `storage.scan infected` line is the one exception, see the malware scan below).
 - **Removing**: removing a connection in the web page deletes its entry (and the file when it was the last one); a Google grant is also revoked. After a reconnect the server lists the connections this workstation should hold and the runner deletes the rest.
 
+### Direct uploads of public form files (OneDrive, Google Drive, S3)
+
+For these three kinds a public form file goes from the visitor's browser straight to the firm's storage; the bytes never
+cross the Guildwise server. The runner issues a short-lived upload address for one file (5 to 30 minutes, longer for
+bigger files), the browser uploads to a hidden `.guildwise-incoming` folder (or prefix) below the base folder, and the
+runner then checks the stored file (exact size, sha256, the first bytes against the file type, the malware scan when it is
+on) before it moves the file to its real path. A file that fails a check is deleted. Abandoned uploads are removed by a
+sweep every 10 minutes (entries older than 31 minutes that belong to no open upload).
+
+There is no fallback through the server: when a cloud storage cannot take direct uploads, the form refuses files for that
+destination and the storage settings row says why ("Public form files: not possible: ..."). Local folders and vaults
+keep the relay.
+
+- **S3**: the endpoint must use https (an `http:` MinIO on a LAN cannot take public form files). Add a CORS rule to the
+  bucket: allowed origin = the public address of the Guildwise site, method `PUT`, allowed headers `content-type`,
+  `if-none-match`, `x-amz-checksum-sha256`. Without it the runner reports `cors_missing`.
+- **OneDrive / SharePoint, Google Drive**: nothing to configure. Google Drive start requests carry the page origin.
+- Update runners before the server: a runner without this feature reports no upload host, so files for its cloud
+  destinations are refused.
+- `AOM_FORMS_DIRECT_UPLOADS=false` on the server turns direct uploads off for every destination (everything relays as in
+  1.6.0).
+
 ### Malware scan of form uploads
 
 Files uploaded through public forms can be checked for malware on this workstation before they are written to the firm's storage. The scan is **off by default**: with it off, uploads are written as before and nothing contacts clamd. The server never stores or scans an upload.

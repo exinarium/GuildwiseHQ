@@ -62,6 +62,28 @@ uploader; someone who controls a client's network (TLS assumed); an operator wit
 - The page's script is served by the same server; a compromised server could serve altered script, as with the rest of
   the web app.
 
+## Direct uploads to cloud storage (GWP-147)
+
+For OneDrive/SharePoint, Google Drive and S3 destinations the file goes from the browser to the provider with a
+short-lived, single-use grant issued by the runner; the server passes the address on without storing or logging it.
+Owner decision (ledger 7b91aa22, option o2): every check above stays and there is no relay fallback for cloud
+destinations. Where each check runs for a direct upload:
+
+| Check | Where |
+|---|---|
+| T8 count, total size, per-file size | server at start, and again before an address is issued |
+| T10 type allow list by extension | server at start (no address for a refused type) |
+| T10 magic bytes, executable by content | runner, on the staged object, with the same `checkUploadHead` |
+| T9 exact size and sha256 | S3 signature (length, checksum) and always the runner, on the staged object |
+| T11 malware scan | runner, on the staged object, fail closed, same quarantine and rollback |
+| T12 path sanitising, no overwrite | runner; the browser only writes a staging name, the runner moves the file after the checks |
+| T16 host exposure | the page rules (`connect-src`) list the exact upload hosts of the form's destinations, reported by the runner and kept in server memory; the host is visible to the visitor, nothing else about the destination is |
+
+A cloud destination with no reported upload host refuses at start (503 `upload_unavailable`); a failed grant fails the
+submission; a relay `PUT` for a direct part is refused with 409 `upload_mode` before any byte is read. The runner offline
+still gives the secure-link flow (GWP-68). `AOM_FORMS_DIRECT_UPLOADS` (default `true`; `false` = every destination relays
+as in 1.6.0).
+
 ## Settings
 
 `AOM_FORMS_POW_BITS` (16; 0 turns the puzzle off, at most 22), `AOM_FORMS_MIN_FILL_MS` (3000), `AOM_FORMS_SESSION_TTL_MIN`

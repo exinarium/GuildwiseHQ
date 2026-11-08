@@ -692,3 +692,5 @@ runner-side follow-up.
 
 Follow-ups (backlog suggestions): runner-side malware scan of uploads; `storage.delete` cleanup for expired
 submissions; PDF copy of the answers; configurable proxy hop count instead of `trustProxy: true`.
+
+> Update (GWP-147): an upload now reaches the runner in two ways: through the server relay (local folders, vaults) or straight from the browser to the provider (OneDrive, Google Drive, S3). See `GWP-147-direct-browser-to-storage-uploads-for-cloud-connec.md`.
