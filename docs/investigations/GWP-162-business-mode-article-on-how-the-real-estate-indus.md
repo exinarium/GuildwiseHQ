@@ -94,7 +94,22 @@ The card came back to design again with nothing new attached. Re-checked against
 
 Nothing in the findings, placement or build design changes. Each time the "keep blocked" question is answered, the card returns to design, so another design pass cannot move it on. What it needs is an owner action: attach the inputs, re-scope (option B), or close (option C).
 
+## Owner decision, 2026-11-08 (fourth design pass): close with no article
+
+The owner answered the open question (ledger 75e14977): "Owner closes GWP-162 (and GWP-163/164) without an article, or moves them back to the backlog until pilots exist." That is option C from the comparison above.
+
+What this means for the card:
+
+- **No article is written.** Nothing is added to `docs/blog/industry/`, the launch set, the migration, the schema, the tests or guildwise-cloud. Nothing is posted in Platform > Blog.
+- The build design in "Recommendation" (steps 1-6) is kept only as a reference in case a new card is raised after real estate pilots have run. It is **not** to be built under GWP-162.
+- The card closes with no content change. The only commits on the card branch are this report.
+- The same decision applies to GWP-163 (accounting) and GWP-164 (law).
+
+If the topic is raised again, a new card needs these before design: `industry-roadmap.md` (Real estate section), anonymised pilot notes showing the pieces in use, and the pilot consent record.
+
 ## Acceptance criteria mapping
+
+Final status after the owner's decision: AC 1 (findings recorded) is met by this report. The remaining ACs no longer apply because the owner closed the card without an article. AC 8 holds trivially: launch articles and `blog-launch.test.ts` are untouched.
 
 | AC | Status |
 | --- | --- |
