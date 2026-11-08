@@ -12,7 +12,9 @@ import { AOM_BRIDGES_FILE } from '../shims.ts';
  * Local test services of a project (GWP-41, docs/RUNNER.md "Local test services"). The server sends the project's declared
  * loopback host:port pairs with a card shift; this module decides which of them the shift's sandbox may reach and why not
  * for the rest. Nothing here opens a port (`probeLocalPort` only connects, from the runner, outside any sandbox). The opening itself is one exact `host:port` entry in the Claude Code
- * sandbox's `allowedDomains` (its proxy enforces the port), and `aom-env` tunnels a local listener through that proxy.
+ * sandbox's `allowedDomains` (its proxy enforces the port), or, for a harness runtime (Gemini CLI, opencode, Codex in the harness
+ * box), one exact entry in the runner's egress proxy `testServices` list (kept apart from `privateEndpoints`). Either way
+ * `aom-env` tunnels a local listener through that proxy.
  * Nothing is hard-coded: host and port always come from the project's settings.
  */
 
@@ -45,6 +47,11 @@ export interface TestServiceInput {
   platform: NodeJS.Platform;
   /** The effective sandbox state of the runtime (`enforced` is the only one that can open a single port). */
   sandbox: 'enforced' | 'unsandboxed' | 'unavailable' | undefined;
+  /**
+   * The runtime's CLI and its shell reach the network only through the runner's egress proxy (the harness box: Gemini CLI,
+   * opencode, Codex with the harness sandbox). Such a runtime gets each allowed service as an exact proxy entry.
+   */
+  egressProxy?: boolean;
   /** `claude --version` of this workstation (absent: unknown). */
   claudeVersion?: string | undefined;
   /** Ports the runner itself owns: its local HTTP port and every port of a run environment. Never opened. */
@@ -81,13 +88,16 @@ export function decideTestServices(i: TestServiceInput): TestServiceDecision[] {
     reason,
   });
   // The shift-wide reasons first, then the per-port ones.
+  // Claude Code opens a port through its own sandbox proxy; a harness runtime through the runner's egress proxy. The Claude
+  // Code version gate applies to the Claude Code path only (`claudeVersion` is the adapter's own version otherwise).
+  const path = i.runtime === 'claude-code' ? 'claude' : i.egressProxy ? 'egress' : undefined;
   const shiftWide = !i.hasShell
     ? 'this role has no shell'
-    : i.runtime !== 'claude-code'
+    : path === undefined
       ? `not reachable with the ${i.runtime} runtime (no per-port opening there)`
       : i.platform !== 'linux' || i.sandbox !== 'enforced'
         ? "this platform's sandbox cannot open a single loopback port; nothing was opened"
-        : !versionAtLeast(i.claudeVersion, MIN_CLAUDE_FOR_TEST_SERVICES)
+        : path === 'claude' && !versionAtLeast(i.claudeVersion, MIN_CLAUDE_FOR_TEST_SERVICES)
           ? `Claude Code ${i.claudeVersion ?? '(unknown version)'} cannot limit the sandbox to one port (needs ${MIN_CLAUDE_FOR_TEST_SERVICES} or newer)`
           : null;
   return services.map((s): TestServiceDecision => {

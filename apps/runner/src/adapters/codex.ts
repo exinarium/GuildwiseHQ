@@ -36,6 +36,7 @@ import { CodexStreamParser, codexUsageLimit, isCodexAuthFailureText } from './co
 import {
   BRIDGE_PORT,
   type HarnessLaunch,
+  harnessTestServices,
   type LaunchedHarness,
   launchInHarnessSandbox,
   probeHarnessSandbox,
@@ -736,6 +737,11 @@ export class CodexAdapter implements RuntimeAdapter {
     return (this.host.platform ?? process.platform) === 'linux' ? 'harness' : 'native';
   }
 
+  /** Only in the harness box does Codex's shell go through the runner's egress proxy; its native sandbox has none. */
+  usesEgressProxy(): boolean {
+    return this.sandboxKind() === 'harness';
+  }
+
   private sandboxPlatformProblem(): string | undefined {
     const p = this.host.platform ?? process.platform;
     return p === 'linux' || p === 'darwin'
@@ -1245,6 +1251,7 @@ export class CodexAdapter implements RuntimeAdapter {
     );
     this.withExtra(cmd);
     const authFile = join(codexHome, 'auth.json');
+    const testServices = harnessTestServices(input, o.roleKey, o.chat);
     const launch: HarnessLaunch = {
       cliHosts: [
         ...(sel.via === 'key' ? ['api.openai.com'] : ['chatgpt.com', 'auth.openai.com', 'api.openai.com']),
@@ -1255,6 +1262,7 @@ export class CodexAdapter implements RuntimeAdapter {
         : {}),
       extraHosts: this.cfg.extraAllowedDomains ?? [],
       ...(this.host.store?.endpoints().length ? { privateEndpoints: this.host.store.endpoints() } : {}),
+      ...(testServices ? { testServices } : {}),
       ...(sel.via === 'key'
         ? {
             routes: [

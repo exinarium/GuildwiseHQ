@@ -13,6 +13,7 @@ import {
   type WrappedCommand,
   wrapInHarnessSandbox,
 } from '../sandbox/harness-sandbox.ts';
+import { TEST_SERVICE_ROLES } from '../sandbox/test-services.ts';
 import { REGISTRY_DOMAINS } from './claude-policy.ts';
 
 /**
@@ -48,10 +49,29 @@ export interface HarnessLaunch {
   cmd: { bin: string; args: string[]; env: Record<string, string> };
   /** The workstation owner's private-endpoint allow-list (exact host:port entries); empty by default. */
   privateEndpoints?: string[];
+  /**
+   * The shift's local test services: exact loopback `host:port` entries (`testServiceDomain` form), kept apart from
+   * `privateEndpoints`. Empty or absent: nothing is opened.
+   */
+  testServices?: string[];
   /** Log a refused host (no path, no credential). */
   onDeny?: (host: string) => void;
   /** Test hook: reach loopback and private addresses, and resolve names as given (a fake API on localhost). */
   proxyTest?: { allowPrivate: true; resolve?: (host: string) => Promise<string> };
+}
+
+/**
+ * The shift's local test services for the egress proxy: a card shift of a builder, reviewer or tester only, never a chat
+ * (the supervisor already decided the list; this repeats the role filter as a second guard). Undefined: nothing to open.
+ */
+export function harnessTestServices(
+  input: { testServiceDomains?: string[] | undefined } | object,
+  roleKey: string,
+  chat: boolean,
+): string[] | undefined {
+  const list =
+    'testServiceDomains' in input ? (input as { testServiceDomains?: string[] }).testServiceDomains : undefined;
+  return !chat && TEST_SERVICE_ROLES.has(roleKey) && list?.length ? [...list] : undefined;
 }
 
 export interface LaunchedHarness {
@@ -72,6 +92,7 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     ...(l.routes ? { routes: l.routes } : {}),
     ...(l.onDeny ? { onDeny: l.onDeny } : {}),
     ...(l.privateEndpoints?.length ? { privateEndpoints: l.privateEndpoints } : {}),
+    ...(l.testServices?.length ? { testServices: l.testServices } : {}),
     ...(l.proxyTest ?? {}),
   });
   let shimDir: string | undefined;
