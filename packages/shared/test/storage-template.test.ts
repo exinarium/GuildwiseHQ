@@ -6,6 +6,7 @@ import {
   isAckedFromRunner,
   makeEnvelope,
   RunnerToServerSchema,
+  storedPathSegments,
   renderStoragePath,
   ServerToRunnerSchema,
   sanitizeStorageSegment,
@@ -116,5 +117,34 @@ describe('protocol', () => {
     expect(isAckedFromRunner('storage.report')).toBe(true);
     expect(isAckedFromRunner('storage.auth')).toBe(true);
     expect(ENVELOPE_COMMANDS.has('storage.connect')).toBe(true);
+  });
+});
+
+describe('storedPathSegments', () => {
+  it('returns the segments of a path a write produced', () => {
+    expect(storedPathSegments('Forms/Acme/id-front.pdf')).toEqual(['Forms', 'Acme', 'id-front.pdf']);
+    expect(storedPathSegments('Forms/a-2.pdf')).toEqual(['Forms', 'a-2.pdf']);
+  });
+  it('strips and requires the base', () => {
+    expect(storedPathSegments('pre/fix/a.pdf', 'pre/fix')).toEqual(['a.pdf']);
+    expect(storedPathSegments('other/a.pdf', 'pre/fix')).toBeNull();
+    expect(storedPathSegments('pre/fix', 'pre/fix')).toBeNull();
+  });
+  it.each([
+    '',
+    '/abs/x.pdf',
+    '../x.pdf',
+    'a/../x.pdf',
+    'a/./x.pdf',
+    'a//x.pdf',
+    'a/',
+    'C:\\x\\y.pdf',
+    'C:/x/y.pdf',
+    'a\\b.pdf',
+    'a/b\u0000.pdf',
+    'a/con',
+    `${'a/'.repeat(250)}b`,
+  ])('refuses %j', (p) => {
+    expect(storedPathSegments(p)).toBeNull();
   });
 });

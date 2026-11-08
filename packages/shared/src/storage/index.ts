@@ -47,6 +47,10 @@ export const STORAGE_RETRYABLE: Record<StorageErrorCode, boolean> = {
 /** Announced in `hello.capabilities` by a runner that holds storage connections. */
 export const STORAGE_CAPABILITY = 'storage:1';
 /** Raw bytes per chunk frame. */
+/** Announced in `hello.capabilities` by a runner that handles `storage.delete`. */
+export const STORAGE_DELETE_CAPABILITY = 'storage-delete:1';
+export const STORAGE_DELETE_TIMEOUT_MS = 30_000;
+export type StorageDeleteOutcome = 'deleted' | 'not_found';
 export const STORAGE_CHUNK_BYTES = 256 * 1024;
 /** Chunks in flight per transfer (2 MiB). */
 export const STORAGE_WINDOW = 8;
@@ -249,6 +253,28 @@ export function renderStoragePath(
   if (e && !/\.[A-Za-z0-9]{1,12}$/.test(name)) name = `${name}.${e}`;
   if ([...folder, name].join('/').length > MAX_PATH) return { ok: false, error: 'the path is too long' };
   return { ok: true, folder, name };
+}
+
+/**
+ * The segments of a stored path below its destination base, or null when the path could not have come from a write:
+ * absolute, a drive letter, a backslash, NUL, empty, '.', '..', or a segment that sanitizeStorageSegment would change.
+ * `base` is the S3 prefix or the vault folder: the path must start with `${base}/` and the base is stripped first.
+ */
+export function storedPathSegments(path: string, base = ''): string[] | null {
+  if (!path || path.length > 1024) return null;
+  let rest = path;
+  const b = base.replace(/^\/+|\/+$/g, '');
+  if (b) {
+    if (!rest.startsWith(`${b}/`)) return null;
+    rest = rest.slice(b.length + 1);
+  }
+  if (!rest || rest.length > MAX_PATH) return null;
+  const segs = rest.split('/');
+  for (const seg of segs) {
+    if (!seg || seg === '.' || seg === '..') return null;
+    if (sanitizeStorageSegment(seg) !== seg) return null;
+  }
+  return segs;
 }
 
 /** Validates the pieces of a template without values (placeholders known and braces balanced). */
