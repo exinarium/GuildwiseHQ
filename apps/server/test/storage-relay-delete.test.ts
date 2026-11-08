@@ -10,7 +10,13 @@ function make(over: Partial<StorageRelayDeps> = {}, onSend?: (f: Frame, relay: S
   const frames: Frame[] = [];
   const logs: any[] = [];
   const deps: StorageRelayDeps = {
-    config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 2, deleteTimeoutMs: 100, maxDeletesInFlight: 2 },
+    config: {
+      writeTimeoutMs: 5000,
+      maxFileBytes: 1e6,
+      maxInFlight: 2,
+      deleteTimeoutMs: 100,
+      maxDeletesInFlight: 2,
+    },
     lookup: async (_o, id) => (id === CONN ? { kind: 'local', workstationId: WS } : undefined),
     isOnline: () => true,
     send: (_ws, type, payload) => {
@@ -30,19 +36,22 @@ function make(over: Partial<StorageRelayDeps> = {}, onSend?: (f: Frame, relay: S
 const req = { orgId: 'o', connectionId: CONN, path: 'Forms/Acme/a.pdf', submissionId: SUB };
 
 describe('StorageRelay.delete', () => {
-  it.each(['deleted', 'not_found'] as const)('sends storage.delete and resolves %s as success', async (result) => {
-    const t = make({}, (f, r) => r.onDeleteResult(WS, f.payload.requestId, { ok: true, result }));
-    await expect(t.relay.delete({ ...req, providerId: 'id1' })).resolves.toEqual({ ok: true, result });
-    expect(t.frames).toHaveLength(1);
-    expect(t.frames[0]?.type).toBe('storage.delete');
-    expect(t.frames[0]?.payload).toMatchObject({
-      connectionId: CONN,
-      path: 'Forms/Acme/a.pdf',
-      providerId: 'id1',
-      submissionId: SUB,
-    });
-    expect(t.relay.inFlight).toBe(0);
-  });
+  it.each(['deleted', 'not_found'] as const)(
+    'sends storage.delete and resolves %s as success',
+    async (result) => {
+      const t = make({}, (f, r) => r.onDeleteResult(WS, f.payload.requestId, { ok: true, result }));
+      await expect(t.relay.delete({ ...req, providerId: 'id1' })).resolves.toEqual({ ok: true, result });
+      expect(t.frames).toHaveLength(1);
+      expect(t.frames[0]?.type).toBe('storage.delete');
+      expect(t.frames[0]?.payload).toMatchObject({
+        connectionId: CONN,
+        path: 'Forms/Acme/a.pdf',
+        providerId: 'id1',
+        submissionId: SUB,
+      });
+      expect(t.relay.inFlight).toBe(0);
+    },
+  );
 
   it('returns a typed runner error as a failure that counts', async () => {
     const error = { code: 'permission' as const, message: 'refused', retryable: false };
@@ -87,7 +96,11 @@ describe('StorageRelay.delete', () => {
 
   it('is not tried when the socket is gone at send time', async () => {
     const t = make({ send: () => false });
-    expect(await t.relay.delete(req)).toMatchObject({ ok: false, notTried: true, error: { code: 'runner_offline' } });
+    expect(await t.relay.delete(req)).toMatchObject({
+      ok: false,
+      notTried: true,
+      error: { code: 'runner_offline' },
+    });
   });
 
   it('refuses a missing connection without counting it as offline', async () => {
@@ -98,16 +111,30 @@ describe('StorageRelay.delete', () => {
   });
 
   it('has its own cap and does not use upload slots', async () => {
-    const t = make({ config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 0, deleteTimeoutMs: 200, maxDeletesInFlight: 1 } });
+    const t = make({
+      config: {
+        writeTimeoutMs: 5000,
+        maxFileBytes: 1e6,
+        maxInFlight: 0,
+        deleteTimeoutMs: 200,
+        maxDeletesInFlight: 1,
+      },
+    });
     const first = t.relay.delete(req);
     await new Promise((r) => setTimeout(r, 10));
-    expect(await t.relay.delete(req)).toMatchObject({ ok: false, notTried: true, error: { code: 'unavailable' } });
+    expect(await t.relay.delete(req)).toMatchObject({
+      ok: false,
+      notTried: true,
+      error: { code: 'unavailable' },
+    });
     expect(t.relay.inFlight).toBe(0);
     await first;
   });
 
   it('ignores a result from another workstation', async () => {
-    const t = make({}, (f, r) => r.onDeleteResult('other', f.payload.requestId, { ok: true, result: 'deleted' }));
+    const t = make({}, (f, r) =>
+      r.onDeleteResult('other', f.payload.requestId, { ok: true, result: 'deleted' }),
+    );
     expect(await t.relay.delete(req)).toMatchObject({ ok: false, error: { code: 'timeout' } });
   });
 
@@ -115,7 +142,12 @@ describe('StorageRelay.delete', () => {
     const t = make({}, (f, r) => r.onDeleteResult(WS, f.payload.requestId, { ok: true, result: 'deleted' }));
     await t.relay.delete(req);
     expect(t.logs).toHaveLength(1);
-    expect(t.logs[0]).toMatchObject({ connectionId: CONN, kind: 'local', submissionId: SUB, outcome: 'deleted' });
+    expect(t.logs[0]).toMatchObject({
+      connectionId: CONN,
+      kind: 'local',
+      submissionId: SUB,
+      outcome: 'deleted',
+    });
     expect(t.logs[0].pathHash).toMatch(/^[0-9a-f]{12}$/);
     expect(JSON.stringify(t.logs)).not.toContain('Acme');
   });
