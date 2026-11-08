@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { constants, createReadStream, createWriteStream, lstatSync, statSync } from 'node:fs';
-import { link, mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
+import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { fromNodeError } from './errors.ts';
 import {
   PROBE_BODY,
@@ -114,6 +114,34 @@ export class LocalConnector implements StorageConnector {
   async delete(path: string): Promise<void> {
     const f = confineUnder(this.root, path.split('/'));
     await rm(f, { force: true });
+  }
+
+  async deleteFile(ref: { path: string }): Promise<'deleted' | 'not_found'> {
+    const segs = storedPathSegments(ref.path);
+    if (!segs) throw new StorageError('invalid', 'The file is outside the storage destination.');
+    // A folder that is not there (a share that is not mounted) must not look like "the file is gone".
+    try {
+      if (!statSync(resolve(this.root)).isDirectory()) throw new Error('not a directory');
+    } catch {
+      throw new StorageError('unavailable', 'The storage folder is not reachable on this workstation.');
+    }
+    const f = confineUnder(this.root, segs);
+    let st: Awaited<ReturnType<typeof lstat>>;
+    try {
+      st = await lstat(f);
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT' || (err as { code?: string }).code === 'ENOTDIR')
+        return 'not_found';
+      throw fromNodeError(err);
+    }
+    if (!st.isFile()) throw new StorageError('invalid', 'Only files are removed, not folders or links.');
+    try {
+      await rm(f);
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT') return 'not_found';
+      throw fromNodeError(err);
+    }
+    return 'deleted';
   }
 }
 

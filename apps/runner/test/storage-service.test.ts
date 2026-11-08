@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -178,6 +178,47 @@ describe('local connection', () => {
   it('answers not_found for an unknown connection', async () => {
     await write(t, Buffer.from('x'), { conn: OTHER });
     expect(result(t)).toMatchObject({ ok: false, error: { code: 'not_found', retryable: false } });
+  });
+
+  describe('storage.delete', () => {
+    const REQ = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+    const del = async (path: string, conn = CONN) => {
+      t.frames.length = 0;
+      t.svc.onMessage({ type: 'storage.delete', requestId: REQ, connectionId: conn, path } as never);
+      for (let i = 0; i < 100 && !t.frames.some((f) => f.type === 'storage.delete.result'); i++)
+        await new Promise((r) => setTimeout(r, 10));
+      return t.frames.find((f) => f.type === 'storage.delete.result')?.payload;
+    };
+
+    it('deletes a written file, then answers not_found as a result for a repeat', async () => {
+      await write(t, Buffer.from('hello'));
+      expect(existsSync(join(t.stored, 'Smith', 'doc.txt'))).toBe(true);
+      expect(await del('Smith/doc.txt')).toEqual({ requestId: REQ, ok: true, result: 'deleted' });
+      expect(existsSync(join(t.stored, 'Smith', 'doc.txt'))).toBe(false);
+      expect(await del('Smith/doc.txt')).toEqual({ requestId: REQ, ok: true, result: 'not_found' });
+    });
+
+    it('refuses a path outside the root with a typed error and deletes nothing', async () => {
+      writeFileSync(join(t.root, 'outside.txt'), 'keep');
+      const r = await del('../outside.txt');
+      expect(r).toMatchObject({ requestId: REQ, ok: false, error: { code: 'invalid' } });
+      expect(r?.result).toBeUndefined();
+      expect(existsSync(join(t.root, 'outside.txt'))).toBe(true);
+    });
+
+    it('answers an error with code not_found (not a result) for an unknown storage', async () => {
+      const r = await del('Smith/doc.txt', OTHER);
+      expect(r).toMatchObject({ ok: false, error: { code: 'not_found' } });
+      expect(r?.result).toBeUndefined();
+    });
+
+    it('logs a path hash, not the path', async () => {
+      await write(t, Buffer.from('x'));
+      await del('Smith/doc.txt');
+      const log = t.logs.join('\n');
+      expect(log).toMatch(/^storage\.delete conn=.* kind=local submission=- path#=[0-9a-f]{12} deleted \d+ms/m);
+      expect(log).not.toContain('Smith');
+    });
   });
 
   it('logs no path, name or content for a write', async () => {

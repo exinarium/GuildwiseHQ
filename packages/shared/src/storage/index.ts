@@ -46,11 +46,11 @@ export const STORAGE_RETRYABLE: Record<StorageErrorCode, boolean> = {
 
 /** Announced in `hello.capabilities` by a runner that holds storage connections. */
 export const STORAGE_CAPABILITY = 'storage:1';
-/** Raw bytes per chunk frame. */
 /** Announced in `hello.capabilities` by a runner that handles `storage.delete`. */
 export const STORAGE_DELETE_CAPABILITY = 'storage-delete:1';
 export const STORAGE_DELETE_TIMEOUT_MS = 30_000;
 export type StorageDeleteOutcome = 'deleted' | 'not_found';
+/** Raw bytes per chunk frame. */
 export const STORAGE_CHUNK_BYTES = 256 * 1024;
 /** Chunks in flight per transfer (2 MiB). */
 export const STORAGE_WINDOW = 8;
