@@ -165,7 +165,12 @@ async function changeListFor(
         if (c) matched.push(c);
         if (!list.some((x) => x.key === entry.key)) list.push(entry);
       }
-      changes.push({ source: m.sha, subject: subjectWithWorkRefs(m.subject, matched), cards: list, areas: [] });
+      changes.push({
+        source: m.sha,
+        subject: subjectWithWorkRefs(m.subject, matched),
+        cards: list,
+        areas: [],
+      });
     }
   for (const c of summary.commits)
     if (want.has(c.sha)) {

@@ -1,5 +1,5 @@
 import { checkOutboundLeaks, type InternalRefs, type LeakResult } from '@aom/shared';
-import { one, type Queryable, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 /** Names of every agent of the organization (retired ones too: their names are just as internal). */
 export async function orgAgentNames(db: Queryable, orgId: string): Promise<string[]> {
@@ -26,11 +26,7 @@ export async function screenOutbound(
  * The internal keys a draft for this card must not name: the card's own ref and the project's keys. The client knows the
  * work by its ticket (`ticketKey`).
  */
-export async function cardInternalRefs(
-  db: Queryable,
-  card: { ref: string; project_id: string },
-  ticketKey: string,
-): Promise<InternalRefs> {
+export async function cardInternalRefs(db: Queryable, card: Row, ticketKey: string): Promise<InternalRefs> {
   const project = await one<{ key: string }>(db, 'SELECT key FROM projects WHERE id=$1', [card.project_id]);
-  return { refs: [card.ref], ticketKey, ...(project?.key ? { projectKey: project.key } : {}) };
+  return { refs: [String(card.ref)], ticketKey, ...(project?.key ? { projectKey: project.key } : {}) };
 }

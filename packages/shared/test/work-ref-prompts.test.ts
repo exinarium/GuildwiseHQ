@@ -16,7 +16,10 @@ import {
 import { buildBrief, reworkReviewBrief, U } from './fixtures.ts';
 
 /** The fixture's card (WEB-12) made from the client's ticket ABC-1, as the server sends it. */
-const intake = (b: ShiftBrief): ShiftBrief => ({ ...b, card: { ...b.card, workRef: 'ABC-1', isClientRef: true } });
+const intake = (b: ShiftBrief): ShiftBrief => ({
+  ...b,
+  card: { ...b.card, workRef: 'ABC-1', isClientRef: true },
+});
 const testerBrief = (): ShiftBrief => {
   const b = buildBrief();
   return {
@@ -121,7 +124,10 @@ describe('Work reference in the DevOps texts', () => {
   };
   const line = workRefLine('ABC-1', 'WEB-12');
   it('the schema accepts the work reference fields', () => {
-    const parsed = DevopsShiftSchema.parse({ ...devops, card: { ...card, workRef: 'ABC-1', isClientRef: true } });
+    const parsed = DevopsShiftSchema.parse({
+      ...devops,
+      card: { ...card, workRef: 'ABC-1', isClientRef: true },
+    });
     expect(parsed.card).toMatchObject({ workRef: 'ABC-1', isClientRef: true });
   });
   it('an intake card names ABC-1 in the prompt and the instructions', () => {
