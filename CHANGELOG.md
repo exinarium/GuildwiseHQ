@@ -10,6 +10,10 @@ Runner 0.1.70.
 
 - Optional malware scan of public form uploads, set per workstation (`uploadScan`, off by default). With a clamd running on the workstation, each uploaded file is scanned before it is written to the firm's storage. An infected file, or a scan that cannot run, is never written and the whole submission is taken back; infected files are kept in an owner-only quarantine folder on the workstation. The submitter sees a plain message and keeps their answers. `doctor` and "Test connection" report whether clamd answers.
 
+### Security
+
+- The server no longer trusts every `X-Forwarded-For` hop. The new `AOM_TRUST_PROXY` setting decides which proxies may set the client address that every per-address limit uses: unset trusts loopback only (`127.0.0.0/8`, `::1`); `false`, `0` or `none` never trusts the header; a number from 1 to 32 trusts that many hops; a comma-separated list of IPv4/IPv6 addresses and CIDR ranges (and the names `loopback`, `linklocal`, `uniquelocal`) trusts those peers; `true` restores the old behaviour and logs a warning at startup. An invalid value stops the server at startup with a message naming the variable. **Default changed**: before, any client that reached the server directly could choose its own address and get past the per-address rate limits. A reverse proxy on the same host keeps working unchanged; a proxy in another container or on another host needs the setting, or every visitor shares the proxy's address. The bundled `docker-compose.prod.yml` sets `loopback,uniquelocal` for the app and the video worker. See docs/SELF-HOSTING.md "Running behind a reverse proxy".
+
 ### Changed
 
 - Bundled Caddy: every log line, errors included, now goes through a filter that deletes token, signature and credential headers and redacts the secret part of the public relay, hook, form and invitation addresses; request body limits apply to `/relay/in/*`, `/hooks/in/*` and the public form API; the image is pinned to `caddy:2.11`. `AOM_STORAGE_MAX_FILE_BYTES`, `AOM_JOURNEY_HOOK_MAX_BYTES` and `AOM_RELAY_MAX_BODY_BYTES` now reach the app and the proxy from `.env`.
