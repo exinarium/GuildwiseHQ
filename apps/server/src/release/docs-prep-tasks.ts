@@ -10,8 +10,8 @@ import {
   type PrepWriterFailureCode,
   prepWriterUnavailable,
   RELEASE_PREP_MAX_SHIFT_MINUTES,
-  type ReleasePrepTask,
   ReleaseDocsPrepSummarySchema,
+  type ReleasePrepTask,
   ReleasePrepTaskSchema,
   type RunnerToServerOf,
   releasePrepBriefOutcomes,
@@ -33,8 +33,8 @@ import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts'
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
 import { accountOf, agentSpecFor, briefAgent } from '../runner-gateway/brief.ts';
-import { changelogDenyList } from './docs-prep-changelog.ts';
-import { changeListFor, changelogWriterInput, storedChangelogResult } from './docs-prep-writer.ts';
+import { changelogDenyList, changelogWriterInput, storedChangelogResult } from './docs-prep-changelog.ts';
+import { changeListFor } from './docs-prep-writer.ts';
 
 /**
  * Release prep tasks (design GWP-92 5.4/5.7, GWP-134): work inside a prep step that an agent does in a `release_prep`
@@ -335,7 +335,10 @@ export async function releasePrepTaskPass(
     const kindOf = task.data.kind;
     const whatFor = kindOf === 'new_video' ? `the ${what} video` : what;
     if (builders.length === 0) {
-      await fail(prepWriterUnavailable('no_writer', kindOf, { workstation: ws?.name, what: whatFor }), 'no_writer');
+      await fail(
+        prepWriterUnavailable('no_writer', kindOf, { workstation: ws?.name, what: whatFor }),
+        'no_writer',
+      );
       lastWhy.delete(t.id);
       continue;
     }
@@ -611,9 +614,14 @@ async function checkPrepProposal(
     if (!p.success)
       return {
         ok: false,
-        error: `the proposal is not valid: ${p.error.issues[0]?.path.join('.') ?? ''} ${p.error.issues[0]?.message ?? ''}`.trim(),
+        error:
+          `the proposal is not valid: ${p.error.issues[0]?.path.join('.') ?? ''} ${p.error.issues[0]?.message ?? ''}`.trim(),
       };
-    return { ok: true, result: { proposal: p.data }, message: `${p.data.edits.length} guide edit(s) accepted.` };
+    return {
+      ok: true,
+      result: { proposal: p.data },
+      message: `${p.data.edits.length} guide edit(s) accepted.`,
+    };
   }
   if (parsed.kind !== 'changelog_entries') return { ok: false, error: 'this task has no proposal' };
   const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [task.run_id]);
@@ -643,12 +651,14 @@ async function checkPrepProposal(
 }
 
 async function repoRowOf(db: Queryable, runId: string, repoId: string): Promise<Row | null> {
-  return (await one(
-    db,
-    `SELECT r.*, pr.remote_url_normalized, pr.forge_kind, pr.name FROM release_docs_prep_repos r
+  return (
+    (await one(
+      db,
+      `SELECT r.*, pr.remote_url_normalized, pr.forge_kind, pr.name FROM release_docs_prep_repos r
        JOIN project_repos pr ON pr.id = r.repo_id WHERE r.run_id=$1 AND r.repo_id=$2`,
-    [runId, repoId],
-  )) ?? null;
+      [runId, repoId],
+    )) ?? null
+  );
 }
 
 type EndOutcome = 'rejected' | 'lost' | 'stopped' | 'no_report' | 'crashed' | 'timeout' | 'reported';

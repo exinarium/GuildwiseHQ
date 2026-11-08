@@ -127,6 +127,16 @@ function ProjectPrep({ item }: { item: ReleaseDocsPrepOverviewItem }) {
 
 type StepRow = ReleaseDocsPrepRunDto['repos'][number]['steps'][number];
 
+/**
+ * Where the changelog entries show: the row that applied them (`apply`, or the single phase of an older run), and the
+ * `write` row only while the writer is working ("Writing entries…").
+ */
+export function showsChangelogOutput(s: Pick<StepRow, 'phase' | 'state'>): boolean {
+  if (s.phase === 'write') return s.state === 'running';
+  if (s.phase === 'apply') return s.state !== 'running';
+  return true;
+}
+
 /** A step's own report renderer, by step id. Steps without one look as before. */
 const STEP_REPORTS: Record<string, (p: { report: Record<string, unknown> }) => ReactNode> = {
   videos: VideoStepReport,
@@ -203,7 +213,7 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
                   </span>
                 )}
                 {s.step === 'guide' && s.output != null && <GuideStepOutput output={s.output} />}
-                {s.step === 'changelog' && !s.error && (
+                {s.step === 'changelog' && !s.error && showsChangelogOutput(s) && (
                   <ChangelogStepOutput repoName={repo.repoName} state={s.state} output={s.output} />
                 )}
               </li>

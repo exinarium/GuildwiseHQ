@@ -109,41 +109,41 @@ export async function buildBaTaskShiftStart(
     ? await buildSpecCardTask(ctx.pool, task, agent.role_key === 'architect' ? 'architect' : 'ba')
     : null;
   const baTask: BaTaskShift | null = specCard
-      ? specTask
-        ? { taskId: task.id, kind: task.kind, specCard: specTask, cards: [], followups: [], outstanding: [] }
+    ? specTask
+      ? { taskId: task.id, kind: task.kind, specCard: specTask, cards: [], followups: [], outstanding: [] }
+      : null
+    : mailDraft
+      ? mailTask
+        ? {
+            taskId: task.id,
+            kind: task.kind,
+            mailDraft: mailTask,
+            cards: [],
+            followups: [],
+            outstanding: [],
+          }
         : null
-      : mailDraft
-        ? mailTask
+      : batch
+        ? batchTask
           ? {
               taskId: task.id,
               kind: task.kind,
-              mailDraft: mailTask,
+              batch: batchTask,
               cards: [],
               followups: [],
               outstanding: [],
             }
           : null
-        : batch
-          ? batchTask
-            ? {
-                taskId: task.id,
-                kind: task.kind,
-                batch: batchTask,
-                cards: [],
-                followups: [],
-                outstanding: [],
-              }
-            : null
-          : reporter
-            ? {
-                taskId: task.id,
-                kind: task.kind,
-                cards: [],
-                followups: [],
-                outstanding: [],
-                reporter: await buildReviewTask(ctx, ctx.pool, task),
-              }
-            : await buildBaTask(ctx.pool, task);
+        : reporter
+          ? {
+              taskId: task.id,
+              kind: task.kind,
+              cards: [],
+              followups: [],
+              outstanding: [],
+              reporter: await buildReviewTask(ctx, ctx.pool, task),
+            }
+          : await buildBaTask(ctx.pool, task);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [task.project_id]);
   if (!role || !baTask || !project) return null;
   const brief: ShiftBrief = {

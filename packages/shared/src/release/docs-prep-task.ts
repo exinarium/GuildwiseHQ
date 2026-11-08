@@ -33,8 +33,8 @@ export const NewVideoTaskSchema = z.object({
 });
 export type NewVideoTask = z.infer<typeof NewVideoTaskSchema>;
 
-export { ChangelogEntriesTaskSchema };
 export type { ChangelogEntriesTask } from './changelog-task.ts';
+export { ChangelogEntriesTaskSchema };
 
 /** The file a proposal task writes (at the worktree root). */
 export const PREP_PROPOSAL_FILE = 'release-prep-proposal.json';
@@ -273,9 +273,7 @@ export function renderReleasePrepInstructions(
       '',
     ].join('\n');
   const rules =
-    task.kind === 'changelog_entries'
-      ? CHANGELOG_WRITER_RULES.map((r) => `- ${r}`)
-      : [guideWriterText()];
+    task.kind === 'changelog_entries' ? CHANGELOG_WRITER_RULES.map((r) => `- ${r}`) : [guideWriterText()];
   return [
     ...head,
     '- Do not install anything, start servers or build anything: the release prep applies and checks your proposal itself.',
@@ -318,7 +316,10 @@ export function renderReleasePrepPrompt(rp: ReleasePrepShift): string {
       '',
       JSON.stringify(t.changes, null, 1),
       ...(t.coveredSources.length
-        ? ['', `${t.coveredSources.length} changes were dealt with by an earlier prep run: do not write them again.`]
+        ? [
+            '',
+            `${t.coveredSources.length} changes were dealt with by an earlier prep run: do not write them again.`,
+          ]
         : []),
       '',
       `Then write \`${PREP_PROPOSAL_FILE}\` and finish with \`aom prep done --summary "..."\` (or \`aom prep fail --reason "..."\`).`,

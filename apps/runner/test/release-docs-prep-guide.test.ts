@@ -167,7 +167,10 @@ describe("release prep step 'guide'", () => {
     const { check } = await analyseThenGuide(s);
     expect(check.state).toBe('passed');
     expect(check.files).toEqual([]);
-    const report = check.report as { guidePath: string; changes: { sources: string[]; files: string[]; hints: { section: string }[] }[] };
+    const report = check.report as {
+      guidePath: string;
+      changes: { sources: string[]; files: string[]; hints: { section: string }[] }[];
+    };
     expect(report.guidePath).toBe('docs/USER-GUIDE.md');
     expect(report.changes).toHaveLength(1);
     expect(report.changes[0]?.sources).toEqual(['card:GWP-89']);

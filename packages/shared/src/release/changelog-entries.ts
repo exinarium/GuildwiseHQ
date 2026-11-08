@@ -115,7 +115,7 @@ export const describeEntryFinding = (index: number, f: EntryFinding): string =>
 
 const HeadingSchema = z.enum(['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'] as const);
 
-/** What the changelog writer reports (`aom release-changelog --file`). Every change ends up in exactly one list. */
+/** What the changelog writer reports (`release-prep-proposal.json` of a `changelog_entries` task). Every change ends up in exactly one list. */
 export const ChangelogProposalSchema = z.object({
   entries: z
     .array(

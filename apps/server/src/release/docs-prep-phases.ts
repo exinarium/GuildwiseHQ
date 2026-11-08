@@ -1,13 +1,13 @@
 import type { Ctx } from '../context.ts';
 import type { Queryable, Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { runVideosAuthorPhase, videosRenderInput, videosRepairRound } from './docs-prep-videos.ts';
 import {
   changelogApplyInput,
   guideApplyInput,
   runChangelogWritePhase,
   runGuideWritePhase,
 } from './docs-prep-writer.ts';
-import { runVideosAuthorPhase, videosRenderInput, videosRepairRound } from './docs-prep-videos.ts';
 
 /**
  * The server's side of the phased content steps: which phases the server runs itself, what a runner phase gets from an

@@ -31,7 +31,9 @@ export async function finishPrepProposal(
   if (outside.length > 0)
     return {
       ok: false,
-      findings: [`changed files outside the task: ${outside.slice(0, 20).join(', ')}. Change only ${PREP_PROPOSAL_FILE}.`],
+      findings: [
+        `changed files outside the task: ${outside.slice(0, 20).join(', ')}. Change only ${PREP_PROPOSAL_FILE}.`,
+      ],
     };
   const abs = join(wt.path, PREP_PROPOSAL_FILE);
   if (!files.includes(PREP_PROPOSAL_FILE) || !existsSync(abs))
@@ -69,7 +71,10 @@ export async function finishPrepProposal(
   const ctx = guideCheckContext(wt.path, guidePath, []);
   const pre = checkGuideUpdate(null, before, ctx);
   if (pre.errors.length > 0)
-    return { ok: false, findings: tooLong([`the user guide has problems before the update: ${pre.errors[0]}`]) };
+    return {
+      ok: false,
+      findings: tooLong([`the user guide has problems before the update: ${pre.errors[0]}`]),
+    };
   const tried = tryGuideEdits(before, p.data, ctx);
   if (tried.errors.length > 0) return { ok: false, findings: tooLong(tried.errors) };
   return { ok: true, proposal: p.data };

@@ -215,7 +215,12 @@ async function checkPhase(ctx: DocsPrepStepContext) {
   const covered = new Set(input.coveredSources);
   const uncovered = items.filter((i) => i.sources.some((s) => !covered.has(s)));
   if (uncovered.length === 0)
-    return { ok: true as const, files: [], report: { changes: [] }, output: { ...empty('passed'), nothing: 'no new changes' } };
+    return {
+      ok: true as const,
+      files: [],
+      report: { changes: [] },
+      output: { ...empty('passed'), nothing: 'no new changes' },
+    };
 
   const before = await readFile(abs, 'utf8');
   const checkCtx = guideCheckContext(wt, guidePath, input.denyList);
@@ -242,7 +247,8 @@ async function checkPhase(ctx: DocsPrepStepContext) {
     if (JSON.stringify(changes).length <= CHECK_REPORT_MAX_BYTES) break;
     changes = build(cap);
   }
-  while (changes.length > 1 && JSON.stringify(changes).length > CHECK_REPORT_MAX_BYTES) changes = changes.slice(0, -1);
+  while (changes.length > 1 && JSON.stringify(changes).length > CHECK_REPORT_MAX_BYTES)
+    changes = changes.slice(0, -1);
   return { ok: true as const, files: [], report: { guidePath, changes } };
 }
 
@@ -261,7 +267,13 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const { input, guidePath } = g;
   const abs = join(wt, guidePath);
   if (!existsSync(abs) || !statSync(abs).isFile())
-    return { ok: true, state: 'skipped', note: NO_GUIDE_NOTE, files: [], output: { ...empty('passed'), skipped: 'no user guide' } };
+    return {
+      ok: true,
+      state: 'skipped',
+      note: NO_GUIDE_NOTE,
+      files: [],
+      output: { ...empty('passed'), skipped: 'no user guide' },
+    };
   const rawProposal = ctx.input?.proposal;
   if (rawProposal === undefined || rawProposal === null)
     return { ok: true, files: [], output: { ...empty('passed'), nothing: 'no new changes' } };

@@ -167,7 +167,10 @@ describe('proposal task kinds (one writer mechanism)', () => {
   it('words the no-writer failure the same way for every step, naming what is missing and the fix', () => {
     const c = prepWriterUnavailable('no_writer', 'changelog_entries', { workstation: 'ws-1' });
     const g = prepWriterUnavailable('no_writer', 'guide_edits', { workstation: 'ws-1' });
-    const v = prepWriterUnavailable('no_writer', 'new_video', { workstation: 'ws-1', what: 'the timesheets video' });
+    const v = prepWriterUnavailable('no_writer', 'new_video', {
+      workstation: 'ws-1',
+      what: 'the timesheets video',
+    });
     expect(c).toBe(
       'Write changelog: no agent on ws-1 can write the changelog entries. It needs an active BA, architect or builder agent on that workstation. Hire or move one there (or turn the step off), then Retry prep. Or write the entries under ## [Unreleased] by hand and Skip prep.',
     );
@@ -179,7 +182,10 @@ describe('proposal task kinds (one writer mechanism)', () => {
 
   it('words the unreachable and failed cases', () => {
     expect(
-      prepWriterUnavailable('writer_unreachable', 'guide_edits', { workstation: 'ws-1', reason: 'the runner is offline' }),
+      prepWriterUnavailable('writer_unreachable', 'guide_edits', {
+        workstation: 'ws-1',
+        reason: 'the runner is offline',
+      }),
     ).toContain('within 2 hours (the runner is offline)');
     expect(prepWriterUnavailable('writer_failed', 'changelog_entries', { reason: 'no reason' })).toBe(
       'Write changelog: the changelog entries could not be written: no reason',
@@ -196,7 +202,9 @@ describe('proposal task kinds (one writer mechanism)', () => {
     const g = renderReleasePrepInstructions(agent, project, rpOf(guide) as never);
     expect(g).toContain('release-prep-proposal.json');
     expect(g).toContain('replace_text');
-    expect(renderReleasePrepPrompt(rpOf(changelog) as never)).toContain(`id ${'a'.repeat(40)}: Add the export button`);
+    expect(renderReleasePrepPrompt(rpOf(changelog) as never)).toContain(
+      `id ${'a'.repeat(40)}: Add the export button`,
+    );
     expect(renderReleasePrepPrompt(rpOf(guide) as never)).toContain('docs/USER-GUIDE.md');
   });
 

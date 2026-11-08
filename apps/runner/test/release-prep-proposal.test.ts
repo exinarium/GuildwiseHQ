@@ -36,7 +36,17 @@ const ID = (n: number) => `019e3f6a-7b1c-7a2d-8c3e-01234567890${n}`;
 const GUIDE_TASK = {
   kind: 'guide_edits' as const,
   guidePath: 'docs/USER-GUIDE.md',
-  changes: [{ sources: ['card:GWP-89'], title: 'Release prep', subjects: [], files: [], areas: [], routes: [], hints: [] }],
+  changes: [
+    {
+      sources: ['card:GWP-89'],
+      title: 'Release prep',
+      subjects: [],
+      files: [],
+      areas: [],
+      routes: [],
+      hints: [],
+    },
+  ],
   coveredSources: [],
 };
 const CHANGELOG_TASK = {
@@ -73,7 +83,14 @@ async function setup(task: typeof GUIDE_TASK | typeof CHANGELOG_TASK) {
 }
 
 const GOOD_EDITS = {
-  edits: [{ op: 'append', section: '4.28', text: '**Release prep.** Run it before you approve.', sources: ['card:GWP-89'] }],
+  edits: [
+    {
+      op: 'append',
+      section: '4.28',
+      text: '**Release prep.** Run it before you approve.',
+      sources: ['card:GWP-89'],
+    },
+  ],
 };
 
 describe('finishPrepProposal', () => {
@@ -89,7 +106,11 @@ describe('finishPrepProposal', () => {
 
   it('refuses edits that break the guide, with the checkGuideUpdate findings', async () => {
     const { rp, wt } = await setup(GUIDE_TASK);
-    put(wt.path, PREP_PROPOSAL_FILE, JSON.stringify({ edits: [{ op: 'append', section: '9.9', text: 'x', sources: [] }] }));
+    put(
+      wt.path,
+      PREP_PROPOSAL_FILE,
+      JSON.stringify({ edits: [{ op: 'append', section: '9.9', text: 'x', sources: [] }] }),
+    );
     const r = await finishPrepProposal(wt, rp);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.findings.join()).toMatch(/9\.9/);
@@ -102,7 +123,15 @@ describe('finishPrepProposal', () => {
       wt.path,
       PREP_PROPOSAL_FILE,
       JSON.stringify({
-        edits: [{ op: 'replace_text', section: '4.28', find: 'The **Releases** page', replace: '### 4.30 Extra\n\nThe page', sources: [] }],
+        edits: [
+          {
+            op: 'replace_text',
+            section: '4.28',
+            find: 'The **Releases** page',
+            replace: '### 4.30 Extra\n\nThe page',
+            sources: [],
+          },
+        ],
       }),
     );
     const r = await finishPrepProposal(wt, rp);
@@ -136,7 +165,11 @@ describe('finishPrepProposal', () => {
     put(
       wt.path,
       PREP_PROPOSAL_FILE,
-      JSON.stringify({ entries: [{ heading: 'Added', text: 'A thing.', sources: ['s1'] }], covered: [], skipped: [] }),
+      JSON.stringify({
+        entries: [{ heading: 'Added', text: 'A thing.', sources: ['s1'] }],
+        covered: [],
+        skipped: [],
+      }),
     );
     const ok = await finishPrepProposal(wt, rp);
     expect(ok.ok).toBe(true);

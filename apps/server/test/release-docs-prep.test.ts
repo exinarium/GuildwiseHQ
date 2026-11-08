@@ -410,9 +410,7 @@ async function dispatchTask(role = 'builder') {
     await q2(`SELECT id FROM agents WHERE role_key=$2 AND workstation_id=$1 LIMIT 1`, [w.workstationId, role])
   )[0];
   const t = (
-    await q2(
-      `SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`,
-    )
+    await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`)
   )[0];
   const shiftId = crypto.randomUUID();
   await withAppendTx(w.t.app.ctx.pool, (tx) =>
@@ -447,9 +445,11 @@ describe('the Update user guide step', () => {
   const lastPayload = async () => (await cmds()).at(-1)!.payload;
   const stepTag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
   const guideRows = async () =>
-    (await q2(`SELECT step, phase, state, error, report FROM release_docs_prep_steps WHERE step='guide' ORDER BY phase`)).map(
-      (r: any) => [r.phase, r.state, r.error],
-    );
+    (
+      await q2(
+        `SELECT step, phase, state, error, report FROM release_docs_prep_steps WHERE step='guide' ORDER BY phase`,
+      )
+    ).map((r: any) => [r.phase, r.state, r.error]);
   const change = {
     sources: ['card:TOY-1'],
     title: 'Release prep',
@@ -467,7 +467,9 @@ describe('the Update user guide step', () => {
     report: { guidePath: 'docs/USER-GUIDE.md', changes },
   });
   const PROPOSAL = {
-    edits: [{ op: 'append', section: '4.28', text: '**Release prep.** Run it first.', sources: ['card:TOY-1'] }],
+    edits: [
+      { op: 'append', section: '4.28', text: '**Release prep.** Run it first.', sources: ['card:TOY-1'] },
+    ],
   };
 
   it('refuses a run when the guide step is on but Analyse changes is unticked (409 release_docs_prep_requires)', async () => {
@@ -539,7 +541,11 @@ describe('the Update user guide step', () => {
     await answer(checked([change]));
     const [t] = await tasks();
     expect(t.status).toBe('queued');
-    expect(t.task).toMatchObject({ kind: 'guide_edits', guidePath: 'docs/USER-GUIDE.md', coveredSources: [] });
+    expect(t.task).toMatchObject({
+      kind: 'guide_edits',
+      guidePath: 'docs/USER-GUIDE.md',
+      coveredSources: [],
+    });
     expect(t.task.changes[0].hints[0].section).toBe('4.28 Releases');
     // the writer runs as a release prep shift and reports the proposal the runner already checked
     const shift = await dispatchTask('architect');

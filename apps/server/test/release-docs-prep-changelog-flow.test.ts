@@ -7,8 +7,8 @@ import {
   streamId,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { withAppendTx } from '../src/db/tx.ts';
 import { runBaTaskFallback } from '../src/commands/ba-tasks.ts';
+import { withAppendTx } from '../src/db/tx.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import { applyLegacyChangelogReport } from '../src/release/docs-prep-legacy.ts';
 import { applyReleasePrepReport, releasePrepTaskPass } from '../src/release/docs-prep-tasks.ts';
@@ -128,7 +128,9 @@ async function dispatchTask(role = 'ba') {
   const agent = (
     await q2(`SELECT id FROM agents WHERE role_key=$2 AND workstation_id=$1 LIMIT 1`, [w.workstationId, role])
   )[0];
-  const t = (await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`))[0];
+  const t = (
+    await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`)
+  )[0];
   const shiftId = crypto.randomUUID();
   await withAppendTx(w.t.app.ctx.pool, (tx) =>
     w.t.app.ctx.store.append(
@@ -178,7 +180,9 @@ describe('Write changelog: dispatch', () => {
     const write = run.repos[0].steps.find((s: any) => s.step === 'changelog' && s.phase === 'write');
     expect(write.state).toBe('running');
     expect(t[0].task.changes.map((c: any) => c.source)).toEqual([FEAT, CHORE]);
-    expect(t[0].task.existing).toEqual([{ heading: 'Added', text: 'Retire a workstation with agent handover.' }]);
+    expect(t[0].task.existing).toEqual([
+      { heading: 'Added', text: 'Retire a workstation with agent handover.' },
+    ]);
   });
 
   it('the writer of a changelog task is a BA first, then an architect, then a builder (one registry)', () => {
@@ -283,11 +287,15 @@ describe('Write changelog: the report', () => {
         warnings: [],
       },
     });
-    const row = (await q2(`SELECT output FROM release_docs_prep_steps WHERE step='changelog' AND phase='apply'`))[0];
+    const row = (
+      await q2(`SELECT output FROM release_docs_prep_steps WHERE step='changelog' AND phase='apply'`)
+    )[0];
     expect(row.output.added[0].text).toBe(ENTRY);
     expect(row.output.skipped).toEqual([{ source: CHORE, reason: 'internal' }]);
     const run = await latest();
-    expect(run.repos[0].steps.find((s: any) => s.step === 'changelog' && s.phase === 'apply').output.added).toHaveLength(1);
+    expect(
+      run.repos[0].steps.find((s: any) => s.step === 'changelog' && s.phase === 'apply').output.added,
+    ).toHaveLength(1);
   });
 
   it('a deny-list name in an entry is refused (and never echoed)', async () => {
@@ -379,7 +387,13 @@ describe('a Write changelog BA task queued before the update (legacy)', () => {
             streamId: streamId.baTask(taskId),
             event: {
               type: 'BaTaskQueued',
-              payload: { taskId, projectId: w.projectId, kind: 'release_changelog', prepRunId: run.id, prepRepoId: w.repoId },
+              payload: {
+                taskId,
+                projectId: w.projectId,
+                kind: 'release_changelog',
+                prepRunId: run.id,
+                prepRepoId: w.repoId,
+              },
             },
             actor: { kind: 'system' } as never,
             scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' } as never,
@@ -392,7 +406,7 @@ describe('a Write changelog BA task queued before the update (legacy)', () => {
     return (await q2(`SELECT * FROM ba_tasks WHERE id=$1`, [taskId]))[0];
   }
 
-  it('the fallback cancels the task and fails the run\'s changelog row with a retry message', async () => {
+  it("the fallback cancels the task and fails the run's changelog row with a retry message", async () => {
     const task = await legacyTask();
     await withAppendTx(w.t.app.ctx.pool, (tx) => runBaTaskFallback(w.t.app.ctx, tx, task));
     expect((await q2(`SELECT status FROM ba_tasks WHERE id=$1`, [task.id]))[0].status).toBe('cancelled');

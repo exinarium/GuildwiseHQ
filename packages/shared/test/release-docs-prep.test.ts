@@ -229,10 +229,18 @@ describe('content steps with a writer phase (GWP-134)', () => {
   });
   it('dispatches changelog write to the server and guide check to the runner', () => {
     expect(
-      nextReleaseDocsPrepAction({ status: 'running', steps: ['analyse', 'changelog'], repos: [repo('a', [analysed])] }),
+      nextReleaseDocsPrepAction({
+        status: 'running',
+        steps: ['analyse', 'changelog'],
+        repos: [repo('a', [analysed])],
+      }),
     ).toEqual({ kind: 'dispatch', step: 'changelog', phase: 'write', repoIds: ['a'], by: 'server' });
     expect(
-      nextReleaseDocsPrepAction({ status: 'running', steps: ['analyse', 'guide'], repos: [repo('a', [analysed])] }),
+      nextReleaseDocsPrepAction({
+        status: 'running',
+        steps: ['analyse', 'guide'],
+        repos: [repo('a', [analysed])],
+      }),
     ).toEqual({ kind: 'dispatch', step: 'guide', phase: 'check', repoIds: ['a'] });
   });
   it('a skipped guide check skips write and apply with the same note, so no writer is looked for', () => {

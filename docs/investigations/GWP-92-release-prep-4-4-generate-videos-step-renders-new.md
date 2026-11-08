@@ -626,3 +626,7 @@ four fixture files into `AOM_VIDEO_OUT`, or fails. No real Playwright, voice or 
 
 - **Voice:** Kokoro `af_heart`, as `voice.ts` resolves it with no override. 'British' in the card is inaccurate. A real
   British voice would be a new card to switch the voice and re-record the library.
+
+---
+
+**Superseded by GWP-134 (the writer part).** The writer of Generate videos is now a release prep task (`docs/investigations/GWP-134-release-prep-one-writer-mechanism-for-the-content.md`): the writer is chosen in one place for every content step, and the BA task `release_changelog` and the headless guide call are gone. The checks and the output described above still apply.

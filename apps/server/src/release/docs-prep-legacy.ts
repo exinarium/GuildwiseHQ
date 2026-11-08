@@ -21,7 +21,11 @@ async function cancel(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
         streamId: streamId.baTask(task.id),
         event: {
           type: 'BaTaskCompleted' as const,
-          payload: { taskId: task.id, status: 'cancelled', note: 'Write changelog now uses a release prep task' },
+          payload: {
+            taskId: task.id,
+            status: 'cancelled',
+            note: 'Write changelog now uses a release prep task',
+          },
         },
         actor: SYSTEM_ACTOR,
         scope: task.project_id ? projectScope(task.org_id, task.project_id) : orgScope(task.org_id),
@@ -30,7 +34,9 @@ async function cancel(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
     { tx },
   );
   if (!task.prep_run_id || !task.prep_repo_id) return;
-  const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1 FOR UPDATE', [task.prep_run_id]);
+  const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1 FOR UPDATE', [
+    task.prep_run_id,
+  ]);
   if (!run || run.status !== 'running') return;
   const row = await one(
     tx,

@@ -3,16 +3,14 @@ import {
   DEFAULT_GUIDE_PATH,
   GuideEditsTaskSchema,
   GuideProposalSchema,
-  type ReleaseChangelogOutput,
   type ReleaseDocsPrepSummary,
   ReleaseDocsPrepSummarySchema,
-  unreleasedBullets,
   workReference,
 } from '@aom/shared';
-import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Ctx } from '../context.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
-import { changelogDispatchFor, coveredSourcesFor, summarySources } from './docs-prep-changelog.ts';
+import { changelogDispatchFor, changelogWriterInput } from './docs-prep-changelog.ts';
 import type { ServerPhaseOutcome } from './docs-prep-phases.ts';
 import { guideCoveredSources } from './docs-prep-steps.ts';
 import {
@@ -21,7 +19,6 @@ import {
   registerPhaseTasksFinisher,
   taskFailureText,
 } from './docs-prep-tasks.ts';
-import { loadFacts } from './facts.ts';
 
 /**
  * Release prep, the writer phases of 'Write changelog' (`write`) and 'Update user guide' (`write`): the server queues one
@@ -35,12 +32,14 @@ const summaryOf = (repo: Row): ReleaseDocsPrepSummary | null => {
 };
 
 async function repoRow(db: Queryable, runId: string, repoId: string): Promise<Row | null> {
-  return (await one(
-    db,
-    `SELECT r.*, pr.remote_url_normalized, pr.forge_kind, pr.name FROM release_docs_prep_repos r
+  return (
+    (await one(
+      db,
+      `SELECT r.*, pr.remote_url_normalized, pr.forge_kind, pr.name FROM release_docs_prep_repos r
        JOIN project_repos pr ON pr.id = r.repo_id WHERE r.run_id=$1 AND r.repo_id=$2`,
-    [runId, repoId],
-  )) ?? null;
+      [runId, repoId],
+    )) ?? null
+  );
 }
 
 /** The step's report of one phase. */
@@ -61,16 +60,6 @@ async function doneTask(db: Queryable, runId: string, repoId: string, step: stri
 }
 
 // ---------------------------------------------------------------------------------------------------- changelog
-
-/** The changes no earlier run wrote, and the bullets already under Unreleased (from the facts at the analysed head). */
-export async function changelogWriterInput(db: Queryable, run: Row, repo: Row, summary: ReleaseDocsPrepSummary) {
-  const covered = await coveredSourcesFor(db, run, repo);
-  const uncovered = summarySources(summary).filter((s) => !covered.has(s));
-  const f = await loadFacts(db, repo.repo_id);
-  const md = f?.facts?.changelog ?? null;
-  const existing = md ? unreleasedBullets(md) : [];
-  return { uncovered, existing };
-}
 
 interface ChangeCard {
   /** The card's work reference: its client ticket (`ABC-1`) for an intake card, otherwise its internal ref. */
@@ -231,17 +220,6 @@ registerPhaseTasksFinisher('changelog/write', async (_tx, _run, _repoId, tasks) 
     },
   };
 });
-
-/** The stored result of an accepted changelog proposal: the checked entries with the proposal's lists. */
-export type StoredChangelogResult = {
-  entries: { heading: string; text: string; sources: string[] }[];
-  covered: ReleaseChangelogOutput['covered'];
-  skipped: ReleaseChangelogOutput['skipped'];
-};
-export const storedChangelogResult = (
-  entries: StoredChangelogResult['entries'],
-  proposal: { covered: StoredChangelogResult['covered']; skipped: StoredChangelogResult['skipped'] },
-): StoredChangelogResult => ({ entries, covered: proposal.covered, skipped: proposal.skipped });
 
 // ---------------------------------------------------------------------------------------------------------- guide
 

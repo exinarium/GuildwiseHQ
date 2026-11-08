@@ -5,6 +5,7 @@ import {
   ReleaseChangelogOutputSchema,
   type ReleaseDocsPrepSummary,
   ReleasePrepChangelogPayloadSchema,
+  unreleasedBullets,
 } from '@aom/shared';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { loadFacts } from './facts.ts';
@@ -138,3 +139,29 @@ export async function changelogDenyList(db: Queryable, orgId: string): Promise<s
   }
   return [...out];
 }
+
+/** The changes no earlier run wrote, and the bullets already under Unreleased (from the facts at the analysed head). */
+export async function changelogWriterInput(
+  db: Queryable,
+  run: Row,
+  repo: Row,
+  summary: ReleaseDocsPrepSummary,
+) {
+  const covered = await coveredSourcesFor(db, run, repo);
+  const uncovered = summarySources(summary).filter((s) => !covered.has(s));
+  const f = await loadFacts(db, repo.repo_id);
+  const md = f?.facts?.changelog ?? null;
+  const existing = md ? unreleasedBullets(md) : [];
+  return { uncovered, existing };
+}
+
+/** The stored result of an accepted changelog proposal: the checked entries with the proposal's lists. */
+export type StoredChangelogResult = {
+  entries: { heading: string; text: string; sources: string[] }[];
+  covered: ReleaseChangelogOutput['covered'];
+  skipped: ReleaseChangelogOutput['skipped'];
+};
+export const storedChangelogResult = (
+  entries: StoredChangelogResult['entries'],
+  proposal: { covered: StoredChangelogResult['covered']; skipped: StoredChangelogResult['skipped'] },
+): StoredChangelogResult => ({ entries, covered: proposal.covered, skipped: proposal.skipped });

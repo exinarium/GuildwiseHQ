@@ -4,13 +4,13 @@ import {
   RELEASE_SHIP_CAPABILITY,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { withAppendTx } from '../src/db/tx.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import {
   queueReleasePrepTasks,
   RELEASE_PREP_MAX_REJECTIONS,
   releasePrepTaskPass,
 } from '../src/release/docs-prep-tasks.ts';
-import { withAppendTx } from '../src/db/tx.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { freshState } from './helpers/shifts.ts';
@@ -108,7 +108,11 @@ beforeEach(async () => {
   await q(`UPDATE project_repos SET main_branch='main', working_branch=NULL WHERE id=$1`, [w.repoId]);
   w.t.clock.setOffset(0);
   r = await w.connectRunner({
-    capabilities: [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY, RELEASE_SHIP_CAPABILITY],
+    capabilities: [
+      RELEASE_DOCS_PREP_CAPABILITY,
+      RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
+      RELEASE_SHIP_CAPABILITY,
+    ],
   });
   await w.hire('Bea', 'builder', 'junior');
   await owner('PUT', `${base()}/settings`, {
@@ -241,7 +245,9 @@ describe('one chooser for the writer of every content step', () => {
   const guideTask = {
     kind: 'guide_edits' as const,
     guidePath: 'docs/USER-GUIDE.md',
-    changes: [{ sources: ['card:TOY-1'], title: 'x', subjects: [], files: [], areas: [], routes: [], hints: [] }],
+    changes: [
+      { sources: ['card:TOY-1'], title: 'x', subjects: [], files: [], areas: [], routes: [], hints: [] },
+    ],
     coveredSources: [],
   };
 
