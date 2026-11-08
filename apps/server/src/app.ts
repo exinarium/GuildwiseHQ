@@ -144,6 +144,7 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { DirectUploads } from './storage-relay/direct.ts';
 import { StorageRelay } from './storage-relay/hub.ts';
 import { describeTrustProxy, fastifyTrustProxy, trustProxyWarning } from './trust-proxy.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
@@ -297,6 +298,8 @@ export const LOG_REDACT = {
     'req.body.email',
     '*.x-form-link',
     '*.x-upload-token',
+    '*.grant',
+    '*.uploadUrl',
     // The text of an automation's result for the runner channels never reaches a log line.
     '*.whatsapp.text',
     '*.sheet.row',
@@ -598,6 +601,22 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     log: (entry) => ctx.log.info({ storage: entry }, 'storage write'),
     // Connection, kind, submission, a hash of the path, outcome and duration: never the path (it can hold client names).
     logDelete: (entry) => ctx.log.info({ storage: { op: 'delete', ...entry } }, 'storage delete'),
+    now: () => ctx.clock.now().getTime(),
+  });
+  ctx.services.direct = new DirectUploads({
+    lookup: async (orgId, connectionId) => {
+      const r = await one<{ kind: StorageKind; workstation_id: string }>(
+        ctx.pool,
+        `SELECT kind, workstation_id FROM storage_connections WHERE id=$1 AND org_id=$2 AND status='active'`,
+        [connectionId, orgId],
+      );
+      return r ? { kind: r.kind, workstationId: r.workstation_id } : undefined;
+    },
+    isOnline: (ws) => ctx.services.runners.isOnline(ws),
+    send: (ws, type, payload) =>
+      ctx.services.runners.send(ws, type as 'storage.grant.open', payload as never, ctx.clock.now()),
+    // Connection, operation, outcome and duration only: never an address.
+    log: (entry) => ctx.log.info({ storageDirect: entry }, 'storage direct'),
     now: () => ctx.clock.now().getTime(),
   });
   // After a restart nothing is served until the runners announce again (right after their welcome).

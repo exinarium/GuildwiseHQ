@@ -232,6 +232,8 @@ const EnvSchema = z.object({
   AOM_FORMS_FORM_SUBMITS_PER_MIN: z.coerce.number().int().min(1).max(100000).default(60),
   AOM_FORMS_FORM_SUBMIT_BURST: z.coerce.number().int().min(1).max(100000).default(30),
   // Runner offline: the secure link flow (docs/security/public-forms.md, T-off-1..5)
+  /** Public form files to OneDrive, Google Drive and S3 go browser to storage. Off: every destination relays. */
+  AOM_FORMS_DIRECT_UPLOADS: bool(true),
   AOM_FORMS_OFFLINE_IP_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(3),
   AOM_FORMS_OFFLINE_IP_BURST: z.coerce.number().int().min(1).max(1000).default(2),
   AOM_FORMS_OFFLINE_FORM_PER_HOUR: z.coerce.number().int().min(1).max(100000).default(30),
@@ -359,6 +361,7 @@ export interface Config {
     offlineIpPerHour: number;
     offlineIpBurst: number;
     offlineFormPerHour: number;
+    directUploads: boolean;
     offlineMaxOpen: number;
     /** Days a case waits for the runner, days the secure link lasts (a form setting overrides it), seconds a runner must stay connected before links go out. */
     offlineHoldDays: number;
@@ -530,6 +533,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       offlineIpPerHour: e.AOM_FORMS_OFFLINE_IP_PER_HOUR,
       offlineIpBurst: e.AOM_FORMS_OFFLINE_IP_BURST,
       offlineFormPerHour: e.AOM_FORMS_OFFLINE_FORM_PER_HOUR,
+      directUploads: e.AOM_FORMS_DIRECT_UPLOADS,
       offlineMaxOpen: e.AOM_FORMS_OFFLINE_MAX_OPEN,
       offlineHoldDays: e.AOM_FORMS_OFFLINE_HOLD_DAYS,
       offlineLinkDays: e.AOM_FORMS_OFFLINE_LINK_DAYS,

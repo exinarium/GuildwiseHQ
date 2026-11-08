@@ -126,6 +126,9 @@ export async function listStorageConnections(
           },
       createdAt: iso(r.created_at) as string,
       canConnect: r.ws_user === userId,
+      directUploads: ctx.config.publicForms.directUploads
+        ? ctx.services.direct.availabilityOf(r.id, r.kind)
+        : null,
     };
   });
 }
