@@ -244,6 +244,49 @@ AOM_HTTPS_PORT=9443
 AOM_HTTP_PORT=9080
 ```
 
+### Proxy logs and body limits
+
+The bundled Caddy configuration (`deploy/Caddyfile`) does two things for the public, unauthenticated routes.
+
+**Log redaction.** Caddy logs handler errors (a `502` while the app restarts, a `413`, a client abort) with the request address and headers, even without an access log. Every Caddy log line goes through one global filter that:
+
+- deletes the headers `X-Form-Link`, `X-Upload-Token`, `X-File-Name`, `X-Guildwise-Signature`, `X-Hub-Signature-256`, `X-Signature`, `X-Goog-Channel-Token`, `Idempotency-Key`, `X-Guildwise-Delivery`, `Cookie`, `Authorization`, `Proxy-Authorization` and the response `Set-Cookie`;
+- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
+
+If a relay kind of yours sends a secret in another header, add a `request>headers>Name delete` line to the filter.
+
+**Body limits.** Caddy refuses a larger body with `413` before the app reads it.
+
+| Route | Proxy limit | How to change |
+| --- | --- | --- |
+| `/relay/in/*` | 4 MiB, fixed | The app's own limit is `AOM_RELAY_MAX_BODY_BYTES` (at most 4 MiB); the app records bodies between its limit and 4 MiB as rejected. |
+| `/hooks/in/*` | `AOM_JOURNEY_HOOK_MAX_BYTES` (default 64 KiB) | Set it in `.env`. |
+| Public form file part (`PUT /api/public/forms/<id>/submissions/<sid>/parts/<n>`) | `AOM_STORAGE_MAX_FILE_BYTES` (default 25 MiB) | Set it in `.env`. |
+| Rest of `/api/public/forms/*` | 4 MiB, fixed | Same as the app. |
+
+After you change a variable in `.env`, run `docker compose -f docker-compose.prod.yml up -d`. Compose passes it to both the app and Caddy, so the two stay equal; do not give them different values. A journey webhook over the limit is refused by the proxy, so it does not show as a call on the Journeys page.
+
+**Access log.** A `log` directive inside the site block creates its own logger, and the global filter does not apply to it. If you add one, give it the same filter, for example:
+
+```caddyfile
+log {
+	output file /data/access.log
+	format filter {
+		wrap json
+		fields {
+			request>headers>X-Form-Link delete
+			request>headers>X-Upload-Token delete
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			resp_headers>Set-Cookie delete
+			request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms)/)[^/?#]+" "${1}${2}[redacted]"
+		}
+	}
+}
+```
+
+Copy every line of the global filter in `deploy/Caddyfile` rather than this short example. A reverse proxy of your own in front must delete the same headers and not log the address of these routes.
+
 ## 8. Upgrades
 
 Back up first (section 9), then:
@@ -256,6 +299,7 @@ curl https://guildwise.example.com/api/health
 
 Migrations run on boot. Downtime is usually a few seconds. Watch the logs with `docker compose -f docker-compose.prod.yml logs -f app`.
 
+- **Caddy image.** A release that changes the Caddy image tag is picked up with `docker compose -f docker-compose.prod.yml pull caddy` (or `up -d --pull always`).
 - **Keep runners in step.** When a release changes the runner, update the workstations too. The installer re-run upgrades them, and the server offers the runner release it ships.
 - **Data migrations.** Some releases include data migrations. They are idempotent, and they run on boot unless `AOM_DATA_MIGRATIONS=false`. Some have a `--dry-run` preview, for example `node dist/orgs-migrate.mjs --dry-run`, run with `docker compose ... exec app`.
 - **Do not** run `down -v` during an upgrade. It deletes the volumes.
@@ -381,7 +425,7 @@ A Business mode organization can give an outside provider (the WhatsApp Cloud AP
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. |
+| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. The bundled proxy caps this route at 4 MiB. |
 | `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST` | `60`, `20` | Requests per minute and burst, per integration. More is `429`. |
 | `AOM_RELAY_TIMEOUT_MS` | `5000` | How long the server waits for the runner's answer (`504` after that); 1000 to 15000. Keep it below the provider's own timeout. |
 | `AOM_RELAY_TIMEOUTS` | unset | Per kind overrides, for example `whatsapp_cloud=5000,calendar_push=8000`. |
@@ -389,7 +433,7 @@ A Business mode organization can give an outside provider (the WhatsApp Cloud AP
 | `AOM_RELAY_MAX_IN_FLIGHT` | `200` | Requests waiting for a runner at once; more get `503`. |
 | `AOM_RELAY_RETENTION_DAYS` | `30` | How long the per-request metadata (time, integration, size, status, latency, outcome) is kept. |
 
-A reverse proxy in front of the server must not write an access log for `/relay/in/*`: the address and query string carry the integration's secret path and the provider's verify token. The bundled Caddy configuration writes no access log.
+A reverse proxy in front of the server must not write an access log for `/relay/in/*`: the address and query string carry the integration's secret path and the provider's verify token. The bundled Caddy configuration writes no access log; it logs only errors, through a filter that redacts the address and query (see "Proxy logs and body limits" in section 7).
 
 On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` tells the runner to serve an integration (restart the runner to apply); `relay list` and `relay remove` manage the list.
 
@@ -400,6 +444,7 @@ A form published from the forms builder is open to anyone with its address (`htt
 - Put the server behind a reverse proxy that sets `X-Forwarded-For`: the per-address limits depend on it (the per-form limit does not).
 - Set `AOM_SECRET_KEY`. Personal links and page sessions are signed with a key derived from it; rotating it ends every personal link.
 - A public request to `/f/*` must not be cached by the proxy (the server sends `Cache-Control: no-store`).
+- The bundled proxy limits request bodies: a file part to `AOM_STORAGE_MAX_FILE_BYTES`, everything else on the form API to 4 MiB (section 7, "Proxy logs and body limits").
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
