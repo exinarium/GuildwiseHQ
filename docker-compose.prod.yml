@@ -31,6 +31,9 @@ services:
       AOM_STORAGE_MAX_FILE_BYTES: ${AOM_STORAGE_MAX_FILE_BYTES:-26214400}
       AOM_JOURNEY_HOOK_MAX_BYTES: ${AOM_JOURNEY_HOOK_MAX_BYTES:-65536}
       AOM_RELAY_MAX_BODY_BYTES: ${AOM_RELAY_MAX_BODY_BYTES:-1048576}
+      # Caddy reaches the app from its container address on the compose network: trust X-Forwarded-For only from
+      # private addresses (docs/SELF-HOSTING.md "Running behind a reverse proxy").
+      AOM_TRUST_PROXY: ${AOM_TRUST_PROXY:-loopback,uniquelocal}
       AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
       AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
       # Inbound e-mail (platform owner's one-time set-up, docs/SELF-HOSTING.md "Inbound e-mail"): all three, or none.
@@ -91,6 +94,8 @@ services:
       DATABASE_URL: postgres://aom:${POSTGRES_PASSWORD}@postgres:5432/aom
       AOM_PUBLIC_ORIGIN: ${AOM_PUBLIC_ORIGIN:?set AOM_PUBLIC_ORIGIN in .env}
       AOM_SECRET_KEY: ${AOM_SECRET_KEY:?set AOM_SECRET_KEY in .env (a long random string, e.g. openssl rand -base64 32)}
+      # Same as the app: Caddy proxies /api/worker/video/* to this container.
+      AOM_TRUST_PROXY: ${AOM_TRUST_PROXY:-loopback,uniquelocal}
       AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
       AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
       AOM_YOUTUBE_CLIENT_ID: ${AOM_YOUTUBE_CLIENT_ID:-}

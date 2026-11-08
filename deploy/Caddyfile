@@ -74,6 +74,9 @@
 	}
 
 	# WebSocket upgrades (/api/ws, /api/runner/ws) pass through reverse_proxy unchanged.
+	# Caddy replaces X-Forwarded-For from clients it does not trust, and the app trusts the header from private addresses
+	# (AOM_TRUST_PROXY in docker-compose.prod.yml). If you add `trusted_proxies` here for a CDN in front, set
+	# AOM_TRUST_PROXY to match (docs/SELF-HOSTING.md "Running behind a reverse proxy").
 	handle {
 		reverse_proxy app:4600 {
 			health_uri /api/health

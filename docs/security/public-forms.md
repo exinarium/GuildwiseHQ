@@ -48,7 +48,7 @@ uploader; someone who controls a client's network (TLS assumed); an operator wit
 | T16 | Leaking where the firm stores data | The public view of a form blanks every connection, folder and name template and the logo id | `form-public-answers.test.ts`, `public-forms-publish.test.ts` |
 | T17 | A partial submission seen as complete | Complete only after every file and both answers documents have a storage reference; the claim is a conditional update; the JSON is written last; nothing is marked complete when a write fails | `public-forms-submit.test.ts` (storage failure) |
 | T18 | Client loses their answers on a phone | Answers are kept in the page and mirrored to `sessionStorage` (never `localStorage`); a retry re-sends only the files not stored; a file that cannot be restored is asked for again | `public-form-page.test.tsx` |
-| T19 | Spoofed client address (`X-Forwarded-For`) | The per-form limit does not depend on the address. The server trusts the proxy header (`trustProxy`), so run it behind a reverse proxy that sets it; a configurable hop count is a recorded follow-up | documented |
+| T19 | Spoofed client address (`X-Forwarded-For`) | The per-form limit does not depend on the address. `AOM_TRUST_PROXY` (default: loopback only) decides which peers may set the header: it is honoured only from the configured proxy addresses or hop count, so a client that reaches the server directly is limited on its socket address; an invalid value stops the server at startup (docs/SELF-HOSTING.md "Running behind a reverse proxy") | `trust-proxy.test.ts`, `public-forms-ratelimit.test.ts` (rotating `X-Forwarded-For`) |
 | T20 | Operator with database access | The database holds no answers or files; tokens are signed, not stored; storage credentials stay on the workstation | table dump in `public-forms-submit.test.ts` |
 | T21 | A runner that is offline drops a submission silently | The start step refuses before anything is uploaded; an outage mid-way leaves the row not complete; the client is told, and the hook for the offline flow is called | `public-forms-submit.test.ts` (offline) |
 
@@ -60,7 +60,6 @@ uploader; someone who controls a client's network (TLS assumed); an operator wit
 - Rate limits are per server process; a multi-instance hosted deployment needs a shared store (hosted edge settings).
 - The page's script is served by the same server; a compromised server could serve altered script, as with the rest of
   the web app.
-- A configurable proxy hop count instead of trusting any `X-Forwarded-For`.
 
 ## Settings
 

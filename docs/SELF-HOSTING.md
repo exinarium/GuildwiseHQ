@@ -107,6 +107,7 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_MIGRATE_ON_BOOT` | `true` | Apply migrations on start. |
 | `AOM_EXTRA_ORIGINS` | unset | Extra exact origins the web app may be opened from (comma-separated, never `*`). |
 | `AOM_RATE_LIMIT` | `true` | Request rate limiting. |
+| `AOM_TRUST_PROXY` | loopback only (the Compose file sets `loopback,uniquelocal`) | Which proxies may set `X-Forwarded-For`, and so the client address every per-address limit uses. See [Running behind a reverse proxy](#running-behind-a-reverse-proxy). |
 | `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Platform ceiling on shifts per workstation (`0` means no ceiling). |
 | `AOM_DATA_MIGRATIONS` | on | Set to `false` to skip data migrations on boot. |
 
@@ -287,6 +288,39 @@ log {
 
 Copy every line of the global filter in `deploy/Caddyfile` rather than this short example. A reverse proxy of your own in front must delete the same headers and not log the address of these routes.
 
+### Running behind a reverse proxy
+
+`AOM_TRUST_PROXY` decides which peers the server believes when they send `X-Forwarded-For`. The address it resolves is the
+client address used by every per-address limit (public forms, the landing-page assistant, help videos, sign-in and
+password reset, the general request limit), by blog API key address allow lists, and in the logs and audit trail.
+
+**Default (unset): loopback only.** The server trusts `X-Forwarded-For` only from `127.0.0.0/8` and `::1`. A reverse
+proxy on the same host keeps working, and a client that reaches the server directly cannot choose its own address.
+
+| Value | Meaning | Use it for |
+| --- | --- | --- |
+| unset | Trust loopback only. | Caddy or nginx on the same host, proxying to `127.0.0.1:4600`. |
+| `loopback,uniquelocal` | Trust loopback and the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`). | The bundled `docker-compose.prod.yml`. It already sets this value, overridable from `.env`. |
+| `172.18.0.0/16` or `172.18.0.5` | Trust only these addresses or CIDR ranges (IPv4 or IPv6, comma-separated). The names `loopback`, `linklocal` and `uniquelocal` are accepted too. | Docker Compose with your own proxy in another container (its network address or the network's CIDR), or a proxy on another host. |
+| `10.0.0.5,203.0.113.0/24` | The proxy's address plus the CDN's published ranges. | A CDN in front of your proxy. Configure the proxy to keep the CDN's `X-Forwarded-For`. |
+| `1`, `2`, ... up to `32` | Trust exactly that many hops: the client is the address that many entries back from the server. | A proxy (`1`) or a CDN in front of a proxy (`2`), when the server cannot be reached except through them. |
+| `false`, `0` or `none` | Never trust `X-Forwarded-For`; the client is the socket address, even from loopback. | A server that clients reach directly, with no proxy. |
+| `true` | Trust every hop (the behaviour before this setting existed). | Not recommended. |
+
+Prefer addresses over a hop count: a hop count does not check who the peer is, so anyone who can reach port 4600
+without going through the proxy can write the address they want into the header. Use a hop count only when the server
+is reachable through the proxy alone.
+
+> **Warning:** `AOM_TRUST_PROXY=true` on a server that can be reached without the proxy lets every client choose its own
+> address and get past the per-address rate limits. The server logs a warning at startup when it is set.
+
+An invalid value (a word, a negative number, a hop count above 32, an address or CIDR range that does not parse) stops
+the server at startup with a message that names `AOM_TRUST_PROXY` and the accepted forms. The server never falls back to
+trusting every hop. At startup the log has a `trusted proxy` line that shows what is trusted.
+
+If every visitor seems to share one address (limits trigger for everyone, the logs show only the proxy's address), the
+proxy is not trusted: set `AOM_TRUST_PROXY` to its address or network.
+
 ## 8. Upgrades
 
 Back up first (section 9), then:
@@ -441,7 +475,7 @@ On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` te
 
 A form published from the forms builder is open to anyone with its address (`https://<your domain>/f/<id>`) or a personal link. Answers and files go to the firm's own storage through its runner; the server keeps references only. Read [docs/security/public-forms.md](security/public-forms.md) before you enable it for strangers.
 
-- Put the server behind a reverse proxy that sets `X-Forwarded-For`: the per-address limits depend on it (the per-form limit does not).
+- The per-address limits use the client address the server resolves (the per-form limit does not depend on it). Behind a proxy in another container or on another host, set `AOM_TRUST_PROXY` (see [Running behind a reverse proxy](#running-behind-a-reverse-proxy)).
 - Set `AOM_SECRET_KEY`. Personal links and page sessions are signed with a key derived from it; rotating it ends every personal link.
 - A public request to `/f/*` must not be cached by the proxy (the server sends `Cache-Control: no-store`).
 - The bundled proxy limits request bodies: a file part to `AOM_STORAGE_MAX_FILE_BYTES`, everything else on the form API to 4 MiB (section 7, "Proxy logs and body limits").
