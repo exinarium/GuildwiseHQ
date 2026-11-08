@@ -82,6 +82,7 @@ export class GitLabForge implements Forge {
         ...base,
         state: 'not_connected',
         detail:
+          this.env.tokens.problem?.() ??
           'Run `guildwise-runner git-connect gitlab` (it runs `glab auth login` or saves a personal access token).',
       };
     try {

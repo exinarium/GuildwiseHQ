@@ -10,6 +10,7 @@ import { loadConfig } from '../config.ts';
 import { touchRecheck } from '../forge/connect.ts';
 import { SshSettingsStore } from '../forge/ssh.ts';
 import { FileTokenStore } from '../forge/tokens.ts';
+import { fileKeyOf } from '../secrets/keys.ts';
 import { discoverPluginMcpServers, mcpAuthStates } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { realExecutor } from '../toolchain/exec.ts';
@@ -24,6 +25,8 @@ import type { AdapterEnv, IntegrationAdapter } from './types.ts';
  */
 export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> = {}): AdapterEnv {
   const config = () => loadConfig(paths.config);
+  // the sealed git-tokens.json needs the runner's file key; not exposed as `sealKey` (that would enable other connects)
+  const keyOf = overrides.sealKey ?? fileKeyOf(paths.secrets);
   const claudeStore = new ClaudeCredentialStore(claudeFile(paths.secrets));
   const claudeAccounts = new ClaudeAccountRegistry({
     home: homedir(),
@@ -51,7 +54,7 @@ export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> =
     forge: {
       exec: realExecutor,
       fetch: globalThis.fetch,
-      tokens: new FileTokenStore(join(paths.secrets, 'git-tokens.json')),
+      tokens: new FileTokenStore(join(paths.secrets, 'git-tokens.json'), keyOf),
       ssh: {
         settings: new SshSettingsStore(join(paths.secrets, 'git-ssh.json')),
         knownHosts: join(paths.secrets, 'known_hosts'),

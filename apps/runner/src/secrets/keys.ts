@@ -9,7 +9,7 @@ import {
   privateDecrypt,
 } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   ENVELOPE_MAX_AHEAD_MS,
   INTEGRATION_ENVELOPE_ALG,
@@ -180,4 +180,16 @@ export class RunnerKeys {
       throw new EnvelopeError('too_far', 'the sealed values are valid for too long');
     return inner;
   }
+}
+
+/**
+ * `keyOf` for the sealed files in `secretsDir`, for code that has no Runner (the CLI, the headless adapters). It opens
+ * `<secretsDir>/runner-key.pem` on first use only, the same key the runner process derives from.
+ */
+export function fileKeyOf(secretsDir: string): (fileName: string) => Buffer {
+  let keys: RunnerKeys | undefined;
+  return (name) => {
+    keys ??= new RunnerKeys(join(secretsDir, 'runner-key.pem'));
+    return keys.deriveFileKey(name);
+  };
 }

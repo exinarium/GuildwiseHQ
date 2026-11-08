@@ -1,6 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
+import { basename } from 'node:path';
 import type { ConnectableForge } from '@aom/shared';
+import { type ZodType, z } from 'zod';
+import { SealedFile, unreadableMessage } from '../secrets/sealed-file.ts';
 
 /** A token held on this workstation. `user` is the git username (or the e-mail for Bitbucket Cloud). */
 export interface StoredToken {
@@ -15,7 +17,8 @@ export interface StoredToken {
 
 /**
  * Tokens for forges that have no CLI login (Azure DevOps PAT, Bitbucket API token, GitLab PAT without glab). Kept in
- * `<data dir>/secrets/git-tokens.json`, mode 0600 in a 0700 directory, on this workstation only. Status reported to
+ * `<data dir>/secrets/git-tokens.json`, encrypted with this runner's key (mode 0600 in a 0700 directory), on this
+ * workstation only. Status reported to
  * the server says connected or not, never the token.
  */
 export interface TokenStore {
@@ -25,6 +28,8 @@ export interface TokenStore {
   /** Removes only that organization's token for Azure DevOps. */
   remove(provider: ConnectableForge, host: string, organization?: string): boolean;
   list(): Array<Omit<StoredToken, 'token'>>;
+  /** Why the saved tokens are not available (the file cannot be read), if so. Never holds a secret. */
+  problem?(): string | undefined;
 }
 
 /**
@@ -52,28 +57,72 @@ function migrate(data: Record<string, StoredToken>): Record<string, StoredToken>
   return out;
 }
 
+const StoredTokenSchema = z
+  .object({
+    provider: z.string(),
+    host: z.string(),
+    token: z.string().min(1),
+    user: z.string().optional(),
+    organization: z.string().optional(),
+    savedAt: z.string(),
+  })
+  .passthrough();
+const StoredTokensSchema = z.record(z.string(), StoredTokenSchema) as unknown as ZodType<Record<string, StoredToken>>;
+
+/** The old plaintext file: keep every entry that has the token shape, drop the rest (one bad entry never fails it). */
+function legacyTokens(raw: unknown): Record<string, StoredToken> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, StoredToken> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const p = StoredTokenSchema.safeParse(v);
+    if (p.success) out[k] = p.data as StoredToken;
+  }
+  return out;
+}
+
+export const TOKENS_UNREADABLE = unreadableMessage(
+  'git host tokens',
+  'Connect GitLab, Bitbucket or Azure DevOps again (Integrations page or `guildwise-runner git-connect <provider>`).',
+);
+
 export class FileTokenStore implements TokenStore {
-  constructor(private readonly file: string) {}
+  private readonly sealed: SealedFile<Record<string, StoredToken>>;
+  private unreadable = false;
+
+  constructor(
+    private readonly file: string,
+    keyOf: (fileName: string) => Buffer,
+    private readonly opts: { warn?: (message: string) => void } = {},
+  ) {
+    this.sealed = new SealedFile(file, keyOf, StoredTokensSchema, (v) => Object.values(v).map((t) => t.token));
+  }
 
   private read(): Record<string, StoredToken> {
-    try {
-      return migrate(JSON.parse(readFileSync(this.file, 'utf8')) as Record<string, StoredToken>);
-    } catch {
+    const r = this.sealed.open({ legacy: legacyTokens });
+    if (r.state === 'unreadable') {
+      if (!this.unreadable) this.opts.warn?.(TOKENS_UNREADABLE);
+      this.unreadable = true;
       return {};
     }
+    this.unreadable = false;
+    if (r.state === 'missing') return {};
+    // the temp name the plaintext store used: after a crash it may still hold tokens in plaintext
+    if (r.migrated) rmSync(`${this.file}.tmp`, { force: true });
+    return migrate(r.value);
   }
 
   private write(data: Record<string, StoredToken>): void {
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
-    renameSync(tmp, this.file);
-    try {
-      chmodSync(this.file, 0o600);
-      chmodSync(dirname(this.file), 0o700);
-    } catch {
-      // Windows: the data dir sits in the user's profile
+    // never overwrite a file that cannot be read: it may hold every other token, sealed with an older key
+    if (this.sealed.open({ legacy: legacyTokens }).state === 'unreadable') {
+      const moved = this.sealed.quarantine();
+      this.opts.warn?.(`${TOKENS_UNREADABLE} The unreadable file was kept as ${moved ? basename(moved) : 'it was'}.`);
     }
+    this.sealed.save(data);
+  }
+
+  problem(): string | undefined {
+    this.read();
+    return this.unreadable ? TOKENS_UNREADABLE : undefined;
   }
 
   get(provider: ConnectableForge, host: string, organization?: string) {

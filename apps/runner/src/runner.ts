@@ -107,7 +107,7 @@ import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
 import { ExternalAdapters } from './external/index.ts';
-import { resolveJira } from './external/jira-store.ts';
+import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
@@ -425,10 +425,13 @@ export class Runner {
       ...(opts.serverFetch ? { fetch: opts.serverFetch } : {}),
     });
     this.exec = opts.executor ?? realExecutor;
+    this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
-      tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json')),
+      tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json'), (n) => this.keys.deriveFileKey(n), {
+        warn: (m) => this.log.warn(m),
+      }),
       ssh: {
         settings: new SshSettingsStore(join(this.paths.secrets, 'git-ssh.json')),
         knownHosts: join(this.paths.secrets, 'known_hosts'),
@@ -436,7 +439,6 @@ export class Runner {
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     };
     this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
-    this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.whatsapp = new WhatsAppSecretStore({
       file: join(this.paths.secrets, 'relay-whatsapp.json'),
       keys: this.keys,
@@ -978,8 +980,15 @@ export class Runner {
 
   /** Jira credentials in force: `secrets/jira.json` (written by `aom-runner jira-connect`), else config.json's `jira` block. */
   private jiraConfig() {
-    return resolveJira(this.paths.secrets, this.freshConfig().jira);
+    const keyOf = (n: string) => this.keys.deriveFileKey(n);
+    const problem = new JiraCredentialStore(jiraFile(this.paths.secrets), keyOf).problem();
+    // the poller asks on every poll: say it once per change, not on every call
+    if (problem && !this.jiraUnreadableWarned) this.log.warn(problem);
+    this.jiraUnreadableWarned = !!problem;
+    if (problem) return undefined;
+    return resolveJira(this.paths.secrets, this.freshConfig().jira, keyOf);
   }
+  private jiraUnreadableWarned = false;
 
   /** The organization source folder of an organization (read fresh from config.json, so `org-folder set` needs no restart). */
   private orgSourceFolder(orgId: string): string | undefined {

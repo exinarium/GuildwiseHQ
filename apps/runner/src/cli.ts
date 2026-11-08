@@ -58,7 +58,7 @@ import { resolveDataDir, runnerPaths } from './paths.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
-import { RunnerKeys } from './secrets/keys.ts';
+import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
 import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
@@ -759,7 +759,7 @@ interface JiraConnectOpts {
 /**
  * `aom-runner jira-connect`: saves this workstation's Jira credentials for downloading ticket attachments and posting
  * approved updates. Asks for the base URL, your e-mail and an API token (hidden; or piped on stdin), checks them against
- * Jira and stores them in `secrets/jira.json` (mode 0600), never in config.json. The token is never shown to an agent
+ * Jira and stores them in `secrets/jira.json`, encrypted with this runner's key (mode 0600), never in config.json. The token is never shown to an agent
  * and never sent to the server (it only learns "connected / not connected / refused").
  */
 async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
@@ -769,7 +769,7 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
     const paths = runnerPaths(entryDir(root, e));
     return {
       paths,
-      store: new JiraCredentialStore(jiraFile(paths.secrets)),
+      store: new JiraCredentialStore(jiraFile(paths.secrets), fileKeyOf(paths.secrets)),
       config: loadConfig(entryConfigPath(root, e)),
       jira: new JiraIntegration(headlessEnv(paths)),
     };
@@ -855,7 +855,7 @@ interface GitConnectOpts {
 
 /**
  * `aom-runner git-connect <provider>`: sets up (or checks) this workstation's login to a git host. Credentials stay on
- * this machine: `gh`/`glab` hold their own logins, tokens go to secrets/git-tokens.json (mode 0600). The server only
+ * this machine: `gh`/`glab` hold their own logins, tokens go to secrets/git-tokens.json, encrypted with this runner's key (mode 0600). The server only
  * ever learns "connected / not connected" (`git.report`).
  */
 async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<void> {
@@ -866,7 +866,7 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   const { root, entries } = selectPairings(opts);
   const stores = entries.map((e) => {
     const paths = runnerPaths(entryDir(root, e));
-    return { paths, store: new FileTokenStore(`${paths.secrets}/git-tokens.json`) };
+    return { paths, store: new FileTokenStore(`${paths.secrets}/git-tokens.json`, fileKeyOf(paths.secrets)) };
   });
   const first = stores[0] as (typeof stores)[number];
   const env = { exec: realExecutor, fetch, tokens: first.store };

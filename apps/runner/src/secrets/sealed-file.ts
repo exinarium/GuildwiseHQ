@@ -18,6 +18,24 @@ interface Envelope {
   tag: string;
 }
 
+export type SealedRead<T> =
+  | { state: 'missing' }
+  | { state: 'ok'; value: T; migrated: boolean }
+  | { state: 'unreadable'; reason: 'key' | 'damaged' };
+
+const isEnvelope = (x: unknown): x is Envelope =>
+  !!x &&
+  typeof x === 'object' &&
+  (x as Envelope).v === 1 &&
+  (x as Envelope).alg === 'A256GCM' &&
+  typeof (x as Envelope).iv === 'string' &&
+  typeof (x as Envelope).ct === 'string' &&
+  typeof (x as Envelope).tag === 'string';
+
+/** The message for a secrets file that cannot be opened. It names no file contents and no secret. */
+export const unreadableMessage = (what: string, how: string): string =>
+  `The saved ${what} on this workstation cannot be read (the runner key changed or the file is damaged). ${how}`;
+
 export class SealedFile<T> {
   constructor(
     private readonly file: string,
@@ -31,22 +49,81 @@ export class SealedFile<T> {
     return basename(this.file);
   }
 
+  /**
+   * Reads the file and says why it holds nothing usable: missing, sealed with another key (or tampered: GCM cannot tell
+   * the two apart) or damaged. With `legacy`, a file that is not an envelope but that `legacy` accepts (the plaintext
+   * form a store used before it was sealed) is sealed in place: the new envelope is written to a 0600 temp file and
+   * renamed over the plaintext, so no plaintext copy stays under any name. If that write fails, the value is still
+   * returned and the next read tries again.
+   */
+  open(opts: { legacy?: (raw: unknown) => T | undefined } = {}): SealedRead<T> {
+    if (!existsSync(this.file)) return { state: 'missing' };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(this.file, 'utf8'));
+    } catch {
+      return { state: 'unreadable', reason: 'damaged' };
+    }
+    if (!isEnvelope(raw)) {
+      let value: T | undefined;
+      try {
+        value = opts.legacy?.(raw);
+      } catch {
+        value = undefined;
+      }
+      if (value === undefined) return { state: 'unreadable', reason: 'damaged' };
+      for (const s of this.secretsOf(value)) registerSecret(s);
+      try {
+        this.save(value);
+      } catch {
+        return { state: 'ok', value, migrated: false };
+      }
+      return { state: 'ok', value, migrated: true };
+    }
+    let plain: string;
+    try {
+      const d = createDecipheriv('aes-256-gcm', this.keyOf(this.name), Buffer.from(raw.iv, 'base64'));
+      d.setAAD(Buffer.from(this.name));
+      d.setAuthTag(Buffer.from(raw.tag, 'base64'));
+      plain = Buffer.concat([d.update(Buffer.from(raw.ct, 'base64')), d.final()]).toString('utf8');
+    } catch {
+      return { state: 'unreadable', reason: 'key' };
+    }
+    let parsed: ReturnType<ZodType<T>['safeParse']>;
+    try {
+      parsed = this.schema.safeParse(JSON.parse(plain));
+    } catch {
+      return { state: 'unreadable', reason: 'damaged' };
+    }
+    if (!parsed.success) return { state: 'unreadable', reason: 'damaged' };
+    for (const s of this.secretsOf(parsed.data)) registerSecret(s);
+    return { state: 'ok', value: parsed.data, migrated: false };
+  }
+
+  /** The value, or undefined when the file is missing, not sealed, sealed with another key or damaged. */
   load(): T | undefined {
     try {
-      if (!existsSync(this.file)) return undefined;
-      const env = JSON.parse(readFileSync(this.file, 'utf8')) as Envelope;
-      if (env.v !== 1 || env.alg !== 'A256GCM') return undefined;
-      const d = createDecipheriv('aes-256-gcm', this.keyOf(this.name), Buffer.from(env.iv, 'base64'));
-      d.setAAD(Buffer.from(this.name));
-      d.setAuthTag(Buffer.from(env.tag, 'base64'));
-      const plain = Buffer.concat([d.update(Buffer.from(env.ct, 'base64')), d.final()]).toString('utf8');
-      const parsed = this.schema.safeParse(JSON.parse(plain));
-      if (!parsed.success) return undefined;
-      for (const s of this.secretsOf(parsed.data)) registerSecret(s);
-      return parsed.data;
+      const r = this.open();
+      return r.state === 'ok' ? r.value : undefined;
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Moves an unreadable file aside (it stays encrypted) as `<name>.unreadable-<timestamp>`, so a new save does not
+   * destroy it and it can still be opened if the old runner key comes back. Returns the new path.
+   */
+  quarantine(): string | undefined {
+    if (!existsSync(this.file)) return undefined;
+    const to = `${this.file}.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    renameSync(this.file, to);
+    try {
+      chmodSync(to, 0o600);
+    } catch {
+      // not supported on every platform
+    }
+    return to;
   }
 
   save(value: T): void {
