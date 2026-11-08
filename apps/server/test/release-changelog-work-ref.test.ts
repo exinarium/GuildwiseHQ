@@ -1,17 +1,14 @@
 import {
-  RELEASE_CHANGELOG_OUTCOME,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   ReleaseFactsSchema,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { withAppendTx } from '../src/db/tx.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
-import {
-  applyReleaseChangelogReport,
-  buildReleaseChangelogTask,
-} from '../src/release/docs-prep-changelog-task.ts';
+import { applyReleasePrepReport } from '../src/release/docs-prep-tasks.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, fullFields, markOnline, type World } from './helpers/world.ts';
@@ -34,13 +31,13 @@ const M3 = 'e'.repeat(40);
 const q2 = async (sql: string, params: unknown[] = []) => (await q(sql, params)) as [any, ...any[]];
 const base = () => `/api/projects/${w.projectId}/release-docs-prep`;
 const cmds = () => q2(`SELECT * FROM runner_commands WHERE type='release.docs_prep' ORDER BY created_at`);
-const tasks = () => q2(`SELECT * FROM ba_tasks WHERE kind='release_changelog' ORDER BY created_at`);
+const tasks = () => q2(`SELECT * FROM release_docs_prep_tasks WHERE step='changelog' ORDER BY created_at`);
 
 beforeEach(async () => {
   await freshState();
   await q(`TRUNCATE release_proposals, release_ships, repo_release_facts, release_docs_prep_runs CASCADE`);
   await q(`TRUNCATE runner_commands CASCADE`);
-  await q(`DELETE FROM ba_tasks WHERE kind='release_changelog'`);
+  await q(`TRUNCATE release_docs_prep_tasks`);
   await q(
     `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"guide": false}}'::jsonb, working_branch='release/1.5.0' WHERE id=$1`,
     [w.projectId],
@@ -52,7 +49,12 @@ beforeEach(async () => {
      ON CONFLICT (workstation_id) DO UPDATE SET capabilities=$2`,
     [
       w.workstationId,
-      [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_SHIP_CAPABILITY, RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY],
+      [
+        RELEASE_DOCS_PREP_CAPABILITY,
+        RELEASE_SHIP_CAPABILITY,
+        RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
+        RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
+      ],
     ],
   );
   const facts = ReleaseFactsSchema.parse({
@@ -120,29 +122,57 @@ describe('Write changelog for intake cards', () => {
       { sha: M3, subject: `Merge ${plain.ref}`, cardKeys: [plain.ref] },
     ]);
     const [task] = await tasks();
-    const brief = await buildReleaseChangelogTask(w.t.app.ctx.pool, task);
-    expect(brief?.changes.map((c) => c.cards)).toEqual([
+    expect(task.task.changes.map((c: any) => c.cards)).toEqual([
       [{ key: 'ABC-1', title: 'Export boards', client: true }],
       [{ key: 'ABC-1', title: 'Export boards', client: true }],
       [{ key: plain.ref, title: 'Faster board' }],
     ]);
-    expect(JSON.stringify(brief)).not.toContain(intake.ref);
-    expect(brief?.changes[0]?.subject).toBe('Merge ABC-1 export boards');
+    expect(JSON.stringify(task.task)).not.toContain(intake.ref);
+    expect(task.task.changes[0]?.subject).toBe('Merge ABC-1 export boards');
 
-    await q(`UPDATE ba_tasks SET status='running' WHERE id=$1`, [task.id]);
-    const res = await withAppendTx(w.t.app.ctx.pool, (tx) =>
-      applyReleaseChangelogReport(w.t.app.ctx, tx, task, {
-        report: {
-          kind: 'outcome',
-          outcomeId: RELEASE_CHANGELOG_OUTCOME.done,
-          data: {
-            entries: [
-              { heading: 'Added', text: ENTRY('Export a board'), sources: [M1, M2] },
-              { heading: 'Changed', text: ENTRY('Faster board'), sources: [M3] },
-            ],
+    await w.hire('Ada', 'ba', 'senior');
+    const agent = (
+      await q2(`SELECT id FROM agents WHERE role_key='ba' AND workstation_id=$1 LIMIT 1`, [w.workstationId])
+    )[0];
+    const shiftId = crypto.randomUUID();
+    await withAppendTx(w.t.app.ctx.pool, (tx) =>
+      w.t.app.ctx.store.append(
+        [
+          {
+            streamId: `releasedocs-${task.run_id}`,
+            event: {
+              type: 'ReleaseDocsPrepTaskDispatched',
+              payload: { taskId: task.id, shiftId, agentId: agent.id, workstationId: w.workstationId },
+            },
+            actor: { kind: 'system' } as never,
+            scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' } as never,
           },
-        },
-      } as any),
+        ],
+        { tx },
+      ),
+    );
+    const shift = (await q2(`SELECT * FROM shifts WHERE id=$1`, [shiftId]))[0];
+    const res = await withAppendTx(w.t.app.ctx.pool, (tx) =>
+      applyReleasePrepReport(
+        w.t.app.ctx,
+        tx,
+        {
+          report: {
+            kind: 'outcome',
+            outcomeId: 'prep_done',
+            note: 'done',
+            data: {
+              proposal: {
+                entries: [
+                  { heading: 'Added', text: ENTRY('Export a board'), sources: [M1, M2] },
+                  { heading: 'Changed', text: ENTRY('Faster board'), sources: [M3] },
+                ],
+              },
+            },
+          },
+        } as never,
+        shift,
+      ),
     );
     expect(res.accepted).toBe(true);
     const list = await cmds();

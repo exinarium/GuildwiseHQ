@@ -28,12 +28,14 @@ export const ChangelogEntriesTaskSchema = z.object({
         source: z.string().max(80),
         subject: z.string().max(400),
         cards: z
-          .array(z.object({
+          .array(
+            z.object({
               key: z.string().max(40),
               title: z.string().max(400).nullable(),
               /** `key` is the client's ticket reference of an intake card (added to the entry by the platform). */
               client: z.boolean().optional(),
-            }))
+            }),
+          )
           .max(50)
           .default([]),
         areas: z.array(z.string().max(200)).max(50).default([]),

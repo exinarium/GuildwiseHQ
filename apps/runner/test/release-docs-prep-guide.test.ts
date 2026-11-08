@@ -413,7 +413,7 @@ describe("release prep step 'guide'", () => {
   it('edits the configured guide and not docs/USER-GUIDE.md, and skips the PDF for another name', async () => {
     const s = setup({ scripts: true, build: 'flags', guideAt: 'docs/MANUAL.md', alsoDefault: true });
     const e = fakeExec();
-    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+    const { guide } = await analyseThenGuide(s, PROPOSAL, e, {
       guidePath: 'docs/MANUAL.md',
       guidePathConfigured: true,
       repoName: 'GuildwiseHQ',
@@ -427,36 +427,36 @@ describe("release prep step 'guide'", () => {
 
   it('fails naming the repository and path when the configured guide is missing', async () => {
     const s = setup();
-    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+    const { check } = await analyseThenGuide(s, PROPOSAL, fakeExec(), {
       guidePath: 'docs/guide/MANUAL.md',
       guidePathConfigured: true,
       repoName: 'GuildwiseHQ',
     });
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toContain('docs/guide/MANUAL.md');
-    expect(guide.error).toContain('GuildwiseHQ');
-    expect(guide.error).toContain('release/1.5.0');
+    expect(check.state).toBe('failed');
+    expect(check.error).toContain('docs/guide/MANUAL.md');
+    expect(check.error).toContain('GuildwiseHQ');
+    expect(check.error).toContain('release/1.5.0');
   });
 
   it('still skips a missing default guide when no path is configured', async () => {
     const s = setup({ guide: false });
-    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+    const { check } = await analyseThenGuide(s, PROPOSAL, fakeExec(), {
       guidePath: 'docs/USER-GUIDE.md',
       guidePathConfigured: false,
       repoName: 'GuildwiseHQ',
     });
-    expect(guide.state).toBe('passed');
-    expect(guide.output).toMatchObject({ skipped: 'no user guide' });
+    expect(check.state).toBe('skipped');
+    expect(check.output).toMatchObject({ skipped: 'no user guide' });
   });
 
   it('refuses a path outside the repository', async () => {
     const s = setup();
-    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+    const { check } = await analyseThenGuide(s, PROPOSAL, fakeExec(), {
       guidePath: '../x.md',
       guidePathConfigured: true,
     });
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toMatch(/refusing the user guide path \.\.\/x\.md/);
+    expect(check.state).toBe('failed');
+    expect(check.error).toMatch(/refusing the user guide path \.\.\/x\.md/);
   });
 
   it('refuses a guide that is a symlink to a file outside the worktree', async () => {
@@ -467,12 +467,12 @@ describe("release prep step 'guide'", () => {
     sh(s.repo.clone, 'git', ['add', '-A']);
     sh(s.repo.clone, 'git', ['commit', '-m', 'link']);
     sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.5.0']);
-    const { guide } = await analyseThenGuide(s, fakeModel(), fakeExec(), {
+    const { check } = await analyseThenGuide(s, PROPOSAL, fakeExec(), {
       guidePath: 'docs-link.md',
       guidePathConfigured: true,
     });
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toMatch(/points outside the repository/);
+    expect(check.state).toBe('failed');
+    expect(check.error).toMatch(/points outside the repository/);
   });
 
   it('fails when the PDF build fails or touches files outside the guide', async () => {

@@ -171,10 +171,14 @@ const NEWER_SERVER = 'this runner needs a newer server for Update user guide: up
 /** The guide path of the step input, or the failure. */
 function guidePathOf(ctx: DocsPrepStepContext) {
   const input = ReleaseDocsPrepGuideInputSchema.safeParse(ctx.payload.stepInput ?? {});
-  if (!input.success) return { ok: false as const, error: 'the user guide step got an invalid input from the server' };
+  if (!input.success)
+    return { ok: false as const, error: 'the user guide step got an invalid input from the server' };
   const checked = normalizeGuidePath(input.data.guidePath);
   if (!checked.ok)
-    return { ok: false as const, error: `refusing the user guide path ${input.data.guidePath}: it ${checked.reason}` };
+    return {
+      ok: false as const,
+      error: `refusing the user guide path ${input.data.guidePath}: it ${checked.reason}`,
+    };
   const guidePath = checked.path ?? DEFAULT_GUIDE_PATH;
   const where = `${guidePath} on ${ctx.payload.releaseBranch}${input.data.repoName ? ` in ${input.data.repoName}` : ''}`;
   return { ok: true as const, input: input.data, guidePath, where };

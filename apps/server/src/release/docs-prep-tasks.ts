@@ -33,8 +33,12 @@ import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts'
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
 import { accountOf, agentSpecFor, briefAgent } from '../runner-gateway/brief.ts';
-import { changelogDenyList, changelogWriterInput, storedChangelogResult } from './docs-prep-changelog.ts';
-import { changeListFor } from './docs-prep-writer.ts';
+import {
+  changeListFor,
+  changelogDenyList,
+  changelogWriterInput,
+  storedChangelogResult,
+} from './docs-prep-changelog.ts';
 
 /**
  * Release prep tasks (design GWP-92 5.4/5.7, GWP-134): work inside a prep step that an agent does in a `release_prep`
