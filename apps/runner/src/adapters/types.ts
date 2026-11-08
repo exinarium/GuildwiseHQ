@@ -300,6 +300,11 @@ export interface RuntimeAdapter {
   readonly instructionStyle?: 'cli' | 'tools';
   /** Probed at start and every 10 min. */
   capabilities(): Promise<RuntimeCapabilities>;
+  /**
+   * True when the runtime's CLI and its shell reach the network only through the runner's egress proxy (the harness box), so a
+   * declared local test service can be opened there as an exact proxy entry. Absent: false.
+   */
+  usesEgressProxy?(): boolean;
   /** Where this runtime reads its instructions (Claude Code: `<configDir>/CLAUDE.md`). */
   writeInstructions(
     sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>,

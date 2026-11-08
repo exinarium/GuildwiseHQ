@@ -17,6 +17,7 @@ import { deniedShellPrefixes } from './denied-shell.ts';
 import {
   BRIDGE_PORT,
   type HarnessLaunch,
+  harnessTestServices,
   installDirsOf,
   type LaunchedHarness,
   launchInHarnessSandbox,
@@ -325,6 +326,11 @@ export class OpencodeAdapter implements RuntimeAdapter {
     return ids;
   }
 
+  /** opencode always runs in the harness box: its shell reaches the network through the runner's egress proxy only. */
+  usesEgressProxy(): boolean {
+    return true;
+  }
+
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
     // availability only: a key of some organization counts, but a run uses it only for the organization it names
@@ -478,12 +484,14 @@ export class OpencodeAdapter implements RuntimeAdapter {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
     const nuget = userNugetPackages(this.realHome());
+    const testServices = harnessTestServices(input, opts.roleKey, opts.chat);
     const launch: HarnessLaunch = {
       // opencode makes no call of its own besides the model's (its model list, updates, sharing and plugins are off)
       cliHosts: routes.map((r) => new URL(r.upstream).hostname),
       extraHosts: this.cfg.extraAllowedDomains,
       routes,
       ...(this.store?.endpoints().length ? { privateEndpoints: this.store.endpoints() } : {}),
+      ...(testServices ? { testServices } : {}),
       ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
       sandbox: {
         cwd: input.cwd,

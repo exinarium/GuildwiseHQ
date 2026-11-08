@@ -8,7 +8,14 @@ import {
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP, connect as netConnect, type Socket } from 'node:net';
-import { classifyIp, endpointListed, orgCredentialEndpointProblem } from '@aom/shared';
+import {
+  classifyIp,
+  endpointListed,
+  isTestServiceHost,
+  normaliseTestServiceHost,
+  orgCredentialEndpointProblem,
+  testServiceDomain,
+} from '@aom/shared';
 
 /**
  * The network of a harness sandbox (docs/RUNNER.md, "Sandbox parity of the other runtimes"). The sandboxed CLI has no network
@@ -17,6 +24,8 @@ import { classifyIp, endpointListed, orgCredentialEndpointProblem } from '@aom/s
  * - lets a CONNECT through only to a host on the allow-list (the model API, the package registries, the per-shift target), on
  *   port 443 or 80, and only to a public address (a name that resolves to loopback, a private range or the metadata address is
  *   refused, so an allowed name cannot be used to reach the runner or the LAN);
+ * - lets a CONNECT or plain request through to a declared local test service (`testServices`): an exact loopback `host:port`,
+ *   kept apart from `privateEndpoints`;
  * - serves "routes": a local path prefix that is forwarded to one upstream with headers the proxy adds. The model API key lives in
  *   such a route, so the key never exists inside the sandbox, where the agent's shell could read it.
  */
@@ -54,6 +63,13 @@ export interface EgressProxyOptions {
    * Link-local and metadata addresses are never reachable, listed or not. Empty by default.
    */
   privateEndpoints?: string[];
+  /**
+   * The shift's local test services (GWP-41): exact loopback `host:port` entries (`127.0.0.1:5433`, `[::1]:6379`,
+   * `localhost:4000`). A CONNECT or plain request to exactly one of them is let through to this machine; any other port, host or
+   * loopback address is refused as before. Entries that are not a loopback test-service host with a valid port are dropped.
+   * Never read by the private-endpoint or org credential checks. Empty by default.
+   */
+  testServices?: string[];
   /** Test hook: the ports a CONNECT or plain request may use (default 80 and 443). */
   allowedPorts?: number[];
   /** Test hook: resolve names. */
@@ -138,6 +154,34 @@ function parseHostPort(target: string): { host: string; port: number } | undefin
   return { host: m[1], port: Number(m[2]) };
 }
 
+const validPort = (port: number): boolean => Number.isInteger(port) && port >= 1 && port <= 65535;
+
+/**
+ * The canonical form (`testServiceDomain`) of each entry that is a loopback test-service host (127.0.0.1, ::1, localhost) with a
+ * valid port; anything else (a LAN address, a wildcard, a bare host, another loopback address) is dropped.
+ */
+export function canonicalTestServices(entries: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const e of entries) {
+    const hp = parseHostPort(e);
+    if (!hp || !validPort(hp.port)) continue;
+    const host = normaliseTestServiceHost(hp.host);
+    if (isTestServiceHost(host)) out.add(testServiceDomain({ host, port: hp.port }));
+  }
+  return [...out];
+}
+
+/**
+ * True only when host and port both exactly match an entry (canonical `testServiceDomain` form). `[::1]` and `::1` are the same
+ * host; no wildcard, range, whole-host or whole-loopback form exists.
+ */
+export function testServiceListed(host: string, port: number, entries: readonly string[]): boolean {
+  if (entries.length === 0 || !validPort(port)) return false;
+  const h = normaliseTestServiceHost(host);
+  if (!isTestServiceHost(h)) return false;
+  return entries.includes(testServiceDomain({ host: h, port }));
+}
+
 /** Starts the proxy on a Unix socket (mode 0600). The caller closes it when the session ends. */
 export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressProxy> {
   const denied = new Set<string>();
@@ -151,6 +195,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
   const portOk = (p: number): boolean => (o.allowedPorts ? o.allowedPorts.includes(p) : ALLOWED_PORTS.has(p));
   const sockets = new Set<Socket>();
   const routes = [...(o.routes ?? [])].sort((a, b) => b.prefix.length - a.prefix.length);
+  const testServices = canonicalTestServices(o.testServices ?? []);
 
   const server: Server = createHttpServer((req, res) => {
     void handle(req, res);
@@ -165,6 +210,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     let target: URL;
     let privateOk = false;
     let routeHit = false;
+    let testHit: string | undefined;
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers[k] = v;
     for (const k of ['host', 'connection', 'proxy-connection', 'keep-alive', 'transfer-encoding', 'upgrade'])
@@ -209,28 +255,33 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       } catch {
         return fail(400, 'bad request');
       }
+      // A declared local test service: exactly this loopback host and port, plain http, straight to this machine.
+      if (target.protocol === 'http:' && testServiceListed(target.hostname, Number(target.port || 80), testServices))
+        testHit = normaliseTestServiceHost(target.hostname);
       const listed = endpointListed(target.hostname, Number(target.port || 80), o.privateEndpoints ?? []);
       const port = Number(target.port || 80);
       if (
-        target.protocol !== 'http:' ||
-        !(listed || (portOk(port) && hostAllowed(target.hostname, o.allowedHosts)))
+        !testHit &&
+        (target.protocol !== 'http:' ||
+          !(listed || (portOk(port) && hostAllowed(target.hostname, o.allowedHosts))))
       ) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
       }
     }
     asked.add(target.hostname);
-    let ip: string | undefined;
-    try {
-      ip = await publicAddress(
-        target.hostname,
-        o,
-        Number(target.port || (target.protocol === 'https:' ? 443 : 80)),
-        routeHit && privateOk,
-      );
-    } catch {
-      return fail(502, 'name does not resolve');
-    }
+    let ip: string | undefined = testHit;
+    if (!ip)
+      try {
+        ip = await publicAddress(
+          target.hostname,
+          o,
+          Number(target.port || (target.protocol === 'https:' ? 443 : 80)),
+          routeHit && privateOk,
+        );
+      } catch {
+        return fail(502, 'name does not resolve');
+      }
     if (!ip) {
       deny(target.hostname);
       return fail(403, 'address not allowed');
@@ -264,6 +315,26 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     const refuse = (code: string): void => {
       client.end(`HTTP/1.1 ${code}\r\nConnection: close\r\n\r\n`);
     };
+    const tunnel = (ip: string, port: number): void => {
+      const up = netConnect({ host: ip, port });
+      sockets.add(up);
+      up.on('close', () => sockets.delete(up));
+      up.on('error', () => {
+        refuse('502 Bad Gateway');
+        up.destroy();
+      });
+      up.on('connect', () => {
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head.length) up.write(head);
+        up.pipe(client);
+        client.pipe(up);
+      });
+      client.on('close', () => up.destroy());
+    };
+    // A declared local test service: exactly this loopback host and port, straight to this machine (never resolved by name
+    // through the test hook, never through the private-address check, which would refuse loopback).
+    if (hp && testServiceListed(hp.host, hp.port, testServices))
+      return tunnel(normaliseTestServiceHost(hp.host), hp.port);
     const listed = !!hp && endpointListed(hp.host, hp.port, o.privateEndpoints ?? []);
     if (!hp || !(listed || (portOk(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
       deny(hp?.host ?? '?');
@@ -275,20 +346,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
           deny(hp.host);
           return refuse('403 Forbidden');
         }
-        const up = netConnect({ host: ip, port: hp.port });
-        sockets.add(up);
-        up.on('close', () => sockets.delete(up));
-        up.on('error', () => {
-          refuse('502 Bad Gateway');
-          up.destroy();
-        });
-        up.on('connect', () => {
-          client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-          if (head.length) up.write(head);
-          up.pipe(client);
-          client.pipe(up);
-        });
-        client.on('close', () => up.destroy());
+        tunnel(ip, hp.port);
       },
       () => refuse('502 Bad Gateway'),
     );
