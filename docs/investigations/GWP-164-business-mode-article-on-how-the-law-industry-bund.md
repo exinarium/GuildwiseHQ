@@ -99,3 +99,31 @@ Risks: a published slug collision (check first); pilot consent scope (publish no
 | No customer names or unagreed pilot details | Blocked: needs the consent record. Design step 5 |
 | Appears in the Help blog after publish | Manual post route (d), design step 7 |
 | Launch articles unchanged, blog-launch.test.ts passes | Guaranteed by not using the launch set |
+
+## Owner decision and final outcome, 2026-11-08 (fourth design pass)
+
+The card came back to design twice after the first pass (re-checks at `9618cec3` and `5471bd37`). Each time the planner decided to keep it blocked. The owner has now decided for the whole group of industry articles (decision 75e14977, the answer to the GWP-162 question): **close GWP-162, GWP-163 and GWP-164 without an article, or move them back to the backlog until pilots exist.** This is option C in the table above. GWP-162 and GWP-163 have already been handled this way.
+
+Re-check for this pass:
+
+- `origin/release/1.6.0` is still at `5471bd37`, with no new commits since the third pass. The only law piece in code is still the rule pack "Law firms" (five agent-instruction rules). There is no law playbook, role or journey template.
+- The card still has no attachments, and neither vault has `industry-roadmap.md`, pilot notes or a consent record.
+
+Outcome:
+
+- **No article is written, and this report is the only file that changes.** The build stage has nothing to implement. The builder must not create `docs/blog/industry/law.md` or the shared industry-article test for this card.
+- The card is closed, or returned to the backlog, as the owner decided. The builder hands it on with no code change, and the BA or owner closes it at finalize.
+- If a law pilot runs later, the card can be raised again from the backlog. The design under "Design for the build, once unblocked" still applies then: source at `docs/blog/industry/law.md`, tags from `BLOG_TAGS`, a manual post in Platform > Blog, and only the names listed in design step 2. It must be re-checked against the release current at that time.
+
+### Acceptance criteria under this outcome
+
+| AC | Status |
+| --- | --- |
+| Findings recorded on the card | Met: this report, the handoff summary and the Card Brief |
+| Close if an article exists | No article exists. The card closes anyway, on the owner's decision (75e14977) |
+| Exactly one new article, parses clean | Not met, on purpose: the owner withdrew it |
+| Every named piece exists | Not applicable: no article |
+| Recommendation framing + pilot walk-through | Not met: there is no pilot material, and the owner closed the card |
+| No customer or pilot data | Met trivially: nothing is published |
+| Appears in the Help blog | Not applicable |
+| Launch articles unchanged, blog-launch.test.ts passes | Met: nothing in the launch set or its tests changes |
