@@ -60,7 +60,7 @@ import {
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
-import { isReadOnlyWorktreeRole } from '../adapters/claude-policy.ts';
+import { isReadOnlyWorktreeRole, type ScopedVault } from '../adapters/claude-policy.ts';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
@@ -520,6 +520,21 @@ export function shiftVaultsOf(msg: {
   return (msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
     ? [msg.vault]
     : [];
+}
+
+/**
+ * The vault clones a shift reads only in part: a card shift reads the organization vault without the other projects'
+ * folders (the root, everything outside projects/ and its own project folder, the folder the server resolved for the
+ * card, never derived from the key). Every other shift, and every other vault, opens whole.
+ */
+export function cardScopedVaults(
+  shiftKind: string | undefined,
+  vaultCtxs: ReadonlyArray<{ kind?: string; addDir: string; folder?: string }>,
+): ScopedVault[] {
+  if (shiftKind !== 'card') return [];
+  return vaultCtxs.flatMap((c) =>
+    c.kind === 'org' && c.folder ? [{ dir: c.addDir, keep: join(c.addDir, ...c.folder.split('/')) }] : [],
+  );
 }
 
 export class ShiftSupervisor {
@@ -1274,6 +1289,8 @@ export class ShiftSupervisor {
       path: c.addDir,
       kind: 'vault',
     }));
+    // A card shift reads the organization vault only outside the other projects' folders.
+    const scopedVaults = cardScopedVaults(msg.kind, vaultCtxs);
     s.brief = withVaultContexts(msg.brief, vaultCtxs);
     // A "run this branch" request: the runner finds BUILD.md and the commits itself (the server never reads repositories).
     if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
@@ -1442,6 +1459,7 @@ export class ShiftSupervisor {
         ...(msg.kind === 'ba_task' ? registeredFolders : []),
         ...vaultReadFolder,
       ].map((f) => f.path),
+      ...(scopedVaults.length ? { scopedVaults } : {}),
       addDirs: scanDirs,
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
     };
@@ -1577,6 +1595,7 @@ export class ShiftSupervisor {
           ...(msg.kind === 'ba_task' ? registeredFolders : []),
           ...vaultReadFolder,
         ].map((f) => f.path),
+        ...(scopedVaults.length ? { scopedVaults } : {}),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),

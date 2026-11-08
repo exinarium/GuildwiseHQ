@@ -1823,6 +1823,19 @@ clone under `vaults/`; with none, the instructions say the vault is not cloned h
 The vault is listed in "Folders you can read" as read-only; writes go through `aom` commands (`aom publish`,
 `aom investigation record`, ...), never directly. A vault of another organization is never sent.
 
+**Other projects' folders in the organization vault (card shifts).** A card shift reads the organization vault clone
+without the other projects: the root files, everything outside `projects/` and its own project folder (the `folder` the
+server sent with the vault, `projectVaultFolder`, never derived from the key) stay readable; every other entry of
+`projects/` is denied to the Read, Grep and Glob tools (`Read(<path>)` and `Read(<path>/**)`) and to the shell
+(`denyRead`, and the clone is opened to `allowRead` entry by entry so those folders are not re-opened). Secret files stay
+denied as before, in the card's own folder too. The clone's own `.git` is denied the same way (its history holds every
+project; vault writes go through `aom` and the runner syncs the clone outside the sandbox), and symbolic links at the
+clone's root and in `projects/` are not opened to the shell (the sandbox would bind their target). A project with no folder yet sees the root and `org/` only. The
+`projects/` entries are listed when the shift's settings are built (`vaultSiblingMasks` in `claude-policy.ts`), so a
+project folder created after the shift started is not masked in that shift; the next shift masks it. Delegated
+sub-tasks of the shift get the same masks. The project's own vault clone, question, BA task and CEO shifts, and chats
+are not masked. This is hardening only: the workstation user can see every project of the organization anyway.
+
 ### The CEO shift (`kind: 'ceo'`) and `aom ceo`
 
 The organization's CEO agent (docs/design/ceo-agent-v2.md) runs on one of the owner's workstations in two ways: **wake shifts**

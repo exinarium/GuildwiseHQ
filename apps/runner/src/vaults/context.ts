@@ -15,6 +15,8 @@ import { isLocalVaultDir } from './local.ts';
 export interface VaultShiftContext {
   /** Which vault this is (set by readVaultContexts). */
   kind?: ShiftVault['kind'];
+  /** The card's project folder inside the vault, as the server sent it (set by readVaultContexts). */
+  folder?: string;
   /** The one directory passed to the runtime as `--add-dir`. */
   addDir: string;
   standingOrders: Array<{ title: string; body: string }>;
@@ -107,7 +109,7 @@ export async function readVaultContexts(
     seen.add(v.vaultId);
     const ctx = await readVaultContext(vaultsDir, v);
     if (!ctx || out.some((c) => c.addDir === ctx.addDir)) continue;
-    out.push({ ...ctx, kind: v.kind });
+    out.push({ ...ctx, kind: v.kind, ...(v.folder ? { folder: v.folder } : {}) });
   }
   if (out.length < 2) return out;
   return out.map((c) => ({

@@ -8,7 +8,13 @@ import {
   TEST_SERVICES_SETTING,
   type TestServicesSeen,
 } from '../sandbox/test-services.ts';
-import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
+import {
+  isSecretFileName,
+  sandboxReadEntries,
+  scanCloneEntries,
+  scanMasksFor,
+  secretReadDenies,
+} from './read-only-dirs.ts';
 
 /**
  * What an agent session may touch, expressed in Claude Code's own settings (verified against
@@ -54,6 +60,12 @@ export interface ClaudePolicyContext {
    * Only their secret-file Read denies are kept (see `splitOwnRepository`).
    */
   ownRepoDirs?: string[];
+  /**
+   * Read-only vault clones (also in `readDirs`) of which only part is readable: the organization vault in a card shift.
+   * `keep` is the card's own project folder inside `dir` (resolved by the server). Every other entry of `<dir>/projects/`
+   * is unreadable to the Read tool and to the shell (`vaultSiblingMasks`). Absent: every read-only folder opens whole.
+   */
+  scopedVaults?: ScopedVault[];
   /** The runner's `bin/` (the `aom` shim) and where the shim's script lives: readable although inside the data dir. */
   aomReadPaths: string[];
   /** Unix socket of the runner's IPC server (the `aom` CLI talks over it: the sandbox has no loopback route out). */
@@ -94,6 +106,74 @@ export interface ClaudePolicyContext {
    * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook.
    */
   guardHookCommand?: string;
+}
+
+/** A read-only vault clone of which only the root, everything outside `projects/` and `keep` are readable. */
+export interface ScopedVault {
+  /** The vault clone (one of `readDirs`). */
+  dir: string;
+  /** The card's own folder inside it, e.g. `<dir>/projects/a` (it need not exist yet). */
+  keep: string;
+}
+
+/**
+ * The entries of `<vault>/projects/` a shift must not read: every one except the folder on the path to `keep`. Listed when
+ * the settings are built, so a project folder created after the shift started is not covered (settings are rebuilt at
+ * every shift start). No `projects/` folder: nothing to mask.
+ */
+export function vaultSiblingMasks(v: ScopedVault): string[] {
+  const projects = join(resolve(v.dir), 'projects');
+  const rel = relative(projects, resolve(v.keep)).split(sep).filter(Boolean);
+  const own = rel.length > 0 && rel[0] !== '..' ? rel[0] : undefined;
+  let names: string[];
+  try {
+    names = readdirSync(projects);
+  } catch {
+    return [];
+  }
+  return names.filter((n) => n !== own).map((n) => join(projects, n));
+}
+
+/**
+ * Everything of a scoped vault the shift must not read: the other projects' folders and the clone's own git metadata
+ * (`<dir>/.git`: its history holds every project, so `git show HEAD:projects/b/...` would undo the mask). Agents never
+ * need the vault history: vault writes go through `aom` and the runner syncs the clone outside the sandbox.
+ */
+export function scopedVaultHidden(v: ScopedVault): string[] {
+  return [join(resolve(v.dir), '.git'), ...vaultSiblingMasks(v)];
+}
+
+/**
+ * `sandboxReadEntries` for a scoped vault: the clone opened entry by entry so the masked project folders and the
+ * clone's `.git` stay out (allowRead beats denyRead in the sandbox, so allowing the clone whole would re-open them).
+ * Secret files stay out as everywhere else. Symbolic links at the root and in `projects/` are left out too: the sandbox
+ * binds a link's target, so a link into a masked folder would open it. A folder too large to scan is left closed (fail
+ * closed, like `sandboxReadEntries`).
+ */
+function scopedVaultReadEntries(v: ScopedVault): string[] {
+  const root = resolve(v.dir);
+  const hidden = new Set(scopedVaultHidden(v));
+  const projects = join(root, 'projects');
+  const open = (dir: string): string[] => {
+    let entries: Array<{ name: string; isDir: boolean; isLink: boolean }>;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).map((e) => ({
+        name: e.name,
+        isDir: e.isDirectory(),
+        isLink: e.isSymbolicLink(),
+      }));
+    } catch {
+      return [];
+    }
+    return entries.flatMap((e) => {
+      const path = join(dir, e.name);
+      if (hidden.has(path) || e.isLink) return [];
+      if (path === projects && e.isDir) return open(path);
+      if (e.isDir) return sandboxReadEntries(path) ?? [];
+      return isSecretFileName(e.name) ? [] : [path];
+    });
+  };
+  return open(root);
 }
 
 /** What a shift's sandbox is allowed, beyond what its tools imply. */
@@ -344,8 +424,21 @@ function sandboxBlock(
     ...(profile.browser ? browserMask(ctx) : []),
   ];
   const readDirs = ctx.readDirs ?? [];
-  // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead).
-  const readEntries = readDirs.flatMap((d) => sandboxReadEntries(d) ?? []);
+  const scoped = ctx.scopedVaults ?? [];
+  const scopeOf = (d: string) => scoped.find((v) => resolve(v.dir) === resolve(d));
+  // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead);
+  // a scoped vault also leaves out the other projects' folders.
+  const readEntries = readDirs.flatMap((d) => {
+    const v = scopeOf(d);
+    return v ? scopedVaultReadEntries(v) : (sandboxReadEntries(d) ?? []);
+  });
+  // the other projects' folders and the git metadata of a scoped vault, named too (already outside every allowRead entry)
+  denyRead.push(
+    ...readDirs.flatMap((d) => {
+      const v = scopeOf(d);
+      return v ? scopedVaultHidden(v) : [];
+    }),
+  );
   return {
     enabled: true,
     failIfUnavailable: ctx.mode === 'required',
@@ -506,11 +599,16 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
 }
 
 /** Read-only folders: no Edit or Write there (a deny wins over every allow), and no secret file is readable. */
-function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs' | 'ownRepoDirs'>): string[] {
+function readOnlyDenies(
+  ctx: Pick<ClaudePolicyContext, 'readDirs' | 'ownRepoDirs' | 'scopedVaults'>,
+): string[] {
   const dirs = ctx.readDirs ?? [];
+  const scoped = (ctx.scopedVaults ?? []).filter((v) => dirs.some((d) => resolve(d) === resolve(v.dir)));
   return [
     ...dirs.flatMap((d) => [`Edit(${ruleAbs(d)}/**)`, `Edit(${ruleAbs(d)})`]),
     ...secretReadDenies([...dirs, ...(ctx.ownRepoDirs ?? [])]),
+    // a scoped vault: the other projects' folders and its git metadata are not readable (Read, Grep and Glob)
+    ...scoped.flatMap(scopedVaultHidden).flatMap((p) => [`Read(${ruleAbs(p)}/**)`, `Read(${ruleAbs(p)})`]),
   ];
 }
 

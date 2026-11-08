@@ -516,6 +516,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
       addDirs?: string[];
       readDirs?: string[];
+      scopedVaults?: Array<{ dir: string; keep: string }>;
       toolchainReadDirs?: string[];
       extraAllowedDomains?: string[];
       testServiceDomains?: string[];
@@ -536,6 +537,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       addDirs: input.addDirs ?? [],
       gitDirs: chat ? [] : gitDirsOf(cwd),
       readDirs: input.readDirs ?? [],
+      ...(input.scopedVaults?.length ? { scopedVaults: input.scopedVaults } : {}),
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       realHome: this.realHome(),
