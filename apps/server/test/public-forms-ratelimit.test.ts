@@ -63,3 +63,30 @@ describe('rate limiting (AC6)', () => {
     expect((await pf.start(quiet.publicId, dto, { full_name: 'x' }, f1, {}, ip)).status).toBe(201);
   });
 });
+
+describe('the per-address limit keys on the resolved client address (default AOM_TRUST_PROXY)', () => {
+  const hit = (publicId: string, remoteAddress: string, xff: string) =>
+    pf.w.t.app.inject({
+      method: 'GET',
+      url: `/api/public/forms/${publicId}`,
+      remoteAddress,
+      headers: { 'x-forwarded-for': xff },
+    });
+
+  it('a directly reachable client that rotates X-Forwarded-For still hits the limit', async () => {
+    const { publicId } = await pf.published(pf.definition('Rate spoof'));
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++)
+      statuses.push((await hit(publicId, '203.0.113.77', `198.51.100.${i + 1}`)).statusCode);
+    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
+  });
+
+  it('behind a same-host proxy (loopback peer) distinct forwarded addresses get separate buckets', async () => {
+    const { publicId } = await pf.published(pf.definition('Rate proxied'));
+    const statuses: number[] = [];
+    for (let i = 0; i < 25; i++)
+      statuses.push((await hit(publicId, '127.0.0.1', `192.0.2.${100 + i}`)).statusCode);
+    expect(statuses.every((s) => s === 200)).toBe(true);
+  });
+});

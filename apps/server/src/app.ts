@@ -145,6 +145,7 @@ import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
 import { StorageRelay } from './storage-relay/hub.ts';
+import { describeTrustProxy, fastifyTrustProxy, trustProxyWarning } from './trust-proxy.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
@@ -318,9 +319,12 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
             redact: LOG_REDACT,
             stream: logRing.tee(opts.logStream ?? process.stdout),
           },
-    trustProxy: true,
+    trustProxy: fastifyTrustProxy(config.trustProxy),
     bodyLimit: 2 * 1024 * 1024,
   }) as unknown as AomApp;
+  const trustWarning = trustProxyWarning(config.trustProxy);
+  if (trustWarning) app.log.warn(trustWarning);
+  else app.log.info({ trustProxy: describeTrustProxy(config.trustProxy) }, 'trusted proxy');
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 

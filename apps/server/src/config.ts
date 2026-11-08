@@ -8,6 +8,7 @@ import {
   STORAGE_MAX_FILE_BYTES,
 } from '@aom/shared';
 import { z } from 'zod';
+import { parseTrustProxy, type TrustProxy } from './trust-proxy.ts';
 
 /**
  * `AOM_EXTRA_ORIGINS`: comma-separated exact origins (`scheme://host[:port]`), normalised the way a browser sends the Origin
@@ -93,6 +94,8 @@ const EnvSchema = z.object({
   AOM_MEDIA_MAX_CONCURRENT_PER_IP: z.coerce.number().int().min(0).max(1000).default(8),
   AOM_MEDIA_RATE_PER_MIN: z.coerce.number().int().min(0).max(100000).default(240),
   AOM_RATE_LIMIT: bool(true),
+  /** Which proxies may set X-Forwarded-For; parsed by parseTrustProxy (trust-proxy.ts), which owns the validation. */
+  AOM_TRUST_PROXY: z.string().optional(),
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
@@ -260,6 +263,8 @@ export interface Config {
   mediaMaxConcurrentPerIp: number;
   mediaRatePerMin: number;
   rateLimit: boolean;
+  /** Which proxies may set `X-Forwarded-For` (`AOM_TRUST_PROXY`); unset: loopback only. Decides `req.ip` for every per-address limit. */
+  trustProxy: TrustProxy;
   testClock: boolean;
   /** Accept `file://` and absolute-path git remotes (tests and the e2e harness only). */
   allowLocalRemotes: boolean;
@@ -432,6 +437,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mediaMaxConcurrentPerIp: e.AOM_MEDIA_MAX_CONCURRENT_PER_IP,
     mediaRatePerMin: e.AOM_MEDIA_RATE_PER_MIN,
     rateLimit: e.AOM_RATE_LIMIT,
+    trustProxy: parseTrustProxy(e.AOM_TRUST_PROXY),
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
