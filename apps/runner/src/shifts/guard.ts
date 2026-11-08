@@ -3,6 +3,7 @@ import {
   CARD_BRANCH_PREFIXES,
   type GuardViolation,
   isRunnerOwnedBranch,
+  workRefBranchPart,
 } from '@aom/shared';
 import picomatch from 'picomatch';
 import {
@@ -92,6 +93,10 @@ export interface GuardInput {
   projectKey?: string;
   /** Main, the project working branch and the base branch: strict unless checked out in a sibling worktree. */
   protectedBranches?: string[];
+  /** The branch part of this card's client ticket (`ABC-1`, `web-12`): its ticket-named branches are the card's own. */
+  ownTicketBranchPart?: string;
+  /** The project's card branch prefix (brief.project.branchPrefix): branches under it are card branches. */
+  cardBranchPrefix?: string;
 }
 
 /**
@@ -549,12 +554,41 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   return violations;
 }
 
-/** The card ref a branch name carries (`backup/gwp-63-x` -> `GWP-63`), for the project's key only; null when none. */
-export function cardRefOfBranch(name: string, projectKey: string | undefined): string | null {
-  if (!projectKey) return null;
-  const key = projectKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const m = new RegExp(`(?:^|/)(${key}-\\d+)(?=$|[-/_.])`, 'i').exec(name);
-  return m?.[1] ? m[1].toUpperCase() : null;
+/**
+ * What the brief adds to the other-branch guard: the branch part of the card's client ticket (its ticket-named branches
+ * are its own) and the project's card branch prefix (branches under it are card branches). Older servers send neither.
+ */
+export function workRefGuardInput(
+  card: { workRef?: string; isClientRef?: boolean },
+  project: { branchPrefix?: string },
+): Pick<GuardInput, 'ownTicketBranchPart' | 'cardBranchPrefix'> {
+  const part = card.isClientRef && card.workRef ? workRefBranchPart(card.workRef) : null;
+  return {
+    ...(part ? { ownTicketBranchPart: part } : {}),
+    ...(project.branchPrefix ? { cardBranchPrefix: project.branchPrefix } : {}),
+  };
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The card ref a branch name carries (`backup/gwp-63-x` -> `GWP-63`), for the project's key; null when none. `own`: the
+ * card's own client ticket part (`ABC-1`) maps the card's ticket-named branches (`aom/ABC-1-x`) to its own ref.
+ */
+export function cardRefOfBranch(
+  name: string,
+  projectKey: string | undefined,
+  own?: { cardRef: string; ticketPart: string },
+): string | null {
+  if (projectKey) {
+    const m = new RegExp(`(?:^|/)(${escapeRe(projectKey)}-\\d+)(?=$|[-/_.])`, 'i').exec(name);
+    if (m?.[1]) return m[1].toUpperCase();
+  }
+  if (own?.ticketPart && own.cardRef) {
+    if (new RegExp(`(?:^|/)${escapeRe(own.ticketPart)}(?=$|[-/_.])`, 'i').test(name))
+      return own.cardRef.toUpperCase();
+  }
+  return null;
 }
 
 /** Heads this worktree's HEAD pointed at through a commit-creating action since the shift began; null: unknown. */
@@ -595,6 +629,10 @@ export async function otherBranchViolation(input: GuardInput): Promise<GuardViol
   if (head.exitCode === 0 && head.stdout.trim())
     protectedSet.add(head.stdout.trim().replace(/^origin\//, ''));
   const ownRef = input.cardRef?.toUpperCase();
+  const ownTicket =
+    input.cardRef && input.ownTicketBranchPart
+      ? { cardRef: input.cardRef, ticketPart: input.ownTicketBranchPart }
+      : undefined;
   let shas: Set<string> | null | undefined;
   const moved: string[] = [];
   for (const b of Object.keys(now)) {
@@ -607,9 +645,13 @@ export async function otherBranchViolation(input: GuardInput): Promise<GuardViol
     if (protectedSet.has(b)) provenance = siblings.has(b);
     else if (siblings.has(b)) provenance = true;
     else {
-      const ref = cardRefOfBranch(b, input.projectKey);
+      const ref = cardRefOfBranch(b, input.projectKey, ownTicket);
       if (ref && ref === ownRef) provenance = false;
-      else provenance = ref !== null || CARD_BRANCH_PREFIXES.some((p) => b.startsWith(p));
+      else
+        provenance =
+          ref !== null ||
+          CARD_BRANCH_PREFIXES.some((p) => b.startsWith(p)) ||
+          (!!input.cardBranchPrefix && b.startsWith(input.cardBranchPrefix));
     }
     if (!provenance) {
       moved.push(b);

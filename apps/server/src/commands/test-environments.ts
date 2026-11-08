@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  branchName,
   CHECK_TIMEOUT_MAX_MIN,
+  cardBranchName,
   DEFAULT_RUN_PORT_RANGE,
   DESK_SUBKIND,
   expandEnvId,
@@ -209,7 +209,7 @@ export async function startTestRunIn(
   if (!cardRepo) return { skip: 'the card repository is not cloned on its workstation' };
   if (!wcard.worktree_path) return { skip: 'the card has no worktree yet' };
   const cardBranch = (wcard.branch_name ??
-    branchName(project.branch_prefix, wcard.ref, wcard.title)) as string;
+    cardBranchName(project.branch_prefix ?? '', wcard as never).name) as string;
   const sources = repos.map((r) => ({
     repo: r,
     branch: (r.id === cardRepo.id ? cardBranch : (r.working_branch ?? project.working_branch)) as string,

@@ -210,6 +210,7 @@ import {
   runGuard,
   snapshotBranches,
   uncommittedOutOfScope,
+  workRefGuardInput,
 } from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
@@ -2342,6 +2343,7 @@ export class ShiftSupervisor {
       permissions: msg.agent.permissions,
       cardRef: msg.brief.card.ref,
       projectKey: msg.brief.project.key,
+      ...workRefGuardInput(msg.brief.card, msg.brief.project),
       ...(protectedBranches.length ? { protectedBranches } : {}),
       branchName: s.worktree?.branchName ?? '',
       startSha,

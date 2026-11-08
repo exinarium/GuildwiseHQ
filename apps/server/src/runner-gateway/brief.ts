@@ -29,6 +29,7 @@ import {
   streamId,
   VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
+  workReference,
 } from '@aom/shared';
 import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
@@ -56,6 +57,12 @@ import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
+
+/** The card's work reference for the brief: its intake ticket key when it came from a client ticket, else its ref. */
+export function briefWorkRef(card: Row): { workRef: string; isClientRef: boolean } {
+  const wr = workReference({ ref: card.ref as string, fields: card.fields });
+  return { workRef: wr.ref, isClientRef: wr.isClientRef };
+}
 
 export function agentSpec(a: Row): AgentRuntimeSpec {
   return {
@@ -280,6 +287,7 @@ export async function buildBrief(
     card: {
       id: card.id,
       ref: card.ref,
+      ...briefWorkRef(card),
       title: card.title,
       cardType: card.card_type,
       fields: card.fields,
@@ -331,6 +339,7 @@ export async function buildBrief(
       key: project.key,
       name: project.name,
       workingBranch: project.working_branch,
+      ...(project.branch_prefix ? { branchPrefix: project.branch_prefix as string } : {}),
       e2eGlobs: project.e2e_globs,
       architecturalGlobs: project.architectural_globs,
       vaultFolder: project.vault_folder ?? undefined,

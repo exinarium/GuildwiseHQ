@@ -11,6 +11,7 @@ import {
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
+  workRefGuardInput,
 } from '../src/shifts/guard.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -405,5 +406,139 @@ describe('guard: commits_on_other_branch attribution by card', () => {
     expect(cardRefOfBranch('feat/video-1.3', 'GWP')).toBeNull();
     expect(cardRefOfBranch('release/1.5.0', 'GWP')).toBeNull();
     expect(cardRefOfBranch('aom/gwp-63-x', undefined)).toBeNull();
+  });
+});
+
+describe('guard: intake cards with ticket-named branches', () => {
+  const repoId = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
+  /** Card TOY-1 came from ticket ABC-1 and works on `feature/ABC-1-x`; card TOY-2 (ticket ABC-2) on `feature/ABC-2-y`. */
+  async function intakeCards(extra: { cardBranchPrefix?: string | null } = {}) {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt-a');
+    const bPath = join(tmp(), 'wt-b');
+    const own = 'feature/ABC-1-x';
+    const w = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: { mode: 'create', repoId, remoteUrlNormalized: 'x', baseBranch: 'main', branchName: own },
+      defaultPath: path,
+    });
+    await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: {
+        mode: 'create',
+        repoId,
+        remoteUrlNormalized: 'x',
+        baseBranch: 'main',
+        branchName: 'feature/ABC-2-y',
+      },
+      defaultPath: bPath,
+    });
+    const branchesAtStart = await snapshotBranches(path);
+    const startedAtMs = Date.now();
+    const fromBrief = workRefGuardInput(
+      { workRef: 'ABC-1', isClientRef: true },
+      extra.cardBranchPrefix === null ? {} : { branchPrefix: extra.cardBranchPrefix ?? 'feature/' },
+    );
+    const guard = async () =>
+      (
+        await runGuard({
+          worktree: path,
+          roleKey: 'builder',
+          permissions: role('builder').permissions,
+          branchName: own,
+          startSha: w.headSha,
+          branchesAtStart,
+          e2eGlobs: ['e2e/**'],
+          cardRef: 'TOY-1',
+          projectKey: 'TOY',
+          startedAtMs,
+          ...fromBrief,
+        })
+      ).filter((v) => v.rule === 'commits_on_other_branch');
+    const commit = (wt: string, f: string) => {
+      writeFileSync(join(wt, f), f);
+      sh(wt, 'git', ['add', '-A']);
+      sh(wt, 'git', ['commit', '-m', f]);
+    };
+    return { repo, path, bPath, guard, commit };
+  }
+
+  it('workRefGuardInput takes the ticket part only for a client reference', () => {
+    expect(workRefGuardInput({ workRef: 'ABC-1', isClientRef: true }, { branchPrefix: 'aom/' })).toEqual({
+      ownTicketBranchPart: 'ABC-1',
+      cardBranchPrefix: 'aom/',
+    });
+    expect(workRefGuardInput({ workRef: 'acme/web#12', isClientRef: true }, {})).toEqual({
+      ownTicketBranchPart: 'web-12',
+    });
+    expect(workRefGuardInput({ workRef: 'TOY-1', isClientRef: false }, {})).toEqual({});
+    expect(workRefGuardInput({}, { branchPrefix: '' })).toEqual({});
+  });
+
+  it("(a) committing on the card's own ticket branch passes", async () => {
+    const t = await intakeCards();
+    t.commit(t.path, 'a1.txt');
+    t.commit(t.path, 'a2.txt');
+    expect(await t.guard()).toEqual([]);
+  });
+
+  it("(b) committing on another card's ticket-named or key-named branch is refused", async () => {
+    const t = await intakeCards();
+    sh(t.repo.clone, 'git', ['branch', 'feature/ABC-2-old', 'main']);
+    t.commit(t.path, 'a1.txt');
+    sh(t.path, 'git', ['branch', '-f', 'feature/ABC-2-old', 'HEAD']);
+    expect((await t.guard())[0]?.detail).toContain('feature/ABC-2-old (commits made in this worktree)');
+
+    const u = await intakeCards();
+    sh(u.repo.clone, 'git', ['branch', 'aom/toy-7-z', 'main']);
+    sh(u.path, 'git', ['checkout', 'aom/toy-7-z']);
+    u.commit(u.path, 'x.txt');
+    sh(u.path, 'git', ['checkout', 'feature/ABC-1-x']);
+    expect((await u.guard())[0]?.detail).toContain('aom/toy-7-z (commits made in this worktree)');
+
+    const v = await intakeCards();
+    v.commit(v.path, 'a1.txt');
+    sh(v.path, 'git', ['update-ref', 'refs/heads/feature/ABC-2-y', 'HEAD']);
+    expect((await v.guard())[0]?.detail).toContain('feature/ABC-2-y');
+  });
+
+  it('another card moving its own ticket branch under the project prefix does not refuse this card', async () => {
+    const t = await intakeCards();
+    t.commit(t.bPath, 'b1.txt');
+    sh(t.bPath, 'git', ['branch', 'feature/ABC-2-backup', 'HEAD']);
+    expect(await t.guard()).toEqual([]);
+    // Without the prefix (an older server) the same branch is a non-card branch: stricter, still refused.
+    const u = await intakeCards({ cardBranchPrefix: null });
+    u.commit(u.bPath, 'b1.txt');
+    sh(u.bPath, 'git', ['branch', 'feature/ABC-2-backup', 'HEAD']);
+    expect((await u.guard())[0]?.detail).toContain('feature/ABC-2-backup');
+  });
+
+  it("the card's own leftover ticket branch stays strict, like its own key-named backups", async () => {
+    const t = await intakeCards();
+    t.commit(t.path, 'a1.txt');
+    sh(t.path, 'git', ['branch', 'backup/ABC-1-save', 'HEAD']);
+    expect((await t.guard())[0]?.detail).toContain('backup/ABC-1-save');
+    expect((await t.guard())[0]?.detail).not.toContain('commits made in this worktree');
+  });
+
+  it('cardRefOfBranch maps the own ticket branches to the own ref, with a boundary', () => {
+    const own = { cardRef: 'toy-1', ticketPart: 'ABC-1' };
+    expect(cardRefOfBranch('aom/ABC-1-fix-login', 'TOY', own)).toBe('TOY-1');
+    expect(cardRefOfBranch('backup/abc-1-x', 'TOY', own)).toBe('TOY-1');
+    expect(cardRefOfBranch('ABC-1', 'TOY', own)).toBe('TOY-1');
+    expect(cardRefOfBranch('aom/ABC-10-x', 'TOY', own)).toBeNull();
+    expect(cardRefOfBranch('aom/XABC-1-x', 'TOY', own)).toBeNull();
+    expect(cardRefOfBranch('aom/ABC-2-x', 'TOY', own)).toBeNull();
+    // A key-named branch of another card is still that card's.
+    expect(cardRefOfBranch('aom/toy-7-x', 'TOY', own)).toBe('TOY-7');
+    // (c) A card without a ticket: unchanged.
+    expect(cardRefOfBranch('aom/toy-5-x', 'TOY')).toBe('TOY-5');
+    expect(cardRefOfBranch('aom/ABC-1-x', 'TOY')).toBeNull();
+    expect(
+      cardRefOfBranch('aom/web-12-dark-mode', undefined, { cardRef: 'TOY-3', ticketPart: 'web-12' }),
+    ).toBe('TOY-3');
   });
 });
