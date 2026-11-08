@@ -493,7 +493,7 @@ changed sections, a markdown link check passes, then ship succeeds.
 
 ## 9. Follow-ups (backlog suggestions, not this card)
 
-- Release prep: also update the in-app Help articles (`apps/web/src/help/articles/`) for changed features.
+- Release prep: also update the in-app Help articles (`apps/web/src/help/articles/`) for changed features. Done in GWP-136 (step `help`).
 - PDF guide: take the footer and cover date from the release instead of the hard-coded "7 October 2026".
 - A per-repository "user guide path" setting (this card uses the fixed default `docs/USER-GUIDE.md`).
 - A project setting for which agent writes the release documentation.

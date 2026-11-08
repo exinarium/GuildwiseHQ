@@ -83,11 +83,11 @@ beforeEach(async () => {
 });
 
 /**
- * 'Write changelog' and 'Update user guide' are on by default but need a writer agent: these tests untick both unless
+ * 'Write changelog', 'Update user guide' and 'Update Help articles' are on by default but need a writer agent: these tests untick them unless
  * they ask for one ('Write changelog' has its own tests in release-docs-prep-changelog-flow.test.ts).
  */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false, ...steps } });
+  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false, help: false, ...steps } });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -163,7 +163,7 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'videos', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'help', 'videos', 'commit']);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -258,7 +258,7 @@ describe('the user guide path setting', () => {
 
   it('sends the configured path to a runner that has the capability, and fails the step before dispatch without it', async () => {
     await w.hire('Amy', 'architect', 'senior');
-    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true } });
+    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true, help: false } });
     await q(
       `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text WHERE workstation_id=$1`,
       [w.workstationId, RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY],
@@ -275,7 +275,7 @@ describe('the user guide path setting', () => {
 
   it('fails the guide step before dispatch on a workstation without the capability', async () => {
     await w.hire('Amy', 'architect', 'senior');
-    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true } });
+    await put({ [w.repoId]: 'docs/guide/MANUAL.md' }, { steps: { changelog: false, guide: true, help: false } });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
     const run = await latest();

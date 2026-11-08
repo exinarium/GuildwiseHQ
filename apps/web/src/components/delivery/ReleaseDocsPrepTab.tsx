@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Badge, Button, Callout, ErrorBox, Panel, Spinner } from '../ui.tsx';
 import { ChangelogStepOutput } from './ChangelogStepOutput.tsx';
 import { GuideStepOutput } from './GuideStepOutput.tsx';
+import { HelpStepOutput } from './HelpStepOutput.tsx';
 import { VideoStepReport } from './VideoStepReport.tsx';
 
 const TONE = {
@@ -213,6 +214,7 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
                   </span>
                 )}
                 {s.step === 'guide' && s.output != null && <GuideStepOutput output={s.output} />}
+                {s.step === 'help' && s.output != null && <HelpStepOutput output={s.output} />}
                 {s.step === 'changelog' && !s.error && showsChangelogOutput(s) && (
                   <ChangelogStepOutput repoName={repo.repoName} state={s.state} output={s.output} />
                 )}

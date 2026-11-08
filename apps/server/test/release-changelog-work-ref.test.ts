@@ -39,7 +39,7 @@ beforeEach(async () => {
   await q(`TRUNCATE runner_commands CASCADE`);
   await q(`TRUNCATE release_docs_prep_tasks`);
   await q(
-    `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"guide": false}}'::jsonb, working_branch='release/1.5.0' WHERE id=$1`,
+    `UPDATE projects SET release_docs_prep='{"enabled": true, "steps": {"guide": false, "help": false}}'::jsonb, working_branch='release/1.5.0' WHERE id=$1`,
     [w.projectId],
   );
   await q(`UPDATE project_repos SET main_branch='main', working_branch=NULL WHERE id=$1`, [w.repoId]);

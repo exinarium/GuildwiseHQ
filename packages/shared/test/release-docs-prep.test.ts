@@ -27,11 +27,13 @@ describe('release docs prep step registry', () => {
       'analyse',
       'changelog',
       'guide',
+      'help',
       'commit',
     ]);
     expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual([
       'changelog',
       'guide',
+      'help',
       'commit',
     ]);
   });
@@ -39,6 +41,7 @@ describe('release docs prep step registry', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: { guide: false } }).map((s) => s.id)).toEqual([
       'analyse',
       'changelog',
+      'help',
       'commit',
     ]);
   });

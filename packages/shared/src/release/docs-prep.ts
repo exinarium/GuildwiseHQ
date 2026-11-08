@@ -82,8 +82,30 @@ export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
   writerPhase: 'write',
 };
 
+export const HELP_STEP: ReleaseDocsPrepStepDef = {
+  id: 'help',
+  label: 'Update Help articles',
+  description:
+    'Updates the in-app Help article sections for the changed features. Keeps every section anchor and the article headers. Needs Analyse changes.',
+  // after the guide (30), so the writer sees the updated guide; before the videos (40)
+  order: 35,
+  defaultOn: true,
+  producesFiles: true,
+  requires: ['analyse'],
+  phases: ['check', 'write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
+};
+
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, VIDEOS_STEP, COMMIT_STEP];
+const STEPS: ReleaseDocsPrepStepDef[] = [
+  ANALYSE_STEP,
+  CHANGELOG_STEP,
+  GUIDE_STEP,
+  HELP_STEP,
+  VIDEOS_STEP,
+  COMMIT_STEP,
+];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {
