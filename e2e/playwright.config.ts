@@ -72,6 +72,9 @@ const config = defineConfig({
     { name: 'business-terms', testMatch: 'business-terms.spec.ts', dependencies: ['auth'] },
     // Storage connections (Organization settings > Storage): its own user and mock runner; a local folder under the e2e dir.
     { name: 'storage', testMatch: 'storage.spec.ts', dependencies: ['auth'] },
+    // Public form files straight from the browser to an https S3 stand-in (presigned PUT), and the local relay: its own
+    // user and mock runner.
+    { name: 'storage-direct', testMatch: 'storage-direct.spec.ts', dependencies: ['auth'] },
     // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
     { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
     // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
