@@ -1665,7 +1665,7 @@ cannot loosen anything.
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
 | `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the other cards' `.git/worktrees/<other>` admin folders, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git; see "Git metadata in the shift sandbox" below |
-| `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles on Linux/WSL2 (no effect there); on macOS only for builder, reviewer, tester and browser roles (see "macOS: local binding (loopback) per role") | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+| `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles on Linux/WSL2 (no effect there); on macOS only for builder, tester and browser roles (see "macOS: local binding (loopback) per role") | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
 
 **Git metadata in the shift sandbox.** A card worktree is a linked worktree: git keeps its index, `HEAD`, `logs`,
 `ORIG_HEAD` and `MERGE_*` files in the main clone's `.git/worktrees/<card>` admin folder, and its commits in the clone's
@@ -1760,21 +1760,21 @@ On macOS the runner sets it only for roles that run the project's tests or the a
 | Role | Why it keeps local binding on macOS |
 | --- | --- |
 | builder | runs the unit tests it writes; many suites start a server on `127.0.0.1` and connect to it |
-| reviewer | re-runs the build and the unit tests to verify them |
 | tester | runs suites and browsers against the app under test on localhost (macOS has no `aom-env` forwarder or test-service opening) |
 | any role with `"browser": true` | browsers against localhost, the tester's reason |
 
 The list is `DARWIN_LOCAL_BINDING_ROLES` in `apps/runner/src/adapters/claude-policy.ts` (with `keepsLocalBindingOnDarwin`
-for browser roles). Every other shift (BA, planner, architect, pre-reviewer, writer, CEO), every chat, @mention work and
-the DevOps scan get `false`. The platform is the runner's own `process.platform` when the settings are generated, not a
-config key.
+for browser roles). Every other shift (BA, planner, architect, reviewer, pre-reviewer, writer, CEO), every chat, @mention
+work and the DevOps scan get `false`. The reviewer and the pre-reviewer are off on purpose: their role rules say they
+never build or run the tests, and they read untrusted diffs. The platform is the runner's own `process.platform` when the
+settings are generated, not a config key.
 
 What a role loses with it off: it cannot start a server on a local port, connect to one, or reach a host service on
 localhost from its shell. The package registries still work (they go through the sandbox proxy). `aom` still works: it
 is an excluded command that runs outside the sandbox, and it talks over the Unix socket in `AOM_IPC_SOCKET` (which stays
 in `allowUnixSockets`).
 
-Residual risk: on macOS the builder, reviewer, tester and browser roles can still reach every localhost service. The
+Residual risk: on macOS the builder, tester and browser roles can still reach every localhost service. The
 runner's IPC endpoint needs the shift's own bearer token, but an unauthenticated local service (a debugger, a database
 without a password, Docker on TCP) is reachable from those shifts. Run the runner as a dedicated unprivileged user and do
 not leave unauthenticated services listening on a Mac that runs agents. A custom role that runs tests without

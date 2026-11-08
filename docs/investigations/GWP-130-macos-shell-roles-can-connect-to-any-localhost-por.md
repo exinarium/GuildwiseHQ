@@ -59,7 +59,7 @@ Built-in roles (`packages/shared/src/roles/builtin.ts`) and whether they need it
 | Role | Shell | Runs tests / servers / browsers? | macOS decision |
 | --- | --- | --- | --- |
 | `builder` | yes | yes: runs the unit tests it writes (standing order) | **keep** |
-| `reviewer` | yes | yes: re-runs the build and the unit tests to verify | **keep** |
+| `reviewer` | yes | no: "you never build or test it", "Never build the project and never run its tests" (`builtin.ts:65`, `:92`); read-only worktree; reads untrusted diffs | off (changed in review: first drafted as keep) |
 | `tester` | yes | yes: suites, Playwright, the app under test on localhost | **keep** |
 | custom role with `browser: true` (`runsBrowsers`) | yes | yes: browsers against localhost (same reason as tester) | **keep** (via the existing owner-granted flag) |
 | `pre_reviewer` | yes | no: "you never build or run tests" (`builtin.ts:296`, `:309`) | off |
@@ -73,18 +73,20 @@ Built-in roles (`packages/shared/src/roles/builtin.ts`) and whether they need it
 | DevOps (not scan) | n/a | unsandboxed by design | unchanged (no sandbox block) |
 | `analyst`, `researcher`, `checker`, `scout`, `curator` | no | n/a | off (already `false`: no shell) |
 
-The allow-list `builder`, `reviewer`, `tester` is the same set as `TEST_SERVICE_ROLES`
-(`apps/runner/src/sandbox/test-services.ts:20`). That is the set the project already treats as "runs the project's tests".
-The planning note proposed tester and browser roles only. I add builder and reviewer because without them unit tests that
-bind loopback break on macOS. Those are the most common kind in this repo and in typical Node/.NET/Python projects.
+The allow-list is `builder`, `tester`. The planning note proposed tester and browser roles only. I add builder because
+without it unit tests that bind loopback break on macOS. Those are the most common kind in this repo and in typical
+Node/.NET/Python projects. The first draft also kept `reviewer` (to match `TEST_SERVICE_ROLES` in
+`apps/runner/src/sandbox/test-services.ts:20`), but the built-in reviewer never builds or runs the tests (`builtin.ts:65`,
+`:92`) and reads untrusted diffs, so review dropped it, the same reasoning as for `pre_reviewer`. `TEST_SERVICE_ROLES` is
+Linux-only and stays as it is.
 
 ## Options
 
 | Option | What | For | Against |
 | --- | --- | --- | --- |
 | A. Leave as is, document only | Keep `true` for all shell roles; add the RUNNER.md section | no code | Every shell role, chat and CEO on macOS keeps reach to every localhost service. Fails AC 2. |
-| B. Off on darwin for everyone except tester/browser roles | Planning note's candidate list | smallest list | Builders and reviewers cannot run loopback-binding unit tests on macOS. That is a real regression of the build and review stages. |
-| **C. Off on darwin except an explicit allow-list: builder, reviewer, tester, plus roles with `browser: true`** | One constant with a reason per role; platform read at generation time | Closes the hole for planner, BA, architect, pre-reviewer, writer, chat, CEO and mentions (the roles that never need it); no stage loses what it needs; Linux unchanged | The three test-running roles keep full localhost reach on macOS (inherent to Seatbelt: bind and connect cannot be split). Documented as residual risk. |
+| B. Off on darwin for everyone except tester/browser roles | Planning note's candidate list | smallest list | Builders cannot run loopback-binding unit tests on macOS. That is a real regression of the build stage. |
+| **C. Off on darwin except an explicit allow-list: builder, tester, plus roles with `browser: true`** | One constant with a reason per role; platform read at generation time | Closes the hole for planner, BA, architect, reviewer, pre-reviewer, writer, chat, CEO and mentions (the roles that never need it); no stage loses what it needs; Linux unchanged | The test-running roles keep full localhost reach on macOS (inherent to Seatbelt: bind and connect cannot be split). Documented as residual risk. |
 | D. Off for everyone on darwin; run tests through DevOps on macOS | Strictest | | Breaks the build/review/test loop on every Mac workstation. Not proportionate. |
 
 ## Recommendation
@@ -102,7 +104,7 @@ outside the sandbox and prefers the Unix socket.
    and `scan-guard.test.ts` stay as they are and must keep passing.
 3. `docs/RUNNER.md`: table row at `:1606`, a new subsection, and one clause at `:2388`.
 4. `docs/design/run-and-integration-tests.md` D6 (`:14`) and `:128`: "on for shell roles" becomes "on for shell roles on
-   Linux; on macOS for builder, reviewer, tester and browser roles".
+   Linux; on macOS for builder, tester and browser roles".
 
 ### Code (snippets for the builder)
 
@@ -130,8 +132,6 @@ platform?: NodeJS.Platform;
 export const DARWIN_LOCAL_BINDING_ROLES: ReadonlyMap<string, string> = new Map([
   // runs the unit tests it writes; many suites start a server on 127.0.0.1 and connect to it (listen(0), supertest, mock servers)
   ['builder', 'runs the unit tests it writes, which start and connect to loopback servers'],
-  // re-runs the builder's build and unit tests to verify them (same loopback servers)
-  ['reviewer', 're-runs the build and the unit tests'],
   // runs the suites and browsers against the app under test on localhost; macOS has no aom-env forwarder or test-service opening
   ['tester', 'runs suites and browsers against the app under test on localhost'],
 ]);
@@ -190,7 +190,7 @@ only on darwin, and only for roles off the list.
 | Settings builder / role | linux | darwin |
 | --- | --- | --- |
 | `buildShiftSettings` builder | true | true |
-| `buildShiftSettings` reviewer | true | true |
+| `buildShiftSettings` reviewer | true | **false** |
 | `buildShiftSettings` tester | true | true |
 | `buildShiftSettings` custom role `{browser: true}` with shell | true | true |
 | `buildShiftSettings` ba / planner / architect / pre_reviewer / writer | true | **false** |
@@ -214,7 +214,7 @@ test is table-driven over `['linux', 'darwin']` and the rows above:
    `network.allowLocalBinding` is removed (constraint: no other setting widened or narrowed).
 4. The `aom` route on darwin (AC 5): for an off-list role (BA) and chat, `excludedCommands` still contains `aom` and
    `aom *`, and `allowUnixSockets` equals `[ipcSocket]` when `ipcSocket` is set.
-5. `DARWIN_LOCAL_BINDING_ROLES` keys are exactly `builder`, `reviewer`, `tester`, and every value is a non-empty reason.
+5. `DARWIN_LOCAL_BINDING_ROLES` keys are exactly `builder`, `tester`, and every value is a non-empty reason.
    This pins the list so a widening needs a deliberate test change (AC 3).
 6. Run `settingsProblem` (role smoke, `apps/runner/src/health/role-smoke.ts:110`) for every built-in role and expect
    `null`. It checks only permission rules, so it is unaffected, but this pins it (test plan item 3).
@@ -231,7 +231,7 @@ for the testers).
 ### `docs/RUNNER.md`
 
 - Row `:1606`: replace "`allowLocalBinding` for `shell` roles" with "`allowLocalBinding` for `shell` roles on
-  Linux/WSL2 (no effect there); on macOS only for builder, reviewer, tester and browser roles (see 'macOS: local binding
+  Linux/WSL2 (no effect there); on macOS only for builder, tester and browser roles (see 'macOS: local binding
   per role')".
 - New subsection right after the "Effective sandbox state" / `scrubSubprocessEnv` text, before "### Browser roles
   (testers) and Unix sockets":
@@ -245,7 +245,7 @@ for the testers).
   > effect. The runner keeps it as before there (`true` for shell roles).
   >
   > On macOS the runner sets it only for roles that run the project's tests or the app:
-  > builder (its unit tests start and connect to loopback servers), reviewer (re-runs them), tester (suites and browsers
+  > builder (its unit tests start and connect to loopback servers), tester (suites and browsers
   > against the app under test; macOS has no `aom-env` forwarder or test-service opening), and any role with
   > `"browser": true`. The list is `DARWIN_LOCAL_BINDING_ROLES` in `claude-policy.ts`. Every other shift, and every chat,
   > CEO session, @mention work and DevOps scan, gets `false`.
@@ -254,7 +254,7 @@ for the testers).
   > localhost from its shell. The package registries still work (they go through the sandbox proxy). `aom` still works:
   > it is an excluded command that runs outside the sandbox, and it talks over the Unix socket in `AOM_IPC_SOCKET`.
   >
-  > Residual risk: on macOS the builder, reviewer, tester and browser roles can still reach every localhost service. The
+  > Residual risk: on macOS the builder, tester and browser roles can still reach every localhost service. The
   > runner's IPC endpoint needs the shift's own bearer token. An unauthenticated local service (a debugger, a database
   > without a password, Docker on TCP) is reachable from those shifts. Run the runner as the dedicated unprivileged user
   > recommended below, and do not leave unauthenticated services listening on a Mac that runs agents.

@@ -52,7 +52,8 @@ const TABLE: Array<{
   darwin: boolean;
 }> = [
   { name: 'shift builder', build: (pl) => shift('builder', pl), linux: true, darwin: true },
-  { name: 'shift reviewer', build: (pl) => shift('reviewer', pl), linux: true, darwin: true },
+  // The reviewer never builds or runs tests and reads untrusted diffs: off on macOS, like pre_reviewer.
+  { name: 'shift reviewer', build: (pl) => shift('reviewer', pl), linux: true, darwin: false },
   { name: 'shift tester', build: (pl) => shift('tester', pl), linux: true, darwin: true },
   {
     name: 'shift custom role with browser: true',
@@ -177,8 +178,8 @@ describe('the aom route to the runner on darwin', () => {
 });
 
 describe('the macOS allow-list', () => {
-  it('is exactly builder, reviewer and tester, each with a reason', () => {
-    expect([...DARWIN_LOCAL_BINDING_ROLES.keys()].sort()).toEqual(['builder', 'reviewer', 'tester']);
+  it('is exactly builder and tester, each with a reason', () => {
+    expect([...DARWIN_LOCAL_BINDING_ROLES.keys()].sort()).toEqual(['builder', 'tester']);
     for (const reason of DARWIN_LOCAL_BINDING_ROLES.values()) expect(reason.trim().length).toBeGreaterThan(0);
   });
 
@@ -187,6 +188,7 @@ describe('the macOS allow-list', () => {
     expect(keepsLocalBindingOnDarwin({ browser: false }, 'tester')).toBe(true);
     expect(keepsLocalBindingOnDarwin({ browser: true }, 'qa_custom')).toBe(true);
     expect(keepsLocalBindingOnDarwin({ browser: false }, 'ba')).toBe(false);
+    expect(keepsLocalBindingOnDarwin({ browser: false }, 'reviewer')).toBe(false);
     expect(keepsLocalBindingOnDarwin({ browser: false }, undefined)).toBe(false);
     expect(keepsLocalBindingOnDarwin({ browser: true }, 'mention')).toBe(false);
   });

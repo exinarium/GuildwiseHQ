@@ -535,12 +535,11 @@ export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: str
 export const DARWIN_LOCAL_BINDING_ROLES: ReadonlyMap<string, string> = new Map([
   // Many unit test suites start a server on 127.0.0.1 and connect to it (listen(0), supertest, mock servers).
   ['builder', 'runs the unit tests it writes, which start and connect to loopback servers'],
-  // Verifies the builder's work by running the same build and unit tests (same loopback servers).
-  ['reviewer', 're-runs the build and the unit tests'],
   // macOS has no aom-env forwarder or test-service opening, so a direct loopback connection is its only route.
   ['tester', 'runs suites and browsers against the app under test on localhost'],
 ]);
 // A custom role with `browser: true` (runsBrowsers, an owner-granted permission) keeps it for the tester's reason.
+// Not the reviewer: it never builds or runs tests and reads untrusted diffs, so it gets no loopback reach (like pre_reviewer).
 
 /** Whether a shift of this role keeps local binding on macOS. Never a mention: a comment does not run the suite. */
 export const keepsLocalBindingOnDarwin = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
