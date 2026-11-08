@@ -56,7 +56,25 @@ const ERROR_TEXT: Record<StorageErrorCode, string> = {
   timeout: 'The storage did not answer in time.',
   malware_detected: 'A file was refused by the malware scan.',
   scan_unavailable: 'The malware scan (clamd) on the workstation is not reachable.',
+  type_refused: 'The content of a file did not match an accepted type.',
 };
+
+const DIRECT_REASON_TEXT: Record<string, string> = {
+  unsupported_kind: 'this kind of storage sends files through the server',
+  http_endpoint: 'the endpoint must use https',
+  cors_missing: 'add the CORS rule to the bucket, see the runner guide',
+  probe_failed: 'the workstation could not check the upload address',
+  needs_reauth: 'sign in again',
+};
+
+/** The line under a cloud storage: can the public send form files straight to it? Null for folders and vaults. */
+export function directUploadsLine(c: StorageConnectionDto): string | null {
+  const d = c.directUploads;
+  if (!d) return null;
+  if (d.state === 'ready') return 'Public form files: ready';
+  if (d.state === 'unknown') return 'Public form files: not checked yet (the workstation is offline)';
+  return `Public form files: not possible: ${DIRECT_REASON_TEXT[d.reason ?? 'probe_failed'] ?? DIRECT_REASON_TEXT.probe_failed}`;
+}
 
 export const storageErrorText = (code: StorageErrorCode | null, message: string | null): string =>
   message ?? (code ? ERROR_TEXT[code] : 'Something went wrong');

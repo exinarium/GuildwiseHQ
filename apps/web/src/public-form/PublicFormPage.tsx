@@ -2,6 +2,7 @@ import type { FormAnswerValue, FormFieldErrorCode, PublicFormDto } from '@aom/sh
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 import { PublicApiError, publicApi } from './api.ts';
+import { DirectBlockedError, DirectExpiredError, directUpload } from './direct-upload.ts';
 import { describePublicError, PUBLIC_TEXT } from './messages.ts';
 import { OfflinePanel } from './OfflinePanel.tsx';
 import { PowUnsupportedError, solvePow } from './pow.ts';
@@ -46,11 +47,24 @@ interface Submission {
   id: string;
   token: string;
   /** Part index (position in the manifest) by field id. */
-  parts: Array<{ field: string; index: number }>;
+  parts: Array<{ field: string; index: number; mode?: 'relay' | 'direct' | undefined }>;
 }
 
 /** The offline flow answered "we will send you a secure link": nothing more to do on this page. */
 class LinkLater extends Error {}
+const errorOfPart = (code: string | undefined): PublicApiError => {
+  switch (code) {
+    case 'type_refused':
+      return new PublicApiError(415, 'file_type_refused', 'type', false);
+    case 'malware_detected':
+      return new PublicApiError(422, 'malware_detected', 'malware', false);
+    case 'scan_unavailable':
+      return new PublicApiError(503, 'scan_unavailable', 'scan', true);
+    default:
+      return new PublicApiError(400, 'invalid_answers', 'The file does not match what was announced.', true);
+  }
+};
+
 const laterOf = (r: unknown): void => {
   const x = r as { status?: string; message?: string } | null;
   if (x?.status === 'link_later') throw new LinkLater(x.message ?? '');
@@ -94,6 +108,7 @@ export function PublicFormPage({
   const initial = useRef<Answers | undefined>(undefined);
   const loadedAt = useRef(Date.now());
   const prefill = useRef<string | undefined>(undefined);
+  const uploadOrigins = useRef<string[]>([]);
   const [offlineState, setOfflineState] = useState<'ask' | 'sending'>('ask');
   const [offlineError, setOfflineError] = useState<string | null>(null);
 
@@ -102,6 +117,7 @@ export function PublicFormPage({
       const dto = await publicApi.load(publicId, link.current);
       pow.current = startPow(dto.session, dto.powBits);
       loadedAt.current = Date.now();
+      uploadOrigins.current = dto.uploadOrigins ?? [];
       if (dto.availability === 'offline') {
         if (dto.link?.purpose === 'offline') {
           const until = new Date(dto.link.expiresAt).toLocaleDateString();
@@ -152,6 +168,78 @@ export function PublicFormPage({
     }
   };
 
+  /**
+   * One file straight to the firm's storage (OneDrive, Google Drive, S3). Never goes through this server: when the
+   * browser cannot reach the provider the submission fails (there is no other way for a cloud destination).
+   */
+  const sendDirect = async (s: Submission, index: number, f: File, label: string): Promise<void> => {
+    const allowed = uploadOrigins.current;
+    const ask = async () => {
+      for (let n = 0; ; n++) {
+        try {
+          return await publicApi.grant(publicId, s.id, index, s.token);
+        } catch (e) {
+          const err = e as PublicApiError;
+          if (err.code === 'upload_unavailable' && err.retryable && n < 2) {
+            await wait(Math.min(10, err.retryAfter || 2) * 1000);
+            continue;
+          }
+          throw e;
+        }
+      }
+    };
+    const sha256 = await sha256File(f);
+    let grant = (await ask()).grant;
+    for (let again = 0; ; again++) {
+      let origin = '';
+      try {
+        origin = new URL(grant.url).origin;
+      } catch {
+        origin = '';
+      }
+      if (!allowed.includes(origin)) {
+        await publicApi.grantCancel(publicId, s.id, index, s.token, 'blocked').catch(() => undefined);
+        throw new PublicApiError(502, 'upload_unavailable', 'blocked', false);
+      }
+      try {
+        const done = await directUpload(f, grant, {
+          onProgress: (n, total) =>
+            setProgress(PUBLIC_TEXT.uploading(`file ${label}`, Math.min(100, Math.floor((n / total) * 100)))),
+          offset: async () => (await publicApi.grantOffset(publicId, s.id, index, s.token)).offset,
+        });
+        setProgress(PUBLIC_TEXT.checking(`file ${label}`));
+        await publicApi.grantComplete(publicId, s.id, index, s.token, {
+          size: f.size,
+          sha256,
+          ...done,
+        });
+        break;
+      } catch (e) {
+        if (e instanceof DirectBlockedError) {
+          await publicApi.grantCancel(publicId, s.id, index, s.token, 'blocked').catch(() => undefined);
+          throw new PublicApiError(502, 'upload_unavailable', 'blocked', false);
+        }
+        if (e instanceof DirectExpiredError && again === 0) {
+          await publicApi.grantCancel(publicId, s.id, index, s.token, 'retry').catch(() => undefined);
+          grant = (await ask()).grant;
+          continue;
+        }
+        throw e instanceof DirectExpiredError
+          ? new PublicApiError(502, 'upload_unavailable', 'expired', true)
+          : e;
+      }
+    }
+    // The runner checks the stored file: wait for the answer.
+    for (let n = 0; n < 600; n++) {
+      const st = await publicApi.status(publicId, s.id, s.token);
+      const p = st.parts.find((x) => x.index === index);
+      if (p?.state === 'stored') return;
+      if (p?.state === 'failed') throw errorOfPart(p.error);
+      await wait(2000);
+    }
+    throw new PublicApiError(0, 'network', 'The check took too long.', true);
+  };
+
   /** Uploads what is not stored yet, then completes. Throws a PublicApiError. */
   const finish = async (s: Submission): Promise<string> => {
     const st = await publicApi.status(publicId, s.id, s.token);
@@ -163,7 +251,8 @@ export function PublicFormPage({
       setProgress(`Sending file ${n} of ${todo.length}…`);
       const f = files.current.get(p.field);
       if (!f) throw new PublicApiError(0, 'file_missing', 'A file must be chosen again.', false);
-      laterOf(await publicApi.putPart(publicId, s.id, p.index, f, s.token));
+      if (p.mode === 'direct') await sendDirect(s, p.index, f, `file ${n} of ${todo.length}`);
+      else laterOf(await publicApi.putPart(publicId, s.id, p.index, f, s.token));
     }
     setProgress('Finishing…');
     const out = await publicApi.complete(publicId, s.id, s.token, answers.current);
@@ -229,7 +318,7 @@ export function PublicFormPage({
     return {
       id: r.submissionId,
       token: r.uploadToken,
-      parts: r.parts.map((p, i) => ({ field: p.field, index: i })),
+      parts: r.parts.map((p, i) => ({ field: p.field, index: i, mode: p.mode })),
     };
   };
 
