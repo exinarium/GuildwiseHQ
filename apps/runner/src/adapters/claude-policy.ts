@@ -85,6 +85,11 @@ export interface ClaudePolicyContext {
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
   tmpEntries?: string[];
   /**
+   * The runner's own OS (default `process.platform`, read when the settings are generated). Injectable for tests only:
+   * no production caller sets it, and no config key or environment variable feeds it.
+   */
+  platform?: NodeJS.Platform;
+  /**
    * The command of the DevOps guard hook (`aom devops-guard`): a PreToolUse hook on every Bash command of the DevOps
    * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook.
    */
@@ -97,6 +102,8 @@ export interface SandboxProfile {
   browser: boolean;
   /** Cannot edit and may not commit: the worktree is read-only to its shell. */
   readOnlyWorktree: boolean;
+  /** macOS: keeps `allowLocalBinding` (`DARWIN_LOCAL_BINDING_ROLES` / browser roles). Ignored on Linux. Default false. */
+  darwinLocalBinding?: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -393,7 +400,10 @@ function sandboxBlock(
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
-      allowLocalBinding: shell,
+      // Linux/WSL2: unchanged (each Bash call has a private network namespace, so the key has no effect there).
+      // macOS: only the allow-listed roles (see DARWIN_LOCAL_BINDING_ROLES); Seatbelt opens every localhost port with it.
+      allowLocalBinding:
+        shell && ((ctx.platform ?? process.platform) !== 'darwin' || profile.darwinLocalBinding === true),
     },
   };
 }
@@ -515,6 +525,25 @@ export const DEPLOY_ASK_ALLOW: readonly string[] = ['Bash(aom deploy run:*)', 'B
 /** The built-in tester always runs browsers (agents hired before the flag existed carry none); custom roles opt in. */
 export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
   p.browser === true || roleKey === 'tester';
+
+/**
+ * macOS only. Under Seatbelt, `allowLocalBinding` opens BOTH listening on a port and connecting to ANY localhost port
+ * (the runner's IPC TCP endpoint, databases, debuggers, the Docker API, ...); the two cannot be split. On Linux/WSL2 the
+ * key has no effect (each Bash call has a private network namespace), so it stays as it always was there.
+ * On macOS only these roles keep it, each because it runs the project's tests or the app itself:
+ */
+export const DARWIN_LOCAL_BINDING_ROLES: ReadonlyMap<string, string> = new Map([
+  // Many unit test suites start a server on 127.0.0.1 and connect to it (listen(0), supertest, mock servers).
+  ['builder', 'runs the unit tests it writes, which start and connect to loopback servers'],
+  // macOS has no aom-env forwarder or test-service opening, so a direct loopback connection is its only route.
+  ['tester', 'runs suites and browsers against the app under test on localhost'],
+]);
+// A custom role with `browser: true` (runsBrowsers, an owner-granted permission) keeps it for the tester's reason.
+// Not the reviewer: it never builds or runs tests and reads untrusted diffs, so it gets no loopback reach (like pre_reviewer).
+
+/** Whether a shift of this role keeps local binding on macOS. Never a mention: a comment does not run the suite. */
+export const keepsLocalBindingOnDarwin = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
+  roleKey !== 'mention' && (runsBrowsers(p, roleKey) || DARWIN_LOCAL_BINDING_ROLES.has(roleKey ?? ''));
 
 /**
  * The workstation's DevOps engineer (`AgentRuntimeSpec.isDevops`, built-in role `devops`) runs OUTSIDE the agent
@@ -761,7 +790,11 @@ export function buildShiftSettings(
     paths.home,
     paths.scratch,
     paths.tmp,
-    { browser: runsBrowsers(p, roleKey), readOnlyWorktree: isReadOnlyWorktreeRole(p) },
+    {
+      browser: runsBrowsers(p, roleKey),
+      readOnlyWorktree: isReadOnlyWorktreeRole(p),
+      darwinLocalBinding: keepsLocalBindingOnDarwin(p, roleKey),
+    },
     testDomains,
   );
   if (sb) out.sandbox = sb;
