@@ -537,7 +537,7 @@ function runnerAlive(statusFile: string): boolean {
     return false;
   }
 }
-
+/** Installs or reports the PDF renderer (Chrome Headless Shell) in the data dir browsers folder. */
 /** Replaces the runner token. The runner must be stopped: a second connection would supersede the running one. */
 async function pdfRendererCmd(
   action: string,
@@ -564,6 +564,7 @@ async function pdfRendererCmd(
   }
 }
 
+/** Replaces the runner token. The runner must be stopped: a second connection would supersede the running one. */
 async function rotateToken(opts: { dataDir?: string; pairing?: string }): Promise<void> {
   const { root, entries } = selectPairings(opts);
   if (entries.length > 1)

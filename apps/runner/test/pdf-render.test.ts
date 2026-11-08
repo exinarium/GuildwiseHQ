@@ -138,3 +138,28 @@ describe('PDF renderer without a browser', () => {
     });
   });
 });
+
+describe('browsers path variable', () => {
+  it('status() and render() leave PLAYWRIGHT_BROWSERS_PATH unchanged', async () => {
+    const saved = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    try {
+      delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      const r = chromiumPdfRenderer({ browsersPath: browsers, idleMs: 60_000 });
+      await r.status();
+      expect(process.env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
+      if (ready) {
+        await r.render(doc([['Q', 'A']]), AbortSignal.timeout(30_000));
+        expect(process.env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
+      }
+      await r.close();
+      process.env.PLAYWRIGHT_BROWSERS_PATH = '/some/other/path';
+      const r2 = chromiumPdfRenderer({ browsersPath: browsers, idleMs: 60_000 });
+      await r2.status();
+      expect(process.env.PLAYWRIGHT_BROWSERS_PATH).toBe('/some/other/path');
+      await r2.close();
+    } finally {
+      if (saved === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = saved;
+    }
+  });
+});

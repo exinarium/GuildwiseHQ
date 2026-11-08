@@ -71,9 +71,18 @@ const FOOTER =
 
 /** Loads playwright-core on demand so a runner without a browser never pays for it. */
 async function loadPlaywright(browsersPath: string): Promise<PwModule> {
-  process.env.PLAYWRIGHT_BROWSERS_PATH ??= browsersPath;
-  const name = 'playwright-core';
-  return (await import(name)) as unknown as PwModule;
+  // playwright-core reads the variable when it loads; keep it out of the runner-wide environment
+  // so child processes (other Playwright runs, toolchain commands) are not redirected.
+  const had = Object.prototype.hasOwnProperty.call(process.env, 'PLAYWRIGHT_BROWSERS_PATH');
+  const old = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
+  try {
+    const name = 'playwright-core';
+    return (await import(name)) as unknown as PwModule;
+  } finally {
+    if (had) process.env.PLAYWRIGHT_BROWSERS_PATH = old;
+    else delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+  }
 }
 
 /** Path of playwright-core's cli.js, for the install command. */
