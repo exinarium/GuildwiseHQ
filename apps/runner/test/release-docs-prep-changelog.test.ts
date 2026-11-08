@@ -183,6 +183,14 @@ describe('release.docs_prep changelog', () => {
     expect(file).toBe(UNDATED);
   });
 
+  it('writes the entries into a changelog whose versions are all undated', async () => {
+    const s = setup('# Changelog\n\n## [Unreleased]\n\n## [1.3.0]\n\n### Fixed\n\n- An old fix.\n');
+    const { c, file } = await prep(s, ENTRIES);
+    expect(c.state).toBe('passed');
+    expect(file).toContain(ENTRIES[0]?.text);
+    expect(file).toContain('## [1.3.0]\n');
+  });
+
   /** The parts of the step context the changelog step does not use (no process). */
   const ctxStubs = () => ({
     outDir: tmp('aom-cl-out-'),

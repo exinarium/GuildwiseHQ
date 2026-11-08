@@ -29,7 +29,9 @@ const summary = (shas: string[], head = 'h1'): ReleaseDocsPrepSummary => ({
 });
 
 const GOOD = '# Changelog\n\n## [Unreleased]\n\n## [1.4.0] - 2026-10-01\n\n### Fixed\n\n- Old.\n';
-const UNDATED = '# Changelog\n\n## [Unreleased]\n\n## [1.5.0]\n\n### Added\n\n- Pending.\n';
+const UNDATED =
+  '# Changelog\n\n## [Unreleased]\n\n## [1.5.0]\n\n### Added\n\n- Pending.\n\n## [1.4.0] - 2026-10-01\n\n### Fixed\n\n- Old.\n';
+const ALL_UNDATED = '# Changelog\n\n## [Unreleased]\n\n## [1.5.0]\n\n### Added\n\n- Pending.\n';
 
 describe('Write changelog dispatch decision', () => {
   const base = { facts: null, covered: new Set<string>() };
@@ -47,6 +49,14 @@ describe('Write changelog dispatch decision', () => {
     });
     expect(d.kind).toBe('fail');
     expect(d.kind === 'fail' && d.error).toContain('## [1.5.0] section without a date');
+  });
+  it('goes ahead with a changelog whose versions are all undated', () => {
+    const d = decideChangelogDispatch({
+      ...base,
+      summary: summary(['a']),
+      facts: { headSha: 'h1', changelog: ALL_UNDATED },
+    });
+    expect(d.kind).not.toBe('fail');
   });
   it('ignores facts read at another head (the runner re-checks the real file)', () => {
     const d = decideChangelogDispatch({
