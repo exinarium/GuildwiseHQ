@@ -798,7 +798,8 @@ export function publicFormRoutes(
           sha256: f.sha256,
           ext: sanitiseUploadName(f.name).ext,
           state: 'pending',
-          mode: modeOf(f.field),
+          // Only a direct part is marked: a relay part is stored exactly as before direct uploads existed.
+          ...(modeOf(f.field) === 'direct' ? { mode: 'direct' as const } : {}),
         }));
         const expiresAt = new Date(now.getTime() + cfg.submissionTtlMin * 60_000);
         try {
