@@ -67,9 +67,9 @@ async function cancel(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
   );
   const workstations = await advance(ctx, tx, run.id);
   for (const w of new Set(workstations))
-    setTimeout(() => {
+    afterCommit(tx, () => {
       void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
-    }, 250);
+    });
 }
 
 /** A report of a `release_changelog` BA task queued before the upgrade. */
