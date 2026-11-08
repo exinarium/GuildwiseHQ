@@ -175,7 +175,8 @@ const PATH_NOISE = new Set(
   ),
 );
 
-function pathWords(path: string): string[] {
+/** The words of a repository path, without the folder names every path has. */
+export function pathWords(path: string): string[] {
   const parts = path.replace(/\.[a-z0-9]+$/i, '').split('/');
   return parts.flatMap((p) => guideWords(p)).filter((w) => !PATH_NOISE.has(w));
 }

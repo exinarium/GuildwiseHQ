@@ -63,10 +63,36 @@ export const GuideEditsTaskSchema = z.object({
 });
 export type GuideEditsTask = z.infer<typeof GuideEditsTaskSchema>;
 
+/** One change of the release as the Help writer sees it, with the Help sections that most likely describe it. */
+export const HelpChangeSchema = GuideChangeSchema.extend({
+  hints: z
+    .array(
+      z.object({
+        article: z.string().max(80),
+        section: z.string().max(80),
+        score: z.number(),
+        why: z.string().max(300),
+      }),
+    )
+    .max(3)
+    .default([]),
+});
+export type HelpChange = z.infer<typeof HelpChangeSchema>;
+
+export const HelpEditsTaskSchema = z.object({
+  kind: z.literal('help_edits'),
+  helpDir: z.string().min(1).max(300),
+  changes: z.array(HelpChangeSchema).min(1).max(300),
+  /** Change ids earlier passed runs already dealt with (the writer must not write them again). */
+  coveredSources: z.array(z.string().max(80)).max(2000).default([]),
+});
+export type HelpEditsTask = z.infer<typeof HelpEditsTaskSchema>;
+
 export const ReleasePrepTaskSchema = z.discriminatedUnion('kind', [
   NewVideoTaskSchema,
   ChangelogEntriesTaskSchema,
   GuideEditsTaskSchema,
+  HelpEditsTaskSchema,
 ]);
 export type ReleasePrepTask = z.infer<typeof ReleasePrepTaskSchema>;
 
@@ -186,6 +212,13 @@ export const PREP_TASK_KINDS: Record<ReleasePrepTask['kind'], PrepTaskKindSpec> 
     what: () => 'the user guide update',
     title: (_t, branch) => `Update the user guide (${branch})`,
   },
+  help_edits: {
+    roles: ['architect', 'ba', 'builder'],
+    result: 'proposal',
+    step: 'Update Help articles',
+    what: () => 'the Help article update',
+    title: (_t, branch) => `Update the Help articles (${branch})`,
+  },
 };
 
 export type PrepWriterFailureCode = 'no_writer' | 'writer_unreachable' | 'writer_failed';
@@ -232,10 +265,12 @@ export function missingNewVideoFiles(task: NewVideoTask, changed: readonly strin
   );
 }
 
-const PROPOSAL_SHAPE: Record<'changelog_entries' | 'guide_edits', string> = {
+const PROPOSAL_SHAPE: Record<'changelog_entries' | 'guide_edits' | 'help_edits', string> = {
   changelog_entries: CHANGELOG_PROPOSAL_SHAPE,
   guide_edits:
     '{"edits":[{"op":"replace_text","section":"4.28","find":"...","replace":"...","sources":["card:KEY-1"]},{"op":"append","section":"4.28","text":"...","sources":[]},{"op":"add_section","after":"4.28","title":"...","body":"...","sources":[]}],"covered":[{"source":"...","section":"4.28"}],"skipped":[{"source":"...","reason":"..."}],"notes":[]}',
+  help_edits:
+    '{"edits":[{"op":"replace_text","article":"phases","section":"release-prep","find":"...","replace":"...","sources":["card:KEY-1"]},{"op":"append","article":"phases","section":"release-prep","text":"...","sources":[]},{"op":"add_section","article":"phases","after":"release-prep","title":"...","id":"new-lowercase-id","body":"...","sources":[]}],"covered":[{"source":"...","article":"phases","section":"release-prep"}],"skipped":[{"source":"...","reason":"..."}],"notes":[]}',
 };
 
 /** The instructions of a release_prep shift (the role's own text is not used: the task is self-contained). */
@@ -273,13 +308,19 @@ export function renderReleasePrepInstructions(
       '',
     ].join('\n');
   const rules =
-    task.kind === 'changelog_entries' ? CHANGELOG_WRITER_RULES.map((r) => `- ${r}`) : [guideWriterText()];
+    task.kind === 'changelog_entries'
+      ? CHANGELOG_WRITER_RULES.map((r) => `- ${r}`)
+      : [playbookText(task.kind === 'help_edits' ? HELP_PLAYBOOK : GUIDE_PLAYBOOK)];
   return [
     ...head,
     '- Do not install anything, start servers or build anything: the release prep applies and checks your proposal itself.',
     '- Nobody answers questions in this shift: decide from what the prompt says.',
     '',
-    task.kind === 'changelog_entries' ? '# The changelog writer' : '# The user guide writer',
+    task.kind === 'changelog_entries'
+      ? '# The changelog writer'
+      : task.kind === 'help_edits'
+        ? '# The Help article writer'
+        : '# The user guide writer',
     '',
     ...rules,
     '',
@@ -298,9 +339,11 @@ export function renderReleasePrepInstructions(
 
 /** The guide writer's instructions: the built-in playbook `user-guide`. */
 export const GUIDE_PLAYBOOK = 'user-guide';
-function guideWriterText(): string {
-  const body = builtinPlaybookText(GUIDE_PLAYBOOK);
-  if (!body) throw new Error(`the built-in playbook ${GUIDE_PLAYBOOK} is missing`);
+/** The Help article writer's instructions: the built-in playbook `help-articles`. */
+export const HELP_PLAYBOOK = 'help-articles';
+function playbookText(key: string): string {
+  const body = builtinPlaybookText(key);
+  if (!body) throw new Error(`the built-in playbook ${key} is missing`);
   return body.trim();
 }
 
@@ -313,6 +356,23 @@ export function renderReleasePrepPrompt(rp: ReleasePrepShift): string {
       `Update the user guide \`${t.guidePath}\` for the changes of this release. Read the guide in your working directory first (its outline, then the sections named in the hints).`,
       '',
       'The changes, each with the sections that most likely describe them:',
+      '',
+      JSON.stringify(t.changes, null, 1),
+      ...(t.coveredSources.length
+        ? [
+            '',
+            `${t.coveredSources.length} changes were dealt with by an earlier prep run: do not write them again.`,
+          ]
+        : []),
+      '',
+      `Then write \`${PREP_PROPOSAL_FILE}\` and finish with \`aom prep done --summary "..."\` (or \`aom prep fail --reason "..."\`).`,
+    ].join('\n');
+  }
+  if (t.kind === 'help_edits') {
+    return [
+      `Update the in-app Help articles in \`${t.helpDir}\` for the changes of this release. Each article is one \`<slug>.md\` file; a section is addressed by its anchor id (the \`{#id}\` of its heading, else the heading text in lower case with dashes). Read the sections named in the hints first, and the updated user guide for the released behaviour.`,
+      '',
+      'The changes, each with the Help sections that most likely describe them:',
       '',
       JSON.stringify(t.changes, null, 1),
       ...(t.coveredSources.length

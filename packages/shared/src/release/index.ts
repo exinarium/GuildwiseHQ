@@ -8,6 +8,7 @@ export * from './docs-prep-dto.ts';
 export * from './docs-prep-task.ts';
 export * from './docs-prep-videos.ts';
 export * from './dto.ts';
+export * from './help-articles.ts';
 export * from './publish.ts';
 export * from './recommend.ts';
 export * from './tags.ts';
