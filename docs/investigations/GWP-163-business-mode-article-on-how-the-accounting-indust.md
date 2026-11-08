@@ -96,3 +96,13 @@ The card came back to design, but none of the inputs the gate needs are there ye
 - There are no card attachments.
 
 The findings, the design and the gate decision above still stand. The card stays blocked (option A) until the owner or BA attaches the three inputs. Running another design pass will not change this.
+
+## Re-check, 2026-11-08 (third design pass)
+
+The card came back to design again, and still nothing has changed:
+
+- `origin/release/1.6.0` is now at `5471bd37`. The commits since `159deee8` cover relay body limits per kind and hiding the project Test services panel in business mode. None of them touches rule packs, roles, playbooks, journey templates or the blog.
+- The vaults still have no `industry-roadmap.md`, no pilot notes and no consent record.
+- There are still no card attachments.
+
+The planner has twice decided to keep the card blocked and not send it back to design (decisions of 2026-11-08). Since the card keeps coming back anyway, the question now goes to the owner, the only person who can change things: attach the inputs, re-scope the card, or close it. Until then, the design above is ready for build as it stands.
