@@ -20,6 +20,7 @@ function setup(
   scanOn = true,
   over: Partial<StorageServiceDeps> = {},
   quarantineInside = false,
+  fields?: Record<string, string>,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'gw-scan-svc-'));
   const stored = join(root, 'files');
@@ -47,7 +48,7 @@ function setup(
         open: (_e: unknown, outer: { ref: string }) => ({
           ref: outer.ref,
           exp: Date.now() + 1000,
-          fields: { root: stored },
+          fields: fields ?? { root: stored },
         }),
       } as never,
       seen: { claim: () => true },
@@ -68,11 +69,11 @@ function setup(
 }
 type T = ReturnType<typeof setup>;
 
-const connect = async (t: T) => {
+const connect = async (t: T, kind = 'local') => {
   const r = await t.svc.handle('storage.connect', {
     requestId: 'r1',
     connectionId: CONN,
-    kind: 'local',
+    kind,
     envelope: {},
   });
   expect(r.error).toBeUndefined();
@@ -302,5 +303,95 @@ describe('health with clamd down', () => {
     expect(r.health.state).toBe('unavailable');
     expect(r.health.errorCode).toBe('scan_unavailable');
     expect(r.health.message).toContain('clamd not reachable at 127.0.0.1:1');
+  });
+});
+
+describe('upload scan on, with a cloud connector (S3, mocked)', () => {
+  const s3Fields = {
+    endpoint: 'http://localhost:9000',
+    region: 'r',
+    bucket: 'b',
+    accessKeyId: 'AK',
+    secretAccessKey: 'SK-secret',
+  };
+  function mockS3() {
+    const objects = new Map<string, Buffer>();
+    const log: string[] = [];
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const key = new URL(url).pathname;
+      log.push(`${method} ${key}`);
+      if (method === 'HEAD') return new Response(null, { status: objects.has(key) ? 200 : 404 });
+      if (method === 'PUT') {
+        const body = init?.body as unknown;
+        const chunks: Buffer[] = [];
+        if (body && typeof (body as any).getReader === 'function') {
+          const rd = (body as ReadableStream<Uint8Array>).getReader();
+          for (;;) {
+            const { done, value } = await rd.read();
+            if (done) break;
+            chunks.push(Buffer.from(value));
+          }
+        }
+        objects.set(key, Buffer.concat(chunks));
+        return new Response('', { status: 200, headers: { etag: '"etag1"' } });
+      }
+      if (method === 'DELETE') {
+        objects.delete(key);
+        return new Response(null, { status: 204 });
+      }
+      return new Response('', { status: 200 });
+    };
+    return { objects, log, fetchFn };
+  }
+
+  it('scans, then puts a clean file to the store', async () => {
+    const s3 = mockS3();
+    const t = setup(() => ({ kind: 'clean' }), true, { fetch: s3.fetchFn as never }, false, s3Fields);
+    await connect(t, 's3');
+    const r = await send(t, Buffer.from('fine'));
+    expect(r.ok).toBe(true);
+    expect(t.calls.scan).toBe(1);
+    expect([...s3.objects.keys()]).toEqual(['/b/sub/doc.txt']);
+    expect(s3.objects.get('/b/sub/doc.txt')?.toString()).toBe('fine');
+  });
+
+  it('infected: nothing is put, and the earlier file of the submission is deleted from the store', async () => {
+    const s3 = mockS3();
+    let call = 0;
+    const t = setup(
+      () => (++call === 1 ? { kind: 'clean' } : { kind: 'infected', signature: 'Eicar-Signature' }),
+      true,
+      { fetch: s3.fetchFn as never },
+      false,
+      s3Fields,
+    );
+    await connect(t, 's3');
+    expect((await send(t, Buffer.from('first'), { name: 'one' })).ok).toBe(true);
+    expect([...s3.objects.keys()]).toEqual(['/b/sub/one.txt']);
+    const r = await send(t, Buffer.from('bad'), { name: 'two' });
+    expect(r.error.code).toBe('malware_detected');
+    expect(s3.objects.size).toBe(0);
+    expect(s3.log.filter((l) => l.startsWith('PUT /b/sub/two'))).toEqual([]);
+    expect(s3.log).toContain('DELETE /b/sub/one.txt');
+    expect(filesIn(t.quarantineDir)).toHaveLength(2);
+  });
+
+  it('scan failure: nothing is put and the earlier file is deleted', async () => {
+    const s3 = mockS3();
+    let call = 0;
+    const t = setup(
+      () => (++call === 1 ? { kind: 'clean' } : { kind: 'failed', reason: 'timeout' }),
+      true,
+      { fetch: s3.fetchFn as never },
+      false,
+      s3Fields,
+    );
+    await connect(t, 's3');
+    await send(t, Buffer.from('first'), { name: 'one' });
+    const r = await send(t, Buffer.from('x'), { name: 'two' });
+    expect(r.error.code).toBe('scan_unavailable');
+    expect(s3.objects.size).toBe(0);
+    expect(filesIn(t.quarantineDir)).toEqual([]);
   });
 });
