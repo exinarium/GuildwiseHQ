@@ -28,7 +28,7 @@ import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { qaOpenEvents } from './qa.ts';
 import { finalizeNext, qaAssignee } from './qa-flow.ts';
-import { rebaseConflictEvents } from './rebase.ts';
+import { finalizeFailureText, isRealConflict, rebaseConflictEvents } from './rebase.ts';
 import { isHighRisk, riskOf } from './review-risk.ts';
 import { spawnCardEvent } from './spawn.ts';
 
@@ -565,7 +565,8 @@ export async function applyFinalizeResult(
             `The card branch is at ${actualSha.slice(0, 10)} but ${String(card.head_sha).slice(0, 10)} was reviewed: nothing was merged and the card goes back to Build.`,
           ),
         );
-    } else if (ok && result?.conflict) {
+    } else if (ok && result?.conflict && isRealConflict(result.conflictedFiles)) {
+      // A conflict only with files: a "conflict" without them (an older runner) or a rebase error takes the failure route.
       const attempt = await cardConflictAttemptEvents(
         ctx,
         tx,
@@ -607,6 +608,8 @@ export async function applyFinalizeResult(
         );
     } else {
       const message = result?.error ?? error ?? 'the completion action failed';
+      const text = finalizeFailureText(action, card.base_branch ?? '', result, error);
+      const rebaseFailed = !!result?.rebaseError || !!result?.conflict;
       ctx.log.warn({ cardId: card.id, ref: card.ref, action, error: message }, 'finalize failed');
       const deskItemId = randomUUID();
       events.push(
@@ -628,7 +631,7 @@ export async function applyFinalizeResult(
               kind: 'escalation',
               subkind: DESK_SUBKIND.finalizeFailed,
               title: `Finalize of ${card.ref} failed (${action})`,
-              body: message,
+              body: rebaseFailed ? text : message,
               options: [],
               blocking: false,
               pinned: true,
@@ -641,7 +644,7 @@ export async function applyFinalizeResult(
           actor: SYSTEM_ACTOR,
           scope,
         },
-        cardMessage(card, { kind: 'system' }, 'system', `Finalize (${action}) failed: ${message}`),
+        cardMessage(card, { kind: 'system' }, 'system', text),
       );
     }
     await ctx.store.append(events, { tx });

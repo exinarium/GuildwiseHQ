@@ -4,9 +4,15 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+Runner 0.1.69.
+
 ### Changed
 
 - Public forms on installs served over plain http: attachments are hashed in the background (in a worker, or a chunk at a time on the page), so a large file no longer freezes the page. When the check before sending takes longer than 3 seconds the page says so, a browser that cannot do the check at all is told the form needs a secure (https) link while the answers stay on the page, and a `403 bad_origin` now says to use the link the firm gave instead of a generic error.
+
+### Fixed
+
+- A rebase onto the base branch that fails for a reason other than a conflict is no longer reported, shown or routed as a conflict. The runner reports a conflict only when git stopped on conflicting paths and it listed them; any other failure (a held `index.lock`, a read-only git dir, an untracked file in the way, a missing base ref) is a rebase error carrying the base ref, the git command, its exit code and git's message (secrets redacted, at most 2000 characters), sent in a new optional `rebaseError` field on the finalize result, the `shift.rejected` message (reason `worktree_failed`) and `run.status`. A branch that already contains its base is left alone (no rebase, head unchanged); only `git merge-base --is-ancestor` exit 1 leads to a rebase, other exits are errors. After a conflict or an error the runner aborts only a rebase or merge that is actually in progress and never resets, cleans or stashes, so untracked files stay as they are. The server treats a conflict without files (also from an older runner) as a failure on all three paths: finalize raises the desk escalation, a shift rejection backs off like `worktree_failed`, a test environment fails normally; the card thread names the base branch and quotes git, and the card is not sent back to Rework and gets no DevOps conflict attempt.
 
 ## [1.5.0] - 2026-11-05
 

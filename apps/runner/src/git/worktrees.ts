@@ -383,7 +383,7 @@ async function removeWorktreeLocked(
   return { removed, branchDeleted };
 }
 
-export { RebaseConflictError, rebaseOntoBase } from './rebase.ts';
+export { RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
 
 export interface ReadOnlyCheckout {
   path: string;

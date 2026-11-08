@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
 /**
@@ -150,6 +151,11 @@ export const FinalizeResultSchema = z.object({
   headSha: z.string().optional(),
   conflictedFiles: z.array(z.string()).optional(),
   error: z.string().optional(),
+  /**
+   * The pre-finalize rebase failed for a reason other than a conflict (with `ok: false`, never with `conflict`): the base
+   * ref, the git command, its exit code and git's message. Optional: an older server strips it and shows `error`.
+   */
+  rebaseError: RebaseErrorInfoSchema.optional(),
 });
 export type FinalizeResult = z.infer<typeof FinalizeResultSchema>;
 
