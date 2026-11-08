@@ -28,10 +28,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { readFormLogo } from '../commands/forms.ts';
 import { destinationWorkstations } from '../commands/forms-offline.ts';
+import { deliver } from '../commands/workstation-setup.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { getFormVersion } from '../queries/forms.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { buildAnswersHtml, buildAnswersJson } from './answers-doc.ts';
 import { clientKey, createFormLimits, type FormLimits } from './limits.ts';
 import { offlineRequestHandler } from './offline.ts';
@@ -379,6 +381,37 @@ export function publicFormRoutes(
       return new Map(r.map((x) => [x.id as string, x.workstation_id as string]));
     };
 
+    /**
+     * The scan refused a file (or could not run): the runner that got it has already removed what it wrote for this
+     * submission. Tell the other workstations holding stored parts to do the same, and forget every reference, so a
+     * late resume can never complete with files that were deleted.
+     */
+    const rollBackSubmission = async (
+      pub: Pub,
+      sid: string,
+      parts: Part[],
+      failing: number,
+      code: string,
+      failingConnectionId: string,
+    ) => {
+      const refs = parts.flatMap((p) => (p.reference ? [p.reference.connectionId] : []));
+      const map = await connectionsOf(pub.orgId, [...new Set([failingConnectionId, ...refs])]);
+      const own = map.get(failingConnectionId);
+      const others = [...new Set(refs.map((c) => map.get(c)).filter((w): w is string => !!w && w !== own))];
+      const expires = new Date(ctx.clock.now().getTime() + 25 * 3600_000);
+      for (const ws of others)
+        await enqueueRunnerCommand(ctx.pool, ws, 'storage.discard', { submissionId: sid }, expires);
+      const reset = parts.map((p, n) => {
+        const { reference: _gone, ...rest } = p;
+        return { ...rest, state: n === failing ? ('failed' as const) : ('pending' as const) };
+      });
+      await ctx.pool.query(
+        `UPDATE form_submissions SET parts=$2::jsonb, status='failed', error_code=$3, updated_at=$4 WHERE id=$1`,
+        [sid, JSON.stringify(reset), code, ctx.clock.now()],
+      );
+      deliver(ctx, others);
+    };
+
     const varsOf = (
       def: FormDefinition,
       sid: string,
@@ -435,7 +468,22 @@ export function publicFormRoutes(
     };
 
     /** Maps a refused storage write to what the page is told. */
-    const storageFailure = (e: StorageWriteError): PfError => {
+    const storageFailure = (e: StorageWriteError, field?: string): PfError => {
+      if (e.code === 'malware_detected')
+        return new PfError(
+          422,
+          'malware_detected',
+          'One of your files could not be accepted because it failed a security check.',
+          { retryable: false, ...(field ? { fields: [{ field, code: 'malware_detected' }] } : {}) },
+        );
+      if (e.code === 'scan_unavailable')
+        return new PfError(
+          503,
+          'scan_unavailable',
+          'Your submission could not be checked right now. Please try again later.',
+          { retryable: true },
+          { retryAfter: retryAfter() },
+        );
       if (e.code === 'not_found')
         return new PfError(
           409,
@@ -819,12 +867,18 @@ export function publicFormRoutes(
           size: part.size,
           source: source(),
           signal: ac.signal,
+          submission: { orgId: pub.orgId, formId: pub.formId, submissionId: sid },
+          scan: { field: field.id, fileName: original },
         });
         if (!r.ok) {
+          if (r.error.code === 'malware_detected' || r.error.code === 'scan_unavailable') {
+            await rollBackSubmission(pub, sid, parts, i, r.error.code, field.destination.connectionId);
+            throw storageFailure(r.error, field.id);
+          }
           await fail(r.error.code);
           if (r.error.code === 'runner_offline')
             return offline(req, reply, 'part', pub, row.link_id, sid, [field.destination.connectionId]);
-          throw storageFailure(r.error);
+          throw storageFailure(r.error, field.id);
         }
         if (r.reference.sha256 !== part.sha256 || r.reference.size !== part.size) {
           await fail('invalid');
@@ -985,6 +1039,7 @@ export function publicFormRoutes(
               source: (async function* () {
                 yield buf;
               })(),
+              submission: { orgId: pub.orgId, formId: pub.formId, submissionId: sid },
             });
             if (!w.ok) {
               await failWith(w.error);

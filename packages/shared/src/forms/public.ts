@@ -43,6 +43,8 @@ export const PUBLIC_FORM_ERROR_CODES = [
   'rate_limited',
   'submission_not_found',
   'submission_busy',
+  'malware_detected',
+  'scan_unavailable',
 ] as const;
 export type PublicFormErrorCode = (typeof PUBLIC_FORM_ERROR_CODES)[number];
 

@@ -54,6 +54,8 @@ const ERROR_TEXT: Record<StorageErrorCode, string> = {
   conflict: 'A file with this name already exists.',
   runner_offline: 'The workstation is offline.',
   timeout: 'The storage did not answer in time.',
+  malware_detected: 'A file was refused by the malware scan.',
+  scan_unavailable: 'The malware scan (clamd) on the workstation is not reachable.',
 };
 
 export const storageErrorText = (code: StorageErrorCode | null, message: string | null): string =>

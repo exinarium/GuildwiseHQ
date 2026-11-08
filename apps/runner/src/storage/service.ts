@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { type FileHandle, open, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import {
   CommandPayloadSchemas,
   healthStateForError,
@@ -23,6 +23,7 @@ import { EnvelopeError, type RunnerKeys } from '../secrets/keys.ts';
 import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
 import { fromNodeError } from './errors.ts';
 import { GDriveConnector } from './gdrive.ts';
+import { SubmissionJournal } from './journal.ts';
 import { checkLocalRoot, LocalConnector } from './local.ts';
 import {
   beginDeviceFlow,
@@ -37,6 +38,7 @@ import {
 } from './oauth.ts';
 import { OneDriveConnector, setupOneDrive } from './onedrive.ts';
 import { checkS3Endpoint, S3Connector } from './s3.ts';
+import { type ClamdClient, clamdClient, quarantine, type ScanVerdict } from './scan.ts';
 import { KeyedMutex, StorageStore } from './store.ts';
 import {
   type FetchLike,
@@ -64,6 +66,15 @@ export interface StorageServiceDeps {
   /** Folders a local connection may not use (the runner's own data directory). */
   forbiddenRoots?: string[];
   log?: (line: string) => void;
+  /** Warning and error lines (the scan verdicts); they fall back to `log`. */
+  logWarn?: (line: string) => void;
+  logError?: (line: string) => void;
+  /** The malware scan of public form uploads. Absent or `enabled: false`: nothing contacts clamd. */
+  uploadScan?: { enabled: boolean; clamd: string; timeoutMs: number; quarantineDir: string };
+  /** Test seam: replaces the clamd client. */
+  scanner?: ClamdClient;
+  /** Where the per-submission journal is kept (`<data dir>/state/storage-submissions.json`). Absent: in memory only. */
+  journalFile?: string;
   /** Bound for the probe of "Test connection". */
   probeTimeoutMs?: number;
 }
@@ -86,6 +97,8 @@ interface Transfer {
   startedAt: number;
   finished: boolean;
   written?: { path: string; providerId?: string };
+  submission?: { orgId: string; formId: string; submissionId: string };
+  scan?: { field: string; fileName: string };
 }
 
 const defaultSleep = (ms: number, signal: AbortSignal) =>
@@ -120,11 +133,17 @@ export class StorageService {
   private readonly health = new Map<string, StorageHealthReport>();
   private readonly fetchFn: FetchLike;
   private readonly now: () => number;
+  private readonly journal: SubmissionJournal;
+  private scannerInstance?: ClamdClient;
 
   constructor(private readonly deps: StorageServiceDeps) {
     this.store = new StorageStore(deps.secretsDir, deps.keyOf);
     this.fetchFn = deps.fetch ?? fetch;
     this.now = deps.now ?? Date.now;
+    this.journal = new SubmissionJournal(
+      deps.journalFile ?? join(deps.spoolDir, '..', 'storage-submissions.json'),
+      this.now,
+    );
     // A spool left by a crash is deleted: nothing of a client's file stays behind.
     try {
       rmSync(deps.spoolDir, { recursive: true, force: true });
@@ -138,17 +157,38 @@ export class StorageService {
     this.deps.log?.(line);
   }
 
+  private logWarn(line: string): void {
+    (this.deps.logWarn ?? this.deps.log)?.(line);
+  }
+
+  private logError(line: string): void {
+    (this.deps.logError ?? this.deps.log)?.(line);
+  }
+
+  private scanOn(): boolean {
+    return this.deps.uploadScan?.enabled === true;
+  }
+
+  /** The clamd client; built on first use, so nothing exists while the setting is off. */
+  private get scanner(): ClamdClient {
+    if (!this.scannerInstance)
+      this.scannerInstance =
+        this.deps.scanner ?? clamdClient((this.deps.uploadScan as { clamd: string }).clamd);
+    return this.scannerInstance;
+  }
+
   // ------------------------------------------------------------------------------------------------ reports
 
   private report(
     id: string,
     state: StorageHealthReport['state'],
     error?: StorageWriteError,
+    note?: string,
   ): StorageHealthReport {
     const h: StorageHealthReport = {
       connectionId: id,
       state,
-      ...(error ? { errorCode: error.code, message: error.message } : {}),
+      ...(error ? { errorCode: error.code, message: error.message } : note ? { message: note } : {}),
       checkedAt: new Date(this.now()).toISOString(),
     };
     this.health.set(id, h);
@@ -266,6 +306,10 @@ export class StorageService {
           return await this.remove(CommandPayloadSchemas['storage.remove'].parse(payload).connectionId);
         case 'storage.sync':
           return await this.sync(CommandPayloadSchemas['storage.sync'].parse(payload).connectionIds);
+        case 'storage.discard': {
+          const { submissionId } = CommandPayloadSchemas['storage.discard'].parse(payload);
+          return { discarded: await this.rollbackSubmission(submissionId) };
+        }
         default:
           return { error: storageError('invalid', 'This command is not supported by this runner version.') };
       }
@@ -339,7 +383,7 @@ export class StorageService {
       if (probe)
         return { health: this.report(p.connectionId, healthStateForError(probe.code), probe), error: probe };
       this.store.put(p.connectionId, conn);
-      return { health: this.report(p.connectionId, 'connected') };
+      return { health: await this.reportWithScan(p.connectionId) };
     } catch (err) {
       const e = this.typed(err);
       return { health: this.report(p.connectionId, healthStateForError(e.code), e), error: e };
@@ -364,6 +408,21 @@ export class StorageService {
     }
   }
 
+  /** Connected, plus the clamd line when the upload scan is on (and nothing about clamd when it is off). */
+  private async reportWithScan(id: string): Promise<StorageHealthReport> {
+    if (!this.scanOn()) return this.report(id, 'connected');
+    if (await this.scanner.ping(3000))
+      return this.report(id, 'connected', undefined, 'Malware scan: clamd reachable.');
+    return this.report(
+      id,
+      'unavailable',
+      storageError(
+        'scan_unavailable',
+        `Storage reachable, but the malware scan is not: clamd not reachable at ${this.deps.uploadScan?.clamd}.`,
+      ),
+    );
+  }
+
   private async test(id: string): Promise<Record<string, unknown>> {
     const conn = this.store.get(id);
     if (!conn) {
@@ -375,8 +434,8 @@ export class StorageService {
       return { health: this.report(id, 'needs_reauth', e), error: e };
     }
     const err = await this.probeOf(id, conn);
-    const health = err ? this.report(id, healthStateForError(err.code), err) : this.report(id, 'connected');
-    return err ? { health, error: err } : { health };
+    if (err) return { health: this.report(id, healthStateForError(err.code), err), error: err };
+    return { health: await this.reportWithScan(id) };
   }
 
   private async remove(id: string): Promise<Record<string, unknown>> {
@@ -583,6 +642,8 @@ export class StorageService {
         chain: Promise.resolve(),
         startedAt: this.now(),
         finished: false,
+        ...(m.submission ? { submission: m.submission } : {}),
+        ...(m.scan ? { scan: m.scan } : {}),
       };
       this.transfers.set(t.id, t);
       this.deps.send('storage.write.credit', { transferId: t.id, upTo: STORAGE_WINDOW });
@@ -625,9 +686,29 @@ export class StorageService {
       ));
     const spooled: Spooled = { file: t.file, size: t.bytes, sha256: sha, contentType: t.contentType };
     const signal = abortAfter(t.deadline - this.now(), t.controller.signal);
+    if (t.scan && t.submission && this.scanOn()) {
+      const cfg = this.deps.uploadScan as NonNullable<StorageServiceDeps['uploadScan']>;
+      const unusable = this.quarantineInsideDestination(cfg.quarantineDir);
+      const timeout = Math.min(cfg.timeoutMs, t.deadline - this.now());
+      const v: ScanVerdict = unusable
+        ? { kind: 'failed', reason: unusable }
+        : await this.scanner.scanFile(t.file, abortAfter(timeout, t.controller.signal));
+      if (t.finished) return void (await this.cleanup(t));
+      if (v.kind === 'infected')
+        return void (await this.reject(t, 'malware_detected', v, sha, cfg.quarantineDir));
+      if (v.kind === 'failed')
+        return void (await this.reject(t, 'scan_unavailable', v, sha, cfg.quarantineDir));
+    }
     try {
       const written = await this.connector(t.connectionId, conn).put(t.target, spooled, signal);
       t.written = written;
+      if (t.submission && !t.finished)
+        this.journal.add({
+          submissionId: t.submission.submissionId,
+          connectionId: t.connectionId,
+          path: written.path,
+          ...(written.providerId ? { providerId: written.providerId } : {}),
+        });
       if (t.finished) {
         // Aborted while the put was running: the caller was told it failed, so the file goes again.
         await this.deleteWritten(t, conn);
@@ -662,16 +743,125 @@ export class StorageService {
 
   private async deleteWritten(t: Transfer, conn: StoredConnection): Promise<void> {
     if (!t.written) return;
+    await this.deleteRef(t.connectionId, conn, t.written);
+    if (t.submission) this.dropJournalEntry(t.submission.submissionId, t.connectionId, t.written.path);
+  }
+
+  private dropJournalEntry(submissionId: string, connectionId: string, path: string): void {
+    const e = this.journal.list(submissionId).find((x) => x.connectionId === connectionId && x.path === path);
+    if (e) this.journal.drop(submissionId, e);
+  }
+
+  /** Best-effort delete of one written file (ids for OneDrive and Google Drive, paths for the rest). */
+  private async deleteRef(
+    connectionId: string,
+    conn: StoredConnection,
+    w: { path: string; providerId?: string },
+  ): Promise<boolean> {
     try {
-      await this.connector(t.connectionId, conn).delete(
-        t.written.providerId && conn.kind !== 's3' && conn.kind !== 'local' && conn.kind !== 'vault'
-          ? `id:${t.written.providerId}`
-          : t.written.path,
+      await this.connector(connectionId, conn).delete(
+        w.providerId && conn.kind !== 's3' && conn.kind !== 'local' && conn.kind !== 'vault'
+          ? `id:${w.providerId}`
+          : w.path,
         AbortSignal.timeout(10_000),
       );
+      return true;
     } catch {
       // best effort
+      return false;
     }
+  }
+
+  /** Deletes everything this workstation wrote for one submission. Idempotent. Returns how many files went. */
+  private async rollbackSubmission(submissionId: string): Promise<number> {
+    let n = 0;
+    for (const e of this.journal.list(submissionId)) {
+      const conn = this.store.get(e.connectionId);
+      if (!conn) {
+        this.logWarn(
+          `storage.scan rollback conn=${e.connectionId} submission=${submissionId}: connection not found`,
+        );
+        continue;
+      }
+      const ok = await this.deleteRef(e.connectionId, conn, {
+        path: e.path,
+        ...(e.providerId ? { providerId: e.providerId } : {}),
+      });
+      if (ok) n++;
+      else
+        this.logWarn(
+          `storage.scan rollback conn=${e.connectionId} submission=${submissionId}: delete failed`,
+        );
+    }
+    this.journal.drop(submissionId);
+    return n;
+  }
+
+  /** A reason when the quarantine folder lies inside a local storage destination, else undefined. */
+  private quarantineInsideDestination(dir: string): string | undefined {
+    const q = resolve(dir) + sep;
+    for (const [, c] of this.store.list()) {
+      if (c.config.kind !== 'local') continue;
+      const root = resolve(c.config.root) + sep;
+      if (q.startsWith(root) || root.startsWith(q))
+        return 'quarantine folder is inside a storage destination';
+    }
+    return undefined;
+  }
+
+  /** The scan said no: take the whole submission back first, then keep the file (infected only) and answer. */
+  private async reject(
+    t: Transfer,
+    code: 'malware_detected' | 'scan_unavailable',
+    v: Exclude<ScanVerdict, { kind: 'clean' }>,
+    sha: string,
+    quarantineDir: string,
+  ): Promise<void> {
+    t.finished = true;
+    const sub = t.submission as NonNullable<Transfer['submission']>;
+    const scan = t.scan as NonNullable<Transfer['scan']>;
+    await this.rollbackSubmission(sub.submissionId);
+    if (v.kind === 'infected') {
+      const now = new Date(this.now());
+      let kept = 'none';
+      try {
+        const q = await quarantine(
+          t.file,
+          quarantineDir,
+          {
+            originalName: scan.fileName,
+            size: t.bytes,
+            sha256: sha,
+            signature: v.signature,
+            formId: sub.formId,
+            submissionId: sub.submissionId,
+            transferId: t.id,
+            orgId: sub.orgId,
+            field: scan.field,
+          },
+          now,
+        );
+        kept = `${q.base}.bin`;
+        if (q.warning) this.logWarn(`storage.scan ${q.warning}`);
+      } catch (err) {
+        this.logError(
+          `storage.scan quarantine failed submission=${sub.submissionId} transfer=${t.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      this.logWarn(
+        `storage.scan infected conn=${t.connectionId} form=${sub.formId} submission=${sub.submissionId} transfer=${t.id} org=${sub.orgId} field=${scan.field} name=${scan.fileName} size=${t.bytes} sha256=${sha} signature=${v.signature} quarantined=${kept}`,
+      );
+      this.result(t.id, { error: storageError('malware_detected', 'The file failed the security check.') });
+    } else {
+      this.logError(
+        `storage.scan failed conn=${t.connectionId} submission=${sub.submissionId} transfer=${t.id} reason=${v.reason}`,
+      );
+      this.result(t.id, { error: storageError('scan_unavailable', 'The file could not be scanned.') });
+    }
+    this.log(
+      `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.size} ${code} ${this.now() - t.startedAt}ms`,
+    );
+    await this.cleanup(t);
   }
 
   private async fail(t: Transfer, e: StorageWriteError): Promise<void> {

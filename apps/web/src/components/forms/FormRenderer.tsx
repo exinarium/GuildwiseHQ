@@ -115,7 +115,10 @@ export function FormRenderer({
       if (!code || shown[f.id]) continue;
       shown[f.id] = validateFieldAnswer(f, answers[f.id]) ?? {
         code,
-        message: 'Please check this answer and try again.',
+        message:
+          code === 'malware_detected'
+            ? 'This file failed a security check. Choose a different file.'
+            : 'Please check this answer and try again.',
       };
     }
 

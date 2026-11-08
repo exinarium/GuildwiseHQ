@@ -60,6 +60,7 @@ import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
+import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
@@ -412,6 +413,16 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
     line(true, 'config', paths.config);
   } catch (err) {
     line(false, 'config', err instanceof Error ? err.message : String(err));
+  }
+  if (config?.uploadScan.enabled) {
+    const addr = config.uploadScan.clamd;
+    let up = false;
+    try {
+      up = await clamdClient(addr).ping(3000);
+    } catch {
+      // an address that does not parse is reported as not reachable
+    }
+    line(up, 'clamd', up ? `clamd reachable at ${addr}` : `clamd not reachable at ${addr}`);
   }
   const claudeBin = config?.runtimes['claude-code'].bin ?? 'claude';
   const c = await execa(claudeBin, ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(

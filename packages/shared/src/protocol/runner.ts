@@ -142,6 +142,7 @@ import {
   StorageAuthCancelPayloadSchema,
   StorageConnectPayloadSchema,
   StorageDevicePromptSchema,
+  StorageDiscardPayloadSchema,
   StorageHealthReportSchema,
   StorageReferenceSchema,
   StorageRemovePayloadSchema,
@@ -1243,6 +1244,7 @@ export const RunnerCommandNameSchema = z.enum([
   'storage.test',
   'storage.remove',
   'storage.sync',
+  'storage.discard',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1355,6 +1357,7 @@ export const CommandPayloadSchemas = {
   'storage.test': StorageTestPayloadSchema,
   'storage.remove': StorageRemovePayloadSchema,
   'storage.sync': StorageSyncPayloadSchema,
+  'storage.discard': StorageDiscardPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -2220,6 +2223,10 @@ export const StorageWriteOpenSchema = msg('storage.write.open', {
   contentType: z.string().max(200),
   size: z.number().int().nonnegative(),
   deadlineMs: z.number().int().positive(),
+  /** Set on every write that belongs to a public form submission (files and answers documents). */
+  submission: z.object({ orgId: z.uuid(), formId: z.uuid(), submissionId: z.uuid() }).optional(),
+  /** Set only on a public form file answer: the runner scans it when its upload scan setting is on. */
+  scan: z.object({ field: z.string().max(100), fileName: z.string().max(300) }).optional(),
 });
 export const StorageWriteChunkSchema = msg('storage.write.chunk', {
   transferId: z.uuid(),

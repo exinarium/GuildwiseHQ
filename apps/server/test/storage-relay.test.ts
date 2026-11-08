@@ -135,6 +135,20 @@ describe('StorageRelay.write', () => {
     expect(t.outcomes[0]).toMatchObject([CONN, { ok: false }]);
   });
 
+  it('forwards the submission and scan context in the open message, and leaves them out otherwise', async () => {
+    const ctx = {
+      submission: { orgId: 'o', formId: 'f', submissionId: 's' },
+      scan: { field: 'f_file', fileName: 'a.pdf' },
+    };
+    const t = make({}, { answer: 'early_error' });
+    await t.relay.write(req(source([Buffer.from('x')]), 1, ctx));
+    expect(t.frames.find((f) => f.type === 'storage.write.open')?.payload).toMatchObject(ctx);
+    const u = make({}, { answer: 'early_error' });
+    await u.relay.write(req(source([Buffer.from('x')]), 1));
+    const open = u.frames.find((f) => f.type === 'storage.write.open')?.payload ?? {};
+    expect('submission' in open || 'scan' in open).toBe(false);
+  });
+
   it('times out within the deadline when the runner is silent, sends abort and holds nothing', async () => {
     const t = make(
       { config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 2 } },
