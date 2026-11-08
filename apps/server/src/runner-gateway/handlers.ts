@@ -480,6 +480,9 @@ export class RunnerHandlers {
       case 'storage.write.result':
         this.ctx.services.storage.onResult(conn.workstationId, msg.transferId, msg);
         return;
+      case 'storage.delete.result':
+        this.ctx.services.storage.onDeleteResult(conn.workstationId, msg.requestId, msg);
+        return;
       case 'relay.serve': {
         const r = await this.ctx.services.webhookRelay.serve(conn, msg.integrations);
         this.send(conn, 'relay.serve.result', r);

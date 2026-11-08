@@ -9,6 +9,7 @@ import {
   renderStoragePath,
   type SealedEnvelope,
   type ServerToRunner,
+  STORAGE_DELETE_TIMEOUT_MS,
   STORAGE_WINDOW,
   type StorageErrorCode,
   type StorageHealthReport,
@@ -595,8 +596,43 @@ export class StorageService {
         if (t) void this.abortTransfer(t, msg.reason);
         break;
       }
+      case 'storage.delete':
+        void this.deleteStored(msg);
+        break;
       default:
         break;
+    }
+  }
+
+  /**
+   * `storage.delete`: removes one file the server wrote earlier, confined to the destination by the connector.
+   * "The file is not there" is `result: 'not_found'` (success); an `error` with code `not_found` means the storage
+   * itself is missing. Logs a path hash, never the path.
+   */
+  private async deleteStored(m: Extract<ServerToRunner, { type: 'storage.delete' }>): Promise<void> {
+    const start = this.now();
+    const conn = this.store.get(m.connectionId);
+    const answer = (r: { result: 'deleted' | 'not_found' } | { error: StorageWriteError }): void => {
+      this.deps.send('storage.delete.result', { requestId: m.requestId, ok: 'result' in r, ...r });
+      const hash = createHash('sha256').update(m.path).digest('hex').slice(0, 12);
+      this.log(
+        `storage.delete conn=${m.connectionId} kind=${conn?.kind ?? '-'} submission=${m.submissionId ?? '-'} ` +
+          `path#=${hash} ${'result' in r ? r.result : r.error.code} ${this.now() - start}ms`,
+      );
+    };
+    if (!conn)
+      return answer({ error: storageError('not_found', 'This storage is not set up on this workstation.') });
+    if (conn.needsReauth)
+      return answer({ error: storageError('auth_expired', 'The sign-in expired: reconnect this storage.') });
+    try {
+      const r = await this.connector(m.connectionId, conn).deleteFile(
+        { path: m.path, ...(m.providerId ? { providerId: m.providerId } : {}) },
+        abortAfter(STORAGE_DELETE_TIMEOUT_MS - 2_000, new AbortController().signal),
+      );
+      if (m.submissionId) this.dropJournalEntry(m.submissionId, m.connectionId, m.path);
+      answer({ result: r });
+    } catch (err) {
+      answer({ error: this.typed(err) });
     }
   }
 

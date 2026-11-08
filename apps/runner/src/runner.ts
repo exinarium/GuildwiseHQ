@@ -68,6 +68,7 @@ import {
   type ShiftLimitSetting,
   type ShiftLimitSource,
   STORAGE_CAPABILITY,
+  STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
   UNLIMITED_SHIFTS,
   uuidv7,
@@ -1497,6 +1498,7 @@ export class Runner {
             : ['runs:1', 'runs:2', 'runs:3']),
         'ceo:1',
         STORAGE_CAPABILITY,
+        STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
@@ -1934,6 +1936,7 @@ export class Runner {
       case 'storage.write.chunk':
       case 'storage.write.end':
       case 'storage.write.abort':
+      case 'storage.delete':
         this.storage.onMessage(msg);
         break;
       case 'relay.request':

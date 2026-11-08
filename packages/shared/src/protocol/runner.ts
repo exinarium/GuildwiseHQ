@@ -2283,6 +2283,21 @@ export const StorageWriteResultSchema = msg('storage.write.result', {
   reference: StorageReferenceSchema.optional(),
   error: StorageWriteErrorSchema.optional(),
 });
+/** Server to runner: remove one file the server wrote earlier (cleanup of an expired form submission). */
+export const StorageDeleteSchema = msg('storage.delete', {
+  requestId: z.uuid(),
+  connectionId: z.uuid(),
+  path: z.string().min(1).max(1024),
+  providerId: z.string().max(300).optional(),
+  /** Logging and the runner's journal only. */
+  submissionId: z.uuid().optional(),
+});
+export const StorageDeleteResultSchema = msg('storage.delete.result', {
+  requestId: z.uuid(),
+  ok: z.boolean(),
+  result: z.enum(['deleted', 'not_found']).optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HelloSchema,
@@ -2334,6 +2349,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageAuthSchema,
   StorageWriteCreditSchema,
   StorageWriteResultSchema,
+  StorageDeleteResultSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2357,6 +2373,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   StorageWriteChunkSchema,
   StorageWriteEndSchema,
   StorageWriteAbortSchema,
+  StorageDeleteSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

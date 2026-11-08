@@ -124,6 +124,35 @@ export async function writeVaultBinary(
   return commitVaultPath(dir, cmd.path, cmd.commitMessage);
 }
 
+/**
+ * Removes one uploaded file from the vault clone and commits the removal (unless `commit` is false, a local vault),
+ * so a sync cannot bring it back. Same checks as a write. Returns false when the file was not there.
+ */
+export async function removeVaultBinary(
+  dir: string,
+  cmd: Pick<VaultWriteFileCommand, 'path' | 'commitMessage'>,
+  opts: { commit?: boolean } = {},
+): Promise<boolean> {
+  const file = checkedBinaryTarget(dir, cmd.path);
+  let st: ReturnType<typeof lstatSync>;
+  try {
+    st = lstatSync(file);
+  } catch {
+    return false;
+  }
+  if (!st.isFile()) throw new VaultWriteError('only files are removed');
+  await rm(file);
+  if (opts.commit === false) return true;
+  const env = await vaultCommitEnv(dir);
+  const tracked = await git(dir, ['ls-files', '--error-unmatch', '--', cmd.path], { env });
+  if (tracked.exitCode !== 0) return true;
+  await gitOk(dir, ['add', '-A', '--', cmd.path], { env });
+  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', cmd.commitMessage, '--', cmd.path], {
+    env,
+  });
+  return true;
+}
+
 /** Refuses a path that runs through a symlink (a vault committed with `docs -> /etc` must not redirect a write). */
 function refuseSymlinks(root: string, path: string): void {
   let cur = root;

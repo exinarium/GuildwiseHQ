@@ -9,6 +9,21 @@ const LABEL: Record<string, string> = {
   expired: 'Timed out',
 };
 
+/** The state of the removal of one file, as visible text (no tooltip: touch screens have no hover). */
+export function cleanupSuffix(c: { state: string; error: string | null }): string {
+  if (c.state === 'removed') return ' — removed';
+  if (c.state === 'failed') return ` — could not be removed${c.error ? `: ${c.error}` : ''}`;
+  return ` — waiting to be removed${c.error ? ` (${c.error})` : ''}`;
+}
+
+export function cleanupSummary(c: { pending: number; removed: number; failed: number }): string {
+  const parts: string[] = [];
+  if (c.removed) parts.push(`${c.removed} removed`);
+  if (c.pending) parts.push(`${c.pending} waiting to be removed`);
+  if (c.failed) parts.push(`${c.failed} could not be removed`);
+  return `Uploaded files: ${parts.join(' · ')}`;
+}
+
 /** What came in: status, time, the client reference and where it was stored. No answers: those are in the firm's storage. */
 export function SubmissionsList({ formId }: { formId: string }) {
   const q = useFormSubmissions(formId);
@@ -34,11 +49,21 @@ export function SubmissionsList({ formId }: { formId: string }) {
               Version {s.formVersion}
               {s.reference ? ` · ${s.reference}` : ''}
             </p>
+            {s.cleanup && (s.cleanup.pending > 0 || s.cleanup.removed > 0 || s.cleanup.failed > 0) && (
+              <p className="text-sm text-fg" data-testid="submission-cleanup">
+                {cleanupSummary(s.cleanup)}
+              </p>
+            )}
             {s.stored.length > 0 && (
               <ul className="mt-1 text-sm text-muted">
                 {s.stored.map((p) => (
                   <li key={`${p.label}-${p.path}`} className="break-all">
                     {p.label}: {p.path}
+                    {p.cleanup && (
+                      <span data-testid={`stored-cleanup-${p.cleanup.state}`}>
+                        {cleanupSuffix(p.cleanup)}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
