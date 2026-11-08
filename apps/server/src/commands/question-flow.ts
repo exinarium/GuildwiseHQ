@@ -263,8 +263,14 @@ export async function devopsTopicQuestion(
     `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`,
     [shift.workstation_id],
   );
-  if (!ws || !(await devopsAgentOn(tx, ws.id, card.org_id))) return undefined;
+  if (!ws) return undefined;
+  const devops = await devopsAgentOn(tx, ws.id, card.org_id);
   const detail = report.text.replace(/\s+/g, ' ').trim().slice(0, 300);
+  // "Test without an environment": a builder's test-run question never parks the card. With no DevOps engineer on the
+  // workstation nobody can run the tests, so the gap is recorded without a request.
+  const testGap = await isBuilderTestGapQuestion(tx, ws.id, card, agent, topic);
+  if (testGap && !devops) return builderTestGapWithoutDevops(ctx, tx, shift, card, agent, detail);
+  if (!devops) return undefined;
   const problem =
     topic === 'environment' || topic === 'tests' ? 'app_not_deployed' : (topic as 'sandbox' | 'tooling');
   const summary = `${card.ref} (${agent.name}, ${shift.stage ?? card.stage}) asks about ${topic}: ${detail}${report.doing ? `\nWhat it was doing: ${report.doing}` : ''}`;
@@ -277,19 +283,7 @@ export async function devopsTopicQuestion(
   const requestedBy = { kind: 'agent' as const, id: agent.id as string, name: agent.name as string };
 
   // "Test without an environment": a builder's test-run question goes to DevOps without parking the card.
-  if (
-    topic === 'tests' &&
-    agent.role_key === 'builder' &&
-    !agent.is_devops &&
-    (await one(tx, 'SELECT 1 AS ok FROM projects WHERE id=$1 AND test_without_environment', [
-      card.project_id,
-    ])) &&
-    (await one(
-      tx,
-      'SELECT 1 AS ok FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
-      [ws.id, QUESTION_CONTINUE_CAPABILITY],
-    ))
-  )
+  if (testGap)
     return builderTestGap(ctx, tx, shift, card, agent, { wsId: ws.id, summary, detail, requestedBy });
 
   if (!report.blocking) {
@@ -363,6 +357,86 @@ export async function devopsTopicQuestion(
   return {
     accepted: true,
     message: `Recorded. The DevOps engineer was asked about ${topic} and ${card.ref} is parked until the request completes. Finish now; do not make further changes.`,
+  };
+}
+
+/**
+ * A test-run question (`--topic tests`) of a builder on a project with "Test without an environment" switched on, from a
+ * runner that can carry on after a question (`question-continue:1`). Such a question never parks the card.
+ */
+async function isBuilderTestGapQuestion(
+  tx: Tx,
+  workstationId: string,
+  card: Row,
+  agent: Row,
+  topic: QuestionTopic,
+): Promise<boolean> {
+  return Boolean(
+    topic === 'tests' &&
+      agent.role_key === 'builder' &&
+      !agent.is_devops &&
+      (await one(tx, 'SELECT 1 AS ok FROM projects WHERE id=$1 AND test_without_environment', [
+        card.project_id,
+      ])) &&
+      (await one(
+        tx,
+        'SELECT 1 AS ok FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+        [workstationId, QUESTION_CONTINUE_CAPABILITY],
+      )),
+  );
+}
+
+/**
+ * A builder's test-run question under "Test without an environment" on a workstation with no DevOps engineer: nobody
+ * can run the tests, so no request is filed. The card records the same gap (`BuilderTestsNotRun`, no request), is not
+ * parked and keeps its claim, and the builder carries on. A second such question in the same stage adds no second gap.
+ */
+async function builderTestGapWithoutDevops(
+  ctx: Ctx,
+  tx: Tx,
+  shift: Row,
+  card: Row,
+  agent: Row,
+  detail: string,
+): Promise<Result> {
+  const stage = String(shift.stage ?? card.stage);
+  const already = await one(
+    tx,
+    'SELECT 1 AS ok FROM card_test_gaps WHERE card_id=$1 AND request_id IS NULL AND stage=$2',
+    [card.id, stage],
+  );
+  const events: AppendInput[] = [
+    cardMessage(
+      card,
+      { kind: 'agent', agentId: agent.id },
+      'question',
+      `${detail}\n\n(topic tests: no DevOps engineer on this workstation, not sent)`,
+    ),
+  ];
+  if (!already)
+    events.push(
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'BuilderTestsNotRun',
+          payload: { cardId: card.id, agentId: agent.id, stage, reason: 'no_devops_engineer', detail },
+        },
+        actor: agentActor(agent.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `${agent.name} did not run the DB-backed tests: 'Test without an environment' is on for this project and there is no test environment and no DevOps engineer on this workstation, so nobody was asked to run them. They are not passed.`,
+        { reason: 'no_devops_engineer' },
+      ),
+    );
+  await ctx.store.append(events, { tx });
+  return {
+    accepted: true,
+    continueShift: true,
+    message: `Recorded. There is no test environment and no DevOps engineer on this workstation, so those tests cannot be run here. ${card.ref} is not parked: carry on without them, do not record them as passed, and say in your handoff note that they were not run (no environment, no DevOps engineer).`,
   };
 }
 

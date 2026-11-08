@@ -163,11 +163,26 @@ describe('evidence panel', () => {
 
 describe('the test gap notice', () => {
   const gap = {
-    requestId: ID(8),
+    requestId: ID(8) as string | null,
+    reason: 'test_without_environment' as const,
     stage: 'build',
     at: '2026-10-30T10:00:00.000Z',
     detail: 'run the DB tests',
   };
+  it('says nobody was asked when no DevOps engineer was on the workstation', () => {
+    wrap(
+      <TestingLinks
+        testing={testing({
+          testGaps: [{ ...gap, requestId: null, reason: 'no_devops_engineer', result: null }],
+        })}
+        status="queued"
+      />,
+    );
+    const text = screen.getByTestId('test-gap-notice').textContent ?? '';
+    expect(text).toContain('did not run the DB-backed tests');
+    expect(text).toContain('No DevOps engineer was on the workstation');
+    expect(text).not.toContain('DevOps request');
+  });
   it('says the builder did not run the DB-backed tests and that the result has not arrived', () => {
     wrap(<TestingLinks testing={testing({ testGaps: [{ ...gap, result: null }] })} status="queued" />);
     const text = screen.getByTestId('test-gap-notice').textContent ?? '';

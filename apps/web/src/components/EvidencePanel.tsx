@@ -102,16 +102,22 @@ export function TestingLinks({
       )}
       {testGaps.map((g) => (
         <p
-          key={g.requestId}
+          key={g.requestId ?? `gap-${g.at}`}
           role="status"
           data-testid="test-gap-notice"
           className="rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-warning-soft-fg"
         >
-          The builder did not run the DB-backed tests (&apos;Test without an environment&apos; is on). DevOps
-          request {g.requestId.slice(0, 8)}:{' '}
-          {g.result
-            ? `result arrived: ${g.result.status}, ${g.result.summary || 'no summary'}`
-            : 'result not arrived yet'}
+          The builder did not run the DB-backed tests (&apos;Test without an environment&apos; is on).{' '}
+          {g.requestId ? (
+            <>
+              DevOps request {g.requestId.slice(0, 8)}:{' '}
+              {g.result
+                ? `result arrived: ${g.result.status}, ${g.result.summary || 'no summary'}`
+                : 'result not arrived yet'}
+            </>
+          ) : (
+            'No DevOps engineer was on the workstation, so nobody was asked to run them.'
+          )}
         </p>
       ))}
       {parent && (
