@@ -46,6 +46,7 @@ import {
   RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
   RELEASE_FACTS_CAPABILITY,
   RELEASE_PUBLISH_CAPABILITY,
+  RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -129,7 +130,7 @@ import { docsPrepModel } from './git/release-docs-prep-model.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
-import { shipReleaseCommit } from './git/release-ship.ts';
+import { deleteKeptReleaseRef, shipReleaseCommit } from './git/release-ship.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { bumpSubmodule } from './git/submodule-pin.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -1501,6 +1502,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
+        RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
         CHECKS_CAPABILITY,
         RELEASE_DOCS_PREP_CAPABILITY,
@@ -2217,6 +2219,14 @@ export class Runner {
             remoteUrlNormalized: p.remoteUrlNormalized,
             workingBranch: p.workingBranch,
           });
+      } else if (command === 'release.ref_cleanup') {
+        // The kept ref of a dismissed release: no clone here means there is no ref to remove either.
+        const p = CommandPayloadSchemas['release.ref_cleanup'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo ? await deleteKeptReleaseRef(repo.localPath, p.version) : { ok: true, deleted: false },
+        );
       } else if (command === 'release.docs_prep') {
         // "No clone here" and every git refusal are answers (ok:true, result.state:'failed'): the server fails the run.
         const p = CommandPayloadSchemas['release.docs_prep'].parse(payload);

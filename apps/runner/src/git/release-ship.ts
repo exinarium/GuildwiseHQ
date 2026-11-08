@@ -4,7 +4,10 @@ import {
   componentBumps,
   hasReleaseSection,
   isSafeGitRef,
+  KEPT_RELEASE_REF_PREFIX,
+  keptReleaseRef,
   newChangelog,
+  type ReleaseRefCleanupResult,
   type ReleaseShipPayload,
   type ReleaseShipResult,
   type ReleaseShipStep,
@@ -109,6 +112,8 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
           'CHANGELOG.md',
         ]);
     const section = releaseSectionOf(shown.stdout, version);
+    // the push went through on an earlier run that was lost before it cleaned up: the kept commit is not needed any more
+    await git(repoPath, ['update-ref', '-d', keptReleaseRef(version)]);
     return {
       ok: true,
       step: 'push',
@@ -135,7 +140,7 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
     return fail('prepare', `tag ${p.tag} already exists: this version was released; choose a higher version`);
 
   // 3. a commit that was made but not pushed (a failed push): push that one
-  const kept = `refs/guildwise/release/${version}`;
+  const kept = keptReleaseRef(version);
   const keptSha = await revParse(repoPath, kept);
   if (keptSha) {
     const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${keptSha}^`])).stdout.trim();
@@ -256,7 +261,7 @@ async function commitRelease(
   if (commit.exitCode !== 0)
     return fail('commit', `git commit failed: ${(commit.stderr || commit.stdout).trim()}`);
   const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-  await git(wt, ['update-ref', `refs/guildwise/release/${p.version}`, sha]);
+  await git(wt, ['update-ref', keptReleaseRef(p.version), sha]);
   return {
     ok: true,
     commit: sha,
@@ -322,7 +327,7 @@ async function pushCommit(
   };
   const pushed = await pushFastForward(repoPath, sha, p.workingBranch, a);
   if (!pushed.ok) return { ok: false, step: 'push', error: firstLine(pushed.error), ...base };
-  await git(repoPath, ['update-ref', '-d', `refs/guildwise/release/${p.version}`]);
+  await git(repoPath, ['update-ref', '-d', keptReleaseRef(p.version)]);
   await advanceLocalBranch(repoPath, p.workingBranch, sha);
   let section = carry.section;
   if (!section) {
@@ -330,4 +335,29 @@ async function pushCommit(
     section = (text.exitCode === 0 ? releaseSectionOf(text.stdout, p.version) : null) ?? undefined;
   }
   return { ok: true, step: 'push', ...base, ...(section ? { section } : {}) };
+}
+
+/**
+ * `release.ref_cleanup`: deletes the kept ref refs/guildwise/release/<version> of a release the owner dismissed. Only a
+ * single-level ref under that prefix is ever touched; a missing ref is a success (`deleted: false`).
+ */
+export async function deleteKeptReleaseRef(
+  repoPath: string,
+  version: string,
+): Promise<ReleaseRefCleanupResult> {
+  const ref = keptReleaseRef(version);
+  const name = ref.slice(KEPT_RELEASE_REF_PREFIX.length);
+  if (!isSafeGitRef(ref) || !ref.startsWith(KEPT_RELEASE_REF_PREFIX) || !name || name.includes('/'))
+    return { ok: false, deleted: false, error: `refusing unsafe ref ${JSON.stringify(ref)}` };
+  try {
+    return await withRepoLock(repoPath, async () => {
+      if (!(await revParse(repoPath, ref))) return { ok: true, deleted: false };
+      const r = await git(repoPath, ['update-ref', '-d', ref]);
+      return r.exitCode === 0
+        ? { ok: true, deleted: true }
+        : { ok: false, deleted: false, error: (r.stderr || r.stdout).trim().slice(0, 500) };
+    });
+  } catch (err) {
+    return { ok: false, deleted: false, error: errMsg(err).slice(0, 500) };
+  }
 }

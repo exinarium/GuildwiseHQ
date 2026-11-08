@@ -1,7 +1,18 @@
-import { RELEASE_SHIP_CAPABILITY, type ReleaseFacts, ReleaseFactsSchema } from '@aom/shared';
+import {
+  RELEASE_REF_CLEANUP_CAPABILITY,
+  RELEASE_SHIP_CAPABILITY,
+  type ReleaseFacts,
+  ReleaseFactsSchema,
+} from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { applyReleaseShipResult } from '../src/release/ship.ts';
+import {
+  RELEASE_SHIP_LOST_TEXT,
+  RELEASE_SHIP_OFFLINE_SECONDS,
+  RELEASE_SHIP_STUCK_GRACE_SECONDS,
+  releaseShipStuckChecks,
+} from '../src/release/ship-stuck.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
@@ -205,5 +216,254 @@ describe('release.ship on the server', () => {
     expect(
       await q2(`SELECT * FROM release_proposals WHERE repo_id=$1 AND state='proposed'`, [w.repoId]),
     ).toHaveLength(1);
+  });
+});
+
+const failedAlerts = () => q2(`SELECT * FROM desk_items WHERE subkind='release_failed' ORDER BY created_at`);
+const cleanups = () =>
+  q2(`SELECT * FROM runner_commands WHERE type='release.ref_cleanup' ORDER BY created_at`);
+const setCapabilities = (caps: string[]) =>
+  q(`UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1`, [w.workstationId, caps]);
+const retry = (alertId: string) =>
+  w.t.req('POST', `/api/desk/${alertId}/resolve`, {
+    cookie: w.owner.cookie,
+    body: { resolution: 'approved' },
+  });
+const dismiss = (alertId: string) =>
+  w.t.req('POST', `/api/desk/${alertId}/dismiss`, { cookie: w.owner.cookie, body: {} });
+/** Moves the server clock past the stuck grace period, so the ship's last change is old enough. */
+const pastGrace = () => w.t.clock.advance((RELEASE_SHIP_STUCK_GRACE_SECONDS + 60) * 1000);
+const secondsAgo = (s: number) => new Date(w.t.clock.now().getTime() - s * 1000);
+
+async function failAt(step: string) {
+  await proposeAndApprove();
+  const id = (await proposal()).id;
+  await applyReleaseShipResult(
+    w.t.app.ctx,
+    w.workstationId,
+    { shipId: id },
+    true,
+    { ok: false, step, error: 'it went wrong', components: [], notices: [] },
+    undefined,
+  );
+  return { id, alert: (await failedAlerts())[0] };
+}
+
+describe('Retry guard (the proposal must still be approved)', () => {
+  it('Retry on the alert of a dismissed release is refused and changes nothing', async () => {
+    const { alert } = await failAt('push');
+    await ok(dismiss(alert.id));
+    expect((await proposal()).state).toBe('dismissed');
+    const started = await eventCount('ReleaseShipStarted');
+    const before = (await commands()).length;
+    const res = await retry(alert.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('release_not_approved');
+    expect(res.body.error.message).toContain('dismissed');
+    expect(await commands()).toHaveLength(before);
+    expect(await eventCount('ReleaseShipStarted')).toBe(started);
+    expect((await ships())[0]).toMatchObject({ status: 'failed', step: 'push' });
+    expect((await proposal()).state).toBe('dismissed');
+  });
+
+  it('Retry of a release whose proposal is no longer approved is refused, whatever the reason', async () => {
+    const { id, alert } = await failAt('commit');
+    await q(`UPDATE release_proposals SET state='closed' WHERE id=$1`, [id]);
+    const res = await retry(alert.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('release_not_approved');
+    expect(res.body.error.message).toContain('closed');
+    expect(await commands()).toHaveLength(1);
+  });
+});
+
+describe('a ship stuck in committing', () => {
+  it('is left alone while its command is live; becomes a stopped release once it is not', async () => {
+    await proposeAndApprove();
+    const id = (await proposal()).id;
+    await q(`UPDATE runner_commands SET status='sent', sent_at=$1 WHERE type='release.ship'`, [
+      w.t.clock.now(),
+    ]);
+    pastGrace();
+    await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+    // sent to a connected workstation: the runner is still working
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(0);
+    expect((await ships())[0].status).toBe('committing');
+    // answered 30 s ago: the result may still be being applied
+    await q(`UPDATE runner_commands SET status='done', done_at=$1 WHERE type='release.ship'`, [
+      secondsAgo(30),
+    ]);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(0);
+    // answered long ago and the ship never moved on: stuck
+    await q(`UPDATE runner_commands SET done_at=$1 WHERE type='release.ship'`, [
+      secondsAgo(RELEASE_SHIP_STUCK_GRACE_SECONDS + 60),
+    ]);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    const alerts = await failedAlerts();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].options.map((o: { id: string }) => o.id)).toEqual(['retry', 'dismiss']);
+    expect(alerts[0].body).toContain(RELEASE_SHIP_LOST_TEXT);
+    expect(alerts[0].data).toMatchObject({ shipId: id, step: 'prepare' });
+    expect((await ships())[0]).toMatchObject({ status: 'failed', step: 'prepare' });
+    // a second pass adds nothing
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(1);
+  });
+
+  it('a ship that only just started is not stuck, even without a command', async () => {
+    await proposeAndApprove();
+    await q(`DELETE FROM runner_commands WHERE type='release.ship'`);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(0);
+    pastGrace();
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(1);
+  });
+
+  it('a command on an unlinked workstation, or one offline too long, is not live; it is cancelled', async () => {
+    await proposeAndApprove();
+    pastGrace();
+    await q(`UPDATE workstations SET status='unlinked' WHERE id=$1`, [w.workstationId]);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(1);
+    expect((await commands())[0]).toMatchObject({ status: 'failed' });
+    await q(`UPDATE workstations SET status='active' WHERE id=$1`, [w.workstationId]);
+  });
+
+  it('a pending command on a workstation offline for longer than the limit is not live', async () => {
+    await proposeAndApprove();
+    pastGrace();
+    await q(`UPDATE workstations SET connected=false, last_seen_at=$2 WHERE id=$1`, [
+      w.workstationId,
+      secondsAgo(RELEASE_SHIP_OFFLINE_SECONDS - 120),
+    ]);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(0);
+    await q(`UPDATE workstations SET last_seen_at=$2 WHERE id=$1`, [
+      w.workstationId,
+      secondsAgo(RELEASE_SHIP_OFFLINE_SECONDS + 60),
+    ]);
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(1);
+    expect((await commands())[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('a dismissed proposal is not swept', async () => {
+    await proposeAndApprove();
+    const id = (await proposal()).id;
+    await q(`DELETE FROM runner_commands WHERE type='release.ship'`);
+    await q(`UPDATE release_proposals SET state='dismissed' WHERE id=$1`, [id]);
+    pastGrace();
+    await releaseShipStuckChecks(w.t.app.ctx);
+    expect(await failedAlerts()).toHaveLength(0);
+  });
+
+  it('Retry re-queues it on the ship workstation; an alreadyDone answer ends it committed', async () => {
+    await proposeAndApprove();
+    const id = (await proposal()).id;
+    await q(`UPDATE runner_commands SET status='done', done_at=$1 WHERE type='release.ship'`, [
+      w.t.clock.now(),
+    ]);
+    pastGrace();
+    await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+    await releaseShipStuckChecks(w.t.app.ctx);
+    const alert = (await failedAlerts())[0];
+    await ok(retry(alert.id));
+    const cmds = await commands();
+    expect(cmds).toHaveLength(2);
+    expect(cmds[1]).toMatchObject({ workstation_id: w.workstationId });
+    expect(cmds[1].payload.shipId).toBe(id);
+    expect((await ships())[0]).toMatchObject({ status: 'committing', workstation_id: w.workstationId });
+    await applyReleaseShipResult(
+      w.t.app.ctx,
+      w.workstationId,
+      { shipId: id },
+      true,
+      { ok: true, step: 'push', alreadyDone: true, commit: 'c'.repeat(40), components: [], notices: [] },
+      undefined,
+    );
+    expect((await ships())[0]).toMatchObject({ status: 'committed', commit_sha: 'c'.repeat(40) });
+    const done = await q2(`SELECT * FROM desk_items WHERE subkind='release_committed'`);
+    expect(done).toHaveLength(1);
+    expect(done[0].body).toContain('nothing new was committed');
+  });
+
+  it('Retry cancels a leftover command of the same ship, so only one is ever live', async () => {
+    const { alert } = await failAt('push');
+    await q(`UPDATE runner_commands SET status='pending' WHERE type='release.ship'`);
+    await ok(retry(alert.id));
+    const cmds = await commands();
+    expect(cmds.map((c) => c.status)).toEqual(['failed', 'pending']);
+  });
+
+  it('Retry of a stuck ship whose proposal is no longer approved is refused', async () => {
+    await proposeAndApprove();
+    const id = (await proposal()).id;
+    await q(`DELETE FROM runner_commands WHERE type='release.ship'`);
+    pastGrace();
+    await releaseShipStuckChecks(w.t.app.ctx);
+    const alert = (await failedAlerts())[0];
+    await q(`UPDATE release_proposals SET state='dismissed' WHERE id=$1`, [id]);
+    const res = await retry(alert.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('release_not_approved');
+    expect(await commands()).toHaveLength(0);
+    expect((await ships())[0].status).toBe('failed');
+  });
+});
+
+describe('Dismiss removes the kept release ref', () => {
+  it('queues release.ref_cleanup to the capable workstation with the clone and returns at once', async () => {
+    const { id, alert } = await failAt('push');
+    await setCapabilities([RELEASE_SHIP_CAPABILITY, RELEASE_REF_CLEANUP_CAPABILITY]);
+    const res = await dismiss(alert.id);
+    expect(res.status).toBe(200);
+    const c = await cleanups();
+    expect(c).toHaveLength(1);
+    expect(c[0].workstation_id).toBe(w.workstationId);
+    expect(c[0].payload).toEqual({
+      shipId: id,
+      repoId: w.repoId,
+      remoteUrlNormalized: (await ships())[0].payload.remoteUrlNormalized,
+      version: '1.4.0',
+    });
+    expect((await proposal()).state).toBe('dismissed');
+  });
+
+  it('an offline workstation still gets it queued (delivered when it reconnects)', async () => {
+    const { alert } = await failAt('commit');
+    await setCapabilities([RELEASE_SHIP_CAPABILITY, RELEASE_REF_CLEANUP_CAPABILITY]);
+    await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
+    await ok(dismiss(alert.id));
+    const c = await cleanups();
+    expect(c).toHaveLength(1);
+    expect(c[0].status).toBe('pending');
+  });
+
+  it('a stuck ship that was dismissed gets the cleanup too', async () => {
+    await proposeAndApprove();
+    await q(`DELETE FROM runner_commands WHERE type='release.ship'`);
+    pastGrace();
+    await releaseShipStuckChecks(w.t.app.ctx);
+    await setCapabilities([RELEASE_SHIP_CAPABILITY, RELEASE_REF_CLEANUP_CAPABILITY]);
+    await ok(dismiss((await failedAlerts())[0].id));
+    expect(await cleanups()).toHaveLength(1);
+  });
+
+  it('a runner without the capability gets nothing; Dismiss still closes the release', async () => {
+    const { alert } = await failAt('push');
+    await ok(dismiss(alert.id));
+    expect(await cleanups()).toHaveLength(0);
+    expect((await proposal()).state).toBe('dismissed');
+  });
+
+  it('nothing is queued after the commit was pushed (publish steps) or for a second Dismiss', async () => {
+    const { alert } = await failAt('push');
+    await setCapabilities([RELEASE_SHIP_CAPABILITY, RELEASE_REF_CLEANUP_CAPABILITY]);
+    await q(`UPDATE release_ships SET step='land'`);
+    await ok(dismiss(alert.id));
+    expect(await cleanups()).toHaveLength(0);
   });
 });

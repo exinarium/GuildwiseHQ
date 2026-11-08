@@ -926,6 +926,28 @@ export const ReleaseShipResultSchema = z.object({
 export type ReleaseShipResult = z.infer<typeof ReleaseShipResultSchema>;
 
 /**
+ * `release.ref_cleanup`: deletes the kept ref refs/guildwise/release/<version> that a stopped release left behind, when
+ * the owner dismisses it. The payload names the version only: the runner builds and checks the ref itself.
+ */
+export const RELEASE_REF_CLEANUP_CAPABILITY = 'release-ref-cleanup:1';
+/** Where a release commit that is made but not yet pushed is kept, so a Retry pushes the same commit. */
+export const KEPT_RELEASE_REF_PREFIX = 'refs/guildwise/release/';
+export const keptReleaseRef = (version: string): string => `${KEPT_RELEASE_REF_PREFIX}${version}`;
+export const ReleaseRefCleanupPayloadSchema = z.object({
+  shipId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(500),
+  version: ReleaseShipPayloadSchema.shape.version,
+});
+export type ReleaseRefCleanupPayload = z.infer<typeof ReleaseRefCleanupPayloadSchema>;
+export const ReleaseRefCleanupResultSchema = z.object({
+  ok: z.boolean(),
+  deleted: z.boolean().default(false),
+  error: z.string().max(500).optional(),
+});
+export type ReleaseRefCleanupResult = z.infer<typeof ReleaseRefCleanupResultSchema>;
+
+/**
  * `release.publish`: after the release commit, bring it to the main branch (found when the release PR was merged, or
  * merged by Guildwise), tag the merge commit `vX.Y.Z` (annotated, never moved) and create the forge release. The runner
  * works every step out again from git and the forge, so a repeat or a Retry never duplicates anything.
@@ -1222,6 +1244,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'release.ship',
+  'release.ref_cleanup',
   'release.docs_prep',
   'release.publish',
   'repo.bump_submodule',
@@ -1335,6 +1358,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
+  'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
   'release.publish': ReleasePublishPayloadSchema,
   'repo.bump_submodule': RepoBumpSubmodulePayloadSchema,
