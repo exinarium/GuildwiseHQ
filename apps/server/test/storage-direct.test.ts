@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { publicPageCsp } from '../src/public-forms/routes.ts';
-import { DirectUploads, validUploadOrigin } from '../src/storage-relay/direct.ts';
+import { DIRECT_VERIFY_TIMEOUT_MS, DirectUploads, validUploadOrigin } from '../src/storage-relay/direct.ts';
 
 describe('upload host rules', () => {
   it.each([
@@ -64,6 +64,12 @@ describe('DirectUploads', () => {
     ttlMs: 1000,
     scan: { field: 'f', fileName: 'x' },
   };
+
+  it('the check bound is just over the runner bound of 10 minutes, far above a relay write, unless set', () => {
+    expect(DIRECT_VERIFY_TIMEOUT_MS).toBeGreaterThan(10 * 60_000);
+    expect(make().d.verifyTimeoutMs).toBe(DIRECT_VERIFY_TIMEOUT_MS);
+    expect(make(true, 1234).d.verifyTimeoutMs).toBe(1234);
+  });
 
   it('keeps only valid reported hosts and forgets them when the runner disconnects', () => {
     const { d } = make();

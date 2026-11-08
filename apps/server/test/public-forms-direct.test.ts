@@ -281,6 +281,31 @@ describe('direct uploads to a cloud destination', () => {
     ).toBe('upload_unavailable');
   });
 
+  it('a long check stays "verifying" past the write timeout and only goes stale after the check bound', async () => {
+    await report(ORIGIN);
+    run.grant = () => null;
+    const s = await begin('Long check');
+    expect((await s.grant()).status).toBe(200);
+    const checking = async (agoMs: number) =>
+      q(`UPDATE form_submissions SET parts=jsonb_set(parts, '{0}', parts->0 || $2::jsonb) WHERE id=$1`, [
+        s.sid,
+        JSON.stringify({ state: 'verifying', verifyingAt: Date.now() - agoMs }),
+      ]);
+
+    // Longer than a relay write may take (60 s by default), well within the check bound (11 min).
+    await checking(5 * 60_000);
+    expect((await s.status()).json.parts[0]).toEqual(expect.objectContaining({ state: 'verifying' }));
+    expect((await s.status()).json.parts[0].error).toBeUndefined();
+    const busy = await s.grant();
+    expect(busy.status).toBe(409);
+    expect(busy.json.error.code).toBe('submission_busy');
+
+    // Past the check bound: the status says it timed out and a new grant may be issued.
+    await checking(11 * 60_000 + 5_000);
+    expect((await s.status()).json.parts[0]).toMatchObject({ state: 'failed', error: 'timeout' });
+    expect((await s.grant()).status).toBe(200);
+  });
+
   it('resume asks the runner for the offset', async () => {
     await report(ORIGIN);
     const s = await begin('Resume');

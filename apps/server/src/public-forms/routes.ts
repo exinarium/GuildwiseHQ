@@ -1056,6 +1056,14 @@ export function publicFormRoutes(
 
     const noStore = (reply: FastifyReply) => reply.header('cache-control', 'no-store');
 
+    /**
+     * A part still being checked counts as given up only after the same bound the server waits for the runner's
+     * answer: the runner may read and scan the whole file, which takes far longer than a relay write.
+     */
+    const staleCheck = (p: Part) =>
+      p.state === 'verifying' &&
+      ctx.clock.now().getTime() - (p.verifyingAt ?? 0) > ctx.services.direct.verifyTimeoutMs;
+
     fastify.route({
       method: 'POST',
       url: '/api/public/forms/:publicId/submissions/:sid/parts/:index/grant',
@@ -1067,9 +1075,7 @@ export function publicFormRoutes(
         const { pub, sid, row, parts, i, part, key } = await directPart(req);
         if (part.state === 'stored')
           throw new PfError(409, 'submission_busy', 'This file was already sent.', {}, {});
-        const stale =
-          part.state === 'verifying' &&
-          ctx.clock.now().getTime() - (part.verifyingAt ?? 0) > ctx.config.storage.writeTimeoutMs;
+        const stale = staleCheck(part);
         if (part.state === 'verifying' && !stale)
           throw new PfError(409, 'submission_busy', 'This file is being checked.', {}, {});
         const def = await definitionOf(pub);
@@ -1299,9 +1305,7 @@ export function publicFormRoutes(
         const out: SubmissionStatusDto = {
           status: expired ? 'expired' : row.status,
           parts: (row.parts as Part[]).map((p) => {
-            const stale =
-              p.state === 'verifying' &&
-              ctx.clock.now().getTime() - (p.verifyingAt ?? 0) > ctx.config.storage.writeTimeoutMs;
+            const stale = staleCheck(p);
             return {
               field: p.field,
               index: p.index,

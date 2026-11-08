@@ -51,6 +51,13 @@ export interface DirectUploadsDeps {
   now?: () => number;
 }
 
+/**
+ * How long the check of a staged object may take before the server gives up on it. Just over the runner's own 10
+ * minute bound (it reads and scans the whole file). The public routes use the same value to decide when a part that is
+ * still being checked counts as stale.
+ */
+export const DIRECT_VERIFY_TIMEOUT_MS = 11 * 60_000;
+
 type Waiter<T> = { workstationId: string; resolve: (v: T) => void };
 type OpenAnswer = { ok: true; grant: DirectGrantInfo } | { ok: false; error: StorageWriteError };
 type Verified = { ok: true; reference: StorageReference } | { ok: false; error: StorageWriteError };
@@ -99,6 +106,11 @@ export class DirectUploads {
 
   constructor(private readonly deps: DirectUploadsDeps) {
     this.now = deps.now ?? Date.now;
+  }
+
+  /** How long `finish` waits for the check; a part checked for longer than this is stale. */
+  get verifyTimeoutMs(): number {
+    return this.deps.verifyTimeoutMs ?? DIRECT_VERIFY_TIMEOUT_MS;
   }
 
   // ------------------------------------------------------------------------------------ what the runners report
@@ -268,13 +280,7 @@ export class DirectUploads {
       ok: false,
       error: storageError('timeout', 'The storage did not answer in time.'),
     };
-    const answer = this.wait(
-      this.verifyWait,
-      grantId,
-      g.workstationId,
-      timedOut,
-      this.deps.verifyTimeoutMs ?? 11 * 60_000,
-    );
+    const answer = this.wait(this.verifyWait, grantId, g.workstationId, timedOut, this.verifyTimeoutMs);
     const sent = this.deps.send(g.workstationId, 'storage.grant.finish', {
       grantId,
       size: body.size,

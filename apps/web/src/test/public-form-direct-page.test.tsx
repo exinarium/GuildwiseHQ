@@ -188,4 +188,14 @@ describe('the public form page, direct upload to the storage provider', () => {
       noRelayPut();
     },
   );
+
+  it('a check that took too long reads as a storage problem the person can retry, not as a wrong file', async () => {
+    server({ afterComplete: { state: 'failed', error: 'timeout' } });
+    await submit();
+    const notice = await screen.findByTestId('public-notice');
+    expect(notice).toHaveTextContent(/couldn't save your form to the firm's storage/);
+    expect(notice).not.toHaveTextContent(/need attention/);
+    expect(paths().some((p) => p === `POST /submissions/${SID}/complete`)).toBe(false);
+    noRelayPut();
+  });
 });

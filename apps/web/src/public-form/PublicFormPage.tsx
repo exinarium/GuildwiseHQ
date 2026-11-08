@@ -60,6 +60,9 @@ const errorOfPart = (code: string | undefined): PublicApiError => {
       return new PublicApiError(422, 'malware_detected', 'malware', false);
     case 'scan_unavailable':
       return new PublicApiError(503, 'scan_unavailable', 'scan', true);
+    // the firm's storage took too long to check the file: nothing is wrong with it, it can be sent again
+    case 'timeout':
+      return new PublicApiError(504, 'storage_failed', 'The check took too long.', true);
     default:
       return new PublicApiError(400, 'invalid_answers', 'The file does not match what was announced.', true);
   }
