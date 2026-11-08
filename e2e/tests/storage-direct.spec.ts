@@ -17,7 +17,8 @@ import {
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { pairRunner, startRunner } from '../support/runner.ts';
+import { deleteMailFor, waitForMail } from '../support/mail.ts';
+import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Public form files to an S3-compatible bucket go straight from the submitter's browser to the bucket with a presigned
 // PUT the runner issues; the Guildwise server only brokers small JSON control calls. A local folder keeps the streamed
@@ -77,6 +78,7 @@ let workstationId: string;
 let s3Id: string;
 let localId: string;
 let s3Origin: string;
+let runnerEnv: Record<string, string> = {};
 
 // ------------------------------------------------------------------------------------------------ the bucket
 
@@ -96,6 +98,8 @@ interface Call {
 const s3 = {
   /** S3 proper: enforce and expose x-amz-checksum-sha256. Off: a provider without a hash (the runner reads it back). */
   checksums: true,
+  /** Moves the bucket's clock forward (a presigned URL used later than its TTL). */
+  clockAheadMs: 0,
   objects: new Map<string, Obj>(),
   calls: [] as Call[],
 };
@@ -120,7 +124,7 @@ function checkPresigned(
   const expires = Number(p.get('X-Amz-Expires'));
   if (!m || !Number.isFinite(expires)) return 'AuthorizationQueryParametersError';
   const at = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`);
-  if (Date.now() > at + expires * 1000) return 'AccessDenied'; // Request has expired
+  if (Date.now() + s3.clockAheadMs > at + expires * 1000) return 'AccessDenied'; // Request has expired
   const [keyId, date, region, service, term] = (p.get('X-Amz-Credential') ?? '').split('/');
   if (
     keyId !== KEY_ID ||
@@ -489,14 +493,12 @@ test('setup: a runner with an https S3-compatible bucket (direct uploads ready) 
     .code as string;
   pairRunner(BASE_URL, code, 'Direct PC', HOME);
   // the runner finds the bucket's host name on this machine and trusts its certificate as it would a public provider's
-  startRunner(
-    {
-      NODE_EXTRA_CA_CERTS: cert.certPath,
-      NODE_OPTIONS: `--import=${pathToFileURL(join(ROOT, 'e2e/support/hosts-preload.mjs')).href}`,
-      AOM_E2E_HOSTS: `${S3_HOST}=127.0.0.1`,
-    },
-    HOME,
-  );
+  runnerEnv = {
+    NODE_EXTRA_CA_CERTS: cert.certPath,
+    NODE_OPTIONS: `--import=${pathToFileURL(join(ROOT, 'e2e/support/hosts-preload.mjs')).href}`,
+    AOM_E2E_HOSTS: `${S3_HOST}=127.0.0.1`,
+  };
+  startRunner(runnerEnv, HOME);
   const ws = await waitFor(
     'runner connected',
     async () => (await (await api.get('/api/workstations')).json()).workstations as any[],
@@ -657,6 +659,15 @@ test('the grant covers one path, the declared size and a short TTL, and a second
   const other = grantUrl.replace('/.guildwise-incoming/', '/.guildwise-incoming/other-');
   expect(await replay(other, grantHeaders, firstFile)).toBe(403);
   expect(await replay(grantUrl, grantHeaders, Buffer.concat([firstFile, Buffer.from('more')]))).toBe(403);
+  // after its TTL the same URL is refused as expired (before the used marker is even looked at)
+  const s3Before = s3.calls.length;
+  s3.clockAheadMs = (ttl + 1) * 1000;
+  try {
+    expect(await replay(grantUrl, grantHeaders, firstFile)).toBe(403);
+  } finally {
+    s3.clockAheadMs = 0;
+  }
+  expect(s3.calls.slice(s3Before).map((c) => c.status)).toEqual([403]);
   // nothing new was delivered
   expect(delivered().length).toBe(1);
 });
@@ -805,4 +816,67 @@ test('a file sent straight to the bucket keeps the submitter file name in the de
   // the field's name template is '{field}-{original}': the relay above stored 'id_copy-lease.pdf'
   expect(filesUnder(FOLDER).some((f) => f.endsWith('id_copy-lease.pdf'))).toBe(true);
   expect(directKey.split('/').pop()).toBe('id_copy-passport.pdf');
+});
+
+// ------------------------------------------------------------------------------------------------ runner offline
+
+test('with the runner offline the page asks only for an email; the secure link that follows sends the file straight to the bucket', async () => {
+  test.setTimeout(240_000);
+  const connected = async () =>
+    ((await (await api.get('/api/workstations')).json()).workstations as any[]).find(
+      (w) => w.id === workstationId,
+    )?.connected as boolean;
+  killRunner('SIGTERM', HOME);
+  await waitFor('runner offline', connected, (c) => c === false, 30_000);
+
+  // the public page asks for an email address only: nothing to fill in, no grant, nothing to the bucket
+  const email = `direct-offline-${Date.now()}@client.example`;
+  await deleteMailFor(email);
+  const s3Before = s3.calls.length;
+  const before = delivered().length;
+  const asked = await pub.newPage();
+  let grants = 0;
+  asked.on('request', (r) => {
+    if (r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/grant')) grants++;
+  });
+  await asked.goto(`/f/${directForm}`);
+  await expect(asked.getByTestId('public-offline')).toBeVisible();
+  await expect(asked.getByTestId('form-submit')).toHaveCount(0);
+  await asked.getByTestId('offline-email').fill(email);
+  await asked.getByTestId('offline-send').click();
+  await expect(asked.getByTestId('public-offline-sent')).toBeVisible({ timeout: 30_000 });
+  expect(grants).toBe(0);
+  expect(s3.calls.length).toBe(s3Before);
+  await asked.close();
+
+  // the runner comes back, reports the bucket's upload origin again, and the secure link is mailed after the settle delay
+  startRunner(runnerEnv, HOME);
+  await waitFor('runner back', connected, (c) => c === true, 30_000);
+  await waitFor(
+    'the S3 connection takes direct uploads again',
+    async () =>
+      ((await (await api.get('/api/org/storage/connections')).json()).connections as any[]).find(
+        (c) => c.id === s3Id,
+      )?.directUploads?.state as string,
+    (s) => s === 'ready',
+    30_000,
+  );
+  const mail = await waitForMail(email, 120_000);
+  expect(mail.subject).toMatch(/^Your secure link from /);
+  const link = /https?:\/\/\S+#c=[A-Za-z0-9._-]+/.exec(mail.text)?.[0] as string;
+  expect(link.startsWith(`${BASE_URL}/f/${directForm}`)).toBe(true);
+
+  // the secure link opens the form; the file goes browser -> bucket as on the public URL, never through the relay
+  const { p, t } = await openForm(`${directForm}${link.slice(link.indexOf('#'))}`);
+  await fillAndSend(p, { name: 'secure.pdf', buffer: pdf(256 * 1024, 'FILE-SENTINEL-offline') });
+  await expect(p.getByTestId('form-confirmation')).toBeVisible({ timeout: 90_000 });
+  expect(t.grants).toBe(1);
+  expect(t.relayPuts).toEqual([]);
+  const got = delivered();
+  expect(got.length).toBe(before + 1);
+  expect(got.some(([k]) => k.endsWith('/id_copy-secure.pdf'))).toBe(true);
+  const sub = await submission(t.sid);
+  expect(sub?.status).toBe('complete');
+  expect(sub?.parts[0]).toMatchObject({ state: 'stored', mode: 'direct' });
+  await p.close();
 });
