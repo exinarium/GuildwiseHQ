@@ -36,6 +36,7 @@ import {
   type OrgGraphScope,
   outcomeDataSchema,
   PREP_OUTCOME,
+  PREP_TASK_KINDS,
   type PublishRequest,
   type ReadableFolder,
   type RebaseErrorInfo,
@@ -105,6 +106,7 @@ import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
   finishPrepTask,
@@ -2809,17 +2811,27 @@ export class ShiftSupervisor {
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
 
       // A release prep task: the runner checks the files against the task and keeps them as a local commit; a refusal
-      // reaches the server as the task's failure (the agent cannot work around it by reporting again).
+      // reaches the server as the task's failure (the agent cannot work around it by reporting again). A proposal task
+      // (changelog entries, guide edits) is checked first and a refusal goes back to the agent, who fixes it in this shift.
       if (msg.kind === 'release_prep' && msg.releasePrep && s.prepTask && outcome.id === PREP_OUTCOME.done) {
-        const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
-        toSend = done.ok
-          ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
-          : {
-              kind: 'outcome',
-              outcomeId: PREP_OUTCOME.failed,
-              note: done.reason,
-              data: { reason: done.reason, refused: true },
-            };
+        if (PREP_TASK_KINDS[msg.releasePrep.task.kind].result === 'proposal') {
+          const checked = await finishPrepProposal(s.prepTask, msg.releasePrep);
+          if (!checked.ok)
+            return rejected(
+              `The proposal was not accepted. Fix these and run aom prep done again:\n${checked.findings.map((f) => `- ${f}`).join('\n')}`,
+            );
+          toSend = { ...toSend, data: { ...toSend.data, proposal: checked.proposal, files: [] } };
+        } else {
+          const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+          toSend = done.ok
+            ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
+            : {
+                kind: 'outcome',
+                outcomeId: PREP_OUTCOME.failed,
+                note: done.reason,
+                data: { reason: done.reason, refused: true },
+              };
+        }
       }
 
       // Transcripts (videos and podcasts): the scout must have looked each one up; the runner attaches the reference.

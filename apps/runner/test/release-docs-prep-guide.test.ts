@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepResult } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { runReleaseDocsPrep } from '../src/git/release-docs-prep.ts';
-import type { DocsPrepExec, DocsPrepModelRequest } from '../src/git/release-docs-prep-steps.ts';
+import type { DocsPrepExec } from '../src/git/release-docs-prep-steps.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -114,17 +114,6 @@ const PROPOSAL = {
   notes: [],
 };
 
-function fakeModel(proposal: unknown = PROPOSAL) {
-  const calls: DocsPrepModelRequest[] = [];
-  const runModel = async (req: DocsPrepModelRequest) => {
-    calls.push(req);
-    const file = /Write the JSON to (\S+)\./.exec(req.prompt)?.[1] as string;
-    writeFileSync(file, JSON.stringify(proposal));
-    return { ok: true as const };
-  };
-  return { calls, runModel };
-}
-
 function fakeExec(effect?: (cwd: string, args: string[]) => void, exitCode = 0) {
   const calls: string[][] = [];
   const exec: DocsPrepExec = async (cmd, args, { cwd }) => {
@@ -135,44 +124,63 @@ function fakeExec(effect?: (cwd: string, args: string[]) => void, exitCode = 0) 
   return { calls, exec };
 }
 
+type Phased = {
+  analyse: ReleaseDocsPrepResult;
+  check: ReleaseDocsPrepResult;
+  guide: ReleaseDocsPrepResult;
+};
+
+/** analyse, then the guide `check` phase, then the guide `apply` phase with the writer's proposal as its input. */
 async function analyseThenGuide(
   s: S,
-  m: ReturnType<typeof fakeModel>,
+  proposal: unknown = PROPOSAL,
   e = fakeExec(),
   stepInput: Record<string, unknown> = {},
-): Promise<{ analyse: ReleaseDocsPrepResult; guide: ReleaseDocsPrepResult }> {
+): Promise<Phased> {
   const analyse = await runReleaseDocsPrep({
     payload: payload(s),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
   });
-  const guide = await runReleaseDocsPrep({
-    payload: payload(s, {
-      step: 'guide',
-      ...(analyse.summary ? { summary: analyse.summary } : {}),
-      stepInput,
-    }),
+  const base = { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}), stepInput };
+  const check = await runReleaseDocsPrep({
+    payload: payload(s, { ...base, phase: 'check' }),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
-    runModel: m.runModel,
     exec: e.exec,
   });
-  return { analyse, guide };
+  const guide = await runReleaseDocsPrep({
+    payload: payload(s, { ...base, phase: 'apply', ...(proposal === null ? {} : { input: { proposal } }) }),
+    repoPath: s.repo.clone,
+    integrationDir: s.integrationDir,
+    exec: e.exec,
+  });
+  return { analyse, check, guide };
 }
 
 const workGuide = (s: S): string =>
   sh(s.repo.clone, 'git', ['show', `refs/guildwise/docs-prep/${RUN}/work:docs/USER-GUIDE.md`]);
 
 describe("release prep step 'guide'", () => {
-  it('updates the matching section, adds a numbered section and names them in the output', async () => {
+  it('check reports the uncovered changes with the sections that describe them, and writes nothing', async () => {
     const s = setup();
-    const m = fakeModel();
-    const { guide } = await analyseThenGuide(s, m);
+    const { check } = await analyseThenGuide(s);
+    expect(check.state).toBe('passed');
+    expect(check.files).toEqual([]);
+    const report = check.report as { guidePath: string; changes: { sources: string[]; files: string[]; hints: { section: string }[] }[] };
+    expect(report.guidePath).toBe('docs/USER-GUIDE.md');
+    expect(report.changes).toHaveLength(1);
+    expect(report.changes[0]?.sources).toEqual(['card:GWP-89']);
+    expect(report.changes[0]?.files).toContain('apps/web/src/pages/Releases.tsx');
+    expect(report.changes[0]?.hints.map((h) => h.section)).toContain('4.28 Releases');
+    expect(sh(s.repo.clone, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
+  it('apply updates the matching section, adds a numbered section and names them in the output', async () => {
+    const s = setup();
+    const { guide } = await analyseThenGuide(s);
     expect(guide.state).toBe('passed');
     expect(guide.files).toEqual(['docs/USER-GUIDE.md']);
-    expect(m.calls).toHaveLength(1);
-    expect(m.calls[0]?.prompt).toContain('card:GWP-89');
-    expect(m.calls[0]?.prompt).toContain('apps/web/src/pages/Releases.tsx');
     expect(guide.output).toMatchObject({
       status: 'passed',
       changed: [{ section: '4.28 Releases', sources: ['card:GWP-89'] }],
@@ -187,33 +195,63 @@ describe("release prep step 'guide'", () => {
     expect(sh(s.repo.clone, 'git', ['rev-parse', 'release/1.5.0'])).toBe(
       sh(s.repo.clone, 'git', ['rev-parse', 'origin/release/1.5.0']),
     );
+    // the work commit keeps the step's label and the owner's identity
+    const work = `refs/guildwise/docs-prep/${RUN}/work`;
+    expect(sh(s.repo.clone, 'git', ['log', '-1', '--format=%s|%an <%ae>', work])).toBe(
+      'docs(release): guide|Release Owner <owner@example.test>',
+    );
   });
 
-  it('skips a repository without a user guide and passes, without a model call', async () => {
+  it('a repository without a user guide is skipped (not passed) by the first phase and needs no writer', async () => {
     const s = setup({ guide: false });
-    const m = fakeModel();
-    const { guide } = await analyseThenGuide(s, m);
-    expect(guide.state).toBe('passed');
-    expect(guide.files).toEqual([]);
-    expect(guide.output).toMatchObject({ status: 'passed', skipped: 'no user guide' });
-    expect(m.calls).toHaveLength(0);
+    const { check } = await analyseThenGuide(s, null);
+    expect(check.ok).toBe(true);
+    expect(check.state).toBe('skipped');
+    expect(check.error).toBe('skipped: no user guide in this repository');
+    expect(check.files).toEqual([]);
+    expect(check.output).toMatchObject({ status: 'passed', skipped: 'no user guide' });
   });
 
-  it('does nothing when every change is covered by an earlier run', async () => {
+  it('check with every change covered by an earlier run has nothing to write', async () => {
     const s = setup();
-    const m = fakeModel();
     const e = fakeExec();
-    const { guide } = await analyseThenGuide(s, m, e, { coveredSources: ['card:GWP-89'] });
+    const { check, guide } = await analyseThenGuide(s, null, e, { coveredSources: ['card:GWP-89'] });
+    expect(check.state).toBe('passed');
+    expect(check.report).toEqual({ changes: [] });
     expect(guide.state).toBe('passed');
     expect(guide.files).toEqual([]);
     expect(guide.output).toMatchObject({ nothing: 'no new changes' });
-    expect(m.calls).toHaveLength(0);
     expect(e.calls).toHaveLength(0);
+  });
+
+  it('apply with no proposal passes with "no new changes" and builds nothing', async () => {
+    const s = setup({ scripts: true });
+    const e = fakeExec();
+    const { guide } = await analyseThenGuide(s, null, e);
+    expect(guide.state).toBe('passed');
+    expect(guide.output).toMatchObject({ nothing: 'no new changes' });
+    expect(e.calls).toHaveLength(0);
+  });
+
+  it('the legacy single phase fails with "needs a newer server"', async () => {
+    const s = setup();
+    const analyse = await runReleaseDocsPrep({
+      payload: payload(s),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+    });
+    const r = await runReleaseDocsPrep({
+      payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+    });
+    expect(r.state).toBe('failed');
+    expect(r.error).toMatch(/needs a newer server for Update user guide/);
   });
 
   it('is idempotent: edits already in the guide change nothing', async () => {
     const s = setup();
-    const first = await analyseThenGuide(s, fakeModel());
+    const first = await analyseThenGuide(s);
     expect(first.guide.files).toEqual(['docs/USER-GUIDE.md']);
     // the same proposal on the guide that already has it
     const md = workGuide(s);
@@ -223,7 +261,7 @@ describe("release prep step 'guide'", () => {
     sh(s.repo.clone, 'git', ['push', '-q', 'origin', 'release/1.5.0']);
     sh(s.repo.clone, 'git', ['update-ref', '-d', `refs/guildwise/docs-prep/${RUN}/work`]);
     sh(s.repo.clone, 'git', ['update-ref', '-d', `refs/guildwise/docs-prep/${RUN}/start`]);
-    const again = await analyseThenGuide(s, fakeModel());
+    const again = await analyseThenGuide(s);
     expect(again.guide.state).toBe('passed');
     expect(again.guide.files).toEqual([]);
     expect(again.guide.output).toMatchObject({ nothing: 'no guide change needed', duplicates: 2 });
@@ -231,16 +269,19 @@ describe("release prep step 'guide'", () => {
 
   it('runs twice on the same release with no further change (a second run is a no-op)', async () => {
     const s = setup();
-    const m = fakeModel();
-    const { analyse, guide } = await analyseThenGuide(s, m);
+    const { analyse, guide } = await analyseThenGuide(s);
     expect(guide.files).toEqual(['docs/USER-GUIDE.md']);
     const work = sh(s.repo.clone, 'git', ['rev-parse', `refs/guildwise/docs-prep/${RUN}/work`]);
-    // the step again (redelivered, or run again): it starts from its own kept work and the writer proposes the same edits
+    // the apply phase again (redelivered, or run again): it starts from its own kept work with the same proposal
     const again = await runReleaseDocsPrep({
-      payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
+      payload: payload(s, {
+        step: 'guide',
+        phase: 'apply',
+        input: { proposal: PROPOSAL },
+        ...(analyse.summary ? { summary: analyse.summary } : {}),
+      }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
-      runModel: m.runModel,
       exec: fakeExec().exec,
     });
     expect(again.state).toBe('passed');
@@ -266,7 +307,6 @@ describe("release prep step 'guide'", () => {
 
   it('with the step not ticked, a run (analyse and commit only) leaves the guide untouched', async () => {
     const s = setup({ scripts: true });
-    const m = fakeModel();
     const e = fakeExec();
     // the server dispatches only the ticked steps: here 'analyse' and 'commit', never 'guide'
     const analyse = await runReleaseDocsPrep({
@@ -282,13 +322,11 @@ describe("release prep step 'guide'", () => {
       }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
-      runModel: m.runModel,
       exec: e.exec,
     });
     expect(commit.state).toBe('passed');
     expect(commit.notices).toContain('no changes');
     expect(commit.commit).toBeUndefined();
-    expect(m.calls).toHaveLength(0);
     expect(e.calls).toHaveLength(0);
     expect(sh(s.repo.clone, 'git', ['show', 'origin/release/1.5.0:docs/USER-GUIDE.md'])).toBe(
       GUIDE.trimEnd(),
@@ -296,14 +334,22 @@ describe("release prep step 'guide'", () => {
     expect(sh(s.repo.clone, 'git', ['status', '--porcelain'])).toBe('');
   });
 
-  it('fails with the errors and writes nothing when the edits stay invalid after one repair', async () => {
+  it('apply refuses edits that fail the guide checks and writes nothing', async () => {
     const s = setup();
-    const m = fakeModel({ edits: [{ op: 'append', section: '9.9', text: 'x', sources: [] }] });
-    const { guide } = await analyseThenGuide(s, m);
+    const { guide } = await analyseThenGuide(s, {
+      edits: [{ op: 'append', section: '9.9', text: 'x', sources: [] }],
+    });
     expect(guide.state).toBe('failed');
-    expect(guide.error).toMatch(/unknown section/);
-    expect(m.calls).toHaveLength(2);
+    expect(guide.error).toMatch(/the guide update was refused: .*unknown section/);
     expect((guide.output as { errors: string[] }).errors.join()).toMatch(/9\.9/);
+    expect(readFileSync(join(s.repo.clone, 'docs/USER-GUIDE.md'), 'utf8')).toBe(GUIDE);
+  });
+
+  it('apply refuses a proposal that is not the expected shape', async () => {
+    const s = setup();
+    const { guide } = await analyseThenGuide(s, { edits: 'nope' });
+    expect(guide.state).toBe('failed');
+    expect(guide.error).toMatch(/guide proposal is not valid/);
   });
 
   it('rebuilds the PDF with the repository scripts and commits it with the text', async () => {
@@ -312,7 +358,7 @@ describe("release prep step 'guide'", () => {
       if (String(args[0]).endsWith('assemble-guide.mjs'))
         writeFileSync(join(cwd, 'docs/guide/guide.html'), '<html/>');
     });
-    const { guide } = await analyseThenGuide(s, fakeModel(), e);
+    const { guide } = await analyseThenGuide(s, PROPOSAL, e);
     expect(guide.state).toBe('passed');
     expect([...guide.files].sort()).toEqual(['docs/USER-GUIDE.md', 'docs/guide/guide.html']);
     expect(guide.output).toMatchObject({ pdf: 'rebuilt' });
@@ -428,46 +474,18 @@ describe("release prep step 'guide'", () => {
 
   it('fails when the PDF build fails or touches files outside the guide', async () => {
     const s = setup({ scripts: true });
-    const bad = await analyseThenGuide(s, fakeModel(), fakeExec(undefined, 1));
+    const bad = await analyseThenGuide(s, PROPOSAL, fakeExec(undefined, 1));
     expect(bad.guide.state).toBe('failed');
     expect(bad.guide.error).toMatch(/PDF guide could not be built/);
     const s2 = setup({ scripts: true });
     const outside = await analyseThenGuide(
       s2,
-      fakeModel(),
+      PROPOSAL,
       fakeExec((cwd, args) => {
         if (String(args[0]).endsWith('assemble-guide.mjs')) writeFileSync(join(cwd, 'CHANGELOG.md'), 'x');
       }),
     );
     expect(outside.guide.state).toBe('failed');
     expect(outside.guide.error).toMatch(/changed CHANGELOG\.md/);
-  });
-
-  it('fails when the writer edits the repository itself', async () => {
-    const s = setup();
-    const runModel = async (req: DocsPrepModelRequest) => {
-      writeFileSync(join(req.readDirs[0] as string, 'docs/USER-GUIDE.md'), 'oops');
-      return { ok: true as const };
-    };
-    const { guide } = await analyseThenGuide(s, { calls: [], runModel });
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toMatch(/writer changed files/);
-  });
-
-  it('fails clearly when no model is available on this runner', async () => {
-    const s = setup();
-    const analyse = await runReleaseDocsPrep({
-      payload: payload(s),
-      repoPath: s.repo.clone,
-      integrationDir: s.integrationDir,
-    });
-    const guide = await runReleaseDocsPrep({
-      payload: payload(s, { step: 'guide', ...(analyse.summary ? { summary: analyse.summary } : {}) }),
-      repoPath: s.repo.clone,
-      integrationDir: s.integrationDir,
-    });
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toMatch(/no agent on this workstation/);
-    expect(readFileSync(join(s.repo.clone, 'docs/USER-GUIDE.md'), 'utf8')).toBe(GUIDE);
   });
 });
