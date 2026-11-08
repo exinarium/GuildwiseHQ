@@ -23,6 +23,8 @@ export const PUBLIC_TEXT = {
 /** An error code as a sentence for a client. No technical detail, nothing the server did not choose to say. */
 export function describePublicError(
   e: Pick<PublicApiError, 'code' | 'status' | 'retryable'> & { message?: string },
+  /** What the submitter called the file (their own field label and file name), when the error says which one. */
+  file?: string,
 ): PublicMessage {
   // The sentences about a secure link (the emailed link of the runner-offline flow) are the server's own.
   if (/^link_(expired|revoked|used)$/.test(e.code) && /secure link/.test(e.message ?? ''))
@@ -49,6 +51,12 @@ export function describePublicError(
         "This form can't accept submissions right now. Please try again later. Your answers are still here.",
         true,
       );
+    case 'malware_detected':
+      return msg(
+        `One of your files${file ? ` (${file})` : ''} could not be accepted because it failed a security check. Please check the file and try again, or contact the firm.`,
+      );
+    case 'scan_unavailable':
+      return msg('Your submission could not be checked right now. Please try again later.', true);
     case 'storage_failed':
       return e.retryable
         ? msg(

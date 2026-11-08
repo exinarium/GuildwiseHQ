@@ -551,6 +551,7 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
     });
+    const quarantineDir = opts.config.uploadScan.quarantineDir;
     this.storage = new StorageService({
       secretsDir: this.paths.secrets,
       spoolDir: join(this.paths.root, 'tmp', 'storage'),
@@ -565,9 +566,17 @@ export class Runner {
         push: async (id) => void (await this.vaults.syncNow(id)),
       },
       oauthEnv: process.env,
-      forbiddenRoots: [this.paths.root],
-      // Connection, kind, size, outcome and duration only: never a path, a name or content.
+      forbiddenRoots: [this.paths.root, ...(quarantineDir ? [quarantineDir] : [])],
+      uploadScan: {
+        ...opts.config.uploadScan,
+        quarantineDir: quarantineDir ?? join(this.paths.root, 'quarantine'),
+      },
+      journalFile: join(this.paths.root, 'state', 'storage-submissions.json'),
+      // Connection, kind, size, outcome and duration only: never a path, a name or content. The scan verdict lines
+      // (`storage.scan ...`) are the exception and hold the cleaned-up file name, never content.
       log: (line) => this.log.info(line),
+      logWarn: (line) => this.log.warn(line),
+      logError: (line) => this.log.error(line),
     });
     // Any account's login or usage state changing is logged (tagged with the account) and reported to the server.
     this.claudeAccounts.onChange((a) => {

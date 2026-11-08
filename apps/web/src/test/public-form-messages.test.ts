@@ -32,4 +32,29 @@ describe('describePublicError', () => {
       'Something went wrong. Your answers are still here. Try again.',
     );
   });
+
+  describe('malware scan', () => {
+    it('a refused file gets the security message, never a signature, engine or path', () => {
+      const m = d('malware_detected', false, 422);
+      expect(m.text).toBe(
+        'One of your files could not be accepted because it failed a security check. Please check the file and try again, or contact the firm.',
+      );
+      expect(m).toMatchObject({ retry: false, closed: false });
+      expect(m.text).not.toMatch(/FOUND|clam|eicar|signature|\/|\\/i);
+    });
+    it('names the file the submitter chose when the error says which', () => {
+      const m = describePublicError(
+        { code: 'malware_detected', status: 422, retryable: false },
+        'CV: cv.pdf',
+      );
+      expect(m.text).toContain('One of your files (CV: cv.pdf) could not be accepted');
+    });
+    it('an unavailable scan asks to try again later', () => {
+      expect(d('scan_unavailable', true, 503)).toEqual({
+        text: 'Your submission could not be checked right now. Please try again later.',
+        retry: true,
+        closed: false,
+      });
+    });
+  });
 });

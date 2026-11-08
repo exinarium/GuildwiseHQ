@@ -4,7 +4,11 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Runner 0.1.69.
+Runner 0.1.70.
+
+### Added
+
+- Optional malware scan of public form uploads, set per workstation (`uploadScan`, off by default). With a clamd running on the workstation, each uploaded file is scanned before it is written to the firm's storage. An infected file, or a scan that cannot run, is never written and the whole submission is taken back; infected files are kept in an owner-only quarantine folder on the workstation. The submitter sees a plain message and keeps their answers. `doctor` and "Test connection" report whether clamd answers.
 
 ### Changed
 

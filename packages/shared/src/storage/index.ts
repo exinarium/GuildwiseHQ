@@ -22,6 +22,8 @@ export const STORAGE_ERROR_CODES = [
   'conflict',
   'runner_offline',
   'timeout',
+  'malware_detected',
+  'scan_unavailable',
 ] as const;
 export const StorageErrorCodeSchema = z.enum(STORAGE_ERROR_CODES);
 export type StorageErrorCode = z.infer<typeof StorageErrorCodeSchema>;
@@ -38,6 +40,8 @@ export const STORAGE_RETRYABLE: Record<StorageErrorCode, boolean> = {
   not_found: false,
   invalid: false,
   too_large: false,
+  malware_detected: false,
+  scan_unavailable: true,
 };
 
 /** Announced in `hello.capabilities` by a runner that holds storage connections. */
@@ -152,6 +156,8 @@ export const StorageTestPayloadSchema = z.object({
 });
 export const StorageRemovePayloadSchema = z.object({ connectionId: z.uuid() });
 export const StorageSyncPayloadSchema = z.object({ connectionIds: z.array(z.uuid()).max(1000) });
+/** Server to runner: remove everything this workstation wrote for one public form submission. */
+export const StorageDiscardPayloadSchema = z.object({ submissionId: z.uuid() });
 
 // ---------------------------------------------------------------------------------------------- path templates
 

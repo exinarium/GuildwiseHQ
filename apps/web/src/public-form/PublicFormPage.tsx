@@ -304,6 +304,16 @@ export function PublicFormPage({
     }
   };
 
+  /** The submitter's own words for the file a scan refused: the field label and the name of the file they chose. */
+  const rejectedFile = (dto: PublicFormDto, err: PublicApiError): string | undefined => {
+    if (err.code !== 'malware_detected') return undefined;
+    const id = err.fields[0]?.field;
+    const f = id ? dto.form.fields.find((x) => x.id === id) : undefined;
+    if (!id || !f) return undefined;
+    const name = files.current.get(id)?.name;
+    return name ? `${f.label}: ${name}` : f.label;
+  };
+
   const submit = async () => {
     if (phase.kind !== 'form') return;
     let dto = phase.dto;
@@ -353,7 +363,9 @@ export function PublicFormPage({
       }
       if (err.fields.length)
         setServerErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.code as FormFieldErrorCode])));
-      const d = describePublicError(err);
+      // The server took the whole submission back: the next try starts a new one (answers and files stay here).
+      if (err.code === 'malware_detected' || err.code === 'scan_unavailable') sub.current = null;
+      const d = describePublicError(err, rejectedFile(phase.dto, err));
       if (d.closed) setPhase({ kind: 'closed', text: d.text });
       else setNotice({ text: d.text, retry: d.retry });
     } finally {

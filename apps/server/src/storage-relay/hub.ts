@@ -25,6 +25,10 @@ export interface StorageWriteRequest {
   source: AsyncIterable<Buffer>;
   /** The public client went away. */
   signal?: AbortSignal;
+  /** Set on every write of a public form submission: lets the runner group the writes and roll them back. */
+  submission?: { orgId: string; formId: string; submissionId: string };
+  /** Set on a public form file answer: the runner scans it when the workstation's upload scan is on. */
+  scan?: { field: string; fileName: string };
 }
 
 export type StorageWriteResult =
@@ -160,6 +164,8 @@ export class StorageRelay {
         contentType: req.contentType,
         size: req.size,
         deadlineMs: this.deps.config.writeTimeoutMs,
+        ...(req.submission ? { submission: req.submission } : {}),
+        ...(req.scan ? { scan: req.scan } : {}),
       });
       if (!opened)
         return await fail(

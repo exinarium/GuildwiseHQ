@@ -722,8 +722,46 @@ Storage connections let forms and journeys write documents and answers to the fi
 - **What is kept where**: `secrets/storage.json` holds every connection's settings and credentials, encrypted like the other secrets (mode 0600, keyed from the runner key). Received files are spooled in `tmp/storage/` while they are written and deleted straight after (the folder is emptied when the runner starts). The server knows only a connection id, its type, a display name, this workstation and the health.
 - **Kinds**: OneDrive/SharePoint and Google Drive (sign in with a code shown in the web page; the runner polls the provider), S3-compatible (endpoint, region, bucket, prefix; `http://` only for a loopback or private address), a local folder or NAS (an absolute path that is not the runner's data folder), and a folder in a vault of this workstation.
 - **Your own sign-in app**: the runner needs a Microsoft Entra app (public client, delegated `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `offline_access`) and a Google OAuth client of type "TVs and Limited Input devices" (scopes `drive.file`, `openid`, `email`, published to Production). Set `AOM_STORAGE_MS_CLIENT_ID` (and `AOM_STORAGE_MS_TENANT`, default `common`) and `AOM_STORAGE_GOOGLE_CLIENT_ID` and `AOM_STORAGE_GOOGLE_CLIENT_SECRET` in the runner's environment. Without them the connection says "This runner has no Microsoft (Google) app configured". Google Drive only exposes what the connector created, so files go under a base folder it creates ("Guildwise uploads" by default).
-- **Errors**: `auth_expired` (sign in again with Reconnect), `permission`, `quota`, `not_found` (folder, drive or bucket gone), `unavailable` (network, rate limit, NAS not mounted), `too_large`, `conflict` (too many files with the same name), `timeout`. The log has one line per write (`storage.write conn=<id> kind=<kind> size=<bytes> ok|<code> <ms>ms`) and never a path, a file name, a token or content.
+- **Errors**: `auth_expired` (sign in again with Reconnect), `permission`, `quota`, `not_found` (folder, drive or bucket gone), `unavailable` (network, rate limit, NAS not mounted), `too_large`, `conflict` (too many files with the same name), `timeout`. The log has one line per write (`storage.write conn=<id> kind=<kind> size=<bytes> ok|<code> <ms>ms`) and never a path, a file name, a token or content (the `storage.scan infected` line is the one exception, see the malware scan below).
 - **Removing**: removing a connection in the web page deletes its entry (and the file when it was the last one); a Google grant is also revoked. After a reconnect the server lists the connections this workstation should hold and the runner deletes the rest.
+
+### Malware scan of form uploads
+
+Files uploaded through public forms can be checked for malware on this workstation before they are written to the firm's storage. The scan is **off by default**: with it off, uploads are written as before and nothing contacts clamd. The server never stores or scans an upload.
+
+**Settings** (in `config.json`, per workstation):
+
+```json
+"uploadScan": {
+  "enabled": true,
+  "clamd": "/var/run/clamav/clamd.ctl",
+  "timeoutMs": 30000,
+  "quarantineDir": "/home/me/.aom-runner/quarantine"
+}
+```
+
+- `enabled`: `false` by default.
+- `clamd`: a unix socket path, or `host:port` (IPv6 as `[::1]:3310`). Default: `/var/run/clamav/clamd.ctl` on Linux, `127.0.0.1:3310` on macOS and Windows. Named pipes are not supported by clamd.
+- `timeoutMs`: how long the scan may take (1000 to 300000, default 30000). The scan also stops at the transfer's own deadline.
+- `quarantineDir`: default `<data dir>/quarantine`. It must be outside every storage destination (a local folder connection or a local vault). A local connection cannot be created over it, and a scan whose quarantine folder lies inside a destination is refused as `scan_unavailable`.
+
+**Installing clamd.** Install ClamAV, update its signatures with `freshclam`, and make clamd listen where `clamd` points.
+
+- Debian/Ubuntu: `sudo apt install clamav-daemon`, then `sudo systemctl stop clamav-freshclam && sudo freshclam && sudo systemctl start clamav-freshclam clamav-daemon`. Socket: `/var/run/clamav/clamd.ctl`. The runner's user must be allowed to use it (add it to the `clamav` group).
+- Fedora/RHEL: `sudo dnf install clamd clamav-update`, run `freshclam`, then `sudo systemctl enable --now clamd@scan`. Socket: `/run/clamd.scan/clamd.sock` (set `clamd` to it).
+- macOS: `brew install clamav`, copy `clamd.conf.sample` and `freshclam.conf.sample` to `clamd.conf` and `freshclam.conf` in `$(brew --prefix)/etc/clamav`, remove the `Example` line, set `TCPSocket 3310` and `TCPAddr 127.0.0.1`, run `freshclam`, start `clamd`. Set `clamd` to `127.0.0.1:3310`.
+- Windows: install the ClamAV MSI, create `clamd.conf` from the sample with `TCPSocket 3310` and `TCPAddr 127.0.0.1`, run `freshclam`, and run `clamd` as a service. Set `clamd` to `127.0.0.1:3310`. The recommended Windows setup is WSL2, which follows the Linux steps.
+- In every case set clamd's `StreamMaxLength` (in `clamd.conf`) at least as high as the largest upload a form allows (default limit 25 MB, up to 100 MB). A file above clamd's limit cannot be scanned and is **refused**, never let through unscanned.
+
+**What happens.** Only file answers of public form submissions are scanned, after the whole file has arrived and before the storage write (any connection kind). The runner streams the file to clamd (`INSTREAM`); only the answer `OK` is clean.
+
+- **Infected file**: the file is not written. Everything this workstation already wrote for the same submission is deleted too, so no part of the submission stays (a file stored on a different workstation is removed by a `storage.discard` command that workstation receives when it is online; the command is kept for 25 hours). The file is moved to the quarantine folder and the submitter is told, without any detail, that the file failed a security check (`malware_detected`).
+- **Scan failure** (clamd not running, wrong address, timeout, file above clamd's limit, unknown answer): fail closed. The file is not written, what the submission wrote is deleted, nothing is quarantined, and the submitter is asked to try again later (`scan_unavailable`). There is no fail-open option.
+- **Quarantine**: `<UTC time>-<sha256>.bin` (the received bytes, never executed or opened) with `<same name>.json` (original file name, size, sha256, clamd signature, form id, submission id, transfer id, organisation id, field, time). The folder is owner-only (0700, files 0600; on Windows the current user only). Nothing sends them to the server or the submitter, and nothing cleans them up automatically: review and delete them yourself.
+- **Log**: an infected file writes one warning line, `storage.scan infected conn=… form=… submission=… transfer=… org=… field=… name=… size=… sha256=… signature=… quarantined=…`. It holds the cleaned-up file name (an exception to the rule above) and never content. A scan failure writes an error line, `storage.scan failed … reason=…`.
+- **Journal**: `state/storage-submissions.json` lists the paths written per submission for 25 hours, so a rollback also works after a restart. It holds no content.
+- **Checking it**: with the setting on, "Test connection" reports `Malware scan: clamd reachable.` or that clamd is not reachable at the address (the connection then shows as unavailable so you notice before a client does), and `guildwise-runner doctor` prints `clamd reachable at <address>` or `clamd not reachable at <address>`. With the setting off, neither says anything about clamd.
+- **Error codes** (shared): `malware_detected` (not retryable) and `scan_unavailable` (retryable).
 
 ## Running and connecting
 
