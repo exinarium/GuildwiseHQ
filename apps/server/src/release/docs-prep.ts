@@ -1155,7 +1155,7 @@ export async function releaseDocsPrepOverview(
     const enabled = settings.enabled;
     const state: ReleaseDocsPrepState = run ? run.status : enabled ? 'not_run' : 'off';
     const autoStart = enabled && settings.autoStart;
-    const readiness = autoStart && branch ? await loadReleaseReadiness(ctx.pool, p) : null;
+    const readiness = autoStart && branch ? await loadReleaseReadiness(ctx.pool, p, ctx.clock.now()) : null;
     const autoStartBlocked =
       readiness?.ready && !run ? ((await startBlocker(ctx.pool, p.id))?.message ?? null) : null;
     out.push({
