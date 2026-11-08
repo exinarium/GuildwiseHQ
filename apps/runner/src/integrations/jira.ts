@@ -1,6 +1,7 @@
 import type { IntegrationScope, IntegrationStatus } from '@aom/shared';
 import { JiraAdapter } from '../external/jira.ts';
 import { JiraCredentialStore, jiraFile, normalizeJiraBaseUrl, resolveJira } from '../external/jira-store.ts';
+import { fileKeyOf } from '../secrets/keys.ts';
 import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
 import { type AdapterEnv, baseStatus, type IntegrationAdapter, type Outcome } from './types.ts';
 
@@ -20,8 +21,15 @@ export class JiraIntegration implements IntegrationAdapter {
     return 'workstation';
   }
 
+  private keyOfFn: ((fileName: string) => Buffer) | undefined;
+  /** The runner's file key; without a Runner (CLI, headless) it is derived from `secrets/runner-key.pem` on first use. */
+  private keyOf(): (fileName: string) => Buffer {
+    this.keyOfFn ??= this.env.sealKey ?? fileKeyOf(this.env.paths.secrets);
+    return this.keyOfFn;
+  }
+
   private store(): JiraCredentialStore {
-    return new JiraCredentialStore(jiraFile(this.env.paths.secrets));
+    return new JiraCredentialStore(jiraFile(this.env.paths.secrets), this.keyOf());
   }
 
   async instances(): Promise<string[]> {
@@ -30,7 +38,9 @@ export class JiraIntegration implements IntegrationAdapter {
 
   async status(): Promise<IntegrationStatus> {
     const now = this.env.now();
-    const cfg = resolveJira(this.env.paths.secrets, this.env.config().jira);
+    const problem = this.store().problem();
+    if (problem) return baseStatus('jira', '', 'workstation', now, 'not_connected', { detail: problem });
+    const cfg = resolveJira(this.env.paths.secrets, this.env.config().jira, this.keyOf());
     if (!cfg)
       return baseStatus('jira', '', 'workstation', now, 'not_connected', {
         detail: 'No Jira credentials are saved on this workstation.',

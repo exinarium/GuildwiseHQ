@@ -571,12 +571,17 @@ describe('connections and the token store', () => {
     const dir = mkdtempSync(join(tmp(), 'tok-'));
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'secrets', 'git-tokens.json');
-    const s = new FileTokenStore(file);
+    const key = () => Buffer.alloc(32, 7);
+    const s = new FileTokenStore(file, key);
     s.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'abc', organization: 'acme' });
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(new FileTokenStore(file).get('azure-devops', 'dev.azure.com', 'acme')?.organization).toBe('acme');
+    expect(new FileTokenStore(file, key).get('azure-devops', 'dev.azure.com', 'acme')?.organization).toBe(
+      'acme',
+    );
     expect(JSON.stringify(s.list())).not.toContain('abc');
-    expect(readFileSync(file, 'utf8')).toContain('abc');
+    const raw = readFileSync(file, 'utf8');
+    expect(raw).not.toContain('abc');
+    expect(JSON.parse(raw)).toMatchObject({ v: 1, alg: 'A256GCM' });
   });
 
   it('describes status and guidance in plain words', () => {

@@ -60,6 +60,7 @@ export class BitbucketCloudForge implements Forge {
         state: 'not_connected',
         problem: 'no_token',
         detail:
+          this.env.tokens.problem?.() ??
           'No token saved. Run `guildwise-runner git-connect bitbucket-cloud` and paste an Atlassian API token (scopes: repository read/write, pull request read/write).',
       };
     if (!t.user)

@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.ts';
+import { JiraCredentialStore } from '../src/external/jira-store.ts';
+import { fileKeyOf } from '../src/secrets/keys.ts';
 import { FakeServer } from './fake-server.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
@@ -69,7 +71,11 @@ describe('guildwise-runner jira-connect', () => {
       expect(good.stdout).toContain('as Pieter');
       expect(good.stdout).not.toContain('right-token');
       const file = join(dir, 'secrets', 'jira.json');
-      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+      const raw = readFileSync(file, 'utf8');
+      expect(raw).not.toContain('right-token');
+      expect(raw).not.toContain('me@acme.com');
+      expect(JSON.parse(raw)).toMatchObject({ v: 1, alg: 'A256GCM' });
+      expect(new JiraCredentialStore(file, fileKeyOf(join(dir, 'secrets'))).load()).toEqual({
         baseUrl: jira.url,
         email: 'me@acme.com',
         apiToken: 'right-token',

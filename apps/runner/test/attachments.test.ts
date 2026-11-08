@@ -220,18 +220,19 @@ describe('Jira attachments downloaded by the runner', () => {
 describe('Jira credentials on the runner', () => {
   it('jira-connect stores the token in secrets/ with mode 0600, and config.json still works', () => {
     const paths = runnerPaths(tmp('data-'));
-    const store = new JiraCredentialStore(jiraFile(paths.secrets));
-    expect(resolveJira(paths.secrets, undefined)).toBeUndefined();
-    expect(resolveJira(paths.secrets, CFG)).toEqual(CFG); // the older config.json form
+    const key = () => Buffer.alloc(32, 7);
+    const store = new JiraCredentialStore(jiraFile(paths.secrets), key);
+    expect(resolveJira(paths.secrets, undefined, key)).toBeUndefined();
+    expect(resolveJira(paths.secrets, CFG, key)).toEqual(CFG); // the older config.json form
     store.save({ ...CFG, apiToken: 'new-token' });
     const mode = statSync(jiraFile(paths.secrets)).mode & 0o777;
     if (process.platform !== 'win32') {
       expect(mode).toBe(0o600);
       expect(statSync(paths.secrets).mode & 0o777).toBe(0o700);
     }
-    expect(resolveJira(paths.secrets, CFG)?.apiToken).toBe('new-token'); // the secrets file wins
+    expect(resolveJira(paths.secrets, CFG, key)?.apiToken).toBe('new-token'); // the secrets file wins
     expect(store.remove()).toBe(true);
-    expect(resolveJira(paths.secrets, CFG)).toEqual(CFG);
+    expect(resolveJira(paths.secrets, CFG, key)).toEqual(CFG);
   });
 
   it('normalizes the base URL', () => {
