@@ -117,7 +117,7 @@ beforeEach(async () => {
   await w.hire('Bea', 'builder', 'junior');
   await owner('PUT', `${base()}/settings`, {
     enabled: true,
-    steps: { changelog: false, guide: false, videos: true },
+    steps: { changelog: false, guide: false, help: false, videos: true },
   });
   await ok(owner('POST', `${base()}/runs`), 202);
   await answer(analysed);
