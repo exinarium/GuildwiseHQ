@@ -1,8 +1,12 @@
 # GWP-147: direct browser-to-storage uploads for cloud connectors
 
-Status: design. Base: `release/1.6.0` at 285412ed (the card branch starts there). Builds on GWP-63 (connectors), GWP-65
-(public forms, security review `docs/security/public-forms.md`), GWP-68 (runner offline flow) and GWP-126 (runner
-malware scan, merged).
+Status: design, gate decided. Base: `release/1.6.0` at 285412ed (the card branch starts there). Builds on GWP-63
+(connectors), GWP-65 (public forms, security review `docs/security/public-forms.md`), GWP-68 (runner offline flow) and
+GWP-126 (runner malware scan, merged).
+
+**Owner decision (ledger 7b91aa22, 2026-11-08): o2.** Every GWP-65 check stays (section 3), and there is **no relay
+fallback** for cloud destinations: when a grant cannot be issued for a OneDrive/SharePoint, Google Drive or S3
+destination, that submission fails with a clear error. Sections 3 to 7 are written to that decision.
 
 ## 1. The question
 
@@ -38,12 +42,11 @@ keeps every new call short (section 5.5), so **no guildwise-cloud card is needed
 
 ## 3. The gate: the GWP-65 decision on server-side checks
 
-`docs/security/public-forms.md` (T8–T12, T16) lists the checks that exist today, but nothing in the ledger says which of
-them may move or be dropped for a direct upload. The proposed decision below is sent to the owner as a blocking question
-from this shift. **The builder must not start until the answer is linked on the card.** If the owner picks a different
-option, sections 5.3 and 5.8 change. The rest of the design holds either way.
+`docs/security/public-forms.md` (T8–T12, T16) lists the checks that exist today, but nothing in the ledger said which of
+them may move or be dropped for a direct upload. The question went to the owner (ledger **7b91aa22**). The answer is
+**o2**: decision D0 below with no relay fallback. Link 7b91aa22 on the card and in `docs/security/public-forms.md`.
 
-**Proposed decision D0 (every check stays, none is dropped):**
+**Decision D0 (every check stays, none is dropped):**
 
 | Check today (security doc row) | Where it runs for a direct upload |
 |---|---|
@@ -58,10 +61,27 @@ Unverified bytes never appear in the firm's real folders: the browser writes to 
 folder or prefix, and the runner moves the file to its rendered path only after every check passes. A failed check
 deletes the staged object, the part fails, and the submission does not record it.
 
-Relay fallback (requirement 6): allowed. A grant that cannot be issued (old runner, S3 bucket without a CORS rule for the
-page, upload origin not known, provider error at grant time) makes that part use the existing relay PUT.
+**Relay fallback (requirement 6): not allowed (owner, o2).** For a cloud destination the file bytes never touch the
+Guildwise server. The rules that follow from it:
 
-A trade-off the owner must accept (T16): the browser now sees the provider upload host, in the page CSP and in the grant
+| Situation | What happens |
+|---|---|
+| Cloud destination, the runner has not reported an upload origin for it (old runner, S3 bucket without the CORS rule, `http:` S3 endpoint, probe failed) | **Start refuses** before any byte is sent: 503 `upload_unavailable`, retryable (a runner that has just reconnected reports within seconds), message "This form can't accept files right now. Please try again later or contact the firm." No submission row is written |
+| Grant request fails with a retryable provider error (429, 5xx, timeout waiting for the runner) | 503 `upload_unavailable`, retryable. The page retries the grant itself. The 3rd failed grant attempt for a part fails the submission (next row) |
+| Grant refused for good (connection needs re-auth, destination missing, render error, grant origin differs from the reported one, 3 attempts used), or the browser cannot reach the provider (CSP or CORS block before the first byte) | The **submission fails**: `rollBackSubmission(..., 'upload_unavailable', ...)` (status `failed`, stored parts discarded on their runners), and the page shows the error. Never a relay PUT |
+| The relay `PUT …/parts/:index` for a part whose mode is `direct` | Always refused: 409 `upload_mode` ("This file must be sent another way. Please reload the page."). This is what makes "no bytes through the server" hold even for a crafted client |
+| Runner offline (at start or at grant time) | Unchanged GWP-68 flow through `offline()`: the hook decides (`link_later` or 503). This is not a fallback to the relay, and requirement 6 keeps it |
+| Local folder/NAS and vault destinations | Relay, unchanged (they are never `direct`) |
+
+The server switch `AOM_FORMS_DIRECT_UPLOADS` (part of o1, kept by o2) defaults to `true`. Setting it to `false` is a
+deployment-wide operator choice, not a per-file fallback: every destination then uses the relay exactly as on
+release/1.6.0. Document it as the way back if direct uploads must be turned off (for example while firms update old
+runners). With it on, a cloud destination is direct or the submission fails.
+
+Because a misconfigured connection now stops the form instead of falling back silently, the firm must be able to see it:
+the runner reports the reason with the origin (section 5.2), and the storage settings row shows it (section 5.4).
+
+The owner accepted the T16 trade-off with o2: the browser now sees the provider upload host, in the page CSP and in the grant
 URL (for example `contoso-my.sharepoint.com` or `files.example-bucket.s3.eu-west-1.amazonaws.com`). Only the host is
 exposed, never the folder template, connection id or label. The grant URL itself is a short-lived capability for one staging object.
 
@@ -89,7 +109,8 @@ exposed, never the folder template, connection id or label. The grant URL itself
 The server stores no endpoint, bucket or tenant (`2810_storage_connections.sql`), and the CSP has to list exact origins
 (no wildcards). **Recommended:** the runner reports one origin per connection in a new non-acked frame,
 `storage.direct.report`, which the server keeps **in memory only**. The runner sends it on `welcome` and after
-connect/test. No report means relay. That is also how an old runner falls back without a capability flag.
+connect/test. No report (or `uploadOrigin: null`) means the destination cannot take public form files: start refuses
+with `upload_unavailable` (section 3). That is also how an old runner is detected without a capability flag.
 
 ## 5. Design
 
@@ -97,8 +118,8 @@ connect/test. No report means relay. That is also how an old runner falls back w
 
 ```
 browser            server (public routes)              runner                          provider
-  | start (manifest) |  pre-checks T8/T10 (unchanged)     |                                 |
-  |<-- parts[i].mode = 'direct' | 'relay'                 |                                 |
+  | start (manifest) |  pre-checks T8/T10 (unchanged), cloud destination without origin -> 503 upload_unavailable
+  |<-- parts[i].mode = 'direct' (cloud) | 'relay' (local/vault, or switch off)              |
   | POST parts/i/grant  ---------> storage.grant.open --->| create staging session/presign->|
   |                    <--------- storage.grant.result <--| (url, headers, expiresAt)       |
   |<-- {url, method, headers, chunkBytes, expiresAt}  (no-store, never logged/stored)       |
@@ -117,15 +138,17 @@ New server→runner frames (best effort, not in `SERVER_ACKED_TYPES`):
   (the same rendering inputs as `storage.write.open`, so the runner renders the final path exactly as today).
 - `storage.grant.status { grantId }` asks for the next byte offset (resume).
 - `storage.grant.finish { grantId, size, sha256, providerId?, etag? }`
-- `storage.grant.cancel { grantId, reason: 'client_gone' | 'expired' | 'fallback' | 'shutdown' }`
+- `storage.grant.cancel { grantId, reason: 'client_gone' | 'expired' | 'retry' | 'blocked' | 'shutdown' }`
 
 New runner→server frames (best effort, **not** in `RUNNER_ACKED_TYPES`, so they never enter the runner outbox; handled on
 the fast path in `gateway.ts` `storageAnswer`, which today matches only `"storage.write.`):
 
-- `storage.grant.result { grantId, ok, grant?: { provider: 'onedrive'|'google_drive'|'s3', method: 'PUT', url, headers: Record<string,string>, chunkBytes: number|null, expiresAt }, fallback?: boolean, error? }`
+- `storage.grant.result { grantId, ok, grant?: { provider: 'onedrive'|'google_drive'|'s3', method: 'PUT', url, headers: Record<string,string>, chunkBytes: number|null, expiresAt }, error?: { code: StorageErrorCode, message } }`
+  (no `fallback` flag: o2 has no relay fallback; `STORAGE_RETRYABLE[error.code]` decides retry versus fail).
 - `storage.grant.offset { grantId, offset: number | null }`
 - `storage.grant.verified { grantId, ok, reference?: StorageReference, error? }`
-- `storage.direct.report { connections: Array<{ connectionId, uploadOrigin: string | null }> }`
+- `storage.direct.report { connections: Array<{ connectionId, uploadOrigin: string | null, reason: 'unsupported_kind' | 'http_endpoint' | 'cors_missing' | 'probe_failed' | 'needs_reauth' | null }> }`
+  (`reason` is set exactly when `uploadOrigin` is null; it is shown to the firm, never to the public page).
 
 `STORAGE_ERROR_CODES` gains `type_refused` (not retryable) so the runner can say "the content did not pass the type check".
 The server maps it to 415 `file_type_refused`, as for the relay. Update `STORAGE_RETRYABLE` and every exhaustive switch.
@@ -174,8 +197,10 @@ http endpoints (MinIO on a LAN) stay relay-only: a public browser cannot reach t
   (`renderStoragePath`, refuse on error as `write.open` does) → `ttl = clamp(5 min + size / 128 KiB/s, 5 min, 30 min)`,
   and never past the submission's own expiry (server sends `ttlMs` already clamped) → `connector.grant(...)` →
   `registerSecret(url)` so the runner's log redaction masks it → a timer at `expiresAt` calls `cancel` (Graph and Drive
-  sessions live for days at the provider, so the runner enforces the TTL). Reply `storage.grant.result`. Any refusal that
-  the relay can handle → `ok:false, fallback:true`.
+  sessions live for days at the provider, so the runner enforces the TTL). Reply `storage.grant.result`. Any refusal →
+  `ok:false, error` with the connector's `StorageErrorCode` (`auth_expired`, `permission`, `quota`, `not_found`,
+  `invalid`, `too_large` are final; `unavailable`, `timeout`, `conflict` are retryable, as in `STORAGE_RETRYABLE`). A kind that is not direct-capable (local, vault) → `invalid`;
+  the server never asks for one, this is defence in depth.
 - **status**: `connector.offset()` → `storage.grant.offset`. Graph returns `nextExpectedRanges`. Drive answers a
   `PUT` with `Content-Range: bytes */size` with 308 + `Range`. S3 returns null, which means restart.
 - **finish**: mark the grant used (a second finish → `invalid`), clear the TTL timer, then **verify**:
@@ -208,17 +233,20 @@ or headers (`registerSecret` as a backstop).
 `apps/server/src/storage-relay/direct.ts` (new, next to `hub.ts`; the relay itself is not touched):
 `DirectUploads` service on `ctx.services`, all in memory:
 
-- `origins: Map<connectionId, { workstationId, origin }>` from `storage.direct.report`, dropped on runner disconnect.
-  It validates the origin by kind: Google must be exactly `https://www.googleapis.com`. OneDrive hosts must end in
-  `.sharepoint.com` or be `api.onedrive.com` / end in `.microsoftpersonalcontent.com`. S3 accepts any host that matches
-  the regex. Anything else is ignored, which means relay.
+- `origins: Map<connectionId, { workstationId, origin: string | null, reason }>` from `storage.direct.report`, dropped on
+  runner disconnect. It validates the origin by kind: Google must be exactly `https://www.googleapis.com`. OneDrive hosts
+  must end in `.sharepoint.com` or be `api.onedrive.com` / end in `.microsoftpersonalcontent.com`. S3 accepts any host
+  that matches the regex. Anything else is stored as `origin: null, reason: 'probe_failed'`, which makes that
+  destination refuse public form files (no relay).
 - `grants: Map<grantId, { sid, index, workstationId, connectionId, expiresAt, state: 'open'|'finishing'|'done' }>` holds
   ids only, never the URL.
-- `open(req) → { ok, grant } | { fallback } | { error }` sends `storage.grant.open` and waits up to 20 s for the result,
-  then checks `new URL(grant.url).origin === origins.get(connectionId).origin`. If they differ it sends `cancel` and
-  returns `fallback`. `finish`, `status` and `cancel` work the same way. `onDisconnect(ws)` fails that workstation's
-  open grants (the part goes back to pending).
-- Limits: at most 3 grants per part per submission, and `maxInFlight` shared with the relay.
+- `open(req) → { ok: true, grant } | { ok: false, error: StorageWriteError }` sends `storage.grant.open` and waits up to
+  20 s for the result (no answer → `timeout`, retryable), then checks
+  `new URL(grant.url).origin === origins.get(connectionId).origin`. If they differ it sends `cancel` and returns a final
+  `invalid` error. `finish`, `status` and `cancel` work the same way. `onDisconnect(ws)` fails that workstation's open
+  grants with `runner_offline`.
+- `availabilityOf(connectionId) → { state: 'ready' | 'unavailable' | 'unknown', reason }` for the storage settings row.
+- Limits: at most 3 grant **attempts** (successful or not) per part per submission, and `maxInFlight` shared with the relay.
 
 `apps/server/src/public-forms/routes.ts`:
 
@@ -226,25 +254,37 @@ or headers (`registerSecret` as a backstop).
   `GET /f/:publicId` the origins are the reported origins of the file fields' destination connections whose kind is
   onedrive/google_drive/s3, nothing else. `AOM_FORMS_DIRECT_UPLOADS=false` (new setting, default `true`) gives `[]` everywhere.
 - `PublicFormDto.uploadOrigins: string[]` (same list) so the page knows which grant origins its CSP allows.
-- Start: unchanged checks. `Part` gains `mode: 'direct'|'relay'`, chosen per part from kind + known origin + setting.
-  The part states gain `'verifying'`. `SubmissionStartResultDto.parts[].mode`.
+- Start: unchanged checks, then (after the online check, before the row is written) the direct check. `connectionsOf`
+  also selects `kind`. With the setting on, a file part whose destination kind is onedrive/google_drive/s3 gets
+  `mode: 'direct'`; if `direct.origins` has no origin for that connection, start throws 503 `upload_unavailable`
+  (retryable, `Retry-After`, message in section 3) and writes no row. Local/vault parts, and every part with the setting
+  off, get `mode: 'relay'`. `Part` gains `mode`, the part states gain `'verifying'`, and `SubmissionStartResultDto.parts[]`
+  gains `mode`. The answers document always goes through the relay as today (it is written by the server, not the
+  browser, so it is not a public form file).
 - New routes (all `logLevel: 'silent'`, `onRequest`, the upload token, JSON ≤ 8 KiB, `cache-control: no-store`; `op`
   values `grant`, `grant_status`, `grant_complete`, `grant_cancel` in the one metadata log line):
   - `POST …/submissions/:sid/parts/:index/grant`. Checks: row not expired or complete, part pending, `mode === 'direct'`,
     the per-file size check again (T8), field and destination present, `accepted = acceptedUploadExtensions(field.allowedTypes)`,
     our content type from `FORM_UPLOAD_TYPES[part.ext]`, and `ttlMs = min(ttl formula, expires_at - now)`. Then
-    `direct.open`. Answers: `200 { mode:'direct', grant:{ method, url, headers, chunkBytes, expiresAt } }`,
-    `200 { mode:'relay' }` (fallback, and the part's `mode` becomes relay in the row), `runner_offline` → the existing
-    `offline(req, reply, 'part', …)`.
+    `direct.open`. Answers: `200 { grant:{ method, url, headers, chunkBytes, expiresAt } }`; `runner_offline` → the
+    existing `offline(req, reply, 'part', …)`; a retryable error with attempts left → 503 `upload_unavailable`
+    (retryable); a final error, or the 3rd failed attempt → `rollBackSubmission(pub, sid, parts, i, 'upload_unavailable',
+    connectionId)` and 502 `upload_unavailable` (not retryable, "Your files could not be sent to the firm. Please
+    contact the firm."). There is no `mode: 'relay'` answer.
   - `GET …/parts/:index/grant` → `{ offset }` (resume).
   - `POST …/parts/:index/grant/complete { size, sha256, providerId?, etag? }`. `size`/`sha256` must equal the part
     manifest, otherwise 400 and cancel. The part becomes `'verifying'`, `direct.finish` runs without awaiting, and the
     answer is `202 { state: 'verifying' }`. When the verified result arrives: on success the part becomes `stored` with
     the reference after the same `sha256`/`size` comparison as the relay (lines 888–894). `malware_detected` /
     `scan_unavailable` → `rollBackSubmission`. Other errors → `failed` with `error_code`.
-  - `POST …/parts/:index/grant/cancel` → cancel, part back to `pending`.
-  - The relay `PUT …/parts/:index` refuses (409 `submission_busy`) while a grant for that part is open, so a file is
-    never stored twice.
+  - `POST …/parts/:index/grant/cancel { reason: 'retry' | 'blocked' | 'abandoned' }` → `direct.cancel`. `retry` (the
+    grant expired or the offset is lost, the page asks a new grant within the attempt cap) puts the part back to
+    `pending`. `blocked` (the browser could not reach the provider before the first byte: CSP, CORS, origin not in
+    `uploadOrigins`) fails the submission through `rollBackSubmission(..., 'upload_unavailable', ...)`. `abandoned` (the
+    user left the page; sent with `navigator.sendBeacon` on `pagehide`, best effort) puts the part back to `pending`.
+  - The relay `PUT …/parts/:index` always refuses a part whose `mode` is `direct`: 409 `upload_mode`, before a body byte
+    is read (check it in `onRequest`/at the top of the handler, as the size checks are). This is the server-side
+    guarantee of "no relay fallback" and of AC 3.
 - Status route: parts report `'verifying'`, plus `error` (code) on a failed part. A `'verifying'` part older than
   `relay.writeTimeoutMs` (by `updated_at`) reads as `failed`, which covers a server restart mid-verify.
 - Complete route: unchanged (`pending.length` already covers `'verifying'`, so complete waits).
@@ -252,8 +292,15 @@ or headers (`registerSecret` as a backstop).
   page sets its own. Add a regression test that the app CSP is unchanged and the public page CSP wins. The only `app.ts`
   edit is the pino redaction `paths` list (about line 283, next to `*.x-upload-token`): add `*.grant`, `*.url`,
   `*.uploadUrl`.
-- Runner offline (GWP-68): start still refuses first (unchanged), and a grant request with the runner gone answers
-  through `offline()`. No change in `offline.ts`/`offline-hook.ts` (AC 8).
+- Runner offline (GWP-68): start still refuses first (unchanged, and the offline check runs **before** the direct
+  check, so an offline runner gets the secure-link flow, not `upload_unavailable`). A grant request with the runner gone
+  answers through `offline()`. No change in `offline.ts`/`offline-hook.ts` (AC 8).
+- Firm visibility (needed because o2 stops the form instead of falling back): `StorageConnectionDto` gains
+  `directUploads: { state: 'ready' | 'unavailable' | 'unknown'; reason: … | null } | null` (null for local/vault), filled in
+  `apps/server/src/commands/storage-connections.ts` from `direct.availabilityOf`. `apps/web/src/components/orgsettings/StorageTab.tsx`
+  shows one line per cloud row: "Public form files: ready", or "Public form files: not possible: <reason text>" (for
+  `cors_missing`: "add the CORS rule to the bucket, see the runner guide"). No upload host or URL is shown.
+- `PfError` codes: add `upload_unavailable` and `upload_mode` to the public error vocabulary (`describePublicError`).
 
 `apps/server/src/runner-gateway/gateway.ts`: the `storageAnswer` fast path also accepts `"storage.grant.` and
 `"storage.direct.` frames. `handlers.ts` gets the same cases for the slow path. Invalid frames log paths only (a grant
@@ -270,11 +317,15 @@ frame holds a URL).
   - S3: one PUT of the `File`; the ETag comes from the response if it is exposed (it is optional).
   - Interruption (network error, the tab coming back from the background): ask `grantOffset` and continue from the
     offset (slice the `File`). Use at most 5 attempts with back-off. If the offset is null or the grant has expired,
-    call `grantCancel`, ask a new grant once, and restart from 0. If that fails, show the existing retryable error.
-    Nothing partial is left behind: provider sessions never create an item until complete, S3 PUTs are atomic, and the
-    runner sweep removes the rest.
+    call `grantCancel({reason:'retry'})`, ask a new grant once, and restart from 0. If that fails, show the error the
+    server returned (retryable `upload_unavailable` lets the user press the existing retry button; the final one ends
+    the submission). Nothing partial is left behind: provider sessions never create an item until complete, S3 PUTs are
+    atomic, and the runner sweep removes the rest.
   - If the grant origin is not in `dto.uploadOrigins`, or the first request fails before any byte was accepted (CSP
-    block, CORS), call `grantCancel` and use the relay `putPart`.
+    block, CORS), call `grantCancel({reason:'blocked'})` and show the `upload_unavailable` error. **Never** call
+    `putPart` for a `direct` part (owner decision o2; the server refuses it anyway).
+  - A retryable 503 `upload_unavailable` on the grant request: retry it automatically after `Retry-After` (at most the
+    server's attempt cap), then show the error.
 - `PublicFormPage.tsx`: per part, `mode === 'direct'` → grant → `directUpload` → `grantComplete` → poll `status` every
   2 s until `stored`/`failed`. Relay parts are unchanged. Progress is a percentage per file (`PUBLIC_TEXT` gets
   "Uploading {name}: {n}%" and "Checking {name}…"). Errors use `describePublicError` with the existing codes
@@ -285,9 +336,13 @@ frame holds a URL).
 
 ### 5.6 Shared DTOs (`packages/shared/src/forms/public.ts`)
 
-`GrantDto { mode: 'direct'; grant: { method: 'PUT'; url: string; headers: Record<string,string>; chunkBytes: number|null; expiresAt: string } } | { mode: 'relay' }`,
+`GrantDto { grant: { method: 'PUT'; url: string; headers: Record<string,string>; chunkBytes: number|null; expiresAt: string } }`
+(no relay variant),
 `GrantCompleteSchema = z.object({ size: int ≥1, sha256: Sha256, providerId: string ≤300 optional, etag: string ≤300 optional })`,
+`GrantCancelSchema = z.object({ reason: z.enum(['retry', 'blocked', 'abandoned']) })`,
 `GrantOffsetDto { offset: number | null }`, and part `mode`, `'verifying'` and `error?` in the start/status DTOs, plus `uploadOrigins` in `PublicFormDto`.
+In `packages/shared/src/storage/index.ts`: `DirectUnavailableReason` (the five reasons of `storage.direct.report`) and
+`StorageConnectionDto.directUploads`.
 
 ### 5.7 TTL (requirement 7, AC 4)
 
@@ -298,11 +353,19 @@ cancels the session, and the sweep deletes the staged entry).
 
 ### 5.8 Risks and open points
 
+- **No fallback means real outages (owner accepted with o2)**: an old runner, an S3 bucket without the CORS rule, an
+  `http:` S3 endpoint (MinIO on a LAN) or a provider outage now stops public form file uploads to that destination
+  instead of relaying them. Mitigations in this design: the start refusal happens before the user uploads anything,
+  the storage settings row tells the firm why, `docs/RUNNER.md` documents the CORS rule, and
+  `AOM_FORMS_DIRECT_UPLOADS=false` is the deployment-wide way back to the 1.6.0 relay. Release notes must say "update
+  runners before the server" for installs with cloud destinations on public forms.
 - **Drive CORS**: browser uploads to a session URI need the `Origin` header on the session start. Undici's `fetch` lets
-  the runner set it. This must be confirmed in UAT with the real OAuth app. If it fails, Drive grants report `fallback`
-  and the relay is used.
+  the runner set it. This must be confirmed in UAT with the real OAuth app. If it does not work, Drive destinations
+  cannot take public form files at all under o2 (no relay); the runner then reports `probe_failed` for Drive and the
+  firm sees it. Flag this to the owner at UAT if it happens.
 - **Graph upload hosts**: the upload host is tenant-specific. The runner learns it from a probe session. If a later
-  session comes back on another host, the server cancels and falls back (section 5.4).
+  session comes back on another host, the server cancels and the submission fails with `upload_unavailable`
+  (section 5.4); the runner refreshes its probe and reports the new origin, so the next submission works.
 - **S3 providers differ**: `x-amz-checksum-sha256` and `If-None-Match` are honoured by AWS, MinIO and R2, but not by
   every S3 clone. The runner-side verify and the sweep are the guarantee, and the provider checks are extra.
 - **Firm bandwidth**: when the scan is on, or the provider exposes no sha256 (OneDrive for Business), the runner reads
@@ -316,13 +379,13 @@ cancels the session, and the sweep deletes the staged entry).
 | AC | Design |
 |---|---|
 | 1. Release/1.6.0 check recorded | Section 2 (also posted on the card). Nothing is built, so the card stays open |
-| 2. GWP-65 decision linked; every kept check enforced and tested | Section 3 (D0, owner answer linked on the card); tests in section 7 rows R4–R7 and S1–S2 |
-| 3. Uploads to OneDrive, Drive and S3 arrive; no bytes through the server | Sections 5.1–5.5. Only JSON ≤ 8 KiB on the new routes, and the per-call log line shows `sizeBytes`. MinIO byte-counter test for testers |
+| 2. GWP-65 decision linked; every kept check enforced and tested | Section 3 (D0 + o2, ledger 7b91aa22, linked on the card); tests in section 7 rows R4–R7 and S1–S2, no-fallback rows S5 and W2 |
+| 3. Uploads to OneDrive, Drive and S3 arrive; no bytes through the server | Sections 5.1–5.5. Only JSON ≤ 8 KiB on the new routes, and the per-call log line shows `sizeBytes`. The relay PUT refuses every `direct` part (409 `upload_mode`), and no code path relays a cloud part. MinIO byte-counter test for testers |
 | 4. One file, one path, TTL, second use, expiry, other path and larger size fail | Section 5.3 table (path and size binding, `If-None-Match`, session end), section 5.7 TTL, runner `finish` single use, server 3-grant cap, verify step 1 |
 | 5. Type or size against limits → no grant, existing validation error | Start checks unchanged plus the grant route's size re-check (section 5.4). The page shows the existing errors |
 | 6. Size or hash mismatch → deleted, error, not delivered | Runner verify steps 1–3 and 7, server part `failed`, complete refuses with `parts_missing` |
 | 7. Local/NAS and vault still relay; their tests unchanged | `isDirectCapable` is false for `LocalConnector`/`VaultConnector`, mode `relay`, relay code untouched |
-| 8. Offline secure-link flow works | Start refusal unchanged; a grant with the runner gone → `offline()`; no change to `offline*.ts` |
+| 8. Offline secure-link flow works | Start refusal unchanged and checked before the direct check; a grant with the runner gone → `offline()`; no change to `offline*.ts` |
 | 9. CSP lists only the needed upload origins | `publicPageCsp(secure, origins)` from reported, validated origins of the form's destinations; no wildcards; `http:` never |
 | 10. 100 MB resumable on OneDrive and Drive; interrupted → resume or clean failure, no orphans | Chunked XHR, offset through the runner, a new grant once, sweep (section 5.3), and provider sessions that never leave partial items |
 
@@ -334,8 +397,8 @@ Runner (`apps/runner/test/`):
   `X-Amz-Expires` equals the TTL; a session token is included.
 - R2 `storage-direct-onedrive.test.ts`, `storage-direct-gdrive.test.ts`, `storage-direct-s3.test.ts` (mocked fetch):
   grant creates the staging session at `.guildwise-incoming/<id>.<ext>`; Drive start carries `Origin` and
-  `X-Upload-Content-Length`; S3 OPTIONS preflight fail → `uploadOrigin` null → grant `fallback`; http S3 endpoint →
-  no direct; `offset` parsing; `promote` with clash `-2`; `cancel` deletes session and staged item.
+  `X-Upload-Content-Length`; S3 OPTIONS preflight fail → `uploadOrigin` null with reason `cors_missing`; http S3
+  endpoint → null with `http_endpoint`; provider error at grant → `ok:false` with the mapped code; `offset` parsing; `promote` with clash `-2`; `cancel` deletes session and staged item.
 - R3 `storage-service-grant.test.ts`: TTL clamp; timer cancels at expiry; a second `finish` → `invalid`; unknown
   grant → `invalid`; `remove()` cancels grants; the URL is never in a log line (scan the captured log for the URL).
 - R4 verify: size mismatch → staged delete + `invalid`; sha mismatch (provider checksum and full-read paths) → delete;
@@ -345,16 +408,24 @@ Runner (`apps/runner/test/`):
   down → `scan_unavailable`; scan off → no full read when the provider exposes sha256 (only a range GET).
 - R6 sweep: deletes entries without an open grant past expiry; keeps an open grant's entry; after a "restart" deletes
   only entries older than 30 min.
-- R7 `LocalConnector`/`VaultConnector` are not direct-capable; `storage.grant.open` for them → `fallback`; the existing
+- R7 `LocalConnector`/`VaultConnector` are not direct-capable; `storage.grant.open` for them → `ok:false`, `invalid`;
+  `storage.direct.report` lists them with `unsupported_kind`; the existing
   `storage-local`, `storage-vault`, `storage-service*` tests pass unchanged.
 
 Server (`apps/server/test/`):
 - S1 `public-forms-direct.test.ts` (fake runner, as in `storage-relay.test.ts`): start returns `mode` per part (cloud with
-  origin → direct; local/vault → relay; no origin → relay; setting off → relay); a grant for a type or size over the
-  limit is never issued (the start 413/415 stays); per-file size re-check at grant; 3-grant cap; grant origin ≠
-  reported → cancel + `relay`; runner offline at grant → offline answer; complete with a size/sha different from the
-  manifest → 400; verified ok → part `stored`; verified `invalid`/`type_refused` → part `failed` and complete refuses;
-  `malware_detected` → submission rolled back; relay PUT refused while a grant is open.
+  origin → direct; local/vault → relay; setting off → relay for every kind); a grant for a type or size over the
+  limit is never issued (the start 413/415 stays); per-file size re-check at grant; runner offline at grant → offline
+  answer; complete with a size/sha different from the manifest → 400; verified ok → part `stored`; verified
+  `invalid`/`type_refused` → part `failed` and complete refuses; `malware_detected` → submission rolled back.
+- S5 no relay fallback (o2): cloud destination with no reported origin (no report at all = old runner, and
+  `uploadOrigin: null`) → start 503 `upload_unavailable`, no `form_submissions` row; runner offline wins over that
+  (offline answer, not `upload_unavailable`); retryable grant error → 503 retryable and the part stays `pending`; 3rd
+  failed attempt → submission `failed` with `error_code='upload_unavailable'` and `storage.discard` queued for other
+  workstations holding parts; final grant error (`auth_expired`, `not_found`) → same; grant origin ≠ reported →
+  cancel frame sent + submission failed; `grant/cancel {reason:'blocked'}` → submission failed; `{reason:'retry'}` → part
+  `pending`; relay `PUT …/parts/:index` for a `direct` part → 409 `upload_mode` with no body read (the fake runner gets
+  no `storage.write.open`). `StorageConnectionDto.directUploads` reports ready/unavailable with the reason, null for local.
 - S2 secrecy: the grant URL is not in any log line (capture pino), not in `form_submissions` (table dump), and not in
   `runner_commands`; the answer has `cache-control: no-store`.
 - S3 `public-forms-headers.test.ts`: CSP `connect-src` is exactly `'self'` plus the reported origins of this form's
@@ -364,9 +435,14 @@ Server (`apps/server/test/`):
 
 Web (`apps/web/test/`):
 - W1 `public-form-direct.test.tsx` (mocked XHR and API): chunked upload with progress text; resume from the offset
-  after a dropped chunk; expiry → new grant once → restart; grant origin not allowed → relay `putPart`; completion
-  report carries size and sha256; `verifying` → poll → stored; failed verification shows the "does not match" message;
-  `type_refused` shows the file-type message.
+  after a dropped chunk; expiry → `grantCancel('retry')` → new grant once → restart; completion report carries size and
+  sha256; `verifying` → poll → stored; failed verification shows the "does not match" message; `type_refused` shows
+  the file-type message.
+- W2 no fallback (o2): grant origin not in `uploadOrigins` → `grantCancel('blocked')` and the `upload_unavailable`
+  message, and `putPart` is **never** called for a direct part (spy); first XHR fails with a network/CORS error before
+  any byte → same; start 503 `upload_unavailable` shows its message before any upload; a retryable grant 503 is retried
+  after `Retry-After`, then the error is shown. `StorageTab` shows the "Public form files" line for a cloud row with
+  `ready` and with `cors_missing`, and nothing for a local row.
 
 Testers (not run by the builder): MinIO end to end with server byte counters and a tampered/oversized PUT;
 UAT 100+ MB to real OneDrive and Drive (needs the GWP-63 OAuth apps); the existing e2e `storage.spec.ts` and offline flow.
@@ -374,9 +450,13 @@ UAT 100+ MB to real OneDrive and Drive (needs the GWP-63 OAuth apps); the existi
 ## 8. Docs the builder updates with the code
 
 - `docs/security/public-forms.md`: T8–T13 and T16 rows (where each check runs for a direct upload, the staging folder,
-  the CSP origins, the host exposure), a settings line for `AOM_FORMS_DIRECT_UPLOADS`, and the decision link.
+  the CSP origins, the host exposure), the rule "no relay fallback for cloud destinations; the submission fails"
+  (owner decision o2, ledger 7b91aa22), a settings line for `AOM_FORMS_DIRECT_UPLOADS` (default on; off = every
+  destination relays as in 1.6.0), and the decision link.
 - `docs/investigations/GWP-63-…md` §3.1: option C is now built for the cloud kinds (pointer to this report).
 - `docs/investigations/GWP-65-…md` §3.5: how an upload reaches the runner now has two paths.
 - `docs/investigations/GWP-68-…md`: one line saying the offline flow is unchanged because start still refuses first.
 - `docs/RUNNER.md`: the `.guildwise-incoming` staging folder, the S3 bucket CORS rule a firm adds to enable direct
-  uploads (allowed origin = the public origin, method PUT, the four headers), and the sweep.
+  uploads (allowed origin = the public origin, method PUT, the four headers; without it public form files to that
+  bucket are refused), that an `http:` S3 endpoint cannot take public form files, the "update runners before the
+  server" note, and the sweep.
