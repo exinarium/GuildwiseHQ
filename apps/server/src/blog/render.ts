@@ -74,6 +74,20 @@ nav.site a.cta{margin-left:8px;padding:0 14px}
 footer.site{padding:20px 0 max(20px,env(safe-area-inset-bottom))}footer.site a{display:inline-flex;align-items:center;min-height:44px;margin-right:18px}
 article table{font-size:.9rem}
 }
+.releases-index{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));column-gap:20px;row-gap:0;margin-top:24px}
+.rel-card{position:relative;min-width:0;display:grid;grid-row:span 4;grid-template-rows:subgrid;row-gap:0;margin:0 0 20px;padding:18px 18px 16px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.rel-card:hover{border-color:var(--muted)}
+.rel-version{margin:0 0 4px;font-size:1.15rem;line-height:1.35;color:var(--fg);overflow-wrap:anywhere}
+.rel-date{margin:0 0 10px;font-size:.85rem;line-height:1.4;color:var(--muted)}
+.rel-summary{margin:0 0 14px;font-size:.95rem;line-height:1.5;color:var(--muted);min-height:4.5em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
+.rel-summary.is-empty{font-style:italic}
+.rel-more{align-self:end;margin:0;font-size:.95rem;font-weight:600;color:var(--brand)}
+.rel-more a{color:var(--brand);text-decoration:underline;text-underline-offset:3px}
+.rel-more a::after{content:"";position:absolute;inset:0;border-radius:12px}
+.rel-more a:focus-visible{outline:none}
+.rel-more a:focus-visible::after{outline:2px solid var(--brand);outline-offset:2px}
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+@supports not (grid-template-rows:subgrid){.rel-card{display:flex;flex-direction:column}.rel-version{min-height:2.7em}.rel-more{margin-top:auto}}
 form.inline{display:inline}button{font:inherit;cursor:pointer;background:var(--brand);color:var(--brand-fg);border:0;border-radius:8px;padding:9px 16px}
 `;
 
@@ -271,19 +285,42 @@ function entryBodyHtml(entryId: string, body: string): string {
   );
 }
 
+const plainInline = (s: string): string =>
+  s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const releaseSummary = (r: Release): string =>
+  fitText(
+    plainInline(
+      r.whatsNew[0]?.title ||
+        r.sections.added[0] ||
+        r.intro ||
+        r.sections.changed[0] ||
+        r.sections.fixed[0] ||
+        '',
+    ),
+    300,
+  );
+
+function releaseCard(r: Release): string {
+  const name = `Guildwise HQ ${r.version}`;
+  const summary = releaseSummary(r);
+  return `<article class="rel-card"><h2 class="rel-version">${esc(name)}</h2>
+<p class="rel-date"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></p>
+<p class="rel-summary${summary ? '' : ' is-empty'}">${esc(summary || 'See the release notes for the full list of changes.')}</p>
+<p class="rel-more"><a href="/releases/${esc(r.version)}">Read more<span class="vh"> about ${esc(name)}</span></a><span aria-hidden="true"> &rarr;</span></p></article>`;
+}
+
 export function releasesIndexPage(origin: string, releases: Release[]): string {
   const desc = 'What changed in each release of Guildwise HQ.';
   const html = `<h1>Releases</h1><p class="lead">${esc(desc)}</p>
 ${
   releases.length
-    ? `<div class="grid">${releases
-        .map((r) => {
-          const first = r.whatsNew[0]?.title ?? r.sections.added[0] ?? r.intro;
-          return `<article class="card"><div class="body"><h2><a href="/releases/${esc(r.version)}">Guildwise HQ ${esc(r.version)}</a></h2>
-<p>${esc(first.length > 160 ? `${first.slice(0, 157)}...` : first)}</p>
-<div class="meta"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></div></div></article>`;
-        })
-        .join('')}</div>`
+    ? `<div class="releases-index">${releases.map(releaseCard).join('')}</div>`
     : '<p>No releases yet. Check back soon.</p>'
 }`;
   return layout(
