@@ -25,7 +25,11 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepSettingsSet'>(e).payload;
     await exec(tx, 'UPDATE projects SET release_docs_prep=$2::jsonb WHERE id=$1', [
       p.projectId,
-      JSON.stringify({ enabled: p.enabled, steps: p.steps }),
+      JSON.stringify({
+        enabled: p.enabled,
+        steps: p.steps,
+        ...(p.guidePaths && Object.keys(p.guidePaths).length > 0 ? { guidePaths: p.guidePaths } : {}),
+      }),
     ]);
   },
   ReleaseDocsPrepStarted: async (tx, e) => {

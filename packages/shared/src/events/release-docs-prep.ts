@@ -13,6 +13,8 @@ export const releaseDocsPrepEvents = [
       projectId: Id,
       enabled: z.boolean(),
       steps: z.record(z.string(), z.boolean()),
+      /** The full map after the change (repository id to path). Absent in old events. */
+      guidePaths: z.record(z.string(), z.string()).optional(),
       setBy: Id,
     }),
   ),

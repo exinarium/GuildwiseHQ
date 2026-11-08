@@ -11,6 +11,28 @@ import { z } from 'zod';
 
 export const DEFAULT_GUIDE_PATH = 'docs/USER-GUIDE.md';
 
+export const GUIDE_PATH_MAX = 300;
+
+export type GuidePathCheck = { ok: true; path: string | null } | { ok: false; reason: string };
+
+/** A repository-relative Markdown path; null = not set (the default docs/USER-GUIDE.md). */
+export function normalizeGuidePath(raw: string | null | undefined): GuidePathCheck {
+  const t = (raw ?? '').trim();
+  if (!t) return { ok: true, path: null };
+  if (t.length > GUIDE_PATH_MAX) return { ok: false, reason: `is longer than ${GUIDE_PATH_MAX} characters` };
+  if ([...t].some((c) => c.charCodeAt(0) < 32)) return { ok: false, reason: 'contains control characters' };
+  const s = t.replace(/\\/g, '/');
+  if (/^[A-Za-z]:/.test(s))
+    return { ok: false, reason: 'must be relative to the repository (no drive letter)' };
+  if (s.startsWith('/')) return { ok: false, reason: "must be relative to the repository (no leading '/')" };
+  const parts = s.split('/').filter((p) => p !== '' && p !== '.');
+  if (parts.includes('..')) return { ok: false, reason: "must not contain '..'" };
+  const path = parts.join('/');
+  if (!/\.md$/i.test(path) || /^\.md$/i.test(parts.at(-1) ?? ''))
+    return { ok: false, reason: 'must be a Markdown file ending in .md' };
+  return { ok: true, path: path === DEFAULT_GUIDE_PATH ? null : path };
+}
+
 export interface GuideHeading {
   /** 0-based line index. */
   line: number;
@@ -659,6 +681,10 @@ export function checkGuideUpdate(
 /** `stepInput` of the 'guide' step (built by the server). */
 export const ReleaseDocsPrepGuideInputSchema = z.object({
   guidePath: z.string().min(1).max(300).default(DEFAULT_GUIDE_PATH),
+  /** True when the repository has its own guide path: a missing file then fails instead of skipping. */
+  guidePathConfigured: z.boolean().default(false),
+  /** For messages only. */
+  repoName: z.string().max(200).optional(),
   /** Change ids (card:<KEY>, merge:<sha>, commit:<sha>) that earlier passed runs of this release dealt with. */
   coveredSources: z.array(z.string().max(80)).max(2000).default([]),
   denyList: z.array(z.string().max(100)).max(200).default([]),

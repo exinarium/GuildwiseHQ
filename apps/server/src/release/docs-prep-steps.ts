@@ -2,6 +2,7 @@ import {
   type AgentRuntimeSpec,
   DEFAULT_GUIDE_PATH,
   guideOutputSources,
+  normalizeGuidePath,
   type ReleaseDocsPrepGuideInput,
   releaseVersionFromBranch,
 } from '@aom/shared';
@@ -80,15 +81,39 @@ export async function guideRelease(
   };
 }
 
+/** The user guide paths stored in a project's release_docs_prep value (valid, non-default entries only). */
+export function configuredGuidePaths(settings: unknown): Record<string, string> {
+  const raw = (settings as { guidePaths?: unknown } | null | undefined)?.guidePaths;
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === 'object')
+    for (const [id, v] of Object.entries(raw)) {
+      const c = typeof v === 'string' ? normalizeGuidePath(v) : null;
+      if (c?.ok && c.path) out[id] = c.path;
+    }
+  return out;
+}
+
+/** The repository's own user guide path, or null when it has none (the default applies). */
+export async function guidePathFor(db: Queryable, projectId: string, repoId: string): Promise<string | null> {
+  const p = await one(db, 'SELECT release_docs_prep FROM projects WHERE id=$1', [projectId]);
+  return configuredGuidePaths(p?.release_docs_prep)[repoId] ?? null;
+}
+
 export const DOCS_PREP_STEP_HOOKS: Record<string, DocsPrepStepHook> = {
   guide: {
     needsWriter: true,
-    stepInput: async (db, run, repo): Promise<ReleaseDocsPrepGuideInput> => ({
-      guidePath: DEFAULT_GUIDE_PATH,
-      coveredSources: await guideCoveredSources(db, run, repo.repo_id),
-      denyList: [],
-      release: await guideRelease(db, run, repo),
-    }),
+    // The path is read when the step is dispatched, so a Retry after fixing the setting uses the new value.
+    stepInput: async (db, run, repo): Promise<ReleaseDocsPrepGuideInput> => {
+      const configured = await guidePathFor(db, run.project_id, repo.repo_id);
+      return {
+        guidePath: configured ?? DEFAULT_GUIDE_PATH,
+        guidePathConfigured: configured !== null,
+        repoName: String(repo.name ?? ''),
+        coveredSources: await guideCoveredSources(db, run, repo.repo_id),
+        denyList: [],
+        release: await guideRelease(db, run, repo),
+      };
+    },
   },
 };
 

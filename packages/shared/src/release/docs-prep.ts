@@ -104,6 +104,8 @@ export const stepPhaseIndex = (id: string, phase: string): number => {
 export interface ReleaseDocsPrepSettings {
   enabled: boolean;
   steps: Record<string, boolean>;
+  /** Repository id to its user guide path (normalised); absent: the default. */
+  guidePaths?: Record<string, string>;
 }
 
 export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: false, steps: {} };
