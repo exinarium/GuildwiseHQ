@@ -2,10 +2,34 @@ import type { FormAnswerValue, FormFieldErrorCode, PublicFormDto } from '@aom/sh
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FormRenderer } from '../components/forms/FormRenderer.tsx';
 import { PublicApiError, publicApi } from './api.ts';
-import { describePublicError } from './messages.ts';
+import { describePublicError, PUBLIC_TEXT } from './messages.ts';
 import { OfflinePanel } from './OfflinePanel.tsx';
-import { solvePow } from './pow.ts';
+import { PowUnsupportedError, solvePow } from './pow.ts';
 import { sha256File } from './sha256.ts';
+
+/** After this long checking the files and solving, the page says it can take a little longer. */
+export const SLOW_MS = 3000;
+
+/** This browser cannot do the check the form needs: shown as a notice, the answers stay. */
+const unsupported = () =>
+  new PublicApiError(0, 'pow_unsupported', 'This browser cannot prepare the form for sending.', false);
+
+/** Solving starts while the person types; a failure is only reported when the result is awaited. */
+const startPow = (session: string, bits: number): Promise<string> => {
+  const p = solvePow(session, bits);
+  p.catch(() => {});
+  return p;
+};
+
+/** The awaited proof of work, with "cannot run here" turned into the error the page shows. */
+const awaitPow = async (p: Promise<string> | null): Promise<string> => {
+  try {
+    return (await p) ?? '0';
+  } catch (e) {
+    if (e instanceof PowUnsupportedError) throw unsupported();
+    throw e;
+  }
+};
 
 type Answers = Record<string, FormAnswerValue>;
 type Phase =
@@ -76,7 +100,7 @@ export function PublicFormPage({
   const load = useCallback(async () => {
     try {
       const dto = await publicApi.load(publicId, link.current);
-      pow.current = solvePow(dto.session, dto.powBits);
+      pow.current = startPow(dto.session, dto.powBits);
       loadedAt.current = Date.now();
       if (dto.availability === 'offline') {
         if (dto.link?.purpose === 'offline') {
@@ -153,19 +177,41 @@ export function PublicFormPage({
       const file = f.type === 'file' ? files.current.get(f.id) : undefined;
       return file ? [{ field: f.id, file }] : [];
     });
-    const manifest = await Promise.all(
-      list.map(async ({ field, file }, index) => ({
-        field,
-        index: 0,
-        name: file.name,
-        size: file.size,
-        sha256: await sha256File(file),
-        pos: index,
-      })),
-    );
-    // Not before the form has been open long enough for a person (the server enforces it too).
-    await wait(Math.max(0, loadedAt.current + dto.minFillMs - Date.now()));
-    const nonce = (await pow.current) ?? '0';
+    // Time spent checking (hashing and solving), not counting the wait for the minimum fill time.
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
+    let spent = 0;
+    let since = 0;
+    const clockOn = () => {
+      since = Date.now();
+      slowTimer = setTimeout(() => setProgress(PUBLIC_TEXT.slowCheck), Math.max(0, SLOW_MS - spent));
+    };
+    const clockOff = () => {
+      clearTimeout(slowTimer);
+      spent += Date.now() - since;
+    };
+    let manifest: Array<{ field: string; index: number; name: string; size: number; sha256: string }>;
+    let nonce: string;
+    try {
+      clockOn();
+      // One file at a time, in the order of the form: at most one file is read into memory.
+      manifest = [];
+      for (const { field, file } of list) {
+        let sha256: string;
+        try {
+          sha256 = await sha256File(file);
+        } catch {
+          throw unsupported();
+        }
+        manifest.push({ field, index: 0, name: file.name, size: file.size, sha256 });
+      }
+      clockOff();
+      // Not before the form has been open long enough for a person (the server enforces it too).
+      await wait(Math.max(0, loadedAt.current + dto.minFillMs - Date.now()));
+      clockOn();
+      nonce = await awaitPow(pow.current);
+    } finally {
+      clockOff();
+    }
     const body = {
       session: dto.session,
       nonce,
@@ -176,7 +222,7 @@ export function PublicFormPage({
           ([k]) => !files.current.has(k) && !manifest.some((m) => m.field === k),
         ),
       ),
-      files: manifest.map(({ pos: _p, ...m }) => m),
+      files: manifest,
     };
     const r = await publicApi.start(publicId, body);
     laterOf(r);
@@ -213,7 +259,7 @@ export function PublicFormPage({
       });
       return;
     }
-    pow.current = solvePow(fresh.session, fresh.powBits);
+    pow.current = startPow(fresh.session, fresh.powBits);
     loadedAt.current = Date.now();
     setPhase({ kind: 'offline', dto: fresh, sent: false });
   };
@@ -225,7 +271,7 @@ export function PublicFormPage({
     setOfflineError(null);
     try {
       await wait(Math.max(0, loadedAt.current + dto.minFillMs - Date.now()));
-      const nonce = (await pow.current) ?? '0';
+      const nonce = await awaitPow(pow.current);
       await publicApi.offlineRequest(publicId, {
         session: dto.session,
         nonce,
@@ -245,7 +291,7 @@ export function PublicFormPage({
       if (['session_used', 'session_invalid', 'form_changed'].includes(err.code)) {
         const fresh = await publicApi.load(publicId, link.current).catch(() => null);
         if (fresh) {
-          pow.current = solvePow(fresh.session, fresh.powBits);
+          pow.current = startPow(fresh.session, fresh.powBits);
           loadedAt.current = Date.now();
           setPhase({ kind: 'offline', dto: fresh, sent: false });
         }

@@ -10,6 +10,16 @@ export interface PublicMessage {
 
 const msg = (text: string, retry = false, closed = false): PublicMessage => ({ text, retry, closed });
 
+/** Sentences the page shows on its own (not answers to a server error). */
+export const PUBLIC_TEXT = {
+  slowCheck:
+    'Still checking your form. This can take a little longer on this device. Please keep this page open.',
+  needsSecureLink:
+    "This form can't be sent from this browser over this link. It needs a secure (https) link. Your answers are still here. Please contact the firm.",
+  badOrigin:
+    "This form can't be sent from this address. Please use the link the firm gave you, or contact the firm.",
+} as const;
+
 /** An error code as a sentence for a client. No technical detail, nothing the server did not choose to say. */
 export function describePublicError(
   e: Pick<PublicApiError, 'code' | 'status' | 'retryable'> & { message?: string },
@@ -55,6 +65,12 @@ export function describePublicError(
       return msg('Some answers need attention. Please check the form and send again.');
     case 'submission_refused':
       return msg('We could not accept this submission. Please try again.', true);
+    // raised by the page itself: this browser cannot do the check the form needs before sending
+    case 'pow_unsupported':
+      return msg(PUBLIC_TEXT.needsSecureLink);
+    // the page was opened at an address the server does not accept (a configuration matter)
+    case 'bad_origin':
+      return msg(PUBLIC_TEXT.badOrigin);
     case 'network':
       return msg('The connection was lost. Your answers are still here. Try again.', true);
     default:

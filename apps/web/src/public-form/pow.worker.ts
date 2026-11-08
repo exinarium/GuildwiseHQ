@@ -1,12 +1,25 @@
+import type { WorkerReply, WorkerRequest } from './form-worker.ts';
 import { powOk } from './pow.ts';
+import { sha256Chunks } from './sha256.ts';
 
-self.onmessage = (e: MessageEvent<{ session: string; bits: number }>) => {
-  const { session, bits } = e.data;
-  for (let i = 0; ; i++) {
-    const nonce = i.toString(36);
-    if (powOk(session, nonce, bits)) {
-      (self as unknown as { postMessage(m: string): void }).postMessage(nonce);
+const reply = (m: WorkerReply) => (self as unknown as { postMessage(m: WorkerReply): void }).postMessage(m);
+
+self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
+  try {
+    const req = e.data;
+    if (req.kind === 'file') {
+      reply({ kind: 'file', hex: await sha256Chunks(req.file) });
       return;
     }
+    const { session, bits } = req;
+    for (let i = 0; ; i++) {
+      const nonce = i.toString(36);
+      if (powOk(session, nonce, bits)) {
+        reply({ kind: 'pow', nonce });
+        return;
+      }
+    }
+  } catch {
+    reply({ kind: 'error', code: 'unsupported' });
   }
 };
