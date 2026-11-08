@@ -12,6 +12,7 @@ import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
 import { migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
+import { migrateMissingDevops } from './missing-devops.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
@@ -66,6 +67,13 @@ export {
   migrateGraphBackfill,
 } from './graph-backfill.ts';
 export { GUILDWISEHQ_RUNNER_RULE_MIGRATION, migrateGuildwiseRunnerRule } from './guildwisehq-runner-rule.ts';
+export {
+  findMissingDevopsPairs,
+  formatMissingDevopsSummary,
+  MISSING_DEVOPS_MIGRATION,
+  type MissingDevopsReport,
+  migrateMissingDevops,
+} from './missing-devops.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -148,6 +156,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'business-builtin-2026-11', run: (env) => migrateBusinessBuiltin(env) },
   { name: 'deploy-removed-computers-2026-11', run: (env) => migrateDeployRemovedComputers(env) },
   { name: 'orphaned-devops-2026-11', run: (env) => migrateOrphanedDevops(env) },
+  { name: 'missing-devops-2026-11', run: (env) => migrateMissingDevops(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

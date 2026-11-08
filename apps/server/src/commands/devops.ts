@@ -165,7 +165,12 @@ export async function devopsHireEvents(
 }
 
 /** The user joined an organization (or started one): their active workstations get its DevOps engineer. */
-export async function hireDevopsForOrgIn(ctx: Ctx, tx: Tx, userId: string, orgId: string): Promise<void> {
+export async function hireDevopsForOrgIn(
+  ctx: Pick<Ctx, 'store'>,
+  tx: Tx,
+  userId: string,
+  orgId: string,
+): Promise<number> {
   const stations = await rows<{ id: string }>(
     tx,
     `SELECT w.id FROM workstations w WHERE w.user_id=$1 AND w.status='active'
@@ -179,6 +184,7 @@ export async function hireDevopsForOrgIn(ctx: Ctx, tx: Tx, userId: string, orgId
     if (ev) events.push(ev);
   }
   if (events.length) await ctx.store.append(events, { tx });
+  return events.length;
 }
 
 /** After `hello`: a DevOps agent whose runtime the workstation lacks moves to an available runtime. */
