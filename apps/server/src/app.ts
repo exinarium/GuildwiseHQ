@@ -563,6 +563,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.webhookRelay.start();
   ctx.services.formsOffline = createFormsOfflineService(ctx);
   ctx.services.storage = new StorageRelay({
     config: ctx.config.storage,
@@ -720,6 +721,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     await reaper.stop();
     await gateway.stop();
     await browser.stop();
+    ctx.services.webhookRelay?.stop();
     await notifier.stop();
     mailer.close();
     await pool.end();
