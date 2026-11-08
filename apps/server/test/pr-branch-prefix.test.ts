@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { prBranchTicket } from '../src/commands/finalize.ts';
+import { finalizeNaming } from '../src/commands/finalize.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
@@ -73,10 +73,11 @@ describe('pull request branch prefix', () => {
     await patch({ prBranchPrefix: '' });
   });
 
-  it('the ticket is the tracker key, else the card ref', () => {
-    expect(prBranchTicket('DCPL-4276', 'P4-3')).toBe('DCPL-4276');
-    expect(prBranchTicket(null, 'P4-3')).toBe('P4-3');
-    expect(prBranchTicket('acme/repo#12', 'P4-3')).toBe('P4-3');
+  it('the ticket is the tracker key (GitHub: its branch part), else the card ref', () => {
+    const card = { ref: 'P4-3', title: 'T' };
+    expect(finalizeNaming(card, 'DCPL-4276').ticket).toBe('DCPL-4276');
+    expect(finalizeNaming(card, null).ticket).toBe('P4-3');
+    expect(finalizeNaming(card, 'acme/repo#12')).toMatchObject({ ticket: 'repo-12', workRef: 'acme/repo#12' });
   });
 
   it('finalize.execute carries the prefix (default feature) and the ticket', async () => {

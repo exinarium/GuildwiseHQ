@@ -63,6 +63,7 @@ const TRIGGER_TYPES = new Set([
   'OrgStatusChanged',
   'OrgMemberAdded',
   'RebaseConflict',
+  'InternalRefInHistory',
   'CardMovedByManager',
   'CardReopened',
   'CardFinalized',

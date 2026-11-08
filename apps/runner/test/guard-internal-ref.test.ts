@@ -61,7 +61,7 @@ const commit = (path: string, file: string, ...messages: string[]) => {
   return sh(path, 'git', ['rev-parse', 'HEAD']);
 };
 
-const internal = (vs: { rule: string }[]) => vs.filter((v) => v.rule.startsWith('internal_ref_'));
+const internal = <T extends { rule: string }>(vs: T[]): T[] => vs.filter((v) => v.rule.startsWith('internal_ref_'));
 
 describe('guard: internal ref on an intake card', () => {
   it('a clean history (ABC-1 commits, other keys in the body) passes', async () => {
