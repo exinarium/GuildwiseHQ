@@ -3,6 +3,7 @@ import { CONNECTABLE_FORGES, createFullNameError, ForgeKindSchema } from '../for
 import { CommitAsSchema } from './commit-identity.ts';
 
 export * from './commit-identity.ts';
+export * from './rebase-error.ts';
 
 /**
  * Approved repository setup (docs/SPEC.md, "External systems boundary"): an agent asks, the project owner approves on

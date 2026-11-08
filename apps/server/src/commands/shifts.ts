@@ -66,7 +66,7 @@ import { qaStepsEvents } from './qa.ts';
 import { QA_STEPS_STAGE } from './qa-flow.ts';
 import { affinityEvent } from './question-flow.ts';
 import { raiseQuestion } from './questions.ts';
-import { rebaseConflictEvents } from './rebase.ts';
+import { isRealConflict, rebaseConflictEvents, rebaseErrorText } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
 import { mergeRisk, riskFields, type StoredRisk, withoutRisk } from './review-risk.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from './stop-loss.ts';
@@ -1246,9 +1246,13 @@ export async function applyShiftRejected(
     return;
   }
   const extra: AppendInput[] = [];
-  if (msg.reason === 'rebase_conflict') {
+  // A conflict only with files. A `rebase_conflict` without them (an older runner) or a `worktree_failed` carrying
+  // `rebaseError` is a workstation problem: the worktree_failed route (back-off, storm desk item), never Rework.
+  const fileLessConflict = msg.reason === 'rebase_conflict' && !isRealConflict(msg.conflictedFiles);
+  const rebaseFailed = fileLessConflict || (msg.reason === 'worktree_failed' && !!msg.rebaseError);
+  if (msg.reason === 'rebase_conflict' && isRealConflict(msg.conflictedFiles)) {
     extra.push(
-      ...rebaseConflictEvents(card, ws.id, card.stage, card.base_branch ?? '', msg.conflictedFiles ?? []),
+      ...rebaseConflictEvents(card, ws.id, card.stage, card.base_branch ?? '', msg.conflictedFiles),
       ...(await cardConflictAttemptEvents(
         ctx,
         tx,
@@ -1256,7 +1260,7 @@ export async function applyShiftRejected(
         ws.id,
         card.stage,
         card.base_branch ?? '',
-        msg.conflictedFiles ?? [],
+        msg.conflictedFiles,
       )),
     );
   } else if (msg.reason === 'environment_not_ready' && msg.environment) {
@@ -1272,7 +1276,8 @@ export async function applyShiftRejected(
     extra.push(...branch.events);
     rejection = branch.rejection;
   } else if (
-    ['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason) &&
+    (fileLessConflict ||
+      ['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) &&
     // An account the runner does not have is a race the next pass settles (the account is marked out above): no penalty.
     !(msg.reason === 'runtime_unavailable' && (msg.detail ?? '').startsWith('account_missing:'))
   ) {
@@ -1297,17 +1302,23 @@ export async function applyShiftRejected(
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
   const text = noIdentity
     ? NO_COMMIT_IDENTITY_MESSAGE
-    : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
-      ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
-      : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
-        ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
-        : msg.reason === 'usage_limited'
-          ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
-          : msg.reason === 'auth_expired'
-            ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-            : msg.reason === 'busy' && msg.capacity
-              ? await shiftCapMessage(tx, ws.id, msg.capacity)
-              : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+    : rebaseFailed
+      ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
+          rebaseError: msg.rebaseError ?? null,
+          detail: msg.detail ?? null,
+          fileLessConflict,
+        })}\nThe card is back in the queue.`
+      : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
+        ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
+        : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
+          ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
+          : msg.reason === 'usage_limited'
+            ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
+            : msg.reason === 'auth_expired'
+              ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+              : msg.reason === 'busy' && msg.capacity
+                ? await shiftCapMessage(tx, ws.id, msg.capacity)
+                : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
   // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
   for (const ev of released)

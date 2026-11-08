@@ -61,6 +61,8 @@ export async function cardConflictAttemptEvents(
   baseBranch: string,
   files: readonly string[],
 ): Promise<AppendInput[]> {
+  // Second line of defence: a "conflict" without files is not a conflict and never starts a DevOps attempt.
+  if (files.length === 0) return [];
   const agent = await devopsAgentOn(tx, workstationId, card.org_id);
   if (!agent) return [];
   const prior = await one(

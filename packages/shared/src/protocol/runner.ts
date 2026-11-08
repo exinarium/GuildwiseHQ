@@ -115,6 +115,7 @@ import {
   RepoCreatePayloadSchema,
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
+import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   CHECKS_MAX,
@@ -1641,6 +1642,11 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
     .optional(),
   /** Additive, with `reason: 'busy'` (`shift-limit:2`): the limit that applied, its source and who holds the slots. */
   capacity: ShiftCapacitySchema.optional(),
+  /**
+   * Additive, with `reason: 'worktree_failed'`: the pre-stage rebase onto the base branch failed for a reason other than
+   * a conflict (base ref, git command, exit code, git's message). Not a conflict: the card is not sent to Rework.
+   */
+  rebaseError: RebaseErrorInfoSchema.optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),

@@ -38,7 +38,7 @@ import picomatch from 'picomatch';
 import { z } from 'zod';
 import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
-import { RebaseConflictError, rebaseOntoBase } from '../git/rebase.ts';
+import { RebaseConflictError, RebaseError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import { type GitAuth, removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
@@ -460,6 +460,10 @@ export class RunManager {
       if (err instanceof RebaseConflictError) {
         env.rebaseConflictFiles = err.conflictedFiles;
         throw new Error(`the card branch conflicts with ${rc.baseBranch}: ${err.conflictedFiles.join(', ')}`);
+      }
+      if (err instanceof RebaseError) {
+        env.rebaseError = err.info;
+        throw new Error(err.message);
       }
       throw err;
     }
@@ -901,6 +905,7 @@ export class RunManager {
       ...(env.error ? { error: env.error.slice(0, 4000) } : {}),
       ...(env.endReason && !isLiveEnv(env) ? { endReason: env.endReason } : {}),
       ...(env.rebaseConflictFiles ? { rebaseConflictFiles: env.rebaseConflictFiles.slice(0, 200) } : {}),
+      ...(env.rebaseError ? { rebaseError: env.rebaseError } : {}),
     };
   }
 

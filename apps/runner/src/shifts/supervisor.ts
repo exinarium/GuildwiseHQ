@@ -38,6 +38,7 @@ import {
   PREP_OUTCOME,
   type PublishRequest,
   type ReadableFolder,
+  type RebaseErrorInfo,
   type RepoReport,
   type ResumeState,
   renderCardAttachments,
@@ -123,6 +124,7 @@ import {
   ensureWorktree,
   type GitAuth,
   RebaseConflictError,
+  RebaseError,
   rebaseOntoBase,
   removeReadOnlyCheckout,
   WorktreeError,
@@ -868,6 +870,7 @@ export class ShiftSupervisor {
     limitedUntil?: string,
     accountKey?: string,
     capacity?: ShiftCapacity,
+    rebaseError?: RebaseErrorInfo,
   ): void {
     // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
     // searching (backlog #79).
@@ -883,6 +886,7 @@ export class ShiftSupervisor {
       ...(limitedUntil ? { limitedUntil } : {}),
       ...(accountKey ? { accountKey } : {}),
       ...(capacity ? { capacity } : {}),
+      ...(rebaseError ? { rebaseError } : {}),
     });
   }
 
@@ -1171,6 +1175,20 @@ export class ShiftSupervisor {
       } catch (err) {
         if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
+        } else if (err instanceof RebaseError) {
+          // Not a conflict: the existing worktree_failed route (an older server parses it), with git's details.
+          this.reject(
+            msg.shiftId,
+            'worktree_failed',
+            err.message,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            err.info,
+          );
         } else if (err instanceof BaseBranchMissingError) {
           this.reject(msg.shiftId, 'worktree_failed', err.message, undefined, undefined, {
             base: err.base,

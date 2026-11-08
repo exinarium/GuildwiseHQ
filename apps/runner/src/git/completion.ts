@@ -6,7 +6,7 @@ import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
-import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
+import { baseTarget, RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
 
@@ -129,6 +129,8 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   } catch (err) {
     if (err instanceof RebaseConflictError)
       return { ok: false, action, conflict: true, conflictedFiles: err.conflictedFiles, error: err.message };
+    // Not a conflict: a workstation problem with git's own message; never `conflict`.
+    if (err instanceof RebaseError) return { ok: false, action, error: err.message, rebaseError: err.info };
     if (err instanceof NoCommitIdentityError) return fail(action, err.message);
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
