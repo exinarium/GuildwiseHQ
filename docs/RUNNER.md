@@ -711,7 +711,7 @@ What the runner does: a GET with `hub.mode=subscribe` and the right `hub.verify_
 
 **Retry window.** Meta documents: "If a webhook request to your endpoint receives an HTTP status code other than 200, or if the webhook cannot be delivered for another reason, Meta retries delivery with decreasing frequency until the request succeeds, for up to 7 days" ([WhatsApp: set up webhooks](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks)); and "delivery is retried immediately, then a few more times with decreasing frequency over the next 7 days. Unacknowledged responses will be dropped after 7 days" ([create a webhook endpoint](https://developers.facebook.com/docs/whatsapp/webhooks/create-webhook-endpoint)). So with the runner offline, messages wait at Meta for up to 7 days. The generic Graph API page names 36 hours; that does not apply to WhatsApp. Meta does not document a response timeout; the runner answers within milliseconds.
 
-**Payload size.** Meta documents webhook payloads of up to 3 MB. The server's single limit `AOM_RELAY_MAX_BODY_BYTES` defaults to 1 MiB; set it to `3145728` on the server to accept Meta's maximum (see SELF-HOSTING.md). An over-limit event gets 413 and Meta retries it.
+**Payload size.** Meta documents webhook payloads of up to 3 MB. The server accepts 3 MiB for a `whatsapp_cloud` integration without any setting; the global `AOM_RELAY_MAX_BODY_BYTES` (1 MiB) still applies to the other kinds, and `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` overrides either (see SELF-HOSTING.md). An over-limit event gets 413 and Meta retries it.
 
 A `kind_mismatch` refusal in the runner log means the web app integration is not of kind WhatsApp.
 

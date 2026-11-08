@@ -1,7 +1,12 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { makeEnvelope, type ServerToRunnerOf } from '@aom/shared';
+import {
+  makeEnvelope,
+  RELAY_BODY_HARD_MAX_BYTES,
+  type ServerToRunnerOf,
+  ServerToRunnerSchema,
+} from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, RunnerConfigSchema, saveConfig } from '../src/config.ts';
 import type { Logger } from '../src/log.ts';
@@ -56,6 +61,24 @@ describe('RelayDispatcher', () => {
       headers: { 'content-type': 'text/plain' },
       body: Buffer.from('123').toString('base64'),
     });
+  });
+
+  it('passes a 3 MiB body (and the 4 MiB maximum) through the frame schema and the dispatcher unchanged', async () => {
+    for (const size of [3 * 1024 * 1024, RELAY_BODY_HARD_MAX_BYTES]) {
+      const body = Buffer.alloc(size, 'ab');
+      const frame = JSON.parse(
+        JSON.stringify(request({ kind: 'whatsapp_cloud', body: body.toString('base64') })),
+      );
+      const parsed = ServerToRunnerSchema.parse(frame) as ServerToRunnerOf<'relay.request'>;
+      const seen: RelayEvent[] = [];
+      const d = new RelayDispatcher({ integrations: () => mine('whatsapp_cloud'), log });
+      d.register('whatsapp_cloud', async (e) => {
+        seen.push(e);
+        return { status: 200 };
+      });
+      expect((await d.dispatch(parsed))?.status).toBe(200);
+      expect(seen[0]?.body.equals(body)).toBe(true);
+    }
   });
 
   it('answers 501 when no handler is registered for the kind', async () => {

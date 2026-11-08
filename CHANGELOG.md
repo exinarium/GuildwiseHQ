@@ -16,6 +16,7 @@ Runner 0.1.70.
 
 ### Changed
 
+- Inbound webhook relay: body limit per kind. A `whatsapp_cloud` integration now accepts up to 3 MiB (Meta's payload size) without any setting, and the new `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` (`kind=bytes` pairs, at most 4 MiB each) overrides the limit of any kind; other kinds keep `AOM_RELAY_MAX_BODY_BYTES`. An over-limit body is refused with 413 before it is read in full.
 - Bundled Caddy: every log line, errors included, now goes through a filter that deletes token, signature and credential headers and redacts the secret part of the public relay, hook, form and invitation addresses; request body limits apply to `/relay/in/*`, `/hooks/in/*` and the public form API; the image is pinned to `caddy:2.11`. `AOM_STORAGE_MAX_FILE_BYTES`, `AOM_JOURNEY_HOOK_MAX_BYTES` and `AOM_RELAY_MAX_BODY_BYTES` now reach the app and the proxy from `.env`.
 - Public forms on installs served over plain http: attachments are hashed in the background (in a worker, or a chunk at a time on the page), so a large file no longer freezes the page. When the check before sending takes longer than 3 seconds the page says so, a browser that cannot do the check at all is told the form needs a secure (https) link while the answers stay on the page, and a `403 bad_origin` now says to use the link the firm gave instead of a generic error.
 

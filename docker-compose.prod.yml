@@ -31,6 +31,7 @@ services:
       AOM_STORAGE_MAX_FILE_BYTES: ${AOM_STORAGE_MAX_FILE_BYTES:-26214400}
       AOM_JOURNEY_HOOK_MAX_BYTES: ${AOM_JOURNEY_HOOK_MAX_BYTES:-65536}
       AOM_RELAY_MAX_BODY_BYTES: ${AOM_RELAY_MAX_BODY_BYTES:-1048576}
+      AOM_RELAY_MAX_BODY_BYTES_BY_KIND: ${AOM_RELAY_MAX_BODY_BYTES_BY_KIND:-}
       # Caddy reaches the app from its container address on the compose network: trust X-Forwarded-For only from
       # private addresses (docs/SELF-HOSTING.md "Running behind a reverse proxy").
       AOM_TRUST_PROXY: ${AOM_TRUST_PROXY:-loopback,uniquelocal}
