@@ -341,8 +341,9 @@ async function memberPlan(db: Queryable, orgId: string, userId: string) {
 /**
  * Takes the member out of the organization, inside the caller's transaction (docs/design/organizations.md section 8.3):
  * `ProjectMemberRemoved` for each project they hold (claims released, their cards and project agents handed to the
- * Owner), their org-wide agents' claims released, the DevOps engineers of their workstations in this organization
- * retired, then `OrgMemberRemoved`. Their other organizations are untouched.
+ * Owner), their org-wide agents' claims released, the offboarding checklist run, the DevOps engineers of their
+ * workstations in this organization retired (unless the offboarding unlink of their workstations already retired them,
+ * so each engineer gets exactly one `AgentRetired`), then `OrgMemberRemoved`. Their other organizations are untouched.
  */
 export async function removeOrgMemberIn(
   ctx: Ctx,
@@ -393,13 +394,6 @@ export async function removeOrgMemberIn(
       WHERE a.org_id=$1 AND a.is_devops AND a.status='active' AND w.user_id=$2`,
     [orgId, userId],
   );
-  for (const d of devops)
-    events.push({
-      streamId: streamId.agent(d.id),
-      event: { type: 'AgentRetired', payload: { agentId: d.id, by: actorId, releasedCardIds: [] } },
-      actor: userActor(actorId),
-      scope: orgScope(orgId),
-    });
   // S-B1: the offboarding checklist (sessions, tokens, pairings, pack credentials, key copies, ownership, private items). Items of
   // the member go to the Owner (not to the Admin who removes them).
   const owner = await one<{ owner_user_id: string }>(
@@ -415,6 +409,27 @@ export async function removeOrgMemberIn(
     transferTo: owner?.owner_user_id ?? actorId,
     counts: { agents: plan.agents.length, cards: plan.owned.length },
   });
+  // A last-organization offboarding unlinks the member's workstations, and the unlink has already retired their DevOps
+  // engineers (reason `workstation_unpaired`). Only the ones still active are retired here, so each gets exactly one event.
+  const stillActive = devops.length
+    ? new Set(
+        (
+          await rows<{ id: string }>(
+            tx,
+            `SELECT id FROM agents WHERE id = ANY($1::uuid[]) AND status='active'`,
+            [devops.map((d) => d.id)],
+          )
+        ).map((r) => r.id),
+      )
+    : new Set<string>();
+  for (const d of devops)
+    if (stillActive.has(d.id))
+      events.push({
+        streamId: streamId.agent(d.id),
+        event: { type: 'AgentRetired', payload: { agentId: d.id, by: actorId, releasedCardIds: [] } },
+        actor: userActor(actorId),
+        scope: orgScope(orgId),
+      });
   events.push({
     streamId: streamId.org(orgId),
     event: { type: 'OrgMemberRemoved', payload: { orgId, userId, reason, by: actorId } },
