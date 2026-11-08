@@ -117,7 +117,12 @@ export const FinalizeExecutePayloadSchema = z.object({
    * `-2`, `-3` when origin already has it. Absent (old servers): the local branch name is used.
    */
   prBranchPrefix: z.string().optional(),
+  /** The ticket part of the PR branch name (`ABC-1`, `web-12`; the card ref for a non-intake card). */
   ticket: z.string().optional(),
+  /** The card's work reference: the client ticket (`ABC-1`, `acme/web#12`). Sent only with `isClientRef`. */
+  workRef: z.string().optional(),
+  /** `workRef` is the client's ticket: titles use it, and the runner refuses commits that carry the internal ref. */
+  isClientRef: z.boolean().optional(),
   remoteBranch: z.string().optional(),
   prTitle: z.string().optional(),
   prBody: z.string().optional(),
@@ -156,6 +161,14 @@ export const FinalizeResultSchema = z.object({
    * ref, the git command, its exit code and git's message. Optional: an older server strips it and shows `error`.
    */
   rebaseError: RebaseErrorInfoSchema.optional(),
+  /** An intake card's commits name its internal ref (with `ok: false`): nothing was pushed, merged or opened. */
+  internalRef: z
+    .object({
+      ref: z.string(),
+      workRef: z.string(),
+      commits: z.array(z.object({ sha: z.string().max(64), subject: z.string().max(200) })).max(50),
+    })
+    .optional(),
 });
 export type FinalizeResult = z.infer<typeof FinalizeResultSchema>;
 

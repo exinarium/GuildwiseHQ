@@ -3,7 +3,11 @@ import {
   branchName,
   cardBranchName,
   cardTicketRef,
+  clientChangeTitle,
+  guardsInternalRef,
   isSafeGitRef,
+  mentionsInternalRef,
+  replaceInternalRef,
   ticketBranchPart,
   workRefBranchPart,
   workReference,
@@ -131,5 +135,36 @@ describe('cardBranchName', () => {
     expect(isSafeGitRef(b.name)).toBe(true);
     expect(b.fallbackReason).toContain(key);
     expect(b.fromTicket).toBeUndefined();
+  });
+});
+
+describe('internal ref matching and the client change title', () => {
+  it('matches only the own ref as a whole key, in any case', () => {
+    expect(mentionsInternalRef('GWP-123: fix', 'GWP-123')).toBe(true);
+    expect(mentionsInternalRef('aom/gwp-123-x', 'GWP-123')).toBe(true);
+    expect(mentionsInternalRef('GWP-1234 fix', 'GWP-123')).toBe(false);
+    expect(mentionsInternalRef('XGWP-123 fix', 'GWP-123')).toBe(false);
+    expect(mentionsInternalRef('ABC-1: fix, see GWP-85', 'GWP-123')).toBe(false);
+  });
+
+  it('guards only a client ref that differs from the card ref', () => {
+    expect(guardsInternalRef({ ref: 'ABC-1', isClientRef: true }, 'GWP-123')).toBe(true);
+    expect(guardsInternalRef({ ref: 'GWP-123', isClientRef: false }, 'GWP-123')).toBe(false);
+    expect(guardsInternalRef({ ref: 'gwp-123', isClientRef: true }, 'GWP-123')).toBe(false);
+  });
+
+  it('prefixes the work ref and scrubs the own ref for an intake card', () => {
+    expect(clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Add thing')).toBe(
+      'ABC-1: Add thing',
+    );
+    expect(
+      clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Follow up gwp-123 (GWP-1234)'),
+    ).toBe('ABC-1: Follow up ABC-1 (GWP-1234)');
+    expect(replaceInternalRef('GWP-123 and gwp-123', 'GWP-123', 'ABC-1')).toBe('ABC-1 and ABC-1');
+  });
+
+  it('keeps the title unchanged for a non-intake card and when the ticket equals the ref', () => {
+    expect(clientChangeTitle({ ref: 'GWP-1', isClientRef: false }, 'GWP-1', 'T')).toBe('T');
+    expect(clientChangeTitle({ ref: 'GWP-1', isClientRef: true }, 'GWP-1', 'T')).toBe('T');
   });
 });

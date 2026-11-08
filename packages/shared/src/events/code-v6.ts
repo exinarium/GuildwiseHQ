@@ -50,6 +50,20 @@ export const codeV6Events = [
     'EvidenceLapsed',
     z.object({ cardId: Id, stage: Stage, expectedSha: z.string(), actualSha: z.string() }),
   ),
+  /**
+   * Finalize of an intake card found commits whose message names the card's internal ref (`ref`) instead of its client
+   * ticket (`workRef`): nothing was pushed or merged; back to Build (rework) so the builder rewords them.
+   */
+  defineEvent(
+    'InternalRefInHistory',
+    z.object({
+      cardId: Id,
+      stage: Stage,
+      ref: z.string(),
+      workRef: z.string(),
+      commits: z.array(z.object({ sha: z.string().max(64), subject: z.string().max(200) })).max(50),
+    }),
+  ),
   /** The owner's approval is for another commit than the branch is at now: the card returns to the approval step. */
   defineEvent(
     'OwnerApprovalLapsed',

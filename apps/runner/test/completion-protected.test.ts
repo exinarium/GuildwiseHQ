@@ -136,3 +136,46 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
     expect(res.notice).toMatch(/refused a direct push/);
   });
 });
+
+describe('completion: protected working branch, intake card', () => {
+  const intake = (p: FinalizeExecutePayload): FinalizeExecutePayload => ({
+    ...p,
+    workRef: 'ABC-1',
+    isClientRef: true,
+    ticket: 'ABC-1',
+    prBranchPrefix: 'feature',
+  });
+
+  it('the fallback pull request uses ABC-1 for its title, body and branch', async () => {
+    const { repo, path } = await cardWorktree();
+    const pr = new FakePr({ url: 'https://host/acme/web/pull/3' });
+    const res = await run(repo, intake(payload(repo, path)), pr, blocked);
+    expect(res).toMatchObject({
+      ok: true,
+      action: 'pr',
+      protectedBranch: true,
+      pushedBranch: 'feature/ABC-1',
+    });
+    expect(pr.calls[0]).toMatchObject({
+      branch: 'feature/ABC-1',
+      title: 'ABC-1: Add thing',
+      body: 'Add thing',
+    });
+    expect(JSON.stringify(pr.calls[0])).not.toMatch(/TOY-1/i);
+  });
+
+  it('commits naming the internal ref stop it before anything is pushed or opened', async () => {
+    const { repo, path } = await cardWorktree();
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'TOY-1: more']);
+    const pr = new FakePr({ url: 'u' });
+    const res = await run(repo, intake(payload(repo, path)), pr, blocked);
+    expect(res.ok).toBe(false);
+    expect(res.internalRef?.commits[0]?.subject).toBe('TOY-1: more');
+    expect(pr.calls).toHaveLength(0);
+    expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
+      'refs/heads/main',
+    );
+  });
+});

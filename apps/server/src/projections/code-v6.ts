@@ -84,6 +84,24 @@ export const codeV6Projectors: Record<string, Projector> = {
     );
   },
 
+  // Finalize refused an intake card's commits that name its internal ref: back to Build; rewording moves the head, so
+  // fresh evidence is due and the approvals no longer count.
+  InternalRefInHistory: async (tx, e) => {
+    const p = ev<'InternalRefInHistory'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET stage='build', status='queued', queued_at=$2, updated_at=$2, rework_round = rework_round + 1,
+                excluded_agent_ids='{}', review_approvals=0, build_evidence=NULL,
+                finalize_state=NULL, finalize_error=NULL, finalize_desk_item_id=NULL,
+                claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                claimed_at=NULL, lease_expires_at=NULL
+          WHERE id=$1`,
+        [p.cardId, e.createdAt],
+      ),
+    );
+  },
+
   // The approval was for another commit: the card returns to the approval step; the approval is asked again for this commit.
   OwnerApprovalLapsed: async (tx, e) => {
     const p = ev<'OwnerApprovalLapsed'>(e).payload;
