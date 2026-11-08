@@ -1,13 +1,26 @@
 import {
+  isOrgManager,
   isOrgOperational,
   RELAY_RESPONSE_HEADERS,
   type RelayKind,
   type RunnerToServerOf,
   uuidv7,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
+import type { StoredEvent } from '../eventstore/types.ts';
 import type { RunnerConn } from '../runner-gateway/registry.ts';
+
+/** How long a forward-time role answer is reused (limit: 60 s). */
+export const RELAY_ROLE_TTL_MS = 30_000;
+
+export type DropReason =
+  | 'member_removed'
+  | 'member_left'
+  | 'role_changed'
+  | 'user_disabled'
+  | 'forward_check_failed';
 
 /** What the hub hands back to the public route. Never holds anything but what the runner answered. */
 export type HubResult =
@@ -52,8 +65,111 @@ export class RelayHub {
   private pending = new Map<string, Pending>();
   private buckets = new Map<string, { tokens: number; at: number }>();
   private rr = 0;
+  /** integration id -> its organization (set when a server is accepted; integrations never change org). */
+  private orgOf = new Map<string, string>();
+  /** `${orgId}:${userId}` -> whether the user may serve relay there, and when that was looked up. */
+  private roleCache = new Map<string, { at: number; ok: Promise<boolean> }>();
+  private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly ctx: Ctx) {}
+
+  /** Starts listening to membership events so a user who loses owner/admin stops serving at once. */
+  start(): void {
+    this.unsubscribe = this.ctx.store.subscribe((e) => this.onEvent(e));
+  }
+
+  stop(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
+  /** The one rule for who may serve relay for an org: an active owner or admin. */
+  private async mayServe(orgId: string, userId: string): Promise<boolean> {
+    return isOrgManager({ orgRole: await orgRoleOf(this.ctx.pool, userId, orgId) });
+  }
+
+  private async onEvent(e: StoredEvent): Promise<void> {
+    const p = e.event.payload as Record<string, any>;
+    try {
+      switch (e.event.type) {
+        case 'OrgMemberRoleChanged':
+          return await this.revalidate(p.orgId, p.userId, 'role_changed');
+        case 'OrgOwnershipTransferred':
+          return await this.revalidate(p.orgId, p.fromUserId, 'role_changed');
+        case 'OrgMemberRemoved':
+          return await this.revalidate(
+            p.orgId,
+            p.userId,
+            p.reason === 'left'
+              ? 'member_left'
+              : p.reason === 'deactivated'
+                ? 'user_disabled'
+                : 'member_removed',
+          );
+        case 'UserDeactivated':
+          for (const k of [...this.roleCache.keys()])
+            if (k.endsWith(`:${p.userId}`)) this.roleCache.delete(k);
+          return await this.dropServers(null, p.userId, 'user_disabled');
+      }
+    } catch (err) {
+      this.ctx.log.error({ err: (err as Error)?.name }, 'relay membership event failed');
+    }
+  }
+
+  private servesFor(orgId: string, userId: string): boolean {
+    for (const [id, m] of this.serving) {
+      if (this.orgOf.get(id) !== orgId) continue;
+      for (const conn of m.values()) if (conn.userId === userId) return true;
+    }
+    return false;
+  }
+
+  /** After a membership event: forget the cached answer, re-read the role, drop the user's servers if it no longer qualifies. */
+  private async revalidate(orgId: string, userId: string, reason: DropReason): Promise<void> {
+    this.roleCache.delete(`${orgId}:${userId}`);
+    if (!this.servesFor(orgId, userId)) return;
+    const ok = await this.mayServe(orgId, userId).catch((err) => {
+      this.ctx.log.warn({ err: err?.name, orgId, userId }, 'relay role re-check failed');
+      return false; // fail closed: the runner can announce again
+    });
+    if (!ok) await this.dropServers(orgId, userId, reason);
+  }
+
+  /** Requests waiting on `conn` (optionally for one integration) end as offline now, as on a disconnect. */
+  private settlePending(conn: RunnerConn, integrationId?: string): void {
+    for (const [requestId, p] of this.pending) {
+      if (p.conn !== conn || (integrationId && p.integrationId !== integrationId)) continue;
+      clearTimeout(p.timer);
+      this.pending.delete(requestId);
+      p.resolve({ kind: 'offline' });
+    }
+  }
+
+  /**
+   * Ends `userId`'s relay serving for `orgId` (every org when null): their entries leave the serving map, requests in
+   * flight to them end as offline, and integrations nobody else serves are marked offline. The runner stays connected.
+   */
+  async dropServers(orgId: string | null, userId: string, reason: DropReason): Promise<void> {
+    const ids: string[] = [];
+    const perRunner = new Map<string, { orgId: string; workstationId: string; integrationIds: string[] }>();
+    for (const [id, m] of this.serving) {
+      const org = this.orgOf.get(id);
+      if (!org || (orgId && org !== orgId)) continue;
+      for (const [ws, conn] of m) {
+        if (conn.userId !== userId) continue;
+        m.delete(ws);
+        this.settlePending(conn, id);
+        ids.push(id);
+        const key = `${org}:${ws}`;
+        const e = perRunner.get(key) ?? { orgId: org, workstationId: ws, integrationIds: [] };
+        e.integrationIds.push(id);
+        perRunner.set(key, e);
+      }
+    }
+    for (const e of perRunner.values())
+      this.ctx.log.info({ relayDrop: { ...e, userId, reason } }, 'relay server dropped');
+    await this.markOffline(ids);
+  }
 
   /** Number of requests waiting for a runner's answer (tests). */
   get inFlight(): number {
@@ -82,6 +198,7 @@ export class RelayHub {
     const accepted: string[] = [];
     const refused: ServeResult['refused'] = [];
     const seen = new Set<string>();
+    const orgs = new Map<string, string>();
     for (const it of items) {
       if (seen.has(it.integrationId)) continue;
       seen.add(it.integrationId);
@@ -97,13 +214,10 @@ export class RelayHub {
       else if (!isOrgOperational(r.org_status))
         refused.push({ integrationId: it.integrationId, reason: 'not_business' });
       else {
-        const m = await one(
-          ctx.pool,
-          `SELECT role FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
-          [r.org_id, conn.userId],
-        );
-        if (m?.role === 'owner' || m?.role === 'admin') accepted.push(it.integrationId);
-        else refused.push({ integrationId: it.integrationId, reason: 'not_allowed' });
+        if (await this.mayServe(r.org_id, conn.userId)) {
+          accepted.push(it.integrationId);
+          orgs.set(it.integrationId, r.org_id);
+        } else refused.push({ integrationId: it.integrationId, reason: 'not_allowed' });
       }
     }
     const now = ctx.clock.now();
@@ -119,6 +233,7 @@ export class RelayHub {
       const m = this.serving.get(id) ?? new Map<string, RunnerConn>();
       this.serving.set(id, m);
       m.set(conn.workstationId, conn);
+      this.orgOf.set(id, orgs.get(id) as string);
     }
     for (const id of accepted)
       await exec(
@@ -136,7 +251,10 @@ export class RelayHub {
     const now = this.ctx.clock.now();
     for (const id of ids) {
       if (this.liveServers(id).length > 0) continue;
-      if (this.serving.get(id)?.size === 0) this.serving.delete(id);
+      if (this.serving.get(id)?.size === 0) {
+        this.serving.delete(id);
+        this.orgOf.delete(id);
+      }
       // `last_served_at <= now`: a runner that announced it again meanwhile keeps its integration online.
       await exec(
         this.ctx.pool,
@@ -151,12 +269,7 @@ export class RelayHub {
    * integrations it served are marked offline if no other runner serves them.
    */
   async disconnected(conn: RunnerConn): Promise<void> {
-    for (const [requestId, p] of this.pending) {
-      if (p.conn !== conn) continue;
-      clearTimeout(p.timer);
-      this.pending.delete(requestId);
-      p.resolve({ kind: 'offline' });
-    }
+    this.settlePending(conn);
     const ids: string[] = [];
     for (const [id, m] of this.serving) {
       if (m.get(conn.workstationId) === conn) {
@@ -170,6 +283,7 @@ export class RelayHub {
   /** An integration was revoked: no runner serves it. */
   forget(integrationId: string): void {
     this.serving.delete(integrationId);
+    this.orgOf.delete(integrationId);
     this.buckets.delete(integrationId);
     this.ctx.pool
       .query('DELETE FROM relay_presence WHERE integration_id=$1', [integrationId])
@@ -183,12 +297,51 @@ export class RelayHub {
     ]);
   }
 
+  /** Candidates whose user is still owner/admin (30 s promise cache per org and user); the others are dropped. */
+  private async qualifying(integrationId: string, candidates: RunnerConn[]): Promise<RunnerConn[]> {
+    const orgId = this.orgOf.get(integrationId);
+    if (!orgId) return [];
+    const now = this.ctx.clock.now().getTime();
+    const verdicts = new Map<string, Promise<boolean | 'error'>>();
+    for (const c of candidates) {
+      if (verdicts.has(c.userId)) continue;
+      const key = `${orgId}:${c.userId}`;
+      let hit = this.roleCache.get(key);
+      if (!hit || now - hit.at >= RELAY_ROLE_TTL_MS) {
+        const fresh = { at: now, ok: this.mayServe(orgId, c.userId) };
+        hit = fresh;
+        this.roleCache.set(key, fresh);
+        fresh.ok.catch(() => {
+          if (this.roleCache.get(key) === fresh) this.roleCache.delete(key);
+        });
+      }
+      verdicts.set(
+        c.userId,
+        hit.ok.catch(() => 'error' as const),
+      );
+    }
+    const out: RunnerConn[] = [];
+    for (const c of candidates) {
+      const v = await verdicts.get(c.userId);
+      if (v === false) {
+        await this.dropServers(orgId, c.userId, 'forward_check_failed');
+        continue;
+      }
+      if (v === 'error') continue; // not verified: skip this request, do not drop
+      if (this.serving.get(integrationId)?.get(c.workstationId) === c) out.push(c);
+    }
+    return out;
+  }
+
   /** Sends the request to one serving runner and waits for its answer, at most `timeoutMs`. */
-  forward(req: ForwardRequest, timeoutMs: number): Promise<HubResult> {
+  async forward(req: ForwardRequest, timeoutMs: number): Promise<HubResult> {
     const { ctx } = this;
-    if (this.pending.size >= ctx.config.relay.maxInFlight) return Promise.resolve({ kind: 'offline' });
-    const servers = this.liveServers(req.integrationId);
-    if (servers.length === 0) return Promise.resolve({ kind: 'offline' });
+    if (this.pending.size >= ctx.config.relay.maxInFlight) return { kind: 'offline' };
+    const candidates = this.liveServers(req.integrationId);
+    if (candidates.length === 0) return { kind: 'offline' };
+    const servers = await this.qualifying(req.integrationId, candidates);
+    // Re-checked after the await: the limit and the map may have changed meanwhile.
+    if (servers.length === 0 || this.pending.size >= ctx.config.relay.maxInFlight) return { kind: 'offline' };
     const start = this.rr++;
     return new Promise<HubResult>((resolve) => {
       for (let i = 0; i < servers.length; i++) {
