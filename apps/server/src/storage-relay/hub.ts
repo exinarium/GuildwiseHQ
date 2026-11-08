@@ -3,8 +3,8 @@ import {
   renderStoragePath,
   STORAGE_CHUNK_BYTES,
   STORAGE_DELETE_TIMEOUT_MS,
-  type StorageDeleteOutcome,
   STORAGE_WINDOW,
+  type StorageDeleteOutcome,
   type StorageErrorCode,
   type StorageKind,
   type StorageReference,
@@ -54,6 +54,8 @@ export type StorageDeleteResult =
       error: StorageWriteError;
       /** Not an attempt: the runner is offline, too old, or the relay is busy. Try again later without counting. */
       notTried?: true;
+      /** The storage connection no longer exists (removed on the server): retrying cannot help. */
+      gone?: true;
     };
 
 export interface StorageRelayDeps {
@@ -323,13 +325,26 @@ export class StorageRelay {
       return r;
     };
     const fail = (code: StorageErrorCode, message: string, notTried = false) =>
-      finish({ ok: false, error: storageError(code, message), ...(notTried ? { notTried: true as const } : {}) });
+      finish({
+        ok: false,
+        error: storageError(code, message),
+        ...(notTried ? { notTried: true as const } : {}),
+      });
 
     const conn = await this.deps.lookup(req.orgId, req.connectionId);
-    if (!conn) return fail('not_found', 'The storage connection does not exist.');
+    if (!conn)
+      return finish({
+        ok: false,
+        error: storageError('not_found', 'The storage connection does not exist.'),
+        gone: true,
+      });
     kind = conn.kind;
     if (!this.deps.isOnline(conn.workstationId))
-      return fail('runner_offline', "The firm's workstation is offline, so the file cannot be removed now.", true);
+      return fail(
+        'runner_offline',
+        "The firm's workstation is offline, so the file cannot be removed now.",
+        true,
+      );
     if (this.deps.supportsDelete && !(await this.deps.supportsDelete(conn.workstationId)))
       return fail(
         'unavailable',
@@ -366,7 +381,10 @@ export class StorageRelay {
       if (!sent)
         settle({
           ok: false,
-          error: storageError('runner_offline', "The firm's workstation is offline, so the file cannot be removed now."),
+          error: storageError(
+            'runner_offline',
+            "The firm's workstation is offline, so the file cannot be removed now.",
+          ),
           notTried: true,
         });
     });
@@ -381,7 +399,8 @@ export class StorageRelay {
   ): void {
     const p = this.pendingDeletes.get(requestId);
     if (!p || p.workstationId !== workstationId) return;
-    if (r.ok && (r.result === 'deleted' || r.result === 'not_found')) p.settle({ ok: true, result: r.result });
+    if (r.ok && (r.result === 'deleted' || r.result === 'not_found'))
+      p.settle({ ok: true, result: r.result });
     else
       p.settle({
         ok: false,

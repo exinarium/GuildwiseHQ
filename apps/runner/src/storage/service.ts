@@ -620,7 +620,8 @@ export class StorageService {
           `path#=${hash} ${'result' in r ? r.result : r.error.code} ${this.now() - start}ms`,
       );
     };
-    if (!conn) return answer({ error: storageError('not_found', 'This storage is not set up on this workstation.') });
+    if (!conn)
+      return answer({ error: storageError('not_found', 'This storage is not set up on this workstation.') });
     if (conn.needsReauth)
       return answer({ error: storageError('auth_expired', 'The sign-in expired: reconnect this storage.') });
     try {

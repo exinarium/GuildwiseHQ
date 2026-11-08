@@ -147,7 +147,9 @@ export async function removeVaultBinary(
   const tracked = await git(dir, ['ls-files', '--error-unmatch', '--', cmd.path], { env });
   if (tracked.exitCode !== 0) return true;
   await gitOk(dir, ['add', '-A', '--', cmd.path], { env });
-  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', cmd.commitMessage, '--', cmd.path], { env });
+  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', cmd.commitMessage, '--', cmd.path], {
+    env,
+  });
   return true;
 }
 

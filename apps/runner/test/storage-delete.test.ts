@@ -31,13 +31,17 @@ describe('Local deleteFile', () => {
     const root = tmp();
     const outside = tmp();
     writeFileSync(join(outside, 'x.pdf'), 'keep');
-    await expect(new LocalConnector(join(root)).deleteFile({ path: p })).rejects.toMatchObject({ code: 'invalid' });
+    await expect(new LocalConnector(join(root)).deleteFile({ path: p })).rejects.toMatchObject({
+      code: 'invalid',
+    });
     expect(existsSync(join(outside, 'x.pdf'))).toBe(true);
   });
   it('never deletes a folder', async () => {
     const root = tmp();
     mkdirSync(join(root, 'Forms'));
-    await expect(new LocalConnector(root).deleteFile({ path: 'Forms' })).rejects.toMatchObject({ code: 'invalid' });
+    await expect(new LocalConnector(root).deleteFile({ path: 'Forms' })).rejects.toMatchObject({
+      code: 'invalid',
+    });
     expect(existsSync(join(root, 'Forms'))).toBe(true);
   });
   it('refuses a file reached through a link', async () => {
@@ -51,9 +55,11 @@ describe('Local deleteFile', () => {
     expect(existsSync(join(other, 'a.pdf'))).toBe(true);
   });
   it('says unavailable, not not_found, when the root is missing', async () => {
-    await expect(new LocalConnector(join(tmp(), 'gone')).deleteFile({ path: 'a.pdf' })).rejects.toMatchObject({
-      code: 'unavailable',
-    });
+    await expect(new LocalConnector(join(tmp(), 'gone')).deleteFile({ path: 'a.pdf' })).rejects.toMatchObject(
+      {
+        code: 'unavailable',
+      },
+    );
   });
 });
 
@@ -75,7 +81,9 @@ describe('Vault deleteFile', () => {
     const dir = tmp();
     mkdirSync(join(dir, 'Other'));
     writeFileSync(join(dir, 'Other', 'doc.txt'), 'keep');
-    await expect(new VaultConnector(access(dir), 'v1', 'Intake').deleteFile({ path: p })).rejects.toMatchObject({
+    await expect(
+      new VaultConnector(access(dir), 'v1', 'Intake').deleteFile({ path: p }),
+    ).rejects.toMatchObject({
       code: 'invalid',
     });
     expect(existsSync(join(dir, 'Other', 'doc.txt'))).toBe(true);
@@ -104,7 +112,9 @@ describe('S3 deleteFile', () => {
     const calls: string[] = [];
     const c = mk(async (url, init) => {
       calls.push(`${init?.method} ${url}`);
-      return init?.method === 'DELETE' ? new Response(null, { status: 204 }) : new Response('', { status: 200 });
+      return init?.method === 'DELETE'
+        ? new Response(null, { status: 204 })
+        : new Response('', { status: 200 });
     });
     await expect(c.deleteFile({ path: 'intake/Forms/a.pdf' }, sig)).resolves.toBe('deleted');
     expect(calls).toEqual([
@@ -132,14 +142,10 @@ describe('OneDrive deleteFile', () => {
   const cfg = { driveId: 'd1', baseFolder: 'Forms', baseItemId: 'base1' };
   it('deletes by path under the base folder and ignores a provider id', async () => {
     const calls: string[] = [];
-    const c = new OneDriveConnector(
-      cfg,
-      token,
-      async (url, init) => {
-        calls.push(`${init?.method} ${url}`);
-        return new Response(null, { status: 204 });
-      },
-    );
+    const c = new OneDriveConnector(cfg, token, async (url, init) => {
+      calls.push(`${init?.method} ${url}`);
+      return new Response(null, { status: 204 });
+    });
     await expect(c.deleteFile({ path: 'Acme/a b.pdf' }, sig)).resolves.toBe('deleted');
     expect(calls).toEqual(['DELETE https://graph.microsoft.com/v1.0/drives/d1/items/base1:/Acme/a%20b.pdf']);
   });
@@ -149,7 +155,9 @@ describe('OneDrive deleteFile', () => {
   });
   it.each([...OUTSIDE, 'id:abc'])('refuses %j before any call', async (p) => {
     const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));
-    await expect(new OneDriveConnector(cfg, token, fetchFn).deleteFile({ path: p }, sig)).rejects.toMatchObject({
+    await expect(
+      new OneDriveConnector(cfg, token, fetchFn).deleteFile({ path: p }, sig),
+    ).rejects.toMatchObject({
       code: 'invalid',
     });
     expect(fetchFn).not.toHaveBeenCalled();
@@ -165,7 +173,9 @@ describe('OneDrive deleteFile', () => {
 describe('Google Drive deleteFile', () => {
   const FOLDER = 'application/vnd.google-apps.folder';
   /** A tiny fake drive: id -> metadata. */
-  function drive(files: Record<string, { name: string; parents: string[]; mimeType?: string; trashed?: boolean }>) {
+  function drive(
+    files: Record<string, { name: string; parents: string[]; mimeType?: string; trashed?: boolean }>,
+  ) {
     const calls: string[] = [];
     const fetchFn = async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
@@ -192,16 +202,22 @@ describe('Google Drive deleteFile', () => {
 
   it('deletes a file whose parent chain reaches the base folder', async () => {
     const d = drive(tree);
-    await expect(mk(d.fetchFn).deleteFile({ path: 'Acme/a.pdf', providerId: 'f1' }, sig)).resolves.toBe('deleted');
+    await expect(mk(d.fetchFn).deleteFile({ path: 'Acme/a.pdf', providerId: 'f1' }, sig)).resolves.toBe(
+      'deleted',
+    );
     expect(d.calls.at(-1)).toMatch(/^DELETE .*files\/f1$/);
   });
   it('deletes a file directly in the base folder', async () => {
     const d = drive(tree);
-    await expect(mk(d.fetchFn).deleteFile({ path: 'b.pdf', providerId: 'top' }, sig)).resolves.toBe('deleted');
+    await expect(mk(d.fetchFn).deleteFile({ path: 'b.pdf', providerId: 'top' }, sig)).resolves.toBe(
+      'deleted',
+    );
   });
   it('reports not_found for a missing or binned file', async () => {
     const d = drive(tree);
-    await expect(mk(d.fetchFn).deleteFile({ path: 'a.pdf', providerId: 'nope' }, sig)).resolves.toBe('not_found');
+    await expect(mk(d.fetchFn).deleteFile({ path: 'a.pdf', providerId: 'nope' }, sig)).resolves.toBe(
+      'not_found',
+    );
     await expect(mk(d.fetchFn).deleteFile({ path: 'Acme/a.pdf', providerId: 'bin' }, sig)).resolves.toBe(
       'not_found',
     );
@@ -209,11 +225,15 @@ describe('Google Drive deleteFile', () => {
   });
   it('refuses a file outside the base folder and sends no DELETE', async () => {
     const d = drive(tree);
-    await expect(mk(d.fetchFn).deleteFile({ path: 'Acme/a.pdf', providerId: 'stray' }, sig)).rejects.toMatchObject({
+    await expect(
+      mk(d.fetchFn).deleteFile({ path: 'Acme/a.pdf', providerId: 'stray' }, sig),
+    ).rejects.toMatchObject({
       code: 'invalid',
     });
     // The name does not match the stored path.
-    await expect(mk(d.fetchFn).deleteFile({ path: 'Acme/other.pdf', providerId: 'f1' }, sig)).rejects.toMatchObject({
+    await expect(
+      mk(d.fetchFn).deleteFile({ path: 'Acme/other.pdf', providerId: 'f1' }, sig),
+    ).rejects.toMatchObject({
       code: 'invalid',
     });
     // A folder is never deleted.
@@ -224,7 +244,9 @@ describe('Google Drive deleteFile', () => {
   });
   it.each([...OUTSIDE])('refuses the path %j before any call', async (p) => {
     const fetchFn = vi.fn(async () => json(200, {}));
-    await expect(mk(fetchFn).deleteFile({ path: p, providerId: 'f1' }, sig)).rejects.toMatchObject({ code: 'invalid' });
+    await expect(mk(fetchFn).deleteFile({ path: p, providerId: 'f1' }, sig)).rejects.toMatchObject({
+      code: 'invalid',
+    });
     expect(fetchFn).not.toHaveBeenCalled();
   });
   it('requires a provider id and a base folder id', async () => {

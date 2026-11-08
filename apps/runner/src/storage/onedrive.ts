@@ -198,7 +198,8 @@ export class OneDriveConnector implements StorageConnector {
     const res = await authed(this.fetchFn, 'onedrive', this.token, url, { method: 'DELETE' }, signal);
     if (res.status === 404) return 'not_found';
     await res.arrayBuffer().catch(() => undefined);
-    if (res.status === 409) throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
+    if (res.status === 409)
+      throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
     return 'deleted';
   }
 }

@@ -194,7 +194,12 @@ export class GDriveConnector implements StorageConnector {
     );
     if (res.status === 404) return null;
     if (!res.ok) throw await httpError('google_drive', res);
-    const j = (await res.json()) as { name?: string; parents?: string[]; trashed?: boolean; mimeType?: string };
+    const j = (await res.json()) as {
+      name?: string;
+      parents?: string[];
+      trashed?: boolean;
+      mimeType?: string;
+    };
     if (j.trashed) return null;
     return { name: j.name ?? '', parents: j.parents ?? [], mimeType: j.mimeType ?? '' };
   }
@@ -203,7 +208,10 @@ export class GDriveConnector implements StorageConnector {
    * Strict delete of one file below the base folder. Drive has no paths, so the file id is required, and the file is
    * only removed when its name and its parent chain match the stored path up to the base folder.
    */
-  async deleteFile(ref: { path: string; providerId?: string }, signal: AbortSignal): Promise<'deleted' | 'not_found'> {
+  async deleteFile(
+    ref: { path: string; providerId?: string },
+    signal: AbortSignal,
+  ): Promise<'deleted' | 'not_found'> {
     const outside = () => new StorageError('invalid', 'The file is outside the storage destination.');
     const segs = storedPathSegments(ref.path);
     if (!segs || !ref.providerId || !this.cfg.baseFolderId) throw outside();
@@ -228,7 +236,8 @@ export class GDriveConnector implements StorageConnector {
     );
     if (res.status === 404) return 'not_found';
     await res.arrayBuffer().catch(() => undefined);
-    if (res.status === 409) throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
+    if (res.status === 409)
+      throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
     return 'deleted';
   }
 }

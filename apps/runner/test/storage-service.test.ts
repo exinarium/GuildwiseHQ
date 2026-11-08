@@ -216,7 +216,9 @@ describe('local connection', () => {
       await write(t, Buffer.from('x'));
       await del('Smith/doc.txt');
       const log = t.logs.join('\n');
-      expect(log).toMatch(/^storage\.delete conn=.* kind=local submission=- path#=[0-9a-f]{12} deleted \d+ms/m);
+      expect(log).toMatch(
+        /^storage\.delete conn=.* kind=local submission=- path#=[0-9a-f]{12} deleted \d+ms/m,
+      );
       expect(log).not.toContain('Smith');
     });
   });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { renderStoragePath, type StorageReference, type StorageWriteError } from '@aom/shared';
@@ -84,6 +84,10 @@ export interface StorageStub {
   opens(): number;
   /** Return an error for a write to make the "firm's storage" fail; null lets it through. */
   failWhen: (open: { ext?: string; name: string; size: number }) => StorageWriteError | null;
+  /** Every `storage.delete` frame seen, in order. */
+  deleteFrames: Array<{ requestId: string; path: string; providerId?: string }>;
+  /** Return an error for a `storage.delete` to make it fail; null lets it through. Set `ignore` to stay silent. */
+  deleteBehavior: { error: StorageWriteError | null; ignore: boolean };
   stop(): void;
 }
 
@@ -110,6 +114,8 @@ export function serveStorage(r: FakeRunner, dir: string, connectionId: string): 
     },
     opens: () => opens,
     failWhen: () => null,
+    deleteFrames: [],
+    deleteBehavior: { error: null, ignore: false },
     stop: () => r.ws.off('message', onMessage),
   };
   const onMessage = (data: unknown) => {
@@ -161,6 +167,25 @@ export function serveStorage(r: FakeRunner, dir: string, connectionId: string): 
       r.send('storage.write.result', { transferId: f.transferId, ok: true, reference });
     } else if (f.type === 'storage.write.abort') {
       transfers.delete(f.transferId);
+    } else if (f.type === 'storage.delete') {
+      stub.deleteFrames.push({ requestId: f.requestId, path: f.path, providerId: f.providerId });
+      if (stub.deleteBehavior.ignore) return;
+      if (stub.deleteBehavior.error) {
+        r.send('storage.delete.result', {
+          requestId: f.requestId,
+          ok: false,
+          error: stub.deleteBehavior.error,
+        });
+        return;
+      }
+      const file = join(dir, f.path);
+      const there = existsSync(file);
+      if (there) rmSync(file);
+      r.send('storage.delete.result', {
+        requestId: f.requestId,
+        ok: true,
+        result: there ? 'deleted' : 'not_found',
+      });
     }
   };
   r.ws.on('message', onMessage);
@@ -240,7 +265,7 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
     self.dir = mkdtempSync(join(tmpdir(), 'pf-store-'));
     self.orgId = (await q('SELECT id FROM organizations WHERE owner_user_id=$1', [self.w.owner.id]))[0]
       ?.id as string;
-    self.r = await self.w.connectRunner({ capabilities: ['storage:1'] });
+    self.r = await self.w.connectRunner({ capabilities: ['storage:1', 'storage-delete:1'] });
     self.api = (method, url, body) =>
       self.w.t.req(method, url, { cookie: self.w.owner.cookie, ...(body !== undefined ? { body } : {}) });
     const created = await ok<any>(

@@ -41,7 +41,10 @@ export interface StorageConnector {
    * 'not_found' when the file is not there. Throws StorageError('invalid') for a path outside the base, and a typed
    * error for anything else.
    */
-  deleteFile(ref: { path: string; providerId?: string }, signal: AbortSignal): Promise<'deleted' | 'not_found'>;
+  deleteFile(
+    ref: { path: string; providerId?: string },
+    signal: AbortSignal,
+  ): Promise<'deleted' | 'not_found'>;
 }
 
 export type StorageConfig =

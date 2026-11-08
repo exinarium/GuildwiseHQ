@@ -6,12 +6,12 @@ import {
   isAckedFromRunner,
   makeEnvelope,
   RunnerToServerSchema,
-  storedPathSegments,
   renderStoragePath,
   ServerToRunnerSchema,
   sanitizeStorageSegment,
   storageClashName,
   storageError,
+  storedPathSegments,
 } from '../src/index.ts';
 
 const vars = { journey: 'Rental', client: 'A. Smith', field: 'id-document', date: '2026-11-03', ext: 'pdf' };
