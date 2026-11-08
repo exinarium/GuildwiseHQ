@@ -6,7 +6,7 @@ import {
   ReleaseFactsSchema,
   streamId,
 } from '@aom/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBaTaskFallback } from '../src/commands/ba-tasks.ts';
 import { withAppendTx } from '../src/db/tx.ts';
 import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
@@ -467,6 +467,28 @@ describe('a Write changelog BA task queued before the update (legacy)', () => {
     const run = await latest();
     expect(run.status).toBe('failed');
     expect(run.failed.error).toBe('Write changelog was interrupted by an update. Retry prep.');
+  });
+
+  it('sets no 250 ms timer for the fallback or the report and sends nothing when the transaction rolls back', async () => {
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    const deliver = vi.spyOn(w.t.app.ctx.services.gateway, 'deliverPending');
+    try {
+      const task = await legacyTask();
+      deliver.mockClear();
+      await expect(
+        withAppendTx(w.t.app.ctx.pool, async (tx) => {
+          await runBaTaskFallback(w.t.app.ctx, tx, task);
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+      expect(deliver).not.toHaveBeenCalled();
+      expect((await q2(`SELECT status FROM ba_tasks WHERE id=$1`, [task.id]))[0].status).toBe('running');
+      await withAppendTx(w.t.app.ctx.pool, (tx) => applyLegacyChangelogReport(w.t.app.ctx, tx, task));
+      expect(timer.mock.calls.filter((c) => c[1] === 250)).toEqual([]);
+    } finally {
+      timer.mockRestore();
+      deliver.mockRestore();
+    }
   });
 
   it('a report cancels the task, writes nothing and fails the row the same way', async () => {

@@ -3,7 +3,7 @@ import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { ReportResult } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
-import type { Tx } from '../db/tx.ts';
+import { afterCommit, type Tx } from '../db/tx.ts';
 import { advance } from './docs-prep.ts';
 
 /**
