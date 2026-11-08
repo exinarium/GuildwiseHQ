@@ -41,11 +41,17 @@ function write(clone: string, path: string, text: string) {
 }
 
 /** main (tagged), then release/1.5.0 with one merge of a feature branch that changes the Releases page. */
-function setup(opts: { guide?: boolean; scripts?: boolean } = {}) {
+function setup(opts: { guide?: boolean; scripts?: boolean; build?: 'flags' | 'old' } = {}) {
   const repo = makeRepo();
   write(repo.clone, 'README.md', 'hello\n');
   if (opts.guide ?? true) write(repo.clone, 'docs/USER-GUIDE.md', GUIDE);
   if (opts.scripts) write(repo.clone, 'docs/guide/assemble-guide.mjs', '// assemble\n');
+  if (opts.build)
+    write(
+      repo.clone,
+      'docs/guide/build-guide.mjs',
+      opts.build === 'flags' ? "// takes '--date' and '--edition'\n" : '// takes --out only\n',
+    );
   sh(repo.clone, 'git', ['add', '-A']);
   sh(repo.clone, 'git', ['commit', '-m', 'chore: start']);
   sh(repo.clone, 'git', ['tag', '-a', 'v1.4.0', '-m', '1.4.0']);
@@ -301,6 +307,48 @@ describe("release prep step 'guide'", () => {
     expect([...guide.files].sort()).toEqual(['docs/USER-GUIDE.md', 'docs/guide/guide.html']);
     expect(guide.output).toMatchObject({ pdf: 'rebuilt' });
     expect(e.calls.map((c) => c.join(' '))).toContain('node docs/guide/assemble-guide.mjs');
+  });
+
+  it('passes the run date and the release version to a build script that takes them', async () => {
+    const s = setup({ scripts: true, build: 'flags' });
+    const e = fakeExec();
+    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+      release: { version: '1.5.0', date: null, runDate: '2026-11-08' },
+    });
+    expect(guide.state).toBe('passed');
+    expect(e.calls.map((c) => c.join(' '))).toContain(
+      'node docs/guide/build-guide.mjs --date 2026-11-08 --edition 1.5.0',
+    );
+    expect(guide.output).toMatchObject({
+      pdf: 'rebuilt',
+      pdfDate: '2026-11-08',
+      pdfDateSource: 'run',
+      pdfEdition: '1.5.0',
+    });
+    expect((guide.output as { notes: string[] }).notes.join()).toMatch(/no date yet.*2026-11-08/);
+  });
+
+  it('passes the release date when the release has one, without a note', async () => {
+    const s = setup({ scripts: true, build: 'flags' });
+    const e = fakeExec();
+    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+      release: { version: null, date: '2026-12-01', runDate: '2026-11-08' },
+    });
+    expect(e.calls.map((c) => c.join(' '))).toContain('node docs/guide/build-guide.mjs --date 2026-12-01');
+    expect(guide.output).toMatchObject({ pdfDate: '2026-12-01', pdfDateSource: 'release' });
+    expect((guide.output as { notes: string[] }).notes.join()).not.toMatch(/no date yet/);
+  });
+
+  it('passes no flag to a build script that does not take them, and warns', async () => {
+    const s = setup({ scripts: true, build: 'old' });
+    const e = fakeExec();
+    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+      release: { version: '1.5.0', date: null, runDate: '2026-11-08' },
+    });
+    expect(e.calls.map((c) => c.join(' '))).toContain('node docs/guide/build-guide.mjs');
+    const o = guide.output as { pdfDate?: string; warnings: string[] };
+    expect(o.pdfDate).toBeUndefined();
+    expect(o.warnings.join()).toMatch(/takes no --date/);
   });
 
   it('fails when the PDF build fails or touches files outside the guide', async () => {

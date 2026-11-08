@@ -662,8 +662,28 @@ export const ReleaseDocsPrepGuideInputSchema = z.object({
   /** Change ids (card:<KEY>, merge:<sha>, commit:<sha>) that earlier passed runs of this release dealt with. */
   coveredSources: z.array(z.string().max(80)).max(2000).default([]),
   denyList: z.array(z.string().max(100)).max(200).default([]),
+  /** The release being prepared, for the PDF guide's cover and footer. Absent from an older server. */
+  release: z
+    .object({
+      version: z.string().min(1).max(40).nullable().default(null),
+      /** The release's own date; null until the release is approved (normal during prep). */
+      date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable()
+        .default(null),
+      /** The day the prep run started (server clock, UTC): the fallback. */
+      runDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    })
+    .optional(),
 });
 export type ReleaseDocsPrepGuideInput = z.infer<typeof ReleaseDocsPrepGuideInputSchema>;
+
+/** "release/1.6.0" -> "1.6.0"; null when the branch name carries no version. */
+export function releaseVersionFromBranch(branch: string): string | null {
+  const m = /^release[/-]v?(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?)$/.exec(branch);
+  return m ? (m[1] as string) : null;
+}
 
 const cap = <T extends z.ZodTypeAny>(t: T) => z.array(t).max(50).default([]);
 
@@ -686,6 +706,13 @@ export const ReleaseDocsPrepGuideOutputSchema = z.object({
   skippedChanges: cap(z.object({ source: z.string().max(80), reason: z.string().max(300) })),
   duplicates: z.number().int().nonnegative().default(0),
   pdf: z.enum(['rebuilt', 'no change', 'no PDF build']).default('no change'),
+  /** The date and release the PDF build was given (only when the build script takes them). */
+  pdfDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  pdfDateSource: z.enum(['release', 'run']).optional(),
+  pdfEdition: z.string().max(40).optional(),
   errors: cap(z.string().max(500)),
   warnings: cap(z.string().max(500)),
   notes: cap(z.string().max(500)),

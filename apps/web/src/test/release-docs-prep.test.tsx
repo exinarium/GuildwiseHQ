@@ -347,6 +347,9 @@ describe("Releases > Release prep tab > 'Update user guide' output", () => {
           skippedChanges: [{ source: 'card:GWP-12', reason: 'tests only' }],
           duplicates: 0,
           pdf: 'rebuilt',
+          pdfDate: '2026-11-08',
+          pdfDateSource: 'run',
+          pdfEdition: '1.5.0',
           errors: [],
           warnings: [],
           notes: [],
@@ -368,6 +371,7 @@ describe("Releases > Release prep tab > 'Update user guide' output", () => {
     wrap(<ReleaseDocsPrepTab />);
     const hq = await screen.findByTestId('prep-repo-GuildwiseHQ');
     expect(within(hq).getByTestId('guide-output-changed')).toHaveTextContent('4.28 Releases');
+    expect(within(hq).getByTestId('guide-output-pdf-date')).toHaveTextContent('PDF dated 2026-11-08, release 1.5.0');
     expect(within(hq).getByTestId('guide-output-added')).toHaveTextContent(
       '4.28a Release prep (after 4.28 Releases)',
     );
