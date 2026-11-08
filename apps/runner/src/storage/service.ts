@@ -33,6 +33,7 @@ import {
   pollDeviceFlow,
   refreshTokens,
   revokeToken,
+  type Tokens,
 } from './oauth.ts';
 import { OneDriveConnector, setupOneDrive } from './onedrive.ts';
 import { checkS3Endpoint, S3Connector } from './s3.ts';
@@ -99,6 +100,10 @@ const defaultSleep = (ms: number, signal: AbortSignal) =>
       { once: true },
     );
   });
+
+/** True while the entry still holds the refresh token a refresh started from. */
+const isCurrent = (c: StoredConnection | undefined, refreshToken: string): c is StoredConnection =>
+  c?.auth?.type === 'oauth' && c.auth.refreshToken === refreshToken;
 
 const abortAfter = (ms: number, parent: AbortSignal) =>
   AbortSignal.any([parent, AbortSignal.timeout(Math.max(1, ms))]);
@@ -179,18 +184,38 @@ export class StorageService {
         const p = oauthProvider(conn.kind as 'onedrive' | 'google_drive', this.deps.oauthEnv ?? {});
         if (!p)
           throw new StorageError('invalid', 'This runner has no sign-in app configured for this storage.');
+        let t: Tokens;
         try {
-          const t = await refreshTokens(p, a.refreshToken, this.fetchFn, this.now());
-          this.store.put(id, { ...conn, auth: { type: 'oauth', ...t, account: t.account ?? a.account } });
-          return t.accessToken;
+          t = await refreshTokens(p, a.refreshToken, this.fetchFn, this.now());
         } catch (err) {
+          // The entry may have been removed or replaced while the refresh was running: write nothing back.
+          const cur = this.store.get(id);
+          if (!isCurrent(cur, a.refreshToken)) return this.superseded(cur);
           if (err instanceof StorageError && err.code === 'auth_expired') {
-            this.store.put(id, { ...conn, needsReauth: true });
+            this.store.put(id, { ...cur, needsReauth: true });
             this.report(id, 'needs_reauth', storageError('auth_expired', err.message));
           }
           throw err;
         }
+        // No await between this read and the put, so a removal cannot slip in between.
+        const cur = this.store.get(id);
+        if (!isCurrent(cur, a.refreshToken)) {
+          // Removed: a rotated refresh token nobody will ever hold is revoked, best effort and not awaited
+          // (revokeToken never rejects; OneDrive has no revoke endpoint, so nothing happens there).
+          if (!cur && t.refreshToken !== a.refreshToken) void revokeToken(p, t.refreshToken, this.fetchFn);
+          return this.superseded(cur);
+        }
+        this.store.put(id, { ...cur, auth: { type: 'oauth', ...t, account: t.account ?? a.account } });
+        return t.accessToken;
       });
+  }
+
+  /** The entry a refresh started from is gone or was replaced by a new sign-in. */
+  private superseded(cur: StoredConnection | undefined): string {
+    if (cur?.auth?.type === 'oauth' && !cur.needsReauth) return cur.auth.accessToken;
+    if (cur?.needsReauth)
+      throw new StorageError('auth_expired', 'The sign-in expired: reconnect this storage.');
+    throw new StorageError('not_found', 'This storage is not set up on this workstation.');
   }
 
   private connector(id: string, conn: StoredConnection): StorageConnector {
