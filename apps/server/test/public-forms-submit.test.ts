@@ -72,6 +72,7 @@ describe('a valid submission (AC3)', () => {
     expect(Object.keys(row).sort()).toEqual(
       [
         'answers_refs',
+        'cleanup_queued_at',
         'completed_at',
         'created_at',
         'error_code',

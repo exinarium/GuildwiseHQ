@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
+import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { authed, httpError, type TokenFn } from './http.ts';
 import {
   type FetchLike,
@@ -177,5 +177,67 @@ export class GDriveConnector implements StorageConnector {
       { method: 'DELETE' },
       signal,
     );
+  }
+
+  /** One folder or file for the parent-chain check; null when it is gone or in the bin. */
+  private async meta(
+    id: string,
+    signal: AbortSignal,
+  ): Promise<{ name: string; parents: string[]; mimeType: string } | null> {
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(id)}?fields=id,name,parents,trashed,mimeType`,
+      { method: 'GET' },
+      signal,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw await httpError('google_drive', res);
+    const j = (await res.json()) as {
+      name?: string;
+      parents?: string[];
+      trashed?: boolean;
+      mimeType?: string;
+    };
+    if (j.trashed) return null;
+    return { name: j.name ?? '', parents: j.parents ?? [], mimeType: j.mimeType ?? '' };
+  }
+
+  /**
+   * Strict delete of one file below the base folder. Drive has no paths, so the file id is required, and the file is
+   * only removed when its name and its parent chain match the stored path up to the base folder.
+   */
+  async deleteFile(
+    ref: { path: string; providerId?: string },
+    signal: AbortSignal,
+  ): Promise<'deleted' | 'not_found'> {
+    const outside = () => new StorageError('invalid', 'The file is outside the storage destination.');
+    const segs = storedPathSegments(ref.path);
+    if (!segs || !ref.providerId || !this.cfg.baseFolderId) throw outside();
+    const file = await this.meta(ref.providerId, signal);
+    if (!file) return 'not_found';
+    if (file.mimeType === FOLDER || file.name !== segs[segs.length - 1]) throw outside();
+    let parent = file.parents[0];
+    for (let i = segs.length - 2; i >= 0; i--) {
+      if (!parent) throw outside();
+      const folder = await this.meta(parent, signal);
+      if (!folder || folder.mimeType !== FOLDER || folder.name !== segs[i]) throw outside();
+      parent = folder.parents[0];
+    }
+    if (!parent || parent !== this.cfg.baseFolderId) throw outside();
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(ref.providerId)}`,
+      { method: 'DELETE' },
+      signal,
+    );
+    if (res.status === 404) return 'not_found';
+    await res.arrayBuffer().catch(() => undefined);
+    if (res.status === 409)
+      throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
+    return 'deleted';
   }
 }

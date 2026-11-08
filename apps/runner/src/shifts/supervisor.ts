@@ -920,6 +920,7 @@ export class ShiftSupervisor {
       roleKey: msg.agent.roleKey,
       isDevops: !!msg.agent.isDevops,
       runtime: msg.agent.runtime,
+      egressProxy: adapter?.usesEgressProxy?.() === true,
       hasShell: msg.agent.permissions.allowedTools.includes('shell'),
       platform: process.platform,
       sandbox: caps?.sandbox,

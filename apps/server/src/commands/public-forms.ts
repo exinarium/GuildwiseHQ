@@ -10,6 +10,7 @@ import {
   type FormSubmissionDto,
   publicFormPath,
   type StorageReference,
+  type SubmissionCleanupState,
   streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
@@ -17,6 +18,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
+import { queueFormUploadCleanup } from '../public-forms/cleanup.ts';
 import { newLinkId, newPublicId, signClientLink } from '../public-forms/tokens.ts';
 import { orgScope, userActor } from './common.ts';
 
@@ -398,9 +400,32 @@ export async function listSubmissions(
     [formId, orgId, before ?? null],
   );
   const page = r.slice(0, 50);
+  const cleanup = new Map<
+    string,
+    Map<string, { state: SubmissionCleanupState; attempts: number; error: string | null }>
+  >();
+  if (page.length) {
+    const c = await rows<{
+      submission_id: string;
+      label: string;
+      path: string;
+      state: SubmissionCleanupState;
+      attempts: number;
+      last_error: string | null;
+    }>(
+      ctx.pool,
+      'SELECT submission_id, label, path, state, attempts, last_error FROM form_submission_cleanup WHERE submission_id = ANY($1::uuid[])',
+      [page.map((x) => x.id)],
+    );
+    for (const x of c) {
+      const m = cleanup.get(x.submission_id) ?? new Map();
+      m.set(`${x.label}\u0000${x.path}`, { state: x.state, attempts: x.attempts, error: x.last_error });
+      cleanup.set(x.submission_id, m);
+    }
+  }
   return {
     submissions: page.map((x) => {
-      const stored: Array<{ label: string; path: string }> = [];
+      const stored: FormSubmissionDto['stored'] = [];
       const refs = x.answers_refs as {
         html?: StorageReference;
         json?: StorageReference;
@@ -411,6 +436,17 @@ export async function listSubmissions(
       if (refs.pdf) stored.push({ label: 'Answers (PDF)', path: refs.pdf.path });
       for (const p of x.parts as Array<{ field: string; reference?: StorageReference }>)
         if (p.reference) stored.push({ label: p.field, path: p.reference.path });
+      const queued = cleanup.get(x.id);
+      let counts: FormSubmissionDto['cleanup'] = null;
+      if (queued) {
+        counts = { pending: 0, removed: 0, failed: 0 };
+        for (const f of stored) {
+          const c = queued.get(`${f.label}\u0000${f.path}`);
+          if (!c) continue;
+          f.cleanup = c;
+          counts[c.state]++;
+        }
+      }
       return {
         id: x.id,
         status: x.status,
@@ -420,6 +456,7 @@ export async function listSubmissions(
         createdAt: iso(x.created_at) as string,
         completedAt: iso(x.completed_at),
         stored,
+        cleanup: counts,
       };
     }),
     nextCursor: r.length > 50 ? (iso(page[49]?.created_at) as string) : null,
@@ -434,7 +471,11 @@ export async function pruneFormSubmissions(ctx: Ctx): Promise<void> {
       WHERE expires_at < $1 AND status IN ('receiving','failed','storing')`,
     [now],
   );
-  await ctx.pool.query(`DELETE FROM form_submissions WHERE status='expired' AND updated_at < $1`, [
-    new Date(now.getTime() - 30 * 86_400_000),
-  ]);
+  await queueFormUploadCleanup(ctx);
+  // A row whose files still wait to be removed is kept: the desk shows them and the sweep needs the row.
+  await ctx.pool.query(
+    `DELETE FROM form_submissions f WHERE f.status='expired' AND f.updated_at < $1
+        AND NOT EXISTS (SELECT 1 FROM form_submission_cleanup c WHERE c.submission_id = f.id AND c.state='pending')`,
+    [new Date(now.getTime() - 30 * 86_400_000)],
+  );
 }

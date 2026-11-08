@@ -104,7 +104,7 @@ export function MobileTabBar({
     <nav
       aria-label="Primary"
       data-testid="mobile-tabbar"
-      className="relative z-40 shrink-0 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] backdrop-blur md:hidden"
+      className="relative z-40 shrink-0 border-t border-line bg-surface/95 pb-(--safe-bottom) pl-(--safe-left) pr-(--safe-right) backdrop-blur md:hidden"
     >
       <ul className="grid h-14 grid-cols-5 items-stretch">
         <li className="contents">

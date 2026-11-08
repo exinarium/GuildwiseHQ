@@ -299,6 +299,12 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     ok: false,
     error: { code: 'unavailable', message: 'down', retryable: true },
   },
+  'storage.delete.result': {
+    ...env('storage.delete.result'),
+    requestId: U.d,
+    ok: true,
+    result: 'not_found',
+  },
   'relay.serve': {
     ...env('relay.serve'),
     integrations: [{ integrationId: '11111111-1111-4111-8111-111111111111', kind: 'generic' }],
@@ -378,6 +384,13 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
     sha256: 'a'.repeat(64),
   },
   'storage.write.abort': { ...env('storage.write.abort'), transferId: U.d, reason: 'timeout' },
+  'storage.delete': {
+    ...env('storage.delete'),
+    requestId: U.d,
+    connectionId: U.d,
+    path: 'Forms/a.pdf',
+    providerId: 'id1',
+  },
   'relay.serve.result': {
     ...env('relay.serve.result'),
     accepted: ['11111111-1111-4111-8111-111111111111'],

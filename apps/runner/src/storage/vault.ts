@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isSafeVaultPath, STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
-import { writeVaultBinary } from '../vaults/write.ts';
+import { isSafeVaultPath, STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
+import { removeVaultBinary, VaultWriteError, writeVaultBinary } from '../vaults/write.ts';
 import { fromNodeError } from './errors.ts';
 import {
   PROBE_BODY,
@@ -83,6 +83,28 @@ export class VaultConnector implements StorageConnector {
       if (!isSafeVaultPath(path)) return;
       await rm(join(dir, ...path.split('/')), { force: true });
     });
+  }
+
+  async deleteFile(ref: { path: string }): Promise<'deleted' | 'not_found'> {
+    const segs = storedPathSegments(ref.path, this.folder);
+    if (!segs || !isSafeVaultPath(ref.path))
+      throw new StorageError('invalid', 'The file is outside the storage destination.');
+    const name = segs[segs.length - 1] ?? '';
+    const removed = await this.withDir(async (dir) => {
+      try {
+        return await removeVaultBinary(
+          dir,
+          { path: ref.path, commitMessage: `Remove ${name}` },
+          { commit: !this.vaults.isLocal(this.vaultId) },
+        );
+      } catch (err) {
+        if (err instanceof VaultWriteError)
+          throw new StorageError('invalid', 'The file is outside the storage destination.');
+        throw err;
+      }
+    });
+    if (removed) await this.vaults.push?.(this.vaultId).catch(() => undefined);
+    return removed ? 'deleted' : 'not_found';
   }
 }
 void mkdir;

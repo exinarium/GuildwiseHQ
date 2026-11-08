@@ -57,7 +57,7 @@ import {
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
-import { TestEnvProblem } from '../events/testing.ts';
+import { BUILDER_TEST_GAP_REASONS, TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
@@ -372,11 +372,17 @@ export const ShiftBriefSchema = z.object({
     /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */
     projectDoc: z.string().optional(),
   }),
-  /** Builder test runs that went to DevOps without an environment (`BuilderTestsNotRun`): the reviewer and the tester must know. */
+  /** Builder test runs not run without an environment (`BuilderTestsNotRun`): the reviewer and the tester must know. */
   testGaps: z
     .array(
       z.object({
+        /**
+         * The DevOps request asked to run the tests; `''`: no DevOps engineer was on the workstation, nobody was asked.
+         * Stays a required string: older runners drop a `shift.start` frame that fails their schema.
+         */
         requestId: z.string(),
+        /** Absent: older servers (always `test_without_environment`). */
+        reason: z.enum(BUILDER_TEST_GAP_REASONS).optional(),
         stage: z.string(),
         agentName: z.string(),
         at: z.string(),
@@ -2291,6 +2297,21 @@ export const StorageWriteResultSchema = msg('storage.write.result', {
     })
     .optional(),
 });
+/** Server to runner: remove one file the server wrote earlier (cleanup of an expired form submission). */
+export const StorageDeleteSchema = msg('storage.delete', {
+  requestId: z.uuid(),
+  connectionId: z.uuid(),
+  path: z.string().min(1).max(1024),
+  providerId: z.string().max(300).optional(),
+  /** Logging and the runner's journal only. */
+  submissionId: z.uuid().optional(),
+});
+export const StorageDeleteResultSchema = msg('storage.delete.result', {
+  requestId: z.uuid(),
+  ok: z.boolean(),
+  result: z.enum(['deleted', 'not_found']).optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HelloSchema,
@@ -2342,6 +2363,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageAuthSchema,
   StorageWriteCreditSchema,
   StorageWriteResultSchema,
+  StorageDeleteResultSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2365,6 +2387,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   StorageWriteChunkSchema,
   StorageWriteEndSchema,
   StorageWriteAbortSchema,
+  StorageDeleteSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

@@ -28,6 +28,7 @@ import { deniedShellPrefixes } from './denied-shell.ts';
 import { GeminiStreamParser, geminiUsageLimit, isGeminiAuthFailureText } from './gemini-stream-parser.ts';
 import {
   type HarnessLaunch,
+  harnessTestServices,
   installDirsOf,
   type LaunchedHarness,
   launchInHarnessSandbox,
@@ -686,6 +687,11 @@ export class GeminiAdapter implements RuntimeAdapter {
     return (this.host.sandboxProbe ?? (() => probeHarnessSandbox(this.host.platform)))();
   }
 
+  /** The Gemini CLI always runs in the harness box: its shell reaches the network through the runner's egress proxy only. */
+  usesEgressProxy(): boolean {
+    return true;
+  }
+
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
     const sel = this.authSelection();
@@ -964,6 +970,7 @@ export class GeminiAdapter implements RuntimeAdapter {
     if (this.host.extraArgs?.length)
       cmd.args.splice(cmd.args.indexOf('--admin-policy'), 0, ...this.host.extraArgs);
     const loginPaths = LOGIN_FILES.map((n) => join(dotGemini(ghome), n));
+    const testServices = harnessTestServices(input, opts.roleKey, opts.chat);
     const launch: HarnessLaunch = {
       cliHosts: [
         ...(sel.via === 'key'
@@ -976,6 +983,7 @@ export class GeminiAdapter implements RuntimeAdapter {
         : {}),
       extraHosts: this.cfg.extraAllowedDomains,
       ...(this.store?.endpoints().length ? { privateEndpoints: this.store.endpoints() } : {}),
+      ...(testServices ? { testServices } : {}),
       ...(sel.via === 'key'
         ? {
             routes: [

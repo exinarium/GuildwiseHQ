@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
-import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
+import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { fromHttp } from './errors.ts';
 import { signV4, uriEncode } from './s3-sign.ts';
 import {
@@ -155,5 +155,22 @@ export class S3Connector implements StorageConnector {
   async delete(path: string, signal: AbortSignal): Promise<void> {
     const res = await this.call('DELETE', path, signal, createHash('sha256').update('').digest('hex'));
     if (!res.ok && res.status !== 404) await this.fail(res);
+  }
+
+  async deleteFile(ref: { path: string }, signal: AbortSignal): Promise<'deleted' | 'not_found'> {
+    const prefix = this.cfg.prefix.replace(/^\/+|\/+$/g, '');
+    const segs = storedPathSegments(ref.path, prefix);
+    if (!segs) throw new StorageError('invalid', 'The file is outside the storage destination.');
+    const key = this.key(segs);
+    const empty = createHash('sha256').update('').digest('hex');
+    // S3 answers 204 for a missing key, so look first to tell "deleted" from "not there".
+    const head = await this.call('HEAD', key, signal, empty);
+    if (head.status === 404) return 'not_found';
+    if (head.status !== 200) await this.fail(head);
+    const del = await this.call('DELETE', key, signal, empty);
+    if (del.status === 404) return 'not_found';
+    if (!del.ok) await this.fail(del);
+    await del.arrayBuffer().catch(() => undefined);
+    return 'deleted';
   }
 }

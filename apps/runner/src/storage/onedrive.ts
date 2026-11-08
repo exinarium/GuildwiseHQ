@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
+import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { authed, type TokenFn } from './http.ts';
 import {
   type FetchLike,
@@ -185,5 +185,21 @@ export class OneDriveConnector implements StorageConnector {
       ? `${GRAPH}/drives/${this.cfg.driveId}/items/${path.slice(3)}`
       : `${GRAPH}/drives/${this.cfg.driveId}/items/${this.base}:/${path.split('/').map(enc).join('/')}`;
     await authed(this.fetchFn, 'onedrive', this.token, url, { method: 'DELETE' }, signal);
+  }
+
+  /**
+   * Strict delete of one file below the base folder. Path addressing only: an item id could point anywhere in the
+   * drive, so `providerId` is ignored.
+   */
+  async deleteFile(ref: { path: string }, signal: AbortSignal): Promise<'deleted' | 'not_found'> {
+    const segs = storedPathSegments(ref.path);
+    if (!segs) throw new StorageError('invalid', 'The file is outside the storage destination.');
+    const url = `${GRAPH}/drives/${this.cfg.driveId}/items/${this.base}:/${segs.map(enc).join('/')}`;
+    const res = await authed(this.fetchFn, 'onedrive', this.token, url, { method: 'DELETE' }, signal);
+    if (res.status === 404) return 'not_found';
+    await res.arrayBuffer().catch(() => undefined);
+    if (res.status === 409)
+      throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
+    return 'deleted';
   }
 }

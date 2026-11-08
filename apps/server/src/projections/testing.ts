@@ -138,7 +138,7 @@ export const testingProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO card_test_gaps (card_id, request_id, agent_id, stage, reason, detail, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
-      [p.cardId, p.requestId, p.agentId, p.stage, p.reason, p.detail, e.createdAt],
+      [p.cardId, p.requestId ?? null, p.agentId, p.stage, p.reason, p.detail, e.createdAt],
     );
   },
 

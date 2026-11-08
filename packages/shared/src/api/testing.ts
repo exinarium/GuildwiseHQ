@@ -6,7 +6,7 @@ import {
   StoredCompletionAction,
   TestEvidence,
 } from '../cards/types.ts';
-import { RegressionPlatform, SuiteKind, TestPlatform } from '../events/testing.ts';
+import { BUILDER_TEST_GAP_REASONS, RegressionPlatform, SuiteKind, TestPlatform } from '../events/testing.ts';
 import { TestSuiteResultDtoSchema } from '../runs/integration.ts';
 import { IsoTime } from './common.ts';
 
@@ -67,11 +67,13 @@ export const CardTestingSchema = z.object({
   waitingOn: RelatedCardSchema.nullable(),
   /** Set while a tester shift is parked on a DevOps request (app not deployed / Docker missing). */
   parkedOn: z.object({ requestId: z.uuid(), problem: z.string() }).nullable(),
-  /** Builder test runs that went to DevOps under "Test without an environment" (the DB-backed tests were not run). */
+  /** Builder test runs not run under "Test without an environment" (the DB-backed tests were not run). */
   testGaps: z
     .array(
       z.object({
-        requestId: z.uuid(),
+        /** The DevOps request asked to run them; null: no DevOps engineer was on the workstation, nobody was asked. */
+        requestId: z.uuid().nullable(),
+        reason: z.enum(BUILDER_TEST_GAP_REASONS),
         stage: z.string(),
         at: z.string(),
         detail: z.string(),

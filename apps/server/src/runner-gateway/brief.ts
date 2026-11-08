@@ -422,7 +422,11 @@ export async function buildBrief(
   };
 }
 
-/** The builder test runs of the card that went to DevOps without an environment: the reviewer and the tester must know. */
+/**
+ * The builder test runs of the card that were not run without an environment: the reviewer and the tester must know.
+ * A gap with no DevOps request (no engineer on the workstation) is sent with `requestId: ''`: older runners drop a
+ * `shift.start` whose brief fails their schema, so the field stays a string.
+ */
 async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?: ShiftBrief['testGaps'] }> {
   if (agent.is_devops) return {};
   const gaps = await rows(
@@ -434,7 +438,8 @@ async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?:
   if (gaps.length === 0) return {};
   return {
     testGaps: gaps.map((g) => ({
-      requestId: g.request_id,
+      requestId: g.request_id ?? '',
+      reason: g.reason,
       stage: g.stage,
       agentName: g.agent_name ?? 'the builder',
       at: iso(g.created_at) as string,

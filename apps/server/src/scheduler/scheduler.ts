@@ -25,6 +25,7 @@ import { reachabilityTick } from '../delivery/reachability.ts';
 import { governanceTick } from '../governance/offboarding.ts';
 import { journeyTick } from '../journeys/tick.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
+import { kickFormUploadCleanup } from '../public-forms/cleanup.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
 import { videoWatch } from '../video/sweep.ts';
 
@@ -210,6 +211,8 @@ export class Scheduler {
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),
     );
+    // Starts the sweep and returns: a slow runner must not hold up the rest of this chain.
+    kickFormUploadCleanup(this.ctx);
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
   }
 

@@ -359,5 +359,15 @@ export interface FormSubmissionDto {
   createdAt: string;
   completedAt: string | null;
   /** Where the answers and files landed (storage paths, no content). */
-  stored: Array<{ label: string; path: string }>;
+  stored: Array<{
+    label: string;
+    path: string;
+    /** Set on files of an expired submission once their removal is queued. */
+    cleanup?: { state: SubmissionCleanupState; attempts: number; error: string | null };
+  }>;
+  /** Counts over `stored[].cleanup`; null when no removal was queued. */
+  cleanup?: { pending: number; removed: number; failed: number } | null;
 }
+
+/** Removal of the files an expired submission left in the firm's storage. */
+export type SubmissionCleanupState = 'pending' | 'removed' | 'failed';
