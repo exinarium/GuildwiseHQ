@@ -1,18 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import {
   checkChangelog,
-  RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
   RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES,
   type ReleaseChangelogOutput,
   ReleaseChangelogOutputSchema,
   type ReleaseDocsPrepSummary,
   ReleasePrepChangelogPayloadSchema,
-  streamId,
 } from '@aom/shared';
-import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
-import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import type { Tx } from '../db/tx.ts';
 import { loadFacts } from './facts.ts';
 
 /**
@@ -21,8 +15,6 @@ import { loadFacts } from './facts.ts';
  */
 
 export const NEEDS_ANALYSE = 'Write changelog needs Analyse changes. Turn it on in the project settings.';
-export const NEEDS_RUNNER =
-  'Write changelog needs a newer runner on the workstation that has this repository. Update the runner and retry prep.';
 /** The source ids of a change summary: the commits and merges 'Analyse changes' found. */
 export function summarySources(summary: ReleaseDocsPrepSummary): string[] {
   return [...new Set([...summary.commits.map((c) => c.sha), ...summary.merges.map((m) => m.sha)])];
@@ -51,12 +43,10 @@ export type ChangelogDispatch =
 /** Pure: the decision for one repository. `facts` is used only when it was read at the analysed head. */
 export function decideChangelogDispatch(i: {
   summary: ReleaseDocsPrepSummary | null;
-  hasCapability: boolean;
   facts: { headSha: string; changelog: string | null } | null;
   covered: ReadonlySet<string>;
 }): ChangelogDispatch {
   if (!i.summary) return { kind: 'fail', error: NEEDS_ANALYSE };
-  if (!i.hasCapability) return { kind: 'fail', error: NEEDS_RUNNER };
   if (i.facts && i.facts.headSha === i.summary.headSha && i.facts.changelog !== null) {
     const { errors } = checkChangelog(i.facts.changelog);
     if (errors.length > 0) return { kind: 'fail', error: errors.join(' ') };
@@ -99,15 +89,10 @@ export async function changelogDispatchFor(
   repo: Row,
   summary: ReleaseDocsPrepSummary | null,
 ): Promise<ChangelogDispatch> {
-  const cap = await one(
-    db,
-    'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
-    [repo.workstation_id, RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY],
-  );
   const covered = await coveredSourcesFor(db, run, repo);
   const f = await loadFacts(db, repo.repo_id);
   const facts = f?.facts ? { headSha: f.facts.headSha, changelog: f.facts.changelog ?? null } : null;
-  return decideChangelogDispatch({ summary, hasCapability: !!cap, facts, covered });
+  return decideChangelogDispatch({ summary, facts, covered });
 }
 
 /** The sources earlier passed runs of the same release (branch, repository, base tag) already handled. */
@@ -117,6 +102,7 @@ export async function coveredSourcesFor(db: Queryable, run: Row, repo: Row): Pro
     `SELECT s.output, r.commit_sha FROM release_docs_prep_runs u
        JOIN release_docs_prep_repos r ON r.run_id = u.id
        LEFT JOIN release_docs_prep_steps s ON s.run_id = u.id AND s.repo_id = r.repo_id AND s.step = 'changelog'
+                                          AND s.phase IN ('', 'apply')
       WHERE u.project_id=$1 AND u.release_branch=$2 AND u.status='passed' AND u.id <> $3
         AND r.repo_id=$4 AND r.base_tag IS NOT DISTINCT FROM $5`,
     [run.project_id, run.release_branch, run.id, repo.repo_id, repo.base_tag],
@@ -127,47 +113,28 @@ export async function coveredSourcesFor(db: Queryable, run: Row, repo: Row): Pro
   );
 }
 
-/**
- * Marks the step running (no runner command yet) and queues the BA task that proposes the entries for one repository.
- * At most one open task per (run, repository).
- */
-export async function queueChangelogTask(ctx: Ctx, tx: Tx, run: Row, repoId: string): Promise<void> {
-  const open = await one(
-    tx,
-    `SELECT 1 FROM ba_tasks WHERE prep_run_id=$1 AND prep_repo_id=$2 AND status IN ('queued','running')`,
-    [run.id, repoId],
-  );
-  const scope = projectScope(run.org_id, run.project_id);
-  const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
-  const taskId = randomUUID();
-  await ctx.store.append(
-    [
-      {
-        streamId: streamId.releaseDocsPrep(run.id),
-        event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId: run.id, repoId, step: 'changelog' } },
-        actor,
-        scope,
-      },
-      ...(open
-        ? []
-        : [
-            {
-              streamId: streamId.baTask(taskId),
-              event: {
-                type: 'BaTaskQueued' as const,
-                payload: {
-                  taskId,
-                  projectId: run.project_id,
-                  kind: 'release_changelog' as const,
-                  prepRunId: run.id,
-                  prepRepoId: repoId,
-                },
-              },
-              actor,
-              scope,
-            },
-          ]),
-    ],
-    { tx },
-  );
+/** Names that must never reach a public entry: agents, members, workstations and their host names of the organisation. */
+export async function changelogDenyList(db: Queryable, orgId: string): Promise<string[]> {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    if (typeof v !== 'string') return;
+    const t = v.trim();
+    if (t.length >= 3) out.add(t);
+  };
+  for (const a of await rows(db, 'SELECT name FROM agents WHERE org_id=$1', [orgId])) add(a.name);
+  for (const u of await rows(
+    db,
+    `SELECT u.display_name FROM users u JOIN org_members m ON m.user_id = u.id WHERE m.org_id=$1`,
+    [orgId],
+  ))
+    add(u.display_name);
+  for (const w of await rows(
+    db,
+    `SELECT w.name, w.hostname FROM workstations w JOIN org_members m ON m.user_id = w.user_id WHERE m.org_id=$1`,
+    [orgId],
+  )) {
+    add(w.name);
+    add(w.hostname);
+  }
+  return [...out];
 }

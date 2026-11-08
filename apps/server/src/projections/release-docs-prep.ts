@@ -207,9 +207,19 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepTaskFinished'>(e).payload;
     await exec(
       tx,
-      `UPDATE release_docs_prep_tasks SET status=$2, note=$3, commit_sha=$4, files=$5::jsonb, updated_at=$6
+      `UPDATE release_docs_prep_tasks SET status=$2, note=$3, commit_sha=$4, files=$5::jsonb, updated_at=$6,
+              result=$7::jsonb, code=$8
         WHERE id=$1 AND status IN ('queued','running')`,
-      [p.taskId, p.ok ? 'done' : 'failed', p.note, p.commit ?? null, JSON.stringify(p.files), e.createdAt],
+      [
+        p.taskId,
+        p.ok ? 'done' : 'failed',
+        p.note,
+        p.commit ?? null,
+        JSON.stringify(p.files),
+        e.createdAt,
+        p.result === undefined ? null : JSON.stringify(p.result),
+        p.code ?? null,
+      ],
     );
   },
   ReleaseDocsPrepSkipped: async (tx, e) => {

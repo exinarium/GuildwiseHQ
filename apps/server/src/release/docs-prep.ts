@@ -10,6 +10,8 @@ import {
   normalizeGuidePath,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
+  releaseDocsPrepStep,
   type ReleaseDocsPrepAction,
   type ReleaseDocsPrepGateInput,
   type ReleaseDocsPrepGateView,
@@ -39,20 +41,15 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { changelogDispatchFor, queueChangelogTask, storedStepOutput } from './docs-prep-changelog.ts';
-import {
-  configuredGuidePaths,
-  DOCS_PREP_STEP_HOOKS,
-  docsPrepWriter,
-  guidePathFor,
-} from './docs-prep-steps.ts';
+import { storedStepOutput } from './docs-prep-changelog.ts';
 import {
   PHASE_FAILURE_HOOKS,
   PHASE_INPUTS,
   REPORT_MAX_BYTES,
   SERVER_PHASES,
   type ServerPhaseOutcome,
-} from './docs-prep-videos.ts';
+} from './docs-prep-phases.ts';
+import { configuredGuidePaths, DOCS_PREP_STEP_HOOKS, guidePathFor } from './docs-prep-steps.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -458,6 +455,8 @@ export async function advance(ctx: Ctx, tx: Tx, runId: string): Promise<string[]
     if (action.kind === 'dispatch' && action.by === 'server') {
       const handler = SERVER_PHASES[`${action.step}/${action.phase ?? ''}`];
       for (const repoId of action.repoIds) {
+        // A step with a writer phase needs a runner that takes writer tasks, before its first phase (here a server phase).
+        if (!(await writerStepGate(ctx, tx, s.run, repoId, action.step, action.phase ?? ''))) continue;
         const out = handler
           ? await handler(ctx, tx, s.run, repoId)
           : { state: 'failed' as const, error: `no server phase ${action.step}/${action.phase}` };
@@ -560,22 +559,12 @@ async function dispatchAction(
     );
     if (!repo) continue;
     const summary = repo.summary ? ReleaseDocsPrepSummarySchema.safeParse(repo.summary) : null;
-    let changelog: ReleaseDocsPrepPayload['changelog'];
-    if (action.step === 'changelog') {
-      const d = await changelogDispatchFor(tx, run, repo, summary?.success ? summary.data : null);
-      if (d.kind === 'fail') {
-        await failStepBeforeDispatch(ctx, tx, run, repoId, action.step, d.error);
-        failedHere = true;
-        continue;
-      }
-      if (d.kind === 'write') {
-        // The entries for new changes are written by a BA first; its accepted report sends the runner command.
-        await queueChangelogTask(ctx, tx, run, repoId);
-        continue;
-      }
-      changelog = { projectName: project?.name ?? '', entries: [] };
+    // A step with a writer phase needs a runner that takes writer tasks, before its first phase (here a runner phase).
+    if (!(await writerStepGate(ctx, tx, run, repoId, action.step, action.phase ?? ''))) {
+      failedHere = true;
+      continue;
     }
-    if (action.step === 'guide' && !action.phase) {
+    if (action.step === 'guide' && (action.phase ?? '') === 'check') {
       const configured = await guidePathFor(tx, run.project_id, repoId);
       if (configured) {
         const cap = await one(
@@ -591,33 +580,23 @@ async function dispatchAction(
             repoId,
             action.step,
             `The workstation that has ${repo.name} needs a newer runner to use the user guide path ${configured}. Update the runner and retry.`,
+            action.phase,
           );
           failedHere = true;
           continue;
         }
       }
     }
-    const hook = action.phase ? undefined : DOCS_PREP_STEP_HOOKS[action.step];
-    let writer: ReleaseDocsPrepPayload['writer'] | null = null;
-    if (hook?.needsWriter) {
-      writer = await docsPrepWriter(ctx, tx, run, repo);
-      if (!writer) {
-        // Not dispatched: the step fails here with the reason (Retry or Skip), as for 'changelog' above.
-        await failStepBeforeDispatch(
-          ctx,
-          tx,
-          run,
-          repoId,
-          action.step,
-          `no agent on the workstation that has ${repo.name} can write the release documentation`,
-        );
-        failedHere = true;
-        continue;
-      }
-    }
+    const hook = DOCS_PREP_STEP_HOOKS[action.step];
     const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
     const inputOf = PHASE_INPUTS[`${action.step}/${action.phase ?? ''}`];
     const input = inputOf ? await inputOf(tx, runId, repoId) : undefined;
+    // The changelog's apply phase sends its checked entries as `payload.changelog` (the runner's changelog step reads it,
+    // and an older runner can apply them too); every other phase gets its earlier phase's result as `input`.
+    const changelog: ReleaseDocsPrepPayload['changelog'] =
+      action.step === 'changelog'
+        ? { projectName: project?.name ?? '', entries: [], ...(input ?? {}) }
+        : undefined;
     deliver.push(
       await sendDocsPrepStepCommand(ctx, tx, run, repo, {
         step: action.step,
@@ -626,14 +605,55 @@ async function dispatchAction(
         commitAs: commitAs ?? null,
         ...(changelog ? { changelog } : {}),
         ...(stepInput ? { stepInput } : {}),
-        ...(writer ? { writer } : {}),
-        ...(input ? { input } : {}),
+        ...(input && !changelog ? { input } : {}),
       }),
     );
   }
   // A step that failed before anything was sent finishes the run now (nothing is committed).
   if (failedHere) deliver.push(...(await advance(ctx, tx, runId)));
   return deliver;
+}
+
+/**
+ * Every step with a writer phase (changelog, guide, videos) needs a runner on the repository's workstation that takes
+ * release prep writer tasks. Checked once, before the step's first phase, so an older runner fails with one clear message
+ * instead of half-running the step. Returns false when it failed the row (the run then fails).
+ */
+async function writerStepGate(
+  ctx: Ctx,
+  tx: Tx,
+  run: Row,
+  repoId: string,
+  step: string,
+  phase: string,
+): Promise<boolean> {
+  const def = releaseDocsPrepStep(step);
+  if (!def?.writerPhase) return true;
+  const first = def.phases?.[0] ?? '';
+  if (phase !== first) return true;
+  const repo = await one(
+    tx,
+    `SELECT r.workstation_id, pr.name FROM release_docs_prep_repos r JOIN project_repos pr ON pr.id = r.repo_id
+      WHERE r.run_id=$1 AND r.repo_id=$2`,
+    [run.id, repoId],
+  );
+  if (!repo) return true;
+  const cap = await one(
+    tx,
+    'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+    [repo.workstation_id, RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY],
+  );
+  if (cap) return true;
+  await failStepBeforeDispatch(
+    ctx,
+    tx,
+    run,
+    repoId,
+    step,
+    `${def.label} needs a newer runner on the workstation that has ${repo.name}. Update the runner and retry prep.`,
+    phase,
+  );
+  return false;
 }
 
 /** A (step, repository) that fails before a command is sent: started and failed at once, with the reason. */
@@ -644,15 +664,17 @@ async function failStepBeforeDispatch(
   repoId: string,
   step: string,
   error: string,
+  phase?: string,
 ): Promise<void> {
   const runId: string = run.id;
   const scope = projectScope(run.org_id, run.project_id);
   const actor = run.started_by ? userActor(run.started_by) : SYSTEM_ACTOR;
+  const at = phase ? { phase } : {};
   await ctx.store.append(
     [
       {
         streamId: streamId.releaseDocsPrep(runId),
-        event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId, repoId, step } },
+        event: { type: 'ReleaseDocsPrepStepStarted', payload: { runId, repoId, step, ...at } },
         actor,
         scope,
       },
@@ -660,7 +682,7 @@ async function failStepBeforeDispatch(
         streamId: streamId.releaseDocsPrep(runId),
         event: {
           type: 'ReleaseDocsPrepStepFinished',
-          payload: { runId, repoId, step, state: 'failed', error, files: [] },
+          payload: { runId, repoId, step, ...at, state: 'failed', error, files: [] },
         },
         actor,
         scope,
@@ -686,7 +708,6 @@ export async function sendDocsPrepStepCommand(
     commitAs: ReleaseDocsPrepPayload['commitAs'];
     changelog?: ReleaseDocsPrepPayload['changelog'];
     stepInput?: ReleaseDocsPrepPayload['stepInput'];
-    writer?: ReleaseDocsPrepPayload['writer'];
     input?: ReleaseDocsPrepPayload['input'];
   },
 ): Promise<string> {
@@ -711,7 +732,6 @@ export async function sendDocsPrepStepCommand(
     commitAs: o.commitAs ?? null,
     ...(o.changelog ? { changelog: o.changelog } : {}),
     ...(o.stepInput ? { stepInput: o.stepInput } : {}),
-    ...(o.writer ? { writer: o.writer } : {}),
     ...(o.input ? { input: o.input } : {}),
   };
   const commandId = await enqueueRunnerCommand(tx, repo.workstation_id, 'release.docs_prep', payload);
