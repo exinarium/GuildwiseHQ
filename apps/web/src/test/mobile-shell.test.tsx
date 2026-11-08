@@ -272,7 +272,7 @@ describe('the phone app frame', () => {
       const scroll = screen.getByTestId('app-scroll');
       expect(scroll.contains(bar)).toBe(false);
       expect(screen.getByTestId('page').parentElement?.className).not.toContain('app-bottom-inset');
-      expect(bar.className).toContain('pb-[env(safe-area-inset-bottom)]');
+      expect(bar.className).toContain('pb-(--safe-bottom)');
     },
   );
 

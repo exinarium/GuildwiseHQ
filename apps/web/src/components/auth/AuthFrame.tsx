@@ -14,7 +14,7 @@ const BULLETS = [
 export function AuthFrame({ children }: { children: ReactNode }) {
   return (
     <div className="auth-frame flex min-h-dvh flex-col bg-canvas lg:flex-row">
-      <aside className="relative isolate flex shrink-0 flex-col justify-between overflow-hidden bg-side px-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-8 text-white max-lg:h-44 max-lg:rounded-b-[24px] max-sm:h-48 sm:max-lg:h-56 lg:w-[55%] lg:p-10">
+      <aside className="relative isolate flex shrink-0 flex-col justify-between overflow-hidden bg-side px-6 pt-[max(1.5rem,var(--safe-top))] pb-8 text-white max-lg:h-44 max-lg:rounded-b-[24px] max-sm:h-48 sm:max-lg:h-56 lg:w-[55%] lg:p-10">
         <LoginArt className="absolute inset-0 -z-10 opacity-90" />
         <div
           aria-hidden="true"
@@ -36,7 +36,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
           </ul>
         </div>
       </aside>
-      <main className="flex flex-1 flex-col items-center justify-center px-6 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] max-lg:-mt-2">
+      <main className="flex flex-1 flex-col items-center justify-center px-6 py-8 pb-[max(2rem,var(--safe-bottom))] max-lg:-mt-2">
         <div className="w-full max-w-sm">{children}</div>
         <p className="mt-10 text-xs text-subtle">
           Your code stays in your repositories ·{' '}

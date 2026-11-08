@@ -180,7 +180,7 @@ export function SidebarBody({
           </div>
         ))}
       </nav>
-      <div className="shrink-0 space-y-1 border-t border-side-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 space-y-1 border-t border-side-line p-3 pb-[max(0.75rem,var(--safe-bottom))]">
         {setupSlot}
         <ul className={cx('space-y-0.5', collapsed && 'flex flex-col items-center')}>
           {footer.map((e) => (

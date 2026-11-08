@@ -430,9 +430,9 @@ export function Dialog({
           onInteractOutside={dismissible ? undefined : (e) => e.preventDefault()}
           onEscapeKeyDown={dismissible ? undefined : (e) => e.preventDefault()}
           className={cx(
-            'fixed z-70 flex max-h-[calc(var(--vvh,100dvh)*0.92)] flex-col overflow-hidden border border-line bg-surface shadow-lg',
-            'max-sm:inset-x-0 max-sm:bottom-[var(--kbd-gap,0px)] max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-[env(safe-area-inset-bottom)]',
-            'sm:top-1/2 sm:left-1/2 sm:max-h-[90dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:animate-rise sm:rounded-dialog',
+            'fixed z-70 flex max-h-[calc((var(--vvh,100dvh)-var(--safe-top))*0.92)] flex-col overflow-hidden border border-line bg-surface shadow-lg',
+            'max-sm:inset-x-0 max-sm:bottom-[var(--kbd-gap,0px)] max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-(--safe-bottom-kbd) max-sm:pl-(--safe-left) max-sm:pr-(--safe-right)',
+            'sm:top-1/2 sm:left-1/2 sm:max-h-[calc(90dvh-2*var(--safe-y))] sm:max-w-[calc(100vw-2*var(--safe-x)-1rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:animate-rise sm:rounded-dialog',
             dialogWidth[size],
           )}
         >
