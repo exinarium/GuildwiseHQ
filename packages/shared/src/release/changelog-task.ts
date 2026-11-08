@@ -33,7 +33,16 @@ export const ReleaseChangelogTaskSchema = z.object({
       z.object({
         source: z.string(),
         subject: z.string(),
-        cards: z.array(z.object({ key: z.string(), title: z.string().nullable() })).default([]),
+        cards: z
+          .array(
+            z.object({
+              key: z.string(),
+              title: z.string().nullable(),
+              /** `key` is the client's ticket reference of an intake card (added to the entry by the platform). */
+              client: z.boolean().optional(),
+            }),
+          )
+          .default([]),
         areas: z.array(z.string()).default([]),
       }),
     )
@@ -131,6 +140,31 @@ export function checkChangelogProposal(
   return errors.length ? { ok: false, errors } : { ok: true, entries, proposal: p };
 }
 
+/** At most this many client ticket references are added to one entry. */
+const MAX_CLIENT_REFS = 5;
+
+/**
+ * Adds the client ticket references of an entry's changes after the public gate: `text (ABC-1)` / `text (ABC-1, ABC-7)`.
+ * The writer never writes keys; the platform adds the ticket of each intake card the entry describes. Entries without
+ * intake cards are returned unchanged, and a reference already at the end of the text is not added twice.
+ */
+export function withClientRefs<E extends { text: string; sources: string[] }>(
+  entries: readonly E[],
+  changes: ReleaseChangelogTask['changes'],
+): E[] {
+  const bySource = new Map(changes.map((c) => [c.source, c]));
+  return entries.map((e) => {
+    const refs: string[] = [];
+    for (const source of e.sources)
+      for (const card of bySource.get(source)?.cards ?? [])
+        if (card.client === true && card.key.trim() && !refs.includes(card.key.trim())) refs.push(card.key.trim());
+    if (refs.length === 0) return e;
+    const suffix = ` (${refs.slice(0, MAX_CLIENT_REFS).join(', ')})`;
+    const text = e.text.trimEnd();
+    return text.endsWith(suffix) ? e : { ...e, text: `${text}${suffix}` };
+  });
+}
+
 export function renderReleaseChangelogInstructions<O extends { id: string; label: string }>(
   brief: { agent: { name: string }; role: { instructions: string; coreRules: string[] } },
   task: ReleaseChangelogTask,
@@ -155,7 +189,7 @@ export function renderReleaseChangelogInstructions<O extends { id: string; label
       '',
       '- Headings: only Added, Changed, Deprecated, Removed, Fixed, Security. Normally Added (new), Changed (improved or upgrade notes, start an upgrade note with "Upgrade:") and Fixed. Start a breaking change with the word BREAKING under Changed or Removed.',
       '- One entry is one line: a short phrase naming the feature or fix, then one to four plain sentences on what the user can now do or what no longer goes wrong, and why it matters. Between 20 and 900 characters. **Bold** for a screen label and backticks for a setting a self-hoster needs are fine.',
-      '- Never write ticket keys, commit ids, links, #numbers, @handles, host names, URLs, e-mail or IP addresses, secrets, names of people, agents or machines, or anything about how the work was done (reviews, rework, shifts).',
+      '- Never write ticket keys (the platform adds the client\'s ticket reference itself where one applies), commit ids, links, #numbers, @handles, host names, URLs, e-mail or IP addresses, secrets, names of people, agents or machines, or anything about how the work was done (reviews, rework, shifts).',
       '- Internal-only work (refactoring, build, tests, tooling) is not written: put it in "skipped" with the reason "internal".',
       '- A change that an existing entry already describes goes into "covered" with that entry\'s number. Do not write it again.',
       '- One entry may cover several changes: list all their ids in its "sources". Every change in the list must appear exactly once: in an entry\'s sources, in covered or in skipped.',

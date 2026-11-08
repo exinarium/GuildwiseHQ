@@ -17,7 +17,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../err
 import type { AppendInput } from '../eventstore/types.ts';
 import { completeCommand, enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
-import { orgAgentNames, screenOutbound } from './leak-check.ts';
+import { cardInternalRefs, orgAgentNames, screenOutbound } from './leak-check.ts';
 
 /**
  * The outbox (docs/SPEC.md "External systems boundary"; docs/ARCHITECTURE.md section 16.5). A draft the card's owner
@@ -120,7 +120,12 @@ export async function resolveOutboundIn(
   const finalBody = (editedBody ?? draft.body).trim();
   if (!finalBody) throw badRequest('empty_body', 'the update is empty');
   if (edited) {
-    const leak = await screenOutbound(tx, card.org_id, finalBody);
+    const leak = await screenOutbound(
+      tx,
+      card.org_id,
+      finalBody,
+      await cardInternalRefs(tx, card, draft.external_key),
+    );
     if (!leak.ok)
       throw unprocessable('internal_details', leakMessage(leak.matches), { matches: leak.matches });
   }

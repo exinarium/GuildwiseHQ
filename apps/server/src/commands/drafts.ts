@@ -20,7 +20,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { loadManageable } from './cards.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import type { RpcReply } from './intake.ts';
-import { screenOutbound } from './leak-check.ts';
+import { cardInternalRefs, screenOutbound } from './leak-check.ts';
 import { cardGoesThroughQa } from './qa-flow.ts';
 
 const KIND_LABEL: Record<OutboundKind, string> = {
@@ -166,7 +166,7 @@ export async function draftOutboundIn(ctx: Ctx, tx: Tx, input: DraftInput): Prom
   const draftId = randomUUID();
   const scope = projectScope(card.org_id, card.project_id);
   const actor = author.kind === 'agent' ? agentActor(author.agentId) : userActor(author.userId);
-  const leak = await screenOutbound(tx, card.org_id, body);
+  const leak = await screenOutbound(tx, card.org_id, body, await cardInternalRefs(tx, card, ref.key));
   // The manager's own text is refused on the spot; the BA's blocked draft is recorded so the card history shows it.
   if (!leak.ok && author.kind === 'user')
     return { ok: false, blocked: true, matches: leak.matches, error: leakMessage(leak.matches) };

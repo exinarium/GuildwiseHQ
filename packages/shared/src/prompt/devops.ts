@@ -3,6 +3,7 @@ import type { ShiftBrief } from '../protocol/runner.ts';
 import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
+import { clientWorkRef, workRefLine } from './work-ref.ts';
 
 /** Appended by the runner to the instructions of card shifts (kept out of `renderInstructions` on purpose). */
 export const ENVIRONMENT_HELP_SECTION = `# Environment help
@@ -13,6 +14,8 @@ Need the app started, a tool installed or the environment fixed? Run \`aom devop
 /** The card a DevOps request was filed for, as plain text for the prompt. */
 function cardSection(card: NonNullable<DevopsShift['card']>): string {
   const lines = [`${card.ref}: ${card.title}`];
+  const client = clientWorkRef(card);
+  if (client) lines.push(workRefLine(client, card.ref));
   const meta = [
     card.cardType ? `type ${card.cardType}` : '',
     card.stage ? `stage ${card.stage}` : '',
@@ -76,10 +79,12 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
     ].join('\n'),
   );
   if (devops.card) {
+    const clientRef = clientWorkRef(devops.card);
     out.push('# The card of this request');
     out.push(
       [
         `This request was filed for card ${devops.card.ref}. You can read and update that one card (no other card):`,
+        ...(clientRef ? [workRefLine(clientRef, devops.card.ref)] : []),
         '- `aom card show` prints the card with its fields and latest comments.',
         '- `aom card comment --note "<text>"` comments on it (what you found or changed, for the card\'s people and agents).',
         '- `aom card update ' +

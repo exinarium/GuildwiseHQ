@@ -13,3 +13,4 @@ export * from './review-task.ts';
 export * from './shift-prompt.ts';
 export * from './standing-orders.ts';
 export * from './untrusted.ts';
+export * from './work-ref.ts';

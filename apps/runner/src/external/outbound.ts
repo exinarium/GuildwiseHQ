@@ -77,7 +77,12 @@ export class OutboundExecutor {
     }
     if (done?.state === 'posted')
       return { ok: true, duplicate: true, ...(done.externalRef ? { externalRef: done.externalRef } : {}) };
-    const leak = checkOutboundLeaks(payload.body, payload.agentNames);
+    // The card's internal key never goes outside: the client knows the work by its ticket.
+    const leak = checkOutboundLeaks(payload.body, payload.agentNames, {
+      refs: [payload.cardRef],
+      projectKey: payload.cardRef.replace(/-P?\d+$/, ''),
+      ticketKey: payload.ref.key,
+    });
     if (!leak.ok) return { ok: false, error: `refused before posting: ${leakMessage(leak.matches)}` };
     const adapter = this.deps.adapters.get(payload.ref.system);
     if (!adapter) return { ok: false, error: `this workstation has no adapter for ${payload.ref.system}` };
