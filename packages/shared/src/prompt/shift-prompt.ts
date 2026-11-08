@@ -3,6 +3,7 @@ import type { CheckEvidence } from '../cards/lean-v6.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderUntrusted } from './untrusted.ts';
+import { clientWorkRef, isPlainTicketKey } from './work-ref.ts';
 
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const list = (v: unknown): string[] =>
@@ -242,6 +243,29 @@ function investigationContext(brief: ShiftBrief): string {
 }
 
 /**
+ * The client's ticket reference of an intake card and how to use it; null for any other card, so its prompt is
+ * unchanged. The reference is outside data: a plain key is shown as a value, anything else inside an untrusted block.
+ */
+function workRefSection(card: ShiftBrief['card']): string | null {
+  const ref = clientWorkRef(card);
+  if (!ref) return null;
+  const plain = isPlainTicketKey(ref);
+  const head = plain
+    ? `This card came from the client's ticket \`${ref}\`: that is the reference of this work outside. \`${card.ref}\` is only the internal board key.`
+    : `This card came from the client's ticket shown below: its key is the reference of this work outside. \`${card.ref}\` is only the internal board key.\n${renderUntrusted('Ticket reference', ref)}`;
+  const r = plain ? `\`${ref}\`` : 'the ticket key';
+  return section(
+    'Work reference',
+    [
+      head,
+      `- Use ${r} in commit messages, branch names, pull request titles and descriptions, and in every text that goes to the client: release notes, changelog lines, ticket comments and status updates.`,
+      `- Never write \`${card.ref}\` in any of these. \`${card.ref}\` is for \`aom\` commands and the card thread only.`,
+      `- A commit message, branch name or pull request text on this card that names \`${card.ref}\` instead of ${r} does not meet this rule (reviewers and testers: flag it).`,
+    ].join('\n'),
+  );
+}
+
+/**
  * Renders the card as a markdown prompt (`-p`): ref, title, type, risk tier, rework round; the card fields;
  * dependencies; all prior handoffs; latest review comments; last thread messages; then the job for this shift
  * (docs/ARCHITECTURE.md section 13.2). Pure and deterministic.
@@ -271,6 +295,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
       ...(card.parent ? [`- Parent card: ${card.parent.ref} ${card.parent.title}`] : []),
     ].join('\n'),
   );
+  parts.push(workRefSection(card));
 
   if (card.cardType === 'feed') parts.push(section('Feed context', feedContext(brief)));
   // Business card types: the fields the person filled in, under their labels (a field from outside stays untrusted).

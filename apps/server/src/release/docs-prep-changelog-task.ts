@@ -7,6 +7,8 @@ import {
   type RunnerToServerOf,
   streamId,
   unreleasedBullets,
+  withClientRefs,
+  workReference,
 } from '@aom/shared';
 import { publicText } from '../blog/releases.ts';
 import { loadCommitAs } from '../commands/commit-as.ts';
@@ -89,6 +91,95 @@ async function writerInput(db: Queryable, run: Row, repo: Row, summary: ReleaseD
   return { uncovered, existing };
 }
 
+interface ChangeCard {
+  /** The card's work reference: its client ticket (`ABC-1`) for an intake card, otherwise its internal ref. */
+  key: string;
+  /** The internal ref (never shown to the writer for an intake card). */
+  ref: string;
+  title: string;
+  client: boolean;
+}
+
+/**
+ * The project's cards a release's merge keys name, by internal ref and, for an intake card, by its client ticket too
+ * (merges name either). The work reference comes from workReference, so an intake card is always shown by its ticket.
+ */
+export async function resolveChangeCards(
+  db: Queryable,
+  projectId: string,
+  keys: readonly string[],
+): Promise<Map<string, ChangeCard>> {
+  const out = new Map<string, ChangeCard>();
+  if (!keys.length) return out;
+  const found = await rows(
+    db,
+    `SELECT ref, title, fields FROM cards WHERE project_id=$1 AND status<>'cancelled'
+        AND (ref = ANY($2) OR coalesce(fields->>'externalRef','') <> '') ORDER BY created_at, ref`,
+    [projectId, [...keys]],
+  );
+  for (const c of found) {
+    const wr = workReference({ ref: c.ref, fields: c.fields });
+    const card: ChangeCard = { key: wr.ref, ref: c.ref, title: c.title, client: wr.isClientRef };
+    out.set(c.ref, card);
+    if (wr.isClientRef && !out.has(wr.ref)) out.set(wr.ref, card);
+  }
+  return out;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The subject with each intake card's internal ref replaced by its ticket, so the writer never sees the internal key. */
+function subjectWithWorkRefs(subject: string, cards: readonly ChangeCard[]): string {
+  let out = subject;
+  for (const c of cards)
+    if (c.client && c.key !== c.ref)
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escapeRe(c.ref)}(?![0-9])`, 'g'), c.key);
+  return out;
+}
+
+/** The changes the writer describes (and the accepted entries are mapped back to): merges with their cards, then commits. */
+async function changeListFor(
+  db: Queryable,
+  run: Row,
+  summary: ReleaseDocsPrepSummary,
+  uncovered: readonly string[],
+): Promise<ReleaseChangelogTask['changes']> {
+  const keys = [...new Set(summary.merges.flatMap((m) => m.cardKeys))];
+  const cards = await resolveChangeCards(db, run.project_id, keys);
+  // Jira keys are indexed upper case (workReference canonicalises them); a merge may name one in lower case.
+  const lookup = (k: string) => cards.get(k) ?? cards.get(k.toUpperCase());
+  const titles = new Map<string, string>();
+  for (const c of summary.cards) if (c.title && !titles.has(c.key)) titles.set(c.key, c.title);
+  const want = new Set(uncovered);
+  const changes: ReleaseChangelogTask['changes'] = [];
+  for (const m of summary.merges)
+    if (want.has(m.sha)) {
+      want.delete(m.sha);
+      const matched: ChangeCard[] = [];
+      const list: ReleaseChangelogTask['changes'][number]['cards'] = [];
+      for (const k of m.cardKeys) {
+        const c = lookup(k);
+        const entry = c
+          ? { key: c.key, title: c.title, ...(c.client ? { client: true } : {}) }
+          : { key: k, title: titles.get(k) ?? null };
+        if (c) matched.push(c);
+        if (!list.some((x) => x.key === entry.key)) list.push(entry);
+      }
+      changes.push({
+        source: m.sha,
+        subject: subjectWithWorkRefs(m.subject, matched),
+        cards: list,
+        areas: [],
+      });
+    }
+  for (const c of summary.commits)
+    if (want.has(c.sha)) {
+      want.delete(c.sha);
+      changes.push({ source: c.sha, subject: c.subject, cards: [], areas: [] });
+    }
+  return changes;
+}
+
 /** The brief of a `release_changelog` shift. Null when the run or repository is gone. */
 export async function buildReleaseChangelogTask(
   db: Queryable,
@@ -101,32 +192,7 @@ export async function buildReleaseChangelogTask(
   if (!summary) return null;
   const { uncovered, existing } = await writerInput(db, run, repo, summary);
   const project = await one(db, 'SELECT name FROM projects WHERE id=$1', [run.project_id]);
-  const keys = [...new Set(summary.merges.flatMap((m) => m.cardKeys))];
-  const titles = new Map<string, string>();
-  if (keys.length)
-    for (const c of await rows(db, 'SELECT ref, title FROM cards WHERE project_id=$1 AND ref = ANY($2)', [
-      run.project_id,
-      keys,
-    ]))
-      titles.set(c.ref, c.title);
-  for (const c of summary.cards) if (c.title && !titles.has(c.key)) titles.set(c.key, c.title);
-  const want = new Set(uncovered);
-  const changes: ReleaseChangelogTask['changes'] = [];
-  for (const m of summary.merges)
-    if (want.has(m.sha)) {
-      want.delete(m.sha);
-      changes.push({
-        source: m.sha,
-        subject: m.subject,
-        cards: m.cardKeys.map((k) => ({ key: k, title: titles.get(k) ?? null })),
-        areas: [],
-      });
-    }
-  for (const c of summary.commits)
-    if (want.has(c.sha)) {
-      want.delete(c.sha);
-      changes.push({ source: c.sha, subject: c.subject, cards: [], areas: [] });
-    }
+  const changes = await changeListFor(db, run, summary, uncovered);
   return {
     runId: run.id,
     repoId: repo.repo_id,
@@ -236,6 +302,8 @@ export async function applyReleaseChangelogReport(
       accepted: false,
       error: `The entries were not accepted. Fix these and report again:\n${check.errors.map((e) => `- ${e}`).join('\n')}`,
     };
+  // The writer never writes keys: the client ticket of each intake card an entry describes is added here.
+  const entries = withClientRefs(check.entries, await changeListFor(tx, run, summary, uncovered));
   const project = await one(tx, 'SELECT key, name FROM projects WHERE id=$1', [run.project_id]);
   await ctx.store.append([taskDone(task, 'done')], { tx });
   const ws = await sendDocsPrepStepCommand(ctx, tx, run, repo, {
@@ -244,14 +312,14 @@ export async function applyReleaseChangelogReport(
     commitAs: (await loadCommitAs(tx, run.project_id)) ?? null,
     changelog: {
       projectName: project?.name ?? '',
-      entries: check.entries,
+      entries,
       proposal: { covered: check.proposal.covered, skipped: check.proposal.skipped },
     },
   });
   deliverLater(ctx, [ws]);
   return {
     accepted: true,
-    message: `${check.entries.length} entr${check.entries.length === 1 ? 'y' : 'ies'} accepted for ${repo.name}.`,
+    message: `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} accepted for ${repo.name}.`,
   };
 }
 

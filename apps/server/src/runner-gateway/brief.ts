@@ -897,6 +897,7 @@ export async function devopsCardBrief(
   }
   return {
     ref: card.ref,
+    ...briefWorkRef(card),
     title: outsideTitle ? renderUntrusted(`${what} subject`, card.title) : card.title,
     cardType: card.card_type,
     stage: card.stage ?? undefined,

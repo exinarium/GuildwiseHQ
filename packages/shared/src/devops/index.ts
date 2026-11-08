@@ -155,6 +155,10 @@ export const DevopsShiftSchema = z.object({
   card: z
     .object({
       ref: z.string(),
+      /** The card's work reference (same as ShiftBrief.card.workRef): the intake ticket key or the internal ref. */
+      workRef: z.string().optional(),
+      /** `workRef` is the client's ticket, not the internal card ref. Absent: older servers. */
+      isClientRef: z.boolean().optional(),
       title: z.string(),
       cardType: z.string().optional(),
       stage: z.string().optional(),

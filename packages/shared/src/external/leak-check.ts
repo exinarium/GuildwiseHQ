@@ -119,9 +119,56 @@ export interface LeakResult {
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Finds internal names and terms in a draft. `agentNames` are the organization's agents (whole word, case-insensitive). */
-export function checkOutboundLeaks(body: string, agentNames: readonly string[] = []): LeakResult {
+/**
+ * The card a draft is written for. Its internal key (`GWP-123`) never goes outside: the client knows the work by its
+ * ticket (`ticketKey`). `projectKey` also refuses any other internal key of the project (`GWP-7`), except when the
+ * ticket is a Jira key with the same prefix: then the client's own keys look the same and only `refs` apply.
+ */
+export interface InternalRefs {
+  refs?: readonly string[];
+  projectKey?: string;
+  ticketKey?: string;
+}
+
+/** True when `ticketKey` is a Jira key whose project prefix is `projectKey` (case-insensitive). */
+const samePrefix = (projectKey: string, ticketKey: string | undefined): boolean =>
+  !!ticketKey && new RegExp(`^${escapeRe(projectKey)}-\\d+$`, 'i').test(ticketKey.trim());
+
+/** Internal card keys in a draft (see InternalRefs). */
+function internalKeyMatches(body: string, internal: InternalRefs): Array<{ at: number; text: string }> {
   const found: Array<{ at: number; text: string }> = [];
+  const ticket = internal.ticketKey?.trim();
+  const label = ticket ? `internal card key (name the ticket ${ticket} instead)` : 'internal card key';
+  const refs = new Set(
+    (internal.refs ?? [])
+      .map((r) => r.trim())
+      .filter((r) => r.length >= 2 && r.toLowerCase() !== ticket?.toLowerCase()),
+  );
+  for (const ref of refs) {
+    const m = new RegExp(`(?<![A-Za-z0-9])${escapeRe(ref)}(?![0-9])`, 'i').exec(body);
+    if (m) found.push({ at: m.index, text: `"${m[0]}" (${label})` });
+  }
+  const key = internal.projectKey?.trim();
+  if (key && /^[A-Za-z][A-Za-z0-9]{0,9}$/.test(key) && !samePrefix(key, ticket)) {
+    for (const m of body.matchAll(new RegExp(`\\b${escapeRe(key)}-P?\\d+\\b`, 'g'))) {
+      if (ticket && m[0].toLowerCase() === ticket.toLowerCase()) continue;
+      found.push({ at: m.index ?? 0, text: `"${m[0]}" (${label})` });
+      break;
+    }
+  }
+  return found;
+}
+
+/**
+ * Finds internal names and terms in a draft. `agentNames` are the organization's agents (whole word, case-insensitive);
+ * `internal` names the card's internal keys, which are refused too.
+ */
+export function checkOutboundLeaks(
+  body: string,
+  agentNames: readonly string[] = [],
+  internal: InternalRefs = {},
+): LeakResult {
+  const found: Array<{ at: number; text: string }> = internalKeyMatches(body, internal);
   for (const name of new Set(agentNames.map((n) => n.trim()).filter((n) => n.length >= 2))) {
     const re = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(name)}(?![\\p{L}\\p{N}_])`, 'giu');
     const common = COMMON_WORD_NAMES.has(name.toLowerCase());
