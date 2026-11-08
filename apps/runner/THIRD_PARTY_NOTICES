@@ -87,3 +87,13 @@ The licence text of each of the components above:
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
+
+
+playwright-core (Apache-2.0)
+  Copyright (c) Microsoft Corporation. Licensed under the Apache License, Version 2.0
+  (https://www.apache.org/licenses/LICENSE-2.0). Used to drive the browser that prints the PDF copy of a form's answers.
+
+Chrome Headless Shell (BSD-3-Clause, with the Chromium third-party notices)
+  Copyright 2015 The Chromium Authors. Downloaded by `guildwise-runner pdf-renderer install` into the runner's data
+  folder, not shipped inside the runner package. Its licence and credits are in the LICENSE.headless_shell file and
+  the ABOUT file of the downloaded browser folder.

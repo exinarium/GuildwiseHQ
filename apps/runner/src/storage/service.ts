@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
-import { type FileHandle, open, rm } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { type FileHandle, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, join, resolve, sep } from 'node:path';
 import {
   CommandPayloadSchemas,
   healthStateForError,
@@ -37,6 +37,7 @@ import {
   type Tokens,
 } from './oauth.ts';
 import { OneDriveConnector, setupOneDrive } from './onedrive.ts';
+import { PdfError, type PdfRenderer } from './pdf.ts';
 import { checkS3Endpoint, S3Connector } from './s3.ts';
 import { type ClamdClient, clamdClient, quarantine, type ScanVerdict } from './scan.ts';
 import { KeyedMutex, StorageStore } from './store.ts';
@@ -75,6 +76,8 @@ export interface StorageServiceDeps {
   scanner?: ClamdClient;
   /** Where the per-submission journal is kept (`<data dir>/state/storage-submissions.json`). Absent: in memory only. */
   journalFile?: string;
+  /** Renders the PDF copy of a form's answers. Absent: the copy is reported as unavailable. */
+  pdf?: PdfRenderer;
   /** Bound for the probe of "Test connection". */
   probeTimeoutMs?: number;
 }
@@ -99,7 +102,11 @@ interface Transfer {
   written?: { path: string; providerId?: string };
   submission?: { orgId: string; formId: string; submissionId: string };
   scan?: { field: string; fileName: string };
+  derive?: { pdf: true };
+  derivedWritten?: { path: string; providerId?: string };
 }
+
+type Derived = NonNullable<Extract<RunnerToServer, { type: 'storage.write.result' }>['derived']>;
 
 const defaultSleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -600,7 +607,10 @@ export class StorageService {
     }
   }
 
-  private result(id: string, r: { reference: StorageReference } | { error: StorageWriteError }): void {
+  private result(
+    id: string,
+    r: { reference: StorageReference; derived?: Derived } | { error: StorageWriteError },
+  ): void {
     this.deps.send('storage.write.result', {
       transferId: id,
       ok: 'reference' in r,
@@ -644,6 +654,7 @@ export class StorageService {
         finished: false,
         ...(m.submission ? { submission: m.submission } : {}),
         ...(m.scan ? { scan: m.scan } : {}),
+        ...(m.derive ? { derive: m.derive } : {}),
       };
       this.transfers.set(t.id, t);
       this.deps.send('storage.write.credit', { transferId: t.id, upTo: STORAGE_WINDOW });
@@ -714,6 +725,12 @@ export class StorageService {
         await this.deleteWritten(t, conn);
         return;
       }
+      const derived = t.derive?.pdf && t.submission ? await this.derivePdf(t, conn, written) : undefined;
+      if (t.finished) {
+        // Aborted while the PDF was being made: the html and the pdf both go.
+        await this.deleteWritten(t, conn);
+        return;
+      }
       t.finished = true;
       const reference: StorageReference = {
         v: 1,
@@ -729,7 +746,7 @@ export class StorageService {
       this.log(
         `storage.write conn=${t.connectionId} kind=${t.kind} size=${t.bytes} ok ${this.now() - t.startedAt}ms`,
       );
-      this.result(t.id, { reference });
+      this.result(t.id, { reference, ...(derived ? { derived } : {}) });
       await this.cleanup(t);
     } catch (err) {
       if (t.finished) return void (await this.cleanup(t));
@@ -742,9 +759,78 @@ export class StorageService {
   }
 
   private async deleteWritten(t: Transfer, conn: StoredConnection): Promise<void> {
-    if (!t.written) return;
-    await this.deleteRef(t.connectionId, conn, t.written);
-    if (t.submission) this.dropJournalEntry(t.submission.submissionId, t.connectionId, t.written.path);
+    for (const w of [t.written, t.derivedWritten]) {
+      if (!w) continue;
+      await this.deleteRef(t.connectionId, conn, w);
+      if (t.submission) this.dropJournalEntry(t.submission.submissionId, t.connectionId, w.path);
+    }
+  }
+
+  /**
+   * Makes the PDF copy of the answers HTML that was just written and puts it next to it. Whatever happens,
+   * the html write stays a success: the outcome goes back in `derived`. One log line, with no content.
+   */
+  private async derivePdf(
+    t: Transfer,
+    conn: StoredConnection,
+    written: { path: string; providerId?: string },
+  ): Promise<Derived> {
+    const sub = t.submission as NonNullable<Transfer['submission']>;
+    const started = this.now();
+    const pdfFile = join(this.deps.spoolDir, `${t.id}.pdf`);
+    let code: 'pdf_unavailable' | 'pdf_failed' | 'pdf_timeout' | 'pdf_write_failed' | undefined;
+    let reference: StorageReference | undefined;
+    try {
+      const budget = Math.min(20_000, t.deadline - this.now() - 3_000);
+      if (budget < 2_000) throw new PdfError('pdf_timeout');
+      if (!this.deps.pdf) throw new PdfError('pdf_unavailable');
+      const html = await readFile(t.file, 'utf8');
+      const signal = abortAfter(budget, t.controller.signal);
+      const bytes = await this.deps.pdf.render(html, signal);
+      await writeFile(pdfFile, bytes, { mode: 0o600 });
+      const sha = createHash('sha256').update(bytes).digest('hex');
+      const name = `${basename(written.path).replace(/\.html?$/i, '')}.pdf`;
+      try {
+        const put = await this.connector(t.connectionId, conn).put(
+          { folder: t.target.folder, name },
+          { file: pdfFile, size: bytes.length, sha256: sha, contentType: 'application/pdf' },
+          abortAfter(Math.max(2_000, t.deadline - this.now()), t.controller.signal),
+        );
+        t.derivedWritten = put;
+        this.journal.add({
+          submissionId: sub.submissionId,
+          connectionId: t.connectionId,
+          path: put.path,
+          ...(put.providerId ? { providerId: put.providerId } : {}),
+        });
+        reference = {
+          v: 1,
+          connectionId: t.connectionId,
+          kind: t.kind,
+          path: put.path,
+          ...(put.providerId ? { providerId: put.providerId } : {}),
+          size: bytes.length,
+          sha256: sha,
+          contentType: 'application/pdf',
+          writtenAt: new Date(this.now()).toISOString(),
+        };
+      } catch {
+        code = 'pdf_write_failed';
+      }
+    } catch (err) {
+      code = err instanceof PdfError ? err.code : 'pdf_failed';
+    } finally {
+      await rm(pdfFile, { force: true });
+    }
+    const line = `storage.pdf conn=${t.connectionId} submission=${sub.submissionId} transfer=${t.id} ${
+      reference ? 'ok' : code
+    } size=${reference?.size ?? 0} ${this.now() - started}ms`;
+    if (reference) {
+      this.log(line);
+      return { pdf: { ok: true, reference } };
+    }
+    this.logWarn(line);
+    return { pdf: { ok: false, code: code ?? 'pdf_failed' } };
   }
 
   private dropJournalEntry(submissionId: string, connectionId: string, path: string): void {

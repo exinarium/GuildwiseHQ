@@ -177,6 +177,7 @@ import { TargetSecrets } from './secrets/targets.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { chromiumPdfRenderer, type PdfRenderer } from './storage/pdf.ts';
 import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
@@ -339,6 +340,7 @@ export class Runner {
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly storage: StorageService;
+  private readonly pdf: PdfRenderer;
   readonly claudeStore: ClaudeCredentialStore;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
@@ -560,6 +562,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
     });
     const quarantineDir = opts.config.uploadScan.quarantineDir;
+    this.pdf = chromiumPdfRenderer({ browsersPath: join(this.paths.root, 'browsers') });
     this.storage = new StorageService({
       secretsDir: this.paths.secrets,
       spoolDir: join(this.paths.root, 'tmp', 'storage'),
@@ -580,6 +583,7 @@ export class Runner {
         quarantineDir: quarantineDir ?? join(this.paths.root, 'quarantine'),
       },
       journalFile: join(this.paths.root, 'state', 'storage-submissions.json'),
+      pdf: this.pdf,
       // Connection, kind, size, outcome and duration only: never a path, a name or content. The scan verdict lines
       // (`storage.scan ...`) are the exception and hold the cleaned-up file name, never content.
       log: (line) => this.log.info(line),
@@ -1184,6 +1188,7 @@ export class Runner {
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
+    this.repairPdfRenderer();
     await this.scan();
     // Backlog #81: temp content left by earlier shifts (and a crashed runner) goes before anything runs.
     await sweepAgentTmps(this.paths, this.supervisor.persistedAgentIds())
@@ -1254,8 +1259,21 @@ export class Runner {
     await this.supervisor.stopAll('manager');
     await this.chat.cancelAll('runner stopped');
     await this.client.stop();
+    await this.pdf.close();
     await this.ipc.stop();
     this.writeStatus(false);
+  }
+
+  /** The PDF browser of a new runner version is fetched in the background; until then copies report 'unavailable'. */
+  private repairPdfRenderer(): void {
+    void (async () => {
+      if ((await this.pdf.status()).ready) return;
+      this.log.info('pdf renderer: browser missing, installing in the background');
+      await this.pdf.install({ withDeps: false, log: () => undefined });
+      this.log.info('pdf renderer: browser installed');
+    })().catch(() =>
+      this.log.warn('pdf renderer: background install failed (run `guildwise-runner pdf-renderer install`)'),
+    );
   }
 
   /** `aom runner status|logs` and the `runner.diagnostics` command: this workstation's status and logs, secrets masked. */

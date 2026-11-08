@@ -60,6 +60,7 @@ import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
+import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
@@ -424,6 +425,16 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
     }
     line(up, 'clamd', up ? `clamd reachable at ${addr}` : `clamd not reachable at ${addr}`);
   }
+  {
+    const st = await chromiumPdfRenderer({ browsersPath: join(paths.root, 'browsers') }).status();
+    line(
+      st.ready ? true : 'warn',
+      'PDF renderer',
+      st.ready
+        ? 'ready (Chrome Headless Shell)'
+        : 'missing — run guildwise-runner pdf-renderer install (PDF copies of form answers stay off until then)',
+    );
+  }
   const claudeBin = config?.runtimes['claude-code'].bin ?? 'claude';
   const c = await execa(claudeBin, ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
     () => undefined,
@@ -528,6 +539,31 @@ function runnerAlive(statusFile: string): boolean {
 }
 
 /** Replaces the runner token. The runner must be stopped: a second connection would supersede the running one. */
+async function pdfRendererCmd(
+  action: string,
+  opts: { dataDir?: string; pairing?: string; withDeps?: boolean },
+): Promise<void> {
+  const r = chromiumPdfRenderer({ browsersPath: join(pairingPaths(opts).root, 'browsers') });
+  try {
+    if (action === 'status') {
+      const st = await r.status();
+      console.log(
+        st.ready
+          ? 'PDF renderer: ready'
+          : 'PDF renderer: missing — run `guildwise-runner pdf-renderer install`',
+      );
+      if (!st.ready) process.exitCode = 1;
+    } else if (action === 'install') {
+      await r.install({ withDeps: !!opts.withDeps, log: (l) => console.log(l) });
+      console.log('PDF renderer: installed');
+    } else {
+      throw new Error('Use `pdf-renderer install` or `pdf-renderer status`.');
+    }
+  } finally {
+    await r.close();
+  }
+}
+
 async function rotateToken(opts: { dataDir?: string; pairing?: string }): Promise<void> {
   const { root, entries } = selectPairings(opts);
   if (entries.length > 1)
@@ -1317,6 +1353,15 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(doctor);
+  program
+    .command('pdf-renderer <action>')
+    .description(
+      'install or check the browser that makes PDF copies of form answers (action: install | status)',
+    )
+    .option('--with-deps', 'also install the system libraries and fonts (Linux, needs sudo)')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(pdfRendererCmd);
   program
     .command('rotate-token')
     .description('replace the runner token with a freshly issued one (stop the runner first)')

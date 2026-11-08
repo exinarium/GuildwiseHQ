@@ -4,10 +4,11 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-Runner 0.1.70.
+Runner 0.1.71.
 
 ### Added
 
+- PDF copy of a public form's answers. Next to the `.json` and `.html` copies, the firm's storage now also gets a `.pdf` with the same base name in the same folder, made on the firm's workstation from the HTML copy it receives (the server never renders, stores or keeps it). The browser that prints it (Chrome Headless Shell through `playwright-core`) runs with scripts and network off, is installed by the Linux and macOS installers in a step that never fails the install, and is repaired by the runner after an update; `guildwise-runner pdf-renderer install|status` and a `doctor` line manage and show it. If the copy cannot be made the submission still succeeds and the desk gets one notice, "PDF copy missing", pointing to the HTML copy. The submissions list shows the PDF entry. New optional `derive` on `storage.write.open` and `derived` on `storage.write.result` (no protocol version change).
 - Optional malware scan of public form uploads, set per workstation (`uploadScan`, off by default). With a clamd running on the workstation, each uploaded file is scanned before it is written to the firm's storage. An infected file, or a scan that cannot run, is never written and the whole submission is taken back; infected files are kept in an owner-only quarantine folder on the workstation. The submitter sees a plain message and keeps their answers. `doctor` and "Test connection" report whether clamd answers.
 
 ### Security

@@ -29,10 +29,18 @@ export interface StorageWriteRequest {
   submission?: { orgId: string; formId: string; submissionId: string };
   /** Set on a public form file answer: the runner scans it when the workstation's upload scan is on. */
   scan?: { field: string; fileName: string };
+  /** Set only on the answers HTML: the runner also writes a PDF copy made from it. */
+  derive?: { pdf: true };
 }
 
+export type StorageDerived = {
+  pdf:
+    | { ok: true; reference: StorageReference }
+    | { ok: false; code: 'pdf_unavailable' | 'pdf_failed' | 'pdf_timeout' | 'pdf_write_failed' };
+};
+
 export type StorageWriteResult =
-  | { ok: true; reference: StorageReference }
+  | { ok: true; reference: StorageReference; derived?: StorageDerived }
   | { ok: false; error: StorageWriteError };
 
 export interface StorageRelayDeps {
@@ -64,7 +72,7 @@ export interface StorageRelayDeps {
 interface Pending {
   workstationId: string;
   onCredit(upTo: number): void;
-  onResult(r: { ok: true; reference: StorageReference } | { ok: false; error: StorageWriteError }): void;
+  onResult(r: StorageWriteResult): void;
   onGone(): void;
 }
 
@@ -89,7 +97,14 @@ export class StorageRelay {
   async write(req: StorageWriteRequest): Promise<StorageWriteResult> {
     const start = this.now();
     let kind: StorageKind | null = null;
-    const finish = async (r: StorageWriteResult): Promise<StorageWriteResult> => {
+    const finish = async (r0: StorageWriteResult): Promise<StorageWriteResult> => {
+      let r = r0;
+      // A PDF receipt for another storage, or of another type, is a failed PDF: the write itself stays ok.
+      if (r.ok && r.derived?.pdf.ok) {
+        const ref = r.derived.pdf.reference;
+        if (ref.connectionId !== req.connectionId || ref.contentType !== 'application/pdf')
+          r = { ...r, derived: { pdf: { ok: false, code: 'pdf_failed' } } };
+      }
       this.deps.log({
         connectionId: req.connectionId,
         kind,
@@ -166,6 +181,7 @@ export class StorageRelay {
         deadlineMs: this.deps.config.writeTimeoutMs,
         ...(req.submission ? { submission: req.submission } : {}),
         ...(req.scan ? { scan: req.scan } : {}),
+        ...(req.derive ? { derive: req.derive } : {}),
       });
       if (!opened)
         return await fail(
@@ -270,11 +286,17 @@ export class StorageRelay {
   onResult(
     workstationId: string,
     transferId: string,
-    r: { ok: boolean; reference?: StorageReference | undefined; error?: StorageWriteError | undefined },
+    r: {
+      ok: boolean;
+      reference?: StorageReference | undefined;
+      error?: StorageWriteError | undefined;
+      derived?: StorageDerived | undefined;
+    },
   ): void {
     const p = this.pending.get(transferId);
     if (!p || p.workstationId !== workstationId) return;
-    if (r.ok && r.reference) p.onResult({ ok: true, reference: r.reference });
+    if (r.ok && r.reference)
+      p.onResult({ ok: true, reference: r.reference, ...(r.derived ? { derived: r.derived } : {}) });
     else
       p.onResult({
         ok: false,

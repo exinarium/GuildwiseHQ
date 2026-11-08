@@ -798,7 +798,16 @@ guildwise-runner status [--data-dir <path>]
 
 Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox). With several pairings it prints one block per pairing (`--pairing <id|name>` picks one); `guildwise-runner pairings` lists them in one line each.
 
-### Troubleshooting
+### PDF copy of form answers
+
+When a public form is submitted, the runner writes the answers as `.json`, `.html` and a `.pdf` with the same base name in the same folder. The PDF is made on this workstation from the HTML it receives; the server never renders or keeps it.
+
+- **Renderer:** Chrome Headless Shell, driven by `playwright-core` (Apache-2.0; the browser is BSD-3-Clause with the Chromium notices). It is downloaded, not shipped in the runner package: about 100 MB to download and about 250 to 300 MB on disk, kept in the `browsers` folder of the runner's data folder. It runs with scripts and network off.
+- **Install:** the Linux and macOS installers do it in a step that never fails the install. On Linux the step also installs the system libraries and `fonts-noto-core` (Arabic, Hebrew, Indic, Thai). If it failed, or after a runner update, run `guildwise-runner pdf-renderer install` (add `--with-deps` on Linux for the libraries and fonts; it needs sudo). The runner also tries a background install on start when the browser is missing. On native Windows (not recommended) run `guildwise-runner pdf-renderer install` once by hand.
+- **Check:** `guildwise-runner pdf-renderer status` and the `PDF renderer` line of `guildwise-runner doctor`.
+- **When it fails:** the submission still succeeds and the JSON, HTML and uploads are written. The desk gets one "PDF copy missing" notice. The runner log has one `storage.pdf` line with the outcome code, size and time, never answer text.
+
+## Troubleshooting
 
 ```sh
 guildwise-runner doctor [--data-dir <path>]

@@ -85,6 +85,8 @@ export const DESK_SUBKIND = {
   formOfflineLink: 'form_offline_link',
   /** A client's secure link could not be sent (hold ran out, mail failed, key unreadable) or expired unused. */
   formOfflineHoldExpired: 'form_offline_hold_expired',
+  /** A public form submission was saved but its PDF copy could not be made (one per submission, an alert). */
+  formPdfMissing: 'form_pdf_missing',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
   /** A card waits at an approval step (workflow `human` step with purpose approval). */

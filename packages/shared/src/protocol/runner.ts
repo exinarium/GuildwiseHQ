@@ -2251,6 +2251,8 @@ export const StorageWriteOpenSchema = msg('storage.write.open', {
   submission: z.object({ orgId: z.uuid(), formId: z.uuid(), submissionId: z.uuid() }).optional(),
   /** Set only on a public form file answer: the runner scans it when its upload scan setting is on. */
   scan: z.object({ field: z.string().max(100), fileName: z.string().max(300) }).optional(),
+  /** Set only on the answers HTML of a public form submission: the runner also writes a PDF made from it. */
+  derive: z.object({ pdf: z.literal(true) }).optional(),
 });
 export const StorageWriteChunkSchema = msg('storage.write.chunk', {
   transferId: z.uuid(),
@@ -2276,6 +2278,18 @@ export const StorageWriteResultSchema = msg('storage.write.result', {
   ok: z.boolean(),
   reference: StorageReferenceSchema.optional(),
   error: StorageWriteErrorSchema.optional(),
+  /** What the runner made from the written file (the PDF copy of the answers HTML). Absent on an old runner. */
+  derived: z
+    .object({
+      pdf: z.discriminatedUnion('ok', [
+        z.object({ ok: z.literal(true), reference: StorageReferenceSchema }),
+        z.object({
+          ok: z.literal(false),
+          code: z.enum(['pdf_unavailable', 'pdf_failed', 'pdf_timeout', 'pdf_write_failed']),
+        }),
+      ]),
+    })
+    .optional(),
 });
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [

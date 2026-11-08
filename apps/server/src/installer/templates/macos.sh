@@ -67,6 +67,13 @@ install_extras() {
   else note "Skipped Docker. You can add it later."; fi
 }
 
+# The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
+install_pdf_renderer() {
+  note "Installing the browser for PDF copies of form answers (a download of roughly 100 MB) ..."
+  if runner pdf-renderer install >/dev/null 2>&1; then good "PDF renderer installed"; return; fi
+  step_warn "Could not install the PDF renderer. PDF copies of form answers stay off until \`guildwise-runner pdf-renderer install\` succeeds."
+}
+
 service_path() {
   printf '%s' "${BIN_DIR}:$(dirname "$(command -v node)"):$(dirname "$(command -v claude 2>/dev/null || echo /usr/local/bin/claude)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
@@ -126,6 +133,7 @@ main() {
   step "Optional extras"; install_extras
   step "Downloading the runner"; install_runner_release
   step "Pairing with ${APP_NAME}"; pair_runner
+  step "Installing the PDF renderer"; install_pdf_renderer
   step "Choosing your code folder"; add_repo_folders
   step "Signing in to Claude"; sign_in_to_claude
   step "Starting the runner and checking everything"
