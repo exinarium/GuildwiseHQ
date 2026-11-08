@@ -175,7 +175,7 @@ async function opencodeRig() {
   return { adapter, launches, start };
 }
 
-function codexRig(sandboxMode: 'harness' | 'native' = 'harness') {
+async function codexRig(sandboxMode: 'harness' | 'native' = 'harness') {
   const root = tmp('aom-codex-root-');
   const home = tmp('aom-codex-home-');
   mkdirSync(join(home, '.codex'), { recursive: true });
@@ -204,6 +204,7 @@ function codexRig(sandboxMode: 'harness' | 'native' = 'harness') {
     },
     runnerPaths(root),
     {
+      store: await storeWith(runnerPaths(root)),
       home,
       parent: { PATH: '/usr/bin:/bin' },
       platform: 'linux',
@@ -291,7 +292,7 @@ describe('the harness adapters pass the shift test services to their launch', ()
   const rigs = {
     gemini: geminiRig,
     opencode: opencodeRig,
-    codex: async () => codexRig('harness'),
+    codex: () => codexRig('harness'),
   };
 
   for (const [name, mk] of Object.entries(rigs)) {
@@ -314,8 +315,8 @@ describe('the harness adapters pass the shift test services to their launch', ()
     });
   }
 
-  it('codex with its native sandbox does not use the egress proxy', () => {
-    expect(codexRig('native').adapter.usesEgressProxy()).toBe(false);
-    expect(codexRig('harness').adapter.usesEgressProxy()).toBe(true);
+  it('codex with its native sandbox does not use the egress proxy', async () => {
+    expect((await codexRig('native')).adapter.usesEgressProxy()).toBe(false);
+    expect((await codexRig('harness')).adapter.usesEgressProxy()).toBe(true);
   });
 });
