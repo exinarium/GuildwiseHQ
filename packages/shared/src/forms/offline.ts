@@ -37,6 +37,8 @@ export interface OfflineNoticeInput {
   recordName?: string | null;
   journeyName?: string | null;
   holdDays?: number;
+  /** The case belongs to a journey wait: the client's earlier personal link no longer works. */
+  journey?: boolean;
 }
 
 /** The desk notification text of a case. Takes no email address, so none can end up in the item. */
@@ -56,12 +58,14 @@ export function offlineNoticeText(c: OfflineNoticeInput): { title: string; body:
     case 'hold_expired':
       return {
         title: `Secure link not sent: ${c.formTitle} (${who})`,
-        body: `Your runner was offline for ${c.holdDays ?? OFFLINE_HOLD_DAYS.default} days; we could not send the secure link${where} and have deleted the email address.`,
+        body: `Your runner was offline for ${c.holdDays ?? OFFLINE_HOLD_DAYS.default} days; we could not send the secure link${where} and have deleted the email address.${c.journey ? ' Open the journey and press "Send a new link" on the waiting step to get a new link for the client.' : ''}`,
       };
     case 'failed':
       return {
         title: `Secure link not sent: ${c.formTitle} (${who})`,
-        body: `We could not email the secure link${where}. The email address has been deleted. Ask the client to open the form again.`,
+        body: c.journey
+          ? `We could not email the secure link${where}. The email address has been deleted and the client's earlier link no longer works. Open the journey and press "Send a new link" on the waiting step, then send the new link to the client yourself.`
+          : `We could not email the secure link${where}. The email address has been deleted. Ask the client to open the form again.`,
       };
     case 'link_expired':
       return {

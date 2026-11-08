@@ -16,8 +16,10 @@ const R1 = '0192f3a0-0000-7000-8000-0000000000c1';
 
 let posts: string[];
 let waits: unknown;
+let role = 'owner';
 beforeEach(() => {
   posts = [];
+  role = 'owner';
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -25,6 +27,7 @@ beforeEach(() => {
         posts.push(url);
         return url.endsWith('/email') ? json({ email: 'ann@client.example' }) : json({ ok: true });
       }
+      if (url.endsWith('/auth/me')) return json({ user: { id: 'u1' }, activeOrg: { id: 'o1', role } });
       if (url.endsWith('/waits')) return json(waits);
       return json({});
     }),
@@ -161,7 +164,7 @@ describe('the desk notice of a case', () => {
     expect(block.textContent).toContain('Rental application');
     expect(block.textContent).toContain('Rentals');
     expect(block.textContent).not.toContain('@');
-    await u.click(screen.getByTestId('form-offline-show'));
+    await u.click(await screen.findByTestId('form-offline-show'));
     expect((await screen.findByTestId('form-offline-email')).textContent).toContain('ann@client.example');
     await u.click(screen.getByTestId('form-offline-resend'));
     await waitFor(() => expect(posts).toContain(`/api/forms/offline-requests/${R1}/resend`));
@@ -171,7 +174,7 @@ describe('the desk notice of a case', () => {
     const u = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     wrap(<FormOfflineLinkBlock item={item()} />);
-    await u.click(screen.getByTestId('form-offline-continue'));
+    await u.click(await screen.findByTestId('form-offline-continue'));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('secure link will stop working'));
     await waitFor(() => expect(posts).toContain(`/api/journey-waits/${W1}/continue`));
     confirm.mockRestore();
@@ -185,5 +188,27 @@ describe('the desk notice of a case', () => {
     first.unmount();
     wrap(<FormOfflineLinkBlock item={item('form_offline_hold_expired')} />);
     expect(screen.queryByTestId('form-offline-show')).toBeNull();
+  });
+
+  it.each([
+    ['owner', true],
+    ['admin', true],
+    ['member', false],
+  ])('shows Show email, Resend and Cancel for a %s: %s', async (r, shown) => {
+    role = r;
+    wrap(<FormOfflineLinkBlock item={item()} />);
+    // Continue journey is not role-gated in the web, so it marks the block as rendered
+    await screen.findByTestId('form-offline-continue');
+    await waitFor(() => {
+      for (const t of ['form-offline-show', 'form-offline-resend', 'form-offline-cancel'])
+        expect(!!screen.queryByTestId(t)).toBe(shown);
+    });
+    expect(screen.getByTestId('form-offline-desk-item').textContent).toContain('Rental application');
+  });
+
+  it('a member sees no action bar on a public-URL case', async () => {
+    role = 'member';
+    wrap(<FormOfflineLinkBlock item={item('form_offline_link', { waitId: '', instanceId: '' })} />);
+    expect(screen.getByTestId('form-offline-desk-item').querySelector('.sticky-actions')).toBeNull();
   });
 });

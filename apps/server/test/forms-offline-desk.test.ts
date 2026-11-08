@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sweepFormsOffline } from '../src/commands/forms-offline.ts';
 import { q as rawQ } from './helpers/db.ts';
 import { messagesTo, waitForMessages } from './helpers/mailpit.ts';
@@ -85,5 +85,45 @@ describe('desk: show email and resend link', () => {
     expect(row).toEqual({ status: 'cancelled', email_enc: null, email_key: null });
     expect((await pf.api('POST', `/api/forms/offline-requests/${id}/email`)).status).toBe(400);
     expect((await pf.api('POST', `/api/forms/offline-requests/${id}/resend`)).status).toBe(400);
+  });
+});
+
+describe('desk: a failing mail transport on Resend', () => {
+  it('answers with a generic 503, logs only a fixed line with the case id, keeps the case and the address, and a later resend works', async () => {
+    const email = `a2f-${randomUUID().slice(0, 8)}@client.example`;
+    const { id, formId } = await sentCase(email);
+    const logFrom = pf.logs.length;
+    const spy = vi
+      .spyOn(ctx().mailer, 'send')
+      .mockRejectedValue(new Error(`550 5.1.1 <${email}>: Recipient address rejected`));
+    const res = await pf.api('POST', `/api/forms/offline-requests/${id}/resend`);
+    spy.mockRestore();
+
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({
+      error: { code: 'mail_failed', message: 'The link could not be sent. Try again later.' },
+    });
+    const body = JSON.stringify(res.body);
+    for (const bad of ['@', '550', 'stack', 'Recipient']) expect(body).not.toContain(bad);
+    const logs = pf.logs.slice(logFrom).join('\n');
+    expect(logs).toContain('offline form link resend failed');
+    expect(logs).toContain(id);
+    expect(logs).not.toContain(email);
+    expect(logs).not.toContain('Recipient');
+
+    const row = (
+      await q('SELECT status, email_enc, resends FROM form_offline_requests WHERE id=$1', [id])
+    )[0];
+    expect(row.status).toBe('sent');
+    expect(row.email_enc).not.toBeNull();
+    expect(row.resends).toBe(0);
+    const events = await q(`SELECT 1 FROM events WHERE type='FormOfflineLinkResent' AND stream_id=$1`, [
+      `form-${formId}`,
+    ]);
+    expect(events).toHaveLength(0);
+
+    const again = await ok<any>(pf.api('POST', `/api/forms/offline-requests/${id}/resend`));
+    expect(again.resends).toBe(1);
+    expect(await messagesTo(email)).toHaveLength(2);
   });
 });
