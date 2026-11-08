@@ -27,7 +27,10 @@ export async function withTx<T>(pool: pg.Pool, fn: (tx: Tx) => Promise<T>): Prom
     await client.query('COMMIT');
     pendingAfterCommit.delete(client);
     // Fire and forget: a failing hook never changes the result of a committed transaction.
-    for (const f of after) void Promise.resolve().then(f).catch(() => undefined);
+    for (const f of after)
+      void Promise.resolve()
+        .then(f)
+        .catch(() => undefined);
     return out;
   } catch (err) {
     try {

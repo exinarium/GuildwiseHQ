@@ -19,10 +19,13 @@ describe('agent handles that are ordinary words', () => {
     'Fixed a crash that Mark reported in the export.',
   ])('rejects "%s"', (t) => expect(scrub(t, mark)).toContain('deny_list'));
 
-  it('rejects @Mark', () => expect(scrub('@Mark added a board filter today.', mark)).toEqual(['not_public', 'deny_list']));
+  it('rejects @Mark', () =>
+    expect(scrub('@Mark added a board filter today.', mark)).toEqual(['not_public', 'deny_list']));
 
   it('still rejects a handle that is not an ordinary word, anywhere', () => {
-    expect(scrub('Katherine made the release flow faster.', { agentHandles: ['Katherine'] })).toContain('deny_list');
+    expect(scrub('Katherine made the release flow faster.', { agentHandles: ['Katherine'] })).toContain(
+      'deny_list',
+    );
   });
 
   it('keeps the strict match for a member with the same name', () => {

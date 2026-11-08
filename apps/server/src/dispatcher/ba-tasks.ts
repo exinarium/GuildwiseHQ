@@ -16,9 +16,10 @@ import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { scopingPlan } from '../commands/spec-card.ts';
 import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
-import { one, rows } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
+import { prepRunEnded } from '../release/docs-prep-changelog.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
 import { accountForAgent, loadProjectAccounts } from './accounts.ts';
 import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from './ba-agent-sql.ts';
@@ -41,6 +42,27 @@ export interface BaTaskDispatch {
  * (no BA hired, none online for 15 minutes, two failed attempts) is done by the server from a template: no agent ever
  * blocks, and the manager is never left uninformed.
  */
+/** Closes a task that is still queued as cancelled, with the reason. */
+async function cancelQueued(ctx: Ctx, t: Row, note: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const cur = await one(tx, `SELECT 1 FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [t.id]);
+    if (!cur) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.baTask(t.id),
+          event: { type: 'BaTaskCompleted', payload: { taskId: t.id, status: 'cancelled', note } },
+          actor: SYSTEM_ACTOR,
+          scope: t.project_id
+            ? projectScope(t.org_id, t.project_id)
+            : { orgId: t.org_id, projectId: null, audience: 'org' },
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
 export async function baTaskPass(
   ctx: Ctx,
   skipAgent: (agentId: string) => boolean = () => false,
@@ -79,32 +101,16 @@ export async function baTaskPass(
         ? await one(ctx.pool, 'SELECT status FROM cards WHERE id=$1', [t.card_id])
         : undefined;
       if (!card || card.status === 'cancelled') {
-        await withAppendTx(ctx.pool, async (tx) => {
-          const cur = await one(tx, `SELECT 1 FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [
-            t.id,
-          ]);
-          if (!cur) return;
-          await ctx.store.append(
-            [
-              {
-                streamId: streamId.baTask(t.id),
-                event: {
-                  type: 'BaTaskCompleted',
-                  payload: {
-                    taskId: t.id,
-                    status: 'cancelled',
-                    note: 'the card was cancelled before the task started',
-                  },
-                },
-                actor: SYSTEM_ACTOR,
-                scope: t.project_id
-                  ? projectScope(t.org_id, t.project_id)
-                  : { orgId: t.org_id, projectId: null, audience: 'org' },
-              },
-            ],
-            { tx },
-          );
-        });
+        await cancelQueued(ctx, t, 'the card was cancelled before the task started');
+        continue;
+      }
+    }
+    // A retired `release_changelog` task of a release prep run that has ended is closed, never dispatched or given to
+    // the fallback. A task of a running run goes on as before.
+    if (t.kind === 'release_changelog' && t.prep_run_id) {
+      const why = await prepRunEnded(ctx.pool, t.prep_run_id);
+      if (why) {
+        await cancelQueued(ctx, t, why);
         continue;
       }
     }

@@ -38,6 +38,7 @@ import {
   changeListFor,
   changelogDenyList,
   changelogWriterInput,
+  prepRunEnded,
   storedChangelogResult,
 } from './docs-prep-changelog.ts';
 
@@ -274,6 +275,33 @@ export interface ReleasePrepDispatch {
 const lastWhy = new Map<string, string>();
 
 /**
+ * A queued task of a run that is no longer running is never dispatched: it is closed as failed with the reason (no
+ * phase finishes, the run is over).
+ */
+async function closeTasksOfEndedRuns(ctx: Ctx): Promise<void> {
+  const stale = await rows(
+    ctx.pool,
+    `SELECT t.id FROM release_docs_prep_tasks t
+       JOIN release_docs_prep_runs u ON u.id = t.run_id AND u.status <> 'running'
+      WHERE t.status = 'queued'`,
+  );
+  for (const t of stale) {
+    await withAppendTx(ctx.pool, async (tx) => {
+      const cur = await one(
+        tx,
+        `SELECT * FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`,
+        [t.id],
+      );
+      if (!cur) return;
+      const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [cur.run_id]);
+      if (!run || run.status === 'running') return;
+      const why = (await prepRunEnded(tx, run.id)) ?? 'the release prep run ended before the task started';
+      await ctx.store.append([taskFinished(run, cur.id, false, why)], { tx });
+    });
+  }
+}
+
+/**
  * Gives queued tasks to an agent on the repository's workstation: one task at a time per (run, repository, phase), in
  * order, and one release_prep shift at a time per agent. The agent's role comes from PREP_TASK_KINDS (the one place a
  * writer is chosen, for every content step). No such agent on the workstation fails the task at once (`no_writer`); a task
@@ -284,6 +312,7 @@ export async function releasePrepTaskPass(
   skipAgent: (agentId: string) => boolean = () => false,
   workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<ReleasePrepDispatch[]> {
+  await closeTasksOfEndedRuns(ctx);
   const now = ctx.clock.now();
   const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(

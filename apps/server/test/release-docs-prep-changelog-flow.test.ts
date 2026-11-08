@@ -9,6 +9,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { runBaTaskFallback } from '../src/commands/ba-tasks.ts';
 import { withAppendTx } from '../src/db/tx.ts';
+import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import { applyLegacyChangelogReport } from '../src/release/docs-prep-legacy.ts';
 import { applyReleasePrepReport, releasePrepTaskPass } from '../src/release/docs-prep-tasks.ts';
@@ -313,6 +314,29 @@ describe('Write changelog: the report', () => {
     expect((await tasks())[0].status).toBe('running');
   });
 
+  it('an agent handle that is an ordinary word is refused only when it names the agent', async () => {
+    await w.hire('Ada', 'ba', 'senior');
+    await w.hire('Mark', 'builder', 'junior');
+    await startToChangelog();
+    const shift = await dispatchTask();
+    const bad = await prepReport(shift, 'prep_done', 'done', {
+      proposal: {
+        entries: [
+          { heading: 'Added', text: 'The agent Mark now retries the export of a board.', sources: [FEAT] },
+        ],
+        skipped: [{ source: CHORE, reason: 'internal' }],
+      },
+    });
+    expect(bad.accepted).toBe(false);
+    const ok = await prepReport(shift, 'prep_done', 'done', {
+      proposal: {
+        entries: [{ heading: 'Added', text: 'Mark items as done from the board.', sources: [FEAT] }],
+        skipped: [{ source: CHORE, reason: 'internal' }],
+      },
+    });
+    expect(ok.accepted).toBe(true);
+  });
+
   it('a report with no proposal is refused', async () => {
     await w.hire('Ada', 'ba', 'senior');
     await startToChangelog();
@@ -405,6 +429,36 @@ describe('a Write changelog BA task queued before the update (legacy)', () => {
     await q(`UPDATE ba_tasks SET status='running' WHERE id=$1`, [taskId]);
     return (await q2(`SELECT * FROM ba_tasks WHERE id=$1`, [taskId]))[0];
   }
+
+  it.each([
+    ['passed', 'finished'],
+    ['failed', 'failed'],
+    ['skipped', 'was cancelled'],
+  ])('a queued task of a run that is %s is closed, not dispatched', async (status, wording) => {
+    const task = await legacyTask();
+    await q(`UPDATE ba_tasks SET status='queued' WHERE id=$1`, [task.id]);
+    await q(`UPDATE release_docs_prep_runs SET status=$1`, [status]);
+    const started = await baTaskPass(w.t.app.ctx);
+    expect(started).toEqual([]);
+    const cur = (await q2(`SELECT * FROM ba_tasks WHERE id=$1`, [task.id]))[0];
+    expect(cur.status).toBe('cancelled');
+    expect(cur.note ?? '').toContain(`release prep run ended (it ${wording})`);
+    expect(
+      (
+        await q2(`SELECT count(*)::int AS n FROM events WHERE type='BaTaskDispatched' AND stream_id=$1`, [
+          `ba-task-${task.id}`,
+        ])
+      )[0].n,
+    ).toBe(0);
+  });
+
+  it('a queued task of a run that is still running is not closed for an ended run', async () => {
+    const task = await legacyTask();
+    await q(`UPDATE ba_tasks SET status='queued' WHERE id=$1`, [task.id]);
+    await baTaskPass(w.t.app.ctx);
+    const cur = (await q2(`SELECT * FROM ba_tasks WHERE id=$1`, [task.id]))[0];
+    expect(cur.note ?? '').not.toContain('release prep run ended');
+  });
 
   it("the fallback cancels the task and fails the run's changelog row with a retry message", async () => {
     const task = await legacyTask();

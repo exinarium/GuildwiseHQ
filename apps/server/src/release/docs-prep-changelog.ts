@@ -116,6 +116,16 @@ export async function coveredSourcesFor(db: Queryable, run: Row, repo: Row): Pro
   );
 }
 
+const RUN_END: Record<string, string> = { passed: 'finished', failed: 'failed', skipped: 'was cancelled' };
+
+/** Why a queued task of a release prep run must not start: the run ended (or is gone). Null while it is running. */
+export async function prepRunEnded(db: Queryable, runId: string): Promise<string | null> {
+  const run = await one(db, 'SELECT status FROM release_docs_prep_runs WHERE id=$1', [runId]);
+  if (!run) return 'the release prep run ended (it no longer exists) before the task started';
+  if (run.status === 'running') return null;
+  return `the release prep run ended (it ${RUN_END[run.status as string] ?? run.status}) before the task started`;
+}
+
 /**
  * Names that must never reach a public entry. `terms` (members, workstations, host names) match as plain words;
  * `agentHandles` are agent names, which the entry check matches by their own rule when they are ordinary words.

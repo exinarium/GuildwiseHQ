@@ -23,7 +23,12 @@ describe('afterCommit', () => {
       log.push('body');
     });
     await tick();
-    expect(log.filter((l) => ['BEGIN', 'body', 'COMMIT', 'hook'].includes(l))).toEqual(['BEGIN', 'body', 'COMMIT', 'hook']);
+    expect(log.filter((l) => ['BEGIN', 'body', 'COMMIT', 'hook'].includes(l))).toEqual([
+      'BEGIN',
+      'body',
+      'COMMIT',
+      'hook',
+    ]);
   });
 
   it('never runs the hook when the transaction rolls back', async () => {

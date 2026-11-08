@@ -3,7 +3,7 @@ import {
   RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
 } from '@aom/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withAppendTx } from '../src/db/tx.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import {
@@ -143,6 +143,48 @@ async function startShift(shiftId: string) {
   r.started(shiftId);
   await until(async () => (await shiftRow(shiftId))?.status === 'running', 3000, 'shift running');
 }
+
+describe('queued tasks of a run that ended', () => {
+  it.each([
+    ['passed', 'finished'],
+    ['failed', 'failed'],
+    ['skipped', 'was cancelled'],
+  ])(
+    'a queued task of a run that is %s is closed with the reason and not dispatched',
+    async (status, wording) => {
+      await q(`UPDATE release_docs_prep_runs SET status=$1`, [status]);
+      const started = await releasePrepTaskPass(w.t.app.ctx);
+      expect(started).toEqual([]);
+      const [t] = await tasks();
+      expect(t.status).toBe('failed');
+      expect(t.note).toContain(`release prep run ended (it ${wording})`);
+      expect(t.code ?? null).toBeNull();
+    },
+  );
+});
+
+describe('commands are delivered after the commit', () => {
+  it('sends the next step command once the report committed, with no timer', async () => {
+    const start = await dispatch();
+    await startShift(start.shiftId);
+    const deliver = vi.spyOn(w.t.app.ctx.services.gateway, 'deliverPending');
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      const { reportId } = r.report(start.shiftId, {
+        kind: 'outcome',
+        outcomeId: 'prep_done',
+        note: 'wrote the forms video',
+        data: { commit: SHA, files: ['e2e/video/forms.spec.ts'] },
+      });
+      await r.waitFor('shift.report.result', (f) => f.reportId === reportId);
+      expect(deliver).toHaveBeenCalledWith(w.workstationId);
+      expect(timer.mock.calls.some((c) => c[1] === 250)).toBe(false);
+    } finally {
+      deliver.mockRestore();
+      timer.mockRestore();
+    }
+  });
+});
 
 describe('a release_prep shift through the gateway', () => {
   it('is started by the dispatcher pass, kept on heartbeat, and its prep done renders the new video', async () => {
