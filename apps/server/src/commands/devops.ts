@@ -28,7 +28,7 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { type Tx, withAppendTx } from '../db/tx.ts';
+import { APPEND_LOCK_ID, type Tx, withAppendTx } from '../db/tx.ts';
 import { COMPUTER_REMOVED, computerRemovedMessage } from '../delivery/computer-removed.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
@@ -66,7 +66,9 @@ const DEVOPS_NAMES = [
 ];
 
 /** First unused DevOps name in the org (retired agents keep their names; numbered variants when the list runs out). */
-async function devopsName(db: Queryable, orgId: string): Promise<string> {
+async function devopsName(db: Queryable, orgId: string, taken: Set<string> = new Set()): Promise<string> {
+  // The append lock serialises name choice with every other writer (re-entrant within this transaction).
+  await db.query('SELECT pg_advisory_xact_lock($1)', [APPEND_LOCK_ID]);
   const used = new Set(
     (await rows<{ n: string }>(db, 'SELECT lower(name) AS n FROM agents WHERE org_id=$1', [orgId])).map(
       (r) => r.n,
@@ -75,7 +77,11 @@ async function devopsName(db: Queryable, orgId: string): Promise<string> {
   for (let round = 1; ; round++) {
     for (const base of DEVOPS_NAMES) {
       const name = round === 1 ? base : `${base} ${round}`;
-      if (!used.has(name.toLowerCase())) return name;
+      const key = name.toLowerCase();
+      if (!used.has(key) && !taken.has(key)) {
+        taken.add(key);
+        return name;
+      }
     }
   }
 }
@@ -92,6 +98,7 @@ export async function devopsHireEvent(
   userId: string,
   orgId: string,
   workstationId: string,
+  taken?: Set<string>,
 ): Promise<AppendInput | null> {
   const role = await loadRole(tx, orgId, DEVOPS_ROLE_KEY);
   if (!role) return null;
@@ -114,7 +121,7 @@ export async function devopsHireEvent(
         orgId,
         hiredByUserId: userId,
         workstationId,
-        name: await devopsName(tx, orgId),
+        name: await devopsName(tx, orgId, taken),
         roleKey: role.key,
         roleVersion: role.version,
         seniority: 'senior',
@@ -166,8 +173,9 @@ export async function hireDevopsForOrgIn(ctx: Ctx, tx: Tx, userId: string, orgId
     [userId, orgId],
   );
   const events: AppendInput[] = [];
+  const taken = new Set<string>();
   for (const w of stations) {
-    const ev = await devopsHireEvent(tx, userId, orgId, w.id);
+    const ev = await devopsHireEvent(tx, userId, orgId, w.id, taken);
     if (ev) events.push(ev);
   }
   if (events.length) await ctx.store.append(events, { tx });
@@ -914,7 +922,14 @@ export function registerDevopsMembershipHook(ctx: Ctx): () => void {
       const p = e.event.payload;
       await withAppendTx(ctx.pool, (tx) => hireDevopsForOrgIn(ctx, tx, p.userId, p.orgId));
     } catch (err) {
-      ctx.log.warn({ err }, 'devops membership hook failed');
+      ctx.log.warn(
+        {
+          err,
+          orgId: e.event.type === 'OrgMemberAdded' ? e.event.payload.orgId : undefined,
+          userId: e.event.type === 'OrgMemberAdded' ? e.event.payload.userId : undefined,
+        },
+        'devops membership hook failed',
+      );
     }
   });
 }

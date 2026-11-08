@@ -17,7 +17,7 @@ import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { conflict, forbidden, notFound } from '../errors.ts';
+import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { TEAM } from '../mail/layout.ts';
 import { newOrgInvitationMail } from '../mail/templates.ts';
@@ -537,7 +537,16 @@ export async function acceptInvitationExisting(
     await ctx.store.append(events, { tx });
     await ensureOrgInbox(ctx, tx, orgId, ctx.config.inbound.domain);
     // Their workstations get this organization's DevOps engineer.
-    await hireDevopsForOrgIn(ctx, tx, session.user.id, orgId);
+    try {
+      await hireDevopsForOrgIn(ctx, tx, session.user.id, orgId);
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      ctx.log.error({ err, orgId, userId: session.user.id }, 'devops hire failed during invitation accept');
+      throw conflict(
+        'devops_hire_failed',
+        'could not set up your DevOps engineers; the invitation is still pending',
+      );
+    }
     return {
       orgId,
       kind: inv.kind as string,
