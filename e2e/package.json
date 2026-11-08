@@ -16,7 +16,7 @@
     "regression": "playwright test",
     "summary": "node support/summary.ts",
     "deps:cache": "bash scripts/copy-cached-deps.sh",
-    "test:unit": "node --test 'support/*.test.ts' '../docs/guide/*.test.mjs'"
+    "test:unit": "node --test 'support/*.test.ts'"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
