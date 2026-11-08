@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AgentPermissions, BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -7,9 +7,11 @@ import {
   buildShiftSettings,
   type ClaudePolicyContext,
   type ClaudeSettings,
+  scopedVaultHidden,
   vaultSiblingMasks,
 } from '../src/adapters/claude-policy.ts';
 import { SECRET_FILE_GLOBS, sandboxReadEntries } from '../src/adapters/read-only-dirs.ts';
+import { cardScopedVaults } from '../src/shifts/supervisor.ts';
 import { readVaultContexts } from '../src/vaults/context.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
@@ -19,7 +21,7 @@ cleanupTmp();
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder')!.permissions as AgentPermissions;
 const ba = BUILTIN_ROLES.find((r) => r.key === 'ba')!.permissions as AgentPermissions;
 
-/** An organization vault: root files, org/, projects/a (with a secret), projects/b and projects/c. */
+/** A git-synced organization vault: .git, root files, org/, projects/a (with a secret), projects/b and projects/c. */
 function orgVault(projects = ['a', 'b', 'c']): string {
   const dir = join(tmp('aom-org-vault-'), 'vault-org');
   const files: Record<string, string> = {
@@ -27,6 +29,8 @@ function orgVault(projects = ['a', 'b', 'c']): string {
     'standing-orders.md': 'rules\n',
     '.env': 'SECRET=1\n',
     'org/people.md': 'people\n',
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    '.git/objects/pack/history.pack': 'every project\n',
   };
   for (const p of projects) {
     files[`projects/${p}/PROJECT.md`] = `# ${p}\n`;
@@ -127,7 +131,7 @@ describe('card shift: the organization vault is read without the other projects'
     // the scoped rules are today's rules plus the sibling denies, nothing removed
     const before = denyRules(shift(v, null));
     expect(scoped.filter((r) => !before.includes(r)).sort()).toEqual(
-      ['projects/b', 'projects/c']
+      ['.git', 'projects/b', 'projects/c']
         .flatMap((p) => [`Read(${ruleAbs(join(v, p))})`, `Read(${ruleAbs(join(v, p))}/**)`])
         .sort(),
     );
@@ -184,6 +188,68 @@ describe('card shift: the organization vault is read without the other projects'
     );
     expect(denyRules(s).some((r) => r.includes(v))).toBe(false);
     expect(denyRead(s).some((r) => r.startsWith(v))).toBe(false);
+  });
+});
+
+describe('card shift: the scoped clone hides its git history and its links', () => {
+  it('the clone’s .git is not readable from the shell or the Read tool (its history holds every project)', () => {
+    const v = orgVault();
+    const s = shift(v, 'projects/a');
+    for (const p of ['.git', '.git/HEAD', '.git/objects/pack/history.pack'])
+      expect(shellReads(s, join(v, p)), p).toBe(false);
+    expect(denyRead(s)).toContain(join(v, '.git'));
+    expect(denyRules(s)).toContain(`Read(${ruleAbs(join(v, '.git'))}/**)`);
+    expect(denyRules(s)).toContain(`Read(${ruleAbs(join(v, '.git'))})`);
+    expect(shellReads(s, join(v, 'org/people.md'))).toBe(true);
+  });
+
+  it('an unscoped clone still opens its .git as before', () => {
+    const v = orgVault();
+    const s = shift(v, null);
+    expect(shellReads(s, join(v, '.git/HEAD'))).toBe(true);
+    expect(denyRead(s)).not.toContain(join(v, '.git'));
+    expect(denyRules(s).some((r) => r.includes(join(v, '.git')))).toBe(false);
+  });
+
+  it('scopedVaultHidden: the clone’s .git plus the other projects', () => {
+    const v = orgVault();
+    expect(scopedVaultHidden({ dir: v, keep: join(v, 'projects/a') }).sort()).toEqual(
+      [join(v, '.git'), join(v, 'projects/b'), join(v, 'projects/c')].sort(),
+    );
+  });
+
+  it('a link at the root or in projects/ is not opened to the shell (its target would be bound)', () => {
+    const v = orgVault();
+    symlinkSync(join(v, 'projects/b'), join(v, 'shortcut'));
+    symlinkSync(join(v, 'projects/c/PROJECT.md'), join(v, 'c.md'));
+    symlinkSync(join(v, 'projects/b'), join(v, 'projects/a-alias'));
+    const s = shift(v, 'projects/a');
+    for (const p of ['shortcut', 'c.md', 'projects/a-alias'])
+      expect(
+        allowRead(s).some((a) => a === join(v, p) || a.startsWith(`${join(v, p)}/`)),
+        p,
+      ).toBe(false);
+    expect(shellReads(s, join(v, 'projects/a/PROJECT.md'))).toBe(true);
+    expect(shellReads(s, join(v, 'README.md'))).toBe(true);
+  });
+});
+
+describe('cardScopedVaults (supervisor): only the organization vault of a card shift is scoped', () => {
+  const ctxs = [
+    { kind: 'org', addDir: '/v/org', folder: 'projects/toy-legacy' },
+    { kind: 'project', addDir: '/v/prj', folder: 'projects/toy' },
+  ];
+  it('a card shift scopes the org vault to the folder the server sent', () => {
+    expect(cardScopedVaults('card', ctxs)).toEqual([
+      { dir: '/v/org', keep: join('/v/org', 'projects', 'toy-legacy') },
+    ]);
+  });
+  it('non-card shifts are not scoped', () => {
+    for (const k of ['question', 'ba_task', 'ceo', 'devops', undefined])
+      expect(cardScopedVaults(k, ctxs), String(k)).toEqual([]);
+  });
+  it('an org vault without a folder is not scoped', () => {
+    expect(cardScopedVaults('card', [{ kind: 'org', addDir: '/v/org' }])).toEqual([]);
   });
 });
 

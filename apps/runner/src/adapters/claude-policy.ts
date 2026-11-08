@@ -135,27 +135,39 @@ export function vaultSiblingMasks(v: ScopedVault): string[] {
 }
 
 /**
- * `sandboxReadEntries` for a scoped vault: the clone opened entry by entry so the masked project folders stay out
- * (allowRead beats denyRead in the sandbox, so allowing the clone whole would re-open them). Secret files stay out as
- * everywhere else. A folder too large to scan is left closed (fail closed, like `sandboxReadEntries`).
+ * Everything of a scoped vault the shift must not read: the other projects' folders and the clone's own git metadata
+ * (`<dir>/.git`: its history holds every project, so `git show HEAD:projects/b/...` would undo the mask). Agents never
+ * need the vault history: vault writes go through `aom` and the runner syncs the clone outside the sandbox.
+ */
+export function scopedVaultHidden(v: ScopedVault): string[] {
+  return [join(resolve(v.dir), '.git'), ...vaultSiblingMasks(v)];
+}
+
+/**
+ * `sandboxReadEntries` for a scoped vault: the clone opened entry by entry so the masked project folders and the
+ * clone's `.git` stay out (allowRead beats denyRead in the sandbox, so allowing the clone whole would re-open them).
+ * Secret files stay out as everywhere else. Symbolic links at the root and in `projects/` are left out too: the sandbox
+ * binds a link's target, so a link into a masked folder would open it. A folder too large to scan is left closed (fail
+ * closed, like `sandboxReadEntries`).
  */
 function scopedVaultReadEntries(v: ScopedVault): string[] {
   const root = resolve(v.dir);
-  const masked = new Set(vaultSiblingMasks(v));
+  const hidden = new Set(scopedVaultHidden(v));
   const projects = join(root, 'projects');
   const open = (dir: string): string[] => {
-    let entries: Array<{ name: string; isDir: boolean }>;
+    let entries: Array<{ name: string; isDir: boolean; isLink: boolean }>;
     try {
       entries = readdirSync(dir, { withFileTypes: true }).map((e) => ({
         name: e.name,
         isDir: e.isDirectory(),
+        isLink: e.isSymbolicLink(),
       }));
     } catch {
       return [];
     }
     return entries.flatMap((e) => {
       const path = join(dir, e.name);
-      if (masked.has(path)) return [];
+      if (hidden.has(path) || e.isLink) return [];
       if (path === projects && e.isDir) return open(path);
       if (e.isDir) return sandboxReadEntries(path) ?? [];
       return isSecretFileName(e.name) ? [] : [path];
@@ -420,11 +432,11 @@ function sandboxBlock(
     const v = scopeOf(d);
     return v ? scopedVaultReadEntries(v) : (sandboxReadEntries(d) ?? []);
   });
-  // the other projects' folders of a scoped vault, named too (they are already outside every allowRead entry)
+  // the other projects' folders and the git metadata of a scoped vault, named too (already outside every allowRead entry)
   denyRead.push(
     ...readDirs.flatMap((d) => {
       const v = scopeOf(d);
-      return v ? vaultSiblingMasks(v) : [];
+      return v ? scopedVaultHidden(v) : [];
     }),
   );
   return {
@@ -595,8 +607,8 @@ function readOnlyDenies(
   return [
     ...dirs.flatMap((d) => [`Edit(${ruleAbs(d)}/**)`, `Edit(${ruleAbs(d)})`]),
     ...secretReadDenies([...dirs, ...(ctx.ownRepoDirs ?? [])]),
-    // a scoped vault: the other projects' folders are not readable (Read, Grep and Glob)
-    ...scoped.flatMap(vaultSiblingMasks).flatMap((p) => [`Read(${ruleAbs(p)}/**)`, `Read(${ruleAbs(p)})`]),
+    // a scoped vault: the other projects' folders and its git metadata are not readable (Read, Grep and Glob)
+    ...scoped.flatMap(scopedVaultHidden).flatMap((p) => [`Read(${ruleAbs(p)}/**)`, `Read(${ruleAbs(p)})`]),
   ];
 }
 
