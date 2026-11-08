@@ -86,3 +86,13 @@ This matches the owner's answer to the GWP-162 question (ledger 28ab23a7), which
 | No customer or pilot data without consent | Blocked: needs the consent record |
 | Appears in the Help blog after publish | Manual post route (d), tester check |
 | Launch articles unchanged, blog-launch.test.ts passes | Guaranteed by not using the launch set |
+
+## Re-check, 2026-11-08 (second design pass)
+
+The card came back to design, but none of the inputs the gate needs are there yet:
+
+- `origin/release/1.6.0` is at `159deee8`. The seven commits after `ce132c10` cover intake ticket references in prompts and outbound drafts, plus release housekeeping. None of them touches rule packs, roles, playbooks, journey templates or the blog. Files that mention "accounting" are the same as in the first pass: `rule-packs.ts`, `roles/business.ts`, `page-help-content.ts`, `api/ledger.ts` and the rule-pack test.
+- The vaults still have no `industry-roadmap.md`, no pilot notes and no consent record. The only "pilot" hit is the code-graph index.
+- There are no card attachments.
+
+The findings, the design and the gate decision above still stand. The card stays blocked (option A) until the owner or BA attaches the three inputs. Running another design pass will not change this.
