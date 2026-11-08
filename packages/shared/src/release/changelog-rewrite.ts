@@ -195,7 +195,7 @@ export function checkChangelog(
     const l = lines[i] as string;
     if (!VERSION_HEADING.test(l) || UNRELEASED_HEADING.test(l) || DATED_VERSION_HEADING.test(l)) continue;
     const version = /^##\s+\[([^\]]+)\]/.exec(l)?.[1] ?? '';
-    if (newestDated < 0 || i < newestDated)
+    if (newestDated >= 0 && i < newestDated)
       errors.push(
         `CHANGELOG.md already has a ## [${version}] section without a date (line ${i + 1}). Ship would treat ${version} as released and ignore Unreleased. Move its entries under ## [Unreleased] and remove the heading, then retry prep.`,
       );
@@ -203,6 +203,10 @@ export function checkChangelog(
   if (opts.version) {
     const re = new RegExp(`^##\\s+\\[${escapeRe(opts.version)}\\]`);
     const at = lines.findIndex((l) => re.test(l));
+    if (at >= 0 && !DATED_VERSION_HEADING.test(lines[at] as string) && newestDated < 0)
+      errors.push(
+        `CHANGELOG.md already has a ## [${opts.version}] section without a date (line ${at + 1}). Ship would treat ${opts.version} as released and ignore Unreleased. Move its entries under ## [Unreleased] and remove the heading, then retry prep.`,
+      );
     if (at >= 0 && DATED_VERSION_HEADING.test(lines[at] as string))
       errors.push(
         `CHANGELOG.md already has a released ## [${opts.version}] section (line ${at + 1}). Entries written now would not be part of ${opts.version}.`,

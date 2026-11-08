@@ -60,3 +60,15 @@ describe('aom report: the BA reporter is retired', () => {
     expect(t.reports).toHaveLength(1);
   });
 });
+
+describe('aom usage text', () => {
+  it('lists the spec-card pair on one clean line and no line starts with a bare pipe', async () => {
+    const { USAGE } = await import('../src/aom/aom-cli.ts');
+    const lines = USAGE.split('\n');
+    expect(lines.some((l) => l.trim().startsWith('|'))).toBe(false);
+    const spec = lines.filter((l) => l.includes('report spec-card'));
+    expect(spec).toHaveLength(1);
+    expect(spec[0]).toContain('report spec-card --file <json> | report spec-card-fail --note "<why>"');
+    expect(USAGE).not.toContain('release-changelog');
+  });
+});
