@@ -5,7 +5,7 @@ import {
   type ReleaseDocsPrepGuideInput,
   releaseVersionFromBranch,
 } from '@aom/shared';
-import { type Queryable, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 /**
  * The server twin of the runner's step handlers: what a content step of Release prep (docs and videos) gets in its

@@ -353,7 +353,7 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
     // The date and release come from the release being prepared, but only a build script that takes the flags
     // can show them (a release branch cut before the flags existed keeps the date written in it).
     const buildText = existsSync(join(wt, build)) ? readFileSyncSafe(join(wt, build)) : '';
-    const pdf = guidePdfMeta(input.data.release, new Date());
+    const pdf = guidePdfMeta(input.release, new Date());
     const buildArgs = [build];
     if (buildText.includes('--date')) {
       buildArgs.push('--date', pdf.date);

@@ -371,7 +371,7 @@ describe("release prep step 'guide'", () => {
   it('passes the run date and the release version to a build script that takes them', async () => {
     const s = setup({ scripts: true, build: 'flags' });
     const e = fakeExec();
-    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+    const { guide } = await analyseThenGuide(s, PROPOSAL, e, {
       release: { version: '1.5.0', date: null, runDate: '2026-11-08' },
     });
     expect(guide.state).toBe('passed');
@@ -390,7 +390,7 @@ describe("release prep step 'guide'", () => {
   it('passes the release date when the release has one, without a note', async () => {
     const s = setup({ scripts: true, build: 'flags' });
     const e = fakeExec();
-    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+    const { guide } = await analyseThenGuide(s, PROPOSAL, e, {
       release: { version: null, date: '2026-12-01', runDate: '2026-11-08' },
     });
     expect(e.calls.map((c) => c.join(' '))).toContain('node docs/guide/build-guide.mjs --date 2026-12-01');
@@ -401,7 +401,7 @@ describe("release prep step 'guide'", () => {
   it('passes no flag to a build script that does not take them, and warns', async () => {
     const s = setup({ scripts: true, build: 'old' });
     const e = fakeExec();
-    const { guide } = await analyseThenGuide(s, fakeModel(), e, {
+    const { guide } = await analyseThenGuide(s, PROPOSAL, e, {
       release: { version: '1.5.0', date: null, runDate: '2026-11-08' },
     });
     expect(e.calls.map((c) => c.join(' '))).toContain('node docs/guide/build-guide.mjs');
