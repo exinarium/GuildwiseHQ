@@ -178,7 +178,7 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   signOff: z.boolean().optional(),
   /** Input of a content step, checked by the step's own schema on the runner. */
   stepInput: z.record(z.string(), z.unknown()).optional(),
-  /** The agent that writes the step's text (model-backed steps only). */
+  /** Retired (GWP-134): the writer is a release prep task now. Accepted and ignored for one version so an older server's command still parses. */
   writer: AgentRuntimeSpecSchema.optional(),
   /** Step 'changelog': the checked entries to merge into Unreleased. */
   changelog: ReleasePrepChangelogPayloadSchema.optional(),
@@ -214,6 +214,9 @@ export const RELEASE_DOCS_PREP_CAPABILITY = 'release-docs-prep:1';
 export const RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY = 'release-docs-prep-changelog:1';
 /** The runner fails a configured, missing user guide instead of skipping it. */
 export const RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY = 'release-docs-prep-guide-path:1';
+
+/** The runner takes the writer work of the content steps as release prep tasks (changelog_entries, guide_edits, new_video). */
+export const RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY = 'release-docs-prep-writer-tasks:1';
 
 /** The largest step output stored (serialised JSON). */
 export const RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES = 64 * 1024;

@@ -120,6 +120,10 @@ export const releaseDocsPrepEvents = [
       note: z.string(),
       commit: z.string().optional(),
       files: z.array(z.string()).default([]),
+      /** Why the task failed when no agent could write it (see prepWriterUnavailable); absent otherwise. */
+      code: z.enum(['no_writer', 'writer_unreachable', 'writer_failed']).optional(),
+      /** The checked proposal of a proposal task (changelog_entries, guide_edits). */
+      result: z.unknown().optional(),
     }),
   ),
   defineEvent(

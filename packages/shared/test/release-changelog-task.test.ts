@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BaTaskKind, baTaskBriefOutcomes } from '../src/phases/index.ts';
-import { commandForOutcome } from '../src/prompt/commands.ts';
+import { BaTaskKind } from '../src/phases/index.ts';
 import {
+  CHANGELOG_WRITER_RULES,
+  type ChangelogEntriesTask,
   checkChangelogProposal,
-  RELEASE_CHANGELOG_OUTCOME,
-  type ReleaseChangelogTask,
-  renderReleaseChangelogInstructions,
   renderReleaseChangelogPrompt,
 } from '../src/release/changelog-task.ts';
 
@@ -129,21 +127,9 @@ describe('checkChangelogProposal', () => {
   });
 });
 
-describe('release_changelog task kind', () => {
-  it('is a BA task kind with a done and a fail outcome and their aom commands', () => {
-    expect(BaTaskKind.parse('release_changelog')).toBe('release_changelog');
-    const outcomes = baTaskBriefOutcomes('release_changelog');
-    expect(outcomes.map((o) => o.id)).toEqual([
-      RELEASE_CHANGELOG_OUTCOME.done,
-      RELEASE_CHANGELOG_OUTCOME.fail,
-    ]);
-    expect(commandForOutcome(outcomes[0] as never)).toContain('aom report release-changelog --file');
-    expect(commandForOutcome(outcomes[1] as never)).toContain('aom report release-changelog-fail --note');
-  });
-
-  const task: ReleaseChangelogTask = {
-    runId: '00000000-0000-4000-8000-000000000001',
-    repoId: '00000000-0000-4000-8000-000000000002',
+describe('changelog_entries task prompt', () => {
+  const task: ChangelogEntriesTask = {
+    kind: 'changelog_entries',
     projectName: 'Toy',
     repoName: 'toy-repo',
     releaseBranch: 'release/1.5.0',
@@ -153,22 +139,19 @@ describe('release_changelog task kind', () => {
     existing: [{ heading: 'Added', text: 'Retire a workstation.' }],
   };
 
+  it('the legacy BA task kind stays parseable but has no brief outcomes any more', () => {
+    expect(BaTaskKind.parse('release_changelog')).toBe('release_changelog');
+  });
+
   it('the prompt numbers the existing entries and lists each change with its id', () => {
     const p = renderReleaseChangelogPrompt(task);
     expect(p).toContain(`id ${A}: Add the export button`);
     expect(p).toContain('1. [Added] Retire a workstation.');
   });
 
-  it('the instructions name the headings, the playbook step and the report command', () => {
-    const outcomes = baTaskBriefOutcomes('release_changelog');
-    const text = renderReleaseChangelogInstructions(
-      { agent: { name: 'Ada' }, role: { instructions: 'Be a BA.', coreRules: [] } },
-      task,
-      outcomes,
-      (o) => commandForOutcome(o as never),
-    );
+  it('the writer rules name the headings and the playbook step', () => {
+    const text = CHANGELOG_WRITER_RULES.join('\n');
     expect(text).toContain('Added, Changed, Deprecated, Removed, Fixed, Security');
     expect(text).toContain('step-05-changelog-unattended.md');
-    expect(text).toContain('aom report release-changelog --file');
   });
 });
