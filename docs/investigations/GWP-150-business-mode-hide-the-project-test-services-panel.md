@@ -113,6 +113,20 @@ small separate change. Even then, the server refusal ACs should be dropped, not 
 Because this goes against the card's written ACs and a later owner decision, the choice is put to the owner rather
 than decided in design.
 
+## Decision (2026-11-08)
+
+The owner chose **o1: close GWP-150 as superseded by views and build nothing.**
+
+- The pre-check found Test services gated on `traits.usesRepos` (`ProjectSettings.tsx:453`), the same gate as its
+  neighbours (Full suite, Code map, Merging, Manual QA). It was re-checked at the end of design and is unchanged.
+- Nothing links to `#test-services` (no TOC entry, no in-app link); a deep link is harmless.
+- `setTestServices` has no mode check, by design (`f14efb4d`).
+- The card's goal (keeping developer surfaces away from business users) is now handled per member by the view.
+- No code change: the web, the server, the runner, the `SetTestServicesRequest` contract and stored test-service
+  settings all stay as they are.
+- If Test services should be tucked away for Business-view members, that is a new design decision that changes the
+  views rule, and it needs a new card (o2/o2b above are the starting point).
+
 ## Acceptance criteria against the options
 
 | AC | o1 (close) | o2 (hide in Business view, web only) |
