@@ -41,6 +41,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { loadReleaseReadiness } from './docs-prep-auto.ts';
 import { storedStepOutput } from './docs-prep-changelog.ts';
 import {
   PHASE_FAILURE_HOOKS,
@@ -50,7 +51,6 @@ import {
   type ServerPhaseOutcome,
 } from './docs-prep-phases.ts';
 import { configuredGuidePaths, DOCS_PREP_STEP_HOOKS, guidePathFor } from './docs-prep-steps.ts';
-import { loadReleaseReadiness } from './docs-prep-auto.ts';
 import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
