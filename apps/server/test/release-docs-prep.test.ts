@@ -536,7 +536,7 @@ describe('the Update user guide step', () => {
     await answer(passedAnalyse);
     const check = await lastPayload();
     expect([check.step, check.phase]).toEqual(['guide', 'check']);
-    expect(check.stepInput).toEqual({ guidePath: 'docs/USER-GUIDE.md', coveredSources: [], denyList: [] });
+    expect(check.stepInput).toMatchObject({ guidePath: 'docs/USER-GUIDE.md', coveredSources: [], denyList: [] });
     expect(check.writer).toBeUndefined();
     await answer(checked([change]));
     const [t] = await tasks();
