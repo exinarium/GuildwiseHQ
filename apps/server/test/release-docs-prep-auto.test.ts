@@ -67,7 +67,7 @@ const settings = (body: Record<string, unknown>, cookie?: string) =>
   owner(
     'PUT',
     `${base()}/settings`,
-    { enabled: true, steps: { changelog: false, guide: false }, ...body },
+    { enabled: true, steps: { changelog: false, guide: false, help: false }, ...body },
     cookie,
   );
 
