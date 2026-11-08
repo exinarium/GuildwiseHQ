@@ -84,6 +84,16 @@ The card came back to design with nothing new attached. Re-checked against `orig
 
 The decision on the card (keep blocked until the owner or BA attaches the roadmap, anonymised pilot notes and the consent record) still applies. The findings, placement and build design above are unchanged. The card must not go to build until that material is attached.
 
+## Re-check, 2026-11-08 (third design pass)
+
+The card came back to design again with nothing new attached. Re-checked against `origin/release/1.6.0` at 5471bd37:
+
+- The 10 commits since 285e8e1d cover intake ticket references in prompts and drafts, per-kind relay body limits and the Business view Test services panel. In the relevant areas only `apps/server/src/commands/drafts.ts`, `leak-check.ts` and `outbox.ts` changed, and none of them touches rule packs, roles, playbooks, journey templates or the blog.
+- `git grep -i "real estate|estate agen|real_estate"` on release/1.6.0 still finds only `packages/shared/src/ledger/rule-packs.ts`, the ledger API type and two investigation docs. There is still no real estate playbook or role.
+- Neither knowledge vault mentions `industry-roadmap.md`, real estate or pilots, and the card has no attachments.
+
+Nothing in the findings, placement or build design changes. Each time the "keep blocked" question is answered, the card returns to design, so another design pass cannot move it on. What it needs is an owner action: attach the inputs, re-scope (option B), or close (option C).
+
 ## Acceptance criteria mapping
 
 | AC | Status |
