@@ -116,30 +116,49 @@ export async function coveredSourcesFor(db: Queryable, run: Row, repo: Row): Pro
   );
 }
 
-/** Names that must never reach a public entry: agents, members, workstations and their host names of the organisation. */
-export async function changelogDenyList(db: Queryable, orgId: string): Promise<string[]> {
-  const out = new Set<string>();
-  const add = (v: unknown) => {
+const RUN_END: Record<string, string> = { passed: 'finished', failed: 'failed', skipped: 'was cancelled' };
+
+/** Why a queued task of a release prep run must not start: the run ended (or is gone). Null while it is running. */
+export async function prepRunEnded(db: Queryable, runId: string): Promise<string | null> {
+  const run = await one(db, 'SELECT status FROM release_docs_prep_runs WHERE id=$1', [runId]);
+  if (!run) return 'the release prep run ended (it no longer exists) before the task started';
+  if (run.status === 'running') return null;
+  return `the release prep run ended (it ${RUN_END[run.status as string] ?? run.status}) before the task started`;
+}
+
+/**
+ * Names that must never reach a public entry. `terms` (members, workstations, host names) match as plain words;
+ * `agentHandles` are agent names, which the entry check matches by their own rule when they are ordinary words.
+ */
+export async function changelogDenyList(
+  db: Queryable,
+  orgId: string,
+): Promise<{ terms: string[]; agentHandles: string[] }> {
+  const terms = new Set<string>();
+  const agents = new Set<string>();
+  const add = (into: Set<string>, v: unknown) => {
     if (typeof v !== 'string') return;
     const t = v.trim();
-    if (t.length >= 3) out.add(t);
+    if (t.length >= 3) into.add(t);
   };
-  for (const a of await rows(db, 'SELECT name FROM agents WHERE org_id=$1', [orgId])) add(a.name);
+  for (const a of await rows(db, 'SELECT name FROM agents WHERE org_id=$1', [orgId])) add(agents, a.name);
   for (const u of await rows(
     db,
     `SELECT u.display_name FROM users u JOIN org_members m ON m.user_id = u.id WHERE m.org_id=$1`,
     [orgId],
   ))
-    add(u.display_name);
+    add(terms, u.display_name);
   for (const w of await rows(
     db,
     `SELECT w.name, w.hostname FROM workstations w JOIN org_members m ON m.user_id = w.user_id WHERE m.org_id=$1`,
     [orgId],
   )) {
-    add(w.name);
-    add(w.hostname);
+    add(terms, w.name);
+    add(terms, w.hostname);
   }
-  return [...out];
+  const lower = new Set([...terms].map((t) => t.toLowerCase()));
+  // A handle that is also a member, workstation or host name stays a plain term: the strict match wins.
+  return { terms: [...terms], agentHandles: [...agents].filter((h) => !lower.has(h.toLowerCase())) };
 }
 
 /** The changes no earlier run wrote, and the bullets already under Unreleased (from the facts at the analysed head). */

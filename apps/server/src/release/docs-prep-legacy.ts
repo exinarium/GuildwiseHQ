@@ -3,7 +3,7 @@ import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { ReportResult } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
-import type { Tx } from '../db/tx.ts';
+import { afterCommit, type Tx } from '../db/tx.ts';
 import { advance } from './docs-prep.ts';
 
 /**
@@ -67,9 +67,9 @@ async function cancel(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
   );
   const workstations = await advance(ctx, tx, run.id);
   for (const w of new Set(workstations))
-    setTimeout(() => {
+    afterCommit(tx, () => {
       void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
-    }, 250);
+    });
 }
 
 /** A report of a `release_changelog` BA task queued before the upgrade. */

@@ -29,7 +29,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import { orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { type Tx, withAppendTx } from '../db/tx.ts';
+import { afterCommit, type Tx, withAppendTx } from '../db/tx.ts';
 import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
@@ -38,6 +38,7 @@ import {
   changeListFor,
   changelogDenyList,
   changelogWriterInput,
+  prepRunEnded,
   storedChangelogResult,
 } from './docs-prep-changelog.ts';
 
@@ -205,19 +206,13 @@ async function afterTaskFinished(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
     { tx },
   );
   const { advance } = await import('./docs-prep.ts');
-  scheduleDelivery(ctx, await advance(ctx, tx, run.id));
+  scheduleDelivery(ctx, tx, await advance(ctx, tx, run.id));
 }
 
-/** Commands queued inside a transaction are delivered once it has committed (the pass flushes too). */
-const toDeliver = new Set<string>();
-function scheduleDelivery(ctx: Ctx, workstations: string[]): void {
-  for (const w of workstations) toDeliver.add(w);
-  if (workstations.length > 0) setTimeout(() => flushDelivery(ctx), 250).unref?.();
-}
-function flushDelivery(ctx: Ctx): void {
-  const ws = [...toDeliver];
-  toDeliver.clear();
-  for (const w of ws) void Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined);
+/** Commands queued inside a transaction are delivered once it has committed (never when it rolls back). */
+function scheduleDelivery(ctx: Ctx, tx: Tx, workstations: string[]): void {
+  for (const w of new Set(workstations))
+    afterCommit(tx, () => Promise.resolve(ctx.services.gateway.deliverPending(w)).catch(() => undefined));
 }
 
 function taskFinished(
@@ -280,6 +275,33 @@ export interface ReleasePrepDispatch {
 const lastWhy = new Map<string, string>();
 
 /**
+ * A queued task of a run that is no longer running is never dispatched: it is closed as failed with the reason (no
+ * phase finishes, the run is over).
+ */
+async function closeTasksOfEndedRuns(ctx: Ctx): Promise<void> {
+  const stale = await rows(
+    ctx.pool,
+    `SELECT t.id FROM release_docs_prep_tasks t
+       JOIN release_docs_prep_runs u ON u.id = t.run_id AND u.status <> 'running'
+      WHERE t.status = 'queued'`,
+  );
+  for (const t of stale) {
+    await withAppendTx(ctx.pool, async (tx) => {
+      const cur = await one(
+        tx,
+        `SELECT * FROM release_docs_prep_tasks WHERE id=$1 AND status='queued' FOR UPDATE`,
+        [t.id],
+      );
+      if (!cur) return;
+      const run = await one(tx, 'SELECT * FROM release_docs_prep_runs WHERE id=$1', [cur.run_id]);
+      if (!run || run.status === 'running') return;
+      const why = (await prepRunEnded(tx, run.id)) ?? 'the release prep run ended before the task started';
+      await ctx.store.append([taskFinished(run, cur.id, false, why)], { tx });
+    });
+  }
+}
+
+/**
  * Gives queued tasks to an agent on the repository's workstation: one task at a time per (run, repository, phase), in
  * order, and one release_prep shift at a time per agent. The agent's role comes from PREP_TASK_KINDS (the one place a
  * writer is chosen, for every content step). No such agent on the workstation fails the task at once (`no_writer`); a task
@@ -290,7 +312,7 @@ export async function releasePrepTaskPass(
   skipAgent: (agentId: string) => boolean = () => false,
   workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<ReleasePrepDispatch[]> {
-  flushDelivery(ctx);
+  await closeTasksOfEndedRuns(ctx);
   const now = ctx.clock.now();
   const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
@@ -649,11 +671,13 @@ async function checkPrepProposal(
   if (!run || !repo || !summary?.success)
     return { ok: false, error: 'the change summary of this run is gone: report that nothing can be written' };
   const { uncovered, existing } = await changelogWriterInput(tx, run, repo, summary.data);
+  const names = await changelogDenyList(tx, run.org_id);
   const check = checkChangelogProposal(proposal, {
     uncovered,
     existingCount: existing.length,
     publicText,
-    denyList: await changelogDenyList(tx, run.org_id),
+    denyList: names.terms,
+    agentHandles: names.agentHandles,
   });
   if (!check.ok)
     return {
