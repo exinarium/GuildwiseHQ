@@ -2,6 +2,9 @@ import {
   type ApiKey,
   ApiKeyAuditRowSchema,
   ApiKeySchema,
+  type BlogImageUploaded,
+  BlogImageUploadedSchema,
+  type BlogOriginKind,
   type BlogPost,
   BlogPostSchema,
   type BlogSettings,
@@ -15,6 +18,7 @@ import {
   type CreateBlogTopicRequest,
   CreatedApiKeySchema,
   DigestPreferenceSchema,
+  type ManualPostRequest,
   type PatchBlogSettingsRequestSchema,
   type PatchBlogWriterRequest,
   PlatformBlogListSchema,
@@ -26,7 +30,7 @@ import {
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { del, get, patch, post, put, qs } from '../client.ts';
+import { del, get, patch, post, put, qs, upload } from '../client.ts';
 
 // ---- Help > Blog (any signed-in person)
 
@@ -72,10 +76,10 @@ const SocialSchema = z.object({
 const PlatformBlogSchema = PlatformBlogListSchema.extend({ social: SocialSchema });
 export type PlatformBlog = z.infer<typeof PlatformBlogSchema>;
 
-export function usePlatformBlog(status?: string) {
+export function usePlatformBlog(status?: string, origin?: BlogOriginKind) {
   return useQuery({
-    queryKey: ['platform', 'blog', 'list', status ?? ''],
-    queryFn: () => get(`/platform/blog${qs({ status })}`, PlatformBlogSchema),
+    queryKey: ['platform', 'blog', 'list', status ?? '', origin ?? ''],
+    queryFn: () => get(`/platform/blog${qs({ status, origin })}`, PlatformBlogSchema),
     refetchInterval: 30_000,
   });
 }
@@ -115,6 +119,17 @@ function useBlogMutation<V, R = unknown>(fn: (v: V) => Promise<R>) {
 export const useEditPost = (id: string) =>
   useBlogMutation((v: Partial<Omit<BlogPost, 'id'>>) =>
     patch(`/platform/blog/posts/${id}`, v, BlogPostSchema),
+  );
+/** An article a person writes in the authoring view (the writer's posts use `useEditPost`). */
+export const useCreateManualPost = () =>
+  useBlogMutation((v: ManualPostRequest) => post('/platform/blog/manual', v, BlogPostSchema));
+export const useUpdateManualPost = (id: string) =>
+  useBlogMutation((v: ManualPostRequest) => put(`/platform/blog/manual/${id}`, v, BlogPostSchema));
+/** Uploads one image of the article; the answer carries the Markdown to put in the body. */
+export const useUploadBlogImage = (postId: string) =>
+  useBlogMutation(
+    async (file: File): Promise<BlogImageUploaded> =>
+      BlogImageUploadedSchema.parse(await upload(`/platform/blog/posts/${postId}/images`, file)),
   );
 export const usePublishPost = (id: string) =>
   useBlogMutation(() => post(`/platform/blog/posts/${id}/publish`, undefined, BlogPostSchema));

@@ -57,6 +57,7 @@ import { Projects } from './pages/Projects.tsx';
 import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
 import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
 import { PlatformBlog } from './pages/platform/PlatformBlog.tsx';
+import { PlatformBlogArticle } from './pages/platform/PlatformBlogArticle.tsx';
 import { PlatformBlogPost } from './pages/platform/PlatformBlogPost.tsx';
 import { PlatformInbound } from './pages/platform/PlatformInbound.tsx';
 import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
@@ -208,6 +209,7 @@ export const routes = [
           { path: '/platform/invitations', element: <PlatformInvitations /> },
           { path: '/platform/users', element: <PlatformUsers /> },
           { path: '/platform/blog', element: <PlatformBlog /> },
+          { path: '/platform/blog/new', element: <PlatformBlogArticle /> },
           { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
           { path: '/platform/api-keys', element: <PlatformApiKeys /> },
           { path: '/platform/runners', element: <PlatformRunners /> },

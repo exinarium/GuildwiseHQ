@@ -1,4 +1,5 @@
 import {
+  BLOG_IMAGE,
   BlogContentSchema,
   ConnectSocialChannelRequestSchema,
   CreateApiKeyRequestSchema,
@@ -7,6 +8,7 @@ import {
   EditBlogPostRequestSchema,
   EditSocialPostRequestSchema,
   IdParamsSchema,
+  ManualPostRequestSchema,
   PatchBlogSettingsRequestSchema,
   PatchBlogWriterRequestSchema,
   PlatformBlogQuerySchema,
@@ -35,6 +37,7 @@ import {
 } from '../commands/blog.ts';
 import { digestTestMail } from '../commands/blog-digest.ts';
 import { apiKeyAudit, createApiKey, listApiKeys, revokeApiKey } from '../commands/blog-keys.ts';
+import { createManualPost, updateManualPost, uploadBlogImage } from '../commands/blog-manual.ts';
 import {
   connectChannel,
   disconnectChannel,
@@ -66,7 +69,7 @@ export function blogPlatformRoutes(ctx: Ctx) {
     app.get('/api/platform/blog', { schema: { querystring: PlatformBlogQuerySchema } }, async (req) => {
       await requireSuperAdmin(ctx, req);
       return {
-        posts: await listPosts(ctx, { status: req.query.status, limit: 200 }),
+        posts: await listPosts(ctx, { status: req.query.status, origin: req.query.origin, limit: 200 }),
         pending: await pendingCount(ctx),
         settings: await blogSettings(ctx),
         social: { channels: await listChannels(ctx), ...(await socialProblems(ctx)) },
@@ -107,6 +110,45 @@ export function blogPlatformRoutes(ctx: Ctx) {
       const { post } = await submitPost(ctx, req.body, { userId: s.user.id }, 'draft');
       reply.code(201);
       return post;
+    });
+
+    // A hand-written article (the authoring view): looser limits than the writer's, origin kind 'manual'.
+    app.post(
+      '/api/platform/blog/manual',
+      { schema: { body: ManualPostRequestSchema } },
+      async (req, reply) => {
+        const s = await requireSuperAdmin(ctx, req);
+        const post = await createManualPost(ctx, s.user, req.body);
+        reply.code(201);
+        return post;
+      },
+    );
+    app.put(
+      '/api/platform/blog/manual/:id',
+      { schema: { params: IdParamsSchema, body: ManualPostRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return updateManualPost(ctx, s.user, req.params.id, req.body);
+      },
+    );
+    // Images travel as the raw request body, like the document upload: the routes of this plugin only.
+    await fastify.register(async (inner) => {
+      const limit = BLOG_IMAGE.maxBytes + 1024;
+      inner.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: limit }, (_req, body, done) =>
+        done(null, body),
+      );
+      typed(inner).post(
+        '/api/platform/blog/posts/:id/images',
+        { schema: { params: IdParamsSchema }, bodyLimit: limit },
+        async (req, reply) => {
+          const s = await requireSuperAdmin(ctx, req);
+          if (!Buffer.isBuffer(req.body))
+            throw badRequest('file_required', 'send the image as the request body');
+          const image = await uploadBlogImage(ctx, s.user, req.params.id, req.body);
+          reply.code(201);
+          return image;
+        },
+      );
     });
 
     app.patch(

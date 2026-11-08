@@ -38,6 +38,20 @@ export const BLOG_LIMITS = {
   writesPerHour: 10,
 } as const;
 
+/** Hand-written articles: looser than the writer's limits (a person's short note is fine), same maxima. */
+export const MANUAL_POST_LIMITS = { titleMin: 3, summaryMin: 20, bodyMin: 1, authorMax: 80 } as const;
+export const BLOG_IMAGE = {
+  maxBytes: 5 * 1024 * 1024,
+  perPost: 50,
+  types: { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' },
+} as const;
+/** The only image URL the blog Markdown renders: an uploaded blog image on this site. */
+export const BLOG_IMAGE_SRC_RE =
+  /^\/blog\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp|gif)$/;
+/** Where an article came from: the blog writer (API or hosted job) or a person in the platform UI. */
+export const BLOG_ORIGIN_KINDS = ['writer', 'manual'] as const;
+export type BlogOriginKind = (typeof BLOG_ORIGIN_KINDS)[number];
+
 export const SOCIAL_NETWORKS = ['facebook', 'linkedin', 'x', 'bluesky'] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 

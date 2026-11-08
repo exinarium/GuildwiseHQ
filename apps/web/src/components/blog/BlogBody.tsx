@@ -40,6 +40,16 @@ function Inline({ c }: { c: MdInline[] }): ReactNode {
             <Inline c={n.c} />
           </a>
         );
+      case 'img':
+        return (
+          <img
+            key={key}
+            src={n.src}
+            alt={n.alt}
+            loading="lazy"
+            className="my-3 h-auto max-w-full rounded-control"
+          />
+        );
       default:
         return null;
     }

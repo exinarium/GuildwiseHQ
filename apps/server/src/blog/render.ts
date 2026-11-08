@@ -48,6 +48,7 @@ h2{font-size:1.5rem;margin:2em 0 .5em;line-height:1.3}h3{font-size:1.2rem;margin
 .tags a.on{background:var(--brand);color:var(--brand-fg)}
 .pager{display:flex;justify-content:space-between;margin-top:32px}
 article{max-width:720px;margin:0 auto}
+article p img{display:block;max-width:100%;height:auto;border-radius:8px;margin:16px auto}
 article img.cover{width:100%;height:auto;aspect-ratio:1200/630;border-radius:12px;margin:20px 0;background:var(--sunken)}
 article pre{background:var(--sunken);padding:14px;border-radius:8px;overflow:auto;font-size:.9rem}
 article code{background:var(--sunken);padding:1px 5px;border-radius:4px;font-size:.92em}
@@ -149,7 +150,7 @@ function tagList(tags: string[], active?: string): string {
 function card(origin: string, p: PublicBlogPost): string {
   return `<article class="card"><a href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(coverUrl(origin, p.coverImage.defaultKey))}" alt="" loading="lazy" width="1200" height="630"></a>
 <div class="body">${tagList(p.tags)}<h2><a href="/blog/${esc(p.slug)}">${esc(p.title)}</a></h2><p>${esc(p.summary)}</p>
-<div class="meta"><time datetime="${esc(p.publishedAt)}">${esc(fmtDate(p.publishedAt))}</time> &middot; ${p.readingMinutes} min read</div></div></article>`;
+<div class="meta">${p.author ? `${esc(p.author)} &middot; ` : ''}<time datetime="${esc(p.publishedAt)}">${esc(fmtDate(p.publishedAt))}</time> &middot; ${p.readingMinutes} min read</div></div></article>`;
 }
 
 export function listPage(
@@ -216,16 +217,17 @@ export function postPage(
   const sources = post.sources.length
     ? `<h2>Sources</h2><ol class="sources">${post.sources.map((s) => `<li><a href="${esc(s.url)}" rel="nofollow noopener noreferrer" target="_blank">${esc(s.title)}</a></li>`).join('')}</ol>`
     : '';
+  const manual = post.origin === 'manual';
   const by = [disclosure.agentName, disclosure.model].filter(Boolean).join(', ');
   const html = `<article><p class="meta"><a href="/blog">&larr; All articles</a></p>
 <h1>${esc(post.title)}</h1>
-<p class="meta">${esc(BLOG_AUTHOR)} &middot; <time datetime="${esc(post.publishedAt)}">${esc(fmtDate(post.publishedAt))}</time> &middot; ${post.readingMinutes} min read</p>
+<p class="meta">${esc(post.author || BLOG_AUTHOR)} &middot; <time datetime="${esc(post.publishedAt)}">${esc(fmtDate(post.publishedAt))}</time> &middot; ${post.readingMinutes} min read</p>
 ${tagList(post.tags)}
 <img class="cover" src="${esc(image)}" alt="${esc(post.coverImage.alt)}" width="1200" height="630">
 ${videoEmbedHtml(video)}
 ${renderMarkdownHtml(post.bodyMarkdown)}
 ${sources}
-<p class="disclosure">This article was written by an AI agent for Guildwise HQ${by ? ` (${esc(by)})` : ''} and is reviewed against its sources.</p>
+${manual ? '' : `<p class="disclosure">This article was written by an AI agent for Guildwise HQ${by ? ` (${esc(by)})` : ''} and is reviewed against its sources.</p>`}
 <div class="cta-box"><strong>Many hands. One master.</strong><p>Guildwise HQ lets one person run an organization of AI agents, with a board, a desk for decisions and a full record of the work.</p><a class="btn" href="/">See how Guildwise HQ works</a></div>
 </article>`;
   return layout(
@@ -248,7 +250,9 @@ ${sources}
         dateModified: post.updatedAt,
         image: [image],
         mainEntityOfPage: canonical,
-        author: { '@type': 'Organization', name: BLOG_AUTHOR },
+        author: manual
+          ? { '@type': 'Person', name: post.author }
+          : { '@type': 'Organization', name: BLOG_AUTHOR },
         publisher: {
           '@type': 'Organization',
           name: 'Guildwise HQ',
