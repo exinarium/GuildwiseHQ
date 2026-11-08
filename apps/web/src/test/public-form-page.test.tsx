@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { type FormDefinition, newFormDefinition, newFormField, publicFormView } from '@aom/shared';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PUBLIC_TEXT } from '../public-form/messages.ts';
 import { PublicFormPage } from '../public-form/PublicFormPage.tsx';
 
 const PID = 'AbCdEfGhIjKlMnOpQrStUv';
@@ -237,6 +239,42 @@ describe('the public form page', () => {
     first.unmount();
     render(<PublicFormPage publicId={PID} />);
     expect(await screen.findByLabelText(/Full name/)).toHaveValue('Ann');
+  });
+
+  it('without crypto.subtle (plain http), a form with a file sends a valid proof of work and the right file hash', async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      getRandomValues: <T extends ArrayBufferView>(a: T) => real.getRandomValues(a as never) as T,
+      randomUUID: () => real.randomUUID(),
+      subtle: undefined,
+    });
+    server();
+    const base = handler;
+    handler = (c) => (path(c) === '' && c.method === 'GET' ? json(dto({ powBits: 8 })) : base(c));
+    render(<PublicFormPage publicId={PID} />);
+    const u = setup();
+    await fill(u);
+    await u.click(screen.getByTestId('form-submit'));
+    expect(await screen.findByTestId('form-confirmation')).toHaveTextContent('Thank you');
+    const start = calls.find((c) => path(c) === '/submissions');
+    const h = createHash('sha256').update(`${start?.body.session}:${start?.body.nonce}`).digest();
+    expect(start?.body.nonce).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
+    expect(h[0]).toBe(0);
+    expect(start?.body.files[0].sha256).toBe(createHash('sha256').update('%PDF-1.7 content').digest('hex'));
+  });
+
+  it('a 403 bad_origin says to use the link the firm gave, not the generic error, and keeps the answers', async () => {
+    server();
+    const base = handler;
+    handler = (c) => (path(c) === '/submissions' && c.method === 'POST' ? err(403, 'bad_origin') : base(c));
+    render(<PublicFormPage publicId={PID} />);
+    const u = setup();
+    await fill(u);
+    await u.click(screen.getByTestId('form-submit'));
+    const notice = await screen.findByTestId('public-notice');
+    expect(notice).toHaveTextContent(PUBLIC_TEXT.badOrigin);
+    expect(notice).not.toHaveTextContent(/Something went wrong/);
+    expect(screen.getByLabelText(/Full name/)).toHaveValue('Ann Example');
   });
 
   it('the rendered page has no style attribute (the policy has no inline styles)', async () => {
