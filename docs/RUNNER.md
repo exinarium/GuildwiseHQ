@@ -1522,8 +1522,9 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
 
 1. **prepare**: fetch the working branch and the tags; refuse when tag `v<version>` already exists.
 2. If `origin/<working branch>` already has `## [<version>]` in CHANGELOG.md, the answer is `alreadyDone` with that commit
-   and nothing is made. A commit made by an earlier attempt but not pushed (kept under `refs/guildwise/release/<version>`)
-   is pushed as it is when its parent is still the branch tip; if the branch moved, it is made again and a notice says so.
+   and nothing is made; a kept ref left by an earlier run that was lost after its push is removed then. A commit made by
+   an earlier attempt but not pushed (kept under `refs/guildwise/release/<version>`) is pushed as it is when its parent is
+   still the branch tip; if the branch moved, it is made again and a notice says so.
 3. **components**: the shared `componentBumps` reads each rule's version file at the tag and at the head; only a rule whose
    files changed since the tag and whose version is not already raised is written (`replaceComponentVersion` with the
    approved version). A missing file or a pattern that does not match stops the step.
@@ -1537,6 +1538,16 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
    branch is reported with the host's own message.
 
 A failure comes back as an answer (`ok: false`, the `step` and git's message), never a crash. Runners announce `release-ship:1`.
+
+### `release.ref_cleanup`
+
+Sent when the owner dismisses a stopped release, to every workstation with the clone that announces
+`release-ref-cleanup:1`. The payload carries `shipId`, `repoId`, `remoteUrlNormalized` and the `version` (a release
+version, checked by the schema), never a ref name: the runner builds `refs/guildwise/release/<version>` itself, checks it
+with `isSafeGitRef` and the prefix (one level under `refs/guildwise/release/`, nothing else is ever deleted) and deletes it
+under the per-clone lock. A missing ref, or no clone on this workstation, is a success (`{ ok: true, deleted: false }`);
+an unsafe ref is refused (`ok: false`). The server treats the answer as terminal and does not retry it. An offline
+workstation gets the command when it reconnects; an older runner without the capability is never sent it.
 
 ### `release.docs_prep`
 

@@ -318,6 +318,7 @@ async function closeItem(
 ) {
   let mergeInto: { id: string; body: string } | undefined;
   let workstationToDeliver: string | undefined;
+  let cleanupWorkstations: string[] = [];
   let devops = false;
   let partial = false;
   let phases = false;
@@ -420,7 +421,8 @@ async function closeItem(
     } else if (item.kind === 'alert' && item.subkind === 'release_failed') {
       // A stopped release: Retry sends the stored command again; Dismiss abandons the release.
       if (resolution === 'approved') workstationToDeliver = await retryReleaseShipIn(ctx, tx, user, item);
-      else if (resolution === 'dismissed') await dismissReleaseShipIn(ctx, tx, user, item);
+      else if (resolution === 'dismissed')
+        cleanupWorkstations = await dismissReleaseShipIn(ctx, tx, user, item);
     } else if (item.kind === 'alert' && item.subkind === 'repo_create_failed' && resolution === 'approved') {
       // Retry of a failed repository creation (works for alerts stored without options, too): owner only, and the
       // request must still be failed; the same request goes to the owner's workstation again.
@@ -542,6 +544,9 @@ async function closeItem(
     else await rejectRecommendation(ctx, user, ceoItem, note);
   }
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
+  // The kept release ref cleanup after a Dismiss: delivered without waiting, Dismiss never depends on the runner.
+  for (const ws of cleanupWorkstations)
+    void Promise.resolve(ctx.services.gateway.deliverPending(ws)).catch(() => undefined);
   if (playbookRun) await afterPlaybookRunDecision(ctx, playbookRun);
   if (packWorkstation) {
     await afterAssignmentDecision(ctx, packWorkstation);
