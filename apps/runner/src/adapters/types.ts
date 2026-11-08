@@ -94,6 +94,12 @@ export interface NativeSubagentUsage {
   summary?: string;
 }
 
+/** A read-only vault clone (one of `readDirs`) of which only `keep` is readable under `<dir>/projects/`. */
+export interface ScopedVaultInput {
+  dir: string;
+  keep: string;
+}
+
 export interface ShiftStartInput {
   shiftId: string;
   /** Rendered card prompt (section 13.2). */
@@ -113,6 +119,11 @@ export interface ShiftStartInput {
    * writable; secret files inside stay unreadable (claude-policy.ts).
    */
   readDirs?: string[];
+  /**
+   * Card shifts: the organization vault clone (one of `readDirs`) and the card's own project folder in it. The other
+   * projects' folders of that clone stay unreadable (claude-policy.ts `vaultSiblingMasks`).
+   */
+  scopedVaults?: ScopedVaultInput[];
   /** Directories of the agent toolchains (bin and read dirs) sandboxed commands may read (registry.ts). */
   toolchainReadDirs?: string[];
   /**
@@ -220,6 +231,8 @@ export interface ChatStartInput {
   resumeSessionId?: string;
   /** Read-only folders: the project's own clones and its reference repositories on this workstation. */
   readDirs?: string[];
+  /** A delegated child of a card shift: the same partly readable vault clones as its parent (`ShiftStartInput`). */
+  scopedVaults?: ScopedVaultInput[];
   /** Directories of the agent toolchains sandboxed commands may read. */
   toolchainReadDirs?: string[];
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */

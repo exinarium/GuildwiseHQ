@@ -65,6 +65,8 @@ export interface DelegateWork {
   cwd: string;
   /** Read-only folders the parent may read (reference repositories, the vault). */
   readDirs: string[];
+  /** Vault clones of `readDirs` the parent reads only in part (a card shift's organization vault). */
+  scopedVaults?: Array<{ dir: string; keep: string }>;
   /** Folders the parent was given with `--add-dir` (the vault of a card). */
   addDirs?: string[];
   toolchainReadDirs?: string[];
@@ -431,6 +433,7 @@ export class DelegateRunner {
           env,
           addDirs: caller.work?.addDirs ?? [],
           readDirs: caller.work?.readDirs ?? [],
+          ...(caller.work?.scopedVaults?.length ? { scopedVaults: caller.work.scopedVaults } : {}),
           ...(caller.work?.toolchainReadDirs ? { toolchainReadDirs: caller.work.toolchainReadDirs } : {}),
           maxShiftMinutes: Math.max(1, Math.ceil(timeoutMs / 60_000)),
           ...(caller.orgId ? { orgId: caller.orgId } : {}),
@@ -447,6 +450,7 @@ export class DelegateRunner {
           env,
           readOnly: true,
           readDirs: caller.work?.readDirs ?? [],
+          ...(caller.work?.scopedVaults?.length ? { scopedVaults: caller.work.scopedVaults } : {}),
           ...(caller.work?.toolchainReadDirs ? { toolchainReadDirs: caller.work.toolchainReadDirs } : {}),
           ...(caller.orgId ? { orgId: caller.orgId } : {}),
           sessionTurn: {

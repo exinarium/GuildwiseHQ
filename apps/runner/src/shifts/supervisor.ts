@@ -1274,6 +1274,16 @@ export class ShiftSupervisor {
       path: c.addDir,
       kind: 'vault',
     }));
+    // A card shift reads the organization vault only outside the other projects' folders: the root, everything outside
+    // projects/ and its own project folder (the folder the server resolved for the card, never derived from the key).
+    const scopedVaults =
+      msg.kind === 'card'
+        ? vaultCtxs.flatMap((c) =>
+            c.kind === 'org' && c.folder
+              ? [{ dir: c.addDir, keep: join(c.addDir, ...c.folder.split('/')) }]
+              : [],
+          )
+        : [];
     s.brief = withVaultContexts(msg.brief, vaultCtxs);
     // A "run this branch" request: the runner finds BUILD.md and the commits itself (the server never reads repositories).
     if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
@@ -1442,6 +1452,7 @@ export class ShiftSupervisor {
         ...(msg.kind === 'ba_task' ? registeredFolders : []),
         ...vaultReadFolder,
       ].map((f) => f.path),
+      ...(scopedVaults.length ? { scopedVaults } : {}),
       addDirs: scanDirs,
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
     };
@@ -1577,6 +1588,7 @@ export class ShiftSupervisor {
           ...(msg.kind === 'ba_task' ? registeredFolders : []),
           ...vaultReadFolder,
         ].map((f) => f.path),
+        ...(scopedVaults.length ? { scopedVaults } : {}),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
