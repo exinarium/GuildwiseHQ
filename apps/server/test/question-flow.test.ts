@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CardTestingSchema } from '@aom/shared';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { detectLoops } from '../src/ceo/detectors.ts';
 import { testGapResultPass } from '../src/dispatcher/bottleneck.ts';
+import { cardTesting } from '../src/queries/testing.ts';
 import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -1099,5 +1101,171 @@ describe('a builder\'s test question under "Test without an environment"', () =>
     expect(res).toMatchObject({ accepted: true, continueShift: true });
     expect(await cardRow(card.id)).toMatchObject({ status: 'claimed', parked_request_id: null });
     r.ended(start.shiftId, 'stopped');
+  });
+
+  describe('with no DevOps engineer on the workstation', () => {
+    /** Retires the active DevOps engineers (`devopsAgentOn` only finds active ones) and returns the restore. */
+    let retired: string[] = [];
+    const retireDevops = async () => {
+      retired = (
+        await q(`UPDATE agents SET status='retired' WHERE is_devops AND status='active' RETURNING id`)
+      ).map((a) => a.id as string);
+      expect(retired.length).toBeGreaterThan(0);
+    };
+    afterEach(async () => {
+      if (retired.length) await q(`UPDATE agents SET status='active' WHERE id = ANY($1)`, [retired]);
+      retired = [];
+    });
+    const threadBodies = async (cardId: string) =>
+      (await q('SELECT body FROM thread_messages WHERE thread_id=$1', [cardId])).map((m) => String(m.body));
+
+    it('ON + tests: the gap is recorded without a request, the card is not parked and the builder carries on', async () => {
+      await reset();
+      await setting(true);
+      await w.hire('Bea', 'builder', 'junior');
+      await retireDevops();
+      const card = await w.card({ title: 'Needs DB tests, no DevOps' });
+      const start = await claimCard(card.id);
+      await p.startShift(r, start);
+      expect(start.brief.builderTestsNonBlocking).toBe(true);
+      const before = await cardRow(card.id);
+      const res = await ask(start.shiftId, testQuestion);
+      expect(res).toMatchObject({ accepted: true, continueShift: true });
+      expect(res.message).toMatch(/no DevOps engineer/);
+      expect(res.message).toMatch(/carry on without them/);
+      const c = await cardRow(card.id);
+      expect(c).toMatchObject({ status: 'claimed', stage: before.stage, parked_request_id: null });
+      expect(c.claim_shift_id).toBe(before.claim_shift_id);
+      expect(c.claim_id).toBe(before.claim_id);
+      expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(0);
+      expect(await eventsOfType('QuestionRaised')).toHaveLength(0);
+      expect(await itemsOf(card.id)).toHaveLength(0);
+      expect(await eventsOfType('ClaimReleased')).toHaveLength(0);
+      expect(await eventsOfType('TestEnvironmentParked')).toHaveLength(0);
+      const gaps = await q('SELECT * FROM card_test_gaps WHERE card_id=$1', [card.id]);
+      expect(gaps).toHaveLength(1);
+      expect(gaps[0]).toMatchObject({
+        request_id: null,
+        reason: 'no_devops_engineer',
+        stage: 'build',
+        result_at: null,
+      });
+      const [ev] = await eventsOfType('BuilderTestsNotRun');
+      expect(ev).toMatchObject({ cardId: card.id, reason: 'no_devops_engineer' });
+      expect(ev.requestId).toBeUndefined();
+      const reason = (await threadBodies(card.id)).filter(
+        (b) => b.includes('did not run the DB-backed tests') && b.includes('no DevOps engineer'),
+      );
+      expect(reason).toHaveLength(1);
+      // A second test question gets the same answer and adds no second gap or reason message.
+      const again = await ask(start.shiftId, {
+        ...testQuestion,
+        text: 'Can anyone run the integration suite here?',
+      });
+      expect(again).toMatchObject({ accepted: true, continueShift: true });
+      expect(await q('SELECT 1 FROM card_test_gaps WHERE card_id=$1', [card.id])).toHaveLength(1);
+      expect(
+        (await threadBodies(card.id)).filter((b) => b.includes('did not run the DB-backed tests')),
+      ).toHaveLength(1);
+      expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(0);
+      // The shift can still hand off.
+      const done = await p.report(r, start.shiftId, handoff('DB tests not run'), DIFF_SMALL);
+      expect(done.accepted).toBe(true);
+      r.ended(start.shiftId, 'reported');
+    });
+
+    it('OFF + tests: the normal question chain, no gap and no request', async () => {
+      await reset();
+      await setting(false);
+      await w.hire('Bea', 'builder', 'junior');
+      await retireDevops();
+      const { card, res } = await buildAndAsk('Tests, setting off, no DevOps', testQuestion);
+      expect(res.accepted).toBe(true);
+      expect(res.continueShift).toBeUndefined();
+      expect(await cardRow(card.id)).toMatchObject({ status: 'blocked', claim_id: null });
+      expect(await eventsOfType('QuestionRaised')).toHaveLength(1);
+      expect(await q('SELECT 1 FROM card_test_gaps WHERE card_id=$1', [card.id])).toHaveLength(0);
+      expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(0);
+    });
+
+    it.each([
+      ['an ordinary question (no topic)', { text: 'Should the retry delay be 5 seconds or 10 seconds?' }],
+      [
+        'a deploy question (topic environment)',
+        { text: 'Please deploy the staging app', topic: 'environment' },
+      ],
+    ])('ON + %s: the normal question chain, no gap', async (_label, over) => {
+      await reset();
+      await setting(true);
+      await w.hire('Bea', 'builder', 'junior');
+      await retireDevops();
+      const { card, res } = await buildAndAsk('Ordinary question, no DevOps', over);
+      expect(res.accepted).toBe(true);
+      expect(res.continueShift).toBeUndefined();
+      expect(await cardRow(card.id)).toMatchObject({ status: 'blocked', claim_id: null });
+      expect(await eventsOfType('QuestionRaised')).toHaveLength(1);
+      expect(await q('SELECT 1 FROM card_test_gaps WHERE card_id=$1', [card.id])).toHaveLength(0);
+      expect(await q('SELECT 1 FROM devops_requests WHERE card_id=$1', [card.id])).toHaveLength(0);
+    });
+
+    it('the reviewer brief and the card view show the gap like a GWP-42 gap; no result pass touches it', async () => {
+      await reset();
+      await setting(true);
+      await w.hire('Bea', 'builder', 'junior');
+      await w.hire('Rex', 'reviewer', 'senior');
+      await retireDevops();
+      const card = await w.card({ title: 'Gap without request, review' });
+      const start = await claimCard(card.id);
+      await p.startShift(r, start);
+      await ask(start.shiftId, testQuestion);
+      await p.report(r, start.shiftId, handoff('DB tests not run'), DIFF_SMALL);
+      r.ended(start.shiftId, 'reported');
+      await until(
+        async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [start.shiftId, 'ended']))[0],
+        3000,
+        'shift ended',
+      );
+      const review = await nextShift('Rex');
+      expect(review.brief.testGaps).toHaveLength(1);
+      expect(review.brief.testGaps[0]).toMatchObject({
+        requestId: '',
+        reason: 'no_devops_engineer',
+        stage: 'build',
+        agentName: 'Bea',
+      });
+      expect(await testGapResultPass(w.t.app.ctx)).toBe(0);
+      expect((await q('SELECT result_at FROM card_test_gaps WHERE card_id=$1', [card.id]))[0]).toMatchObject({
+        result_at: null,
+      });
+      const testing = await cardTesting(w.t.app.ctx, await cardRow(card.id), false);
+      expect(CardTestingSchema.shape.testGaps.parse(testing.testGaps)).toEqual([
+        expect.objectContaining({
+          requestId: null,
+          reason: 'no_devops_engineer',
+          stage: 'build',
+          result: null,
+        }),
+      ]);
+    });
+
+    it('a card with one gap of each kind lists both in the brief', async () => {
+      await reset();
+      await setting(true);
+      await w.hire('Bea', 'builder', 'junior');
+      const card = await w.card({ title: 'Both kinds of gap' });
+      const start = await claimCard(card.id);
+      await p.startShift(r, start);
+      await ask(start.shiftId, testQuestion);
+      await retireDevops();
+      await ask(start.shiftId, { ...testQuestion, text: 'Can anyone run the integration suite here?' });
+      const gaps = await q(
+        'SELECT request_id, reason FROM card_test_gaps WHERE card_id=$1 ORDER BY created_at',
+        [card.id],
+      );
+      expect(gaps.map((g) => g.reason)).toEqual(['test_without_environment', 'no_devops_engineer']);
+      expect(gaps[0]!.request_id).not.toBeNull();
+      expect(gaps[1]!.request_id).toBeNull();
+      r.ended(start.shiftId, 'stopped');
+    });
   });
 });

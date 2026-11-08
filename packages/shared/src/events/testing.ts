@@ -24,7 +24,15 @@ export const TestEnvProblem = z.enum([
 ]);
 export type TestEnvProblem = z.infer<typeof TestEnvProblem>;
 
-/** Kind of a suite card: spawned after finalize (`full_suite`) or requested by the manager (`regression`). */
+/**
+ * Why a builder's DB-backed tests were not run under "Test without an environment" (`BuilderTestsNotRun`):
+ * `test_without_environment` the DevOps engineer was asked to run them; `no_devops_engineer` the workstation had none,
+ * so nobody was asked and no result will arrive.
+ */
+export const BUILDER_TEST_GAP_REASONS = ['test_without_environment', 'no_devops_engineer'] as const;
+export type BuilderTestGapReason = (typeof BUILDER_TEST_GAP_REASONS)[number];
+
+/** Kind of a suite card:spawned after finalize (`full_suite`) or requested by the manager (`regression`). */
 export const SuiteKind = z.enum(['full_suite', 'regression']);
 export type SuiteKind = z.infer<typeof SuiteKind>;
 
@@ -105,15 +113,18 @@ export const testingEvents = [
     'TestEnvironmentParked',
     z.object({ cardId: Id, requestId: Id, problem: TestEnvProblem, detail: z.string().default('') }),
   ),
-  /** "Test without an environment": a builder's test-run question went to DevOps without parking the card. */
+  /**
+   * "Test without an environment": a builder's test-run question did not park the card. With a DevOps engineer on the
+   * workstation it went to DevOps (`requestId`); without one nobody was asked (no `requestId`, `no_devops_engineer`).
+   */
   defineEvent(
     'BuilderTestsNotRun',
     z.object({
       cardId: Id,
-      requestId: Id,
+      requestId: Id.optional(),
       agentId: Id,
       stage: z.string(),
-      reason: z.literal('test_without_environment'),
+      reason: z.enum(BUILDER_TEST_GAP_REASONS),
       detail: z.string().default(''),
     }),
   ),

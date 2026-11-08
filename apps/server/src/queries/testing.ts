@@ -59,7 +59,8 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
     testGaps: (
       await rows(ctx.pool, 'SELECT * FROM card_test_gaps WHERE card_id=$1 ORDER BY created_at', [card.id])
     ).map((g) => ({
-      requestId: g.request_id,
+      requestId: g.request_id ?? null,
+      reason: g.reason,
       stage: g.stage,
       at: iso(g.created_at) as string,
       detail: g.detail,
