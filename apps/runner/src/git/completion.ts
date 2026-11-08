@@ -190,7 +190,8 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
  * branch whose message names the internal ref. Any found: a refusal listing them; none (or a non-intake card): null.
  */
 async function internalRefPreflight(p: FinalizeExecutePayload, wt: string): Promise<FinalizeResult | null> {
-  if (!p.isClientRef || !p.workRef || !guardsInternalRef({ ref: p.workRef, isClientRef: true }, p.ref)) return null;
+  if (!p.isClientRef || !p.workRef || !guardsInternalRef({ ref: p.workRef, isClientRef: true }, p.ref))
+    return null;
   const commits = await commitsWithInternalRef(wt, `${await baseTarget(wt, p.baseBranch)}..HEAD`, p.ref);
   if (!commits.length) return null;
   return {

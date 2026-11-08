@@ -154,10 +154,12 @@ describe('internal ref matching and the client change title', () => {
   });
 
   it('prefixes the work ref and scrubs the own ref for an intake card', () => {
-    expect(clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Add thing')).toBe('ABC-1: Add thing');
-    expect(clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Follow up gwp-123 (GWP-1234)')).toBe(
-      'ABC-1: Follow up ABC-1 (GWP-1234)',
+    expect(clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Add thing')).toBe(
+      'ABC-1: Add thing',
     );
+    expect(
+      clientChangeTitle({ ref: 'ABC-1', isClientRef: true }, 'GWP-123', 'Follow up gwp-123 (GWP-1234)'),
+    ).toBe('ABC-1: Follow up ABC-1 (GWP-1234)');
     expect(replaceInternalRef('GWP-123 and gwp-123', 'GWP-123', 'ABC-1')).toBe('ABC-1 and ABC-1');
   });
 

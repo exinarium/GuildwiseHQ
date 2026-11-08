@@ -402,7 +402,8 @@ describe('completion: intake card uses the work reference, never the internal re
     expect(res.ok).toBe(true);
     expect(pr.calls[0]!.title).toBe('ABC-1: Add thing');
     expect(pr.calls[0]!.branch).toBe('p/ABC-1');
-    for (const s of [pr.calls[0]!.title, pr.calls[0]!.body, pr.calls[0]!.branch]) expect(s).not.toMatch(/TOY-1/i);
+    for (const s of [pr.calls[0]!.title, pr.calls[0]!.body, pr.calls[0]!.branch])
+      expect(s).not.toMatch(/TOY-1/i);
   });
 
   it('scrubs the internal ref from the title of the pull request and the merge commit', async () => {
@@ -448,13 +449,15 @@ describe('completion: intake card uses the work reference, never the internal re
       expect(res.internalRef?.ref).toBe('TOY-1');
       expect(res.internalRef?.workRef).toBe('ABC-1');
       expect(res.internalRef?.commits.map((c) => c.sha)).toEqual([bad]);
-      expect(res.internalRef?.commits[0]!.subject).toBe('ABC-1: tidy');
+      expect(res.internalRef?.commits[0]?.subject).toBe('ABC-1: tidy');
       expect(res.error).toContain(bad.slice(0, 10));
       expect(res.error).toContain('ABC-1');
       expect(pr.calls).toHaveLength(0);
     }
     expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(mainBefore);
-    expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe('refs/heads/main');
+    expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
+      'refs/heads/main',
+    );
     expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(bad);
   });
 

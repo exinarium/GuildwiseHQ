@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type CompletionAction,
   cardTicketRef,
   clientChangeTitle,
-  type CompletionAction,
   DEFAULT_PR_BRANCH_PREFIX,
   DESK_SUBKIND,
   type FinalizeCardRequest,
@@ -146,8 +146,12 @@ export function finalizeNaming(
   card: { ref: string; title: string; fields?: unknown },
   intakeKey?: string | null,
 ): Pick<FinalizeExecutePayload, 'ticket' | 'workRef' | 'isClientRef' | 'prTitle' | 'prBody'> {
-  const fields = (card.fields && typeof card.fields === 'object' ? card.fields : {}) as Record<string, unknown>;
-  const fromIntake = !cardTicketRef(fields) && intakeKey?.trim() ? { ...fields, externalRef: intakeKey } : fields;
+  const fields = (card.fields && typeof card.fields === 'object' ? card.fields : {}) as Record<
+    string,
+    unknown
+  >;
+  const fromIntake =
+    !cardTicketRef(fields) && intakeKey?.trim() ? { ...fields, externalRef: intakeKey } : fields;
   const wr = workReference({ ref: card.ref, fields: fromIntake });
   const client = guardsInternalRef(wr, card.ref);
   const ticket = (client && wr.ticket && ticketBranchPart(wr.ticket)) || card.ref;
@@ -174,7 +178,10 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
       WHERE ic.card_id=$1 AND i.external_key IS NOT NULL ORDER BY ic.created_at LIMIT 1`,
     [card.id],
   )) as { external_key: string } | null;
-  const naming = finalizeNaming(card as { ref: string; title: string; fields?: unknown }, intake?.external_key);
+  const naming = finalizeNaming(
+    card as { ref: string; title: string; fields?: unknown },
+    intake?.external_key,
+  );
   const payload: FinalizeExecutePayload = {
     cardId: card.id,
     ref: card.ref,

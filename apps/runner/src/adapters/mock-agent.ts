@@ -129,7 +129,13 @@ function buildWork(brief: Brief): void {
     `unit-test-like file for ${brief.card.ref}, round ${round}\n`,
   );
   sh('git', ['add', '-A']);
-  sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${commitRef(brief)}`]);
+  sh('git', [
+    'commit',
+    '--no-verify',
+    '--allow-empty',
+    '-m',
+    `mock build round ${round}: ${commitRef(brief)}`,
+  ]);
 }
 
 async function report(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {

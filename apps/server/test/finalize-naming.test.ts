@@ -16,7 +16,11 @@ describe('finalizeNaming: what a pull request or merge of the card is called', (
   });
 
   it('an intake card (fields.externalRef) uses the client ticket and never the internal ref', () => {
-    const n = finalizeNaming({ ref: 'GWP-123', title: 'Follow up gwp-123', fields: { externalRef: 'abc-1' } });
+    const n = finalizeNaming({
+      ref: 'GWP-123',
+      title: 'Follow up gwp-123',
+      fields: { externalRef: 'abc-1' },
+    });
     expect(n).toEqual({
       ticket: 'ABC-1',
       workRef: 'ABC-1',
@@ -37,9 +41,9 @@ describe('finalizeNaming: what a pull request or merge of the card is called', (
   });
 
   it('the ticket in the fields wins over the intake key', () => {
-    expect(finalizeNaming({ ref: 'P4-3', title: 'T', fields: { externalRef: 'ABC-7' } }, 'DCPL-1').workRef).toBe(
-      'ABC-7',
-    );
+    expect(
+      finalizeNaming({ ref: 'P4-3', title: 'T', fields: { externalRef: 'ABC-7' } }, 'DCPL-1').workRef,
+    ).toBe('ABC-7');
   });
 
   it('a GitHub ticket gets a branch-safe ticket part and keeps its reference in the title', () => {
@@ -80,7 +84,13 @@ describe('internalRefEvents: finalize refused an intake card', () => {
     const [ev, msg] = internalRefEvents(card, found);
     expect(ev!.event).toEqual({
       type: 'InternalRefInHistory',
-      payload: { cardId: card.id, stage: 'finalize', ref: 'GWP-123', workRef: 'ABC-1', commits: found.commits },
+      payload: {
+        cardId: card.id,
+        stage: 'finalize',
+        ref: 'GWP-123',
+        workRef: 'ABC-1',
+        commits: found.commits,
+      },
     });
     const body = (msg!.event.payload as { body: string }).body;
     expect(body).toContain('Nothing was merged or pushed');

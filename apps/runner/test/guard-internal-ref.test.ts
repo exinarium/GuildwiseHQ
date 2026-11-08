@@ -61,7 +61,8 @@ const commit = (path: string, file: string, ...messages: string[]) => {
   return sh(path, 'git', ['rev-parse', 'HEAD']);
 };
 
-const internal = <T extends { rule: string }>(vs: T[]): T[] => vs.filter((v) => v.rule.startsWith('internal_ref_'));
+const internal = <T extends { rule: string }>(vs: T[]): T[] =>
+  vs.filter((v) => v.rule.startsWith('internal_ref_'));
 
 describe('guard: internal ref on an intake card', () => {
   it('a clean history (ABC-1 commits, other keys in the body) passes', async () => {
@@ -181,7 +182,9 @@ describe('workRefGuardInput: clientRef', () => {
 
   it('is not set for a non-intake card, a ticket equal to the ref, or without the card ref', () => {
     expect(workRefGuardInput({ ref: 'TOY-1', workRef: 'TOY-1', isClientRef: false }, {})).toEqual({});
-    expect(workRefGuardInput({ ref: 'TOY-1', workRef: 'toy-1', isClientRef: true }, {}).clientRef).toBeUndefined();
+    expect(
+      workRefGuardInput({ ref: 'TOY-1', workRef: 'toy-1', isClientRef: true }, {}).clientRef,
+    ).toBeUndefined();
     expect(workRefGuardInput({ workRef: 'ABC-1', isClientRef: true }, {})).toEqual({
       ownTicketBranchPart: 'ABC-1',
     });

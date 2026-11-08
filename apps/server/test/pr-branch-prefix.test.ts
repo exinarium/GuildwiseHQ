@@ -77,7 +77,10 @@ describe('pull request branch prefix', () => {
     const card = { ref: 'P4-3', title: 'T' };
     expect(finalizeNaming(card, 'DCPL-4276').ticket).toBe('DCPL-4276');
     expect(finalizeNaming(card, null).ticket).toBe('P4-3');
-    expect(finalizeNaming(card, 'acme/repo#12')).toMatchObject({ ticket: 'repo-12', workRef: 'acme/repo#12' });
+    expect(finalizeNaming(card, 'acme/repo#12')).toMatchObject({
+      ticket: 'repo-12',
+      workRef: 'acme/repo#12',
+    });
   });
 
   it('finalize.execute carries the prefix (default feature) and the ticket', async () => {

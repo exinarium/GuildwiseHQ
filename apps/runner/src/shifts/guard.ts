@@ -620,7 +620,10 @@ export function workRefGuardInput(
 ): Pick<GuardInput, 'ownTicketBranchPart' | 'cardBranchPrefix' | 'clientRef'> {
   const part = card.isClientRef && card.workRef ? workRefBranchPart(card.workRef) : null;
   const client =
-    card.isClientRef && card.workRef && card.ref && guardsInternalRef({ ref: card.workRef, isClientRef: true }, card.ref)
+    card.isClientRef &&
+    card.workRef &&
+    card.ref &&
+    guardsInternalRef({ ref: card.workRef, isClientRef: true }, card.ref)
       ? card.workRef
       : null;
   return {
