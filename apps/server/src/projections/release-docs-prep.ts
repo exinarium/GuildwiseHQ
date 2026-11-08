@@ -29,6 +29,7 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         enabled: p.enabled,
         steps: p.steps,
         ...(p.guidePaths && Object.keys(p.guidePaths).length > 0 ? { guidePaths: p.guidePaths } : {}),
+        ...(p.autoStart ? { autoStart: true } : {}),
       }),
     ]);
   },
@@ -36,8 +37,8 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepStarted'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, retry_of, started_by, started_at, updated_at)
-       SELECT $1, pr.org_id, pr.id, $3, 'running', $4::text[], $5, $6, $7, $8, $8 FROM projects pr WHERE pr.id = $2
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, retry_of, started_by, started_at, updated_at, heads, ready_key)
+       SELECT $1, pr.org_id, pr.id, $3, 'running', $4::text[], $5, $6, $7, $8, $8, $9::jsonb, $10 FROM projects pr WHERE pr.id = $2
        ON CONFLICT (id) DO NOTHING`,
       [
         p.runId,
@@ -46,8 +47,10 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         p.steps,
         p.trigger,
         p.retryOf ?? null,
-        p.startedBy,
+        p.startedBy ?? null,
         e.createdAt,
+        p.heads ? JSON.stringify(p.heads) : null,
+        p.readyKey ?? null,
       ],
     );
     for (const r of p.repos) {
