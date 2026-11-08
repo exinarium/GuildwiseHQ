@@ -496,8 +496,8 @@ The app container has a health check against `/api/health`.
 **Every write returns `403 bad_origin`**
 
 The page is open at an address other than `AOM_PUBLIC_ORIGIN`. Add that exact origin to `AOM_EXTRA_ORIGINS` and restart.
-Public forms are affected the same way: a form opened at a LAN address (for example `http://192.168.1.20:4700/f/…`)
-can only be sent when that origin is `AOM_PUBLIC_ORIGIN` or listed in `AOM_EXTRA_ORIGINS`.
+Public forms are not affected: the `/api/public/forms/` routes do not compare the `Origin` value, so a form opened at a
+LAN address (for example `http://192.168.1.20:4700/f/…`) can be sent without listing that address.
 
 **Sign-in does not stick on a plain `http` address**
 
