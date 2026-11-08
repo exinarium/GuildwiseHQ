@@ -367,7 +367,7 @@ export function CardNewForm({
         {create.error && !errors._form && !missingFromError(create.error).length && (
           <ErrorBox error={create.error} />
         )}
-        <div className="sticky bottom-0 z-10 max-md:bottom-0 -mx-4 border-t border-line bg-canvas/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:mx-0 sm:rounded-card sm:border sm:px-4">
+        <div className="sticky bottom-0 z-10 max-md:bottom-0 -mx-4 border-t border-line bg-canvas/90 px-4 pt-3 pb-3 md:pb-[max(0.75rem,var(--safe-bottom))] backdrop-blur sm:mx-0 sm:rounded-card sm:border sm:px-4">
           <p id="new-card-help" className="mb-2 text-xs text-subtle max-md:sr-only">
             Specify sends the card to the Spec stage and checks every required field. Save draft keeps it
             private until you are ready.

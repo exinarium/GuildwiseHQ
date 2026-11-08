@@ -268,7 +268,8 @@ input[type="radio"] {
     bottom: 0;
     z-index: 5;
     margin-inline: -1rem;
-    padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+    /* No bottom inset: the bar always sits above the tab bar, a sheet's own inset or the keyboard. */
+    padding: 0.75rem 1rem;
     background: var(--surface);
     border-top: 1px solid var(--line);
   }
@@ -291,13 +292,31 @@ input[type="radio"] {
 /* The phone's bottom tab bar (components/shell/MobileTabBar.tsx) is 3.5rem tall plus the home-indicator inset. It is the last
    child of the app frame, under the scrolling area, so content never needs padding for it. --app-bottom-inset is only for
    position:fixed things (FAB, toasts, prompts): it clears the tab bar, or the keyboard while it is open (--kbd-gap is written
-   by lib/viewport.ts). Sticky bars inside the scrolling area use bottom: 0. 0px from md up (the sidebar). */
+   by lib/viewport.ts). Sticky bars inside the scrolling area use bottom: 0. From md up (the sidebar) it only clears the
+   home indicator, which is 0px on desktop. */
+
+/* Device safe areas (notch, status bar, rounded corners, home indicator / gesture bar). The only place env() is read:
+   components use these variables, never env() directly. 0px wherever the browser reports no inset (desktop, a normal
+   browser tab), so nothing moves there. --safe-bottom-kbd is the bottom inset for surfaces whose bottom follows the
+   on-screen keyboard: it drops to 0 while the keyboard is open (html[data-kbd], lib/viewport.ts), so they sit directly
+   on the keyboard. */
 :root {
-  --app-bottom-inset: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-x: max(var(--safe-left), var(--safe-right));
+  --safe-y: max(var(--safe-top), var(--safe-bottom));
+  --safe-bottom-kbd: var(--safe-bottom);
+  /* From md up (sidebar layout, phones in landscape) fixed things only need to clear the home indicator. */
+  --app-bottom-inset: var(--safe-bottom);
+}
+:root[data-kbd] {
+  --safe-bottom-kbd: 0px;
 }
 @media (max-width: 767.98px) {
   :root {
-    --app-tabbar-h: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    --app-tabbar-h: calc(3.5rem + var(--safe-bottom));
     --app-bottom-inset: calc(var(--kbd-gap, 0px) + var(--app-tabbar-h));
   }
   :root[data-kbd] {

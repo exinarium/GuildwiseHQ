@@ -91,7 +91,7 @@ export function ChatDrawer({
         <RadixDialog.Content
           aria-label="Chat"
           aria-describedby={undefined}
-          className="fixed right-0 z-50 flex w-full max-md:top-[var(--vv-top,0px)] max-md:bottom-[var(--kbd-gap,0px)] md:inset-y-0 flex-col overflow-hidden border-l border-line bg-surface pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl sm:w-[28rem]"
+          className="fixed right-0 z-50 flex w-full max-md:top-[var(--vv-top,0px)] max-md:bottom-[var(--kbd-gap,0px)] md:inset-y-0 flex-col overflow-hidden border-l border-line bg-surface pt-(--safe-top) pr-(--safe-right) pb-(--safe-bottom-kbd) pl-(--safe-left) shadow-xl sm:w-[28rem]"
         >
           <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1.5">
             {threadId ? (
