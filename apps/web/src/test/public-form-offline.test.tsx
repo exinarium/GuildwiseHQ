@@ -28,6 +28,7 @@ const dto = (over: Record<string, unknown> = {}) => ({
   powBits: 0,
   minFillMs: 0,
   availability: 'open',
+  firmName: null,
   link: null,
   ...over,
 });
@@ -159,5 +160,18 @@ describe('secure link sentences', () => {
     expect(describePublicError({ code: 'runner_online', status: 409, retryable: false }).text).toMatch(
       /reload/i,
     );
+  });
+});
+
+describe('the firm name on the offline panel', () => {
+  it('shows the firm name, not the form title, and falls back to the title when there is none', async () => {
+    handler = () => json(dto({ availability: 'offline', firmName: 'Smith & Co' }));
+    const first = render(<PublicFormPage publicId={PID} />);
+    expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe('Smith & Co');
+    expect(screen.queryByText('Rental application')).toBeNull();
+    first.unmount();
+    handler = () => json(dto({ availability: 'offline', firmName: null }));
+    render(<PublicFormPage publicId={PID} />);
+    expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe('Rental application');
   });
 });

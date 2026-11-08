@@ -273,7 +273,8 @@ export interface PublicFormDto {
   version: number;
   /** The public logo route, or null. */
   logo: string | null;
-  /** The firm's name is not stored on a form: the page uses the form title. */
+  /** The firm's name (organization name), shown on the offline panel; null when empty. */
+  firmName: string | null;
   session: string;
   powBits: number;
   minFillMs: number;

@@ -8,6 +8,7 @@ import {
   useShowOfflineEmail,
 } from '../../api/queries/forms-offline.ts';
 import { useWaitAction } from '../../api/queries/journeys.ts';
+import { useCanManageOrg } from '../../lib/orgRole.ts';
 import { Button, useToast } from '../ui.tsx';
 
 type Data = {
@@ -38,6 +39,7 @@ export function FormOfflineLinkBlock({ item }: { item: DeskItemDto }) {
   const resend = useResendOfflineLink();
   const cancel = useCancelOfflineRequest();
   const act = useWaitAction();
+  const canManage = useCanManageOrg();
   const [email, setEmail] = useState<string | null>(null);
   const fail = (e: unknown) => toast.error(errorMessage(e));
   const sent = item.subkind === 'form_offline_link';
@@ -93,7 +95,7 @@ export function FormOfflineLinkBlock({ item }: { item: DeskItemDto }) {
           Email address: {email}
         </p>
       )}
-      {sent && (
+      {sent && (canManage || data.waitId) && (
         <div className="sticky-actions flex flex-wrap gap-2 max-md:[&>button]:flex-1">
           {data.waitId && (
             <Button
@@ -111,32 +113,39 @@ export function FormOfflineLinkBlock({ item }: { item: DeskItemDto }) {
               Continue journey
             </Button>
           )}
-          <Button
-            variant="secondary"
-            disabled={busy}
-            data-testid="form-offline-show"
-            onClick={() => show.mutate(id, { onSuccess: (r) => setEmail(r.email), onError: fail })}
-          >
-            Show email
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy}
-            data-testid="form-offline-resend"
-            onClick={() =>
-              resend.mutate(id, { onSuccess: () => toast.success('The link was sent again.'), onError: fail })
-            }
-          >
-            Resend link
-          </Button>
-          <Button
-            variant="danger"
-            disabled={busy}
-            data-testid="form-offline-cancel"
-            onClick={() => cancel.mutate(id, { onError: fail })}
-          >
-            Cancel
-          </Button>
+          {canManage && (
+            <>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                data-testid="form-offline-show"
+                onClick={() => show.mutate(id, { onSuccess: (r) => setEmail(r.email), onError: fail })}
+              >
+                Show email
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                data-testid="form-offline-resend"
+                onClick={() =>
+                  resend.mutate(id, {
+                    onSuccess: () => toast.success('The link was sent again.'),
+                    onError: fail,
+                  })
+                }
+              >
+                Resend link
+              </Button>
+              <Button
+                variant="danger"
+                disabled={busy}
+                data-testid="form-offline-cancel"
+                onClick={() => cancel.mutate(id, { onError: fail })}
+              >
+                Cancel
+              </Button>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -31,6 +31,25 @@ describe('offlineNoticeText', () => {
   });
 });
 
+describe('offlineNoticeText for a journey case', () => {
+  const base = { formTitle: 'F', clientReference: 'C1' };
+  it('points a failed or expired-hold journey case to "Send a new link"', () => {
+    for (const kind of ['failed', 'hold_expired'] as const) {
+      const body = offlineNoticeText({ ...base, kind, journey: true }).body;
+      expect(body).toContain('Send a new link');
+      expect(body).not.toContain('open the form again');
+    }
+  });
+  it('keeps the public-URL texts unchanged', () => {
+    expect(offlineNoticeText({ ...base, kind: 'failed' }).body).toBe(
+      'We could not email the secure link. The email address has been deleted. Ask the client to open the form again.',
+    );
+    expect(offlineNoticeText({ ...base, kind: 'hold_expired', holdDays: 7 }).body).toBe(
+      'Your runner was offline for 7 days; we could not send the secure link and have deleted the email address.',
+    );
+  });
+});
+
 describe('OfflineRequestSchema', () => {
   const ok = { session: 'x'.repeat(20), nonce: '0', website: '', email: 'a@b.example' };
   it('takes a session, a proof and one email address, nothing else', () => {

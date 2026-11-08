@@ -575,8 +575,13 @@ export function publicFormRoutes(
             purpose: row.purpose === 'offline' ? 'offline' : 'client',
           };
         }
+        const org = await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [pub.orgId]);
         const body: PublicFormDto = {
           form: publicFormView(def),
+          firmName:
+            String(org?.name ?? '')
+              .trim()
+              .slice(0, 120) || null,
           version: pub.version,
           logo: def.settings.logo
             ? `/api/public/forms/${(req.params as { publicId: string }).publicId}/logo`

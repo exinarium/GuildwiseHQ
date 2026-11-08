@@ -385,7 +385,7 @@ export function PublicFormPage({
   if (phase.kind === 'offline')
     return (
       <OfflinePanel
-        firm={phase.dto.form.settings.title}
+        firm={phase.dto.firmName ?? phase.dto.form.settings.title}
         logoUrl={phase.dto.logo ?? undefined}
         initialEmail={prefill.current}
         state={phase.sent ? 'sent' : offlineState}

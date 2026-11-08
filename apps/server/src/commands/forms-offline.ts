@@ -13,7 +13,7 @@ import { decryptFor } from '../auth/secrets.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, forbidden, notFound } from '../errors.ts';
+import { badRequest, forbidden, HttpError, notFound } from '../errors.ts';
 import { defaultAddressee } from '../journeys/waits.ts';
 import { formSecureLinkMail } from '../mail/templates.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -175,6 +175,7 @@ async function raiseCaseAlert(
     recordName: cx.recordName,
     journeyName: cx.journeyName,
     holdDays: ctx.config.publicForms.offlineHoldDays,
+    journey: !!c.journey_wait_id,
   });
   const deskItemId = randomUUID();
   const addressee = cx.inst ? await defaultAddressee(tx, cx.inst) : undefined;
@@ -382,8 +383,8 @@ async function sendDue(ctx: Ctx): Promise<void> {
       );
       if (up?.n !== dest.workstations.length) continue;
       await sendOne(ctx, d.id, pub);
-    } catch (err) {
-      ctx.log.error({ err, requestId: d.id }, 'offline form link failed');
+    } catch (err: any) {
+      ctx.log.error({ requestId: d.id, code: err?.code ?? null }, 'offline form link failed');
     }
   }
 }
@@ -631,14 +632,39 @@ export async function resendOfflineLink(ctx: Ctx, who: Who, id: string): Promise
   }
   const url = await clientLinkUrl(ctx, c.org_id, c.form_id, c.link_id);
   if (!url) throw badRequest('link_not_usable', 'The form is not published.');
-  // count first, so a failing mail server cannot be used to send without limit
+  // reserve a resend first, so a failing mail server cannot be used to send without limit
   const n = await withAppendTx(ctx.pool, async (tx) => {
     const r = await tx.query(
       `UPDATE form_offline_requests SET resends=resends+1, updated_at=$2 WHERE id=$1 AND resends < $3 AND status='sent' RETURNING resends`,
       [c.id, ctx.clock.now(), OFFLINE_MAX_RESENDS],
     );
-    const count = r.rows[0]?.resends as number | undefined;
-    if (!count) return null;
+    return (r.rows[0]?.resends as number | undefined) ?? null;
+  });
+  if (!n) throw badRequest('resend_limit', `The link was already sent again ${OFFLINE_MAX_RESENDS} times.`);
+  try {
+    await ctx.mailer.send(
+      formSecureLinkMail({
+        to: email,
+        firmName: await firmName(ctx, c.org_id),
+        link: url,
+        expiresAt: new Date(l.expires_at),
+        origin: ctx.config.publicOrigin,
+      }),
+    );
+  } catch {
+    // The transport error can quote the recipient: never log, return or rethrow it.
+    try {
+      await ctx.pool.query(
+        'UPDATE form_offline_requests SET resends=resends-1, updated_at=$2 WHERE id=$1 AND resends > 0',
+        [c.id, ctx.clock.now()],
+      );
+    } catch {
+      // the resend stays used up: fails safe
+    }
+    ctx.log.warn({ requestId: c.id }, 'offline form link resend failed');
+    throw new HttpError(503, 'mail_failed', 'The link could not be sent. Try again later.');
+  }
+  await withAppendTx(ctx.pool, async (tx) => {
     await ctx.store.append(
       [
         formEvent(
@@ -646,32 +672,21 @@ export async function resendOfflineLink(ctx: Ctx, who: Who, id: string): Promise
           c.form_id,
           {
             type: 'FormOfflineLinkResent',
-            payload: { requestId: c.id, formId: c.form_id, by: who.userId, n: count },
+            payload: { requestId: c.id, formId: c.form_id, by: who.userId, n },
           },
           who.userId,
         ),
       ],
       { tx },
     );
-    return count;
   });
-  if (!n) throw badRequest('resend_limit', `The link was already sent again ${OFFLINE_MAX_RESENDS} times.`);
-  await ctx.mailer.send(
-    formSecureLinkMail({
-      to: email,
-      firmName: await firmName(ctx, c.org_id),
-      link: url,
-      expiresAt: new Date(l.expires_at),
-      origin: ctx.config.publicOrigin,
-    }),
-  );
   return { resends: n };
 }
 
 /** Cancel: the case closes, the email is cleared and the link is revoked. A journey wait keeps running. */
 export async function cancelOfflineRequest(ctx: Ctx, who: Who, id: string): Promise<void> {
   await ownerOrAdmin(ctx, who);
-  const c = await openCase(ctx, who, id);
+  await openCase(ctx, who, id);
   await withAppendTx(ctx.pool, async (tx) => {
     const cur = await one(
       tx,
@@ -689,5 +704,4 @@ export async function cancelOfflineRequest(ctx: Ctx, who: Who, id: string): Prom
     await closeCaseDeskItemIfPublic(ctx, tx, cur, 'Cancelled.');
     await closeCase(ctx, tx, cur, 'cancelled', { by: who.userId });
   });
-  void c;
 }

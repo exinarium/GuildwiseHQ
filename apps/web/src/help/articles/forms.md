@@ -52,4 +52,4 @@ Under **Personal links** create a link for one client or record: type a referenc
 
 ## When your workstation is offline {#offline}
 
-The public form shows an email box and sends nothing but the address. When the workstation has been back for 30 seconds the client gets one email with a secure, single-use link, and your desk gets one notice per case with **Resend link**.
+The public form shows an email box and sends nothing but the address. When the workstation has been back for 30 seconds the client gets one email with a secure, single-use link, and your desk gets one notice per case with **Resend link**. Resend link, Show email and Cancel are for Owners and Admins. If the secure link cannot be emailed to a journey client, open the journey and press **Send a new link** on the waiting step, then pass the new link on to the client.
