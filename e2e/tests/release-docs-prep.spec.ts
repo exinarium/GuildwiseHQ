@@ -375,6 +375,10 @@ test('AC4/AC5/AC8: Run release prep analyses both repositories; a second run is 
   expect(done.status, done.error ?? '').toBe('passed');
 
   await expect(prep.getByTestId('release-docs-prep-state')).toHaveText('passed');
+  // the project is on main, both repositories on release/1.1: the run is labelled and keyed with the repositories' branch
+  expect(done.release_branch).toBe(BRANCH);
+  await expect(prep).toContainText(`Release project · ${BRANCH}`);
+  await expect(prep).not.toContainText('Release project · main');
   const alpha = prep.getByTestId('prep-repo-alpha');
   const beta = prep.getByTestId('prep-repo-beta');
   await expect(alpha.getByTestId('prep-summary')).toContainText('2 commits since v1.0.0');
