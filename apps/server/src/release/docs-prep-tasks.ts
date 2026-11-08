@@ -649,11 +649,13 @@ async function checkPrepProposal(
   if (!run || !repo || !summary?.success)
     return { ok: false, error: 'the change summary of this run is gone: report that nothing can be written' };
   const { uncovered, existing } = await changelogWriterInput(tx, run, repo, summary.data);
+  const names = await changelogDenyList(tx, run.org_id);
   const check = checkChangelogProposal(proposal, {
     uncovered,
     existingCount: existing.length,
     publicText,
-    denyList: await changelogDenyList(tx, run.org_id),
+    denyList: names.terms,
+    agentHandles: names.agentHandles,
   });
   if (!check.ok)
     return {

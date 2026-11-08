@@ -66,6 +66,7 @@ export function checkChangelogProposal(
     existingCount: number;
     publicText: (s: string) => string;
     denyList?: readonly string[];
+    agentHandles?: readonly string[];
   },
 ): ProposalCheck {
   const parsed = ChangelogProposalSchema.safeParse(data);
@@ -86,6 +87,7 @@ export function checkChangelogProposal(
     const findings = scrubChangelogEntry(e, {
       publicText: ctx.publicText,
       ...(ctx.denyList ? { denyList: ctx.denyList } : {}),
+      ...(ctx.agentHandles ? { agentHandles: ctx.agentHandles } : {}),
     });
     for (const f of findings) errors.push(describeEntryFinding(i, f));
     const heading = changelogHeadingOf(e.heading);
