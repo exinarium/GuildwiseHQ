@@ -73,3 +73,58 @@ export function signV4(i: SignInput): Record<string, string> {
 
 /** Exposed for the signature test vectors. */
 export const _internal = { canonicalRequestHash: hex };
+
+export interface PresignInput {
+  method: string;
+  host: string;
+  /** Already URI-encoded path, starting with `/`. */
+  path: string;
+  /** Headers the browser must send exactly as signed (besides `host`). */
+  headers?: Record<string, string>;
+  region: string;
+  service?: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  /** Seconds the URL stays valid (1..604800). */
+  expires: number;
+  now: Date;
+}
+
+/** AWS Signature Version 4 in query form (a presigned URL). Returns the query string without a leading `?`. */
+export function presignV4(i: PresignInput): string {
+  const amz = i.now
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
+  const date = amz.slice(0, 8);
+  const service = i.service ?? 's3';
+  const scope = `${date}/${i.region}/${service}/aws4_request`;
+  const lower: Record<string, string> = { host: i.host };
+  for (const [k, v] of Object.entries(i.headers ?? {}))
+    lower[k.toLowerCase()] = v.trim().replace(/\s+/g, ' ');
+  const names = Object.keys(lower).sort();
+  const signedHeaders = names.join(';');
+  const params: Record<string, string> = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': `${i.accessKeyId}/${scope}`,
+    'X-Amz-Date': amz,
+    'X-Amz-Expires': String(Math.max(1, Math.min(604800, Math.floor(i.expires)))),
+    'X-Amz-SignedHeaders': signedHeaders,
+  };
+  if (i.sessionToken) params['X-Amz-Security-Token'] = i.sessionToken;
+  const query = Object.entries(params)
+    .map(([k, v]) => [uriEncode(k), uriEncode(v)] as const)
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&');
+  const canonicalHeaders = names.map((n) => `${n}:${lower[n]}\n`).join('');
+  const canonical = [i.method, i.path, query, canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n');
+  const toSign = ['AWS4-HMAC-SHA256', amz, scope, hex(canonical)].join('\n');
+  const kSigning = hmac(
+    hmac(hmac(hmac(`AWS4${i.secretAccessKey}`, date), i.region), service),
+    'aws4_request',
+  );
+  const signature = createHmac('sha256', kSigning).update(toSign, 'utf8').digest('hex');
+  return `${query}&X-Amz-Signature=${signature}`;
+}

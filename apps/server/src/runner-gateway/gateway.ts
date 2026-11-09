@@ -1,8 +1,10 @@
 import {
   type EventOf,
   RUNNER_TOKEN_PREFIX,
+  type RunnerToServer,
   RunnerToServerSchema,
   type ServerToRunnerOf,
+  type StorageKind,
   streamId,
   UNLIMITED_SHIFTS,
   UNPAIRED_CLOSE_REASON,
@@ -128,6 +130,7 @@ export class RunnerGateway {
       const gone = conn as RunnerConn | null;
       if (gone) void ctx.services.webhookRelay.disconnected(gone);
       if (gone) ctx.services.storage.onDisconnect(gone.workstationId);
+      if (gone) ctx.services.direct.onDisconnect(gone.workstationId);
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
         if (!c || this.closing) return;
@@ -186,7 +189,13 @@ export class RunnerGateway {
    * behind slow handlers. Invalid frames log paths only (a result can carry a path).
    */
   private storageAnswer(conn: RunnerConn, text: string): boolean {
-    if (!text.slice(0, 160).includes('"storage.write.')) return false;
+    const head = text.slice(0, 160);
+    if (
+      !head.includes('"storage.write.') &&
+      !head.includes('"storage.grant.') &&
+      !head.includes('"storage.direct.')
+    )
+      return false;
     let json: unknown;
     try {
       json = JSON.parse(text);
@@ -194,7 +203,15 @@ export class RunnerGateway {
       return false;
     }
     const type = (json as { type?: unknown } | null)?.type;
-    if (type !== 'storage.write.credit' && type !== 'storage.write.result') return false;
+    if (
+      type !== 'storage.write.credit' &&
+      type !== 'storage.write.result' &&
+      type !== 'storage.grant.result' &&
+      type !== 'storage.grant.offset' &&
+      type !== 'storage.grant.verified' &&
+      type !== 'storage.direct.report'
+    )
+      return false;
     const parsed = RunnerToServerSchema.safeParse(json);
     if (!parsed.success) {
       this.ctx.log.warn(
@@ -208,7 +225,41 @@ export class RunnerGateway {
       this.ctx.services.storage.onCredit(conn.workstationId, m.transferId, m.upTo);
     else if (m.type === 'storage.write.result')
       this.ctx.services.storage.onResult(conn.workstationId, m.transferId, m);
+    else this.directFrame(conn, m);
     return true;
+  }
+
+  /** The direct upload frames (grant answers and the upload host report). Nothing here is logged: a grant holds a URL. */
+  private directFrame(conn: RunnerConn, m: RunnerToServer): void {
+    const direct = this.ctx.services.direct;
+    switch (m.type) {
+      case 'storage.grant.result':
+        direct.onResult(conn.workstationId, m);
+        break;
+      case 'storage.grant.offset':
+        direct.onOffset(conn.workstationId, m.grantId, m.offset);
+        break;
+      case 'storage.grant.verified':
+        direct.onVerified(conn.workstationId, m);
+        break;
+      case 'storage.direct.report':
+        void this.reportDirect(conn.workstationId, m.connections);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private async reportDirect(
+    workstationId: string,
+    list: Extract<RunnerToServer, { type: 'storage.direct.report' }>['connections'],
+  ): Promise<void> {
+    const rows = await this.ctx.pool.query(
+      `SELECT id, kind FROM storage_connections WHERE workstation_id=$1 AND status='active' AND id = ANY($2::uuid[])`,
+      [workstationId, list.map((c) => c.connectionId)],
+    );
+    const kinds = new Map<string, StorageKind>(rows.rows.map((r) => [r.id as string, r.kind as StorageKind]));
+    this.ctx.services.direct.onReport(workstationId, (id) => kinds.get(id), list);
   }
 
   private async authenticate(

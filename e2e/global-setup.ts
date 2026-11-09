@@ -12,6 +12,7 @@ import {
   PG_ADMIN_URL,
   PORT,
   paths,
+  ROOT,
   SMTP_URL,
   SUPER,
 } from './support/env.ts';
@@ -165,13 +166,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_HYGIENE_SCHEDULE: 'false',
     // schedules: the webhook receivers of the specs listen on this machine
     AOM_WEBHOOK_ALLOW_PRIVATE: 'true',
+    // public forms: every submission of the suite comes from 127.0.0.1, more than the default 5 at once
+    AOM_FORMS_IP_SUBMIT_BURST: '50',
+    AOM_FORMS_IP_SUBMITS_PER_HOUR: '500',
     // the "Add a workstation" wizard serves a runner release: a stand-in file is enough, no spec downloads it
     AOM_RUNNER_RELEASE_DIR: releaseDir,
     LOG_LEVEL: 'info',
   };
   // idempotent: the server's own CLIs create only the accounts that are missing
   // (AOM_E2E_ADMIN_NAME / AOM_E2E_ADMIN_ORG rename the demo admin and organization for the getting-started video)
-  await seedE2eAccounts(defaultAccounts(), { env });
+  // through the built CLIs (apps/server/dist): pnpm refuses to run in a worktree whose node_modules is a link
+  await seedE2eAccounts(defaultAccounts(), { env, appDir: join(ROOT, 'apps') });
 
   const log = openSync(paths.serverLog, 'a');
   const server: ChildProcess = spawn('node', [paths.server], { env, stdio: ['ignore', log, log] });

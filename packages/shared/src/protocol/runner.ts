@@ -137,6 +137,7 @@ import {
 import { VaultFolderSchema } from '../safe.ts';
 import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import {
+  DIRECT_UNAVAILABLE_REASONS,
   STORAGE_CHUNK_BYTES,
   StorageAuthBeginPayloadSchema,
   StorageAuthCancelPayloadSchema,
@@ -2313,6 +2314,90 @@ export const StorageDeleteResultSchema = msg('storage.delete.result', {
   error: StorageWriteErrorSchema.optional(),
 });
 
+// ---------------------------------------------------------------- direct uploads (GWP-147)
+// The runner issues a short-lived upload grant for a OneDrive, Google Drive or S3 destination; the public browser uploads
+// to the provider and the runner verifies the staged object. None of these frames is acked. The grant URL is a secret.
+
+const GRANT_HEADERS = ['content-type', 'if-none-match', 'x-amz-checksum-sha256'] as const;
+export const StorageGrantOpenSchema = msg('storage.grant.open', {
+  grantId: z.uuid(),
+  connectionId: z.uuid(),
+  folder: z.string().max(400),
+  name: z.string().max(200),
+  vars: z.record(z.string().max(40), z.string().max(300)),
+  ext: z.string().max(12).optional(),
+  contentType: z.string().max(200),
+  size: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  accepted: z.array(z.string().max(12)).max(60),
+  pageOrigin: z.string().max(200),
+  ttlMs: z.number().int().positive(),
+  submission: z.object({ orgId: z.uuid(), formId: z.uuid(), submissionId: z.uuid() }),
+  scan: z.object({ field: z.string().max(100), fileName: z.string().max(300) }),
+});
+export const StorageGrantStatusSchema = msg('storage.grant.status', { grantId: z.uuid() });
+export const StorageGrantFinishSchema = msg('storage.grant.finish', {
+  grantId: z.uuid(),
+  size: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  providerId: z.string().max(300).optional(),
+  etag: z.string().max(300).optional(),
+});
+export const StorageGrantCancelSchema = msg('storage.grant.cancel', {
+  grantId: z.uuid(),
+  reason: z.enum(['client_gone', 'expired', 'retry', 'blocked', 'shutdown']),
+});
+export const StorageGrantResultSchema = msg('storage.grant.result', {
+  grantId: z.uuid(),
+  ok: z.boolean(),
+  grant: z
+    .object({
+      provider: z.enum(['onedrive', 'google_drive', 's3']),
+      method: z.literal('PUT'),
+      url: z
+        .string()
+        .max(4096)
+        .refine((u) => {
+          try {
+            return new URL(u).protocol === 'https:';
+          } catch {
+            return false;
+          }
+        }),
+      headers: z
+        .partialRecord(z.enum(GRANT_HEADERS), z.string().max(300))
+        .refine((h) => Object.keys(h).length <= 8),
+      chunkBytes: z.number().int().positive().nullable(),
+      expiresAt: z.number().int().positive(),
+    })
+    .optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+export const StorageGrantOffsetSchema = msg('storage.grant.offset', {
+  grantId: z.uuid(),
+  offset: z.number().int().nonnegative().nullable(),
+});
+export const StorageGrantVerifiedSchema = msg('storage.grant.verified', {
+  grantId: z.uuid(),
+  ok: z.boolean(),
+  reference: StorageReferenceSchema.optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+export const StorageDirectReportSchema = msg('storage.direct.report', {
+  connections: z
+    .array(
+      z.object({
+        connectionId: z.uuid(),
+        uploadOrigin: z
+          .string()
+          .regex(/^https:\/\/[a-z0-9.-]+(:\d{1,5})?$/)
+          .nullable(),
+        reason: z.enum(DIRECT_UNAVAILABLE_REASONS).nullable(),
+      }),
+    )
+    .max(100),
+});
+
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HelloSchema,
   OutboxFlushedSchema,
@@ -2364,6 +2449,10 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageWriteCreditSchema,
   StorageWriteResultSchema,
   StorageDeleteResultSchema,
+  StorageGrantResultSchema,
+  StorageGrantOffsetSchema,
+  StorageGrantVerifiedSchema,
+  StorageDirectReportSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2388,6 +2477,10 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   StorageWriteEndSchema,
   StorageWriteAbortSchema,
   StorageDeleteSchema,
+  StorageGrantOpenSchema,
+  StorageGrantStatusSchema,
+  StorageGrantFinishSchema,
+  StorageGrantCancelSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

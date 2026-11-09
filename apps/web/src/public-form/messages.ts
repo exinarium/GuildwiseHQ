@@ -12,6 +12,8 @@ const msg = (text: string, retry = false, closed = false): PublicMessage => ({ t
 
 /** Sentences the page shows on its own (not answers to a server error). */
 export const PUBLIC_TEXT = {
+  uploading: (name: string, pct: number) => `Uploading ${name}: ${pct}%`,
+  checking: (name: string) => `Checking ${name}…`,
   slowCheck:
     'Still checking your form. This can take a little longer on this device. Please keep this page open.',
   needsSecureLink:
@@ -55,6 +57,12 @@ export function describePublicError(
       return msg(
         `One of your files${file ? ` (${file})` : ''} could not be accepted because it failed a security check. Please check the file and try again, or contact the firm.`,
       );
+    case 'upload_unavailable':
+      return e.retryable
+        ? msg("This form can't accept files right now. Please try again later or contact the firm.", true)
+        : msg('Your files could not be sent to the firm. Please contact the firm.', false, true);
+    case 'upload_mode':
+      return msg('This file must be sent another way. Please reload the page.', false, true);
     case 'scan_unavailable':
       return msg('Your submission could not be checked right now. Please try again later.', true);
     case 'storage_failed':

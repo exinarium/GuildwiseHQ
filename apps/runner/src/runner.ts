@@ -585,6 +585,13 @@ export class Runner {
       },
       journalFile: join(this.paths.root, 'state', 'storage-submissions.json'),
       pdf: this.pdf,
+      pageOrigin: (() => {
+        try {
+          return new URL(opts.config.serverUrl).origin;
+        } catch {
+          return undefined;
+        }
+      })(),
       // Connection, kind, size, outcome and duration only: never a path, a name or content. The scan verdict lines
       // (`storage.scan ...`) are the exception and hold the cleaned-up file name, never content.
       log: (line) => this.log.info(line),
@@ -870,6 +877,8 @@ export class Runner {
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
       this.announceRelay();
       this.storage.reportAll();
+      void this.storage.reportDirect().catch(() => undefined);
+      void this.storage.sweepStaging().catch(() => undefined);
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
@@ -1956,6 +1965,10 @@ export class Runner {
       case 'storage.write.end':
       case 'storage.write.abort':
       case 'storage.delete':
+      case 'storage.grant.open':
+      case 'storage.grant.status':
+      case 'storage.grant.finish':
+      case 'storage.grant.cancel':
         this.storage.onMessage(msg);
         break;
       case 'relay.request':

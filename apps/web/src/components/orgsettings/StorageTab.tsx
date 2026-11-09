@@ -11,6 +11,7 @@ import {
 import { agoText } from '../../lib/ago.ts';
 import { newId } from '../../lib/secure.ts';
 import {
+  directUploadsLine,
   STORAGE_KIND_LABEL,
   storageConnectAction,
   storageErrorText,
@@ -135,6 +136,11 @@ export function StorageTab({ canManage }: { canManage: boolean }) {
                     {c.health.checkedAt ? ` · checked ${agoText(c.health.checkedAt)}` : ''}
                     {c.health.message && c.health.state !== 'connected' ? ` · ${c.health.message}` : ''}
                   </p>
+                  {directUploadsLine(c) && (
+                    <p className="text-sm text-muted" data-testid={`storage-direct-${c.id}`}>
+                      {directUploadsLine(c)}
+                    </p>
+                  )}
                   {tests[c.id] && <TestResult rid={tests[c.id] as string} />}
                   {canManage && (
                     <div className="flex flex-wrap gap-2">

@@ -22,6 +22,7 @@ import type { Scheduler } from './scheduler/scheduler.ts';
 import type { BoardService } from './sessions/board.ts';
 import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
+import type { DirectUploads } from './storage-relay/direct.ts';
 import type { StorageRelay } from './storage-relay/hub.ts';
 import type { VideoDestinationClient } from './video/destinations.ts';
 import type { YouTubeClient } from './video/youtube.ts';
@@ -85,6 +86,8 @@ export interface Services {
   webhookRelay: RelayHub;
   /** The write relay to a firm's own storage: streams a file to the runner that holds the connection and keeps nothing. */
   storage: StorageRelay;
+  /** Direct browser-to-storage uploads: reported upload hosts and open grants (memory only). */
+  direct: DirectUploads;
   /** What a public form does when the firm's runner is offline (the offline flow replaces the default). */
   publicFormsOffline?: RunnerOfflineHook;
   /** Runner-offline secure links: told when a runner reconnects (schedules a sweep after the settle delay). */
