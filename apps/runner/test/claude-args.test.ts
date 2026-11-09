@@ -3,6 +3,7 @@ import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
 import {
+  buildDevopsChatSettings,
   buildShiftSettings,
   SESSION_TOOLS_DENIED,
   toolchainReadPaths,
@@ -574,6 +575,80 @@ describe('the DevOps engineer runs unsandboxed (owner decision)', () => {
     expect(deny).not.toContain('Bash(git push:*)');
     expect(deny).not.toContain('Bash');
     expect(deny).not.toContain('Edit');
+  });
+
+  const HOOK = "'/usr/bin/node' '/runner/aom.mjs' 'devops-guard'";
+  const guarded = (over: Parameters<typeof policyCtx>[0] = {}, p = devopsRole.permissions) =>
+    buildShiftSettings(p, policyCtx({ guardHookCommand: HOOK, ...over }), POLICY_PATHS, 'devops', true);
+
+  it('with the guard attached, the rm deny is left out (the guard judges deletes)', () => {
+    const shift = guarded();
+    const chat = buildDevopsChatSettings(
+      devopsRole.permissions,
+      policyCtx({ guardHookCommand: HOOK }),
+      POLICY_PATHS,
+    );
+    for (const s of [shift, chat]) {
+      expect(s.permissions.deny).not.toContain('Bash(rm -rf /*)');
+      expect(s.permissions.deny.some((r) => r.startsWith('Bash(rm '))).toBe(false);
+      expect(s.hooks?.PreToolUse?.[0]?.hooks[0]?.command).toBe(HOOK);
+    }
+  });
+
+  it('without the guard, the rm deny stays', () => {
+    expect(dev().permissions.deny).toContain('Bash(rm -rf /*)');
+    expect(
+      buildDevopsChatSettings(devopsRole.permissions, policyCtx(), POLICY_PATHS).permissions.deny,
+    ).toContain('Bash(rm -rf /*)');
+  });
+
+  it('every other deny entry is the same with and without the guard', () => {
+    expect(guarded().permissions.deny).toEqual(dev().permissions.deny.filter((r) => r !== 'Bash(rm -rf /*)'));
+    expect(guarded().permissions.deny).toEqual(
+      expect.arrayContaining([
+        'ListAgents',
+        'Read(//data/config.json)',
+        'Edit(//data/agents/a1/claude/**)',
+        'Read(//home/me/.claude/**)',
+      ]),
+    );
+    expect(guarded({ addDirs: ['/srv/vault'] }).permissions.deny).toContain('Edit(//srv/vault/**)');
+  });
+
+  it('only rm patterns are left out', () => {
+    const p = {
+      ...devopsRole.permissions,
+      deniedShellPatterns: ['rm -rf /*', ' rm -fr ~ ', 'rmdir /srv', 'git clean*'],
+    };
+    const g = guarded({}, p).permissions.deny;
+    expect(g).not.toContain('Bash(rm -rf /*)');
+    expect(g).not.toContain('Bash(rm -fr ~)');
+    expect(g).toEqual(expect.arrayContaining(['Bash(rmdir /srv)', 'Bash(git clean:*)']));
+    const u = buildShiftSettings(p, policyCtx(), POLICY_PATHS, 'devops', true).permissions.deny;
+    expect(u).toEqual(
+      expect.arrayContaining(['Bash(rm -rf /*)', 'Bash(rm -fr ~)', 'Bash(rmdir /srv)', 'Bash(git clean:*)']),
+    );
+  });
+
+  it('other roles keep the rm deny even with a guard command in the context', () => {
+    for (const [key, role] of [
+      ['builder', builder],
+      ['tester', tester],
+    ] as const) {
+      const s = buildShiftSettings(
+        role.permissions,
+        policyCtx({ guardHookCommand: HOOK }),
+        POLICY_PATHS,
+        key,
+      );
+      expect(s.permissions.deny).toContain('Bash(rm -rf /*)');
+    }
+  });
+
+  it('a guarded read-only scan has no rm deny but keeps the scan denies', () => {
+    const deny = guarded({ readOnlyScan: true }).permissions.deny;
+    expect(deny).not.toContain('Bash(rm -rf /*)');
+    expect(deny).toEqual(expect.arrayContaining(['NotebookEdit', 'WebFetch']));
   });
 
   it('is decided by the isDevops flag only: other roles keep the sandbox and the worktree-only rules', () => {

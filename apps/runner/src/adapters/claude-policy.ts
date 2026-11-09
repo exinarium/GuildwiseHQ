@@ -86,7 +86,8 @@ export interface ClaudePolicyContext {
   tmpEntries?: string[];
   /**
    * The command of the DevOps guard hook (`aom devops-guard`): a PreToolUse hook on every Bash command of the DevOps
-   * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook.
+   * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook. When set, the
+   * role's `rm` deny patterns are left out of the DevOps settings: the guard judges deletes.
    */
   guardHookCommand?: string;
 }
@@ -252,6 +253,11 @@ export function shellDeny(pattern: string): string {
   if (p.endsWith(' *')) return `Bash(${p.slice(0, -2)}:*)`;
   if (p.endsWith('*') && !p.endsWith('/*')) return `Bash(${p.slice(0, -1).trimEnd()}:*)`;
   return `Bash(${p})`;
+}
+
+/** A denied shell pattern whose command is `rm` (`rm -rf /*`). Not `rmdir`, not `rm*`. */
+function isRmPattern(pattern: string): boolean {
+  return pattern.trim().split(/\s+/)[0] === 'rm';
 }
 
 /** `/abs/path` -> `//abs/path` (the absolute-path anchor of permission rules). */
@@ -640,7 +646,9 @@ function buildDevopsSettings(
     ...SESSION_TOOLS_DENIED,
     // git push is allowed (owner decision): it keeps the vaults in sync across workstations with the user's git
     // credentials. Creating a new repository still goes through `aom repo create`.
-    ...p.deniedShellPatterns.map(shellDeny),
+    // With the guard attached, deletes are the guard's to judge (deleteRoots). A `Bash(rm -rf /*)` deny matches every
+    // absolute-path `rm -rf` (`*` is a wildcard), /tmp included, and a deny beats the guard's allow.
+    ...p.deniedShellPatterns.filter((s) => !(ctx.guardHookCommand && isRmPattern(s))).map(shellDeny),
     ...RUNNER_PRIVATE.flatMap((f) => {
       const abs = ruleAbs(join(ctx.runnerRoot, f));
       return [`Read(${abs}/**)`, `Read(${abs})`, `Edit(${abs}/**)`, `Edit(${abs})`];
