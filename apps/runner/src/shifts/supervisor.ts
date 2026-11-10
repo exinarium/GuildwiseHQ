@@ -463,6 +463,8 @@ interface ActiveShift {
   reportAccepted?: boolean;
   /** Resolves when the agent's event stream has ended (the process is gone and its result line was read). */
   streamEnded?: Promise<void>;
+  /** Settled when the verdict of a terminal report in flight is applied (or timed out); undefined without one. */
+  terminalVerdict?: Promise<void>;
   /** Claude's session id of this shift, once the stream said it. */
   runtimeSessionId?: string;
   /** The session this shift was asked to resume, and what the runner decided (reported with the first session update). */
@@ -775,14 +777,28 @@ export class ShiftSupervisor {
     // The server releases the claim as soon as it accepted the report, and that used to kill the process 1.5 s later,
     // before Claude wrote its result line: 577 such shifts recorded estimated usage and were labelled "stopped". Give a
     // session whose report was accepted a short grace to finish by itself (its usage is then the real one).
+    // A terminal report whose verdict is still in flight (the stop can arrive in the same socket read as the verdict)
+    // is waited for first; both waits share one deadline.
+    const grace = this.deps.claimLostGraceMs ?? 5_000;
+    const deadline = Date.now() + grace;
+    if (reason === 'claim_lost' && s.reportState === 'pending' && s.terminalVerdict) {
+      let t: NodeJS.Timeout | undefined;
+      await Promise.race([
+        s.terminalVerdict,
+        new Promise<void>((resolve) => {
+          t = setTimeout(resolve, grace);
+          t.unref?.();
+        }),
+      ]);
+      if (t) clearTimeout(t);
+    }
     const afterAccepted = reason === 'claim_lost' && s.reportAccepted === true;
     if (afterAccepted && s.streamEnded) {
-      const grace = this.deps.claimLostGraceMs ?? 5_000;
       let timer: NodeJS.Timeout | undefined;
       const done = await Promise.race([
         s.streamEnded.then(() => true),
         new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => resolve(false), grace);
+          timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now()));
           timer.unref?.();
         }),
       ]);
@@ -3002,10 +3018,21 @@ export class ShiftSupervisor {
 
     const reportId = uuidv7();
     if (terminal) s.reportState = 'pending';
+    let settleTerminal: () => void = () => undefined;
+    if (terminal) s.terminalVerdict = new Promise<void>((r) => (settleTerminal = r));
     const verdict = new Promise<ReportVerdict | 'timeout'>((resolve) => {
-      s.pendingReports.set(reportId, resolve);
+      // The verdict is applied right here, not after the await below: the server's stop can arrive in the same
+      // socket read and must already see the accepted report.
+      s.pendingReports.set(reportId, (v) => {
+        if (terminal) this.applyTerminalVerdict(s, v);
+        settleTerminal();
+        resolve(v);
+      });
       setTimeout(() => {
-        if (s.pendingReports.delete(reportId)) resolve('timeout');
+        if (s.pendingReports.delete(reportId)) {
+          settleTerminal();
+          resolve('timeout');
+        }
       }, this.deps.reportWaitMs ?? 120_000).unref?.();
     });
     this.deps.transport.send('shift.report', { shiftId: msg.shiftId, reportId, report: toSend, ...attach });
@@ -3015,27 +3042,28 @@ export class ShiftSupervisor {
       // Persisted in the outbox: it will be delivered when the server is reachable.
       return { accepted: true, message: `Queued. ${ACCEPTED_MESSAGE}` };
     }
-    if (!result.accepted) {
-      if (terminal) s.reportState = 'none';
-      return rejected(result.error ?? 'the server rejected the report', result.matches);
-    }
-    if (terminal && result.continueShift) {
-      // A builder's test question under "Test without an environment": accepted, but the shift goes on and may still hand off.
-      s.reportState = 'none';
-    } else if (terminal) {
-      s.reportState = 'accepted';
-      s.reportAccepted = true;
-      s.graceTimer = setTimeout(
-        () => void s.session?.stop('report_accepted'),
-        this.deps.exitGraceMs ?? 120_000,
-      );
-      s.graceTimer.unref?.();
-    }
+    if (!result.accepted) return rejected(result.error ?? 'the server rejected the report', result.matches);
     return {
       accepted: true,
       message: `${result.message ?? (terminal ? ACCEPTED_MESSAGE : 'Recorded.')}${checkNote ? ` ${checkNote}` : ''}`,
       ...(result.matches ? { matches: result.matches } : {}),
     };
+  }
+
+  /** What a terminal report's verdict does to the shift; runs when the verdict arrives. */
+  private applyTerminalVerdict(s: ActiveShift, v: ReportVerdict): void {
+    if (!v.accepted || v.continueShift) {
+      // Rejected, or a builder's test question under "Test without an environment": the shift goes on and may still hand off.
+      s.reportState = 'none';
+      return;
+    }
+    s.reportState = 'accepted';
+    s.reportAccepted = true;
+    s.graceTimer = setTimeout(
+      () => void s.session?.stop('report_accepted'),
+      this.deps.exitGraceMs ?? 120_000,
+    );
+    s.graceTimer.unref?.();
   }
 }
 
