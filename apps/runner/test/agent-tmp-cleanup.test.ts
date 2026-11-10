@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { runnerPaths } from '../src/paths.ts';
 import {
   agentTmpDir,
+  agentTmpRoot,
   cleanAgentTmp,
   ensureSandbox,
   holdAgentTmp,
@@ -115,7 +116,11 @@ describe('agent temp cleanup (backlog #81)', () => {
   it('the agent TMPDIR is a short /tmp path (unix socket limit); scratch stays on disk', async () => {
     const { paths, a } = await setup();
     expect(a.tmp).toBe(agentTmpDir(paths, A));
-    if (process.platform !== 'win32') expect(a.tmp).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
+    // under the agent temp root (`/tmp` in production, pinned by agent-tmp-root.test.ts; the test run's own root here)
+    if (process.platform !== 'win32') {
+      expect(dirname(a.tmp)).toBe(agentTmpRoot());
+      expect(basename(a.tmp)).toMatch(/^aom-[0-9a-f]{10}$/);
+    }
     expect(a.scratch.startsWith(paths.root)).toBe(true);
   });
 });

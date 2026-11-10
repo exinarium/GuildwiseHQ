@@ -17,6 +17,7 @@ import {
   scopeCommand,
   scrubEnv,
 } from '../src/runs/sandbox.ts';
+import { agentTmpRoot } from '../src/sandbox/sandbox.ts';
 import { cleanupTmp, makeRepo, sh, tmp, waitUntil } from './helpers.ts';
 
 cleanupTmp();
@@ -808,7 +809,7 @@ describe('restart, update and keeping worktrees', () => {
     expect(last(r.t.sent, r.envId)).toMatchObject({ state: 'stopped', endReason: 'stopped' });
     expect(existsSync(r.wt)).toBe(true);
     expect(r.t.mgr.worktreeDirs().length).toBe(1); // the sweep leaves it alone
-    expect(existsSync(`/tmp/aom-run-${r.envId.slice(0, 8)}`)).toBe(false); // the run tmp is gone
+    expect(existsSync(`${agentTmpRoot()}/aom-run-${r.envId.slice(0, 8)}`)).toBe(false); // the run tmp is gone
     const res = await r.t.mgr.restart({
       envId: r.envId,
       update: false,
