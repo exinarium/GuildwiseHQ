@@ -38,6 +38,8 @@ export async function startHarness(
       const shiftId = msg.shiftId as string;
       server.send('shift.start', msg);
       const ended = await server.waitFor('shift.ended', (m) => m.shiftId === shiftId, 60_000);
+      // shift.ended goes out before the shift's temp cleanup; wait for that to finish too
+      await runner.supervisor.whenSettled(shiftId);
       return { shiftId, ended };
     },
     async stop() {

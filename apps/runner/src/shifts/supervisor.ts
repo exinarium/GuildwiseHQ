@@ -617,6 +617,18 @@ export class ShiftSupervisor {
   }
 
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
+  private readonly settling = new Map<string, Promise<void>>();
+
+  /** Resolves when the shift's handleStart, including its temp cleanup, has returned; at once for an unknown id. */
+  whenSettled(shiftId: string): Promise<void> {
+    return this.settling.get(shiftId) ?? Promise.resolve();
+  }
+
+  /** Resolves when every shift now being wrapped up has finished its cleanup. */
+  async settledAll(): Promise<void> {
+    await Promise.all([...this.settling.values()]);
+  }
+
   async handleStart(
     msg: ShiftStartMsg,
     resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[] },
@@ -669,6 +681,9 @@ export class ShiftSupervisor {
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
+    let settle!: () => void;
+    const settled = new Promise<void>((r) => (settle = r));
+    this.settling.set(msg.shiftId, settled);
     try {
       await this.run(shift);
     } catch (err) {
@@ -699,6 +714,8 @@ export class ShiftSupervisor {
         if (r.pruned.length) this.log.info(describePrune(shift.msg.agent.agentId, r));
       }
       this.forget(msg.shiftId);
+      if (this.settling.get(msg.shiftId) === settled) this.settling.delete(msg.shiftId);
+      settle();
     }
   }
 
