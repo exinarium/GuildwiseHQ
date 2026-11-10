@@ -118,9 +118,12 @@ async function writeHtml(t: T, o: { derive?: boolean; name?: string; deadlineMs?
 }
 const names = (t: T) => (existsSync(join(t.stored, 'sub')) ? readdirSync(join(t.stored, 'sub')).sort() : []);
 const pdfLines = (t: T) => t.logs.filter((l) => l.startsWith('storage.pdf'));
-const noContent = (t: T) => {
+const noContent = async (t: T) => {
   for (const l of t.logs) expect(l).not.toContain(SECRET_ANSWER);
-  expect(readdirSync(join(t.root, 'tmp', 'storage'))).toEqual([]);
+  // the result is sent before the spool file is removed: give the removal a moment
+  const spool = join(t.root, 'tmp', 'storage');
+  for (let i = 0; i < 100 && readdirSync(spool).length > 0; i++) await new Promise((r) => setTimeout(r, 20));
+  expect(readdirSync(spool)).toEqual([]);
 };
 
 describe('PDF copy of the answers', () => {
@@ -139,7 +142,7 @@ describe('PDF copy of the answers', () => {
     const bytes = readFileSync(join(t.stored, 'sub', 'answers-x.pdf'));
     expect(r.derived.pdf.reference.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
     expect(pdfLines(t)).toHaveLength(1);
-    noContent(t);
+    await noContent(t);
   });
 
   it('follows the clash suffix of the written html', async () => {
@@ -171,7 +174,7 @@ describe('PDF copy of the answers', () => {
     expect(r.derived.pdf).toEqual({ ok: false, code: 'pdf_unavailable' });
     expect(names(t)).toEqual(['answers-x.html']);
     expect(pdfLines(t)).toHaveLength(1);
-    noContent(t);
+    await noContent(t);
   });
 
   it('a renderer that throws (with the answer in its message) gives pdf_failed and no content in the log', async () => {
@@ -186,7 +189,7 @@ describe('PDF copy of the answers', () => {
     expect(r.derived.pdf).toEqual({ ok: false, code: 'pdf_failed' });
     expect(names(t)).toEqual(['answers-x.html']);
     expect(pdfLines(t)).toHaveLength(1);
-    noContent(t);
+    await noContent(t);
   });
 
   it('a renderer that reports a code is passed on', async () => {
@@ -242,7 +245,7 @@ describe('PDF copy of the answers', () => {
     expect(r.ok).toBe(true);
     expect(r.derived.pdf).toEqual({ ok: false, code: 'pdf_write_failed' });
     expect(names(t)).toEqual(['answers-x.html']);
-    noContent(t);
+    await noContent(t);
   });
 
   it('storage.discard removes the html and the pdf', async () => {
