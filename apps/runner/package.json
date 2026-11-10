@@ -23,7 +23,7 @@
     "@aom/shared": "workspace:*",
     "ai": "7.0.164",
     "commander": "^15.1.0",
-    "execa": "^9.0.0",
+    "execa": "^10.2.1",
     "picomatch": "^4.0.0",
     "playwright-core": "^1.65.0",
     "ws": "^8.22.1",
