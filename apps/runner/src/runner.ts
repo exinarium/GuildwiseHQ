@@ -169,7 +169,7 @@ import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
 import { RunManager } from './runs/manager.ts';
-import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import { removeOrphanAgentTmps, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
@@ -1205,6 +1205,12 @@ export class Runner {
       .then((r) => {
         if (r.removed)
           this.log.info(`temp sweep: removed ${r.removed} entries of ${r.agents} agent temp dir(s)`);
+      })
+      .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    // ... and the temp dirs of this runner's agents whose folder is gone (removed outside the runner)
+    await removeOrphanAgentTmps(this.paths, this.supervisor.persistedAgentIds())
+      .then((n) => {
+        if (n) this.log.info(`temp sweep: removed ${n} temp dir(s) of agents that no longer exist`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
     this.startScratchSweeps();

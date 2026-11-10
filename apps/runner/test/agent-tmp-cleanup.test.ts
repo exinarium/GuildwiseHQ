@@ -1,6 +1,17 @@
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { runnerPaths } from '../src/paths.ts';
 import {
@@ -9,7 +20,9 @@ import {
   cleanAgentTmp,
   ensureSandbox,
   holdAgentTmp,
+  removeOrphanAgentTmps,
   sweepAgentTmps,
+  TMP_OWNER_FILE,
   wipeAgent,
 } from '../src/sandbox/sandbox.ts';
 import { makeShiftStart } from './fixtures.ts';
@@ -19,6 +32,9 @@ import { cleanupTmp, tmp } from './helpers.ts';
 cleanupTmp();
 const A = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
 const B = '019e3f6a-7b1c-7a2d-8c3e-0123456789b2';
+
+/** The entries of an agent temp dir, without its owner file. */
+const kept = (dir: string): string[] => readdirSync(dir).filter((n) => n !== TMP_OWNER_FILE);
 
 const fill = (dir: string): void => {
   mkdirSync(join(dir, 'claude-1000', 'review'), { recursive: true });
@@ -51,7 +67,8 @@ describe('agent temp cleanup (backlog #81)', () => {
     fill(a.tmp);
     fill(b.tmp);
     expect(await cleanAgentTmp(a.tmp)).toBeGreaterThan(0);
-    expect(readdirSync(a.tmp)).toEqual(['node-compile-cache']);
+    expect(kept(a.tmp)).toEqual(['node-compile-cache']);
+    expect(existsSync(join(a.tmp, TMP_OWNER_FILE))).toBe(true);
     expect(existsSync(join(b.tmp, 'claude-1000', 'review', 'big.bin'))).toBe(true);
     expect(existsSync(a.tmp)).toBe(true);
   });
@@ -104,7 +121,7 @@ describe('agent temp cleanup (backlog #81)', () => {
     fill(other.tmp);
     const r = await sweepAgentTmps(paths, [B]);
     expect(r.agents).toBe(1);
-    expect(readdirSync(a.tmp)).toEqual(['node-compile-cache']);
+    expect(kept(a.tmp)).toEqual(['node-compile-cache']);
     expect(existsSync(join(b.tmp, 'risk.md'))).toBe(true);
     expect(existsSync(join(other.tmp, 'risk.md'))).toBe(true);
   });
@@ -122,6 +139,96 @@ describe('agent temp cleanup (backlog #81)', () => {
       expect(basename(a.tmp)).toMatch(/^aom-[0-9a-f]{10}$/);
     }
     expect(a.scratch.startsWith(paths.root)).toBe(true);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('temp dirs of agents that no longer exist', () => {
+  // the sweep lists the whole agent temp root: each test gets a root of its own
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.AOM_AGENT_TMP_ROOT;
+    process.env.AOM_AGENT_TMP_ROOT = tmp('aom-orphans-');
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AOM_AGENT_TMP_ROOT;
+    else process.env.AOM_AGENT_TMP_ROOT = saved;
+  });
+
+  it('ensureSandbox writes the owner file through a rename, never through what the agent left there', async () => {
+    const paths = runnerPaths(tmp());
+    const a = await ensureSandbox(paths, A, 'A');
+    const owner = join(a.tmp, TMP_OWNER_FILE);
+    expect(JSON.parse(readFileSync(owner, 'utf8'))).toEqual({ agents: paths.agents, agentId: A });
+    const outside = join(tmp('outside-'), 'precious.txt');
+    writeFileSync(outside, 'p');
+    rmSync(owner);
+    symlinkSync(outside, owner);
+    await ensureSandbox(paths, A, 'A');
+    expect(readFileSync(outside, 'utf8')).toBe('p');
+    expect(lstatSync(owner).isFile()).toBe(true);
+    expect(readdirSync(a.tmp).filter((n) => n.startsWith(TMP_OWNER_FILE))).toEqual([TMP_OWNER_FILE]);
+  });
+
+  it("runner start removes the temp dirs of this runner's agents that no longer exist, and nothing else", async () => {
+    const root = agentTmpRoot();
+    const paths = runnerPaths(tmp());
+    const gone = async (p: typeof paths, id: string) => {
+      const sb = await ensureSandbox(p, id, id);
+      fill(sb.tmp);
+      rmSync(p.agentDir(id), { recursive: true, force: true });
+      return sb.tmp;
+    };
+    const live = (await ensureSandbox(paths, A, 'A')).tmp;
+    const removed = await gone(paths, B);
+    // another runner's agent that no longer exists
+    const otherRunner = await gone(runnerPaths(tmp()), '019e3f6a-7b1c-7a2d-8c3e-0123456789c3');
+    // a forged owner file naming this runner and a gone agent, in a dir that is not that agent's
+    const forged = join(root, 'aom-ffffffffff');
+    mkdirSync(forged);
+    writeFileSync(
+      join(forged, TMP_OWNER_FILE),
+      JSON.stringify({ agents: paths.agents, agentId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d4' }),
+    );
+    // a dir without an owner file (made before this release, or not by a runner)
+    const unowned = join(root, 'aom-0123456789');
+    mkdirSync(unowned);
+    writeFileSync(join(unowned, 'x'), 'x');
+    // gone, but a shift or chat of this process still holds it
+    const heldId = '019e3f6a-7b1c-7a2d-8c3e-0123456789e5';
+    const held = await gone(paths, heldId);
+    const release = holdAgentTmp({ tmp: held });
+    // gone, but its shift is about to be resumed
+    const skipId = '019e3f6a-7b1c-7a2d-8c3e-0123456789f6';
+    const skipped = await gone(paths, skipId);
+    // gone, but the owner file is a FIFO (an agent cannot make the sweep block)
+    const fifo = await gone(paths, '019e3f6a-7b1c-7a2d-8c3e-0123456789a7');
+    rmSync(join(fifo, TMP_OWNER_FILE));
+    execFileSync('mkfifo', [join(fifo, TMP_OWNER_FILE)]);
+    // gone, but its name is a symlink to the real dir
+    const linked = await gone(paths, '019e3f6a-7b1c-7a2d-8c3e-0123456789b8');
+    const moved = join(tmp('moved-'), 'real');
+    renameSync(linked, moved);
+    symlinkSync(moved, linked);
+
+    try {
+      expect(await removeOrphanAgentTmps(paths, [skipId])).toBe(1);
+    } finally {
+      release();
+    }
+    expect(existsSync(removed)).toBe(false);
+    for (const d of [live, otherRunner, forged, unowned, held, skipped, fifo, linked])
+      expect(existsSync(d), d).toBe(true);
+    expect(existsSync(join(moved, 'risk.md'))).toBe(true);
+    // released, the held one goes at the next start; the resumed one once it is no longer skipped
+    expect(await removeOrphanAgentTmps(paths)).toBe(2);
+    expect(existsSync(held)).toBe(false);
+    expect(existsSync(skipped)).toBe(false);
+    expect(existsSync(live)).toBe(true);
+  });
+
+  it('is a no-op when the temp root does not exist', async () => {
+    process.env.AOM_AGENT_TMP_ROOT = join(tmp(), 'missing');
+    expect(await removeOrphanAgentTmps(runnerPaths(tmp()))).toBe(0);
   });
 });
 
@@ -160,7 +267,7 @@ describe('supervisor: the temp dir is emptied when the shift ends', () => {
     await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId);
     await new Promise((r) => setTimeout(r, 300));
     expect(tmpDir).not.toBe('');
-    expect(readdirSync(tmpDir)).toEqual(['node-compile-cache']);
+    expect(kept(tmpDir)).toEqual(['node-compile-cache']);
     await wipeAgent(runnerPaths(h.dataDir), (msg as { agent: { agentId: string } }).agent.agentId);
   });
 });

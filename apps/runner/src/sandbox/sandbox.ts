@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, rmSync } from 'node:fs';
-import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmodSync, constants, existsSync, rmSync } from 'node:fs';
+import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { commitEnv } from '../git/identity.ts';
@@ -195,6 +195,7 @@ export async function ensureSandbox(
   const sb = sandboxFor(paths, agentId, account);
   await Promise.all([sb.home, sb.configDir, sb.scratch].map((d) => mkdir(d, { recursive: true })));
   await mkdir(sb.tmp, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await writeTmpOwner(sb.tmp, paths, agentId);
   if (sb.cacheRoot) await ensureSharedCaches(sb.cacheRoot);
   await ensureDotnetShm();
   const gitconfig = [
@@ -261,8 +262,50 @@ export function wipeAgentSync(paths: RunnerPaths, agentId: string): { removed: b
   return { removed: existed };
 }
 
+/**
+ * `<agent TMPDIR>/.aom-owner`: `{"agents": <data dir>/agents, "agentId": <id>}`. It says which runner and agent the dir
+ * belongs to, so a runner can remove the temp dir of an agent that no longer exists (`removeOrphanAgentTmps`).
+ */
+export const TMP_OWNER_FILE = '.aom-owner';
+
 /** Entries of an agent's TMPDIR that survive the end of a shift (a compile cache is rebuilt slowly and is small). */
-export const TMP_KEEP = ['node-compile-cache'] as const;
+export const TMP_KEEP = ['node-compile-cache', TMP_OWNER_FILE] as const;
+
+/**
+ * Writes the owner file through a new file and a rename, so whatever the agent left at that name (a symlink, a hard link
+ * to another file) is replaced, never written through. Never throws: without the file the dir is only never swept.
+ */
+async function writeTmpOwner(tmp: string, paths: RunnerPaths, agentId: string): Promise<void> {
+  const part = join(tmp, `${TMP_OWNER_FILE}.${process.pid}.${Date.now().toString(36)}`);
+  try {
+    await writeFile(part, `${JSON.stringify({ agents: paths.agents, agentId })}\n`, {
+      mode: 0o600,
+      flag: 'wx',
+    });
+    await rename(part, join(tmp, TMP_OWNER_FILE));
+  } catch {
+    await rm(part, { force: true }).catch(() => undefined);
+  }
+}
+
+/** The owner file of an agent temp dir, or null. Opened without following a symlink or blocking on a FIFO. */
+async function readTmpOwner(file: string): Promise<{ agents: string; agentId: string } | null> {
+  let fh: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    fh = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = await fh.stat();
+    if (!st.isFile() || st.size > 4096) return null;
+    const o = JSON.parse(await fh.readFile('utf8')) as { agents?: unknown; agentId?: unknown };
+    if (typeof o?.agents !== 'string' || typeof o.agentId !== 'string') return null;
+    // an agent id is one path segment
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(o.agentId)) return null;
+    return { agents: o.agents, agentId: o.agentId };
+  } catch {
+    return null;
+  } finally {
+    await fh?.close().catch(() => undefined);
+  }
+}
 
 /** Agent TMPDIR -> number of shifts/chats that use it right now (this process). */
 const tmpHolds = new Map<string, number>();
@@ -345,4 +388,49 @@ export async function sweepAgentTmps(
     removed += await cleanAgentTmp(tmp);
   }
   return { agents, removed };
+}
+
+/**
+ * Runner start (POSIX): removes the temp dirs of THIS runner's agents that no longer exist. `wipeAgent` removes an agent's
+ * temp dir with its folder, but when `agents/<id>` (or the whole data dir) goes some other way (a reset, a hand cleanup,
+ * a wipe that stopped half way) the temp dir and its compile cache stayed in `/tmp` for good. A dir is removed only when
+ * all of these hold: it is a real dir (no symlink) of our user named `aom-<10 hex>` under the agent temp root; its owner
+ * file names this runner's agents folder and an agent id whose temp dir is exactly this dir (the name is this runner's hash
+ * of that id, so a copied or forged owner file cannot point anywhere else); `agents/<id>` does not exist; the id is not in
+ * `skipAgentIds` (shifts about to be resumed); and nobody holds the dir. Dirs without an owner file are never touched.
+ * Never throws; returns the number of dirs removed.
+ */
+export async function removeOrphanAgentTmps(
+  paths: RunnerPaths,
+  skipAgentIds: Iterable<string> = [],
+): Promise<number> {
+  if (process.platform === 'win32') return 0;
+  const skip = new Set(skipAgentIds);
+  const root = agentTmpRoot();
+  const uid = process.getuid?.();
+  let names: string[] = [];
+  try {
+    names = await readdir(root);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!/^aom-[0-9a-f]{10}$/.test(name)) continue;
+    const dir = `${root}/${name}`;
+    try {
+      const st = await lstat(dir);
+      if (!st.isDirectory() || st.isSymbolicLink() || (uid !== undefined && st.uid !== uid)) continue;
+      const owner = await readTmpOwner(join(dir, TMP_OWNER_FILE));
+      if (!owner || owner.agents !== paths.agents) continue;
+      if (agentTmpDir(paths, owner.agentId) !== dir) continue;
+      if (skip.has(owner.agentId) || agentTmpHeld(dir)) continue;
+      if (existsSync(paths.agentDir(owner.agentId))) continue;
+      await rm(dir, { recursive: true, force: true, maxRetries: 2 });
+      removed++;
+    } catch {
+      /* busy or gone: the next start tries again */
+    }
+  }
+  return removed;
 }
