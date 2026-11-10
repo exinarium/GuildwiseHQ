@@ -19,9 +19,9 @@
     "test:unit": "node --test 'support/*.test.ts'"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.13.0",
+    "@axe-core/playwright": "^4.14.0",
     "@aom/video": "workspace:*",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.65.0",
     "@types/pg": "^8.11.0",
     "pdf-parse": "1.1.1",
     "pg": "^8.0.0"
