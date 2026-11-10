@@ -276,18 +276,32 @@ describe('a failing run files every bug (P2)', () => {
     expect(evidence.map((m) => m.body).join('\n')).toContain(`Already open: ${open.ref}.`);
   });
 
-  it('a legacy note without sections still files one bug, and the same title is not filed twice', async () => {
+  it('a note without sections files one bug; its generic title only matches a bug filed from a section', async () => {
     await freshState();
     await q('TRUNCATE suite_run_bugs');
     await hireTeam(w);
+    // two unrelated failures reported without sections under the same generic title: two cards
     const first = (await regression('web')).cards[0];
-    await p.run('Tess', testFail('Mobile menu overlaps'));
+    await p.run('Tess', testFail('2 failures in the web run'));
     expect(await bugsOf(first.id)).toHaveLength(1);
     const second = (await regression('web')).cards[0];
-    await p.run('Tess', testFail('Mobile menu overlaps'));
-    expect(await bugsOf(second.id)).toHaveLength(0);
+    await p.run('Tess', testFail('2 failures in the web run'));
+    expect(await bugsOf(second.id)).toHaveLength(1);
     expect(
       (await eventsOfType('RegressionBugSeenAgain')).filter((e) => e.runCardId === second.id),
+    ).toHaveLength(0);
+    // a bug filed from a section is still found by a later note without sections that names it
+    const third = (await regression('web')).cards[0];
+    await p.run('Tess', {
+      ...testFail('1 failure in the web run'),
+      note: 'Bug: Mobile menu overlaps\nThe menu covers the page.',
+    });
+    expect(await bugsOf(third.id)).toHaveLength(1);
+    const fourth = (await regression('web')).cards[0];
+    await p.run('Tess', testFail('Mobile menu overlaps'));
+    expect(await bugsOf(fourth.id)).toHaveLength(0);
+    expect(
+      (await eventsOfType('RegressionBugSeenAgain')).filter((e) => e.runCardId === fourth.id),
     ).toHaveLength(1);
   });
 });

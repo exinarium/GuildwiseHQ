@@ -18,7 +18,7 @@ describe('parseSuiteBugs', () => {
         {
           title: 'Checkout total is wrong',
           body: 'Expected redirect to /home\n\n2 failed',
-          failureKey: 'title:checkout total is wrong',
+          failureKey: 'note:checkout total is wrong',
           titleKey: 'title:checkout total is wrong',
         },
       ],

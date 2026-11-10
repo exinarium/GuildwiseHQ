@@ -373,13 +373,18 @@ export async function suiteOutcomeEvents(
 export const UNCONFIRMED_TARGET =
   'The deployed commit of the target was not confirmed; this failure may come from an older build.';
 
-/** The open bug card a suite run already filed for this failure (same failing test or same title), if any. */
+/**
+ * The open bug card a suite run already filed for this failure (same failing test or same title), if any. A bug from a
+ * note without sections (`note:` key) has the report title, which can be generic: it only matches a bug filed from a
+ * section with exactly that title, never another such note.
+ */
 async function openSuiteBug(
   tx: Tx,
   projectId: string,
   failureKey: string,
   titleKey: string,
 ): Promise<Row | undefined> {
+  if (failureKey.startsWith('note:')) [failureKey, titleKey] = [titleKey, ''];
   return one(
     tx,
     `SELECT bc.id, bc.ref, bc.org_id, bc.project_id FROM suite_run_bugs b JOIN cards bc ON bc.id = b.bug_card_id

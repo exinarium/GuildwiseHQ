@@ -16,12 +16,18 @@ const norm = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
 export const titleKey = (t: string): string => `title:${norm(t)}`.slice(0, KEY_MAX);
 /** The dedupe key of a failing test id (`<spec file> > <test name>`). */
 export const testKey = (t: string): string => `test:${norm(t)}`.slice(0, KEY_MAX);
+/**
+ * The key of a bug from a note without `Bug:` sections. Its title is the report title, which can be generic ("2
+ * failures in the web run"), so it never matches another such note: it is only checked against bugs filed from a
+ * section with the same title (see the server's `openSuiteBug`).
+ */
+export const noteKey = (t: string): string => `note:${norm(t)}`.slice(0, KEY_MAX);
 
 export interface SuiteBug {
   title: string;
   test?: string;
   body: string;
-  /** `testKey(test)` when the section names a test, else `titleKey(title)`. */
+  /** `testKey(test)` when the section names a test, else `titleKey(title)`; `noteKey(title)` for a note without sections. */
   failureKey: string;
   titleKey: string;
 }
@@ -93,8 +99,11 @@ export function parseSuiteBugs(
   const preamble = pre.join('\n').trim();
   if (!sections.length) {
     const title = fallbackTitle.trim().slice(0, KEY_MAX);
-    const tk = titleKey(title);
-    return { preamble: '', bugs: [{ title, body: note.trim(), failureKey: tk, titleKey: tk }], overflow: 0 };
+    return {
+      preamble: '',
+      bugs: [{ title, body: note.trim(), failureKey: noteKey(title), titleKey: titleKey(title) }],
+      overflow: 0,
+    };
   }
   const bugs: SuiteBug[] = [];
   const byKey = new Map<string, SuiteBug>();
