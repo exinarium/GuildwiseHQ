@@ -4,6 +4,8 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-10
+
 Runner 0.1.71.
 
 ### Added
