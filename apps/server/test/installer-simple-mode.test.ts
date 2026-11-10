@@ -76,9 +76,10 @@ describe('installer: code folder', () => {
   });
 
   it('GUILDWISE_REPO_DIRS still wins in every mode', () => {
-    const r = runFolders(false, { GUILDWISE_REPO_DIRS: '/tmp/aom-fixed-dir' });
+    const fixed = join(tmpdir(), 'aom-fixed-dir');
+    const r = runFolders(false, { GUILDWISE_REPO_DIRS: fixed });
     expect(r.calls).not.toContain('ASKED');
-    expect(r.calls).toContain('runner repos add /tmp/aom-fixed-dir');
+    expect(r.calls).toContain(`runner repos add ${fixed}`);
     rmSync(r.home, { recursive: true, force: true });
   });
 });
