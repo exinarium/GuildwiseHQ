@@ -17,7 +17,7 @@ import {
   highRiskSummary,
   type InvestigationData,
   isBriefWorkflowKey,
-  isSuiteOrigin,
+  isSuiteCard,
   isValidReportPath,
   type LedgerMatch,
   NO_COMMIT_IDENTITY_CODE,
@@ -501,7 +501,7 @@ export async function applyShiftReport(
     case 'TestPassed':
     case 'TestFailed': {
       const ev = payloadData as TestEvidence;
-      if (isSuiteOrigin(card.origin)) {
+      if (isSuiteCard(card.card_type, card.origin)) {
         mains = await suiteOutcomeEvents(
           ctx,
           tx,

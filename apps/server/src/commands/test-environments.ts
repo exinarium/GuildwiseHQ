@@ -383,7 +383,7 @@ SELECT c.id, COALESCE(st.claim_role, 'tester') AS role, st.env_strict AS strict 
  WHERE st.kind IN ('agent', 'server') AND st.environment = 'project'
    AND (st.kind = 'server' OR st.claim_role IS NOT NULL)
    AND c.status = 'queued' AND c.claim_id IS NULL
-   AND c.origin NOT IN ('full_suite', 'regression')
+   AND NOT (c.card_type = 'regression' AND c.origin IN ('full_suite', 'regression'))
    AND c.test_deploy_state IS DISTINCT FROM 'skipped'
    AND COALESCE((c.fields->>'integrationTests')::boolean, true) = true
    AND c.repo_id IS NOT NULL AND c.home_workstation_id IS NOT NULL

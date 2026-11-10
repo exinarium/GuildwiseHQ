@@ -3,7 +3,7 @@ import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { cardRow, eventsOfType, hireTeam, pipeline, testFail, testPass } from './helpers/pipeline.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import { createWorld, fullFields, ok, until, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
@@ -120,6 +120,49 @@ describe('regression runs', () => {
     expect(await q(`SELECT 1 FROM cards WHERE card_type='bug' AND origin='regression'`)).toHaveLength(1);
     const item = (await desk()).items.find((i: any) => i.subkind === 'bug_reported');
     expect(item.title).toMatch(/^Regression failure/);
+  });
+
+  it('a bug card spawned by a regression run goes Test -> Finalize -> merge like any card', async () => {
+    await freshState();
+    await hireTeam(w);
+    const { cards } = await regression('web');
+    const run = cards[0];
+    await p.run('Tess', testFail('Search returns nothing'));
+    const bug = (
+      await q(`SELECT * FROM cards WHERE card_type='bug' AND origin='regression' AND parent_card_id=$1`, [
+        run.id,
+      ])
+    )[0]!;
+    expect(bug).toMatchObject({ stage: 'spec', status: 'draft' });
+    const fields = fullFields({ context: bug.fields.context });
+    await ok(w.t.req('PATCH', `/api/cards/${bug.id}`, { cookie: w.owner.cookie, body: { fields } }));
+    await ok(w.t.req('POST', `/api/cards/${bug.id}/specify`, { cookie: w.owner.cookie }));
+    await p.toTest('Bea', ['Rex']);
+    await p.run('Tess', testPass());
+    // the normal path: Finalize, no suite outcome, the worktree and branch stay for the merge
+    expect(await cardRow(bug.id)).toMatchObject({ stage: 'finalize', origin: 'regression' });
+    expect((await eventsOfType('FullSuitePassed')).filter((e) => e.suiteCardId === bug.id)).toHaveLength(0);
+    const removed = r
+      .of('command')
+      .filter((f) => f.command === 'worktree.remove' && String(f.payload.path).includes(bug.ref));
+    expect(removed).toHaveLength(0);
+    // a feature test run, not a suite run
+    const runs = await q('SELECT kind, result FROM test_runs WHERE card_id=$1', [bug.id]);
+    expect(runs).toEqual([{ kind: 'feature', result: 'passed' }]);
+
+    const fin = r.received.length;
+    await ok(w.t.req('POST', `/api/cards/${bug.id}/finalize`, { cookie: w.owner.cookie, body: {} }));
+    const cmd = await r.waitFor('command', (f) => f.command === 'finalize.execute', 5000, fin);
+    expect(cmd.payload.cardId).toBe(bug.id);
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: { ok: true, action: 'merge', mergeCommit: 'b2c3d4e' },
+    });
+    await until(async () => (await cardRow(bug.id)).status === 'done', 3000, 'bug finalized');
+    expect((await cardRow(bug.id)).merged_into_working_at).not.toBeNull();
+    // the run card itself still ended as a suite card
+    expect(await cardRow(run.id)).toMatchObject({ card_type: 'regression', stage: 'done', status: 'done' });
   });
 
   it('single platform runs and authorization', async () => {

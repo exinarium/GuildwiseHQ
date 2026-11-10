@@ -97,6 +97,11 @@ export const DESK_SUBKIND = {
 export const SUITE_ORIGINS = ['full_suite', 'regression'] as const;
 export const isSuiteOrigin = (origin: string | null | undefined): boolean =>
   origin === 'full_suite' || origin === 'regression';
+/** A suite card (full E2E suite or regression run). A bug card spawned by one keeps the origin for lineage but is not a suite. */
+export const isSuiteCard = (
+  cardType: string | null | undefined,
+  origin: string | null | undefined,
+): boolean => cardType === 'regression' && isSuiteOrigin(origin);
 
 /** Payload of the `finalize.execute` runner command. The runner executes the completion action (no agent involved). */
 export const FinalizeExecutePayloadSchema = z.object({
