@@ -70,7 +70,9 @@ export function harnessTestServices(
   chat: boolean,
 ): string[] | undefined {
   const list =
-    'testServiceDomains' in input ? (input as { testServiceDomains?: string[] }).testServiceDomains : undefined;
+    'testServiceDomains' in input
+      ? (input as { testServiceDomains?: string[] }).testServiceDomains
+      : undefined;
   return !chat && TEST_SERVICE_ROLES.has(roleKey) && list?.length ? [...list] : undefined;
 }
 

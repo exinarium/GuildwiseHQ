@@ -266,7 +266,9 @@ describe('launchInHarnessSandbox hands the test services to the egress proxy', (
       testServices: [`127.0.0.1:${port}`],
     });
     // the proxy socket is the one wrapped into the box (the bridge on 127.0.0.1:3128 forwards to it)
-    const socketPath = launched.command.args.find((a) => a.endsWith('p.sock')) as string;
+    const socketPath = launched.command.args
+      .map((a) => /UNIX-CONNECT:'([^']*p\.sock)'/.exec(a)?.[1])
+      .find(Boolean) as string;
     const status = (target: string) =>
       new Promise<number>((resolve, reject) => {
         const req = request({ socketPath, path: target, method: 'CONNECT', headers: { host: target } });

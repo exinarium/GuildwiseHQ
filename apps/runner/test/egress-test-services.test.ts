@@ -38,7 +38,7 @@ const get = (socketPath: string, path: string): Promise<{ status: number; body: 
   });
 
 /** CONNECT through the proxy; on 200 sends one HTTP request through the tunnel and returns what came back. */
-const connect =(socketPath: string, target: string): Promise<{ status: number; body: string }> =>
+const connect = (socketPath: string, target: string): Promise<{ status: number; body: string }> =>
   new Promise((resolve, reject) => {
     const req = request({ socketPath, path: target, method: 'CONNECT', headers: { host: target } });
     req.on('connect', (res, socket) => {

@@ -264,6 +264,9 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
     ]);
   const fresh = async () => {
     resetClock();
+    // a test that pinned the clock to a fixed past date (setNow) left the sessions last seen then; back on the real clock
+    // they would be idle for longer than a week once the real date moves on, and log the owner out
+    await q(`UPDATE auth_sessions SET last_seen_at=now() WHERE last_seen_at < now()`);
     await tidy();
     await clearSpend();
     // earlier shifts of this file keep their rows (a rebuild must reproduce them) but leave the month under test
