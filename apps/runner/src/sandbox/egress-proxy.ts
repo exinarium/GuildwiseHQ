@@ -256,7 +256,10 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         return fail(400, 'bad request');
       }
       // A declared local test service: exactly this loopback host and port, plain http, straight to this machine.
-      if (target.protocol === 'http:' && testServiceListed(target.hostname, Number(target.port || 80), testServices))
+      if (
+        target.protocol === 'http:' &&
+        testServiceListed(target.hostname, Number(target.port || 80), testServices)
+      )
         testHit = normaliseTestServiceHost(target.hostname);
       const listed = endpointListed(target.hostname, Number(target.port || 80), o.privateEndpoints ?? []);
       const port = Number(target.port || 80);
