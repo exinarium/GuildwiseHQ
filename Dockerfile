@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Guildwise HQ: one image with the API server and the built web app (served by the server).
 
-FROM node:22.23-bookworm-slim AS build
+FROM node:26.13-bookworm-slim AS build
 RUN npm install -g pnpm@12.8.1
 WORKDIR /repo
 COPY . .
@@ -25,7 +25,7 @@ RUN pnpm --filter @aom/server deploy --prod /out/server \
 # the media folder as a named build context, because the context itself leaves the MP4s out (.dockerignore):
 #   docker build --target video-worker --build-context media=media -t aom-video-worker .
 # (docker-compose.prod.yml passes it as additional_contexts.)
-FROM node:22.23-bookworm-slim AS video-worker
+FROM node:26.13-bookworm-slim AS video-worker
 ENV NODE_ENV=production \
     AOM_VIDEO_DIR=/data/video \
     AOM_VIDEO_HOME=/opt/aom-video \
@@ -50,7 +50,7 @@ RUN mkdir -p /data/video && chown -R node:node /data/video /opt/aom-video && chm
 USER node
 CMD ["node", "dist/video-worker.mjs", "--loop"]
 
-FROM node:22.23-bookworm-slim AS runtime
+FROM node:26.13-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     AOM_HOST=0.0.0.0 \
     AOM_PORT=4600 \
