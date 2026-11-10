@@ -32,6 +32,7 @@ import { type ClaimResult, claim } from './claim.ts';
 import { devopsPass } from './devops.ts';
 import { phasePass } from './phases.ts';
 import { blockedQuestionPass, questionPass } from './questions.ts';
+import { regressionLoopPass } from './regression-loop.ts';
 
 /** Events that make a dispatch pass worthwhile (docs/ARCHITECTURE.md section 9.1). */
 const TRIGGER_TYPES = new Set([
@@ -89,6 +90,7 @@ const TRIGGER_TYPES = new Set([
   'BaTaskRequeued',
   'FullSuitePassed',
   'FullSuiteFailed',
+  'ProjectRegressionLoopSet',
 ]);
 
 const REJECT_COOLDOWN_MS = 30_000;
@@ -261,6 +263,8 @@ export class Dispatcher {
     const nowMs = this.ctx.clock.now().getTime();
     // Phases first: the requests, cards and tasks it creates are dispatched in this same pass.
     await this.safely('phase', () => phasePass(this.ctx), undefined);
+    // The regression loop files its DevOps requests and reruns before the claims, so they are dispatched in this pass.
+    await this.safely('regression-loop', () => regressionLoopPass(this.ctx), undefined);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
     // The account each project names for the provider or runtime the agent spends (docs/design/claude-accounts.md, S-A): chosen

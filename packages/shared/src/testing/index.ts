@@ -5,6 +5,8 @@ import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
+export * from './suite-report.ts';
+
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
  * check and the constants of the bug loop (docs/ARCHITECTURE.md sections 5.2, 9.5, 13.5, 13.6 and 24).
@@ -25,6 +27,10 @@ export const DESK_SUBKIND = {
   /** A suite that failed and passed again (flaky) three times in seven days: a notice per project and suite. */
   flakySuite: 'flaky_suite',
   bugReported: 'bug_reported',
+  /** A suite or regression run found the target app on another commit than the one it tests: no bug was filed. */
+  regressionTargetMismatch: 'regression_target_mismatch',
+  /** The regression loop stopped (redeploy failed, no DevOps engineer, cap, ...) or a rerun went green. */
+  regressionLoop: 'regression_loop',
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',
   savedWork: 'saved_work',
@@ -92,6 +98,9 @@ export const DESK_SUBKIND = {
   /** A card waits at an approval step (workflow `human` step with purpose approval). */
   approvalStep: 'approval_step',
 } as const;
+
+/** Automatic reruns of the regression loop per chain (so at most 1 + 3 runs) before it stops and asks a person. */
+export const REGRESSION_LOOP_MAX_RERUNS = 3;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */
 export const SUITE_ORIGINS = ['full_suite', 'regression'] as const;

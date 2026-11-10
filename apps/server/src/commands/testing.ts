@@ -5,7 +5,10 @@ import {
   DevOpsAccessSchema,
   e2eOnlyFailure,
   emptyFields,
+  parseSuiteBugs,
+  parseTargetLine,
   type RunnerToServerOf,
+  SUITE_BUGS_MAX,
   streamId,
   type TestEnvProblem,
   type TestEvidence,
@@ -18,6 +21,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { bugJoinEvents } from './phases.ts';
+import { failedRunLoop, greenRunEvents } from './regression-loop.ts';
 import { spawnCardEvent } from './spawn.ts';
 import {
   bugCardEvents,
@@ -130,12 +134,19 @@ export async function suiteOutcomeEvents(
   pass: boolean,
   note: string,
   evidence: TestEvidence,
+  headSha: string | null = null,
 ): Promise<AppendInput[]> {
   const kind = card.origin === 'regression' ? 'regression' : 'full_suite';
   const platform = card.fields?.platform as 'web' | 'mobile' | undefined;
   const scope = projectScope(card.org_id, card.project_id);
   const actor = agentActor(agentId);
   const events: AppendInput[] = [];
+  const target = pass ? null : parseTargetLine(note);
+  // P4: a failed regression run on a project with the regression loop on is followed until a rerun is green.
+  const loopOn =
+    kind === 'regression' &&
+    !!(await one(tx, 'SELECT regression_loop FROM projects WHERE id=$1', [card.project_id]))?.regression_loop;
+  const followed = !pass && loopOn ? await failedRunLoop(tx, card, ws.id, platform) : null;
   if (pass) {
     events.push({
       streamId: streamId.card(card.id),
@@ -143,51 +154,42 @@ export async function suiteOutcomeEvents(
       actor,
       scope,
     });
-  } else {
-    const title = evidence.title?.trim() || `E2E failure in ${card.ref}`;
-    const description = bugDescription({ note, evidence, parentRef: card.ref });
-    const project = (await one(tx, 'SELECT workflow_key FROM projects WHERE id=$1', [
-      card.project_id,
-    ])) as Row;
-    const bug = await spawnCardEvent(tx, {
-      from: card,
-      title,
-      cardType: 'bug',
-      origin: card.origin,
-      workflowKey: project.workflow_key,
-      status: 'draft',
-      fields: { ...emptyFields('code'), context: description },
-      parentCardId: card.id,
-      completionAction: card.completion_action,
-    });
+    events.push(
+      cardMessage(card, { kind: 'agent', agentId }, 'evidence', `Suite passed: ${evidence.summary}`),
+    );
+    if (kind === 'regression') events.push(...(await greenRunEvents(tx, card)));
+  } else if (target?.kind === 'mismatch') {
+    // P3: the target app does not run the commit under test, so its failures say nothing about this code. No bug cards.
     const deskItemId = randomUUID();
+    const tested = headSha ? headSha.slice(0, 12) : 'unknown';
     events.push(
       {
         streamId: streamId.card(card.id),
         event: {
           type: 'FullSuiteFailed',
-          payload: { suiteCardId: card.id, evidence, testSideFixed: false, kind, platform },
-        },
-        actor,
-        scope,
-      },
-      bug.event,
-      {
-        streamId: streamId.card(bug.cardId),
-        event: {
-          type: 'BugReported',
           payload: {
-            ...(kind === 'regression' ? { regressionCardId: card.id } : { suiteCardId: card.id }),
-            title,
-            description,
+            suiteCardId: card.id,
             evidence,
-            bugCardId: bug.cardId,
-            deskItemId,
+            testSideFixed: false,
+            kind,
+            platform,
+            targetMismatch: {
+              deployedCommit: target.deployed,
+              testedCommit: headSha,
+              line: target.line.slice(0, 500),
+            },
+            ...(followed ? { loop: followed.loop } : {}),
           },
         },
         actor,
         scope,
       },
+      cardMessage(
+        card,
+        { kind: 'agent', agentId },
+        'evidence',
+        `Suite not judged: the target runs another commit (${target.line}). No bug was filed.`,
+      ),
       {
         streamId: streamId.desk(deskItemId),
         event: {
@@ -195,36 +197,168 @@ export async function suiteOutcomeEvents(
           payload: {
             deskItemId,
             kind: 'alert',
-            subkind: DESK_SUBKIND.bugReported,
-            title: `${kind === 'regression' ? 'Regression' : 'Full-suite'} failure: ${title}`,
-            body: `${description}\n\nBug card ${bug.ref} is in Spec for the BA. Nothing is blocked; prioritise the fix or leave it in the queue.`,
+            subkind: DESK_SUBKIND.regressionTargetMismatch,
+            title: `${card.ref}: the ${platform ? `${platform} ` : ''}app under test runs another build`,
+            body: `${card.ref} tested commit ${tested}, but the target app runs ${target.deployed ?? 'another build'} (the tester reported: "${target.line}"). No bug cards were filed, because the failures may come from the old build.\n\n${followed ? 'The regression loop asks the DevOps engineer to redeploy the app; the run starts again when that is done.' : `Redeploy the app so it runs the tested commit, then start the ${kind === 'regression' ? 'regression run' : 'suite'} again.`}`,
             options: [],
             blocking: false,
             pinned: false,
-            cardId: bug.cardId,
+            cardId: card.id,
             projectId: card.project_id,
-            affectedCardIds: [bug.cardId],
+            affectedCardIds: [card.id],
             askedBy: { kind: 'system' },
           },
         },
         actor: SYSTEM_ACTOR,
         scope,
       },
-      // A bug filed after finalize joins the phase it came from, and the phase waits for it (owner decision A6).
-      ...(await bugJoinEvents(tx, bug.cardId, bug.ref, card, {
-        orgId: card.org_id,
-        projectId: card.project_id,
-      })),
     );
+  } else {
+    // One report lists every bug of the run, a `Bug:` section each (P2); a note without sections is one bug.
+    const title = evidence.title?.trim() || `E2E failure in ${card.ref}`;
+    const { preamble, bugs, overflow } = parseSuiteBugs(note, title);
+    const project = (await one(tx, 'SELECT workflow_key FROM projects WHERE id=$1', [
+      card.project_id,
+    ])) as Row;
+    events.push({
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'FullSuiteFailed',
+        payload: {
+          suiteCardId: card.id,
+          evidence,
+          testSideFixed: false,
+          kind,
+          platform,
+          ...(followed ? { loop: followed.loop } : {}),
+        },
+      },
+      actor,
+      scope,
+    });
+    // `next_card_number` is read before the projection runs: each spawned card takes the next offset.
+    let offset = 0;
+    const filed: string[] = [];
+    const seen: string[] = [];
+    for (const b of bugs) {
+      const open = await openSuiteBug(tx, card.project_id, b.failureKey, b.titleKey);
+      if (open) {
+        events.push(
+          {
+            streamId: streamId.card(open.id),
+            event: {
+              type: 'RegressionBugSeenAgain',
+              payload: {
+                runCardId: card.id,
+                bugCardId: open.id,
+                failureKey: b.failureKey,
+                titleKey: b.titleKey,
+                title: b.title,
+              },
+            },
+            actor,
+            scope,
+          },
+          cardMessage(
+            open,
+            { kind: 'system' },
+            'system',
+            `${card.ref} hit this bug again (${evidence.summary.trim() || 'suite failed'}). No second bug card was filed.\n\n${b.body}`.trim(),
+          ),
+        );
+        seen.push(open.ref);
+        continue;
+      }
+      // No target line counts as unknown (the report is refused only on regression-loop projects, P4).
+      const caveat = target?.kind === 'match' ? '' : `${UNCONFIRMED_TARGET}\n\n`;
+      const description = bugDescription({
+        note: caveat + (preamble ? `${b.body}\n\nRun notes:\n${preamble}` : b.body),
+        evidence,
+        parentRef: card.ref,
+      });
+      const bug = await spawnCardEvent(
+        tx,
+        {
+          from: card,
+          title: b.title,
+          cardType: 'bug',
+          origin: card.origin,
+          workflowKey: project.workflow_key,
+          status: 'draft',
+          fields: { ...emptyFields('code'), context: description },
+          parentCardId: card.id,
+          completionAction: card.completion_action,
+        },
+        offset++,
+      );
+      const deskItemId = randomUUID();
+      events.push(
+        bug.event,
+        {
+          streamId: streamId.card(bug.cardId),
+          event: {
+            type: 'BugReported',
+            payload: {
+              ...(kind === 'regression' ? { regressionCardId: card.id } : { suiteCardId: card.id }),
+              title: b.title,
+              description,
+              evidence,
+              bugCardId: bug.cardId,
+              deskItemId,
+              failureKey: b.failureKey,
+            },
+          },
+          actor,
+          scope,
+        },
+        {
+          streamId: streamId.desk(deskItemId),
+          event: {
+            type: 'DeskItemCreated',
+            payload: {
+              deskItemId,
+              kind: 'alert',
+              subkind: DESK_SUBKIND.bugReported,
+              title: `${kind === 'regression' ? 'Regression' : 'Full-suite'} failure: ${b.title}`,
+              body: `${description}\n\nBug card ${bug.ref} is in Spec for the BA. Nothing is blocked; prioritise the fix or leave it in the queue.`,
+              options: [],
+              blocking: false,
+              pinned: false,
+              cardId: bug.cardId,
+              projectId: card.project_id,
+              affectedCardIds: [bug.cardId],
+              askedBy: { kind: 'system' },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        },
+        // A bug filed after finalize joins the phase it came from, and the phase waits for it (owner decision A6).
+        // Only the first bug reopens the phase: a second reopen in the same append would read a stale phase status.
+        ...(await bugJoinEvents(
+          tx,
+          bug.cardId,
+          bug.ref,
+          card,
+          { orgId: card.org_id, projectId: card.project_id },
+          { reopen: filed.length === 0 },
+        )),
+      );
+      filed.push(bug.ref);
+    }
+    const parts = [`Suite failed: ${evidence.summary}`];
+    if (bugs.length > 1 || seen.length) {
+      if (filed.length) parts.push(`Filed: ${filed.join(', ')}.`);
+      if (seen.length) parts.push(`Already open: ${seen.join(', ')}.`);
+    }
+    if (overflow)
+      parts.push(
+        `${overflow} more section(s) past the limit of ${SUITE_BUGS_MAX} were added to the last bug card.`,
+      );
+    events.push(cardMessage(card, { kind: 'agent', agentId }, 'evidence', parts.join(' ')));
   }
-  events.push(
-    cardMessage(
-      card,
-      { kind: 'agent', agentId },
-      'evidence',
-      `${pass ? 'Suite passed' : 'Suite failed'}: ${evidence.summary}`,
-    ),
-  );
+  // after FullSuiteFailed: its loop row must exist before a stop (cap) applies to it
+  if (followed) events.push(...followed.events);
   // The throwaway suite worktree and its branch are not needed any more.
   if (card.worktree_path)
     await enqueueRunnerCommand(tx, ws.id, 'worktree.remove', {
@@ -233,6 +367,32 @@ export async function suiteOutcomeEvents(
       deleteBranch: true,
     });
   return events;
+}
+
+/** The caveat on a bug card whose run could not confirm which commit the target app runs (P3). */
+export const UNCONFIRMED_TARGET =
+  'The deployed commit of the target was not confirmed; this failure may come from an older build.';
+
+/**
+ * The open bug card a suite run already filed for this failure (same failing test or same title), if any. A bug from a
+ * note without sections (`note:` key) has the report title, which can be generic: it only matches a bug filed from a
+ * section with exactly that title, never another such note.
+ */
+async function openSuiteBug(
+  tx: Tx,
+  projectId: string,
+  failureKey: string,
+  titleKey: string,
+): Promise<Row | undefined> {
+  if (failureKey.startsWith('note:')) [failureKey, titleKey] = [titleKey, ''];
+  return one(
+    tx,
+    `SELECT bc.id, bc.ref, bc.org_id, bc.project_id FROM suite_run_bugs b JOIN cards bc ON bc.id = b.bug_card_id
+      WHERE bc.project_id = $1 AND bc.card_type = 'bug' AND bc.status NOT IN ('done', 'cancelled')
+        AND bc.merged_into_working_at IS NULL AND (b.failure_key = $2 OR b.title_key = $3)
+      ORDER BY bc.created_at LIMIT 1`,
+    [projectId, failureKey, titleKey],
+  );
 }
 
 export const PROBLEM_TEXT: Record<TestEnvProblem, string> = {

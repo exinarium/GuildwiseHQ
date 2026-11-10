@@ -194,6 +194,18 @@ export function useSetFullSuite(id: string) {
   });
 }
 
+/** The regression loop switch: a failed regression run is redeployed and run again once its bugs are merged. */
+export function useSetRegressionLoop(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => put(`/projects/${id}/regression-loop`, { enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 /**
  * The project's Claude account setting and, per workstation that can serve it, how the project's account and the main
  * account stand (docs/design/claude-accounts.md). Refreshed while the panel is open: provisioning and sign-in take minutes.

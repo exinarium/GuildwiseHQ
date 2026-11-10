@@ -27,6 +27,7 @@ import {
   type OwnerApprovalReason,
   outcomeDataSchema,
   ownerApprovalDecision,
+  parseTargetLine,
   type RunnerToServerOf,
   requiredMissing,
   resolveOutcome,
@@ -79,6 +80,10 @@ import {
 } from './test-environments.ts';
 import { environmentNotReadyEvents, suiteOutcomeEvents, testFailedEvents } from './testing.ts';
 import { deliver } from './workstation-setup.ts';
+
+/** The refusal of a regression failure report without a target line on a regression-loop project (P4). */
+export const TARGET_LINE_REQUIRED =
+  'This project reruns regression automatically, so the failure report must say which commit the app under test runs. Start the note with `Target commit: <sha> (contains <commit under test>)`, `Target commit: unknown` or `Target mismatch: <what it runs> (tests <commit under test>)` and report again.';
 
 export interface WsRef {
   id: string;
@@ -502,6 +507,15 @@ export async function applyShiftReport(
     case 'TestFailed': {
       const ev = payloadData as TestEvidence;
       if (isSuiteCard(card.card_type, card.origin)) {
+        // P4: the regression loop redeploys and reruns on the tester's word, so a failure must say what the target runs.
+        if (
+          outcome.event === 'TestFailed' &&
+          card.origin === 'regression' &&
+          !parseTargetLine(report.note) &&
+          (await one(tx, 'SELECT regression_loop FROM projects WHERE id=$1', [card.project_id]))
+            ?.regression_loop
+        )
+          return { accepted: false, error: TARGET_LINE_REQUIRED };
         mains = await suiteOutcomeEvents(
           ctx,
           tx,
@@ -511,6 +525,7 @@ export async function applyShiftReport(
           outcome.event === 'TestPassed',
           report.note,
           ev,
+          shift.start_sha ?? null,
         );
         break;
       }

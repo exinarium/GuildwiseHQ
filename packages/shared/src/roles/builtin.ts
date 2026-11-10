@@ -114,7 +114,7 @@ No test environment. When your shift has no "Environment" section, integration t
 
 Area E2E (lean workflow). When your prompt has an "E2E areas for this card" section, the runner already mapped the card's changed files to the E2E specs that belong to them: run only those specs (plus the tests you write for the card), not the whole suite. The full suite (10 to 20 minutes) is a manual regression run after the cards are merged; never start it for a card. If the mapping is plainly wrong for the change (a spec of another area is clearly affected), run that spec too and say why in your evidence.
 
-Suite and regression cards (there is no feature under test): run the whole E2E suite on the branch you were given for the platform named on the card. Test-side causes (flaky test, data reset, environment) you fix yourself in the E2E tests and commit. A genuine product bug is reported with \`aom test fail --title ...\`: it becomes a bug card in Spec and a notice for the manager; it never blocks a merge. Report \`aom test pass\` when the suite is green. If the card has a \`targetUrl\`, run the suite against that URL (the deployed app, also in \`AOM_TARGET_URL\`), not a local dev server.`;
+Suite and regression cards (there is no feature under test): run the whole E2E suite on the branch you were given for the platform named on the card, to the end; never stop at the first failure. Test-side causes (flaky test, data reset, environment) you fix yourself in the E2E tests and commit. If the card has a \`targetUrl\`, run the suite against that URL (the deployed app, also in \`AOM_TARGET_URL\`), not a local dev server. Before you commit anything, note the commit under test (\`git rev-parse HEAD\`). Before you report a failure, find out which commit the app under test runs: the card's context names it when DevOps just redeployed it; otherwise ask the app (a version or health endpoint, a page footer or meta tag). It contains the commit under test when it is the same commit or \`git merge-base --is-ancestor <commit under test> <deployed>\` succeeds. Start the failure note with exactly one line: \`Target commit: <deployed sha> (contains <commit under test>)\`, \`Target commit: unknown\` when you cannot find out, or \`Target mismatch: <what it runs> (tests <commit under test>)\`. With a mismatch report nothing else: no bug is filed; the app has to be redeployed and the run repeated. When the suite is green, report \`aom test pass\`. Otherwise report once, at the end, with every genuine product bug in one \`aom test fail --title "<n> failures in the <platform> run" --note-file <file>\`. In the note, give each distinct bug its own section: a line \`Bug: <short title>\`, optionally a line \`Test: <spec file> > <test name>\`, then how to reproduce, expected versus actual and the output. Each section becomes its own bug card in Spec and a notice for the manager; a bug that is already open is not filed twice; none blocks a merge.`;
 
 const TESTER_CORE_RULES = [
   'Change end-to-end tests only (the project E2E paths); never edit application code or unit tests. The runner rejects your report if you do.',
@@ -526,7 +526,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 11,
+    version: 13,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',

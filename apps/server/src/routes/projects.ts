@@ -25,6 +25,7 @@ import {
   SetProjectPolicyRequestSchema,
   SetProviderAccountRequestSchema,
   SetReferenceReposRequestSchema,
+  SetRegressionLoopRequestSchema,
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
@@ -59,6 +60,7 @@ import {
   setProjectPolicy,
   setProviderAccount,
   setReferenceRepos,
+  setRegressionLoop,
   setStopLoss,
   setTestServices,
   updateProject,
@@ -271,6 +273,22 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req);
         await setFullSuite(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/regression-loop',
+      { schema: { params: IdParamsSchema, body: SetRegressionLoopRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setRegressionLoop(
           ctx,
           a.session.user,
           { id: a.orgId, role: a.role },

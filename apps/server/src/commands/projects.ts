@@ -267,6 +267,37 @@ export async function setProjectPolicy(
 }
 
 /**
+ * "Rerun regression until it passes": the project's Owner or an organization Owner/Admin turns the regression loop on
+ * or off (default off). With it on, a failed regression run is redeployed by DevOps and run again once its bugs merged.
+ */
+export async function setRegressionLoop(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  enabled: boolean,
+) {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    if ((p.regression_loop ?? false) === enabled) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectRegressionLoopSet', payload: { projectId, enabled, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
  * "Run the full end-to-end test suite after each finished card": the project's Owner or an organization Owner/Admin
  * turns the automatic regression card spawned by finalize off or on (default on).
  */

@@ -766,6 +766,7 @@ export async function bugJoinEvents(
   bugRef: string,
   sourceCard: Row,
   scope: { orgId: string; projectId: string },
+  opts: { reopen?: boolean } = {},
 ): Promise<AppendInput[]> {
   let phaseId: string | null = null;
   if (sourceCard.phase_followup_id) {
@@ -800,7 +801,7 @@ export async function bugJoinEvents(
       `Bug ${bugRef} was filed after finalize and joined the phase: the phase waits for it.`,
     ),
   ];
-  if (['reporting', 'awaiting_approval'].includes(phase.status))
+  if ((opts.reopen ?? true) && ['reporting', 'awaiting_approval'].includes(phase.status))
     events.push(...(await reopenEvents(tx, phase, systemBy, `bug ${bugRef} was filed after finalize`)));
   return events;
 }

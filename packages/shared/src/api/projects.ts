@@ -231,6 +231,8 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
+  /** A failed regression run is redeployed by DevOps and run again once its bugs are merged (default false). */
+  regressionLoop: z.boolean().optional(),
   /** lean team: when the owner approves a card after the review (large and high-risk cards by default). */
   ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
   /** lean team: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
@@ -424,6 +426,8 @@ export const SetProjectPolicyRequestSchema = z
   });
 export type SetProjectPolicyRequest = z.infer<typeof SetProjectPolicyRequestSchema>;
 export const SetFullSuiteRequestSchema = z.object({ enabled: z.boolean() });
+/** `PUT /api/projects/:id/regression-loop` (the project Owner, organization Owners and Admins). */
+export const SetRegressionLoopRequestSchema = z.object({ enabled: z.boolean() });
 /** `PUT /api/projects/:id/architect-settings` (organization Owner, Admins and the project owner). */
 export const SetArchitectSettingsRequestSchema = z.object({
   designStep: z.boolean(),
