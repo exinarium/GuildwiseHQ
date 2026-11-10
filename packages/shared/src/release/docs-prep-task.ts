@@ -171,10 +171,16 @@ export function writableFilesFor(task: ReleasePrepTask): string[] {
   return task.kind === 'new_video' ? newVideoWritableFiles(task.slug) : [PREP_PROPOSAL_FILE];
 }
 
-export type PrepWriterRole = 'ba' | 'architect' | 'builder';
+/**
+ * Release prep is always written by the workstation's DevOps engineer (owner decision, GWP-189): the DevOps engineer runs
+ * outside the agent sandbox, while the sandbox of a builder/BA/architect shift makes the worktree read-only
+ * (`worktreeLocked`), so their release prep shifts failed. `devops` is the agent flagged `is_devops`, whatever its role key.
+ */
+export type PrepWriterRole = 'devops';
+const DEVOPS_ONLY: readonly PrepWriterRole[] = ['devops'];
 
 export interface PrepTaskKindSpec {
-  /** The agent roles that may write this kind, in order of preference. The one chooser reads this. */
+  /** The agent roles that may write this kind (only `devops` today). The one chooser reads this. */
   roles: readonly PrepWriterRole[];
   /** `files`: the agent writes repository files. `proposal`: the agent writes `release-prep-proposal.json` for checks. */
   result: 'files' | 'proposal';
@@ -191,14 +197,14 @@ export interface PrepTaskKindSpec {
 /** The one registry of writer work: which roles write which task kind. Add a kind here to add a writer step. */
 export const PREP_TASK_KINDS: Record<ReleasePrepTask['kind'], PrepTaskKindSpec> = {
   new_video: {
-    roles: ['builder'],
+    roles: DEVOPS_ONLY,
     result: 'files',
     step: 'Generate videos',
     what: (t) => (t.kind === 'new_video' ? `the ${t.slug} video` : 'the video'),
     title: (t, branch) => `Write the ${t.kind === 'new_video' ? t.title : ''} video (${branch})`,
   },
   changelog_entries: {
-    roles: ['ba', 'architect', 'builder'],
+    roles: DEVOPS_ONLY,
     result: 'proposal',
     step: 'Write changelog',
     what: () => 'the changelog entries',
@@ -206,14 +212,14 @@ export const PREP_TASK_KINDS: Record<ReleasePrepTask['kind'], PrepTaskKindSpec> 
     manual: 'Or write the entries under ## [Unreleased] by hand and Skip prep.',
   },
   guide_edits: {
-    roles: ['architect', 'ba', 'builder'],
+    roles: DEVOPS_ONLY,
     result: 'proposal',
     step: 'Update user guide',
     what: () => 'the user guide update',
     title: (_t, branch) => `Update the user guide (${branch})`,
   },
   help_edits: {
-    roles: ['architect', 'ba', 'builder'],
+    roles: DEVOPS_ONLY,
     result: 'proposal',
     step: 'Update Help articles',
     what: () => 'the Help article update',
@@ -223,7 +229,7 @@ export const PREP_TASK_KINDS: Record<ReleasePrepTask['kind'], PrepTaskKindSpec> 
 
 export type PrepWriterFailureCode = 'no_writer' | 'writer_unreachable' | 'writer_failed';
 
-const ROLE_NAMES: Record<PrepWriterRole, string> = { ba: 'BA', architect: 'architect', builder: 'builder' };
+const ROLE_NAMES: Record<PrepWriterRole, string> = { devops: 'DevOps' };
 const joinRoles = (roles: readonly PrepWriterRole[]): string => {
   const names = roles.map((r) => ROLE_NAMES[r]);
   return names.length <= 1
@@ -245,7 +251,7 @@ export function prepWriterUnavailable(
   const what = o.what ?? (kind === 'new_video' ? 'the video' : spec.what({ kind } as ReleasePrepTask));
   const manual = spec.manual ? ` ${spec.manual}` : '';
   if (code === 'no_writer')
-    return `${spec.step}: no agent on ${ws} can write ${what}. It needs an active ${joinRoles(spec.roles)} agent on that workstation. Hire or move one there (or turn the step off), then Retry prep.${manual}`;
+    return `${spec.step}: no agent on ${ws} can write ${what}. Release prep is written by the ${joinRoles(spec.roles)} engineer, so it needs the active ${joinRoles(spec.roles)} agent of that workstation (not paused). Bring it back (or turn the step off), then Retry prep.${manual}`;
   if (code === 'writer_unreachable')
     return `${spec.step}: no agent on ${ws} could write ${what} within 2 hours${o.reason ? ` (${o.reason})` : ''}. Check the runner and the agents' model accounts, then Retry prep.${manual}`;
   return `${spec.step}: ${what} could not be written${o.reason ? `: ${o.reason}` : ''}`;

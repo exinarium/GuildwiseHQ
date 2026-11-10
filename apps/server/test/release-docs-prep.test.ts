@@ -23,7 +23,7 @@ import {
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
-import { freshState } from './helpers/shifts.ts';
+import { freshState, hireDevopsEngineer } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
 
 let w: World;
@@ -258,7 +258,7 @@ describe('the user guide path setting', () => {
   });
 
   it('sends the default and configured=false when unset, and the path with configured=true when set', async () => {
-    await w.hire('Amy', 'architect', 'senior');
+    await hireDevopsEngineer(w);
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -267,7 +267,7 @@ describe('the user guide path setting', () => {
   });
 
   it('sends the configured path to a runner that has the capability, and fails the step before dispatch without it', async () => {
-    await w.hire('Amy', 'architect', 'senior');
+    await hireDevopsEngineer(w);
     await put(
       { [w.repoId]: 'docs/guide/MANUAL.md' },
       { steps: { changelog: false, guide: true, help: false } },
@@ -287,7 +287,7 @@ describe('the user guide path setting', () => {
   });
 
   it('fails the guide step before dispatch on a workstation without the capability', async () => {
-    await w.hire('Amy', 'architect', 'senior');
+    await hireDevopsEngineer(w);
     await put(
       { [w.repoId]: 'docs/guide/MANUAL.md' },
       { steps: { changelog: false, guide: true, help: false } },
@@ -421,7 +421,7 @@ describe('prep run', () => {
 
 const tasks = () => q2(`SELECT * FROM release_docs_prep_tasks ORDER BY attempt, position`);
 /** Gives the newest queued task to an agent of `role` (as the dispatcher pass does) and returns the shift row. */
-async function dispatchTask(role = 'builder') {
+async function dispatchTask(role = 'devops') {
   const agent = (
     await q2(`SELECT id FROM agents WHERE role_key=$2 AND workstation_id=$1 LIMIT 1`, [w.workstationId, role])
   )[0];
@@ -499,6 +499,7 @@ describe('the Update user guide step', () => {
   });
 
   it('with no writer agent on the workstation the write phase fails the run with the one no-writer message, before any commit', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE is_devops`);
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -511,7 +512,7 @@ describe('the Update user guide step', () => {
     const write = run.repos[0].steps.find((s: any) => s.step === 'guide' && s.phase === 'write');
     expect(write.state).toBe('failed');
     expect(write.error).toMatch(
-      /^Update user guide: no agent on .+ can write the user guide update\. It needs an active architect, BA or builder agent on that workstation\. Hire or move one there \(or turn the step off\), then Retry prep\.$/,
+      /^Update user guide: no agent on .+ can write the user guide update\. Release prep is written by the DevOps engineer, so it needs the active DevOps agent of that workstation \(not paused\)\. Bring it back \(or turn the step off\), then Retry prep\.$/,
     );
     expect((await tasks())[0].code).toBe('no_writer');
     expect((await cmds()).map(stepTag)).toEqual(['analyse', 'guide:check']);
@@ -545,8 +546,8 @@ describe('the Update user guide step', () => {
   });
 
   it('check, then a guide_edits task for the writer, then the accepted proposal goes to apply, then the commit', async () => {
-    await w.hire('Zed', 'builder', 'junior');
-    await w.hire('Amy', 'architect', 'senior');
+    await hireDevopsEngineer(w);
+    await hireDevopsEngineer(w);
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -568,7 +569,7 @@ describe('the Update user guide step', () => {
     });
     expect(t.task.changes[0].hints[0].section).toBe('4.28 Releases');
     // the writer runs as a release prep shift and reports the proposal the runner already checked
-    const shift = await dispatchTask('architect');
+    const shift = await dispatchTask();
     const bad = await prepReport(shift, 'prep_done', 'wrote it', { proposal: { edits: 'nope' } });
     expect(bad.accepted).toBe(false);
     expect((await tasks())[0].status).toBe('running');
@@ -903,7 +904,7 @@ describe('Generate videos step', () => {
     });
 
   it('queues one release prep task per new video and waits for it (no render yet)', async () => {
-    await w.hire('Bea', 'builder', 'junior');
+    await hireDevopsEngineer(w);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -923,10 +924,8 @@ describe('Generate videos step', () => {
     expect((await latest()).status).toBe('running');
   });
 
-  it('with no builder on the workstation the author phase fails naming the video', async () => {
-    await q(`UPDATE agents SET status='retired' WHERE role_key='builder' AND workstation_id=$1`, [
-      w.workstationId,
-    ]).catch(() => q(`DELETE FROM agents WHERE role_key='builder' AND workstation_id=$1`, [w.workstationId]));
+  it('with no DevOps agent on the workstation the author phase fails naming the video', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE is_devops AND workstation_id=$1`, [w.workstationId]);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -940,7 +939,7 @@ describe('Generate videos step', () => {
   });
 
   it('an authored script is rendered and its video added, then committed', async () => {
-    await w.hire('Bea', 'builder', 'junior');
+    await hireDevopsEngineer(w);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -972,7 +971,7 @@ describe('Generate videos step', () => {
   });
 
   it('a refused or failed script fails the step naming the video', async () => {
-    await w.hire('Bea', 'builder', 'junior');
+    await hireDevopsEngineer(w);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -987,7 +986,7 @@ describe('Generate videos step', () => {
   });
 
   it('a failed render of a new video gets one repair round; a second failure fails naming the video', async () => {
-    await w.hire('Bea', 'builder', 'junior');
+    await hireDevopsEngineer(w);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
@@ -1029,7 +1028,7 @@ describe('Generate videos step', () => {
   });
 
   it('a shift that ends without a report is tried again once, then the task fails', async () => {
-    await w.hire('Bea', 'builder', 'junior');
+    await hireDevopsEngineer(w);
     await enable({ videos: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);

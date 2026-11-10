@@ -28,6 +28,30 @@ type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 export const devopsOf = (msg: ShiftStartMsg): DevopsShift | undefined =>
   msg.kind === 'devops' ? msg.devops : undefined;
 
+/**
+ * The guard hook configuration of a shift of the workstation's DevOps engineer (it runs outside the sandbox, so the hook
+ * is its guardrail). Its own requests (`devops`) and, since GWP-189, the release prep tasks (`release_prep`) it writes; no
+ * other shift kind, and no other agent, gets a guard. The working branch of the project is protected from force-pushes.
+ */
+export function devopsGuardFor(msg: ShiftStartMsg):
+  | {
+      sessionRef: string;
+      protectedBranches: string[];
+      approvedCommands: string[];
+      readOnlyScan?: true;
+    }
+  | undefined {
+  if (!msg.agent.isDevops || (msg.kind !== 'devops' && msg.kind !== 'release_prep')) return undefined;
+  return {
+    sessionRef: msg.shiftId,
+    protectedBranches: [msg.brief.project.workingBranch, msg.worktree?.baseBranch].filter(
+      (b): b is string => !!b,
+    ),
+    approvedCommands: msg.devops?.approval?.commands ?? [],
+    ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true as const } : {}),
+  };
+}
+
 /** A BA task shift (phases): a report, briefs or a custom follow-up for the manager's phase; no card, no worktree. */
 export const baTaskOf = (msg: ShiftStartMsg): BaTaskShift | undefined =>
   msg.kind === 'ba_task' ? msg.baTask : undefined;

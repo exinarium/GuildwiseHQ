@@ -14,7 +14,7 @@ import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import { applyLegacyChangelogReport } from '../src/release/docs-prep-legacy.ts';
 import { applyReleasePrepReport, releasePrepTaskPass } from '../src/release/docs-prep-tasks.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { freshState } from './helpers/shifts.ts';
+import { freshState, hireDevopsEngineer } from './helpers/shifts.ts';
 import { createWorld, markOnline, type World } from './helpers/world.ts';
 
 /** The 'Write changelog' step end to end on the server: dispatch, the release prep task, the report and the stored output. */
@@ -125,7 +125,7 @@ const ENTRY =
 const stepTag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
 
 /** Gives the queued task to the BA (as the dispatcher pass does) and returns the shift row. */
-async function dispatchTask(role = 'ba') {
+async function dispatchTask(role = 'devops') {
   const agent = (
     await q2(`SELECT id FROM agents WHERE role_key=$2 AND workstation_id=$1 LIMIT 1`, [w.workstationId, role])
   )[0];
@@ -168,7 +168,7 @@ async function startToChangelog() {
 
 describe('Write changelog: dispatch', () => {
   it('queues one changelog_entries task for the repository (not a BA task) and sends no runner command yet', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     expect((await cmds()).map(stepTag)).toEqual(['analyse']);
     const t = await tasks();
@@ -186,8 +186,8 @@ describe('Write changelog: dispatch', () => {
     ]);
   });
 
-  it('the writer of a changelog task is a BA first, then an architect, then a builder (one registry)', () => {
-    expect(PREP_TASK_KINDS.changelog_entries.roles).toEqual(['ba', 'architect', 'builder']);
+  it('the writer of a changelog task is the DevOps engineer only (one registry)', () => {
+    expect(PREP_TASK_KINDS.changelog_entries.roles).toEqual(['devops']);
   });
 
   it('fails the step before any task when the facts at the analysed head are malformed', async () => {
@@ -212,20 +212,21 @@ describe('Write changelog: dispatch', () => {
   });
 
   it('with no writer agent on the workstation the write phase fails with the one no-writer message', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE is_devops`);
     await startToChangelog();
     expect(await tasks()).toHaveLength(1);
     await releasePrepTaskPass(w.t.app.ctx);
     const run = await latest();
     expect(run.status).toBe('failed');
     expect(run.failed.error).toMatch(
-      /^Write changelog: no agent on .+ can write the changelog entries\. It needs an active BA, architect or builder agent on that workstation\. Hire or move one there \(or turn the step off\), then Retry prep\. Or write the entries under ## \[Unreleased\] by hand and Skip prep\.$/,
+      /^Write changelog: no agent on .+ can write the changelog entries\. Release prep is written by the DevOps engineer, so it needs the active DevOps agent of that workstation \(not paused\)\. Bring it back \(or turn the step off\), then Retry prep\. Or write the entries under ## \[Unreleased\] by hand and Skip prep\.$/,
     );
     expect((await tasks())[0].code).toBe('no_writer');
     expect((await cmds()).map(stepTag)).toEqual(['analyse']);
   });
 
   it('a task nobody could take within 2 hours fails as writer_unreachable, naming why', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     w.t.clock.advance(2 * 3_600_000 + 60_000);
     try {
@@ -248,7 +249,7 @@ describe('Write changelog: the report', () => {
   };
 
   it('refuses a bad proposal with the findings (repair round), then stores the accepted one and sends it to the runner', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     const shift = await dispatchTask();
     const bad = await prepReport(shift, 'prep_done', 'done', {
@@ -300,7 +301,8 @@ describe('Write changelog: the report', () => {
   });
 
   it('a deny-list name in an entry is refused (and never echoed)', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
+    await q(`UPDATE agents SET name='Ada' WHERE is_devops`);
     await startToChangelog();
     const shift = await dispatchTask();
     const r = await prepReport(shift, 'prep_done', 'done', {
@@ -315,8 +317,8 @@ describe('Write changelog: the report', () => {
   });
 
   it('an agent handle that is an ordinary word is refused only when it names the agent', async () => {
-    await w.hire('Ada', 'ba', 'senior');
-    await w.hire('Mark', 'builder', 'junior');
+    await hireDevopsEngineer(w);
+    await q(`UPDATE agents SET name='Mark' WHERE is_devops`);
     await startToChangelog();
     const shift = await dispatchTask();
     const bad = await prepReport(shift, 'prep_done', 'done', {
@@ -338,7 +340,7 @@ describe('Write changelog: the report', () => {
   });
 
   it('a report with no proposal is refused', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     const shift = await dispatchTask();
     const r = await prepReport(shift, 'prep_done', 'done', {});
@@ -347,7 +349,7 @@ describe('Write changelog: the report', () => {
   });
 
   it('a second run on the same release queues no task and sends no entries', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     await prepReport(await dispatchTask(), 'prep_done', 'done', { proposal: GOOD });
     await answer({
@@ -370,7 +372,7 @@ describe('Write changelog: the report', () => {
   });
 
   it('a fail report fails the step and the run; nothing is sent', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     const r = await prepReport(await dispatchTask(), 'prep_failed', 'The changes are all internal.');
     expect(r.accepted).toBe(true);
@@ -383,7 +385,7 @@ describe('Write changelog: the report', () => {
   });
 
   it('a report after the run was skipped is closed and sends nothing', async () => {
-    await w.hire('Ada', 'ba', 'senior');
+    await hireDevopsEngineer(w);
     await startToChangelog();
     const shift = await dispatchTask();
     await owner('POST', `${base()}/skip`);
