@@ -21,4 +21,5 @@ SELECT COALESCE(e.payload->>'regressionCardId', e.payload->>'suiteCardId')::uuid
   FROM events e,
        LATERAL (SELECT left('title:' || lower(btrim(regexp_replace(e.payload->>'title', '\s+', ' ', 'g'))), 300) AS key) k
  WHERE e.type = 'BugReported' AND COALESCE(e.payload->>'regressionCardId', e.payload->>'suiteCardId') IS NOT NULL
+   AND e.payload->>'bugCardId' IS NOT NULL AND e.payload->>'title' IS NOT NULL
 ON CONFLICT DO NOTHING;

@@ -254,7 +254,22 @@ async function redeployFinishedStep(ctx: Ctx): Promise<void> {
         return;
       }
       const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [l.project_id]);
-      if (!project?.regression_loop || project.status !== 'active') return; // the switched-off step stops it
+      if (project && project.status !== 'active') {
+        await ctx.store.append(
+          loopStoppedEvents(
+            run,
+            'project_inactive',
+            `The project is no longer active: no rerun of ${run.ref}.`,
+            {
+              quiet: true,
+              requestId: d.id,
+            },
+          ),
+          { tx },
+        );
+        return;
+      }
+      if (!project?.regression_loop) return; // the switched-off step stops it
       await ctx.store.append(await requeueEvents(tx, project, run, l, d.id, summary), { tx });
     });
 }

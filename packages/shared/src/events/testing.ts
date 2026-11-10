@@ -44,6 +44,8 @@ export const RegressionLoopStopReason = z.enum([
   'superseded',
   'recipe_deploy',
   'bugs_cancelled',
+  /** The project was archived (or is no longer active) while DevOps redeployed. */
+  'project_inactive',
 ]);
 export type RegressionLoopStopReason = z.infer<typeof RegressionLoopStopReason>;
 export type SuiteKind = z.infer<typeof SuiteKind>;
