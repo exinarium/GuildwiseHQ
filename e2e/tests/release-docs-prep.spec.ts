@@ -67,6 +67,7 @@ const json = async (r: { json(): Promise<unknown> }) => (await r.json()) as any;
 interface RunRow {
   id: string;
   status: string;
+  release_branch: string;
   trigger: string;
   retry_of: string | null;
   started_by: string | null;
