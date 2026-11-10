@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { RUNNER_SUBPROTOCOL, type StorageKind } from '@aom/shared';
+import { RUNNER_SUBPROTOCOL, STORAGE_DELETE_CAPABILITY, type StorageKind } from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -144,7 +144,9 @@ import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
+import { DirectUploads } from './storage-relay/direct.ts';
 import { StorageRelay } from './storage-relay/hub.ts';
+import { describeTrustProxy, fastifyTrustProxy, trustProxyWarning } from './trust-proxy.ts';
 import { createVideoDestinationClient, type VideoDestinationClient } from './video/destinations.ts';
 import { videoMediaRoutes } from './video/media-url.ts';
 import { videoPushRoutes } from './video/push.ts';
@@ -296,6 +298,8 @@ export const LOG_REDACT = {
     'req.body.email',
     '*.x-form-link',
     '*.x-upload-token',
+    '*.grant',
+    '*.uploadUrl',
     // The text of an automation's result for the runner channels never reaches a log line.
     '*.whatsapp.text',
     '*.sheet.row',
@@ -318,9 +322,12 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
             redact: LOG_REDACT,
             stream: logRing.tee(opts.logStream ?? process.stdout),
           },
-    trustProxy: true,
+    trustProxy: fastifyTrustProxy(config.trustProxy),
     bodyLimit: 2 * 1024 * 1024,
   }) as unknown as AomApp;
+  const trustWarning = trustProxyWarning(config.trustProxy);
+  if (trustWarning) app.log.warn(trustWarning);
+  else app.log.info({ trustProxy: describeTrustProxy(config.trustProxy) }, 'trusted proxy');
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
@@ -563,6 +570,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
+  ctx.services.webhookRelay.start();
   ctx.services.formsOffline = createFormsOfflineService(ctx);
   ctx.services.storage = new StorageRelay({
     config: ctx.config.storage,
@@ -581,8 +589,34 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       recordWriteOutcome(ctx, id, outcome).catch((err) =>
         ctx.log.warn({ err: err?.name }, 'storage health update failed'),
       ),
+    supportsDelete: async (ws) => {
+      const r = await one<{ capabilities: string[] }>(
+        ctx.pool,
+        'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+        [ws],
+      );
+      return !!r?.capabilities?.includes(STORAGE_DELETE_CAPABILITY);
+    },
     // Connection, kind, size, outcome and duration only: never a path, a name or content.
     log: (entry) => ctx.log.info({ storage: entry }, 'storage write'),
+    // Connection, kind, submission, a hash of the path, outcome and duration: never the path (it can hold client names).
+    logDelete: (entry) => ctx.log.info({ storage: { op: 'delete', ...entry } }, 'storage delete'),
+    now: () => ctx.clock.now().getTime(),
+  });
+  ctx.services.direct = new DirectUploads({
+    lookup: async (orgId, connectionId) => {
+      const r = await one<{ kind: StorageKind; workstation_id: string }>(
+        ctx.pool,
+        `SELECT kind, workstation_id FROM storage_connections WHERE id=$1 AND org_id=$2 AND status='active'`,
+        [connectionId, orgId],
+      );
+      return r ? { kind: r.kind, workstationId: r.workstation_id } : undefined;
+    },
+    isOnline: (ws) => ctx.services.runners.isOnline(ws),
+    send: (ws, type, payload) =>
+      ctx.services.runners.send(ws, type as 'storage.grant.open', payload as never, ctx.clock.now()),
+    // Connection, operation, outcome and duration only: never an address.
+    log: (entry) => ctx.log.info({ storageDirect: entry }, 'storage direct'),
     now: () => ctx.clock.now().getTime(),
   });
   // After a restart nothing is served until the runners announce again (right after their welcome).
@@ -720,6 +754,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     await reaper.stop();
     await gateway.stop();
     await browser.stop();
+    ctx.services.webhookRelay?.stop();
     await notifier.stop();
     mailer.close();
     await pool.end();

@@ -25,15 +25,20 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepSettingsSet'>(e).payload;
     await exec(tx, 'UPDATE projects SET release_docs_prep=$2::jsonb WHERE id=$1', [
       p.projectId,
-      JSON.stringify({ enabled: p.enabled, steps: p.steps }),
+      JSON.stringify({
+        enabled: p.enabled,
+        steps: p.steps,
+        ...(p.guidePaths && Object.keys(p.guidePaths).length > 0 ? { guidePaths: p.guidePaths } : {}),
+        ...(p.autoStart ? { autoStart: true } : {}),
+      }),
     ]);
   },
   ReleaseDocsPrepStarted: async (tx, e) => {
     const p = ev<'ReleaseDocsPrepStarted'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, retry_of, started_by, started_at, updated_at)
-       SELECT $1, pr.org_id, pr.id, $3, 'running', $4::text[], $5, $6, $7, $8, $8 FROM projects pr WHERE pr.id = $2
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, retry_of, started_by, started_at, updated_at, heads, ready_key)
+       SELECT $1, pr.org_id, pr.id, $3, 'running', $4::text[], $5, $6, $7, $8, $8, $9::jsonb, $10 FROM projects pr WHERE pr.id = $2
        ON CONFLICT (id) DO NOTHING`,
       [
         p.runId,
@@ -42,8 +47,10 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
         p.steps,
         p.trigger,
         p.retryOf ?? null,
-        p.startedBy,
+        p.startedBy ?? null,
         e.createdAt,
+        p.heads ? JSON.stringify(p.heads) : null,
+        p.readyKey ?? null,
       ],
     );
     for (const r of p.repos) {
@@ -203,9 +210,19 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepTaskFinished'>(e).payload;
     await exec(
       tx,
-      `UPDATE release_docs_prep_tasks SET status=$2, note=$3, commit_sha=$4, files=$5::jsonb, updated_at=$6
+      `UPDATE release_docs_prep_tasks SET status=$2, note=$3, commit_sha=$4, files=$5::jsonb, updated_at=$6,
+              result=$7::jsonb, code=$8
         WHERE id=$1 AND status IN ('queued','running')`,
-      [p.taskId, p.ok ? 'done' : 'failed', p.note, p.commit ?? null, JSON.stringify(p.files), e.createdAt],
+      [
+        p.taskId,
+        p.ok ? 'done' : 'failed',
+        p.note,
+        p.commit ?? null,
+        JSON.stringify(p.files),
+        e.createdAt,
+        p.result === undefined ? null : JSON.stringify(p.result),
+        p.code ?? null,
+      ],
     );
   },
   ReleaseDocsPrepSkipped: async (tx, e) => {

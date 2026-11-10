@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
+  RebaseErrorInfo,
   RunEndReason,
   RunEnvState,
   RunPlan,
@@ -105,6 +106,8 @@ export interface EnvState {
   runTmp?: string;
   /** A test environment whose card branch conflicted with its base branch while rebasing (the files). */
   rebaseConflictFiles?: string[];
+  /** A test environment whose card branch could not be rebased for a reason other than a conflict (git's error). */
+  rebaseError?: RebaseErrorInfo;
 }
 
 export const LIVE_ENV_STATES: readonly RunEnvState[] = [

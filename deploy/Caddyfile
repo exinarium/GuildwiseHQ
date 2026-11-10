@@ -1,10 +1,38 @@
 # TLS terminator and reverse proxy for the app container.
 # AOM_DOMAIN: a public DNS name gets a Let's Encrypt certificate automatically (ports 80 and 443 must be reachable).
 # `localhost` (the default) or an IP address uses Caddy's internal CA instead: a locally trusted test certificate.
+{
+	# Caddy logs handler errors (a 502 while the app restarts, a 413, a client abort) with the request URI and headers,
+	# even without an access log. Secrets travel in some of them: delete or redact them in every log line. The URI rule
+	# matches redactUrl in apps/server/src/app.ts; keep the two in step.
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Form-Link delete
+				request>headers>X-Upload-Token delete
+				request>headers>X-File-Name delete
+				request>headers>X-Guildwise-Signature delete
+				request>headers>X-Hub-Signature-256 delete
+				request>headers>X-Signature delete
+				request>headers>X-Goog-Channel-Token delete
+				request>headers>Idempotency-Key delete
+				request>headers>X-Guildwise-Delivery delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>Proxy-Authorization delete
+				resp_headers>Set-Cookie delete
+				request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms|api/invitations|invite)/)[^/?#]+|((?:/|%2F|%252F)m(?:/|%2F|%252F)desk(?:/|%2F|%252F))(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f][0-9A-Fa-f])+|([?&](?:token|code|invite|pairing[_-]?code)=)[^&#]*" "${1}${2}${3}${4}[redacted]"
+			}
+		}
+	}
+}
+
 {$AOM_DOMAIN:localhost} {
 	encode zstd gzip
-	# No `log` directive on purpose: the inbound relay (/relay/in/*) carries a secret path and the provider's verify token in
-	# the URL. If you add an access log, exclude /relay/in/* from it.
+	# No access log on purpose. If you add one, give it the same `format filter` as the global log above
+	# (docs/SELF-HOSTING.md "Proxy logs and body limits"): a site `log` does not use the global filter.
 	# HSTS only for a real domain: a locally trusted `localhost` certificate must not pin browsers to https for
 	# every other service on localhost. (The app sends HSTS itself when AOM_PUBLIC_ORIGIN is https.)
 	@public not host localhost 127.0.0.1 ::1
@@ -15,7 +43,40 @@
 	handle /api/worker/video/* {
 		reverse_proxy video-worker:{$AOM_VIDEO_WORKER_PORT:4610}
 	}
+	# Public form API. A file part is one raw PUT with an exact Content-Length, streamed to the app (no request_buffers:
+	# Caddy never writes a body to disk). Its ceiling is the variable the app enforces. Everything else there is JSON, at
+	# most 4 MiB in the app. The two matchers exclude each other, so their order does not matter.
+	handle /api/public/forms/* {
+		@formPart path_regexp ^/api/public/forms/[^/]+/submissions/[^/]+/parts/[0-9]+$
+		@formJson not path_regexp ^/api/public/forms/[^/]+/submissions/[^/]+/parts/[0-9]+$
+		request_body @formPart {
+			max_size {$AOM_STORAGE_MAX_FILE_BYTES:26214400}
+		}
+		request_body @formJson {
+			max_size 4MiB
+		}
+		reverse_proxy app:4600
+	}
+	# Inbound journey webhooks: the same limit as the app (AOM_JOURNEY_HOOK_MAX_BYTES).
+	handle /hooks/in/* {
+		request_body {
+			max_size {$AOM_JOURNEY_HOOK_MAX_BYTES:65536}
+		}
+		reverse_proxy app:4600
+	}
+	# Inbound webhook relay: the app's own limit (AOM_RELAY_MAX_BODY_BYTES) can be at most 4 MiB (also per kind, AOM_RELAY_MAX_BODY_BYTES_BY_KIND), so the proxy caps at
+	# 4 MiB and the app refuses (and records) anything between its setting and that.
+	handle /relay/in/* {
+		request_body {
+			max_size 4MiB
+		}
+		reverse_proxy app:4600
+	}
+
 	# WebSocket upgrades (/api/ws, /api/runner/ws) pass through reverse_proxy unchanged.
+	# Caddy replaces X-Forwarded-For from clients it does not trust, and the app trusts the header from private addresses
+	# (AOM_TRUST_PROXY in docker-compose.prod.yml). If you add `trusted_proxies` here for a CDN in front, set
+	# AOM_TRUST_PROXY to match (docs/SELF-HOSTING.md "Running behind a reverse proxy").
 	handle {
 		reverse_proxy app:4600 {
 			health_uri /api/health

@@ -67,6 +67,7 @@ const json = async (r: { json(): Promise<unknown> }) => (await r.json()) as any;
 interface RunRow {
   id: string;
   status: string;
+  release_branch: string;
   trigger: string;
   retry_of: string | null;
   started_by: string | null;
@@ -284,6 +285,7 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
     'Analyse changes',
     'Write changelog',
     'Update user guide',
+    'Update Help articles',
     'Generate videos',
     'Commit results',
   ]);
@@ -302,13 +304,20 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
     (s) => s.enabled === true,
     15_000,
   ).then((s) =>
-    expect(s.steps).toEqual({ analyse: true, changelog: true, guide: true, videos: false, commit: true }),
+    expect(s.steps).toEqual({
+      analyse: true,
+      changelog: true,
+      guide: true,
+      help: true,
+      videos: false,
+      commit: true,
+    }),
   );
   // the runs below use Analyse and Commit only (the mock runner has no writer agent for the guide)
   const narrow = await owner.put(`/api/projects/${projectId}/release-docs-prep/settings`, {
     data: {
       enabled: true,
-      steps: { analyse: true, changelog: false, guide: false, videos: false, commit: true },
+      steps: { analyse: true, changelog: false, guide: false, help: false, videos: false, commit: true },
     },
   });
   expect(narrow.status()).toBe(200);
@@ -375,6 +384,10 @@ test('AC4/AC5/AC8: Run release prep analyses both repositories; a second run is 
   expect(done.status, done.error ?? '').toBe('passed');
 
   await expect(prep.getByTestId('release-docs-prep-state')).toHaveText('passed');
+  // the project is on main, both repositories on release/1.1: the run is labelled and keyed with the repositories' branch
+  expect(done.release_branch).toBe(BRANCH);
+  await expect(prep).toContainText(`Release project · ${BRANCH}`);
+  await expect(prep).not.toContainText('Release project · main');
   const alpha = prep.getByTestId('prep-repo-alpha');
   const beta = prep.getByTestId('prep-repo-beta');
   await expect(alpha.getByTestId('prep-summary')).toContainText('2 commits since v1.0.0');

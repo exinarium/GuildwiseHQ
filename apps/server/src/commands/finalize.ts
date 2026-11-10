@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CompletionAction,
+  cardTicketRef,
+  clientChangeTitle,
   DEFAULT_PR_BRANCH_PREFIX,
   DESK_SUBKIND,
   type FinalizeCardRequest,
@@ -8,10 +10,14 @@ import {
   type FinalizeResult,
   FinalizeResultSchema,
   getStage,
+  guardsInternalRef,
   isLeanTeamWorkflow,
   isSafeGitRef,
+  replaceInternalRef,
   type StoredCompletionAction,
   streamId,
+  ticketBranchPart,
+  workReference,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadWorkflowById } from '../catalogue/loader.ts';
@@ -28,7 +34,7 @@ import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { qaOpenEvents } from './qa.ts';
 import { finalizeNext, qaAssignee } from './qa-flow.ts';
-import { rebaseConflictEvents } from './rebase.ts';
+import { finalizeFailureText, isRealConflict, rebaseConflictEvents } from './rebase.ts';
 import { isHighRisk, riskOf } from './review-risk.ts';
 import { spawnCardEvent } from './spawn.ts';
 
@@ -129,10 +135,32 @@ export function ownerApprovalLapsedEvents(
   ];
 }
 
-/** The ticket in a pull request branch name: the tracker key the card came from (Jira), else the card ref. */
-export function prBranchTicket(externalKey: string | null | undefined, ref: string): string {
-  const key = (externalKey ?? '').trim();
-  return /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(key) ? key : ref;
+/**
+ * What a pull request or merge of the card is called (backlog #65, intake cards): the ticket part of the PR branch name
+ * (`ABC-1`, `web-12`; the card ref without a client ticket), the work reference for an intake card, and the title and
+ * body clients read. The ticket comes from the card's work reference; `intakeKey` (the intake's external key) is a
+ * fallback for cards whose fields carry no ticket. A non-intake card gets exactly `{ ticket: ref, prTitle: title,
+ * prBody: title }`; the internal ref never appears in an intake card's title or body.
+ */
+export function finalizeNaming(
+  card: { ref: string; title: string; fields?: unknown },
+  intakeKey?: string | null,
+): Pick<FinalizeExecutePayload, 'ticket' | 'workRef' | 'isClientRef' | 'prTitle' | 'prBody'> {
+  const fields = (card.fields && typeof card.fields === 'object' ? card.fields : {}) as Record<
+    string,
+    unknown
+  >;
+  const fromIntake =
+    !cardTicketRef(fields) && intakeKey?.trim() ? { ...fields, externalRef: intakeKey } : fields;
+  const wr = workReference({ ref: card.ref, fields: fromIntake });
+  const client = guardsInternalRef(wr, card.ref);
+  const ticket = (client && wr.ticket && ticketBranchPart(wr.ticket)) || card.ref;
+  return {
+    ticket,
+    ...(client ? { workRef: wr.ref, isClientRef: true } : {}),
+    prTitle: clientChangeTitle(wr, card.ref, card.title),
+    prBody: client ? replaceInternalRef(card.title, card.ref, wr.ref) : card.title,
+  };
 }
 
 /** `finalize.execute` for the card's home workstation (the runner executes the completion action; no agent). */
@@ -150,7 +178,10 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
       WHERE ic.card_id=$1 AND i.external_key IS NOT NULL ORDER BY ic.created_at LIMIT 1`,
     [card.id],
   )) as { external_key: string } | null;
-  const ticket = prBranchTicket(intake?.external_key, card.ref);
+  const naming = finalizeNaming(
+    card as { ref: string; title: string; fields?: unknown },
+    intake?.external_key,
+  );
   const payload: FinalizeExecutePayload = {
     cardId: card.id,
     ref: card.ref,
@@ -163,14 +194,15 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     baseBranch: card.base_branch ?? repo.working_branch ?? project.working_branch,
     branchName: card.branch_name,
     prBranchPrefix: project.pr_branch_prefix || DEFAULT_PR_BRANCH_PREFIX,
-    ticket,
+    ticket: naming.ticket,
+    ...(naming.isClientRef ? { workRef: naming.workRef, isClientRef: true } : {}),
     ...(earlier.pushedBranch && isSafeGitRef(earlier.pushedBranch)
       ? { remoteBranch: earlier.pushedBranch }
       : {}),
     worktreePath: card.worktree_path ?? null,
     // What clients read (backlog #65): the ticket key when the card came from a ticket, a plain title, no card ref.
-    prTitle: ticket !== card.ref ? `${ticket}: ${card.title}` : card.title,
-    prBody: card.title,
+    prTitle: naming.prTitle,
+    prBody: naming.prBody,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     commitAs: await loadCommitAs(tx, project.id),
     // lean team: the runner lands only the commit that was reviewed (and approved).
@@ -372,6 +404,48 @@ export async function resolveLargeMergeIn(
 }
 
 /**
+ * Finalize refused an intake card whose commits name its internal ref: `InternalRefInHistory` (back to Build, rework)
+ * and a card message that lists the commits and says how to reword them.
+ */
+export function internalRefEvents(
+  card: Row,
+  found: NonNullable<FinalizeResult['internalRef']>,
+): AppendInput[] {
+  const shown = found.commits.slice(0, 10).map((c) => `- ${c.sha.slice(0, 10)} ${c.subject}`);
+  const more = found.commits.length > 10 ? [`- and ${found.commits.length - 10} more`] : [];
+  const base = card.base_branch ? `origin/${card.base_branch}` : 'the working branch';
+  return [
+    {
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'InternalRefInHistory',
+        payload: {
+          cardId: card.id,
+          stage: card.stage,
+          ref: found.ref,
+          workRef: found.workRef,
+          commits: found.commits,
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+    cardMessage(
+      card,
+      { kind: 'system' },
+      'system',
+      [
+        `Nothing was merged or pushed: these commits on the card branch name ${found.ref}, but this work is ${found.workRef} and its commits must use ${found.workRef} only:`,
+        ...shown,
+        ...more,
+        `Reword them: the last one with git commit --amend -m "${found.workRef}: ..."; older ones with git reset --soft $(git merge-base HEAD ${base}) and one new commit. The card is back in Build.`,
+      ].join('\n'),
+      { commits: found.commits },
+    ),
+  ];
+}
+
+/**
  * `command.result` of `finalize.execute`: CardFinalized (+ worktree removal and the full-suite card), a rebase
  * conflict back to Rework, or a failure with a desk escalation. Idempotent: only a card still finalizing is touched.
  */
@@ -565,7 +639,11 @@ export async function applyFinalizeResult(
             `The card branch is at ${actualSha.slice(0, 10)} but ${String(card.head_sha).slice(0, 10)} was reviewed: nothing was merged and the card goes back to Build.`,
           ),
         );
-    } else if (ok && result?.conflict) {
+    } else if (ok && result?.internalRef && !result.ok) {
+      // An intake card's commits name its internal ref: nothing was pushed or merged; the builder rewords them.
+      events.push(...internalRefEvents(card, result.internalRef));
+    } else if (ok && result?.conflict && isRealConflict(result.conflictedFiles)) {
+      // A conflict only with files: a "conflict" without them (an older runner) or a rebase error takes the failure route.
       const attempt = await cardConflictAttemptEvents(
         ctx,
         tx,
@@ -607,6 +685,8 @@ export async function applyFinalizeResult(
         );
     } else {
       const message = result?.error ?? error ?? 'the completion action failed';
+      const text = finalizeFailureText(action, card.base_branch ?? '', result, error);
+      const rebaseFailed = !!result?.rebaseError || !!result?.conflict;
       ctx.log.warn({ cardId: card.id, ref: card.ref, action, error: message }, 'finalize failed');
       const deskItemId = randomUUID();
       events.push(
@@ -628,7 +708,7 @@ export async function applyFinalizeResult(
               kind: 'escalation',
               subkind: DESK_SUBKIND.finalizeFailed,
               title: `Finalize of ${card.ref} failed (${action})`,
-              body: message,
+              body: rebaseFailed ? text : message,
               options: [],
               blocking: false,
               pinned: true,
@@ -641,7 +721,7 @@ export async function applyFinalizeResult(
           actor: SYSTEM_ACTOR,
           scope,
         },
-        cardMessage(card, { kind: 'system' }, 'system', `Finalize (${action}) failed: ${message}`),
+        cardMessage(card, { kind: 'system' }, 'system', text),
       );
     }
     await ctx.store.append(events, { tx });

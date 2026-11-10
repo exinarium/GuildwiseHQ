@@ -225,6 +225,25 @@ export const RelayConfigSchema = z.object({
   sinkDir: z.string().optional(),
 });
 
+/** The clamd address of a platform: a unix socket on Linux, TCP elsewhere (clamd has no unix socket on Windows or Homebrew). */
+export function defaultClamdAddress(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'linux' ? '/var/run/clamav/clamd.ctl' : '127.0.0.1:3310';
+}
+
+/**
+ * Optional malware scan of public form uploads (docs/RUNNER.md, "Malware scan of form uploads"). Off by default: when
+ * off, nothing contacts clamd and uploads are written as before.
+ */
+export const UploadScanConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** The clamd address: a unix socket path, or host:port (IPv6 as [::1]:3310). */
+  clamd: z.string().min(1).default(defaultClamdAddress()),
+  timeoutMs: z.number().int().min(1000).max(300_000).default(30_000),
+  /** Where infected files are kept. Default: `<data dir>/quarantine`. Must be outside every storage destination. */
+  quarantineDir: z.string().min(1).optional(),
+});
+export type UploadScanConfig = z.infer<typeof UploadScanConfigSchema>;
+
 export const RunnerConfigSchema = z.object({
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
@@ -274,6 +293,8 @@ export const RunnerConfigSchema = z.object({
   relay: RelayConfigSchema.default(RelayConfigSchema.parse({})),
   /** Disk retention of the agents' scratch folders (see `ScratchConfigSchema`). */
   scratch: ScratchConfigSchema.default(ScratchConfigSchema.parse({})),
+  /** Malware scan of public form uploads (see `UploadScanConfigSchema`). */
+  uploadScan: UploadScanConfigSchema.default(UploadScanConfigSchema.parse({})),
 });
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;
 

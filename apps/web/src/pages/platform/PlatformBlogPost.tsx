@@ -27,6 +27,7 @@ import {
 } from '../../components/ui.tsx';
 import { formatDateTime } from '../../lib/time.ts';
 import { statusLabel } from './PlatformBlog.tsx';
+import { ArticleEditor } from './PlatformBlogArticle.tsx';
 
 const sourcesToText = (p: BlogPost) => p.sources.map((s) => `${s.title} | ${s.url}`).join('\n');
 const textToSources = (t: string) =>
@@ -57,6 +58,8 @@ export function PlatformBlogPost() {
   const q = usePlatformPost(id);
   if (q.isPending) return <PageSkeleton label="Loading the post" />;
   if (q.isError || !q.data) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
+  // an article a person wrote has its own authoring view
+  if (q.data.originKind === 'manual') return <ArticleEditor post={q.data} />;
   return <Editor post={q.data} />;
 }
 

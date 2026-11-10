@@ -107,6 +107,7 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_MIGRATE_ON_BOOT` | `true` | Apply migrations on start. |
 | `AOM_EXTRA_ORIGINS` | unset | Extra exact origins the web app may be opened from (comma-separated, never `*`). |
 | `AOM_RATE_LIMIT` | `true` | Request rate limiting. |
+| `AOM_TRUST_PROXY` | loopback only (the Compose file sets `loopback,uniquelocal`) | Which proxies may set `X-Forwarded-For`, and so the client address every per-address limit uses. See [Running behind a reverse proxy](#running-behind-a-reverse-proxy). |
 | `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Platform ceiling on shifts per workstation (`0` means no ceiling). |
 | `AOM_DATA_MIGRATIONS` | on | Set to `false` to skip data migrations on boot. |
 
@@ -244,6 +245,82 @@ AOM_HTTPS_PORT=9443
 AOM_HTTP_PORT=9080
 ```
 
+### Proxy logs and body limits
+
+The bundled Caddy configuration (`deploy/Caddyfile`) does two things for the public, unauthenticated routes.
+
+**Log redaction.** Caddy logs handler errors (a `502` while the app restarts, a `413`, a client abort) with the request address and headers, even without an access log. Every Caddy log line goes through one global filter that:
+
+- deletes the headers `X-Form-Link`, `X-Upload-Token`, `X-File-Name`, `X-Guildwise-Signature`, `X-Hub-Signature-256`, `X-Signature`, `X-Goog-Channel-Token`, `Idempotency-Key`, `X-Guildwise-Delivery`, `Cookie`, `Authorization`, `Proxy-Authorization` and the response `Set-Cookie`;
+- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
+
+If a relay kind of yours sends a secret in another header, add a `request>headers>Name delete` line to the filter.
+
+**Body limits.** Caddy refuses a larger body with `413` before the app reads it.
+
+| Route | Proxy limit | How to change |
+| --- | --- | --- |
+| `/relay/in/*` | 4 MiB, fixed | The app's own limit is `AOM_RELAY_MAX_BODY_BYTES` or, per kind, `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` (at most 4 MiB); the app records bodies between its limit and 4 MiB as rejected. A proxy of your own must allow at least 4 MiB on this route. |
+| `/hooks/in/*` | `AOM_JOURNEY_HOOK_MAX_BYTES` (default 64 KiB) | Set it in `.env`. |
+| Public form file part (`PUT /api/public/forms/<id>/submissions/<sid>/parts/<n>`) | `AOM_STORAGE_MAX_FILE_BYTES` (default 25 MiB) | Set it in `.env`. |
+| Rest of `/api/public/forms/*` | 4 MiB, fixed | Same as the app. |
+
+After you change a variable in `.env`, run `docker compose -f docker-compose.prod.yml up -d`. Compose passes it to both the app and Caddy, so the two stay equal; do not give them different values. A journey webhook over the limit is refused by the proxy, so it does not show as a call on the Journeys page.
+
+**Access log.** A `log` directive inside the site block creates its own logger, and the global filter does not apply to it. If you add one, give it the same filter, for example:
+
+```caddyfile
+log {
+	output file /data/access.log
+	format filter {
+		wrap json
+		fields {
+			request>headers>X-Form-Link delete
+			request>headers>X-Upload-Token delete
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			resp_headers>Set-Cookie delete
+			request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms)/)[^/?#]+" "${1}${2}[redacted]"
+		}
+	}
+}
+```
+
+Copy every line of the global filter in `deploy/Caddyfile` rather than this short example. A reverse proxy of your own in front must delete the same headers and not log the address of these routes.
+
+### Running behind a reverse proxy
+
+`AOM_TRUST_PROXY` decides which peers the server believes when they send `X-Forwarded-For`. The address it resolves is the
+client address used by every per-address limit (public forms, the landing-page assistant, help videos, sign-in and
+password reset, the general request limit), by blog API key address allow lists, and in the logs and audit trail.
+
+**Default (unset): loopback only.** The server trusts `X-Forwarded-For` only from `127.0.0.0/8` and `::1`. A reverse
+proxy on the same host keeps working, and a client that reaches the server directly cannot choose its own address.
+
+| Value | Meaning | Use it for |
+| --- | --- | --- |
+| unset | Trust loopback only. | Caddy or nginx on the same host, proxying to `127.0.0.1:4600`. |
+| `loopback,uniquelocal` | Trust loopback and the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`). | The bundled `docker-compose.prod.yml`. It already sets this value, overridable from `.env`. |
+| `172.18.0.0/16` or `172.18.0.5` | Trust only these addresses or CIDR ranges (IPv4 or IPv6, comma-separated). The names `loopback`, `linklocal` and `uniquelocal` are accepted too. | Docker Compose with your own proxy in another container (its network address or the network's CIDR), or a proxy on another host. |
+| `10.0.0.5,203.0.113.0/24` | The proxy's address plus the CDN's published ranges. | A CDN in front of your proxy. Configure the proxy to keep the CDN's `X-Forwarded-For`. |
+| `1`, `2`, ... up to `32` | Trust exactly that many hops: the client is the address that many entries back from the server. | A proxy (`1`) or a CDN in front of a proxy (`2`), when the server cannot be reached except through them. |
+| `false`, `0` or `none` | Never trust `X-Forwarded-For`; the client is the socket address, even from loopback. | A server that clients reach directly, with no proxy. |
+| `true` | Trust every hop (the behaviour before this setting existed). | Not recommended. |
+
+Prefer addresses over a hop count: a hop count does not check who the peer is, so anyone who can reach port 4600
+without going through the proxy can write the address they want into the header. Use a hop count only when the server
+is reachable through the proxy alone.
+
+> **Warning:** `AOM_TRUST_PROXY=true` on a server that can be reached without the proxy lets every client choose its own
+> address and get past the per-address rate limits. The server logs a warning at startup when it is set.
+
+An invalid value (a word, a negative number, a hop count above 32, an address or CIDR range that does not parse) stops
+the server at startup with a message that names `AOM_TRUST_PROXY` and the accepted forms. The server never falls back to
+trusting every hop. At startup the log has a `trusted proxy` line that shows what is trusted.
+
+If every visitor seems to share one address (limits trigger for everyone, the logs show only the proxy's address), the
+proxy is not trusted: set `AOM_TRUST_PROXY` to its address or network.
+
 ## 8. Upgrades
 
 Back up first (section 9), then:
@@ -256,6 +333,7 @@ curl https://guildwise.example.com/api/health
 
 Migrations run on boot. Downtime is usually a few seconds. Watch the logs with `docker compose -f docker-compose.prod.yml logs -f app`.
 
+- **Caddy image.** A release that changes the Caddy image tag is picked up with `docker compose -f docker-compose.prod.yml pull caddy` (or `up -d --pull always`).
 - **Keep runners in step.** When a release changes the runner, update the workstations too. The installer re-run upgrades them, and the server offers the runner release it ships.
 - **Data migrations.** Some releases include data migrations. They are idempotent, and they run on boot unless `AOM_DATA_MIGRATIONS=false`. Some have a `--dry-run` preview, for example `node dist/orgs-migrate.mjs --dry-run`, run with `docker compose ... exec app`.
 - **Do not** run `down -v` during an upgrade. It deletes the volumes.
@@ -381,7 +459,8 @@ A Business mode organization can give an outside provider (the WhatsApp Cloud AP
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. |
+| `AOM_RELAY_MAX_BODY_BYTES` | `1048576` | Largest request body forwarded (at most 4 MiB). Larger is `413`. The bundled proxy caps this route at 4 MiB. A `whatsapp_cloud` integration accepts at least 3 MiB whatever this is, because Meta sends payloads of up to 3 MB. |
+| `AOM_RELAY_MAX_BODY_BYTES_BY_KIND` | unset | Per kind body limits, for example `whatsapp_cloud=3145728,generic=2097152`. Each value is 1 to 4194304 (more is capped, zero or less becomes 1); an unknown kind or a non-number is ignored, as in `AOM_RELAY_TIMEOUTS`. An entry overrides the built-in `whatsapp_cloud` 3 MiB. |
 | `AOM_RELAY_RATE_PER_MINUTE`, `AOM_RELAY_RATE_BURST` | `60`, `20` | Requests per minute and burst, per integration. More is `429`. |
 | `AOM_RELAY_TIMEOUT_MS` | `5000` | How long the server waits for the runner's answer (`504` after that); 1000 to 15000. Keep it below the provider's own timeout. |
 | `AOM_RELAY_TIMEOUTS` | unset | Per kind overrides, for example `whatsapp_cloud=5000,calendar_push=8000`. |
@@ -389,7 +468,7 @@ A Business mode organization can give an outside provider (the WhatsApp Cloud AP
 | `AOM_RELAY_MAX_IN_FLIGHT` | `200` | Requests waiting for a runner at once; more get `503`. |
 | `AOM_RELAY_RETENTION_DAYS` | `30` | How long the per-request metadata (time, integration, size, status, latency, outcome) is kept. |
 
-A reverse proxy in front of the server must not write an access log for `/relay/in/*`: the address and query string carry the integration's secret path and the provider's verify token. The bundled Caddy configuration writes no access log.
+A reverse proxy in front of the server must not write an access log for `/relay/in/*`: the address and query string carry the integration's secret path and the provider's verify token. The bundled Caddy configuration writes no access log; it logs only errors, through a filter that redacts the address and query (see "Proxy logs and body limits" in section 7).
 
 On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` tells the runner to serve an integration (restart the runner to apply); `relay list` and `relay remove` manage the list.
 
@@ -397,9 +476,10 @@ On a workstation, `guildwise-runner relay add <integration-id> --kind <kind>` te
 
 A form published from the forms builder is open to anyone with its address (`https://<your domain>/f/<id>`) or a personal link. Answers and files go to the firm's own storage through its runner; the server keeps references only. Read [docs/security/public-forms.md](security/public-forms.md) before you enable it for strangers.
 
-- Put the server behind a reverse proxy that sets `X-Forwarded-For`: the per-address limits depend on it (the per-form limit does not).
+- The per-address limits use the client address the server resolves (the per-form limit does not depend on it). Behind a proxy in another container or on another host, set `AOM_TRUST_PROXY` (see [Running behind a reverse proxy](#running-behind-a-reverse-proxy)).
 - Set `AOM_SECRET_KEY`. Personal links and page sessions are signed with a key derived from it; rotating it ends every personal link.
 - A public request to `/f/*` must not be cached by the proxy (the server sends `Cache-Control: no-store`).
+- The bundled proxy limits request bodies: a file part to `AOM_STORAGE_MAX_FILE_BYTES`, everything else on the form API to 4 MiB (section 7, "Proxy logs and body limits").
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -451,6 +531,8 @@ The app container has a health check against `/api/health`.
 **Every write returns `403 bad_origin`**
 
 The page is open at an address other than `AOM_PUBLIC_ORIGIN`. Add that exact origin to `AOM_EXTRA_ORIGINS` and restart.
+Public forms are not affected: the `/api/public/forms/` routes do not compare the `Origin` value, so a form opened at a
+LAN address (for example `http://192.168.1.20:4700/f/…`) can be sent without listing that address.
 
 **Sign-in does not stick on a plain `http` address**
 

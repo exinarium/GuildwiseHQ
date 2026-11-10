@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { commandForOutcome, renderInstructions, renderShiftPrompt } from '../src/index.ts';
+import {
+  commandForOutcome,
+  DomainEventSchema,
+  renderInstructions,
+  renderShiftPrompt,
+  ShiftBriefSchema,
+} from '../src/index.ts';
 import { buildBrief, reworkReviewBrief } from './fixtures.ts';
 
 describe('renderShiftPrompt', () => {
@@ -417,5 +423,62 @@ describe('test gaps and the builder hint', () => {
     const p = renderShiftPrompt({ ...buildBrief(), builderTestsNonBlocking: true });
     expect(p).toContain('## Tests that need an environment');
     expect(p).toContain('aom question --topic tests');
+    expect(p).toContain('the DevOps engineer is asked to run them if this workstation has one');
+  });
+  it('says nobody was asked and no result will arrive for a gap without a DevOps request', () => {
+    const p = renderShiftPrompt({
+      ...buildBrief(),
+      testGaps: [{ ...gap, requestId: '', reason: 'no_devops_engineer' }],
+    });
+    expect(p).toContain('## Tests the builder did not run');
+    expect(p).toContain(
+      'Not run: no DevOps engineer on the workstation, nobody was asked (asked by Bea in build',
+    );
+    expect(p).toContain('Result: none will arrive.');
+    expect(p).not.toContain('DevOps request');
+    expect(p).not.toContain('not arrived yet');
+  });
+  it('lists a gap of each kind side by side', () => {
+    const p = renderShiftPrompt({
+      ...buildBrief(),
+      testGaps: [gap, { ...gap, requestId: '', reason: 'no_devops_engineer' }],
+    });
+    expect(p).toContain(`DevOps request ${gap.requestId}`);
+    expect(p).toContain('Result: not arrived yet.');
+    expect(p).toContain('Result: none will arrive.');
+  });
+  it('the brief schema keeps requestId a string (older runners drop a frame that fails it)', () => {
+    const item = ShiftBriefSchema.shape.testGaps.unwrap().element;
+    expect(item.safeParse({ ...gap, requestId: '', reason: 'no_devops_engineer' }).success).toBe(true);
+    expect(item.safeParse(gap).success).toBe(true);
+    expect(item.safeParse({ ...gap, requestId: null }).success).toBe(false);
+  });
+});
+
+describe('the BuilderTestsNotRun event', () => {
+  const base = {
+    cardId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b1',
+    agentId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b2',
+    stage: 'build',
+    detail: 'run the DB tests',
+  };
+  const schema = {
+    safeParse: (payload: Record<string, unknown>) =>
+      DomainEventSchema.safeParse({ type: 'BuilderTestsNotRun', payload }),
+  };
+  it('accepts the stored GWP-42 payload (with a request)', () => {
+    expect(
+      schema.safeParse({
+        ...base,
+        requestId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b3',
+        reason: 'test_without_environment',
+      }).success,
+    ).toBe(true);
+  });
+  it('accepts a gap without a request when no DevOps engineer was on the workstation', () => {
+    expect(schema.safeParse({ ...base, reason: 'no_devops_engineer' }).success).toBe(true);
+  });
+  it('rejects an unknown reason', () => {
+    expect(schema.safeParse({ ...base, reason: 'other' }).success).toBe(false);
   });
 });

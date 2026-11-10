@@ -29,7 +29,7 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
             e.preventDefault();
             document.querySelector<HTMLElement>('[data-testid="page-help-button"]')?.focus();
           }}
-          className="fixed z-70 flex max-h-[88dvh] flex-col overflow-hidden border border-line bg-surface shadow-lg outline-none max-sm:inset-x-0 max-sm:bottom-0 max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-[env(safe-area-inset-bottom)] sm:inset-y-0 sm:right-0 sm:max-h-none sm:w-[min(94vw,26rem)] sm:animate-drawer-right sm:rounded-none sm:border-y-0 sm:border-r-0"
+          className="fixed z-70 flex max-h-[88dvh] flex-col overflow-hidden border border-line bg-surface shadow-lg outline-none max-sm:inset-x-0 max-sm:bottom-0 max-sm:animate-sheet max-sm:rounded-t-dialog max-sm:pb-(--safe-bottom) sm:inset-y-0 sm:right-0 sm:pt-(--safe-top) sm:pr-(--safe-right) sm:pb-(--safe-bottom) sm:max-h-none sm:w-[min(94vw,26rem)] sm:animate-drawer-right sm:rounded-none sm:border-y-0 sm:border-r-0"
         >
           <div className="flex items-start gap-3 border-b border-line px-5 pt-4 pb-3">
             <div className="min-w-0 flex-1">

@@ -10,9 +10,23 @@ export interface PublicMessage {
 
 const msg = (text: string, retry = false, closed = false): PublicMessage => ({ text, retry, closed });
 
+/** Sentences the page shows on its own (not answers to a server error). */
+export const PUBLIC_TEXT = {
+  uploading: (name: string, pct: number) => `Uploading ${name}: ${pct}%`,
+  checking: (name: string) => `Checking ${name}…`,
+  slowCheck:
+    'Still checking your form. This can take a little longer on this device. Please keep this page open.',
+  needsSecureLink:
+    "This form can't be sent from this browser over this link. It needs a secure (https) link. Your answers are still here. Please contact the firm.",
+  badOrigin:
+    "This form can't be sent from this address. Please use the link the firm gave you, or contact the firm.",
+} as const;
+
 /** An error code as a sentence for a client. No technical detail, nothing the server did not choose to say. */
 export function describePublicError(
   e: Pick<PublicApiError, 'code' | 'status' | 'retryable'> & { message?: string },
+  /** What the submitter called the file (their own field label and file name), when the error says which one. */
+  file?: string,
 ): PublicMessage {
   // The sentences about a secure link (the emailed link of the runner-offline flow) are the server's own.
   if (/^link_(expired|revoked|used)$/.test(e.code) && /secure link/.test(e.message ?? ''))
@@ -39,6 +53,18 @@ export function describePublicError(
         "This form can't accept submissions right now. Please try again later. Your answers are still here.",
         true,
       );
+    case 'malware_detected':
+      return msg(
+        `One of your files${file ? ` (${file})` : ''} could not be accepted because it failed a security check. Please check the file and try again, or contact the firm.`,
+      );
+    case 'upload_unavailable':
+      return e.retryable
+        ? msg("This form can't accept files right now. Please try again later or contact the firm.", true)
+        : msg('Your files could not be sent to the firm. Please contact the firm.', false, true);
+    case 'upload_mode':
+      return msg('This file must be sent another way. Please reload the page.', false, true);
+    case 'scan_unavailable':
+      return msg('Your submission could not be checked right now. Please try again later.', true);
     case 'storage_failed':
       return e.retryable
         ? msg(
@@ -55,6 +81,12 @@ export function describePublicError(
       return msg('Some answers need attention. Please check the form and send again.');
     case 'submission_refused':
       return msg('We could not accept this submission. Please try again.', true);
+    // raised by the page itself: this browser cannot do the check the form needs before sending
+    case 'pow_unsupported':
+      return msg(PUBLIC_TEXT.needsSecureLink);
+    // the page was opened at an address the server does not accept (a configuration matter)
+    case 'bad_origin':
+      return msg(PUBLIC_TEXT.badOrigin);
     case 'network':
       return msg('The connection was lost. Your answers are still here. Try again.', true);
     default:

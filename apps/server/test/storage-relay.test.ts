@@ -11,7 +11,10 @@ async function* source(parts: Buffer[]) {
   for (const p of parts) yield p;
 }
 
-function make(over: Partial<StorageRelayDeps> = {}, opts: { answer?: 'ok' | 'silent' | 'early_error' } = {}) {
+function make(
+  over: Partial<StorageRelayDeps> = {},
+  opts: { answer?: 'ok' | 'silent' | 'early_error'; derived?: (ref: StorageReference) => unknown } = {},
+) {
   const frames: Frame[] = [];
   const outcomes: unknown[] = [];
   const logs: unknown[] = [];
@@ -61,7 +64,13 @@ function make(over: Partial<StorageRelayDeps> = {}, opts: { answer?: 'ok' | 'sil
           contentType: 'text/plain',
           writtenAt: new Date().toISOString(),
         };
-        queueMicrotask(() => relay.onResult(WS, tid, { ok: true, reference }));
+        queueMicrotask(() =>
+          relay.onResult(WS, tid, {
+            ok: true,
+            reference,
+            ...(opts.derived ? { derived: opts.derived(reference) as never } : {}),
+          }),
+        );
       }
       return true;
     },
@@ -135,6 +144,20 @@ describe('StorageRelay.write', () => {
     expect(t.outcomes[0]).toMatchObject([CONN, { ok: false }]);
   });
 
+  it('forwards the submission and scan context in the open message, and leaves them out otherwise', async () => {
+    const ctx = {
+      submission: { orgId: 'o', formId: 'f', submissionId: 's' },
+      scan: { field: 'f_file', fileName: 'a.pdf' },
+    };
+    const t = make({}, { answer: 'early_error' });
+    await t.relay.write(req(source([Buffer.from('x')]), 1, ctx));
+    expect(t.frames.find((f) => f.type === 'storage.write.open')?.payload).toMatchObject(ctx);
+    const u = make({}, { answer: 'early_error' });
+    await u.relay.write(req(source([Buffer.from('x')]), 1));
+    const open = u.frames.find((f) => f.type === 'storage.write.open')?.payload ?? {};
+    expect('submission' in open || 'scan' in open).toBe(false);
+  });
+
   it('times out within the deadline when the runner is silent, sends abort and holds nothing', async () => {
     const t = make(
       { config: { writeTimeoutMs: 5000, maxFileBytes: 1e6, maxInFlight: 2 } },
@@ -197,5 +220,43 @@ describe('StorageRelay.write', () => {
     expect(t.relay.inFlight).toBe(1);
     t.relay.onDisconnect(WS);
     expect((await p).ok).toBe(false);
+  });
+});
+
+describe('StorageRelay.write with derive', () => {
+  const body = Buffer.from('<html></html>');
+  const pdfRef = (ref: StorageReference, over: Partial<StorageReference> = {}): StorageReference => ({
+    ...ref,
+    path: 'a/b.pdf',
+    contentType: 'application/pdf',
+    ...over,
+  });
+
+  it('forwards derive in the open frame and passes a PDF receipt through', async () => {
+    const t = make({}, { derived: (ref) => ({ pdf: { ok: true, reference: pdfRef(ref) } }) });
+    const r = await t.relay.write(req(source([body]), body.length, { derive: { pdf: true } }));
+    expect(t.frames.find((f) => f.type === 'storage.write.open')?.payload.derive).toEqual({ pdf: true });
+    expect(r.ok && r.derived?.pdf).toMatchObject({ ok: true, reference: { contentType: 'application/pdf' } });
+  });
+
+  it('sends no derive unless asked', async () => {
+    const t = make();
+    await t.relay.write(req(source([body]), body.length));
+    expect(t.frames.find((f) => f.type === 'storage.write.open')?.payload.derive).toBeUndefined();
+  });
+
+  it('a PDF receipt for another storage or another type becomes pdf_failed and the write stays ok', async () => {
+    for (const bad of [{ connectionId: 'other' }, { contentType: 'text/html' }]) {
+      const t = make({}, { derived: (ref) => ({ pdf: { ok: true, reference: pdfRef(ref, bad) } }) });
+      const r = await t.relay.write(req(source([body]), body.length, { derive: { pdf: true } }));
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.derived).toEqual({ pdf: { ok: false, code: 'pdf_failed' } });
+    }
+  });
+
+  it('a failure code from the runner is passed on', async () => {
+    const t = make({}, { derived: () => ({ pdf: { ok: false, code: 'pdf_timeout' } }) });
+    const r = await t.relay.write(req(source([body]), body.length, { derive: { pdf: true } }));
+    expect(r.ok && r.derived).toEqual({ pdf: { ok: false, code: 'pdf_timeout' } });
   });
 });

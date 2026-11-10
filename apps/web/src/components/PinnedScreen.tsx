@@ -29,7 +29,7 @@ export function PinnedScreen({
   return (
     <div
       data-testid={testId}
-      className="absolute inset-0 z-10 flex flex-col overflow-hidden bg-canvas pt-3 pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))]"
+      className="absolute inset-0 z-10 flex flex-col overflow-hidden bg-canvas pt-3 pr-[max(1rem,var(--safe-right))] pl-[max(1rem,var(--safe-left))]"
     >
       {children}
     </div>

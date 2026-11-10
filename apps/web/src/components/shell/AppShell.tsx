@@ -277,10 +277,19 @@ function Shell({ name, live }: { name: string; live: string }) {
                 ? 'min-h-dvh md:grid md:grid-cols-[var(--sidebar-w)_1fr] md:transition-[grid-template-columns] md:duration-200'
                 : 'fixed inset-x-0 top-[var(--vv-top,0px)] flex h-[var(--vvh,100dvh)] flex-col overflow-hidden',
             )}
-            style={{ ['--sidebar-w' as string]: isTabletUp ? (collapsed ? '4rem' : '16rem') : '0px' }}
+            style={{
+              ['--sidebar-w' as string]: isTabletUp
+                ? collapsed
+                  ? 'calc(4rem + var(--safe-left))'
+                  : 'calc(16rem + var(--safe-left))'
+                : '0px',
+            }}
           >
             {isTabletUp && (
-              <aside className="sticky top-0 z-30 h-dvh overflow-hidden bg-side">
+              <aside
+                data-testid="tablet-sidebar"
+                className="sticky top-0 z-30 h-dvh overflow-hidden bg-side pt-(--safe-top) pl-(--safe-left)"
+              >
                 <SidebarBody
                   sections={sections}
                   footer={footer}
@@ -303,7 +312,10 @@ function Shell({ name, live }: { name: string; live: string }) {
 
             <div className={cx('flex min-w-0 flex-col', isTabletUp ? 'min-h-dvh' : 'min-h-0 flex-1')}>
               {isTabletUp ? (
-                <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 backdrop-blur lg:px-8">
+                <header
+                  data-testid="tablet-header"
+                  className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 pt-(--safe-top) pr-[calc(1.5rem+var(--safe-right))] backdrop-blur lg:px-8 lg:pr-[calc(2rem+var(--safe-right))]"
+                >
                   <div className="flex min-w-0 items-center gap-3">
                     {isDesktop && collapsed && <CollapseButtonLight onToggle={toggle} />}
                     <Breadcrumbs projects={projects} card={shownCardRef} />
@@ -356,7 +368,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               ) : (
                 <header
                   data-testid="mobile-topbar"
-                  className="z-20 flex min-h-14 shrink-0 items-center gap-1 border-b border-line bg-canvas/90 pr-2 pl-[max(0.5rem,env(safe-area-inset-left))] pt-[env(safe-area-inset-top)] backdrop-blur"
+                  className="z-20 flex min-h-14 shrink-0 items-center gap-1 border-b border-line bg-canvas/90 pt-(--safe-top) pr-[max(0.5rem,var(--safe-right))] pl-[max(0.5rem,var(--safe-left))] backdrop-blur"
                 >
                   {backTo ? (
                     <button
@@ -407,7 +419,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                   <div
                     className={cx(
                       isTabletUp
-                        ? 'px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8'
+                        ? 'px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:pr-[calc(1.5rem+var(--safe-right))] sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8 lg:pr-[calc(2rem+var(--safe-right))]'
                         : 'px-4 py-5 sm:px-6 sm:py-6',
                     )}
                   >
@@ -439,7 +451,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                   aria-label="Main menu"
                   aria-describedby={undefined}
                   onInteractOutside={tourOn ? (e) => e.preventDefault() : undefined}
-                  className="fixed inset-0 z-50 animate-fade bg-side pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
+                  className="fixed inset-0 z-50 animate-fade bg-side pt-(--safe-top) pr-(--safe-right) pl-(--safe-left)"
                 >
                   <RadixDialog.Title className="sr-only">Main menu</RadixDialog.Title>
                   <SidebarBody

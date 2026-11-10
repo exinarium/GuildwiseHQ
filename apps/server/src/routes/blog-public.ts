@@ -10,7 +10,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { requireSession, requireUser } from '../auth/guards.ts';
+import { requireSession, requireSuperAdmin, requireUser } from '../auth/guards.ts';
 import { getRelease, loadReleases } from '../blog/releases.ts';
 import {
   EMBED_MARK,
@@ -32,6 +32,7 @@ import {
   publishedTags,
 } from '../commands/blog.ts';
 import { digestPreference, setDigestPreference, userOfUnsubscribeToken } from '../commands/blog-digest.ts';
+import { readBlogImage } from '../commands/blog-manual.ts';
 import { embedsVersion, publicVideoEmbed } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
@@ -238,6 +239,34 @@ export function blogPublicRoutes(ctx: Ctx) {
         },
       );
     }
+
+    // Images of hand-written articles: public only while the article is published; a super admin sees them any time
+    // (the preview). The bytes are served as stored, never sniffed, in a sandbox.
+    app.get(
+      '/blog/media/:file',
+      { schema: { params: z.object({ file: z.string().regex(/^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/) }) } },
+      async (req, reply) => {
+        const [id, ext] = req.params.file.split('.') as [string, string];
+        const img = await readBlogImage(ctx, id, ext);
+        if (!img) return reply.code(404).send();
+        let cache = 'public, max-age=3600';
+        if (img.postStatus !== 'published') {
+          try {
+            await requireSuperAdmin(ctx, req);
+          } catch {
+            return reply.code(404).send();
+          }
+          cache = 'private, no-store';
+        }
+        return reply
+          .header('cache-control', cache)
+          .header('x-content-type-options', 'nosniff')
+          .header('content-security-policy', "default-src 'none'; sandbox")
+          .header('content-disposition', 'inline')
+          .type(img.row.content_type as string)
+          .send(img.row.data);
+      },
+    );
 
     // ---- JSON for Help > Blog (any signed-in person, platform accounts included)
     app.get(

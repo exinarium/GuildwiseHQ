@@ -28,6 +28,8 @@ export interface ReleaseDocsPrepStepDef {
   phases?: readonly string[];
   /** Phases the server runs itself (an agent shift), not a runner command. */
   serverPhases?: readonly string[];
+  /** The phase in which a writer agent writes the step's text (release prep tasks). Gated on the runner capability. */
+  writerPhase?: string;
 }
 
 export const ANALYSE_STEP: ReleaseDocsPrepStepDef = {
@@ -61,6 +63,9 @@ export const CHANGELOG_STEP: ReleaseDocsPrepStepDef = {
   defaultOn: true,
   producesFiles: true,
   requires: ['analyse'],
+  phases: ['write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
 };
 
 export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
@@ -72,10 +77,35 @@ export const GUIDE_STEP: ReleaseDocsPrepStepDef = {
   defaultOn: true,
   producesFiles: true,
   requires: ['analyse'],
+  phases: ['check', 'write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
+};
+
+export const HELP_STEP: ReleaseDocsPrepStepDef = {
+  id: 'help',
+  label: 'Update Help articles',
+  description:
+    'Updates the in-app Help article sections for the changed features. Keeps every section anchor and the article headers. Needs Analyse changes.',
+  // after the guide (30), so the writer sees the updated guide; before the videos (40)
+  order: 35,
+  defaultOn: true,
+  producesFiles: true,
+  requires: ['analyse'],
+  phases: ['check', 'write', 'apply'],
+  serverPhases: ['write'],
+  writerPhase: 'write',
 };
 
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
-const STEPS: ReleaseDocsPrepStepDef[] = [ANALYSE_STEP, CHANGELOG_STEP, GUIDE_STEP, VIDEOS_STEP, COMMIT_STEP];
+const STEPS: ReleaseDocsPrepStepDef[] = [
+  ANALYSE_STEP,
+  CHANGELOG_STEP,
+  GUIDE_STEP,
+  HELP_STEP,
+  VIDEOS_STEP,
+  COMMIT_STEP,
+];
 
 /** The registered steps in run order, with the `last` step forced to the end. */
 export const releaseDocsPrepSteps = (): readonly ReleaseDocsPrepStepDef[] => {
@@ -104,9 +134,17 @@ export const stepPhaseIndex = (id: string, phase: string): number => {
 export interface ReleaseDocsPrepSettings {
   enabled: boolean;
   steps: Record<string, boolean>;
+  /** Repository id to its user guide path (normalised); absent: the default. */
+  guidePaths?: Record<string, string>;
+  /** Start a run by itself when the release is ready on the test site. Absent: off. */
+  autoStart?: boolean;
 }
 
-export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = { enabled: false, steps: {} };
+export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = {
+  enabled: false,
+  steps: {},
+  autoStart: false,
+};
 
 /** The registered steps that are ticked (an unticked-by-default registry entry follows `defaultOn`). */
 export const enabledReleaseDocsPrepSteps = (

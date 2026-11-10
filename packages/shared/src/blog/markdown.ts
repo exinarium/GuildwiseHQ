@@ -6,12 +6,16 @@
  * escapes every text. Links must be http(s) or a same-site path (`/...`); anything else is shown as plain text.
  */
 
+import { BLOG_IMAGE_SRC_RE } from './constants.ts';
+
 export type MdInline =
   | { t: 'text'; v: string }
   | { t: 'code'; v: string }
   | { t: 'strong'; c: MdInline[] }
   | { t: 'em'; c: MdInline[] }
-  | { t: 'link'; href: string; c: MdInline[] };
+  | { t: 'link'; href: string; c: MdInline[] }
+  /** An uploaded blog image (`/blog/media/<uuid>.<ext>`); any other image syntax is not an image. */
+  | { t: 'img'; src: string; alt: string };
 
 export type MdBlock =
   | { t: 'h'; level: 2 | 3 | 4; id: string; text: string }
@@ -43,7 +47,8 @@ export function safeHref(href: string): string | null {
   return null;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\([^)\s]+\))/;
+const INLINE =
+  /(!\[[^\]\n]*\]\(\/blog\/media\/[0-9a-f-]{36}\.(?:png|jpg|webp|gif)\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\([^)\s]+\))/;
 
 export function parseMdInline(s: string): MdInline[] {
   const out: MdInline[] = [];
@@ -56,7 +61,12 @@ export function parseMdInline(s: string): MdInline[] {
     }
     if (m.index > 0) out.push({ t: 'text', v: rest.slice(0, m.index) });
     const tok = m[0];
-    if (tok.startsWith('`')) out.push({ t: 'code', v: tok.slice(1, -1) });
+    if (tok.startsWith('![')) {
+      const im = /^!\[([^\]\n]*)\]\(([^)\s]+)\)$/.exec(tok);
+      if (im && BLOG_IMAGE_SRC_RE.test(im[2] as string))
+        out.push({ t: 'img', src: im[2] as string, alt: im[1] as string });
+      else out.push({ t: 'text', v: tok });
+    } else if (tok.startsWith('`')) out.push({ t: 'code', v: tok.slice(1, -1) });
     else if (tok.startsWith('**')) out.push({ t: 'strong', c: parseMdInline(tok.slice(2, -2)) });
     else if (tok.startsWith('*')) out.push({ t: 'em', c: parseMdInline(tok.slice(1, -1)) });
     else {
@@ -74,7 +84,7 @@ export function parseMdInline(s: string): MdInline[] {
 }
 
 export const mdInlineText = (c: MdInline[]): string =>
-  c.map((i) => (i.t === 'text' || i.t === 'code' ? i.v : mdInlineText(i.c))).join('');
+  c.map((i) => (i.t === 'text' || i.t === 'code' ? i.v : i.t === 'img' ? '' : mdInlineText(i.c))).join('');
 
 const splitRow = (line: string): string[] =>
   line
@@ -217,6 +227,8 @@ function inlineHtml(c: MdInline[]): string {
           const ext = /^https?:/i.test(i.href);
           return `<a href="${escapeHtml(i.href)}"${ext ? ' rel="nofollow noopener noreferrer" target="_blank"' : ''}>${inlineHtml(i.c)}</a>`;
         }
+        case 'img':
+          return `<img src="${escapeHtml(i.src)}" alt="${escapeHtml(i.alt)}" loading="lazy">`;
         default:
           return '';
       }

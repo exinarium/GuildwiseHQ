@@ -3,6 +3,7 @@ import {
   BLOG_AUTHOR,
   BLOG_LIMITS,
   type BlogContent,
+  type BlogOriginKind,
   type BlogPost,
   type BlogSettings,
   type BlogShare,
@@ -64,7 +65,10 @@ export async function blogSettings(ctx: Ctx): Promise<BlogSettings> {
   let autoPublishFrom: string | null = null;
   if (from.present) autoPublishFrom = typeof from.value === 'string' ? from.value : null;
   else {
-    const first = await one(ctx.pool, 'SELECT min(created_at) AS t FROM blog_posts WHERE NOT launch');
+    const first = await one(
+      ctx.pool,
+      `SELECT min(created_at) AS t FROM blog_posts WHERE NOT launch AND origin_kind = 'writer'`,
+    );
     if (first?.t)
       autoPublishFrom = new Date(new Date(first.t).getTime() + REVIEW_PERIOD_DAYS * 24 * HOUR).toISOString();
   }
@@ -237,6 +241,8 @@ export function postDto(r: Row, settings: BlogSettings, shares: BlogShare[] = []
     readingMinutes: r.reading_minutes,
     wordCount: r.word_count,
     warnings: r.warnings ?? [],
+    originKind: r.origin_kind,
+    authorName: r.author_name ?? null,
     origin: r.key_name ?? r.user_name ?? (r.origin_system === 'blog-writer' ? 'Blog writer' : null),
     autoPublishAt,
     shares,
@@ -251,6 +257,7 @@ export async function listPosts(
     since?: string | undefined;
     tag?: string | undefined;
     q?: string | undefined;
+    origin?: BlogOriginKind | undefined;
     limit?: number | undefined;
   },
 ): Promise<BlogPost[]> {
@@ -261,6 +268,7 @@ export async function listPosts(
     where.push(sql.replaceAll('?', `$${params.length}`));
   };
   if (q.status) add('p.status = ?', q.status);
+  if (q.origin) add('p.origin_kind = ?', q.origin);
   if (q.keyId) add(`(p.status = 'published' OR p.origin_key_id = ?)`, q.keyId);
   if (q.since) {
     const d = new Date(q.since);
@@ -312,8 +320,12 @@ function publicDto(ctx: Ctx, r: Row): PublicBlogPost {
     updatedAt: iso(r.updated_at) as string,
     readingMinutes: r.reading_minutes,
     url: postUrl(ctx, r.slug),
+    // only on a hand-written article, so the JSON of writer posts is unchanged
+    ...(r.origin_kind === 'manual' ? { origin: 'manual' as const, author: r.author_name as string } : {}),
   };
 }
+
+const bylineOf = (r: Row): string => (r.origin_kind === 'manual' ? (r.author_name as string) : BLOG_AUTHOR);
 
 export async function listPublished(
   ctx: Ctx,
@@ -349,7 +361,7 @@ export async function listPublishedFull(ctx: Ctx, limit: number): Promise<Public
   );
   return rs.map((r) => {
     const c = r.content as BlogContent;
-    return { ...publicDto(ctx, r), bodyMarkdown: c.bodyMarkdown, sources: c.sources, author: BLOG_AUTHOR };
+    return { ...publicDto(ctx, r), bodyMarkdown: c.bodyMarkdown, sources: c.sources, author: bylineOf(r) };
   });
 }
 
@@ -365,7 +377,7 @@ export async function getPublished(
   const c = r.content as BlogContent;
   return {
     row: r,
-    post: { ...publicDto(ctx, r), bodyMarkdown: c.bodyMarkdown, sources: c.sources, author: BLOG_AUTHOR },
+    post: { ...publicDto(ctx, r), bodyMarkdown: c.bodyMarkdown, sources: c.sources, author: bylineOf(r) },
   };
 }
 
@@ -383,7 +395,7 @@ export async function postsCount(ctx: Ctx): Promise<number> {
 export async function lastPublishedChange(ctx: Ctx): Promise<Date | null> {
   const r = await one(
     ctx.pool,
-    `SELECT max(updated_at) AS t FROM blog_posts WHERE status IN ('published','unpublished')`,
+    `SELECT max(updated_at) AS t FROM blog_posts WHERE status IN ('published','unpublished') OR published_at IS NOT NULL`,
   );
   return r?.t ? new Date(r.t) : null;
 }
@@ -407,6 +419,9 @@ export async function submitPost(
   const hash = contentHash(content);
   const existing = await getPostRow(ctx, 'slug', content.slug);
   if (existing) {
+    // never answer a writer's retry with a person's article, not even when the text matches
+    if (existing.origin_kind === 'manual')
+      throw conflict('slug_taken', 'a post with this slug exists; choose another slug');
     if (existing.content_hash === hash)
       return { post: await getPost(ctx, 'slug', content.slug), created: false };
     throw conflict(
@@ -446,6 +461,9 @@ export async function revisePost(
 ): Promise<BlogPost> {
   const r = await getPostRow(ctx, 'id', postId);
   if (!r) throw notFound('post not found', 'post_not_found');
+  // a hand-written article is never changed through a key (the second guard after the route's own-key check)
+  if (r.origin_kind === 'manual' && (opts.ownKeyOnly || by.apiKeyId || by.system))
+    throw notFound('post not found', 'post_not_found');
   if (opts.ownKeyOnly) {
     if (r.origin_key_id !== by.apiKeyId) throw notFound('post not found', 'post_not_found');
     if (!['in_review', 'rejected', 'draft'].includes(r.status))
@@ -538,7 +556,10 @@ export async function unpublishPost(ctx: Ctx, by: AuthSession['user'], postId: s
   await ctx.store.append([
     {
       streamId: blogStream(postId),
-      event: { type: 'BlogPostUnpublished', payload: { postId, by: by.id } },
+      event: {
+        type: 'BlogPostUnpublished',
+        payload: { postId, by: by.id, ...(r.origin_kind === 'manual' ? { toDraft: true } : {}) },
+      },
       actor: userActor(by.id),
       scope: adminScope,
     },

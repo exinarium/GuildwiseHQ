@@ -346,10 +346,13 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
     (n) => n === 1,
     30_000,
   );
-  const caps = await q<{ capabilities: string[] }>('SELECT capabilities FROM workstation_capabilities');
-  expect(
-    caps.some((c) => c.capabilities.includes('deploy-setup:2') && c.capabilities.includes('deploy-direct:1')),
-  ).toBe(true);
+  const caps = await q<{ capabilities: string[] }>(
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id = $1',
+    [workstationId],
+  );
+  expect(caps).toHaveLength(1);
+  expect(caps[0]?.capabilities).toContain('deploy-setup:2');
+  expect(caps[0]?.capabilities).toContain('deploy-direct:1');
 });
 
 test('connect the server with an existing sign-in; it finds the running stack from its labels although it is not in /opt', async () => {
@@ -689,7 +692,8 @@ test('an app that runs without Docker: found as a plain folder, turned into the 
     async () =>
       (
         await q<Run>(
-          `SELECT status, log_tail, summary FROM deploy_runs WHERE env='shop' AND dry_run ORDER BY created_at DESC LIMIT 1`,
+          `SELECT status, log_tail, summary FROM deploy_runs WHERE project_id=$1 AND env='shop' AND dry_run ORDER BY created_at DESC LIMIT 1`,
+          [projectId],
         )
       )[0],
     (r) => r?.status === 'failed' || r?.status === 'succeeded',

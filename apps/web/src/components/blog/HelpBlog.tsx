@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router';
 import { usePublishedPost, usePublishedPosts } from '../../api/queries/blog.ts';
 import { formatDate } from '../../lib/time.ts';
 import { Badge, EmptyState, ErrorBox, ListSkeleton, Panel } from '../ui.tsx';
-import { BlogBody } from './BlogBody.tsx';
+import { BlogArticleView } from './BlogArticleView.tsx';
 
 const baseOf = (pathname: string) =>
   pathname.startsWith('/platform') ? '/platform/help/blog' : '/help/blog';
@@ -46,6 +46,7 @@ function HelpBlogList() {
               <span className="block text-base font-semibold text-fg">{p.title}</span>
               <span className="mt-1 block text-sm text-muted">{p.summary}</span>
               <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-subtle">
+                {p.author ? `${p.author} · ` : ''}
                 {formatDate(p.publishedAt)} · {p.readingMinutes} min read
                 {p.tags.map((t) => (
                   <Badge key={t} tone="neutral">
@@ -91,33 +92,15 @@ function HelpBlogPost({ slug }: { slug: string }) {
           <ArrowLeft aria-hidden="true" className="size-4" />
           All articles
         </Link>
-        <h2 className="text-2xl font-semibold text-fg">{p.title}</h2>
-        <p className="mt-1 mb-4 text-sm text-subtle">
-          {p.author} · {formatDate(p.publishedAt)} · {p.readingMinutes} min read
-        </p>
-        <BlogBody source={p.bodyMarkdown} />
-        {p.sources.length > 0 && (
-          <section className="mt-6" aria-label="Sources">
-            <h3 className="mb-1 text-base font-semibold text-fg">Sources</h3>
-            <ol className="list-decimal space-y-1 pl-6 text-sm text-muted">
-              {p.sources.map((s) => (
-                <li key={s.url}>
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="nofollow noopener noreferrer"
-                    className="text-brand-text underline underline-offset-2"
-                  >
-                    {s.title}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </section>
-        )}
-        <p className="mt-6 rounded-control bg-sunken p-3 text-sm text-muted">
-          This article was written by an AI agent for Guildwise HQ and is reviewed against its sources.
-        </p>
+        <BlogArticleView
+          title={p.title}
+          author={p.author}
+          publishedAt={p.publishedAt}
+          readingMinutes={p.readingMinutes}
+          body={p.bodyMarkdown}
+          sources={p.sources}
+          manual={p.origin === 'manual'}
+        />
         <p className="mt-4 text-sm">
           <a
             href={`/blog/${p.slug}`}

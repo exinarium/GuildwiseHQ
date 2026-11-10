@@ -36,8 +36,10 @@ import {
   type OrgGraphScope,
   outcomeDataSchema,
   PREP_OUTCOME,
+  PREP_TASK_KINDS,
   type PublishRequest,
   type ReadableFolder,
+  type RebaseErrorInfo,
   type RepoReport,
   type ResumeState,
   renderCardAttachments,
@@ -58,7 +60,7 @@ import {
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
-import { isReadOnlyWorktreeRole } from '../adapters/claude-policy.ts';
+import { isReadOnlyWorktreeRole, type ScopedVault } from '../adapters/claude-policy.ts';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
@@ -104,6 +106,7 @@ import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
   finishPrepTask,
@@ -123,6 +126,7 @@ import {
   ensureWorktree,
   type GitAuth,
   RebaseConflictError,
+  RebaseError,
   rebaseOntoBase,
   removeReadOnlyCheckout,
   WorktreeError,
@@ -208,6 +212,7 @@ import {
   runGuard,
   snapshotBranches,
   uncommittedOutOfScope,
+  workRefGuardInput,
 } from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
@@ -515,6 +520,21 @@ export function shiftVaultsOf(msg: {
   return (msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
     ? [msg.vault]
     : [];
+}
+
+/**
+ * The vault clones a shift reads only in part: a card shift reads the organization vault without the other projects'
+ * folders (the root, everything outside projects/ and its own project folder, the folder the server resolved for the
+ * card, never derived from the key). Every other shift, and every other vault, opens whole.
+ */
+export function cardScopedVaults(
+  shiftKind: string | undefined,
+  vaultCtxs: ReadonlyArray<{ kind?: string; addDir: string; folder?: string }>,
+): ScopedVault[] {
+  if (shiftKind !== 'card') return [];
+  return vaultCtxs.flatMap((c) =>
+    c.kind === 'org' && c.folder ? [{ dir: c.addDir, keep: join(c.addDir, ...c.folder.split('/')) }] : [],
+  );
 }
 
 export class ShiftSupervisor {
@@ -868,6 +888,7 @@ export class ShiftSupervisor {
     limitedUntil?: string,
     accountKey?: string,
     capacity?: ShiftCapacity,
+    rebaseError?: RebaseErrorInfo,
   ): void {
     // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
     // searching (backlog #79).
@@ -883,6 +904,7 @@ export class ShiftSupervisor {
       ...(limitedUntil ? { limitedUntil } : {}),
       ...(accountKey ? { accountKey } : {}),
       ...(capacity ? { capacity } : {}),
+      ...(rebaseError ? { rebaseError } : {}),
     });
   }
 
@@ -915,6 +937,7 @@ export class ShiftSupervisor {
       roleKey: msg.agent.roleKey,
       isDevops: !!msg.agent.isDevops,
       runtime: msg.agent.runtime,
+      egressProxy: adapter?.usesEgressProxy?.() === true,
       hasShell: msg.agent.permissions.allowedTools.includes('shell'),
       platform: process.platform,
       sandbox: caps?.sandbox,
@@ -1171,6 +1194,20 @@ export class ShiftSupervisor {
       } catch (err) {
         if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
+        } else if (err instanceof RebaseError) {
+          // Not a conflict: the existing worktree_failed route (an older server parses it), with git's details.
+          this.reject(
+            msg.shiftId,
+            'worktree_failed',
+            err.message,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            err.info,
+          );
         } else if (err instanceof BaseBranchMissingError) {
           this.reject(msg.shiftId, 'worktree_failed', err.message, undefined, undefined, {
             base: err.base,
@@ -1252,6 +1289,8 @@ export class ShiftSupervisor {
       path: c.addDir,
       kind: 'vault',
     }));
+    // A card shift reads the organization vault only outside the other projects' folders.
+    const scopedVaults = cardScopedVaults(msg.kind, vaultCtxs);
     s.brief = withVaultContexts(msg.brief, vaultCtxs);
     // A "run this branch" request: the runner finds BUILD.md and the commits itself (the server never reads repositories).
     if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
@@ -1420,6 +1459,7 @@ export class ShiftSupervisor {
         ...(msg.kind === 'ba_task' ? registeredFolders : []),
         ...vaultReadFolder,
       ].map((f) => f.path),
+      ...(scopedVaults.length ? { scopedVaults } : {}),
       addDirs: scanDirs,
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
     };
@@ -1555,6 +1595,7 @@ export class ShiftSupervisor {
           ...(msg.kind === 'ba_task' ? registeredFolders : []),
           ...vaultReadFolder,
         ].map((f) => f.path),
+        ...(scopedVaults.length ? { scopedVaults } : {}),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
@@ -2324,6 +2365,7 @@ export class ShiftSupervisor {
       permissions: msg.agent.permissions,
       cardRef: msg.brief.card.ref,
       projectKey: msg.brief.project.key,
+      ...workRefGuardInput(msg.brief.card, msg.brief.project),
       ...(protectedBranches.length ? { protectedBranches } : {}),
       branchName: s.worktree?.branchName ?? '',
       startSha,
@@ -2788,17 +2830,27 @@ export class ShiftSupervisor {
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
 
       // A release prep task: the runner checks the files against the task and keeps them as a local commit; a refusal
-      // reaches the server as the task's failure (the agent cannot work around it by reporting again).
+      // reaches the server as the task's failure (the agent cannot work around it by reporting again). A proposal task
+      // (changelog entries, guide edits) is checked first and a refusal goes back to the agent, who fixes it in this shift.
       if (msg.kind === 'release_prep' && msg.releasePrep && s.prepTask && outcome.id === PREP_OUTCOME.done) {
-        const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
-        toSend = done.ok
-          ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
-          : {
-              kind: 'outcome',
-              outcomeId: PREP_OUTCOME.failed,
-              note: done.reason,
-              data: { reason: done.reason, refused: true },
-            };
+        if (PREP_TASK_KINDS[msg.releasePrep.task.kind].result === 'proposal') {
+          const checked = await finishPrepProposal(s.prepTask, msg.releasePrep);
+          if (!checked.ok)
+            return rejected(
+              `The proposal was not accepted. Fix these and run aom prep done again:\n${checked.findings.map((f) => `- ${f}`).join('\n')}`,
+            );
+          toSend = { ...toSend, data: { ...toSend.data, proposal: checked.proposal, files: [] } };
+        } else {
+          const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+          toSend = done.ok
+            ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
+            : {
+                kind: 'outcome',
+                outcomeId: PREP_OUTCOME.failed,
+                note: done.reason,
+                data: { reason: done.reason, refused: true },
+              };
+        }
       }
 
       // Transcripts (videos and podcasts): the scout must have looked each one up; the runner attaches the reference.

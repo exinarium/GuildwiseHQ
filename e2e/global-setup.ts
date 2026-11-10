@@ -12,11 +12,12 @@ import {
   PG_ADMIN_URL,
   PORT,
   paths,
+  ROOT,
   SMTP_URL,
   SUPER,
 } from './support/env.ts';
 import { deleteMailFor } from './support/mail.ts';
-import { killAllRunners } from './support/runner.ts';
+import { killAllRunners, killFakeServers } from './support/runner.ts';
 import { defaultAccounts, seedE2eAccounts } from './support/seed.ts';
 import { requireBindable } from './support/test-services.ts';
 
@@ -96,8 +97,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   // text the specs read back from the mock runner's tool output (which is cut at a fixed length)
   process.env.NODE_NO_WARNINGS ??= '1';
   process.env.AOM_E2E_DIR = E2E_DIR;
+  // a fake web server a deploy spec of an earlier run left behind (it serves a folder in E2E_DIR)
+  killFakeServers(E2E_DIR);
   rmSync(E2E_DIR, { recursive: true, force: true });
   mkdirSync(E2E_DIR, { recursive: true });
+  // the temp dirs of the suite, its server and its runners live in E2E_DIR (deleted by the next run), not in /tmp;
+  // workers and every process started from here inherit it
+  const tmp = join(E2E_DIR, 'tmp');
+  mkdirSync(tmp, { recursive: true });
+  process.env.TMPDIR = tmp;
+  process.env.TMP = tmp;
+  process.env.TEMP = tmp;
 
   await recreateDb();
   makeToyRepo();
@@ -165,13 +175,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_HYGIENE_SCHEDULE: 'false',
     // schedules: the webhook receivers of the specs listen on this machine
     AOM_WEBHOOK_ALLOW_PRIVATE: 'true',
+    // public forms: every submission of the suite comes from 127.0.0.1, more than the default 5 at once
+    AOM_FORMS_IP_SUBMIT_BURST: '50',
+    AOM_FORMS_IP_SUBMITS_PER_HOUR: '500',
     // the "Add a workstation" wizard serves a runner release: a stand-in file is enough, no spec downloads it
     AOM_RUNNER_RELEASE_DIR: releaseDir,
     LOG_LEVEL: 'info',
   };
   // idempotent: the server's own CLIs create only the accounts that are missing
   // (AOM_E2E_ADMIN_NAME / AOM_E2E_ADMIN_ORG rename the demo admin and organization for the getting-started video)
-  await seedE2eAccounts(defaultAccounts(), { env });
+  // through the built CLIs (apps/server/dist): pnpm refuses to run in a worktree whose node_modules is a link
+  await seedE2eAccounts(defaultAccounts(), { env, appDir: join(ROOT, 'apps') });
 
   const log = openSync(paths.serverLog, 'a');
   const server: ChildProcess = spawn('node', [paths.server], { env, stdio: ['ignore', log, log] });
@@ -183,5 +197,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   return async () => {
     killAllRunners('SIGTERM');
     server.kill('SIGTERM');
+    if (process.env.AOM_JOURNEY_KEEP !== '1') killFakeServers(E2E_DIR);
   };
 }

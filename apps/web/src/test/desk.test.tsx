@@ -293,6 +293,34 @@ describe('DeskItem', () => {
     expect(calls[0]).toEqual({ url: `/api/desk/${base.id}/resolve`, body: { resolution: 'approved' } });
   });
 
+  it('a release whose workstation was lost mid-step offers Retry and Dismiss', async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }),
+    );
+    renderItem(
+      item({
+        kind: 'alert',
+        subkind: 'release_failed',
+        title: 'Release 1.4.0 stopped at prepare',
+        body: 'The workstation stopped answering while it prepared the release commit and never reported a result.',
+        options: [
+          { id: 'retry', label: 'Retry' },
+          { id: 'dismiss', label: 'Dismiss' },
+        ],
+        blocking: false,
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ url: `/api/desk/${base.id}/resolve`, body: { resolution: 'approved' } });
+  });
+
   it('a failed repository creation alert is read only for someone who is not the project owner', () => {
     renderItem(item({ kind: 'alert', subkind: 'repo_create_failed', options: [], canAnswer: false }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();

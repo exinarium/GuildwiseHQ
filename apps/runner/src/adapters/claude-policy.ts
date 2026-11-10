@@ -8,7 +8,13 @@ import {
   TEST_SERVICES_SETTING,
   type TestServicesSeen,
 } from '../sandbox/test-services.ts';
-import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
+import {
+  isSecretFileName,
+  sandboxReadEntries,
+  scanCloneEntries,
+  scanMasksFor,
+  secretReadDenies,
+} from './read-only-dirs.ts';
 
 /**
  * What an agent session may touch, expressed in Claude Code's own settings (verified against
@@ -54,6 +60,12 @@ export interface ClaudePolicyContext {
    * Only their secret-file Read denies are kept (see `splitOwnRepository`).
    */
   ownRepoDirs?: string[];
+  /**
+   * Read-only vault clones (also in `readDirs`) of which only part is readable: the organization vault in a card shift.
+   * `keep` is the card's own project folder inside `dir` (resolved by the server). Every other entry of `<dir>/projects/`
+   * is unreadable to the Read tool and to the shell (`vaultSiblingMasks`). Absent: every read-only folder opens whole.
+   */
+  scopedVaults?: ScopedVault[];
   /** The runner's `bin/` (the `aom` shim) and where the shim's script lives: readable although inside the data dir. */
   aomReadPaths: string[];
   /** Unix socket of the runner's IPC server (the `aom` CLI talks over it: the sandbox has no loopback route out). */
@@ -85,10 +97,84 @@ export interface ClaudePolicyContext {
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
   tmpEntries?: string[];
   /**
+   * The runner's own OS (default `process.platform`, read when the settings are generated). Injectable for tests only:
+   * no production caller sets it, and no config key or environment variable feeds it.
+   */
+  platform?: NodeJS.Platform;
+  /**
    * The command of the DevOps guard hook (`aom devops-guard`): a PreToolUse hook on every Bash command of the DevOps
-   * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook.
+   * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook. When set, the
+   * role's `rm` deny patterns are left out of the DevOps settings: the guard judges deletes.
    */
   guardHookCommand?: string;
+}
+
+/** A read-only vault clone of which only the root, everything outside `projects/` and `keep` are readable. */
+export interface ScopedVault {
+  /** The vault clone (one of `readDirs`). */
+  dir: string;
+  /** The card's own folder inside it, e.g. `<dir>/projects/a` (it need not exist yet). */
+  keep: string;
+}
+
+/**
+ * The entries of `<vault>/projects/` a shift must not read: every one except the folder on the path to `keep`. Listed when
+ * the settings are built, so a project folder created after the shift started is not covered (settings are rebuilt at
+ * every shift start). No `projects/` folder: nothing to mask.
+ */
+export function vaultSiblingMasks(v: ScopedVault): string[] {
+  const projects = join(resolve(v.dir), 'projects');
+  const rel = relative(projects, resolve(v.keep)).split(sep).filter(Boolean);
+  const own = rel.length > 0 && rel[0] !== '..' ? rel[0] : undefined;
+  let names: string[];
+  try {
+    names = readdirSync(projects);
+  } catch {
+    return [];
+  }
+  return names.filter((n) => n !== own).map((n) => join(projects, n));
+}
+
+/**
+ * Everything of a scoped vault the shift must not read: the other projects' folders and the clone's own git metadata
+ * (`<dir>/.git`: its history holds every project, so `git show HEAD:projects/b/...` would undo the mask). Agents never
+ * need the vault history: vault writes go through `aom` and the runner syncs the clone outside the sandbox.
+ */
+export function scopedVaultHidden(v: ScopedVault): string[] {
+  return [join(resolve(v.dir), '.git'), ...vaultSiblingMasks(v)];
+}
+
+/**
+ * `sandboxReadEntries` for a scoped vault: the clone opened entry by entry so the masked project folders and the
+ * clone's `.git` stay out (allowRead beats denyRead in the sandbox, so allowing the clone whole would re-open them).
+ * Secret files stay out as everywhere else. Symbolic links at the root and in `projects/` are left out too: the sandbox
+ * binds a link's target, so a link into a masked folder would open it. A folder too large to scan is left closed (fail
+ * closed, like `sandboxReadEntries`).
+ */
+function scopedVaultReadEntries(v: ScopedVault): string[] {
+  const root = resolve(v.dir);
+  const hidden = new Set(scopedVaultHidden(v));
+  const projects = join(root, 'projects');
+  const open = (dir: string): string[] => {
+    let entries: Array<{ name: string; isDir: boolean; isLink: boolean }>;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).map((e) => ({
+        name: e.name,
+        isDir: e.isDirectory(),
+        isLink: e.isSymbolicLink(),
+      }));
+    } catch {
+      return [];
+    }
+    return entries.flatMap((e) => {
+      const path = join(dir, e.name);
+      if (hidden.has(path) || e.isLink) return [];
+      if (path === projects && e.isDir) return open(path);
+      if (e.isDir) return sandboxReadEntries(path) ?? [];
+      return isSecretFileName(e.name) ? [] : [path];
+    });
+  };
+  return open(root);
 }
 
 /** What a shift's sandbox is allowed, beyond what its tools imply. */
@@ -97,6 +183,8 @@ export interface SandboxProfile {
   browser: boolean;
   /** Cannot edit and may not commit: the worktree is read-only to its shell. */
   readOnlyWorktree: boolean;
+  /** macOS: keeps `allowLocalBinding` (`DARWIN_LOCAL_BINDING_ROLES` / browser roles). Ignored on Linux. Default false. */
+  darwinLocalBinding?: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -254,6 +342,11 @@ export function shellDeny(pattern: string): string {
   return `Bash(${p})`;
 }
 
+/** A denied shell pattern whose command is `rm` (`rm -rf /*`). Not `rmdir`, not `rm*`. */
+function isRmPattern(pattern: string): boolean {
+  return pattern.trim().split(/\s+/)[0] === 'rm';
+}
+
 /** `/abs/path` -> `//abs/path` (the absolute-path anchor of permission rules). */
 export const ruleAbs = (p: string): string => `/${resolve(p)}`;
 
@@ -337,8 +430,21 @@ function sandboxBlock(
     ...(profile.browser ? browserMask(ctx) : []),
   ];
   const readDirs = ctx.readDirs ?? [];
-  // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead).
-  const readEntries = readDirs.flatMap((d) => sandboxReadEntries(d) ?? []);
+  const scoped = ctx.scopedVaults ?? [];
+  const scopeOf = (d: string) => scoped.find((v) => resolve(v.dir) === resolve(d));
+  // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead);
+  // a scoped vault also leaves out the other projects' folders.
+  const readEntries = readDirs.flatMap((d) => {
+    const v = scopeOf(d);
+    return v ? scopedVaultReadEntries(v) : (sandboxReadEntries(d) ?? []);
+  });
+  // the other projects' folders and the git metadata of a scoped vault, named too (already outside every allowRead entry)
+  denyRead.push(
+    ...readDirs.flatMap((d) => {
+      const v = scopeOf(d);
+      return v ? scopedVaultHidden(v) : [];
+    }),
+  );
   return {
     enabled: true,
     failIfUnavailable: ctx.mode === 'required',
@@ -393,7 +499,10 @@ function sandboxBlock(
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
-      allowLocalBinding: shell,
+      // Linux/WSL2: unchanged (each Bash call has a private network namespace, so the key has no effect there).
+      // macOS: only the allow-listed roles (see DARWIN_LOCAL_BINDING_ROLES); Seatbelt opens every localhost port with it.
+      allowLocalBinding:
+        shell && ((ctx.platform ?? process.platform) !== 'darwin' || profile.darwinLocalBinding === true),
     },
   };
 }
@@ -496,11 +605,16 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
 }
 
 /** Read-only folders: no Edit or Write there (a deny wins over every allow), and no secret file is readable. */
-function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs' | 'ownRepoDirs'>): string[] {
+function readOnlyDenies(
+  ctx: Pick<ClaudePolicyContext, 'readDirs' | 'ownRepoDirs' | 'scopedVaults'>,
+): string[] {
   const dirs = ctx.readDirs ?? [];
+  const scoped = (ctx.scopedVaults ?? []).filter((v) => dirs.some((d) => resolve(d) === resolve(v.dir)));
   return [
     ...dirs.flatMap((d) => [`Edit(${ruleAbs(d)}/**)`, `Edit(${ruleAbs(d)})`]),
     ...secretReadDenies([...dirs, ...(ctx.ownRepoDirs ?? [])]),
+    // a scoped vault: the other projects' folders and its git metadata are not readable (Read, Grep and Glob)
+    ...scoped.flatMap(scopedVaultHidden).flatMap((p) => [`Read(${ruleAbs(p)}/**)`, `Read(${ruleAbs(p)})`]),
   ];
 }
 
@@ -515,6 +629,25 @@ export const DEPLOY_ASK_ALLOW: readonly string[] = ['Bash(aom deploy run:*)', 'B
 /** The built-in tester always runs browsers (agents hired before the flag existed carry none); custom roles opt in. */
 export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
   p.browser === true || roleKey === 'tester';
+
+/**
+ * macOS only. Under Seatbelt, `allowLocalBinding` opens BOTH listening on a port and connecting to ANY localhost port
+ * (the runner's IPC TCP endpoint, databases, debuggers, the Docker API, ...); the two cannot be split. On Linux/WSL2 the
+ * key has no effect (each Bash call has a private network namespace), so it stays as it always was there.
+ * On macOS only these roles keep it, each because it runs the project's tests or the app itself:
+ */
+export const DARWIN_LOCAL_BINDING_ROLES: ReadonlyMap<string, string> = new Map([
+  // Many unit test suites start a server on 127.0.0.1 and connect to it (listen(0), supertest, mock servers).
+  ['builder', 'runs the unit tests it writes, which start and connect to loopback servers'],
+  // macOS has no aom-env forwarder or test-service opening, so a direct loopback connection is its only route.
+  ['tester', 'runs suites and browsers against the app under test on localhost'],
+]);
+// A custom role with `browser: true` (runsBrowsers, an owner-granted permission) keeps it for the tester's reason.
+// Not the reviewer: it never builds or runs tests and reads untrusted diffs, so it gets no loopback reach (like pre_reviewer).
+
+/** Whether a shift of this role keeps local binding on macOS. Never a mention: a comment does not run the suite. */
+export const keepsLocalBindingOnDarwin = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
+  roleKey !== 'mention' && (runsBrowsers(p, roleKey) || DARWIN_LOCAL_BINDING_ROLES.has(roleKey ?? ''));
 
 /**
  * The workstation's DevOps engineer (`AgentRuntimeSpec.isDevops`, built-in role `devops`) runs OUTSIDE the agent
@@ -640,7 +773,9 @@ function buildDevopsSettings(
     ...SESSION_TOOLS_DENIED,
     // git push is allowed (owner decision): it keeps the vaults in sync across workstations with the user's git
     // credentials. Creating a new repository still goes through `aom repo create`.
-    ...p.deniedShellPatterns.map(shellDeny),
+    // With the guard attached, deletes are the guard's to judge (deleteRoots). A `Bash(rm -rf /*)` deny matches every
+    // absolute-path `rm -rf` (`*` is a wildcard), /tmp included, and a deny beats the guard's allow.
+    ...p.deniedShellPatterns.filter((s) => !(ctx.guardHookCommand && isRmPattern(s))).map(shellDeny),
     ...RUNNER_PRIVATE.flatMap((f) => {
       const abs = ruleAbs(join(ctx.runnerRoot, f));
       return [`Read(${abs}/**)`, `Read(${abs})`, `Edit(${abs}/**)`, `Edit(${abs})`];
@@ -761,7 +896,11 @@ export function buildShiftSettings(
     paths.home,
     paths.scratch,
     paths.tmp,
-    { browser: runsBrowsers(p, roleKey), readOnlyWorktree: isReadOnlyWorktreeRole(p) },
+    {
+      browser: runsBrowsers(p, roleKey),
+      readOnlyWorktree: isReadOnlyWorktreeRole(p),
+      darwinLocalBinding: keepsLocalBindingOnDarwin(p, roleKey),
+    },
     testDomains,
   );
   if (sb) out.sandbox = sb;

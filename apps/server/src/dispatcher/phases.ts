@@ -16,7 +16,9 @@ import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { requestDeployRun } from '../delivery/runs.ts';
 import { releaseDocsPrepSweep } from '../release/docs-prep.ts';
+import { releaseDocsPrepAutoStart } from '../release/docs-prep-auto.ts';
 import { releaseChecks } from '../release/publish.ts';
+import { releaseShipStuckChecks } from '../release/ship-stuck.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 
 /** One phase's transaction: a failure is logged and does not starve the phases after it. */
@@ -43,7 +45,9 @@ export async function phasePass(ctx: Ctx): Promise<void> {
   };
   await step('merge checks', () => mergeChecks(ctx));
   await step('release checks', () => releaseChecks(ctx));
+  await step('release ship stuck', () => releaseShipStuckChecks(ctx));
   await step('release docs prep sweep', () => releaseDocsPrepSweep(ctx));
+  await step('release docs prep auto-start', () => releaseDocsPrepAutoStart(ctx));
   await step('completion', () => completionStep(ctx));
   await step('results', () => resultsStep(ctx));
   await step('sequencing', () => sequenceStep(ctx));

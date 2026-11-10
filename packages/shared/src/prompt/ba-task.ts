@@ -4,10 +4,6 @@ import { renderSpecCardInstructions, renderSpecCardPrompt } from '../intake/spec
 import { renderMailDraftInstructions, renderMailDraftPrompt } from '../mail/draft.ts';
 import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
-import {
-  renderReleaseChangelogInstructions,
-  renderReleaseChangelogPrompt,
-} from '../release/changelog-task.ts';
 import { AOM_NO_PIPES_NOTE, commandForOutcome } from './commands.ts';
 import { renderReviewInstructions, renderReviewPrompt } from './review-task.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
@@ -32,13 +28,6 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
     return renderMailDraftInstructions(brief, task.mailDraft, brief.shift.outcomes, commandForOutcome);
   if (task.specCard)
     return renderSpecCardInstructions(brief, task.specCard, brief.shift.outcomes, commandForOutcome);
-  if (task.releaseChangelog)
-    return renderReleaseChangelogInstructions(
-      brief,
-      task.releaseChangelog,
-      brief.shift.outcomes,
-      commandForOutcome,
-    );
   if (!task.phase) return renderReviewInstructions(brief, task);
   const phase = task.phase;
   const kind = task.kind as keyof typeof TASK_TITLE;
@@ -93,7 +82,6 @@ export function renderBaTaskPrompt(task: BaTaskShift): string {
   if (task.batch) return renderBatchPrompt(task.batch);
   if (task.mailDraft) return renderMailDraftPrompt(task.mailDraft);
   if (task.specCard) return renderSpecCardPrompt(task.specCard);
-  if (task.releaseChangelog) return renderReleaseChangelogPrompt(task.releaseChangelog);
   if (!task.phase) return renderReviewPrompt(task);
   const phase = task.phase;
   const out: string[] = [];

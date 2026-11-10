@@ -1,8 +1,8 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { ReleaseShipPayload } from '@aom/shared';
+import { CommandPayloadSchemas, type ReleaseShipPayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { shipReleaseCommit } from '../src/git/release-ship.ts';
+import { deleteKeptReleaseRef, shipReleaseCommit } from '../src/git/release-ship.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -266,5 +266,67 @@ describe('release.ship', () => {
     const md = originShow(repo.origin, 'CHANGELOG.md');
     expect(md).toContain('## [Unreleased]');
     expect(md).toContain('## [0.1.0] - 2026-11-01\n\n### Changed\n\n- feat: a');
+  });
+});
+
+describe('release ship recovery', () => {
+  it('a re-run after a lost runner whose push went through: alreadyDone, no second commit or tag, kept ref gone', async () => {
+    const s = setup();
+    const first = await ship(s);
+    expect(first.ok).toBe(true);
+    const count = commitsOn(s.repo.origin);
+    // the runner was lost after the push but before it removed the kept ref
+    sh(s.repo.clone, 'git', ['update-ref', 'refs/guildwise/release/1.4.0', first.commit as string]);
+    const again = await ship(s);
+    expect(again.ok).toBe(true);
+    expect(again.alreadyDone).toBe(true);
+    expect(again.commit).toBe(first.commit);
+    expect(commitsOn(s.repo.origin)).toBe(count);
+    expect(sh(s.repo.origin, 'git', ['tag', '--list'])).toBe('v1.3.0');
+    expect(refs(s.repo.clone)).not.toContain('refs/guildwise/release');
+  });
+});
+
+describe('release.ref_cleanup', () => {
+  it('deletes the kept ref of a dismissed release', async () => {
+    const s = setup();
+    const head = sh(s.repo.clone, 'git', ['rev-parse', 'HEAD']);
+    sh(s.repo.clone, 'git', ['update-ref', 'refs/guildwise/release/1.4.0', head]);
+    expect(refs(s.repo.clone)).toContain('refs/guildwise/release/1.4.0');
+    expect(await deleteKeptReleaseRef(s.repo.clone, '1.4.0')).toEqual({ ok: true, deleted: true });
+    expect(refs(s.repo.clone)).not.toContain('refs/guildwise/release');
+  });
+
+  it('is a success without a change when the ref is already gone', async () => {
+    const s = setup();
+    expect(await deleteKeptReleaseRef(s.repo.clone, '1.4.0')).toEqual({ ok: true, deleted: false });
+  });
+
+  it('touches only the kept ref of that version, never another ref', async () => {
+    const s = setup();
+    const head = sh(s.repo.clone, 'git', ['rev-parse', 'HEAD']);
+    sh(s.repo.clone, 'git', ['update-ref', 'refs/guildwise/release/1.5.0', head]);
+    const before = refs(s.repo.clone);
+    for (const v of ['1.4.0/../../heads/develop', '../heads/develop', '1.4.0/x', '']) {
+      const r = await deleteKeptReleaseRef(s.repo.clone, v);
+      expect(r.ok).toBe(false);
+      expect(r.deleted).toBe(false);
+      expect(r.error).toContain('refusing unsafe ref');
+    }
+    expect(await deleteKeptReleaseRef(s.repo.clone, '1.4.0')).toEqual({ ok: true, deleted: false });
+    expect(refs(s.repo.clone)).toBe(before);
+    expect(refs(s.repo.clone)).toContain('refs/heads/develop');
+  });
+
+  it('the payload carries a release version only', () => {
+    const base = {
+      shipId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d1',
+      repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+      remoteUrlNormalized: 'github.com/acme/toy',
+    };
+    const schema = CommandPayloadSchemas['release.ref_cleanup'];
+    expect(schema.safeParse({ ...base, version: '1.4.0' }).success).toBe(true);
+    expect(schema.safeParse({ ...base, version: '1.4.0/../../heads/develop' }).success).toBe(false);
+    expect(schema.safeParse({ ...base, version: 'develop' }).success).toBe(false);
   });
 });

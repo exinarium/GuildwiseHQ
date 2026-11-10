@@ -21,10 +21,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import {
-  applyReleaseChangelogReport,
-  runReleaseChangelogFallback,
-} from '../release/docs-prep-changelog-task.ts';
+import { applyLegacyChangelogReport, runLegacyChangelogFallback } from '../release/docs-prep-legacy.ts';
 import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { intakeRpc } from './intake.ts';
@@ -126,7 +123,7 @@ export async function applyBaTaskReport(
   if (task.kind === 'batch_intake') return applyBatchReport(ctx, tx, shift, task, msg.report);
   if (task.kind === 'mail_reply_draft') return applyMailDraftReport(ctx, tx, task, msg);
   if (task.kind === 'spec_card') return applySpecCardReport(ctx, tx, task, shift, msg);
-  if (task.kind === 'release_changelog') return applyReleaseChangelogReport(ctx, tx, task, msg);
+  if (task.kind === 'release_changelog') return applyLegacyChangelogReport(ctx, tx, task);
   if (isReporterTaskKind(task.kind)) return applyReviewReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
@@ -493,7 +490,7 @@ export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<vo
   }
   if (task.kind === 'mail_reply_draft') return runMailDraftFallback(ctx, tx, task);
   if (task.kind === 'spec_card') return runSpecCardFallback(ctx, tx, task);
-  if (task.kind === 'release_changelog') return runReleaseChangelogFallback(ctx, tx, task);
+  if (task.kind === 'release_changelog') return runLegacyChangelogFallback(ctx, tx, task);
   if (isReporterTaskKind(task.kind)) return runReviewFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>

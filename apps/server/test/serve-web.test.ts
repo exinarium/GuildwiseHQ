@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,6 +10,11 @@ beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'aom-web-'));
   await writeFile(join(dir, 'index.html'), '<!doctype html><title>aom</title><div id=root></div>');
   await writeFile(join(dir, 'app.js'), 'console.log(1)');
+  // The real dist serves Vite's hashed bundles from a nested folder; the static routes come from a walk of the tree.
+  await mkdir(join(dir, 'assets'));
+  await writeFile(join(dir, 'assets', 'app-abc123.js'), 'console.log("nested")');
+  await writeFile(join(dir, 'sw.js'), 'self.addEventListener("fetch", () => {})');
+  await writeFile(join(dir, '.hidden'), 'not public');
   t = await createTestApp({ env: { AOM_SERVE_WEB: 'true', AOM_WEB_DIST: dir } });
 });
 afterAll(async () => {
@@ -33,6 +38,19 @@ describe('AOM_SERVE_WEB', () => {
       ok: true,
       db: true,
     });
+  });
+
+  it('serves files from nested folders and the service worker, but never dot files', async () => {
+    const nested = await t.app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
+    expect(nested.statusCode).toBe(200);
+    expect(nested.body).toBe('console.log("nested")');
+    expect(String(nested.headers['content-type'])).toContain('javascript');
+    const sw = await t.app.inject({ method: 'GET', url: '/sw.js' });
+    expect(sw.statusCode).toBe(200);
+    expect(sw.headers['cache-control']).toBe('no-cache, no-store, must-revalidate');
+    expect(sw.headers['service-worker-allowed']).toBe('/');
+    const hidden = await t.app.inject({ method: 'GET', url: '/.hidden' });
+    expect(hidden.body).not.toContain('not public');
   });
 
   it('serves the app at /delivery/releases (load and reload), while /releases stays the public release blog', async () => {

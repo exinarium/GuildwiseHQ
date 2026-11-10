@@ -379,6 +379,10 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectFullSuiteSet'>).payload;
     await exec(tx, 'UPDATE projects SET full_suite_after_finalize=$2 WHERE id=$1', [p.projectId, p.enabled]);
   },
+  ProjectRegressionLoopSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRegressionLoopSet'>).payload;
+    await exec(tx, 'UPDATE projects SET regression_loop=$2 WHERE id=$1', [p.projectId, p.enabled]);
+  },
   ProjectClaudeAccountSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectClaudeAccountSet'>).payload;
     await exec(tx, 'UPDATE projects SET claude_account_key=$2, claude_account_fallback=$3 WHERE id=$1', [

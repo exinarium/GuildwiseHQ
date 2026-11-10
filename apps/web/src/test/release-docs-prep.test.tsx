@@ -64,6 +64,60 @@ describe('Release prep (docs and videos) settings', () => {
     );
   });
 
+  it('shows a user guide path field per repository, saves it on blur and shows the 400 inline', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: null }];
+    routes = (_u, m) =>
+      m === 'PUT'
+        ? json(
+            {
+              error: {
+                code: 'invalid_guide_path',
+                message: "The user guide path for GuildwiseHQ must not contain '..': ../x.md",
+              },
+            },
+            400,
+          )
+        : json(settings({ repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const input = await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    expect(input).toHaveAttribute('placeholder', 'docs/USER-GUIDE.md');
+    const user = userEvent.setup();
+    await user.type(input, '../x.md');
+    await user.tab();
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        enabled: false,
+        steps: { analyse: true, commit: true },
+        guidePaths: { [ID(7)]: '../x.md' },
+      }),
+    );
+    expect(await screen.findByTestId(`prep-guide-error-${ID(7)}`)).toHaveTextContent("must not contain '..'");
+    expect(input).toHaveValue('../x.md');
+  });
+
+  it('shows the saved guide path again and disables the field for a member', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: 'docs/guide/MANUAL.md' }];
+    routes = () => json(settings({ canEdit: false, repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const input = await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    expect(input).toHaveValue('docs/guide/MANUAL.md');
+    expect(input).toBeDisabled();
+  });
+
+  it('keeps the step checklist the only fieldset labels when the user guide fields are shown', async () => {
+    const repos = [{ id: ID(7), name: 'GuildwiseHQ', guidePath: null }];
+    routes = () => json(settings({ repos, defaultGuidePath: 'docs/USER-GUIDE.md' }));
+    const { container } = wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    await screen.findByTestId(`prep-guide-path-${ID(7)}`);
+    const labels = [...container.querySelectorAll('fieldset label')].map((l) => (l.textContent ?? '').trim());
+    expect(labels.map((t) => t.startsWith('Analyse changes') || t.startsWith('Commit results'))).toEqual([
+      true,
+      true,
+    ]);
+    expect(screen.getByRole('group', { name: 'User guide' })).toBeInTheDocument();
+    expect(screen.getByLabelText('GuildwiseHQ')).toBe(screen.getByTestId(`prep-guide-path-${ID(7)}`));
+  });
+
   it('is read-only for a member', async () => {
     routes = () => json(settings({ canEdit: false }));
     wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
@@ -199,6 +253,20 @@ describe('Releases > Release prep tab', () => {
     expect(screen.queryByRole('button', { name: 'Run release prep' })).not.toBeInTheDocument();
   });
 
+  it("titles the panel with the overview's release branch, not the project working branch", async () => {
+    routes = () =>
+      json(
+        overview(
+          'running',
+          { releaseBranch: 'release/2.3.0' },
+          run('running', { releaseBranch: 'release/2.3.0' }),
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByText('Guildwise · release/2.3.0')).toBeInTheDocument();
+    expect(screen.queryByText('Guildwise · main')).not.toBeInTheDocument();
+  });
+
   it('gives a member no actions', async () => {
     routes = () => json(overview('failed', { canAct: false }, run('failed')));
     wrap(<ReleaseDocsPrepTab />);
@@ -213,6 +281,118 @@ describe('Releases > Release prep tab', () => {
     const { container } = wrap(<ReleaseDocsPrepTab />);
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(container.querySelector('[data-testid="release-docs-prep-tab"]')).toBeNull();
+  });
+});
+
+describe('Release prep automatic start', () => {
+  it('the panel shows the switch, saves autoStart and keeps it when another setting changes', async () => {
+    routes = (_u, m) =>
+      json(m === 'PUT' ? settings({ enabled: true, autoStart: true }) : settings({ enabled: true }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    const auto = await screen.findByTestId('release-docs-prep-auto-start');
+    expect(auto).not.toBeChecked();
+    expect(auto).toBeEnabled();
+    expect(
+      screen.getByText('Start automatically when the release is ready on the test site'),
+    ).toBeInTheDocument();
+    await userEvent.setup().click(auto);
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({
+        enabled: true,
+        autoStart: true,
+      }),
+    );
+  });
+
+  it('the switch is disabled while prep is off and for a member', async () => {
+    routes = () => json(settings({ enabled: false }));
+    const a = wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    expect(await screen.findByTestId('release-docs-prep-auto-start')).toBeDisabled();
+    a.unmount();
+    routes = () => json(settings({ enabled: true, canEdit: false, autoStart: true }));
+    wrap(<ReleaseDocsPrepPanel projectId={ID(1)} />);
+    await waitFor(() => expect(screen.getByTestId('release-docs-prep-auto-start')).toBeChecked());
+    expect(screen.getByTestId('release-docs-prep-auto-start')).toBeDisabled();
+  });
+
+  it('the tab shows not ready with the reasons and a repository that is not checked', async () => {
+    routes = () =>
+      json(
+        overview(
+          'not_run',
+          {
+            autoStart: true,
+            readiness: {
+              ready: false,
+              repos: [
+                {
+                  repoId: ID(10),
+                  repoName: 'app',
+                  state: 'not_ready',
+                  env: 'test',
+                  reason: 'app: an update of Test copy is running',
+                },
+                {
+                  repoId: ID(11),
+                  repoName: 'lib',
+                  state: 'not_checked',
+                  env: null,
+                  reason: 'lib: no test site deploys it, not checked',
+                },
+              ],
+              reasons: ['app: an update of Test copy is running'],
+            },
+            autoStartBlocked: null,
+          },
+          null,
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    const box = await screen.findByTestId('release-docs-prep-readiness');
+    expect(box).toHaveTextContent('Not ready on the test site yet');
+    expect(box).toHaveTextContent('app: an update of Test copy is running');
+    expect(box).toHaveTextContent('lib: no test site deploys it, not checked');
+    expect(screen.getByTestId('release-docs-prep-auto')).toHaveTextContent('Starts automatically');
+    expect(screen.queryByTestId('release-docs-prep-auto-blocked')).not.toBeInTheDocument();
+  });
+
+  it('the tab shows ready and why the run did not start by itself', async () => {
+    routes = () =>
+      json(
+        overview(
+          'not_run',
+          {
+            autoStart: true,
+            readiness: { ready: true, repos: [], reasons: [] },
+            autoStartBlocked: 'No workstation has app yet. Wait for the clone to finish, then try again.',
+          },
+          null,
+        ),
+      );
+    wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByTestId('release-docs-prep-readiness')).toHaveTextContent(
+      'Ready on the test site',
+    );
+    expect(screen.getByTestId('release-docs-prep-auto-blocked')).toHaveTextContent(
+      'Release prep did not start by itself: No workstation has app yet.',
+    );
+  });
+
+  it("a run reads 'Started automatically' or 'Started by <name>'", async () => {
+    routes = () =>
+      json(
+        overview('running', {}, run('running', { trigger: 'auto', startedBy: null, startedByName: null })),
+      );
+    const a = wrap(<ReleaseDocsPrepTab />);
+    expect(await screen.findByTestId('release-docs-prep-started')).toHaveTextContent(
+      /^Started automatically /,
+    );
+    a.unmount();
+    routes = () => json(overview('running', {}, run('running', { startedByName: 'Pat Doe' })));
+    wrap(<ReleaseDocsPrepTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('release-docs-prep-started')).toHaveTextContent(/^Started by Pat Doe /),
+    );
   });
 });
 
@@ -333,6 +513,9 @@ describe("Releases > Release prep tab > 'Update user guide' output", () => {
           skippedChanges: [{ source: 'card:GWP-12', reason: 'tests only' }],
           duplicates: 0,
           pdf: 'rebuilt',
+          pdfDate: '2026-11-08',
+          pdfDateSource: 'run',
+          pdfEdition: '1.5.0',
           errors: [],
           warnings: [],
           notes: [],
@@ -354,6 +537,9 @@ describe("Releases > Release prep tab > 'Update user guide' output", () => {
     wrap(<ReleaseDocsPrepTab />);
     const hq = await screen.findByTestId('prep-repo-GuildwiseHQ');
     expect(within(hq).getByTestId('guide-output-changed')).toHaveTextContent('4.28 Releases');
+    expect(within(hq).getByTestId('guide-output-pdf-date')).toHaveTextContent(
+      'PDF dated 2026-11-08, release 1.5.0',
+    );
     expect(within(hq).getByTestId('guide-output-added')).toHaveTextContent(
       '4.28a Release prep (after 4.28 Releases)',
     );

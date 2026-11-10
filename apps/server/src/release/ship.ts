@@ -3,6 +3,7 @@ import {
   DESK_SUBKIND,
   RELEASE_PUBLISH_CAPABILITY,
   RELEASE_PUBLISH_STEPS,
+  RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type ReleaseShipPayload,
   ReleaseShipPayloadSchema,
@@ -14,7 +15,7 @@ import { projectRole } from '../authz/scope.ts';
 import { loadCommitAs } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Queryable, type Row } from '../db/sql.ts';
+import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
@@ -65,15 +66,23 @@ export async function shipPayloadFromProposal(
   });
 }
 
-/** A workstation that holds the clone and can ship: the user's own first, then the one seen last. */
-async function shipWorkstation(db: Queryable, repoId: string, userId: string): Promise<string> {
+/**
+ * A workstation that holds the clone and can ship: the preferred one first (on Retry, the ship's own workstation, which
+ * holds the kept release commit), then the user's own, then the one seen last.
+ */
+async function shipWorkstation(
+  db: Queryable,
+  repoId: string,
+  userId: string,
+  preferredId?: string | null,
+): Promise<string> {
   const ws = await one(
     db,
     `SELECT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
        JOIN workstation_capabilities wc ON wc.workstation_id = w.id
       WHERE wr.project_repo_id=$1 AND w.status='active' AND w.connected AND $3 = ANY (wc.capabilities)
-      ORDER BY (w.user_id = $2::uuid) DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
-    [repoId, userId, RELEASE_SHIP_CAPABILITY],
+      ORDER BY (w.id = $4::uuid) IS TRUE DESC, (w.user_id = $2::uuid) DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
+    [repoId, userId, RELEASE_SHIP_CAPABILITY, preferredId ?? null],
   );
   if (ws) return ws.id;
   const clone = await one(db, 'SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [repoId]);
@@ -191,6 +200,29 @@ async function failedShipOf(tx: Tx, user: { id: string }, alert: Row): Promise<R
   return ship;
 }
 
+/** Why a release whose proposal is no longer approved cannot be retried, in words for the owner. */
+export function notRetryableReason(state: string | undefined): string {
+  if (state === 'dismissed') return 'This release was dismissed; it can no longer be retried.';
+  if (state === 'released') return 'This release is already released; there is nothing to retry.';
+  if (state === 'closed') return 'This release proposal was closed; it can no longer be retried.';
+  return 'This release proposal is no longer approved; it can no longer be retried.';
+}
+
+/** Ends every `release.ship` of this ship that could still be delivered or answered, so two never run at once. */
+export async function cancelLiveShipCommands(
+  db: Queryable,
+  shipId: string,
+  reason: string,
+  now: Date,
+): Promise<void> {
+  await exec(
+    db,
+    `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3
+      WHERE type='release.ship' AND payload->>'shipId' = $1 AND status IN ('pending','sent')`,
+    [shipId, reason, now],
+  );
+}
+
 /** Retry from the "Release stopped" alert: the stored payload goes out again; the runner continues from the failed step. */
 export async function retryReleaseShipIn(
   ctx: Ctx,
@@ -201,13 +233,23 @@ export async function retryReleaseShipIn(
   const ship = await failedShipOf(tx, user, alert);
   if (ship.status !== 'failed')
     throw conflict('not_failed', `this release is ${ship.status}, only a stopped release can be retried`);
+  // Only a release that is still approved goes out again (a dismissed one keeps its closed alert, which must not revive it).
+  const proposal = await one(tx, 'SELECT state FROM release_proposals WHERE id=$1 FOR UPDATE', [ship.id]);
+  if (proposal?.state !== 'approved')
+    throw conflict('release_not_approved', notRetryableReason(proposal?.state));
   if ((RELEASE_PUBLISH_STEPS as readonly string[]).includes(ship.step ?? '')) {
     // land, tag or publish: the release commit exists. Never resend release.ship (it would start over).
     const target = await enqueueReleasePublishFor(ctx, tx, user, ship);
     return target;
   }
-  const workstationId = await shipWorkstation(tx, ship.repo_id, user.id);
+  const workstationId = await shipWorkstation(tx, ship.repo_id, user.id, ship.workstation_id);
   const stored = ship.payload as ShipPayload;
+  await cancelLiveShipCommands(
+    tx,
+    ship.id,
+    'the release was retried; a newer request replaces this one',
+    ctx.clock.now(),
+  );
   await queue(ctx, tx, userActor(user.id), ship as never, stored, stored.date, workstationId, true);
   return workstationId;
 }
@@ -250,21 +292,26 @@ async function enqueueReleasePublishWorkstation(tx: Tx, ship: Row): Promise<stri
   return ws?.id ?? null;
 }
 
-/** Dismissing a stopped release abandons it: the proposal is closed so the repository can be proposed again. */
+/**
+ * Dismissing a stopped release abandons it: the proposal is closed so the repository can be proposed again. A release
+ * stopped before its commit was pushed may have left the kept ref refs/guildwise/release/<version> on a workstation:
+ * `release.ref_cleanup` is queued to every capable workstation with the clone (offline ones get it on reconnect).
+ * Returns those workstations; the caller delivers them after the transaction without waiting for the answer.
+ */
 export async function dismissReleaseShipIn(
   ctx: Ctx,
   tx: Tx,
   user: { id: string },
   alert: Row,
-): Promise<void> {
+): Promise<string[]> {
   const ship = await one(tx, `SELECT * FROM release_ships WHERE alert_desk_item_id=$1 FOR UPDATE`, [
     alert.id,
   ]);
-  if (!ship || ship.status !== 'failed') return;
+  if (!ship || ship.status !== 'failed') return [];
   if ((await projectRole(tx, user.id, ship.project_id)) !== 'owner')
     throw forbidden('only the project owner can decide on a release');
   const proposal = await one(tx, `SELECT id, state FROM release_proposals WHERE id=$1 FOR UPDATE`, [ship.id]);
-  if (!proposal || proposal.state !== 'approved') return;
+  if (!proposal || proposal.state !== 'approved') return [];
   await ctx.store.append(
     [
       {
@@ -279,6 +326,38 @@ export async function dismissReleaseShipIn(
     ],
     { tx },
   );
+  return queueKeptRefCleanup(ctx, tx, ship);
+}
+
+/** `release.ref_cleanup` for an abandoned release on every capable workstation with the clone (none after a push). */
+async function queueKeptRefCleanup(ctx: Ctx, tx: Tx, ship: Row): Promise<string[]> {
+  // land, tag or publish: the release commit was pushed, and the runner removed the kept ref then.
+  if ((RELEASE_PUBLISH_STEPS as readonly string[]).includes(ship.step ?? '')) return [];
+  const remote =
+    (ship.payload as { remoteUrlNormalized?: string } | null)?.remoteUrlNormalized ??
+    (await one(tx, 'SELECT remote_url_normalized FROM project_repos WHERE id=$1', [ship.repo_id]))
+      ?.remote_url_normalized;
+  if (!remote) return [];
+  const targets = await rows<{ id: string }>(
+    tx,
+    `SELECT DISTINCT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
+       JOIN workstation_capabilities wc ON wc.workstation_id = w.id
+      WHERE wr.project_repo_id=$1 AND w.status='active' AND $2 = ANY (wc.capabilities)`,
+    [ship.repo_id, RELEASE_REF_CLEANUP_CAPABILITY],
+  );
+  if (!targets.length)
+    ctx.log.debug(
+      { shipId: ship.id },
+      'no workstation supports release.ref_cleanup; a kept release ref may stay behind',
+    );
+  for (const t of targets)
+    await enqueueRunnerCommand(tx, t.id, 'release.ref_cleanup', {
+      shipId: ship.id,
+      repoId: ship.repo_id,
+      remoteUrlNormalized: remote,
+      version: ship.version,
+    });
+  return targets.map((t) => t.id);
 }
 
 const short = (s: string): string => s.slice(0, 7);

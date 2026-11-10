@@ -13,9 +13,9 @@ A change that is not user-visible (tests, refactors, build, internal tools) goes
 A change the guide already describes goes to "covered" with the section.
 Every edit lists the change ids it is for in "sources".
 
-Output: only the JSON file at the path given, in this shape:
+Output: only the JSON file `release-prep-proposal.json` in your working directory, in this shape:
 {"edits":[{"op":"replace_text","section":"4.28","find":"...","replace":"...","sources":["card:KEY-1"]},
           {"op":"append","section":"4.28","text":"...","sources":[]},
           {"op":"add_section","after":"4.28","title":"...","body":"...","sources":[]}],
  "covered":[{"source":"...","section":"4.28"}],"skipped":[{"source":"...","reason":"..."}],"notes":[]}
-Do not edit any file in the repository.
+Change no other file. Then end with `aom prep done --summary "..."`; if the edits are refused, fix exactly what is named and run it again.

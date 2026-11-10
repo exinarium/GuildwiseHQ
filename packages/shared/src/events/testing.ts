@@ -24,8 +24,30 @@ export const TestEnvProblem = z.enum([
 ]);
 export type TestEnvProblem = z.infer<typeof TestEnvProblem>;
 
-/** Kind of a suite card: spawned after finalize (`full_suite`) or requested by the manager (`regression`). */
+/**
+ * Why a builder's DB-backed tests were not run under "Test without an environment" (`BuilderTestsNotRun`):
+ * `test_without_environment` the DevOps engineer was asked to run them; `no_devops_engineer` the workstation had none,
+ * so nobody was asked and no result will arrive.
+ */
+export const BUILDER_TEST_GAP_REASONS = ['test_without_environment', 'no_devops_engineer'] as const;
+export type BuilderTestGapReason = (typeof BUILDER_TEST_GAP_REASONS)[number];
+
+/** Kind of a suite card:spawned after finalize (`full_suite`) or requested by the manager (`regression`). */
 export const SuiteKind = z.enum(['full_suite', 'regression']);
+/** Why the regression loop of a failed run stopped without a rerun. */
+export const RegressionLoopStopReason = z.enum([
+  'cap',
+  'deploy_failed',
+  'no_devops',
+  'requeue_failed',
+  'switched_off',
+  'superseded',
+  'recipe_deploy',
+  'bugs_cancelled',
+  /** The project was archived (or is no longer active) while DevOps redeployed. */
+  'project_inactive',
+]);
+export type RegressionLoopStopReason = z.infer<typeof RegressionLoopStopReason>;
 export type SuiteKind = z.infer<typeof SuiteKind>;
 
 /**
@@ -62,6 +84,18 @@ export const testingEvents = [
       testSideFixed: z.boolean().default(false),
       kind: SuiteKind.default('full_suite'),
       platform: TestPlatform.optional(),
+      /** The target app did not run the commit under test (the tester's `Target mismatch:` line): no bug was filed. */
+      targetMismatch: z
+        .object({
+          deployedCommit: z.string().nullable(),
+          testedCommit: z.string().nullable(),
+          line: z.string().max(500),
+        })
+        .optional(),
+      /** The project runs the regression loop: this failed run is followed (`iteration` 1 = the run a person started). */
+      loop: z
+        .object({ iteration: z.number().int().positive(), rootCardId: Id, workstationId: Id.optional() })
+        .optional(),
     }),
   ),
   /** A bug card in Spec (for the BA) plus a non-blocking desk alert, both in the same append. */
@@ -75,6 +109,59 @@ export const testingEvents = [
       evidence: TestEvidence,
       bugCardId: Id,
       deskItemId: Id,
+      /** The dedupe key of the bug (`test:...` or `title:...`, see `parseSuiteBugs`). Absent on older events. */
+      failureKey: z.string().max(300).optional(),
+    }),
+  ),
+  /**
+   * A failing suite or regression run reported a bug that is already open as a bug card: no new card, a message on the
+   * open one. `runCardId` is the suite or regression card.
+   */
+  defineEvent(
+    'RegressionBugSeenAgain',
+    z.object({
+      runCardId: Id,
+      bugCardId: Id,
+      failureKey: z.string().max(300),
+      titleKey: z.string().max(300),
+      title: z.string().min(1).max(300),
+    }),
+  ),
+  /** Regression loop: every bug of the failed run merged (or the target was stale), so DevOps was asked to redeploy. */
+  defineEvent(
+    'RegressionRedeployRequested',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      requestId: Id,
+      workstationId: Id,
+      mergedBugCardIds: z.array(Id).default([]),
+      baseBranch: z.string().optional(),
+      mergeCommit: z.string().optional(),
+    }),
+  ),
+  /** Regression loop: the redeploy is done and the next regression run (`nextCardId`) is queued. */
+  defineEvent(
+    'RegressionRequeued',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      requestId: Id,
+      nextCardId: Id,
+      iteration: z.number().int().positive(),
+      deployedCommit: z.string().optional(),
+    }),
+  ),
+  /** Regression loop: the loop of this failed run ends without a rerun. */
+  defineEvent(
+    'RegressionLoopStopped',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      reason: RegressionLoopStopReason,
+      detail: z.string().default(''),
+      requestId: Id.optional(),
+      supersededBy: Id.optional(),
     }),
   ),
   /** The manager started a regression run; one regression card per platform (`both` = web + mobile). */
@@ -105,15 +192,18 @@ export const testingEvents = [
     'TestEnvironmentParked',
     z.object({ cardId: Id, requestId: Id, problem: TestEnvProblem, detail: z.string().default('') }),
   ),
-  /** "Test without an environment": a builder's test-run question went to DevOps without parking the card. */
+  /**
+   * "Test without an environment": a builder's test-run question did not park the card. With a DevOps engineer on the
+   * workstation it went to DevOps (`requestId`); without one nobody was asked (no `requestId`, `no_devops_engineer`).
+   */
   defineEvent(
     'BuilderTestsNotRun',
     z.object({
       cardId: Id,
-      requestId: Id,
+      requestId: Id.optional(),
       agentId: Id,
       stage: z.string(),
-      reason: z.literal('test_without_environment'),
+      reason: z.enum(BUILDER_TEST_GAP_REASONS),
       detail: z.string().default(''),
     }),
   ),

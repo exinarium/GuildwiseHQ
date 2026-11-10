@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   RELEASE_DOCS_PREP_CAPABILITY,
+  RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type ReleaseFacts,
   ReleaseFactsSchema,
@@ -9,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { withAppendTx } from '../src/db/tx.ts';
 import {
   applyReleaseDocsPrepResult,
+  docsPrepReleaseBranch,
   releaseDocsPrepSweep,
   releaseDocsPrepViewFor,
 } from '../src/release/docs-prep.ts';
@@ -60,7 +63,10 @@ async function capable() {
   await q(
     `INSERT INTO workstation_capabilities (workstation_id, capabilities, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (workstation_id) DO UPDATE SET capabilities=$2`,
-    [w.workstationId, [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_SHIP_CAPABILITY]],
+    [
+      w.workstationId,
+      [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY, RELEASE_SHIP_CAPABILITY],
+    ],
   );
 }
 
@@ -77,11 +83,14 @@ beforeEach(async () => {
 });
 
 /**
- * 'Write changelog' and 'Update user guide' are on by default but need a BA task and a writer agent: these tests untick
- * both unless they ask for one ('Write changelog' has its own tests in release-docs-prep-changelog-flow.test.ts).
+ * 'Write changelog', 'Update user guide' and 'Update Help articles' are on by default but need a writer agent: these tests untick them unless
+ * they ask for one ('Write changelog' has its own tests in release-docs-prep-changelog-flow.test.ts).
  */
 const enable = (steps: Record<string, boolean> = {}) =>
-  owner('PUT', `${base()}/settings`, { enabled: true, steps: { changelog: false, guide: false, ...steps } });
+  owner('PUT', `${base()}/settings`, {
+    enabled: true,
+    steps: { changelog: false, guide: false, help: false, ...steps },
+  });
 
 /** Answers the newest command of the run as the workstation did. */
 async function answer(result: Record<string, unknown>, ok_ = true, error?: string) {
@@ -157,7 +166,14 @@ describe('Release prep (docs and videos) settings', () => {
     const s = await ok<any>(owner('GET', `${base()}/settings`));
     expect(s.enabled).toBe(false);
     expect(s.canEdit).toBe(true);
-    expect(s.steps.map((x: any) => x.id)).toEqual(['analyse', 'changelog', 'guide', 'videos', 'commit']);
+    expect(s.steps.map((x: any) => x.id)).toEqual([
+      'analyse',
+      'changelog',
+      'guide',
+      'help',
+      'videos',
+      'commit',
+    ]);
   });
 
   it('the owner changes it; a member gets 403 and an outsider 404; unknown steps are refused', async () => {
@@ -189,6 +205,99 @@ describe('Release prep (docs and videos) settings', () => {
     expect(
       (await ok<any>(owner('GET', `${base()}/settings`))).steps.find((x: any) => x.id === 'analyse').enabled,
     ).toBe(false);
+  });
+});
+
+describe('the user guide path setting', () => {
+  const lastPayload = async () => (await cmds()).at(-1)!.payload;
+  const put = (guidePaths?: Record<string, string>, over: Record<string, unknown> = {}) =>
+    owner('PUT', `${base()}/settings`, {
+      enabled: true,
+      steps: {},
+      ...(guidePaths ? { guidePaths } : {}),
+      ...over,
+    });
+
+  it('lists the repositories with no path and the default', async () => {
+    const s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.defaultGuidePath).toBe('docs/USER-GUIDE.md');
+    expect(s.repos).toEqual([{ id: w.repoId, name: expect.any(String), guidePath: null }]);
+  });
+
+  it('stores a normalised path, keeps it across a save without guidePaths, and clears it with an empty value', async () => {
+    expect((await put({ [w.repoId]: './docs//guide\\MANUAL.md ' })).status).toBe(200);
+    let s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBe('docs/guide/MANUAL.md');
+    const before = await events('ReleaseDocsPrepSettingsSet');
+    expect((await put({ [w.repoId]: 'docs/guide/MANUAL.md' })).status).toBe(200);
+    expect(await events('ReleaseDocsPrepSettingsSet')).toBe(before); // unchanged: no event
+    expect((await put(undefined, { enabled: false })).status).toBe(200); // a switch toggle keeps the paths
+    s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBe('docs/guide/MANUAL.md');
+    expect((await put({ [w.repoId]: '' })).status).toBe(200);
+    s = await ok<any>(owner('GET', `${base()}/settings`));
+    expect(s.repos[0].guidePath).toBeNull();
+  });
+
+  it('refuses bad paths with a readable 400, an unknown repository, and a member with 403', async () => {
+    for (const bad of ['../x.md', '/x.md', 'docs/x.txt', 'C:\\x.md']) {
+      const r = await put({ [w.repoId]: bad });
+      expect(r.status, bad).toBe(400);
+      expect(JSON.stringify(r.body)).toContain('invalid_guide_path');
+      expect(r.body.error.message).toContain(bad.trim());
+    }
+    const unknown = await put({ '019e3f6a-7b1c-7a2d-8c3e-0123456789ff': 'docs/a.md' });
+    expect(unknown.status).toBe(400);
+    expect(JSON.stringify(unknown.body)).toContain('unknown_repo');
+    const m = await addMember(w);
+    const denied = await w.t.req('PUT', `${base()}/settings`, {
+      cookie: m.cookie,
+      body: { enabled: true, steps: {}, guidePaths: { [w.repoId]: '../x.md' } },
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  it('sends the default and configured=false when unset, and the path with configured=true when set', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const plain = await lastPayload();
+    expect(plain.stepInput).toMatchObject({ guidePath: 'docs/USER-GUIDE.md', guidePathConfigured: false });
+  });
+
+  it('sends the configured path to a runner that has the capability, and fails the step before dispatch without it', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await put(
+      { [w.repoId]: 'docs/guide/MANUAL.md' },
+      { steps: { changelog: false, guide: true, help: false } },
+    );
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text WHERE workstation_id=$1`,
+      [w.workstationId, RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY],
+    );
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const withCap = await lastPayload();
+    expect(withCap.stepInput).toMatchObject({
+      guidePath: 'docs/guide/MANUAL.md',
+      guidePathConfigured: true,
+      repoName: expect.any(String),
+    });
+  });
+
+  it('fails the guide step before dispatch on a workstation without the capability', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await put(
+      { [w.repoId]: 'docs/guide/MANUAL.md' },
+      { steps: { changelog: false, guide: true, help: false } },
+    );
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    expect(run.failed.error).toContain('needs a newer runner');
+    expect(run.failed.error).toContain('docs/guide/MANUAL.md');
   });
 });
 
@@ -310,8 +419,74 @@ describe('prep run', () => {
   });
 });
 
+const tasks = () => q2(`SELECT * FROM release_docs_prep_tasks ORDER BY attempt, position`);
+/** Gives the newest queued task to an agent of `role` (as the dispatcher pass does) and returns the shift row. */
+async function dispatchTask(role = 'builder') {
+  const agent = (
+    await q2(`SELECT id FROM agents WHERE role_key=$2 AND workstation_id=$1 LIMIT 1`, [w.workstationId, role])
+  )[0];
+  const t = (
+    await q2(`SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`)
+  )[0];
+  const shiftId = crypto.randomUUID();
+  await withAppendTx(w.t.app.ctx.pool, (tx) =>
+    w.t.app.ctx.store.append(
+      [
+        {
+          streamId: `releasedocs-${t.run_id}`,
+          event: {
+            type: 'ReleaseDocsPrepTaskDispatched',
+            payload: { taskId: t.id, shiftId, agentId: agent.id, workstationId: w.workstationId },
+          },
+          actor: { kind: 'system' } as never,
+          scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' } as never,
+        },
+      ],
+      { tx },
+    ),
+  );
+  return (await q2(`SELECT * FROM shifts WHERE id=$1`, [shiftId]))[0];
+}
+const prepReport = (shift: any, outcomeId: string, note: string, data: Record<string, unknown> = {}) =>
+  withAppendTx(w.t.app.ctx.pool, (tx) =>
+    applyReleasePrepReport(
+      w.t.app.ctx,
+      tx,
+      { report: { kind: 'outcome', outcomeId, note, data } } as never,
+      shift,
+    ),
+  );
+
 describe('the Update user guide step', () => {
   const lastPayload = async () => (await cmds()).at(-1)!.payload;
+  const stepTag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
+  const guideRows = async () =>
+    (
+      await q2(
+        `SELECT step, phase, state, error, report FROM release_docs_prep_steps WHERE step='guide' ORDER BY phase`,
+      )
+    ).map((r: any) => [r.phase, r.state, r.error]);
+  const change = {
+    sources: ['card:TOY-1'],
+    title: 'Release prep',
+    subjects: [],
+    files: ['apps/web/src/pages/Releases.tsx'],
+    areas: ['web'],
+    routes: [],
+    hints: [{ section: '4.28 Releases', score: 3, why: 'heading: releases' }],
+  };
+  const checked = (changes: unknown[]) => ({
+    ok: true,
+    state: 'passed',
+    files: [],
+    notices: [],
+    report: { guidePath: 'docs/USER-GUIDE.md', changes },
+  });
+  const PROPOSAL = {
+    edits: [
+      { op: 'append', section: '4.28', text: '**Release prep.** Run it first.', sources: ['card:TOY-1'] },
+    ],
+  };
 
   it('refuses a run when the guide step is on but Analyse changes is unticked (409 release_docs_prep_requires)', async () => {
     await enable({ analyse: false, guide: true });
@@ -323,77 +498,114 @@ describe('the Update user guide step', () => {
     );
   });
 
-  it('with no writer agent on the workstation the guide step fails the run before any commit', async () => {
+  it('with no writer agent on the workstation the write phase fails the run with the one no-writer message, before any commit', async () => {
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
+    expect((await lastPayload()).phase).toBe('check');
+    await answer(checked([change]));
+    expect((await tasks())[0].task.kind).toBe('guide_edits');
+    await releasePrepTaskPass(w.t.app.ctx);
     const run = await latest();
     expect(run.status).toBe('failed');
-    const guide = run.repos[0].steps.find((s: any) => s.step === 'guide');
-    expect(guide.state).toBe('failed');
-    expect(guide.error).toContain('can write the release documentation');
-    expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse']);
-  });
-
-  it('with no writer agent and two repositories the guide step fails in both and the run fails', async () => {
-    const second = randomUUID();
-    await q(
-      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, main_branch)
-       VALUES ($1,$2,'zcloud','git@github.com:acme/zcloud.git','github.com/acme/zcloud','main')`,
-      [second, w.projectId],
+    const write = run.repos[0].steps.find((s: any) => s.step === 'guide' && s.phase === 'write');
+    expect(write.state).toBe('failed');
+    expect(write.error).toMatch(
+      /^Update user guide: no agent on .+ can write the user guide update\. It needs an active architect, BA or builder agent on that workstation\. Hire or move one there \(or turn the step off\), then Retry prep\.$/,
     );
-    try {
-      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId, second] });
-      await enable({ guide: true });
-      expect((await owner('POST', `${base()}/runs`)).status).toBeLessThan(300);
-      const analyse = await cmds();
-      expect(analyse.map((c: any) => c.payload.repoId).sort()).toEqual([w.repoId, second].sort());
-      for (const c of analyse)
-        await applyReleaseDocsPrepResult(
-          w.t.app.ctx,
-          w.workstationId,
-          c.payload,
-          true,
-          passedAnalyse,
-          undefined,
-        );
-      const run = await latest();
-      expect(run.status).toBe('failed');
-      expect(run.repos).toHaveLength(2);
-      for (const repo of run.repos) {
-        const guide = repo.steps.find((s: any) => s.step === 'guide');
-        expect(guide.state).toBe('failed');
-        expect(guide.error).toMatch(
-          /^no agent on the workstation that has .+ can write the release documentation$/,
-        );
-      }
-      expect((await cmds()).map((c: any) => c.payload.step)).toEqual(['analyse', 'analyse']);
-    } finally {
-      await q(`TRUNCATE release_docs_prep_runs CASCADE`);
-      await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
-    }
+    expect((await tasks())[0].code).toBe('no_writer');
+    expect((await cmds()).map(stepTag)).toEqual(['analyse', 'guide:check']);
   });
 
-  it('dispatches the guide step with the preferred writer (architect before builder) and then the commit', async () => {
-    await w.hire('Zed', 'builder', 'junior');
-    const architect = await w.hire('Amy', 'architect', 'senior');
+  it('a repository without a user guide is skipped (not failed) in all three phases, needs no writer, and the run goes on', async () => {
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
-    const payload = await lastPayload();
-    expect(payload.step).toBe('guide');
-    expect(payload.writer).toBeTruthy();
-    expect(JSON.stringify(payload.writer)).toContain(architect.agent?.id ?? architect.id);
-    expect(payload.stepInput.coveredSources).toEqual([]);
-    await answer({ ok: true, state: 'passed', files: [], notices: [], output: { status: 'passed' } });
-    expect((await lastPayload()).step).toBe('commit');
+    await answer({
+      ok: true,
+      state: 'skipped',
+      error: 'skipped: no user guide in this repository',
+      files: [],
+      notices: [],
+      output: { status: 'passed', skipped: 'no user guide' },
+    });
+    const note = 'skipped: no user guide in this repository';
+    expect(await guideRows()).toEqual([
+      ['apply', 'skipped', note],
+      ['check', 'skipped', note],
+      ['write', 'skipped', note],
+    ]);
+    // no task, no BA task, no agent looked up: the next command is the commit
+    expect(await tasks()).toHaveLength(0);
+    expect((await q2(`SELECT count(*)::int AS n FROM ba_tasks`))[0].n).toBe(0);
+    expect((await cmds()).map(stepTag)).toEqual(['analyse', 'guide:check', 'commit:prepare']);
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    expect((await latest()).status).toBe('passed');
   });
 
-  it('stores the step output, shows it in the run view, and hands its sources to the next run as coveredSources', async () => {
+  it('check, then a guide_edits task for the writer, then the accepted proposal goes to apply, then the commit', async () => {
+    await w.hire('Zed', 'builder', 'junior');
     await w.hire('Amy', 'architect', 'senior');
     await enable({ guide: true });
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
+    const check = await lastPayload();
+    expect([check.step, check.phase]).toEqual(['guide', 'check']);
+    expect(check.stepInput).toMatchObject({
+      guidePath: 'docs/USER-GUIDE.md',
+      coveredSources: [],
+      denyList: [],
+    });
+    expect(check.writer).toBeUndefined();
+    await answer(checked([change]));
+    const [t] = await tasks();
+    expect(t.status).toBe('queued');
+    expect(t.task).toMatchObject({
+      kind: 'guide_edits',
+      guidePath: 'docs/USER-GUIDE.md',
+      coveredSources: [],
+    });
+    expect(t.task.changes[0].hints[0].section).toBe('4.28 Releases');
+    // the writer runs as a release prep shift and reports the proposal the runner already checked
+    const shift = await dispatchTask('architect');
+    const bad = await prepReport(shift, 'prep_done', 'wrote it', { proposal: { edits: 'nope' } });
+    expect(bad.accepted).toBe(false);
+    expect((await tasks())[0].status).toBe('running');
+    const good = await prepReport(shift, 'prep_done', 'wrote it', { proposal: PROPOSAL });
+    expect(good.accepted).toBe(true);
+    const [done] = await tasks();
+    expect(done.status).toBe('done');
+    expect(done.result.proposal.edits).toHaveLength(1);
+    const apply = await lastPayload();
+    expect([apply.step, apply.phase]).toEqual(['guide', 'apply']);
+    expect(apply.input.proposal.edits[0].op).toBe('append');
+    expect(apply.stepInput.guidePath).toBe('docs/USER-GUIDE.md');
+    expect(apply.writer).toBeUndefined();
+    await answer({ ok: true, state: 'passed', files: [], notices: [], output: { status: 'passed' } });
+    expect((await lastPayload()).step).toBe('commit');
+  });
+
+  it('a guide check with nothing new skips the write phase (no task) and apply gets no proposal', async () => {
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(checked([]));
+    expect(await tasks()).toHaveLength(0);
+    expect(await guideRows()).toEqual([
+      ['apply', 'running', null],
+      ['check', 'passed', null],
+      ['write', 'skipped', 'no new changes'],
+    ]);
+    const apply = await lastPayload();
+    expect([apply.step, apply.phase, apply.input]).toEqual(['guide', 'apply', {}]);
+  });
+
+  it('stores the apply output, shows it in the run view, and hands its sources to the next run as coveredSources', async () => {
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await answer(checked([]));
     const output = {
       status: 'passed',
       changed: [{ section: '4.2 Cards', sources: ['card:TOY-1'] }],
@@ -404,14 +616,31 @@ describe('the Update user guide step', () => {
     await answer({ ok: true, state: 'passed', files: [], notices: [] });
     const first = await latest();
     expect(first.status).toBe('passed');
-    const guide = first.repos[0].steps.find((s: any) => s.step === 'guide');
-    expect(guide.output).toMatchObject({ status: 'passed', changed: [{ section: '4.2 Cards' }] });
+    const apply = first.repos[0].steps.find((s: any) => s.step === 'guide' && s.phase === 'apply');
+    expect(apply.output).toMatchObject({ status: 'passed', changed: [{ section: '4.2 Cards' }] });
 
     await owner('POST', `${base()}/runs`);
     await answer(passedAnalyse);
     const next = await lastPayload();
-    expect(next.step).toBe('guide');
+    expect([next.step, next.phase]).toEqual(['guide', 'check']);
     expect(next.stepInput.coveredSources).toEqual(['card:TOY-1', 'merge:' + 'c'.repeat(40)]);
+  });
+
+  it('a workstation without the writer-tasks capability fails the step before its first phase with a newer-runner message', async () => {
+    await q(`UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1`, [
+      w.workstationId,
+      [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_SHIP_CAPABILITY],
+    ]);
+    await enable({ guide: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    const run = await latest();
+    expect(run.status).toBe('failed');
+    const row = run.repos[0].steps.find((s: any) => s.step === 'guide');
+    expect(row.error).toBe(
+      'Update user guide needs a newer runner on the workstation that has toy. Update the runner and retry prep.',
+    );
+    expect((await cmds()).map(stepTag)).toEqual(['analyse']);
   });
 });
 
@@ -659,48 +888,7 @@ describe('Generate videos step', () => {
         },
       ],
     );
-  const tasks = () => q2(`SELECT * FROM release_docs_prep_tasks ORDER BY attempt, position`);
   const SHA = 'c'.repeat(40);
-  /** Gives the newest queued task to a builder (as the dispatcher pass does) and returns the shift row. */
-  async function dispatchTask() {
-    const agent = (
-      await q2(`SELECT id FROM agents WHERE role_key='builder' AND workstation_id=$1 LIMIT 1`, [
-        w.workstationId,
-      ])
-    )[0];
-    const t = (
-      await q2(
-        `SELECT * FROM release_docs_prep_tasks WHERE status='queued' ORDER BY attempt, position LIMIT 1`,
-      )
-    )[0];
-    const shiftId = crypto.randomUUID();
-    await withAppendTx(w.t.app.ctx.pool, (tx) =>
-      w.t.app.ctx.store.append(
-        [
-          {
-            streamId: `releasedocs-${t.run_id}`,
-            event: {
-              type: 'ReleaseDocsPrepTaskDispatched',
-              payload: { taskId: t.id, shiftId, agentId: agent.id, workstationId: w.workstationId },
-            },
-            actor: { kind: 'system' } as never,
-            scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' } as never,
-          },
-        ],
-        { tx },
-      ),
-    );
-    return (await q2(`SELECT * FROM shifts WHERE id=$1`, [shiftId]))[0];
-  }
-  const prepReport = (shift: any, outcomeId: string, note: string, data: Record<string, unknown> = {}) =>
-    withAppendTx(w.t.app.ctx.pool, (tx) =>
-      applyReleasePrepReport(
-        w.t.app.ctx,
-        tx,
-        { report: { kind: 'outcome', outcomeId, note, data } } as never,
-        shift,
-      ),
-    );
   const renderFailed = () =>
     answer({
       ok: true,
@@ -746,7 +934,8 @@ describe('Generate videos step', () => {
     await releasePrepTaskPass(w.t.app.ctx);
     const run = await latest();
     expect(run.status).toBe('failed');
-    expect(run.failed.error).toContain('forms: could not write the video script: no builder agent on');
+    expect(run.failed.error).toContain('Generate videos: no agent on');
+    expect(run.failed.error).toContain('can write the forms video.');
     expect((await cmds()).map(tag)).toEqual(['analyse', 'videos:plan']);
   });
 
@@ -875,5 +1064,112 @@ describe('Generate videos step', () => {
     const r = run.repos[0].steps.find((s: any) => s.phase === 'render');
     expect(r.report.videos[0].error).toContain('selector not found');
     expect((await cmds()).map(tag)).not.toContain('commit:prepare');
+  });
+});
+
+describe('the run label and key follow the repositories release branch', () => {
+  const runs = () => q2(`SELECT release_branch, status FROM release_docs_prep_runs ORDER BY started_at`);
+  /** Project on main, its one repository on release/1.5.0 (the card's setup). */
+  const mainProject = async () => {
+    await q(`UPDATE projects SET working_branch='main' WHERE id=$1`, [w.projectId]);
+    await q(`UPDATE project_repos SET working_branch='release/1.5.0' WHERE id=$1`, [w.repoId]);
+  };
+
+  it('helper: shared branch, project branch, first repo branch, different branches', () => {
+    expect(docsPrepReleaseBranch('main', [{ branch: 'release/1' }, { branch: 'release/1' }])).toBe(
+      'release/1',
+    );
+    expect(docsPrepReleaseBranch('release/9', [])).toBe('release/9');
+    expect(docsPrepReleaseBranch(null, [{ branch: 'a' }, { branch: 'b' }])).toBe('a');
+    expect(docsPrepReleaseBranch('main', [{ branch: 'a' }, { branch: 'b' }])).toBe('main');
+    expect(docsPrepReleaseBranch(null, [])).toBeNull();
+  });
+
+  it('project on main, repo on release/1.5.0: the run, latest view and overview use release/1.5.0', async () => {
+    await mainProject();
+    await enable();
+    expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+    expect((await runs())[0].release_branch).toBe('release/1.5.0');
+    expect((await latest()).releaseBranch).toBe('release/1.5.0');
+    const mine = ((await owner('GET', `/api/release-docs-prep`)).body as any[]).find(
+      (o) => o.projectId === w.projectId,
+    );
+    expect(mine.releaseBranch).toBe('release/1.5.0');
+    expect(mine.state).toBe('running');
+  });
+
+  it('no repo override: the project working branch (unchanged)', async () => {
+    await enable();
+    await owner('POST', `${base()}/runs`);
+    expect((await runs())[0].release_branch).toBe('release/1.5.0');
+  });
+
+  it('a second start is a duplicate of release/1.5.0; an older (project, main) run neither blocks nor changes', async () => {
+    await mainProject();
+    await enable();
+    await q(
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, trigger, started_at, updated_at)
+       SELECT gen_random_uuid(), org_id, id, 'main', 'running', 'manual', now() - interval '1 day', now() - interval '1 day'
+         FROM projects WHERE id=$1`,
+      [w.projectId],
+    );
+    const before = (await runs()).length;
+    expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+    const again = await owner('POST', `${base()}/runs`);
+    expect(again.status).toBe(409);
+    expect(JSON.stringify(again.body)).toContain('release/1.5.0');
+    const all = await runs();
+    expect(all.length).toBe(before + 1);
+    expect(
+      all.filter((r: any) => r.release_branch === 'main').every((r: any) => r.status === 'running'),
+    ).toBe(true);
+  });
+
+  it('repositories on different branches: the run is keyed by the project branch and a second start is a duplicate of it', async () => {
+    await mainProject();
+    const second = randomUUID();
+    await q(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, main_branch, working_branch)
+       VALUES ($1,$2,'zother','git@github.com:acme/zother.git','github.com/acme/zother','main','release/2.0.0')`,
+      [second, w.projectId],
+    );
+    try {
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId, second] });
+      await enable();
+      expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+      const analyse = await cmds();
+      expect(analyse.map((c: any) => c.payload.repoId).sort()).toEqual([w.repoId, second].sort());
+      expect((await runs()).map((r: any) => r.release_branch)).toEqual(['main']);
+      expect((await latest()).releaseBranch).toBe('main');
+      const again = await owner('POST', `${base()}/runs`);
+      expect(again.status).toBe(409);
+      expect(JSON.stringify(again.body)).toContain('main');
+      expect((await runs()).length).toBe(1);
+    } finally {
+      await q(`TRUNCATE release_docs_prep_runs CASCADE`);
+      await q(`UPDATE project_repos SET removed_at=now() WHERE id=$1`, [second]);
+    }
+  });
+
+  it('retry, skip and result handling find the same run', async () => {
+    await mainProject();
+    await enable();
+    await owner('POST', `${base()}/runs`);
+    await answer({ ok: false, state: 'failed', error: 'boom', files: [], notices: [] });
+    const failed = await latest();
+    expect(failed.status).toBe('failed');
+    expect((await owner('POST', `${base()}/runs/${failed.id}/retry`)).status).toBe(202);
+    await answer({ ok: false, state: 'failed', error: 'again', files: [], notices: [] });
+    expect((await owner('POST', `${base()}/skip`)).status).toBe(204);
+    expect((await latest()).status).toBe('skipped');
+    expect((await runs()).every((r: any) => r.release_branch === 'release/1.5.0')).toBe(true);
+  });
+
+  it('the ship gate sees a passed run stored under release/1.5.0', async () => {
+    await mainProject();
+    await enable();
+    expect((await approveShip()).status).toBe(409);
+    await runToPassed(PREP);
+    expect((await approveShip()).status).toBe(200);
   });
 });

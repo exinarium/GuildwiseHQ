@@ -97,6 +97,7 @@ describe('registry: Write changelog', () => {
       'analyse',
       'changelog',
       'guide',
+      'help',
       'videos',
       'commit',
     ]);
@@ -111,6 +112,7 @@ describe('registry: Write changelog', () => {
     expect(enabledReleaseDocsPrepSteps({ steps: { changelog: false } }).map((s) => s.id)).toEqual([
       'analyse',
       'guide',
+      'help',
       'commit',
     ]);
   });

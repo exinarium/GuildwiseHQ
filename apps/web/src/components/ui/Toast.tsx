@@ -63,7 +63,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         data-testid="toasts"
-        className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4rem)] z-80 flex flex-col items-center gap-2 px-4 sm:inset-x-auto sm:top-auto sm:right-4 sm:bottom-4 sm:items-end sm:px-0"
+        className="pointer-events-none fixed inset-x-0 top-[calc(var(--safe-top)+4rem)] z-80 flex flex-col items-center gap-2 px-4 sm:inset-x-auto sm:top-auto sm:right-[calc(1rem+var(--safe-right))] sm:bottom-[calc(var(--app-bottom-inset,0px)+1rem)] sm:items-end sm:px-0"
       >
         {items.map((t) => {
           const Icon = icon[t.tone];

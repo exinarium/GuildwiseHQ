@@ -6,13 +6,21 @@ import {
   CompleteSchema,
   checkPublicAnswers,
   checkUploadHead,
+  DESK_SUBKIND,
+  DIRECT_UPLOAD_KINDS,
+  directGrantTtlMs,
   FORM_UPLOAD_TYPES,
   type FormDefinition,
+  GrantCancelSchema,
+  GrantCompleteSchema,
+  type GrantDto,
+  type GrantOffsetDto,
   isOrgOperational,
   PUBLIC_FORM_ID_RE,
   type PublicFormDto,
   publicFormView,
   STORAGE_RETRYABLE,
+  type StorageKind,
   type StorageReference,
   type StorageWriteError,
   type SubmissionCompleteDto,
@@ -28,10 +36,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { readFormLogo } from '../commands/forms.ts';
 import { destinationWorkstations } from '../commands/forms-offline.ts';
+import { deliver } from '../commands/workstation-setup.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { getFormVersion } from '../queries/forms.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { buildAnswersHtml, buildAnswersJson } from './answers-doc.ts';
 import { clientKey, createFormLimits, type FormLimits } from './limits.ts';
 import { offlineRequestHandler } from './offline.ts';
@@ -47,7 +57,19 @@ import {
 
 /** What the lookup found for a request; the only thing kept about a call besides the numbers below. */
 interface PfCall {
-  op: 'view' | 'logo' | 'start' | 'part' | 'status' | 'complete' | 'page' | 'offline';
+  op:
+    | 'view'
+    | 'logo'
+    | 'start'
+    | 'part'
+    | 'status'
+    | 'complete'
+    | 'page'
+    | 'offline'
+    | 'grant'
+    | 'grant_status'
+    | 'grant_complete'
+    | 'grant_cancel';
   startedAt: bigint;
   publicId: string;
   formId: string | null;
@@ -92,18 +114,44 @@ type Part = {
   size: number;
   sha256: string;
   ext: string;
-  state: 'pending' | 'stored' | 'failed';
+  state: 'pending' | 'verifying' | 'stored' | 'failed';
   reference?: StorageReference;
+  /** `direct`: the browser sends this file to the firm's storage (cloud destinations); `relay`: through this server. */
+  mode?: 'relay' | 'direct';
+  /** Grant requests made for this part (at most three). */
+  grantAttempts?: number;
+  /** When the check of a direct upload started (ms). */
+  verifyingAt?: number;
+  /** The code of the last failure of a direct upload. */
+  error?: string;
 };
 
+const UPLOAD_UNAVAILABLE_MSG =
+  "This form can't accept files right now. Please try again later or contact the firm.";
+const GRANT_MAX_ATTEMPTS = 3;
+
 /** The CSP of the public page: nothing from anywhere else, no inline script or style. */
-export function publicPageCsp(secure: boolean): string {
+/** The submitter's file name from the x-file-name header, made safe; 'file' when absent. */
+export function uploadNameOf(header: unknown): string {
+  let raw = '';
+  if (typeof header === 'string') {
+    try {
+      raw = decodeURIComponent(header).slice(0, 300);
+    } catch {
+      raw = '';
+    }
+  }
+  return sanitiseUploadName(raw || 'file').base || 'file';
+}
+
+export function publicPageCsp(secure: boolean, uploadOrigins: readonly string[] = []): string {
+  const connect = ["'self'", ...[...new Set(uploadOrigins)].sort()].join(' ');
   return [
     "default-src 'none'",
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data: blob:",
-    "connect-src 'self'",
+    `connect-src ${connect}`,
     "worker-src 'self'",
     "font-src 'self'",
     "form-action 'none'",
@@ -379,6 +427,82 @@ export function publicFormRoutes(
       return new Map(r.map((x) => [x.id as string, x.workstation_id as string]));
     };
 
+    const CLOUD = new Set<StorageKind>(DIRECT_UPLOAD_KINDS);
+    const kindsOf = async (orgId: string, ids: string[]) => {
+      const r = await rows(
+        ctx.pool,
+        `SELECT id, kind FROM storage_connections WHERE org_id=$1 AND status='active' AND id = ANY($2::uuid[])`,
+        [orgId, ids],
+      );
+      return new Map(r.map((x) => [x.id as string, x.kind as StorageKind]));
+    };
+
+    /** The upload hosts this form's file fields can send to directly (reported by the runners, never stored). */
+    const uploadOriginsOf = async (pub: Pub, def: FormDefinition): Promise<string[]> => {
+      if (!cfg.directUploads) return [];
+      const ids = [
+        ...new Set(
+          def.fields.flatMap((f) =>
+            f.type === 'file' && f.destination.connectionId ? [f.destination.connectionId] : [],
+          ),
+        ),
+      ];
+      if (!ids.length) return [];
+      const kinds = await kindsOf(pub.orgId, ids);
+      return ids.flatMap((id) => {
+        const o = CLOUD.has(kinds.get(id) as StorageKind) ? ctx.services.direct.originOf(id) : null;
+        return o ? [o] : [];
+      });
+    };
+
+    /** The page origin the browser sends files from (for the provider's CORS answer). */
+    const pageOriginOf = (req: FastifyRequest): string => {
+      const o = req.headers.origin;
+      if (typeof o === 'string') {
+        try {
+          const u = new URL(o);
+          if (u.protocol === 'https:' || u.protocol === 'http:') return u.origin;
+        } catch {
+          // fall through
+        }
+      }
+      return `${ctx.config.secureCookies ? 'https' : 'http'}://${req.headers.host ?? 'localhost'}`;
+    };
+
+    /** The grant id of each direct part that has one open, in memory only. */
+    const openGrants = new Map<string, string>();
+
+    /**
+     * The scan refused a file (or could not run): the runner that got it has already removed what it wrote for this
+     * submission. Tell the other workstations holding stored parts to do the same, and forget every reference, so a
+     * late resume can never complete with files that were deleted.
+     */
+    const rollBackSubmission = async (
+      pub: Pub,
+      sid: string,
+      parts: Part[],
+      failing: number,
+      code: string,
+      failingConnectionId: string,
+    ) => {
+      const refs = parts.flatMap((p) => (p.reference ? [p.reference.connectionId] : []));
+      const map = await connectionsOf(pub.orgId, [...new Set([failingConnectionId, ...refs])]);
+      const own = map.get(failingConnectionId);
+      const others = [...new Set(refs.map((c) => map.get(c)).filter((w): w is string => !!w && w !== own))];
+      const expires = new Date(ctx.clock.now().getTime() + 25 * 3600_000);
+      for (const ws of others)
+        await enqueueRunnerCommand(ctx.pool, ws, 'storage.discard', { submissionId: sid }, expires);
+      const reset = parts.map((p, n) => {
+        const { reference: _gone, ...rest } = p;
+        return { ...rest, state: n === failing ? ('failed' as const) : ('pending' as const) };
+      });
+      await ctx.pool.query(
+        `UPDATE form_submissions SET parts=$2::jsonb, status='failed', error_code=$3, updated_at=$4 WHERE id=$1`,
+        [sid, JSON.stringify(reset), code, ctx.clock.now()],
+      );
+      deliver(ctx, others);
+    };
+
     const varsOf = (
       def: FormDefinition,
       sid: string,
@@ -435,7 +559,22 @@ export function publicFormRoutes(
     };
 
     /** Maps a refused storage write to what the page is told. */
-    const storageFailure = (e: StorageWriteError): PfError => {
+    const storageFailure = (e: StorageWriteError, field?: string): PfError => {
+      if (e.code === 'malware_detected')
+        return new PfError(
+          422,
+          'malware_detected',
+          'One of your files could not be accepted because it failed a security check.',
+          { retryable: false, ...(field ? { fields: [{ field, code: 'malware_detected' }] } : {}) },
+        );
+      if (e.code === 'scan_unavailable')
+        return new PfError(
+          503,
+          'scan_unavailable',
+          'Your submission could not be checked right now. Please try again later.',
+          { retryable: true },
+          { retryAfter: retryAfter() },
+        );
       if (e.code === 'not_found')
         return new PfError(
           409,
@@ -446,6 +585,8 @@ export function publicFormRoutes(
           },
         );
       if (e.code === 'too_large') return new PfError(413, 'file_too_large', 'The file is too large.');
+      if (e.code === 'type_refused')
+        return new PfError(415, 'file_type_refused', 'This file type is not accepted.', { retryable: false });
       return new PfError(502, 'storage_failed', STORAGE_MSG, {
         retryable: STORAGE_RETRYABLE[e.code] ?? false,
       });
@@ -491,10 +632,12 @@ export function publicFormRoutes(
           }
         }
         const secure = ctx.config.secureCookies;
+        const pubFound = pubs.get(req);
+        const origins = pubFound ? await uploadOriginsOf(pubFound, await definitionOf(pubFound)) : [];
         reply
           .code(found ? 200 : 404)
           .header('content-type', 'text/html; charset=utf-8')
-          .header('content-security-policy', publicPageCsp(secure))
+          .header('content-security-policy', publicPageCsp(secure, origins))
           .header('cache-control', 'no-store')
           .header('x-robots-tag', 'noindex, nofollow')
           .header('referrer-policy', 'no-referrer')
@@ -527,8 +670,13 @@ export function publicFormRoutes(
             purpose: row.purpose === 'offline' ? 'offline' : 'client',
           };
         }
+        const org = await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [pub.orgId]);
         const body: PublicFormDto = {
           form: publicFormView(def),
+          firmName:
+            String(org?.name ?? '')
+              .trim()
+              .slice(0, 120) || null,
           version: pub.version,
           logo: def.settings.logo
             ? `/api/public/forms/${(req.params as { publicId: string }).publicId}/logo`
@@ -538,6 +686,7 @@ export function publicFormRoutes(
           minFillMs: cfg.minFillMs,
           availability: (await availability(pub)).state === 'offline' ? 'offline' : 'open',
           link,
+          uploadOrigins: await uploadOriginsOf(pub, def),
         };
         return body;
       },
@@ -630,6 +779,30 @@ export function publicFormRoutes(
         if ([...conns.values()].some((ws) => !ctx.services.runners.isOnline(ws)))
           return offline(req, reply, 'start', pub, link?.id ?? null, null, [...wanted]);
 
+        // A cloud destination takes the file straight from the browser. With no reported upload host the form refuses
+        // here, before anything is sent: there is no relay for a cloud destination (the runner offline was handled above).
+        const kinds = cfg.directUploads
+          ? await kindsOf(pub.orgId, [...wanted])
+          : new Map<string, StorageKind>();
+        const modeOf = (field: string): 'relay' | 'direct' => {
+          const dest = def.fields.find((f) => f.id === field);
+          const id = dest?.type === 'file' ? dest.destination.connectionId : null;
+          return id && CLOUD.has(kinds.get(id) as StorageKind) ? 'direct' : 'relay';
+        };
+        for (const f of body.files) {
+          if (modeOf(f.field) !== 'direct') continue;
+          const dest = def.fields.find((x) => x.id === f.field);
+          const id = dest?.type === 'file' ? dest.destination.connectionId : null;
+          if (!id || !ctx.services.direct.originOf(id))
+            throw new PfError(
+              503,
+              'upload_unavailable',
+              UPLOAD_UNAVAILABLE_MSG,
+              { retryable: true },
+              { retryAfter: retryAfter() },
+            );
+        }
+
         const sid = randomUUID();
         const parts: Part[] = body.files.map((f, i) => ({
           field: f.field,
@@ -638,6 +811,8 @@ export function publicFormRoutes(
           sha256: f.sha256,
           ext: sanitiseUploadName(f.name).ext,
           state: 'pending',
+          // Only a direct part is marked: a relay part is stored exactly as before direct uploads existed.
+          ...(modeOf(f.field) === 'direct' ? { mode: 'direct' as const } : {}),
         }));
         const expiresAt = new Date(now.getTime() + cfg.submissionTtlMin * 60_000);
         try {
@@ -665,7 +840,12 @@ export function publicFormRoutes(
         const out: SubmissionStartResultDto = {
           submissionId: sid,
           uploadToken: await signUpload(ctx, sid, expiresAt),
-          parts: parts.map((p) => ({ field: p.field, index: p.index, needed: true })),
+          parts: parts.map((p) => ({
+            field: p.field,
+            index: p.index,
+            needed: true,
+            mode: p.mode ?? 'relay',
+          })),
         };
         return reply.code(201).send(out);
       },
@@ -716,6 +896,15 @@ export function publicFormRoutes(
         const i = /^\d{1,3}$/.test(index) ? Number(index) : -1;
         const part = parts[i];
         if (!part) throw new PfError(404, 'submission_not_found', 'Submission not found.', {}, close);
+        // A direct part never goes through this server, even for a crafted client. Refused before a body byte is read.
+        if (part.mode === 'direct')
+          throw new PfError(
+            409,
+            'upload_mode',
+            'This file must be sent another way. Please reload the page.',
+            { retryable: false },
+            close,
+          );
         if (part.state === 'stored') return reply.header('connection', 'close').send({ state: 'stored' });
 
         // Checked before one byte of the body is read.
@@ -793,16 +982,7 @@ export function publicFormRoutes(
             yield n.value as Buffer;
           }
         }
-        let rawName = '';
-        const hdr = req.headers['x-file-name'];
-        if (typeof hdr === 'string') {
-          try {
-            rawName = decodeURIComponent(hdr).slice(0, 300);
-          } catch {
-            rawName = '';
-          }
-        }
-        const original = sanitiseUploadName(rawName || 'file').base || 'file';
+        const original = uploadNameOf(req.headers['x-file-name']);
         const linkRow = row.link_id
           ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
               row.link_id,
@@ -819,12 +999,18 @@ export function publicFormRoutes(
           size: part.size,
           source: source(),
           signal: ac.signal,
+          submission: { orgId: pub.orgId, formId: pub.formId, submissionId: sid },
+          scan: { field: field.id, fileName: original },
         });
         if (!r.ok) {
+          if (r.error.code === 'malware_detected' || r.error.code === 'scan_unavailable') {
+            await rollBackSubmission(pub, sid, parts, i, r.error.code, field.destination.connectionId);
+            throw storageFailure(r.error, field.id);
+          }
           await fail(r.error.code);
           if (r.error.code === 'runner_offline')
             return offline(req, reply, 'part', pub, row.link_id, sid, [field.destination.connectionId]);
-          throw storageFailure(r.error);
+          throw storageFailure(r.error, field.id);
         }
         if (r.reference.sha256 !== part.sha256 || r.reference.size !== part.size) {
           await fail('invalid');
@@ -842,6 +1028,273 @@ export function publicFormRoutes(
       },
     });
 
+    // ---------------------------------------------------------------------------------- direct uploads (cloud destinations)
+    /** The submission, the direct part and its field, with the same expiry rules as the relay PUT. */
+    const directPart = async (req: FastifyRequest) => {
+      const pub = pubOf(req);
+      const { sid, index } = req.params as { sid: string; index: string };
+      const row = await authorise(req, pub, sid);
+      if (new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() || row.status === 'expired')
+        throw new PfError(
+          410,
+          'submission_expired',
+          'This submission timed out. Please send the form again.',
+        );
+      if (row.status === 'complete' || row.status === 'storing')
+        throw new PfError(409, 'submission_busy', 'This submission is already being processed.');
+      const parts = row.parts as Part[];
+      const i = /^\d{1,3}$/.test(index) ? Number(index) : -1;
+      const part = parts[i];
+      if (!part) throw new PfError(404, 'submission_not_found', 'Submission not found.');
+      if (part.mode !== 'direct')
+        throw new PfError(409, 'upload_mode', 'This file must be sent another way. Please reload the page.', {
+          retryable: false,
+        });
+      return { pub, sid, row, parts, i, part, key: `${sid}:${i}` };
+    };
+
+    const savePart = (sid: string, i: number, part: Part) =>
+      ctx.pool.query(
+        `UPDATE form_submissions SET parts=jsonb_set(parts, $2::text[], $3::jsonb), updated_at=$4 WHERE id=$1`,
+        [sid, [String(i)], JSON.stringify(part), ctx.clock.now()],
+      );
+
+    const noStore = (reply: FastifyReply) => reply.header('cache-control', 'no-store');
+
+    /**
+     * A part still being checked counts as given up only after the same bound the server waits for the runner's
+     * answer: the runner may read and scan the whole file, which takes far longer than a relay write.
+     */
+    const staleCheck = (p: Part) =>
+      p.state === 'verifying' &&
+      ctx.clock.now().getTime() - (p.verifyingAt ?? 0) > ctx.services.direct.verifyTimeoutMs;
+
+    fastify.route({
+      method: 'POST',
+      url: '/api/public/forms/:publicId/submissions/:sid/parts/:index/grant',
+      logLevel: 'silent',
+      config: { op: 'grant' },
+      bodyLimit: 8 * 1024,
+      onRequest,
+      handler: async (req, reply) => {
+        const { pub, sid, row, parts, i, part, key } = await directPart(req);
+        if (part.state === 'stored')
+          throw new PfError(409, 'submission_busy', 'This file was already sent.', {}, {});
+        const stale = staleCheck(part);
+        if (part.state === 'verifying' && !stale)
+          throw new PfError(409, 'submission_busy', 'This file is being checked.', {}, {});
+        const def = await definitionOf(pub);
+        const field = def.fields.find((f) => f.id === part.field);
+        if (!field || field.type !== 'file' || !field.destination.connectionId)
+          throw new PfError(
+            409,
+            'destination_missing',
+            "This form can't accept submissions. Please contact the firm.",
+          );
+        const connectionId = field.destination.connectionId;
+        // The same size and type rules as the start, again before an address is issued.
+        const accepted = acceptedUploadExtensions(field.allowedTypes);
+        if (part.size > Math.min(field.maxSizeBytes, ctx.config.storage.maxFileBytes))
+          throw new PfError(413, 'file_too_large', 'A file is too large.');
+        const type = FORM_UPLOAD_TYPES[part.ext];
+        if (!type || !accepted.includes(part.ext))
+          throw new PfError(415, 'file_type_refused', 'This file type is not accepted.', {
+            retryable: false,
+          });
+
+        const attempts = (part.grantAttempts ?? 0) + 1;
+        const next: Part = { ...part, state: 'pending', grantAttempts: attempts };
+        delete next.verifyingAt;
+        delete next.error;
+        parts[i] = next;
+        await savePart(sid, i, next);
+        const old = openGrants.get(key);
+        if (old) {
+          ctx.services.direct.cancel(old, 'retry');
+          openGrants.delete(key);
+        }
+
+        const linkRow = row.link_id
+          ? await one(ctx.pool, 'SELECT reference, record_id FROM form_client_links WHERE id=$1', [
+              row.link_id,
+            ])
+          : undefined;
+        const original = uploadNameOf(req.headers['x-file-name']);
+        const remaining = Math.max(60_000, new Date(row.expires_at).getTime() - ctx.clock.now().getTime());
+        const r = await ctx.services.direct.open({
+          orgId: pub.orgId,
+          formId: pub.formId,
+          submissionId: sid,
+          index: i,
+          connectionId,
+          folder: field.destination.folder,
+          name: field.destination.name,
+          vars: varsOf(def, sid, new Date(row.created_at), linkRow ?? null, field.id, original, part.ext),
+          ext: part.ext,
+          contentType: type.contentType,
+          size: part.size,
+          sha256: part.sha256,
+          accepted,
+          pageOrigin: pageOriginOf(req),
+          ttlMs: Math.min(directGrantTtlMs(part.size), remaining),
+          scan: { field: field.id, fileName: original },
+        });
+        if (r.ok) {
+          openGrants.set(key, r.grantId);
+          noStore(reply);
+          const out: GrantDto = {
+            grant: {
+              method: 'PUT',
+              url: r.grant.url,
+              headers: r.grant.headers,
+              chunkBytes: r.grant.chunkBytes,
+              expiresAt: new Date(r.grant.expiresAt).toISOString(),
+            },
+          };
+          return out;
+        }
+        if (r.error.code === 'runner_offline')
+          return offline(req, reply, 'part', pub, row.link_id, sid, [connectionId]);
+        if (r.error.retryable && attempts < GRANT_MAX_ATTEMPTS)
+          throw new PfError(
+            503,
+            'upload_unavailable',
+            UPLOAD_UNAVAILABLE_MSG,
+            { retryable: true },
+            { retryAfter: retryAfter() },
+          );
+        // A final refusal, or the third failed attempt: the submission fails. There is no relay for a cloud destination.
+        await rollBackSubmission(pub, sid, parts, i, 'upload_unavailable', connectionId);
+        throw new PfError(
+          502,
+          'upload_unavailable',
+          'Your files could not be sent to the firm. Please contact the firm.',
+          { retryable: false },
+        );
+      },
+    });
+
+    fastify.route({
+      method: 'GET',
+      url: '/api/public/forms/:publicId/submissions/:sid/parts/:index/grant',
+      logLevel: 'silent',
+      config: { op: 'grant_status' },
+      onRequest,
+      handler: async (req, reply) => {
+        const { key } = await directPart(req);
+        const id = openGrants.get(key);
+        noStore(reply);
+        const out: GrantOffsetDto = { offset: id ? await ctx.services.direct.offset(id) : null };
+        return out;
+      },
+    });
+
+    fastify.route({
+      method: 'POST',
+      url: '/api/public/forms/:publicId/submissions/:sid/parts/:index/grant/complete',
+      logLevel: 'silent',
+      config: { op: 'grant_complete' },
+      bodyLimit: 8 * 1024,
+      onRequest,
+      handler: async (req, reply) => {
+        const { pub, sid, parts, i, part, key } = await directPart(req);
+        const body = GrantCompleteSchema.safeParse(req.body);
+        if (!body.success) throw new PfError(400, 'invalid_answers', 'The request could not be read.');
+        const grantId = openGrants.get(key);
+        if (part.state === 'stored') return reply.code(202).send({ state: 'stored' });
+        if (!grantId || part.state !== 'pending')
+          throw new PfError(409, 'submission_busy', 'This upload is not open any more.');
+        if (body.data.size !== part.size || body.data.sha256 !== part.sha256) {
+          ctx.services.direct.cancel(grantId, 'client_gone');
+          openGrants.delete(key);
+          throw new PfError(400, 'invalid_answers', 'The file does not match what was announced.', {
+            retryable: false,
+          });
+        }
+        const verifying: Part = { ...part, state: 'verifying', verifyingAt: ctx.clock.now().getTime() };
+        parts[i] = verifying;
+        await savePart(sid, i, verifying);
+        openGrants.delete(key);
+        const def = await definitionOf(pub);
+        const field = def.fields.find((f) => f.id === part.field);
+        const connectionId = field?.type === 'file' ? (field.destination.connectionId ?? '') : '';
+        void ctx.services.direct
+          .finish(grantId, body.data)
+          .then(async (v) => {
+            const cur = await one(ctx.pool, 'SELECT parts FROM form_submissions WHERE id=$1', [sid]);
+            const now = (cur?.parts as Part[] | undefined) ?? parts;
+            const fresh = now[i] ?? verifying;
+            if (fresh.state !== 'verifying') return;
+            if (v.ok) {
+              const r = v.reference;
+              if (r.sha256 !== part.sha256 || r.size !== part.size || r.connectionId !== connectionId) {
+                await savePart(sid, i, { ...fresh, state: 'failed', error: 'invalid' });
+                return;
+              }
+              await savePart(sid, i, { ...fresh, state: 'stored', reference: r });
+              return;
+            }
+            if (v.error.code === 'malware_detected' || v.error.code === 'scan_unavailable') {
+              await rollBackSubmission(pub, sid, now, i, v.error.code, connectionId);
+              await ctx.pool.query(
+                `UPDATE form_submissions SET parts=jsonb_set(parts, $2::text[], $3::jsonb) WHERE id=$1`,
+                [sid, [String(i)], JSON.stringify({ ...fresh, state: 'failed', error: v.error.code })],
+              );
+              return;
+            }
+            await savePart(sid, i, { ...fresh, state: 'failed', error: v.error.code });
+            await ctx.pool.query(
+              `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1 AND status='receiving'`,
+              [sid, v.error.code, ctx.clock.now()],
+            );
+          })
+          .catch(() => ctx.log.warn({ publicForm: { op: 'grant_complete' } }, 'direct upload check failed'));
+        noStore(reply);
+        return reply.code(202).send({ state: 'verifying' });
+      },
+    });
+
+    fastify.route({
+      method: 'POST',
+      url: '/api/public/forms/:publicId/submissions/:sid/parts/:index/grant/cancel',
+      logLevel: 'silent',
+      config: { op: 'grant_cancel' },
+      bodyLimit: 4 * 1024,
+      onRequest,
+      handler: async (req, reply) => {
+        const { pub, sid, parts, i, part, key } = await directPart(req);
+        const body = GrantCancelSchema.safeParse(req.body ?? { reason: 'abandoned' });
+        if (!body.success) throw new PfError(400, 'invalid_answers', 'The request could not be read.');
+        const grantId = openGrants.get(key);
+        openGrants.delete(key);
+        if (grantId)
+          ctx.services.direct.cancel(
+            grantId,
+            body.data.reason === 'retry'
+              ? 'retry'
+              : body.data.reason === 'blocked'
+                ? 'blocked'
+                : 'client_gone',
+          );
+        if (part.state === 'pending' || part.state === 'verifying') {
+          if (body.data.reason === 'blocked') {
+            // The browser could not reach the storage provider (page rules or CORS): no relay, the submission fails.
+            const def = await definitionOf(pub);
+            const field = def.fields.find((f) => f.id === part.field);
+            const connectionId = field?.type === 'file' ? (field.destination.connectionId ?? '') : '';
+            await rollBackSubmission(pub, sid, parts, i, 'upload_unavailable', connectionId);
+            noStore(reply);
+            return { state: 'failed' };
+          }
+          const back: Part = { ...part, state: 'pending' };
+          delete back.verifyingAt;
+          await savePart(sid, i, back);
+        }
+        noStore(reply);
+        return { state: 'pending' };
+      },
+    });
+
     // ---------------------------------------------------------------------------------- status (to resume a retry)
     fastify.route({
       method: 'GET',
@@ -856,7 +1309,15 @@ export function publicFormRoutes(
           new Date(row.expires_at).getTime() <= ctx.clock.now().getTime() && row.status !== 'complete';
         const out: SubmissionStatusDto = {
           status: expired ? 'expired' : row.status,
-          parts: (row.parts as Part[]).map((p) => ({ field: p.field, index: p.index, state: p.state })),
+          parts: (row.parts as Part[]).map((p) => {
+            const stale = staleCheck(p);
+            return {
+              field: p.field,
+              index: p.index,
+              state: stale ? ('failed' as const) : p.state,
+              ...(stale ? { error: 'timeout' } : p.error ? { error: p.error } : {}),
+            };
+          }),
         };
         return out;
       },
@@ -967,8 +1428,14 @@ export function publicFormRoutes(
             answers: body.data.answers,
             files,
           };
-          const have = (claimed.answers_refs ?? {}) as { html?: StorageReference; json?: StorageReference };
-          const refs: { html?: StorageReference; json?: StorageReference } = { ...have };
+          type AnswersRefs = {
+            html?: StorageReference;
+            json?: StorageReference;
+            pdf?: StorageReference;
+            pdfError?: string;
+          };
+          const have = (claimed.answers_refs ?? {}) as AnswersRefs;
+          const refs: AnswersRefs = { ...have };
           for (const kind of ['html', 'json'] as const) {
             if (refs[kind]) continue;
             const text = kind === 'html' ? buildAnswersHtml(doc) : buildAnswersJson(doc);
@@ -985,6 +1452,9 @@ export function publicFormRoutes(
               source: (async function* () {
                 yield buf;
               })(),
+              submission: { orgId: pub.orgId, formId: pub.formId, submissionId: sid },
+              // Only the answers HTML: the runner makes the PDF copy from it. The server never sees the PDF bytes.
+              ...(kind === 'html' ? { derive: { pdf: true as const } } : {}),
             });
             if (!w.ok) {
               await failWith(w.error);
@@ -993,6 +1463,16 @@ export function publicFormRoutes(
               throw storageFailure(w.error);
             }
             refs[kind] = w.reference;
+            if (kind === 'html') {
+              // No `derived` at all is an older runner: the copy is missing, which is not an error.
+              if (w.derived?.pdf.ok) {
+                refs.pdf = w.derived.pdf.reference;
+                delete refs.pdfError;
+              } else {
+                delete refs.pdf;
+                refs.pdfError = w.derived?.pdf.ok === false ? w.derived.pdf.code : 'pdf_unavailable';
+              }
+            }
             await ctx.pool.query(
               `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
               [sid, JSON.stringify(refs), ctx.clock.now()],
@@ -1023,7 +1503,7 @@ export function publicFormRoutes(
                 orgId: pub.orgId,
                 version: pub.version,
                 ...(row.link_id ? { linkId: row.link_id } : {}),
-                answers: [html, json],
+                answers: refs.pdf ? [html, json, refs.pdf] : [html, json],
                 files: parts.map((p) => p.reference as StorageReference),
               },
             });
@@ -1036,6 +1516,48 @@ export function publicFormRoutes(
               })),
               { tx },
             );
+            if (!refs.pdf) {
+              // One notice per submission (this runs once, inside the rowCount check). No answer text in it.
+              const deskItemId = randomUUID();
+              const ref = linkRow ? (linkRow.reference as string) : undefined;
+              await ctx.store.append(
+                [
+                  {
+                    streamId: streamId.desk(deskItemId),
+                    event: {
+                      type: 'DeskItemCreated',
+                      payload: {
+                        deskItemId,
+                        kind: 'alert',
+                        subkind: DESK_SUBKIND.formPdfMissing,
+                        title: `PDF copy missing: ${def.settings.title}`,
+                        body: [
+                          "The answers were saved as JSON and HTML, but the PDF copy could not be made on the firm's workstation.",
+                          `Open the HTML copy (${html.path}) and print it if you need a PDF.`,
+                          ...(ref ? [`Client reference: ${ref}`] : []),
+                          `Submission ${sid.slice(0, 8)}`,
+                        ].join('\n'),
+                        options: [{ id: 'dismiss', label: 'Dismiss', description: 'Close this notice.' }],
+                        blocking: false,
+                        pinned: false,
+                        affectedCardIds: [],
+                        askedBy: { kind: 'system' },
+                        subjectKey: `form-pdf-missing:${sid}`,
+                        data: {
+                          formId: pub.formId,
+                          submissionId: sid,
+                          htmlPath: html.path,
+                          reason: refs.pdfError ?? 'pdf_unavailable',
+                        },
+                      },
+                    },
+                    actor: SYSTEM_ACTOR,
+                    scope: orgScope(pub.orgId),
+                  },
+                ],
+                { tx },
+              );
+            }
           });
         } catch (err) {
           // An unexpected error after the claim must not leave the row 'storing': the retry would get submission_busy.

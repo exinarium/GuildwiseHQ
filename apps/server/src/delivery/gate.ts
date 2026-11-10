@@ -173,6 +173,8 @@ export async function evaluateEnvGate(
     commit: string | null;
     now: Date;
     repoId?: string | null;
+    /** Only the requirements: the release window and the freeze are left out (release readiness). */
+    requiresOnly?: boolean;
   },
 ): Promise<EnvGateVerdict> {
   const { gates, missingPreset } = await effectiveGates(db, p);
@@ -187,7 +189,7 @@ export async function evaluateEnvGate(
   const missing: string[] = [];
   const evidence: GateEvidence[] = [];
   for (const g of gates) {
-    const v = evaluateGate(g.gate, facts);
+    const v = evaluateGate(p.requiresOnly ? { requires: g.gate.requires } : g.gate, facts);
     missing.push(...v.missing);
     evidence.push(...v.evidence);
   }

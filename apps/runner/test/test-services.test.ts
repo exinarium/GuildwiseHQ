@@ -380,3 +380,81 @@ describe('aom-env test services', () => {
     expect(r.stderr).toContain("ignoring test service '127.0.0.1:abc'");
   });
 });
+
+describe('decideTestServices for the harness runtimes (egress proxy)', () => {
+  const HARNESS = ['gemini', 'opencode', 'codex'];
+  const MIXED: LocalTestService[] = [
+    PG,
+    { name: 'redis', host: '::1', port: 6379 },
+    { name: 'mail', host: 'localhost', port: 1025 },
+    { name: 'own', host: '127.0.0.1', port: 43210 },
+    { name: 'env', host: '127.0.0.1', port: 4000 },
+    { name: 'proxy', host: '127.0.0.1', port: 3128 },
+    bad({ name: 'lan', host: '10.0.0.5', port: 5432 }),
+  ];
+  const ports = { runnerPorts: new Set([43210]), envForwardPorts: new Set([4000]) };
+
+  it('gives a harness runtime the same decisions, list and spec as Claude Code', () => {
+    const claude = decideTestServices(input({ services: MIXED, ...ports }));
+    for (const runtime of HARNESS) {
+      const d = decideTestServices(
+        input({ services: MIXED, ...ports, runtime, egressProxy: true, claudeVersion: '0.65.0' }),
+      );
+      expect(d, runtime).toEqual(claude);
+      expect(testServiceDomains(d)).toEqual(['127.0.0.1:5433', '[::1]:6379', 'localhost:1025']);
+      expect(testServicesSpec(d)).toBe(testServicesSpec(claude));
+    }
+  });
+
+  it('does not apply the Claude Code version gate to the egress proxy path', () => {
+    for (const claudeVersion of [undefined, '0.30.0', '2.1.228'])
+      expect(
+        decideTestServices(input({ runtime: 'gemini', egressProxy: true, claudeVersion }))[0]?.state,
+      ).toBe('allowed');
+  });
+
+  it('keeps refusing a runtime without the egress proxy (Codex with its native sandbox)', () => {
+    expect(reason(decideTestServices(input({ runtime: 'codex', egressProxy: false }))[0])).toMatch(
+      /not reachable with the codex runtime/,
+    );
+    expect(reason(decideTestServices(input({ runtime: 'direct', egressProxy: undefined }))[0])).toMatch(
+      /direct runtime/,
+    );
+  });
+
+  it('refuses on a platform or sandbox that cannot enforce one port, and without a shell', () => {
+    const base = { runtime: 'opencode', egressProxy: true };
+    expect(reason(decideTestServices(input({ ...base, sandbox: 'unavailable' }))[0])).toMatch(
+      /nothing was opened/,
+    );
+    expect(reason(decideTestServices(input({ ...base, platform: 'darwin' }))[0])).toMatch(
+      /cannot open a single loopback port/,
+    );
+    expect(reason(decideTestServices(input({ ...base, hasShell: false }))[0])).toMatch(/no shell/);
+  });
+
+  it('a refused service gets the same reason and note as for Claude Code', () => {
+    const svc = [{ name: 'own', host: '127.0.0.1' as const, port: 43210 }];
+    const claude = decideTestServices(input({ services: svc, ...ports }));
+    const gem = decideTestServices(input({ services: svc, ...ports, runtime: 'gemini', egressProxy: true }));
+    expect(gem).toEqual(claude);
+    expect(testServicesNote(gem)).toBe(testServicesNote(claude));
+    const first = gem[0];
+    if (first?.state === 'refused') expect(refusedProgress(first)).toMatch(/belongs to the runner/);
+    else throw new Error('expected a refusal');
+  });
+
+  it('the note lists an allowed service as reachable, not as "not reachable"', () => {
+    const note = testServicesNote(decideTestServices(input({ runtime: 'codex', egressProxy: true })));
+    expect(note).toContain('- postgres-test: 127.0.0.1:5433');
+    expect(note).toContain('aom-env');
+    expect(note).not.toMatch(/not reachable/i);
+  });
+
+  it('adds nothing for an empty list', () => {
+    const d = decideTestServices(input({ services: [], runtime: 'gemini', egressProxy: true }));
+    expect(d).toEqual([]);
+    expect(testServicesNote(d)).toBe('');
+    expect(testServicesSpec(d)).toBe('');
+  });
+});

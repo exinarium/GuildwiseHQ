@@ -1,8 +1,13 @@
 import { z } from 'zod';
 import {
   BLOG_API_SCOPES,
+  BLOG_COVER_KEYS,
+  BLOG_LIMITS,
+  BLOG_ORIGIN_KINDS,
   BLOG_STATUSES,
+  BLOG_TAG_KEYS,
   BLOG_WRITER,
+  MANUAL_POST_LIMITS,
   SOCIAL_CHANNEL_NETWORKS,
   SOCIAL_NETWORKS,
 } from '../blog/constants.ts';
@@ -20,6 +25,7 @@ import { IsoTime } from './common.ts';
 /** The blog and its agent API. */
 
 export const BlogStatusSchema = z.enum(BLOG_STATUSES);
+export const BlogOriginKindSchema = z.enum(BLOG_ORIGIN_KINDS);
 export const BlogApiScopeSchema = z.enum(BLOG_API_SCOPES);
 export const SocialNetworkSchema = z.enum(SOCIAL_NETWORKS);
 /** A network with a channel row: the four share networks and YouTube (uploads only, never shared to by the sweep). */
@@ -37,7 +43,13 @@ export const BlogShareSchema = z.object({
 export type BlogShare = z.infer<typeof BlogShareSchema>;
 
 export const BlogPostSchema = BlogContentSchema.extend({
+  /** A hand-written article may have no tag. */
+  tags: z.array(z.string()).max(BLOG_LIMITS.tagsMax),
   id: z.uuid(),
+  /** `manual`: written by a person in the platform UI; `writer`: the blog writer (every post before this existed). */
+  originKind: BlogOriginKindSchema,
+  /** The byline of a manual article; null on writer posts. */
+  authorName: z.string().nullable(),
   status: BlogStatusSchema,
   rejectionReason: z.string().nullable(),
   publishedAt: IsoTime.nullable(),
@@ -60,8 +72,11 @@ export const PublicBlogPostSchema = BlogContentSchema.pick({
   title: true,
   summary: true,
   coverImage: true,
-  tags: true,
 }).extend({
+  tags: z.array(z.string()),
+  /** Only present on a hand-written article, so the JSON of writer posts is unchanged. */
+  origin: z.literal('manual').optional(),
+  author: z.string().optional(),
   publishedAt: IsoTime,
   updatedAt: IsoTime,
   readingMinutes: z.number().int(),
@@ -147,7 +162,10 @@ export const PatchBlogSettingsRequestSchema = z.object({
   digestEnabled: z.boolean().optional(),
 });
 
-export const PlatformBlogQuerySchema = z.object({ status: BlogStatusSchema.optional() });
+export const PlatformBlogQuerySchema = z.object({
+  status: BlogStatusSchema.optional(),
+  origin: BlogOriginKindSchema.optional(),
+});
 export const PlatformBlogListSchema = z.object({
   posts: z.array(BlogPostSchema),
   pending: z.number().int(),
@@ -156,6 +174,40 @@ export const PlatformBlogListSchema = z.object({
 export const RejectBlogPostRequestSchema = z.object({ reason: z.string().trim().min(1).max(2000) });
 export const EditBlogPostRequestSchema = BlogContentSchema.omit({ slug: true }).partial();
 export const CreateBlogPostRequestSchema = BlogContentSchema;
+
+/** Create or update an article a person wrote (the platform authoring view). */
+export const ManualPostRequestSchema = z.object({
+  title: z.string().trim().min(MANUAL_POST_LIMITS.titleMin).max(BLOG_LIMITS.titleMax),
+  /** Omitted: made from the title. */
+  slug: BlogSlugSchema.optional(),
+  summary: z.string().trim().min(MANUAL_POST_LIMITS.summaryMin).max(BLOG_LIMITS.summaryMax),
+  bodyMarkdown: z.string().min(MANUAL_POST_LIMITS.bodyMin).max(BLOG_LIMITS.bodyMax),
+  tags: z.array(z.enum(BLOG_TAG_KEYS)).max(BLOG_LIMITS.tagsMax).default([]),
+  /** Omitted: the signed-in user's name. */
+  authorName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MANUAL_POST_LIMITS.authorMax)
+    .refine(
+      (v) => ![...v].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127),
+      'no control characters',
+    )
+    .optional(),
+  coverImage: z
+    .object({ defaultKey: z.enum(BLOG_COVER_KEYS), alt: z.string().trim().min(5).max(200) })
+    .optional(),
+});
+export type ManualPostRequest = z.infer<typeof ManualPostRequestSchema>;
+export const BlogImageUploadedSchema = z.object({
+  id: z.uuid(),
+  url: z.string(),
+  /** The Markdown to put in the body. */
+  markdown: z.string(),
+  contentType: z.string(),
+  size: z.number().int(),
+});
+export type BlogImageUploaded = z.infer<typeof BlogImageUploadedSchema>;
 
 // ---- digest preference
 export const DigestPreferenceSchema = z.object({ optedIn: z.boolean(), isOwner: z.boolean() });

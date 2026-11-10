@@ -22,6 +22,9 @@ export const STORAGE_ERROR_CODES = [
   'conflict',
   'runner_offline',
   'timeout',
+  'malware_detected',
+  'scan_unavailable',
+  'type_refused',
 ] as const;
 export const StorageErrorCodeSchema = z.enum(STORAGE_ERROR_CODES);
 export type StorageErrorCode = z.infer<typeof StorageErrorCodeSchema>;
@@ -38,10 +41,17 @@ export const STORAGE_RETRYABLE: Record<StorageErrorCode, boolean> = {
   not_found: false,
   invalid: false,
   too_large: false,
+  malware_detected: false,
+  scan_unavailable: true,
+  type_refused: false,
 };
 
 /** Announced in `hello.capabilities` by a runner that holds storage connections. */
 export const STORAGE_CAPABILITY = 'storage:1';
+/** Announced in `hello.capabilities` by a runner that handles `storage.delete`. */
+export const STORAGE_DELETE_CAPABILITY = 'storage-delete:1';
+export const STORAGE_DELETE_TIMEOUT_MS = 30_000;
+export type StorageDeleteOutcome = 'deleted' | 'not_found';
 /** Raw bytes per chunk frame. */
 export const STORAGE_CHUNK_BYTES = 256 * 1024;
 /** Chunks in flight per transfer (2 MiB). */
@@ -152,6 +162,8 @@ export const StorageTestPayloadSchema = z.object({
 });
 export const StorageRemovePayloadSchema = z.object({ connectionId: z.uuid() });
 export const StorageSyncPayloadSchema = z.object({ connectionIds: z.array(z.uuid()).max(1000) });
+/** Server to runner: remove everything this workstation wrote for one public form submission. */
+export const StorageDiscardPayloadSchema = z.object({ submissionId: z.uuid() });
 
 // ---------------------------------------------------------------------------------------------- path templates
 
@@ -245,6 +257,28 @@ export function renderStoragePath(
   return { ok: true, folder, name };
 }
 
+/**
+ * The segments of a stored path below its destination base, or null when the path could not have come from a write:
+ * absolute, a drive letter, a backslash, NUL, empty, '.', '..', or a segment that sanitizeStorageSegment would change.
+ * `base` is the S3 prefix or the vault folder: the path must start with `${base}/` and the base is stripped first.
+ */
+export function storedPathSegments(path: string, base = ''): string[] | null {
+  if (!path || path.length > 1024) return null;
+  let rest = path;
+  const b = base.replace(/^\/+|\/+$/g, '');
+  if (b) {
+    if (!rest.startsWith(`${b}/`)) return null;
+    rest = rest.slice(b.length + 1);
+  }
+  if (!rest || rest.length > MAX_PATH) return null;
+  const segs = rest.split('/');
+  for (const seg of segs) {
+    if (!seg || seg === '.' || seg === '..') return null;
+    if (sanitizeStorageSegment(seg) !== seg) return null;
+  }
+  return segs;
+}
+
 /** Validates the pieces of a template without values (placeholders known and braces balanced). */
 export function checkStorageTemplate(template: string): { ok: true } | { ok: false; error: string } {
   const vars: Record<string, string> = {};
@@ -278,6 +312,25 @@ export const StorageAuthBodySchema = z.object({
 });
 export const StorageTestBodySchema = z.object({ requestId: z.string().min(1).max(64) });
 
+/** Why a cloud storage cannot take public form files directly (reported by the runner, shown to the firm only). */
+export const DIRECT_UNAVAILABLE_REASONS = [
+  'unsupported_kind',
+  'http_endpoint',
+  'cors_missing',
+  'probe_failed',
+  'needs_reauth',
+] as const;
+export type DirectUnavailableReason = (typeof DIRECT_UNAVAILABLE_REASONS)[number];
+
+/** Kinds whose public form files go browser to storage. */
+export const DIRECT_UPLOAD_KINDS: readonly StorageKind[] = ['onedrive', 'google_drive', 's3'];
+
+/** TTL of an upload grant: 5 min plus the time a 128 KiB/s link needs, clamped to 5..30 min. */
+export function directGrantTtlMs(size: number): number {
+  const ms = 5 * 60_000 + Math.ceil(size / (128 * 1024)) * 1000;
+  return Math.min(30 * 60_000, Math.max(5 * 60_000, ms));
+}
+
 /** What the list shows. No endpoint, bucket, path, account or token: the server does not know them. */
 export interface StorageConnectionDto {
   id: string;
@@ -294,6 +347,11 @@ export interface StorageConnectionDto {
   createdAt: string;
   /** The signed-in user owns the workstation and may connect, test and reconnect from here. */
   canConnect: boolean;
+  /** Whether public form files can go straight to this storage. Null for local folders and vaults. */
+  directUploads?: {
+    state: 'ready' | 'unavailable' | 'unknown';
+    reason: DirectUnavailableReason | null;
+  } | null;
 }
 
 export interface StorageRequestDto {

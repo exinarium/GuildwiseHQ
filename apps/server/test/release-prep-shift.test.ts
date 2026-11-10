@@ -1,7 +1,16 @@
-import { RELEASE_DOCS_PREP_CAPABILITY, RELEASE_SHIP_CAPABILITY } from '@aom/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  RELEASE_DOCS_PREP_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
+  RELEASE_SHIP_CAPABILITY,
+} from '@aom/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withAppendTx } from '../src/db/tx.ts';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
-import { RELEASE_PREP_MAX_REJECTIONS, releasePrepTaskPass } from '../src/release/docs-prep-tasks.ts';
+import {
+  queueReleasePrepTasks,
+  RELEASE_PREP_MAX_REJECTIONS,
+  releasePrepTaskPass,
+} from '../src/release/docs-prep-tasks.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { freshState } from './helpers/shifts.ts';
@@ -98,11 +107,17 @@ beforeEach(async () => {
   );
   await q(`UPDATE project_repos SET main_branch='main', working_branch=NULL WHERE id=$1`, [w.repoId]);
   w.t.clock.setOffset(0);
-  r = await w.connectRunner({ capabilities: [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_SHIP_CAPABILITY] });
+  r = await w.connectRunner({
+    capabilities: [
+      RELEASE_DOCS_PREP_CAPABILITY,
+      RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
+      RELEASE_SHIP_CAPABILITY,
+    ],
+  });
   await w.hire('Bea', 'builder', 'junior');
   await owner('PUT', `${base()}/settings`, {
     enabled: true,
-    steps: { changelog: false, guide: false, videos: true },
+    steps: { changelog: false, guide: false, help: false, videos: true },
   });
   await ok(owner('POST', `${base()}/runs`), 202);
   await answer(analysed);
@@ -129,10 +144,52 @@ async function startShift(shiftId: string) {
   await until(async () => (await shiftRow(shiftId))?.status === 'running', 3000, 'shift running');
 }
 
+describe('queued tasks of a run that ended', () => {
+  it.each([
+    ['passed', 'finished'],
+    ['failed', 'failed'],
+    ['skipped', 'was cancelled'],
+  ])(
+    'a queued task of a run that is %s is closed with the reason and not dispatched',
+    async (status, wording) => {
+      await q(`UPDATE release_docs_prep_runs SET status=$1`, [status]);
+      const started = await releasePrepTaskPass(w.t.app.ctx);
+      expect(started).toEqual([]);
+      const [t] = await tasks();
+      expect(t.status).toBe('failed');
+      expect(t.note).toContain(`release prep run ended (it ${wording})`);
+      expect(t.code ?? null).toBeNull();
+    },
+  );
+});
+
+describe('commands are delivered after the commit', () => {
+  it('sends the next step command once the report committed, with no timer', async () => {
+    const start = await dispatch();
+    await startShift(start.shiftId);
+    const deliver = vi.spyOn(w.t.app.ctx.services.gateway, 'deliverPending');
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      const { reportId } = r.report(start.shiftId, {
+        kind: 'outcome',
+        outcomeId: 'prep_done',
+        note: 'wrote the forms video',
+        data: { commit: SHA, files: ['e2e/video/forms.spec.ts'] },
+      });
+      await r.waitFor('shift.report.result', (f) => f.reportId === reportId);
+      expect(deliver).toHaveBeenCalledWith(w.workstationId);
+      expect(timer.mock.calls.some((c) => c[1] === 250)).toBe(false);
+    } finally {
+      deliver.mockRestore();
+      timer.mockRestore();
+    }
+  });
+});
+
 describe('a release_prep shift through the gateway', () => {
   it('is started by the dispatcher pass, kept on heartbeat, and its prep done renders the new video', async () => {
     const start = await dispatch();
-    expect(start.releasePrep?.task.slug).toBe('forms');
+    expect(start.releasePrep?.task).toMatchObject({ kind: 'new_video', slug: 'forms' });
     expect(start.releasePrep?.writable).toContain('e2e/video/forms.spec.ts');
     expect((await tasks())[0].status).toBe('running');
     await startShift(start.shiftId);
@@ -215,5 +272,72 @@ describe('a release_prep shift through the gateway', () => {
     const again = await dispatch();
     expect(again.shiftId).not.toBe(start.shiftId);
     w.t.clock.setOffset(0);
+  });
+});
+
+describe('one chooser for the writer of every content step', () => {
+  const changelogTask = {
+    kind: 'changelog_entries' as const,
+    projectName: 'Toy',
+    repoName: 'toy',
+    releaseBranch: 'release/1.5.0',
+    changes: [],
+    existing: [],
+  };
+  const guideTask = {
+    kind: 'guide_edits' as const,
+    guidePath: 'docs/USER-GUIDE.md',
+    changes: [
+      { sources: ['card:TOY-1'], title: 'x', subjects: [], files: [], areas: [], routes: [], hints: [] },
+    ],
+    coveredSources: [],
+  };
+
+  async function queue(step: string, phase: string, task: typeof changelogTask | typeof guideTask) {
+    const run = (await q2('SELECT * FROM release_docs_prep_runs'))[0];
+    await withAppendTx(w.t.app.ctx.pool, (tx) =>
+      queueReleasePrepTasks(w.t.app.ctx, tx, run, w.repoId, step, phase, 0, [task]),
+    );
+  }
+
+  it('gives the changelog task to a BA, the guide task to an architect and the video task to a builder', async () => {
+    const ba = await w.hire('Ada', 'ba', 'senior');
+    const architect = await w.hire('Amy', 'architect', 'senior');
+    await w.hire('Cy', 'builder', 'junior');
+    await queue('changelog', 'write', changelogTask);
+    await queue('guide', 'write', guideTask);
+    await r.barrier();
+    const started = await releasePrepTaskPass(w.t.app.ctx);
+    expect(started).toHaveLength(3);
+    const roleOf = async (taskId: string) =>
+      (
+        await q2(
+          `SELECT a.role_key FROM release_docs_prep_tasks t JOIN agents a ON a.id = t.agent_id WHERE t.id=$1`,
+          [taskId],
+        )
+      )[0].role_key;
+    const byKind: Record<string, string> = {};
+    for (const s of started) {
+      const t = (await q2('SELECT task FROM release_docs_prep_tasks WHERE id=$1', [s.taskId]))[0];
+      byKind[t.task.kind] = await roleOf(s.taskId);
+    }
+    expect(byKind).toEqual({ new_video: 'builder', changelog_entries: 'ba', guide_edits: 'architect' });
+    expect([ba, architect].length).toBe(2);
+    // the start the BA gets is a release_prep shift with the proposal task, not a BA task
+    const start = r.of('shift.start').find((f: any) => f.releasePrep?.task.kind === 'changelog_entries');
+    expect(start?.kind).toBe('release_prep');
+    expect(start?.releasePrep?.writable).toEqual(['release-prep-proposal.json']);
+    expect(start?.brief.card.title).toBe('Write the changelog entries (release/1.5.0)');
+  });
+
+  it('falls back to the next role when the preferred one is not on the workstation (changelog: architect, no BA)', async () => {
+    await w.hire('Amy', 'architect', 'senior');
+    await queue('changelog', 'write', changelogTask);
+    await r.barrier();
+    const started = await releasePrepTaskPass(w.t.app.ctx);
+    const roles = [];
+    for (const s of started)
+      roles.push((await q2('SELECT role_key FROM agents WHERE id=$1', [s.agentId]))[0].role_key);
+    expect(roles.sort()).toEqual(['architect', 'builder']);
   });
 });

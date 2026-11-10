@@ -171,6 +171,7 @@ export class AzureDevOpsForge implements Forge {
         ...base,
         state: 'not_connected',
         detail:
+          this.env.tokens.problem?.() ??
           'Use a Microsoft Entra service principal (set the AZURE_TENANT_ID, AZURE_CLIENT_ID and client credential variables, or `az login --service-principal`), or run `guildwise-runner git-connect azure-devops --organization <name>` and paste a personal access token (Code: read and write).',
       };
     const org = this.org(a);

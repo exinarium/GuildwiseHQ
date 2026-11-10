@@ -1,11 +1,16 @@
 import { readFile } from 'node:fs/promises';
-import { STORAGE_MAX_CLASH, storageClashName } from '@aom/shared';
+import type { DirectUnavailableReason } from '@aom/shared';
+import { STORAGE_MAX_CLASH, storageClashName, storedPathSegments } from '@aom/shared';
 import { authed, httpError, type TokenFn } from './http.ts';
 import {
+  type DirectCapable,
+  type DirectGrant,
   type FetchLike,
   PROBE_BODY,
   PROBE_NAME,
   type Spooled,
+  STAGING_FOLDER,
+  type StagedInfo,
   type StorageConnector,
   StorageError,
   type StorageTarget,
@@ -25,7 +30,7 @@ export interface GDriveConfig {
  * Google Drive with the `drive.file` scope: the connector only sees what it created, so everything lives under a base
  * folder it creates (and recreates when the user deleted or trashed it).
  */
-export class GDriveConnector implements StorageConnector {
+export class GDriveConnector implements StorageConnector, DirectCapable {
   constructor(
     private cfg: GDriveConfig,
     private readonly token: TokenFn,
@@ -177,5 +182,228 @@ export class GDriveConnector implements StorageConnector {
       { method: 'DELETE' },
       signal,
     );
+  }
+
+  /** One folder or file for the parent-chain check; null when it is gone or in the bin. */
+  private async meta(
+    id: string,
+    signal: AbortSignal,
+  ): Promise<{ name: string; parents: string[]; mimeType: string } | null> {
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(id)}?fields=id,name,parents,trashed,mimeType`,
+      { method: 'GET' },
+      signal,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw await httpError('google_drive', res);
+    const j = (await res.json()) as {
+      name?: string;
+      parents?: string[];
+      trashed?: boolean;
+      mimeType?: string;
+    };
+    if (j.trashed) return null;
+    return { name: j.name ?? '', parents: j.parents ?? [], mimeType: j.mimeType ?? '' };
+  }
+
+  /**
+   * Strict delete of one file below the base folder. Drive has no paths, so the file id is required, and the file is
+   * only removed when its name and its parent chain match the stored path up to the base folder.
+   */
+  async deleteFile(
+    ref: { path: string; providerId?: string },
+    signal: AbortSignal,
+  ): Promise<'deleted' | 'not_found'> {
+    const outside = () => new StorageError('invalid', 'The file is outside the storage destination.');
+    const segs = storedPathSegments(ref.path);
+    if (!segs || !ref.providerId || !this.cfg.baseFolderId) throw outside();
+    const file = await this.meta(ref.providerId, signal);
+    if (!file) return 'not_found';
+    if (file.mimeType === FOLDER || file.name !== segs[segs.length - 1]) throw outside();
+    let parent = file.parents[0];
+    for (let i = segs.length - 2; i >= 0; i--) {
+      if (!parent) throw outside();
+      const folder = await this.meta(parent, signal);
+      if (!folder || folder.mimeType !== FOLDER || folder.name !== segs[i]) throw outside();
+      parent = folder.parents[0];
+    }
+    if (!parent || parent !== this.cfg.baseFolderId) throw outside();
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(ref.providerId)}`,
+      { method: 'DELETE' },
+      signal,
+    );
+    if (res.status === 404) return 'not_found';
+    await res.arrayBuffer().catch(() => undefined);
+    if (res.status === 409)
+      throw new StorageError('unavailable', 'The storage is busy or unavailable: try again.');
+    return 'deleted';
+  }
+
+  // ------------------------------------------------------------------------------------------ direct uploads
+
+  async uploadOrigin(): Promise<{ origin: string | null; reason: DirectUnavailableReason | null }> {
+    return { origin: 'https://www.googleapis.com', reason: null };
+  }
+
+  async grant(
+    stagingName: string,
+    file: { size: number; contentType: string; sha256: string },
+    ttlMs: number,
+    pageOrigin: string,
+    signal: AbortSignal,
+  ): Promise<DirectGrant> {
+    const parent = await this.folderPath([STAGING_FOLDER], signal);
+    const start = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${UPLOAD}?uploadType=resumable&fields=id`,
+      {
+        method: 'POST',
+        headers: this.json({
+          'x-upload-content-type': file.contentType,
+          'x-upload-content-length': String(file.size),
+          origin: pageOrigin,
+        }),
+        body: JSON.stringify({ name: stagingName, parents: [parent], mimeType: file.contentType }),
+      },
+      signal,
+    );
+    const loc = start.headers.get('location');
+    if (!start.ok || !loc) throw new StorageError('unavailable', 'The upload could not be started.');
+    return {
+      provider: 'google_drive',
+      url: loc,
+      headers: {},
+      chunkBytes: 8 * 1024 * 1024,
+      expiresAt: Date.now() + ttlMs,
+      stagingRef: `${parent}|${stagingName}`,
+      cancelUrl: loc,
+    };
+  }
+
+  async offset(g: DirectGrant, signal: AbortSignal, size?: number): Promise<number | null> {
+    try {
+      const res = await this.fetchFn(g.url, {
+        method: 'PUT',
+        headers: { 'content-range': `bytes */${size ?? '*'}`, 'content-length': '0' },
+        signal,
+      });
+      await res.arrayBuffer().catch(() => undefined);
+      if (res.status === 308) {
+        const m = /bytes=0-(\d+)/.exec(res.headers.get('range') ?? '');
+        return m ? Number(m[1]) + 1 : 0;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private stagedId(g: DirectGrant, signal: AbortSignal): Promise<string | undefined> {
+    const [parent, name] = g.stagingRef.split('|') as [string, string];
+    return this.find(name, parent, false, signal);
+  }
+
+  async stat(g: DirectGrant, signal: AbortSignal): Promise<StagedInfo | null> {
+    const id = await this.stagedId(g, signal);
+    if (!id) return null;
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(id)}?fields=id,size,sha256Checksum,trashed`,
+      { method: 'GET' },
+      signal,
+    );
+    if (!res.ok) return null;
+    const j = (await res.json()) as { id: string; size?: string; sha256Checksum?: string; trashed?: boolean };
+    if (j.trashed) return null;
+    const sha = j.sha256Checksum?.toLowerCase();
+    return {
+      size: Number(j.size ?? -1),
+      ...(sha && /^[0-9a-f]{64}$/.test(sha) ? { sha256: sha } : {}),
+      providerId: j.id,
+    };
+  }
+
+  async read(
+    g: DirectGrant,
+    range: { start: number; end: number } | null,
+    signal: AbortSignal,
+  ): Promise<ReadableStream<Uint8Array>> {
+    const id = await this.stagedId(g, signal);
+    if (!id) throw new StorageError('not_found', 'The uploaded file was not found.');
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files/${encodeURIComponent(id)}?alt=media`,
+      { method: 'GET', headers: range ? { range: `bytes=${range.start}-${range.end}` } : {} },
+      signal,
+    );
+    if (!res.ok || !res.body) throw new StorageError('not_found', 'The uploaded file was not found.');
+    return res.body as ReadableStream<Uint8Array>;
+  }
+
+  async promote(
+    g: DirectGrant,
+    info: StagedInfo,
+    target: StorageTarget,
+    signal: AbortSignal,
+  ): Promise<{ path: string; providerId?: string }> {
+    const [stagingParent] = g.stagingRef.split('|') as [string];
+    const id = info.providerId ?? (await this.stagedId(g, signal));
+    if (!id) throw new StorageError('not_found', 'The uploaded file was not found.');
+    const parent = await this.folderPath(target.folder, signal);
+    for (let n = 1; n <= STORAGE_MAX_CLASH; n++) {
+      const name = n === 1 ? target.name : storageClashName(target.name, n);
+      if (await this.find(name, parent, false, signal)) continue;
+      const res = await authed(
+        this.fetchFn,
+        'google_drive',
+        this.token,
+        `${API}/files/${encodeURIComponent(id)}?addParents=${encodeURIComponent(parent)}&removeParents=${encodeURIComponent(stagingParent)}&fields=id`,
+        { method: 'PATCH', headers: this.json(), body: JSON.stringify({ name }) },
+        signal,
+      );
+      if (!res.ok) throw new StorageError('unavailable', 'The file could not be moved into place.');
+      return { path: [...target.folder, name].join('/'), providerId: id };
+    }
+    throw new StorageError('conflict', 'Too many files with the same name.');
+  }
+
+  async cancel(g: DirectGrant, signal: AbortSignal): Promise<void> {
+    if (g.cancelUrl) await this.fetchFn(g.cancelUrl, { method: 'DELETE', signal }).catch(() => undefined);
+    const id = await this.stagedId(g, signal).catch(() => undefined);
+    if (id) await this.delete(`id:${id}`, signal).catch(() => undefined);
+  }
+
+  async sweep(keep: (name: string, modifiedAt: number) => boolean, signal: AbortSignal): Promise<number> {
+    const parent = await this.folderPath([STAGING_FOLDER], signal);
+    const res = await authed(
+      this.fetchFn,
+      'google_drive',
+      this.token,
+      `${API}/files?fields=files(id,name,modifiedTime)&pageSize=200&q=${encodeURIComponent(`'${q(parent)}' in parents and trashed=false`)}`,
+      { method: 'GET' },
+      signal,
+    );
+    if (!res.ok) return 0;
+    const j = (await res.json()) as { files?: Array<{ id: string; name: string; modifiedTime?: string }> };
+    let n = 0;
+    for (const f of j.files ?? []) {
+      if (keep(f.name, Date.parse(f.modifiedTime ?? '') || 0)) continue;
+      await this.delete(`id:${f.id}`, signal).catch(() => undefined);
+      n++;
+    }
+    return n;
   }
 }

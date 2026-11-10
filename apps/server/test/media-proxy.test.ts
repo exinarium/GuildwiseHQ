@@ -248,6 +248,23 @@ describe('the /videos limits per address (security review finding 15)', () => {
     expect('release' in lim.take('1.1.1.1')).toBe(true);
   });
 
+  it('a directly reachable client that rotates X-Forwarded-For still hits the rate (default trust)', async () => {
+    const app = await createTestApp({ env: { AOM_MEDIA_URL: fakeUrl, AOM_MEDIA_RATE_PER_MIN: '3' } });
+    try {
+      const get = (i: number) =>
+        app.app.inject({
+          method: 'GET',
+          url: '/videos/desk.mp4',
+          remoteAddress: '203.0.113.7',
+          headers: { 'x-forwarded-for': `198.51.100.${i}` },
+        });
+      for (let i = 1; i <= 3; i++) expect((await get(i)).statusCode).toBe(200);
+      expect((await get(4)).statusCode).toBe(429);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('the route answers 429 with Retry-After past the rate, and recovers for other addresses', async () => {
     const app = await createTestApp({ env: { AOM_MEDIA_URL: fakeUrl, AOM_MEDIA_RATE_PER_MIN: '3' } });
     try {

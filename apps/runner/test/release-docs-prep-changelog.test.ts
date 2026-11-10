@@ -85,7 +85,7 @@ const run = (s: S, over: Partial<ReleaseDocsPrepPayload> = {}): Promise<ReleaseD
   runReleaseDocsPrep({ payload: payload(s, over), repoPath: s.repo.clone, integrationDir: s.integrationDir });
 
 /** analyse, changelog (with `entries`), commit prepare and push. Returns the changelog answer and the pushed file. */
-async function prep(s: S, entries: typeof ENTRIES, runId = RUN) {
+async function prep(s: S, entries: typeof ENTRIES, runId = RUN, phase?: string) {
   const a = await run(s, { runId });
   const common = {
     runId,
@@ -95,6 +95,7 @@ async function prep(s: S, entries: typeof ENTRIES, runId = RUN) {
   const c = await run(s, {
     ...common,
     step: 'changelog',
+    ...(phase ? { phase } : {}),
     changelog: { projectName: 'Guildwise HQ', entries },
   });
   if (c.state === 'passed') {
@@ -117,6 +118,14 @@ async function prep(s: S, entries: typeof ENTRIES, runId = RUN) {
 describe('release.docs_prep changelog', () => {
   it('is registered as the changelog step', () => {
     expect(DOCS_PREP_STEP_HANDLERS.changelog).toBe(changelogStep);
+  });
+
+  it('the apply phase behaves like the single phase: same file, same commit', async () => {
+    const one = await prep(setup(EXISTING), ENTRIES);
+    const apply = await prep(setup(EXISTING), ENTRIES, RUN, 'apply');
+    expect(apply.c.state).toBe('passed');
+    expect(apply.c.files).toEqual(one.c.files);
+    expect(apply.file).toBe(one.file);
   });
 
   it('adds the entries under Unreleased, keeps the old ones and reports them', async () => {
@@ -174,10 +183,17 @@ describe('release.docs_prep changelog', () => {
     expect(file).toBe(UNDATED);
   });
 
-  /** The parts of the step context the changelog step does not use (no model call, no process). */
+  it('writes the entries into a changelog whose versions are all undated', async () => {
+    const s = setup('# Changelog\n\n## [Unreleased]\n\n## [1.3.0]\n\n### Fixed\n\n- An old fix.\n');
+    const { c, file } = await prep(s, ENTRIES);
+    expect(c.state).toBe('passed');
+    expect(file).toContain(ENTRIES[0]?.text);
+    expect(file).toContain('## [1.3.0]\n');
+  });
+
+  /** The parts of the step context the changelog step does not use (no process). */
   const ctxStubs = () => ({
     outDir: tmp('aom-cl-out-'),
-    runModel: async () => ({ ok: false as const, error: 'not used' }),
     exec: async () => ({ exitCode: 1, stdout: '', stderr: 'not used', timedOut: false }),
   });
 

@@ -48,6 +48,7 @@ h2{font-size:1.5rem;margin:2em 0 .5em;line-height:1.3}h3{font-size:1.2rem;margin
 .tags a.on{background:var(--brand);color:var(--brand-fg)}
 .pager{display:flex;justify-content:space-between;margin-top:32px}
 article{max-width:720px;margin:0 auto}
+article p img{display:block;max-width:100%;height:auto;border-radius:8px;margin:16px auto}
 article img.cover{width:100%;height:auto;aspect-ratio:1200/630;border-radius:12px;margin:20px 0;background:var(--sunken)}
 article pre{background:var(--sunken);padding:14px;border-radius:8px;overflow:auto;font-size:.9rem}
 article code{background:var(--sunken);padding:1px 5px;border-radius:4px;font-size:.92em}
@@ -74,6 +75,20 @@ nav.site a.cta{margin-left:8px;padding:0 14px}
 footer.site{padding:20px 0 max(20px,env(safe-area-inset-bottom))}footer.site a{display:inline-flex;align-items:center;min-height:44px;margin-right:18px}
 article table{font-size:.9rem}
 }
+.releases-index{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));column-gap:20px;row-gap:0;margin-top:24px}
+.rel-card{position:relative;min-width:0;display:grid;grid-row:span 4;grid-template-rows:subgrid;row-gap:0;margin:0 0 20px;padding:18px 18px 16px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.rel-card:hover{border-color:var(--muted)}
+.rel-version{margin:0 0 4px;font-size:1.15rem;line-height:1.35;color:var(--fg);overflow-wrap:anywhere}
+.rel-date{margin:0 0 10px;font-size:.85rem;line-height:1.4;color:var(--muted)}
+.rel-summary{margin:0 0 14px;font-size:.95rem;line-height:1.5;color:var(--muted);min-height:4.5em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
+.rel-summary.is-empty{font-style:italic}
+.rel-more{align-self:end;margin:0;font-size:.95rem;font-weight:600;color:var(--brand)}
+.rel-more a{color:var(--brand);text-decoration:underline;text-underline-offset:3px}
+.rel-more a::after{content:"";position:absolute;inset:0;border-radius:12px}
+.rel-more a:focus-visible{outline:none}
+.rel-more a:focus-visible::after{outline:2px solid var(--brand);outline-offset:2px}
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+@supports not (grid-template-rows:subgrid){.rel-card{display:flex;flex-direction:column}.rel-version{min-height:2.7em}.rel-more{margin-top:auto}}
 form.inline{display:inline}button{font:inherit;cursor:pointer;background:var(--brand);color:var(--brand-fg);border:0;border-radius:8px;padding:9px 16px}
 `;
 
@@ -135,7 +150,7 @@ function tagList(tags: string[], active?: string): string {
 function card(origin: string, p: PublicBlogPost): string {
   return `<article class="card"><a href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(coverUrl(origin, p.coverImage.defaultKey))}" alt="" loading="lazy" width="1200" height="630"></a>
 <div class="body">${tagList(p.tags)}<h2><a href="/blog/${esc(p.slug)}">${esc(p.title)}</a></h2><p>${esc(p.summary)}</p>
-<div class="meta"><time datetime="${esc(p.publishedAt)}">${esc(fmtDate(p.publishedAt))}</time> &middot; ${p.readingMinutes} min read</div></div></article>`;
+<div class="meta">${p.author ? `${esc(p.author)} &middot; ` : ''}<time datetime="${esc(p.publishedAt)}">${esc(fmtDate(p.publishedAt))}</time> &middot; ${p.readingMinutes} min read</div></div></article>`;
 }
 
 export function listPage(
@@ -202,16 +217,17 @@ export function postPage(
   const sources = post.sources.length
     ? `<h2>Sources</h2><ol class="sources">${post.sources.map((s) => `<li><a href="${esc(s.url)}" rel="nofollow noopener noreferrer" target="_blank">${esc(s.title)}</a></li>`).join('')}</ol>`
     : '';
+  const manual = post.origin === 'manual';
   const by = [disclosure.agentName, disclosure.model].filter(Boolean).join(', ');
   const html = `<article><p class="meta"><a href="/blog">&larr; All articles</a></p>
 <h1>${esc(post.title)}</h1>
-<p class="meta">${esc(BLOG_AUTHOR)} &middot; <time datetime="${esc(post.publishedAt)}">${esc(fmtDate(post.publishedAt))}</time> &middot; ${post.readingMinutes} min read</p>
+<p class="meta">${esc(post.author || BLOG_AUTHOR)} &middot; <time datetime="${esc(post.publishedAt)}">${esc(fmtDate(post.publishedAt))}</time> &middot; ${post.readingMinutes} min read</p>
 ${tagList(post.tags)}
 <img class="cover" src="${esc(image)}" alt="${esc(post.coverImage.alt)}" width="1200" height="630">
 ${videoEmbedHtml(video)}
 ${renderMarkdownHtml(post.bodyMarkdown)}
 ${sources}
-<p class="disclosure">This article was written by an AI agent for Guildwise HQ${by ? ` (${esc(by)})` : ''} and is reviewed against its sources.</p>
+${manual ? '' : `<p class="disclosure">This article was written by an AI agent for Guildwise HQ${by ? ` (${esc(by)})` : ''} and is reviewed against its sources.</p>`}
 <div class="cta-box"><strong>Many hands. One master.</strong><p>Guildwise HQ lets one person run an organization of AI agents, with a board, a desk for decisions and a full record of the work.</p><a class="btn" href="/">See how Guildwise HQ works</a></div>
 </article>`;
   return layout(
@@ -234,7 +250,9 @@ ${sources}
         dateModified: post.updatedAt,
         image: [image],
         mainEntityOfPage: canonical,
-        author: { '@type': 'Organization', name: BLOG_AUTHOR },
+        author: manual
+          ? { '@type': 'Person', name: post.author }
+          : { '@type': 'Organization', name: BLOG_AUTHOR },
         publisher: {
           '@type': 'Organization',
           name: 'Guildwise HQ',
@@ -271,19 +289,42 @@ function entryBodyHtml(entryId: string, body: string): string {
   );
 }
 
+const plainInline = (s: string): string =>
+  s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const releaseSummary = (r: Release): string =>
+  fitText(
+    plainInline(
+      r.whatsNew[0]?.title ||
+        r.sections.added[0] ||
+        r.intro ||
+        r.sections.changed[0] ||
+        r.sections.fixed[0] ||
+        '',
+    ),
+    300,
+  );
+
+function releaseCard(r: Release): string {
+  const name = `Guildwise HQ ${r.version}`;
+  const summary = releaseSummary(r);
+  return `<article class="rel-card"><h2 class="rel-version">${esc(name)}</h2>
+<p class="rel-date"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></p>
+<p class="rel-summary${summary ? '' : ' is-empty'}">${esc(summary || 'See the release notes for the full list of changes.')}</p>
+<p class="rel-more"><a href="/releases/${esc(r.version)}">Read more<span class="vh"> about ${esc(name)}</span></a><span aria-hidden="true"> &rarr;</span></p></article>`;
+}
+
 export function releasesIndexPage(origin: string, releases: Release[]): string {
   const desc = 'What changed in each release of Guildwise HQ.';
   const html = `<h1>Releases</h1><p class="lead">${esc(desc)}</p>
 ${
   releases.length
-    ? `<div class="grid">${releases
-        .map((r) => {
-          const first = r.whatsNew[0]?.title ?? r.sections.added[0] ?? r.intro;
-          return `<article class="card"><div class="body"><h2><a href="/releases/${esc(r.version)}">Guildwise HQ ${esc(r.version)}</a></h2>
-<p>${esc(first.length > 160 ? `${first.slice(0, 157)}...` : first)}</p>
-<div class="meta"><time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></div></div></article>`;
-        })
-        .join('')}</div>`
+    ? `<div class="releases-index">${releases.map(releaseCard).join('')}</div>`
     : '<p>No releases yet. Check back soon.</p>'
 }`;
   return layout(

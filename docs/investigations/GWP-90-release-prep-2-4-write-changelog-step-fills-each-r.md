@@ -535,3 +535,7 @@ the public page drops it).
 | 5 | Commit results commits the step files only when every step passed in every repo, to the branch ship releases from | **holds** | `docsPrepRepos` uses `repoReleaseBranch` = `r.working_branch ?? p.working_branch`, the same as ship's `COALESCE(r.working_branch, p.working_branch)`. Any failed step finishes the run as failed before `commit`. Two-phase prepare/push. |
 | 6 | Facts refreshed after the prep push and before the ship gate opens | **holds** | `applyReleaseDocsPrepResult` calls `requestReleaseFacts` for every repo with a commit when the run passes. `releaseDocsPrepGate` refuses until the facts contain the prep commit. |
 | 7 | Step results stored per run, step and repo as JSON, sent over realtime, earlier runs readable | **does not hold** | `release_docs_prep_steps` stores `files` and `error` only. The result's `notices` are dropped, and the DTO has no output. Earlier runs are readable. Add a generic `output jsonb` column, carried through result, event, projection and DTO, and build `coveredSources` from earlier passed runs' `changelog` output (4.4, 4.6). |
+
+---
+
+**Superseded by GWP-134 (the writer part).** The writer of Write changelog is now a release prep task (`docs/investigations/GWP-134-release-prep-one-writer-mechanism-for-the-content.md`): the writer is chosen in one place for every content step, and the BA task `release_changelog` and the headless guide call are gone. The checks and the output described above still apply.

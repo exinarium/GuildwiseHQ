@@ -1,4 +1,4 @@
-import { BA_ROLE_KEY, getStage, isSuiteOrigin, resolveOutcome } from '@aom/shared';
+import { BA_ROLE_KEY, getStage, isSuiteCard, resolveOutcome } from '@aom/shared';
 import { loadWorkflowById, resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { workflowView } from './cards.ts';
@@ -40,7 +40,7 @@ export async function humanPurposeOf(db: Queryable, card: Row): Promise<'qa' | '
  * test), a scheduled/automatic card (nobody started it) or a suite card.
  */
 export async function manualQaApplies(db: Queryable, card: Row): Promise<boolean> {
-  if (card.investigation_only || card.scheduled || isSuiteOrigin(card.origin)) return false;
+  if (card.investigation_only || card.scheduled || isSuiteCard(card.card_type, card.origin)) return false;
   const p = await one(db, 'SELECT manual_qa FROM projects WHERE id=$1', [card.project_id]);
   return p?.manual_qa ?? true;
 }

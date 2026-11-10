@@ -9,6 +9,7 @@ import { artifactKeyOf, renderDir } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
+import { fastifyTrustProxy } from '../trust-proxy.ts';
 
 /**
  * The artifact push: a render worker on another machine (one that can render) PUTs each finished file to the machine
@@ -103,7 +104,11 @@ export async function startPushServer(
   ctx: Ctx,
   port = ctx.config.videoWorkerPort,
 ): Promise<() => Promise<void>> {
-  const server = Fastify({ logger: false, trustProxy: true, bodyLimit: 1024 });
+  const server = Fastify({
+    logger: false,
+    trustProxy: fastifyTrustProxy(ctx.config.trustProxy),
+    bodyLimit: 1024,
+  });
   server.setErrorHandler((err: any, _req, reply) => {
     if (err instanceof HttpError)
       return reply.code(err.status).send({ error: { code: err.code, message: err.message } });

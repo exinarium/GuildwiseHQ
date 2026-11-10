@@ -8,10 +8,11 @@
 | --- | --- |
 | `../USER-GUIDE.md` | The guide (text, figure references, table of contents). Edit this. Figures are `![Caption](guide/assets/name.jpg)` lines; callouts are blockquotes starting with **Tip**, **Good to know**, **Watch out**, **In the app** or **Before you start** |
 | `parts/head.html` | The CSS of the PDF (Guildwise colours, Geist font) |
-| `parts/cover.html` | The cover (logo, hero screenshot, edition) |
+| `parts/cover.html` | The cover (logo, hero screenshot, edition). The date and release are placeholders (`data-guide-date`, `data-guide-release`, `data-guide-edition`) that `build-guide.mjs` fills |
 | `assemble-guide.mjs` | Converts `USER-GUIDE.md` to `guide.html`, builds the contents and rewrites the contents list inside `USER-GUIDE.md`; stops when a referenced figure is missing |
 | `guide.html` | The assembled guide (generated; do not edit) |
 | `build-guide.mjs` | Two-pass PDF build with Playwright Chromium; the contents get real page numbers from invisible `TOCMARK_` markers |
+| `guide-meta.mjs` | Argument parsing and date formatting of `build-guide.mjs` (no dependencies; tested by `guide-meta.test.mjs`) |
 | `prepare-assets.mjs` | Converts `raw/*.png` into `assets/*.jpg` (flattened, at most 1600 px wide, JPEG quality 80) |
 | `raw/` | The raw PNG screenshots (written by the Playwright project `guide`) |
 | `assets/` | The figures used by the guide, the logos and the fonts |
@@ -29,6 +30,18 @@ pdfinfo docs/guide/Guildwise-HQ-User-Guide.pdf
 ```
 
 `build-guide.mjs` uses Playwright and `pdf-parse`, both devDependencies of the `e2e` package.
+
+### Date and release on the cover
+
+```sh
+node docs/guide/build-guide.mjs --date 2026-11-08 --edition 1.6.0
+```
+
+- `--date YYYY-MM-DD` sets the date in the footer of every page and on the cover. One value feeds both, so they cannot disagree. It is shown as `8 November 2026`. Default without the flag: `2026-10-07` (`7 October 2026`), so a build without flags looks as before.
+- `--edition <text>` (1 to 40 characters) adds a `Release` row with that text to the cover. Without the flag the cover has no such row.
+- An invalid date (`not-a-date`, `2026-13-40`) stops the build with an error that names the value, exits with code 2 and writes no PDF.
+- `parts/cover.html` holds only placeholders; run `assemble-guide.mjs` after changing it. When `--date` or `--edition` is given and `guide.html` has no placeholder, the build stops and tells you to assemble again.
+- The release docs prep ("Update user guide") passes `--date` with the release date, or with the day the prep run started when the release has no date yet (normal before approval), and `--edition` with the release version. The step output shows which date was used.
 
 ## Take the screenshots again
 

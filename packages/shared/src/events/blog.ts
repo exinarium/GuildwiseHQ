@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BLOG_API_SCOPES, SOCIAL_CHANNEL_NETWORKS } from '../blog/constants.ts';
-import { BlogContentSchema } from '../blog/schema.ts';
+import { BlogContentSchema, BlogSlugSchema, ManualBlogContentSchema } from '../blog/schema.ts';
 import { AnySocialPostContentSchema, SOCIAL_POST_KINDS } from '../blog/social-post.ts';
 import { TOPIC_LIMITS, TopicAreaSchema } from '../blog/topic.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
@@ -12,6 +12,9 @@ export const BlogOriginSchema = z.object({
   /** A platform job (no key, no person): the server-side blog writer. */
   system: z.literal('blog-writer').optional(),
 });
+
+/** The writer shape parses first (so every stored writer payload is unchanged); a hand-written article may be looser. */
+const BlogEventContentSchema = BlogContentSchema.or(ManualBlogContentSchema);
 
 const SettingsChange = z.object({
   enabled: z.boolean().optional(),
@@ -26,7 +29,7 @@ export const blogEvents = [
     'BlogPostSubmitted',
     z.object({
       postId: Id,
-      content: BlogContentSchema,
+      content: BlogEventContentSchema,
       contentHash: z.string(),
       origin: BlogOriginSchema,
       /** `in_review` for API submissions; `draft` for a super admin's own first save. */
@@ -37,18 +40,23 @@ export const blogEvents = [
       launch: z.boolean().optional(),
       /** The queued research topic this article answers (`blog_topics.id`); absent for the rotation and for hand-written posts. */
       topicId: Id.optional(),
+      /** Present on an article a person wrote in the platform UI: its byline. Absent on every writer post. */
+      manual: z.object({ authorName: z.string().min(1).max(80) }).optional(),
     }),
   ),
   defineEvent(
     'BlogPostRevised',
     z.object({
       postId: Id,
-      content: BlogContentSchema,
+      content: BlogEventContentSchema,
       contentHash: z.string(),
       by: BlogOriginSchema,
       /** A rejected or draft post goes back to review when revised. */
       resubmit: z.boolean().default(true),
       warnings: z.array(z.string()).default([]),
+      /** A hand-written article: a new byline and, for an article never published, a new slug. */
+      authorName: z.string().min(1).max(80).optional(),
+      slug: BlogSlugSchema.optional(),
     }),
   ),
   defineEvent(
@@ -56,7 +64,15 @@ export const blogEvents = [
     z.object({ postId: Id, auto: z.boolean(), by: BlogOriginSchema.optional() }),
   ),
   defineEvent('BlogPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
-  defineEvent('BlogPostUnpublished', z.object({ postId: Id, by: Id })),
+  defineEvent(
+    'BlogPostUnpublished',
+    z.object({
+      postId: Id,
+      by: Id,
+      /** A hand-written article goes back to a draft (its address answers 404); a writer post becomes `unpublished` (410). */
+      toDraft: z.boolean().optional(),
+    }),
+  ),
   defineEvent('BlogSettingsChanged', z.object({ change: SettingsChange, by: Id })),
   /** The super admin changed the blog writer's settings (the values are summarised, never secrets). */
   defineEvent('BlogWriterSettingsChanged', z.object({ change: z.record(z.string(), z.unknown()), by: Id })),

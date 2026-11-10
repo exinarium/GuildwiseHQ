@@ -44,8 +44,11 @@ import {
   RELAY_FEATURE,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
+  RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+  RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
   RELEASE_FACTS_CAPABILITY,
   RELEASE_PUBLISH_CAPABILITY,
+  RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -66,6 +69,7 @@ import {
   type ShiftLimitSetting,
   type ShiftLimitSource,
   STORAGE_CAPABILITY,
+  STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
   UNLIMITED_SHIFTS,
   uuidv7,
@@ -107,7 +111,7 @@ import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
 import { ExternalAdapters } from './external/index.ts';
-import { resolveJira } from './external/jira-store.ts';
+import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
@@ -125,11 +129,10 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
-import { docsPrepModel } from './git/release-docs-prep-model.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
-import { shipReleaseCommit } from './git/release-ship.ts';
+import { deleteKeptReleaseRef, shipReleaseCommit } from './git/release-ship.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { bumpSubmodule } from './git/submodule-pin.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -166,7 +169,7 @@ import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
 import { RunManager } from './runs/manager.ts';
-import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import { removeOrphanAgentTmps, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
@@ -175,6 +178,7 @@ import { TargetSecrets } from './secrets/targets.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { chromiumPdfRenderer, type PdfRenderer } from './storage/pdf.ts';
 import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
@@ -337,6 +341,7 @@ export class Runner {
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly storage: StorageService;
+  private readonly pdf: PdfRenderer;
   readonly claudeStore: ClaudeCredentialStore;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
@@ -425,10 +430,17 @@ export class Runner {
       ...(opts.serverFetch ? { fetch: opts.serverFetch } : {}),
     });
     this.exec = opts.executor ?? realExecutor;
+    this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
-      tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json')),
+      tokens: new FileTokenStore(
+        join(this.paths.secrets, 'git-tokens.json'),
+        (n) => this.keys.deriveFileKey(n),
+        {
+          warn: (m) => this.log.warn(m),
+        },
+      ),
       ssh: {
         settings: new SshSettingsStore(join(this.paths.secrets, 'git-ssh.json')),
         knownHosts: join(this.paths.secrets, 'known_hosts'),
@@ -436,7 +448,6 @@ export class Runner {
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     };
     this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
-    this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.whatsapp = new WhatsAppSecretStore({
       file: join(this.paths.secrets, 'relay-whatsapp.json'),
       keys: this.keys,
@@ -551,6 +562,8 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
     });
+    const quarantineDir = opts.config.uploadScan.quarantineDir;
+    this.pdf = chromiumPdfRenderer({ browsersPath: join(this.paths.root, 'browsers') });
     this.storage = new StorageService({
       secretsDir: this.paths.secrets,
       spoolDir: join(this.paths.root, 'tmp', 'storage'),
@@ -565,9 +578,25 @@ export class Runner {
         push: async (id) => void (await this.vaults.syncNow(id)),
       },
       oauthEnv: process.env,
-      forbiddenRoots: [this.paths.root],
-      // Connection, kind, size, outcome and duration only: never a path, a name or content.
+      forbiddenRoots: [this.paths.root, ...(quarantineDir ? [quarantineDir] : [])],
+      uploadScan: {
+        ...opts.config.uploadScan,
+        quarantineDir: quarantineDir ?? join(this.paths.root, 'quarantine'),
+      },
+      journalFile: join(this.paths.root, 'state', 'storage-submissions.json'),
+      pdf: this.pdf,
+      pageOrigin: (() => {
+        try {
+          return new URL(opts.config.serverUrl).origin;
+        } catch {
+          return undefined;
+        }
+      })(),
+      // Connection, kind, size, outcome and duration only: never a path, a name or content. The scan verdict lines
+      // (`storage.scan ...`) are the exception and hold the cleaned-up file name, never content.
       log: (line) => this.log.info(line),
+      logWarn: (line) => this.log.warn(line),
+      logError: (line) => this.log.error(line),
     });
     // Any account's login or usage state changing is logged (tagged with the account) and reported to the server.
     this.claudeAccounts.onChange((a) => {
@@ -848,6 +877,8 @@ export class Runner {
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
       this.announceRelay();
       this.storage.reportAll();
+      void this.storage.reportDirect().catch(() => undefined);
+      void this.storage.sweepStaging().catch(() => undefined);
       this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
@@ -969,8 +1000,15 @@ export class Runner {
 
   /** Jira credentials in force: `secrets/jira.json` (written by `aom-runner jira-connect`), else config.json's `jira` block. */
   private jiraConfig() {
-    return resolveJira(this.paths.secrets, this.freshConfig().jira);
+    const keyOf = (n: string) => this.keys.deriveFileKey(n);
+    const problem = new JiraCredentialStore(jiraFile(this.paths.secrets), keyOf).problem();
+    // the poller asks on every poll: say it once per change, not on every call
+    if (problem && !this.jiraUnreadableWarned) this.log.warn(problem);
+    this.jiraUnreadableWarned = !!problem;
+    if (problem) return undefined;
+    return resolveJira(this.paths.secrets, this.freshConfig().jira, keyOf);
   }
+  private jiraUnreadableWarned = false;
 
   /** The organization source folder of an organization (read fresh from config.json, so `org-folder set` needs no restart). */
   private orgSourceFolder(orgId: string): string | undefined {
@@ -1160,12 +1198,19 @@ export class Runner {
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
+    this.repairPdfRenderer();
     await this.scan();
     // Backlog #81: temp content left by earlier shifts (and a crashed runner) goes before anything runs.
     await sweepAgentTmps(this.paths, this.supervisor.persistedAgentIds())
       .then((r) => {
         if (r.removed)
           this.log.info(`temp sweep: removed ${r.removed} entries of ${r.agents} agent temp dir(s)`);
+      })
+      .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    // ... and the temp dirs of this runner's agents whose folder is gone (removed outside the runner)
+    await removeOrphanAgentTmps(this.paths, this.supervisor.persistedAgentIds())
+      .then((n) => {
+        if (n) this.log.info(`temp sweep: removed ${n} temp dir(s) of agents that no longer exist`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
     this.startScratchSweeps();
@@ -1230,8 +1275,21 @@ export class Runner {
     await this.supervisor.stopAll('manager');
     await this.chat.cancelAll('runner stopped');
     await this.client.stop();
+    await this.pdf.close();
     await this.ipc.stop();
     this.writeStatus(false);
+  }
+
+  /** The PDF browser of a new runner version is fetched in the background; until then copies report 'unavailable'. */
+  private repairPdfRenderer(): void {
+    void (async () => {
+      if ((await this.pdf.status()).ready) return;
+      this.log.info('pdf renderer: browser missing, installing in the background');
+      await this.pdf.install({ withDeps: false, log: () => undefined });
+      this.log.info('pdf renderer: browser installed');
+    })().catch(() =>
+      this.log.warn('pdf renderer: background install failed (run `guildwise-runner pdf-renderer install`)'),
+    );
   }
 
   /** `aom runner status|logs` and the `runner.diagnostics` command: this workstation's status and logs, secrets masked. */
@@ -1473,16 +1531,20 @@ export class Runner {
             : ['runs:1', 'runs:2', 'runs:3']),
         'ceo:1',
         STORAGE_CAPABILITY,
+        STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
+        RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
         CHECKS_CAPABILITY,
         RELEASE_DOCS_PREP_CAPABILITY,
         RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
+        RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
+        RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
         RELEASE_PUBLISH_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
@@ -1908,6 +1970,11 @@ export class Runner {
       case 'storage.write.chunk':
       case 'storage.write.end':
       case 'storage.write.abort':
+      case 'storage.delete':
+      case 'storage.grant.open':
+      case 'storage.grant.status':
+      case 'storage.grant.finish':
+      case 'storage.grant.cancel':
         this.storage.onMessage(msg);
         break;
       case 'relay.request':
@@ -2195,6 +2262,14 @@ export class Runner {
             remoteUrlNormalized: p.remoteUrlNormalized,
             workingBranch: p.workingBranch,
           });
+      } else if (command === 'release.ref_cleanup') {
+        // The kept ref of a dismissed release: no clone here means there is no ref to remove either.
+        const p = CommandPayloadSchemas['release.ref_cleanup'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo ? await deleteKeptReleaseRef(repo.localPath, p.version) : { ok: true, deleted: false },
+        );
       } else if (command === 'release.docs_prep') {
         // "No clone here" and every git refusal are answers (ok:true, result.state:'failed'): the server fails the run.
         const p = CommandPayloadSchemas['release.docs_prep'].parse(payload);
@@ -2206,11 +2281,6 @@ export class Runner {
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              // The writer of the model-backed steps (the user guide): one headless call as the agent the server chose.
-              runModel: docsPrepModel(
-                { adapters: this.adapters, paths: this.paths, toolchains: this.toolchains },
-                p.writer,
-              ),
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();

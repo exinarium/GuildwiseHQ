@@ -43,6 +43,10 @@ export const PUBLIC_FORM_ERROR_CODES = [
   'rate_limited',
   'submission_not_found',
   'submission_busy',
+  'malware_detected',
+  'scan_unavailable',
+  'upload_unavailable',
+  'upload_mode',
 ] as const;
 export type PublicFormErrorCode = (typeof PUBLIC_FORM_ERROR_CODES)[number];
 
@@ -271,24 +275,57 @@ export interface PublicFormDto {
   version: number;
   /** The public logo route, or null. */
   logo: string | null;
-  /** The firm's name is not stored on a form: the page uses the form title. */
+  /** The firm's name (organization name), shown on the offline panel; null when empty. */
+  firmName: string | null;
   session: string;
   powBits: number;
   minFillMs: number;
   /** `offline`: the firm's runner cannot receive a form now; the page offers the secure link instead of the fields. */
   availability: 'open' | 'offline';
   link: null | { state: 'valid'; expiresAt: string; purpose: 'client' | 'offline' };
+  /** The exact upload hosts this page may send files to (the page CSP lists the same). Empty: everything relays. */
+  uploadOrigins?: string[];
 }
 
 export interface SubmissionStartResultDto {
   submissionId: string;
   uploadToken: string;
-  parts: Array<{ field: string; index: number; needed: boolean }>;
+  parts: Array<{ field: string; index: number; needed: boolean; mode?: 'relay' | 'direct' }>;
 }
 
 export interface SubmissionStatusDto {
   status: 'receiving' | 'storing' | 'failed' | 'complete' | 'expired';
-  parts: Array<{ field: string; index: number; state: 'pending' | 'stored' | 'failed' }>;
+  parts: Array<{
+    field: string;
+    index: number;
+    state: 'pending' | 'verifying' | 'stored' | 'failed';
+    error?: string;
+  }>;
+}
+
+/** The browser reports a finished direct upload. Size and sha256 must equal the announced manifest. */
+export const GrantCompleteSchema = z.object({
+  size: z.number().int().min(1),
+  sha256: Sha256,
+  providerId: z.string().max(300).optional(),
+  etag: z.string().max(300).optional(),
+});
+export type GrantCompleteBody = z.infer<typeof GrantCompleteSchema>;
+export const GrantCancelSchema = z.object({ reason: z.enum(['retry', 'blocked', 'abandoned']) });
+export type GrantCancelBody = z.infer<typeof GrantCancelSchema>;
+
+/** A short-lived, single-use upload grant. The URL is a secret: never logged, never stored. */
+export interface GrantDto {
+  grant: {
+    method: 'PUT';
+    url: string;
+    headers: Record<string, string>;
+    chunkBytes: number | null;
+    expiresAt: string;
+  };
+}
+export interface GrantOffsetDto {
+  offset: number | null;
 }
 
 export interface SubmissionCompleteDto {
@@ -356,5 +393,15 @@ export interface FormSubmissionDto {
   createdAt: string;
   completedAt: string | null;
   /** Where the answers and files landed (storage paths, no content). */
-  stored: Array<{ label: string; path: string }>;
+  stored: Array<{
+    label: string;
+    path: string;
+    /** Set on files of an expired submission once their removal is queued. */
+    cleanup?: { state: SubmissionCleanupState; attempts: number; error: string | null };
+  }>;
+  /** Counts over `stored[].cleanup`; null when no removal was queued. */
+  cleanup?: { pending: number; removed: number; failed: number } | null;
 }
+
+/** Removal of the files an expired submission left in the firm's storage. */
+export type SubmissionCleanupState = 'pending' | 'removed' | 'failed';

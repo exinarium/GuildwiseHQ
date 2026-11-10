@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sweepFormsOffline } from '../src/commands/forms-offline.ts';
 import { journeyTick } from '../src/journeys/tick.ts';
 import { toDeskDto } from '../src/queries/desk.ts';
@@ -420,5 +420,71 @@ describe('secure link refusals', () => {
     });
     expect(bot.status).toBe(422);
     await goOnline();
+  });
+});
+
+describe('five failed sends', () => {
+  const failAll = (email: string) =>
+    vi.spyOn(ctx().mailer, 'send').mockRejectedValue(new Error(`550 5.1.1 <${email}>: Recipient rejected`));
+  const failFive = async (formId: string) => {
+    for (let i = 0; i < 5; i++) {
+      await q('UPDATE form_offline_requests SET next_attempt_at=NULL WHERE form_id=$1', [formId]);
+      await sweep();
+    }
+  };
+  const failNotice = async (id: string) =>
+    (await q(`SELECT body FROM desk_items WHERE subject_key=$1`, [`form-offline:${id}:failed`]))[0] as any;
+
+  it('a public-URL case keeps its notice, and no log line carries the address or the transport text', async () => {
+    const { formId, publicId } = await pf.published(pf.definition('Five fails public'));
+    await goOffline();
+    const email = addr('f5');
+    await askForLink(publicId, email);
+    await goOnline();
+    const logFrom = pf.logs.length;
+    const spy = failAll(email);
+    await failFive(formId);
+    spy.mockRestore();
+    const c = await caseOf(formId);
+    expect(c).toMatchObject({ status: 'failed', email_enc: null, attempts: 5 });
+    expect((await failNotice(c.id)).body).toContain('Ask the client to open the form again');
+    const logs = pf.logs.slice(logFrom).join('\n');
+    expect(logs).not.toContain(email);
+    expect(logs).not.toContain('Recipient rejected');
+  });
+
+  it('a journey case points the desk to "Send a new link", and that gives the client a link that opens the form', async () => {
+    const { formId, publicId } = await pf.published(pf.definition('Five fails journey'));
+    const j = await formWaitJourney(formId);
+    const { id, wait, token } = await startInstance(j, 'Cy Failed');
+    await goOffline();
+    const email = addr('fj');
+    await askForLink(publicId, email, token);
+    await goOnline();
+    const spy = failAll(email);
+    await failFive(formId);
+    spy.mockRestore();
+    const c = await caseOf(formId);
+    expect(c.status).toBe('failed');
+    const body = (await failNotice(c.id)).body as string;
+    expect(body).toContain('Send a new link');
+    expect(body).not.toContain('open the form again');
+    expect((await pf.load(publicId, token)).status).toBe(410);
+
+    await ok(pf.api('POST', `/api/journey-waits/${wait.id}/resend-link`));
+    const view = await ok<any>(pf.api('GET', `/api/journey-instances/${id}/waits`));
+    const fresh = /#c=(.+)$/.exec(view.waits[0].linkUrl as string)?.[1] as string;
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(token);
+    expect((await pf.load(publicId, fresh)).status).toBe(200);
+    const s = await pf.submit(
+      publicId,
+      { full_name: 'Cy' },
+      [{ field: 'id_copy', name: 'id.png', bytes: PNG }],
+      fresh,
+    );
+    expect(s.complete?.status).toBe(200);
+    await tick();
+    expect(await instStep(id)).toBe('screening');
   });
 });

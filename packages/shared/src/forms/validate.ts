@@ -20,6 +20,7 @@ export type FormFieldErrorCode =
   | 'invalid_option'
   | 'file_type'
   | 'file_too_large'
+  | 'malware_detected'
   | 'invalid_value';
 
 export interface FormFieldError {

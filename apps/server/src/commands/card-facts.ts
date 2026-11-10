@@ -1,4 +1,4 @@
-import { branchName, DEFAULT_STOP_LOSS, streamId } from '@aom/shared';
+import { cardBranchName, DEFAULT_STOP_LOSS, streamId, workReference } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -79,16 +79,20 @@ export async function cardFactsRpc(
   const usage = await cardUsage(ctx.pool, card.id);
   const budget = await stopLossBudget(ctx.pool, card);
   const unlanded = deps.filter((d) => !d.landed).map((d) => d.ref);
+  // The card's own ticket (a bug child keeps its own work reference, not its worktree card's).
+  const wr = workReference({ ref: card.ref as string, fields: card.fields });
   return [
     true,
     {
       ref: card.ref,
+      workRef: wr.ref,
+      isClientRef: wr.isClientRef,
       title: card.title,
       project: project.key,
       stage: card.stage,
       status: card.status,
       branch: {
-        name: wcard.branch_name ?? branchName(project.branch_prefix, wcard.ref, wcard.title),
+        name: wcard.branch_name ?? cardBranchName(project.branch_prefix ?? '', wcard as never).name,
         base: repo?.working_branch ?? project.working_branch,
       },
       environment: {

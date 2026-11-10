@@ -57,7 +57,7 @@ import {
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
-import { TestEnvProblem } from '../events/testing.ts';
+import { BUILDER_TEST_GAP_REASONS, TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
@@ -115,6 +115,7 @@ import {
   RepoCreatePayloadSchema,
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
+import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   CHECKS_MAX,
@@ -136,11 +137,13 @@ import {
 import { VaultFolderSchema } from '../safe.ts';
 import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import {
+  DIRECT_UNAVAILABLE_REASONS,
   STORAGE_CHUNK_BYTES,
   StorageAuthBeginPayloadSchema,
   StorageAuthCancelPayloadSchema,
   StorageConnectPayloadSchema,
   StorageDevicePromptSchema,
+  StorageDiscardPayloadSchema,
   StorageHealthReportSchema,
   StorageReferenceSchema,
   StorageRemovePayloadSchema,
@@ -304,6 +307,13 @@ export const ShiftBriefSchema = z.object({
   card: z.object({
     id: z.uuid(),
     ref: z.string(),
+    /**
+     * The card's work reference (workReference): its intake ticket key (`ABC-1`) when it came from a client ticket,
+     * otherwise `ref`. Absent: older servers.
+     */
+    workRef: z.string().optional(),
+    /** `workRef` is the client's ticket, not the internal card ref. Absent: older servers. */
+    isClientRef: z.boolean().optional(),
     title: z.string(),
     cardType: z.string(),
     fields: z.record(z.string(), z.unknown()),
@@ -351,6 +361,8 @@ export const ShiftBriefSchema = z.object({
     /** Legacy (ignored): the server no longer sends it. */
     domain: z.enum(['work', 'personal']).optional(),
     workingBranch: z.string(),
+    /** The project's card branch prefix (`aom/`): branches under it are card branches. Absent: older servers. */
+    branchPrefix: z.string().optional(),
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),
@@ -361,11 +373,17 @@ export const ShiftBriefSchema = z.object({
     /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */
     projectDoc: z.string().optional(),
   }),
-  /** Builder test runs that went to DevOps without an environment (`BuilderTestsNotRun`): the reviewer and the tester must know. */
+  /** Builder test runs not run without an environment (`BuilderTestsNotRun`): the reviewer and the tester must know. */
   testGaps: z
     .array(
       z.object({
+        /**
+         * The DevOps request asked to run the tests; `''`: no DevOps engineer was on the workstation, nobody was asked.
+         * Stays a required string: older runners drop a `shift.start` frame that fails their schema.
+         */
         requestId: z.string(),
+        /** Absent: older servers (always `test_without_environment`). */
+        reason: z.enum(BUILDER_TEST_GAP_REASONS).optional(),
         stage: z.string(),
         agentName: z.string(),
         at: z.string(),
@@ -915,6 +933,28 @@ export const ReleaseShipResultSchema = z.object({
 export type ReleaseShipResult = z.infer<typeof ReleaseShipResultSchema>;
 
 /**
+ * `release.ref_cleanup`: deletes the kept ref refs/guildwise/release/<version> that a stopped release left behind, when
+ * the owner dismisses it. The payload names the version only: the runner builds and checks the ref itself.
+ */
+export const RELEASE_REF_CLEANUP_CAPABILITY = 'release-ref-cleanup:1';
+/** Where a release commit that is made but not yet pushed is kept, so a Retry pushes the same commit. */
+export const KEPT_RELEASE_REF_PREFIX = 'refs/guildwise/release/';
+export const keptReleaseRef = (version: string): string => `${KEPT_RELEASE_REF_PREFIX}${version}`;
+export const ReleaseRefCleanupPayloadSchema = z.object({
+  shipId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(500),
+  version: ReleaseShipPayloadSchema.shape.version,
+});
+export type ReleaseRefCleanupPayload = z.infer<typeof ReleaseRefCleanupPayloadSchema>;
+export const ReleaseRefCleanupResultSchema = z.object({
+  ok: z.boolean(),
+  deleted: z.boolean().default(false),
+  error: z.string().max(500).optional(),
+});
+export type ReleaseRefCleanupResult = z.infer<typeof ReleaseRefCleanupResultSchema>;
+
+/**
  * `release.publish`: after the release commit, bring it to the main branch (found when the release PR was merged, or
  * merged by Guildwise), tag the merge commit `vX.Y.Z` (annotated, never moved) and create the forge release. The runner
  * works every step out again from git and the forge, so a repeat or a Retry never duplicates anything.
@@ -1211,6 +1251,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'release.ship',
+  'release.ref_cleanup',
   'release.docs_prep',
   'release.publish',
   'repo.bump_submodule',
@@ -1233,6 +1274,7 @@ export const RunnerCommandNameSchema = z.enum([
   'storage.test',
   'storage.remove',
   'storage.sync',
+  'storage.discard',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1323,6 +1365,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
+  'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
   'release.publish': ReleasePublishPayloadSchema,
   'repo.bump_submodule': RepoBumpSubmodulePayloadSchema,
@@ -1345,6 +1388,7 @@ export const CommandPayloadSchemas = {
   'storage.test': StorageTestPayloadSchema,
   'storage.remove': StorageRemovePayloadSchema,
   'storage.sync': StorageSyncPayloadSchema,
+  'storage.discard': StorageDiscardPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -1641,6 +1685,11 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
     .optional(),
   /** Additive, with `reason: 'busy'` (`shift-limit:2`): the limit that applied, its source and who holds the slots. */
   capacity: ShiftCapacitySchema.optional(),
+  /**
+   * Additive, with `reason: 'worktree_failed'`: the pre-stage rebase onto the base branch failed for a reason other than
+   * a conflict (base ref, git command, exit code, git's message). Not a conflict: the card is not sent to Rework.
+   */
+  rebaseError: RebaseErrorInfoSchema.optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),
@@ -2205,6 +2254,12 @@ export const StorageWriteOpenSchema = msg('storage.write.open', {
   contentType: z.string().max(200),
   size: z.number().int().nonnegative(),
   deadlineMs: z.number().int().positive(),
+  /** Set on every write that belongs to a public form submission (files and answers documents). */
+  submission: z.object({ orgId: z.uuid(), formId: z.uuid(), submissionId: z.uuid() }).optional(),
+  /** Set only on a public form file answer: the runner scans it when its upload scan setting is on. */
+  scan: z.object({ field: z.string().max(100), fileName: z.string().max(300) }).optional(),
+  /** Set only on the answers HTML of a public form submission: the runner also writes a PDF made from it. */
+  derive: z.object({ pdf: z.literal(true) }).optional(),
 });
 export const StorageWriteChunkSchema = msg('storage.write.chunk', {
   transferId: z.uuid(),
@@ -2230,6 +2285,117 @@ export const StorageWriteResultSchema = msg('storage.write.result', {
   ok: z.boolean(),
   reference: StorageReferenceSchema.optional(),
   error: StorageWriteErrorSchema.optional(),
+  /** What the runner made from the written file (the PDF copy of the answers HTML). Absent on an old runner. */
+  derived: z
+    .object({
+      pdf: z.discriminatedUnion('ok', [
+        z.object({ ok: z.literal(true), reference: StorageReferenceSchema }),
+        z.object({
+          ok: z.literal(false),
+          code: z.enum(['pdf_unavailable', 'pdf_failed', 'pdf_timeout', 'pdf_write_failed']),
+        }),
+      ]),
+    })
+    .optional(),
+});
+/** Server to runner: remove one file the server wrote earlier (cleanup of an expired form submission). */
+export const StorageDeleteSchema = msg('storage.delete', {
+  requestId: z.uuid(),
+  connectionId: z.uuid(),
+  path: z.string().min(1).max(1024),
+  providerId: z.string().max(300).optional(),
+  /** Logging and the runner's journal only. */
+  submissionId: z.uuid().optional(),
+});
+export const StorageDeleteResultSchema = msg('storage.delete.result', {
+  requestId: z.uuid(),
+  ok: z.boolean(),
+  result: z.enum(['deleted', 'not_found']).optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+
+// ---------------------------------------------------------------- direct uploads (GWP-147)
+// The runner issues a short-lived upload grant for a OneDrive, Google Drive or S3 destination; the public browser uploads
+// to the provider and the runner verifies the staged object. None of these frames is acked. The grant URL is a secret.
+
+const GRANT_HEADERS = ['content-type', 'if-none-match', 'x-amz-checksum-sha256'] as const;
+export const StorageGrantOpenSchema = msg('storage.grant.open', {
+  grantId: z.uuid(),
+  connectionId: z.uuid(),
+  folder: z.string().max(400),
+  name: z.string().max(200),
+  vars: z.record(z.string().max(40), z.string().max(300)),
+  ext: z.string().max(12).optional(),
+  contentType: z.string().max(200),
+  size: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  accepted: z.array(z.string().max(12)).max(60),
+  pageOrigin: z.string().max(200),
+  ttlMs: z.number().int().positive(),
+  submission: z.object({ orgId: z.uuid(), formId: z.uuid(), submissionId: z.uuid() }),
+  scan: z.object({ field: z.string().max(100), fileName: z.string().max(300) }),
+});
+export const StorageGrantStatusSchema = msg('storage.grant.status', { grantId: z.uuid() });
+export const StorageGrantFinishSchema = msg('storage.grant.finish', {
+  grantId: z.uuid(),
+  size: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  providerId: z.string().max(300).optional(),
+  etag: z.string().max(300).optional(),
+});
+export const StorageGrantCancelSchema = msg('storage.grant.cancel', {
+  grantId: z.uuid(),
+  reason: z.enum(['client_gone', 'expired', 'retry', 'blocked', 'shutdown']),
+});
+export const StorageGrantResultSchema = msg('storage.grant.result', {
+  grantId: z.uuid(),
+  ok: z.boolean(),
+  grant: z
+    .object({
+      provider: z.enum(['onedrive', 'google_drive', 's3']),
+      method: z.literal('PUT'),
+      url: z
+        .string()
+        .max(4096)
+        .refine((u) => {
+          try {
+            return new URL(u).protocol === 'https:';
+          } catch {
+            return false;
+          }
+        }),
+      headers: z
+        .partialRecord(z.enum(GRANT_HEADERS), z.string().max(300))
+        .refine((h) => Object.keys(h).length <= 8),
+      chunkBytes: z.number().int().positive().nullable(),
+      expiresAt: z.number().int().positive(),
+    })
+    .optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+export const StorageGrantOffsetSchema = msg('storage.grant.offset', {
+  grantId: z.uuid(),
+  offset: z.number().int().nonnegative().nullable(),
+});
+export const StorageGrantVerifiedSchema = msg('storage.grant.verified', {
+  grantId: z.uuid(),
+  ok: z.boolean(),
+  reference: StorageReferenceSchema.optional(),
+  error: StorageWriteErrorSchema.optional(),
+});
+export const StorageDirectReportSchema = msg('storage.direct.report', {
+  connections: z
+    .array(
+      z.object({
+        connectionId: z.uuid(),
+        uploadOrigin: z
+          .string()
+          .regex(/^https:\/\/[a-z0-9.-]+(:\d{1,5})?$/)
+          .nullable(),
+        reason: z.enum(DIRECT_UNAVAILABLE_REASONS).nullable(),
+      }),
+    )
+    .max(100),
 });
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
@@ -2282,6 +2448,11 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageAuthSchema,
   StorageWriteCreditSchema,
   StorageWriteResultSchema,
+  StorageDeleteResultSchema,
+  StorageGrantResultSchema,
+  StorageGrantOffsetSchema,
+  StorageGrantVerifiedSchema,
+  StorageDirectReportSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2305,6 +2476,11 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   StorageWriteChunkSchema,
   StorageWriteEndSchema,
   StorageWriteAbortSchema,
+  StorageDeleteSchema,
+  StorageGrantOpenSchema,
+  StorageGrantStatusSchema,
+  StorageGrantFinishSchema,
+  StorageGrantCancelSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

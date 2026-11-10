@@ -394,3 +394,108 @@ describe('the DevOps engineer per organization and workstation', () => {
     ).toMatchObject({ agents: 0, workstations: 0 });
   });
 });
+
+describe('unique names for the DevOps engineers hired when a member joins', () => {
+  async function invite(orgId: string, owner: { cookie: string }, email: string) {
+    await t.req('POST', '/api/org/invitations', {
+      cookie: owner.cookie,
+      headers: { 'x-aom-org': orgId },
+      body: { email, role: 'member' },
+    });
+    const { latestInviteToken } = await import('./helpers/mailpit.ts');
+    return latestInviteToken(email, 'http://aom.test');
+  }
+  const devops = (orgId: string) =>
+    q(`SELECT name, workstation_id FROM agents WHERE org_id=$1 AND is_devops AND status='active'`, [orgId]);
+  const unique = (names: string[]) =>
+    expect(new Set(names.map((n) => n.toLowerCase())).size).toBe(names.length);
+
+  async function orgWithOwnerStation() {
+    const owner = await t.userSession(uniqueEmail('own'));
+    await pairWorkstation(t, owner, 'owner-box');
+    const org = await t.createOrg(owner.id, 'Initech');
+    return { owner, org };
+  }
+
+  for (const n of [2, 3]) {
+    it(`accepts with ${n} workstations: one engineer each, unique names, next to the owner's Atlas`, async () => {
+      const { owner, org } = await orgWithOwnerStation();
+      const before = await devops(org);
+      const u = await t.userSession(uniqueEmail(`u${n}`));
+      for (let i = 0; i < n; i++) await pairWorkstation(t, u, `box${i}`);
+      const token = await invite(org, owner, u.email);
+      await ok(
+        t.req('POST', `/api/invitations/${token}/accept-existing`, { cookie: u.cookie, body: {} }),
+        201,
+      );
+      const member = await q(`SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`, [
+        org,
+        u.id,
+      ]);
+      expect(member).toHaveLength(1);
+      const after = await devops(org);
+      expect(after.length - before.length).toBe(n);
+      unique(after.map((a) => a.name));
+      expect(before.map((a) => a.name.toLowerCase())).toContain('atlas');
+    });
+  }
+
+  it('0 workstations still accepts', async () => {
+    const { owner, org } = await orgWithOwnerStation();
+    const u = await t.userSession(uniqueEmail('u0'));
+    const token = await invite(org, owner, u.email);
+    await ok(t.req('POST', `/api/invitations/${token}/accept-existing`, { cookie: u.cookie, body: {} }), 201);
+    expect((await devops(org)).length).toBe(1);
+  });
+
+  it('the membership hook hires with unique names for a member with 2 workstations', async () => {
+    const { org } = await orgWithOwnerStation();
+    const u = await t.userSession(uniqueEmail('hook'));
+    await pairWorkstation(t, u, 'a');
+    await pairWorkstation(t, u, 'b');
+    await t.addOrgMember(org, u.id, 'member');
+    const all = await devops(org);
+    expect(all).toHaveLength(3);
+    unique(all.map((a) => a.name));
+  });
+
+  it('a failing hire rolls the accept back with a typed error and the same invitation works afterwards', async () => {
+    const { owner, org } = await orgWithOwnerStation();
+    const u = await t.userSession(uniqueEmail('fail'));
+    await pairWorkstation(t, u, 'a');
+    let fail = true;
+    t.app.ctx.store.intercept(async (_tx, batch) => {
+      if (
+        fail &&
+        batch.some(
+          (b) => b.event.type === 'AgentHired' && b.event.payload.isDevops && b.event.payload.orgId === org,
+        )
+      )
+        throw new Error('boom');
+      return batch;
+    });
+    const token = await invite(org, owner, u.email);
+    const r = await t.req('POST', `/api/invitations/${token}/accept-existing`, {
+      cookie: u.cookie,
+      body: {},
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error?.code ?? r.body.code).toBe('devops_hire_failed');
+    expect(
+      await q(`SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`, [org, u.id]),
+    ).toHaveLength(0);
+    fail = false;
+    await ok(t.req('POST', `/api/invitations/${token}/accept-existing`, { cookie: u.cookie, body: {} }), 201);
+  });
+
+  it('pairing in the home organization keeps the default names', async () => {
+    const u = await t.userSession(uniqueEmail('home'));
+    const a = await pairWorkstation(t, u, 'a');
+    const b = await pairWorkstation(t, u, 'b');
+    const names = async (id: string) =>
+      (await q(`SELECT name FROM agents WHERE org_id=$1 AND workstation_id=$2 AND is_devops`, [u.id, id]))[0]
+        ?.name;
+    expect(await names(a.workstationId)).toBe('Atlas');
+    expect(await names(b.workstationId)).toBe('Forge');
+  });
+});

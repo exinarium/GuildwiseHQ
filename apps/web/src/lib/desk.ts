@@ -76,6 +76,8 @@ const SUBKIND_LABEL: Record<string, string> = {
   tester_bottleneck: 'Tester bottleneck',
   test_environment: 'Test environment',
   bug_reported: 'Bug reported',
+  regression_target_mismatch: 'Stale test target',
+  regression_loop: 'Regression loop',
   finalize_failed: 'Finalize failed',
   pr_notice: 'Pull request notice',
   taste_rule: 'Taste rule',

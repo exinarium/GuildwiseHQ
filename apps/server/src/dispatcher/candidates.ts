@@ -124,7 +124,7 @@ export function eligibility(A: AgentRefs) {
     // `test_without_environment`). Suite and regression cards test a target and are not part of the card flow.
     envReady: `((st.environment <> 'project' OR COALESCE(st.env_strict, false)
       OR p.test_without_environment
-      OR c.origin IN ('full_suite','regression')
+      OR (c.card_type = 'regression' AND c.origin IN ('full_suite','regression'))
       OR p.integration_tests->>'mode' IS DISTINCT FROM 'local'
       OR COALESCE((c.fields->>'integrationTests')::boolean, true) = false
       OR NOT EXISTS (SELECT 1 FROM workstation_capabilities wc
@@ -134,7 +134,7 @@ export function eligibility(A: AgentRefs) {
                     AND re.workstation_id = ${A.workstationId}))
       AND (NOT COALESCE(st.env_strict, false)
         OR p.test_without_environment
-        OR c.origin IN ('full_suite','regression')
+        OR (c.card_type = 'regression' AND c.origin IN ('full_suite','regression'))
         OR c.test_deploy_state = 'skipped'
         OR EXISTS (SELECT 1 FROM run_environments re
                     WHERE re.card_id = c.id AND re.purpose = 'test' AND re.verdict_at IS NULL AND re.state = 'healthy'

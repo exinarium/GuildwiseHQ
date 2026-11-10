@@ -29,6 +29,7 @@ import {
   streamId,
   VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
+  workReference,
 } from '@aom/shared';
 import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
@@ -56,6 +57,12 @@ import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
+
+/** The card's work reference for the brief: its intake ticket key when it came from a client ticket, else its ref. */
+export function briefWorkRef(card: Row): { workRef: string; isClientRef: boolean } {
+  const wr = workReference({ ref: card.ref as string, fields: card.fields });
+  return { workRef: wr.ref, isClientRef: wr.isClientRef };
+}
 
 export function agentSpec(a: Row): AgentRuntimeSpec {
   return {
@@ -280,6 +287,7 @@ export async function buildBrief(
     card: {
       id: card.id,
       ref: card.ref,
+      ...briefWorkRef(card),
       title: card.title,
       cardType: card.card_type,
       fields: card.fields,
@@ -331,6 +339,7 @@ export async function buildBrief(
       key: project.key,
       name: project.name,
       workingBranch: project.working_branch,
+      ...(project.branch_prefix ? { branchPrefix: project.branch_prefix as string } : {}),
       e2eGlobs: project.e2e_globs,
       architecturalGlobs: project.architectural_globs,
       vaultFolder: project.vault_folder ?? undefined,
@@ -413,7 +422,11 @@ export async function buildBrief(
   };
 }
 
-/** The builder test runs of the card that went to DevOps without an environment: the reviewer and the tester must know. */
+/**
+ * The builder test runs of the card that were not run without an environment: the reviewer and the tester must know.
+ * A gap with no DevOps request (no engineer on the workstation) is sent with `requestId: ''`: older runners drop a
+ * `shift.start` whose brief fails their schema, so the field stays a string.
+ */
 async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?: ShiftBrief['testGaps'] }> {
   if (agent.is_devops) return {};
   const gaps = await rows(
@@ -425,7 +438,8 @@ async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?:
   if (gaps.length === 0) return {};
   return {
     testGaps: gaps.map((g) => ({
-      requestId: g.request_id,
+      requestId: g.request_id ?? '',
+      reason: g.reason,
       stage: g.stage,
       agentName: g.agent_name ?? 'the builder',
       at: iso(g.created_at) as string,
@@ -888,6 +902,7 @@ export async function devopsCardBrief(
   }
   return {
     ref: card.ref,
+    ...briefWorkRef(card),
     title: outsideTitle ? renderUntrusted(`${what} subject`, card.title) : card.title,
     cardType: card.card_type,
     stage: card.stage ?? undefined,

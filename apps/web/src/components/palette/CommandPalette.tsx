@@ -351,7 +351,7 @@ export function CommandPalette({
           data-testid="command-palette"
           className={cx(
             'fixed z-70 overflow-hidden border border-line bg-surface shadow-lg',
-            'max-sm:inset-x-0 max-sm:top-0 max-sm:rounded-b-dialog max-sm:pt-[env(safe-area-inset-top)]',
+            'max-sm:inset-x-0 max-sm:top-0 max-sm:rounded-b-dialog max-sm:pt-(--safe-top)',
             'sm:top-[14vh] sm:left-1/2 sm:w-[min(92vw,40rem)] sm:-translate-x-1/2 sm:animate-rise sm:rounded-dialog',
           )}
         >

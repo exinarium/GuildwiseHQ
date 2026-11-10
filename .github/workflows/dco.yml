@@ -27,10 +27,19 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           failed=0
           for sha in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
+            # Dependabot commits carry no sign-off. Skip a commit only when GitHub says the pull request was opened
+            # by dependabot[bot] AND the commit author is Dependabot's exact identity. Exact string comparisons.
+            if [ "$PR_AUTHOR" = 'dependabot[bot]' ] \
+              && [ "$(git log -1 --format=%an "$sha")" = 'dependabot[bot]' ] \
+              && [ "$(git log -1 --format=%ae "$sha")" = '49699333+dependabot[bot]@users.noreply.github.com' ]; then
+              echo "Commit $sha is by dependabot[bot] on a Dependabot pull request: exempt."
+              continue
+            fi
             if ! git log -1 --format=%B "$sha" | grep -Eq '^Signed-off-by: .+ <.+>$'; then
               echo "::error::Commit $sha has no Signed-off-by line. Add one with 'git commit -s' (see CONTRIBUTING.md)."
               failed=1

@@ -1867,6 +1867,30 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'blog-and-digest#platform-blog',
   },
+  '/platform/blog/new': {
+    title: 'New article',
+    intro:
+      'Write an article yourself. It stays a draft until you publish it, and then it appears on the blog, in the feed and in Help with your name as the author.',
+    controls: [
+      {
+        name: 'Title, address, summary, tags and author',
+        text: 'The address is made from the title until you change it, and cannot change after the first publish. The summary is used in lists, the feed and search results.',
+      },
+      {
+        name: 'Add image',
+        text: 'Upload a PNG, JPEG, WebP or GIF of up to 5 MB. Save the draft first; the image is added to the text where your cursor was.',
+      },
+      {
+        name: 'Write and Preview',
+        text: 'On a small screen switch between the two; on a wide screen the preview is next to the text and shows the article as readers will see it.',
+      },
+      {
+        name: 'Save draft',
+        text: 'Keeps your work without making it public. You can save as often as you like.',
+      },
+    ],
+    article: 'blog-and-digest#platform-blog',
+  },
   '/platform/blog/:id': {
     title: 'Blog post',
     intro: 'One post: edit it, see it as it will look, then approve or reject it.',

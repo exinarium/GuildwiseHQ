@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { branchName, getStage, MAIN_ACCOUNT, MENTION_WORK_HOLD_MS, streamId } from '@aom/shared';
+import { cardBranchName, getStage, MAIN_ACCOUNT, MENTION_WORK_HOLD_MS, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
-import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { cardMessage, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from '../commands/stop-loss.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, type Queryable } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { agentCapBlocked } from '../provider-keys/caps.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
@@ -52,6 +52,43 @@ export interface ClaimArgs {
   overflow?: boolean;
   /** The Claude account chosen for this shift (`main` or absent: the workstation's main account). */
   accountKey?: string;
+}
+
+/**
+ * `name`, or `name-2`, `name-3`, ... : the first that no other card of the project uses as its branch (case-insensitive,
+ * any status: finished branches can stay in the clone). The runner reuses an existing branch silently, so two cards from
+ * the same ticket must never get the same name.
+ */
+export async function uniqueCardBranch(
+  db: Queryable,
+  projectId: string,
+  cardId: string,
+  name: string,
+): Promise<string> {
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? name : `${name}-${n}`;
+    const taken = await one(
+      db,
+      'SELECT 1 FROM cards WHERE project_id=$1 AND id<>$2 AND lower(branch_name)=lower($3) LIMIT 1',
+      [projectId, cardId, candidate],
+    );
+    if (!taken) return candidate;
+  }
+}
+
+/**
+ * The branch of a card that has none yet: named by its work reference (cardBranchName), a ticket name made unique among
+ * the project's cards. `fallbackReason`: the card's ticket could not be used, the name uses the internal ref.
+ */
+export async function newCardBranch(
+  db: Queryable,
+  prefix: string,
+  card: { id: string; project_id: string; ref: string; title: string; fields?: unknown },
+): Promise<{ name: string; fallbackReason?: string }> {
+  const b = cardBranchName(prefix ?? '', card);
+  if (!b.fromTicket)
+    return b.fallbackReason ? { name: b.name, fallbackReason: b.fallbackReason } : { name: b.name };
+  return { name: await uniqueCardBranch(db, card.project_id, card.id, b.name) };
 }
 
 /**
@@ -143,6 +180,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
 
     let worktree: WorktreeClaim | null = null;
     let syncMain: ClaimResult['syncMain'];
+    let branchFallback: { reason: string; name: string; ref: string } | undefined;
     // Planning (lean team) has no worktree of its own but reads the code: a read-only checkout of the working branch.
     if (stage && (stage.worktree !== 'none' || stage.id === 'planning') && card.repo_id) {
       const wcard = card.worktree_card_id
@@ -153,6 +191,13 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         any
       >;
       const path: string | null = wcard.worktree_path ?? null;
+      // A card that already has a branch keeps it (in-flight cards are never renamed).
+      const fresh = wcard.branch_name
+        ? null
+        : await newCardBranch(tx, project.branch_prefix, wcard as Parameters<typeof newCardBranch>[2]);
+      branchFallback = fresh?.fallbackReason
+        ? { reason: fresh.fallbackReason, name: fresh.name, ref: wcard.ref as string }
+        : undefined;
       worktree = {
         repoId: repo.id,
         remoteUrlNormalized: repo.remote_url_normalized,
@@ -161,7 +206,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
           (path === null && typeof card.fields?.suiteBranch === 'string' && card.fields.suiteBranch) ||
           repo.working_branch ||
           project.working_branch,
-        branchName: wcard.branch_name ?? branchName(project.branch_prefix, wcard.ref, wcard.title),
+        branchName: wcard.branch_name ?? (fresh?.name as string),
         worktreePath: path ?? '',
         homeWorkstationId: wcard.home_workstation_id ?? a.workstation_id,
         created: path === null,
@@ -243,6 +288,17 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
                 actor: SYSTEM_ACTOR,
                 scope: projectScope(card.org_id, card.project_id),
               },
+            ]
+          : []),
+        // The card's ticket could not name the branch: say so once, when the branch is created.
+        ...(branchFallback && worktree?.created && !worktree.readOnly
+          ? [
+              cardMessage(
+                card,
+                { kind: 'system' },
+                'system',
+                `${branchFallback.reason}; the branch uses ${branchFallback.ref} instead: ${branchFallback.name}.`,
+              ),
             ]
           : []),
       ],

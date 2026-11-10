@@ -1,10 +1,11 @@
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepSummary } from '@aom/shared';
 import { changelogStep } from './release-docs-prep-changelog.ts';
 import { runGuideStep } from './release-docs-prep-guide.ts';
+import { runHelpStep } from './release-docs-prep-help.ts';
 import { videosStep } from './release-docs-prep-videos.ts';
 
 /**
- * Handlers of the content steps of Release prep (docs and videos): changelog, user guide, videos. A handler writes files
+ * Handlers of the content steps of Release prep (docs and videos): changelog, user guide, Help articles, videos. A handler writes files
  * into the throwaway worktree (cut from the release branch, with the earlier steps' commits) and returns the repo
  * relative paths it wrote. The runner commits them to a local kept ref; nothing leaves the workstation until the
  * 'commit' step pushes.
@@ -17,10 +18,8 @@ export interface DocsPrepStepContext {
   payload: ReleaseDocsPrepPayload;
   /** The analysis of 'Analyse changes' for this repository. */
   summary: ReleaseDocsPrepSummary | undefined;
-  /** A scratch folder for this step (removed afterwards); the model writes only here. */
+  /** A scratch folder for this step (removed afterwards). */
   outDir: string;
-  /** One unattended model call as `payload.writer`: reads `readDirs`, writes only `writeDir`, no shell. */
-  runModel: (req: DocsPrepModelRequest) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** A process with a time limit and the runner's toolchain PATH; output redacted. */
   exec: DocsPrepExec;
   /** The phase of a step with phases; '' for a single-phase step. */
@@ -33,14 +32,6 @@ export interface DocsPrepStepContext {
   dataDir: string | undefined;
   /** The commit the worktree started from. */
   start: string;
-}
-
-export interface DocsPrepModelRequest {
-  instructions: string;
-  prompt: string;
-  readDirs: string[];
-  writeDir: string;
-  timeoutMs: number;
 }
 
 export type DocsPrepExec = (
@@ -74,6 +65,7 @@ export interface DocsPrepStepSpec {
 export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler | DocsPrepStepSpec> = {
   changelog: changelogStep,
   guide: runGuideStep,
+  help: runHelpStep,
   videos: videosStep,
 };
 

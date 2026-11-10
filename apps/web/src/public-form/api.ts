@@ -1,4 +1,6 @@
 import type {
+  GrantDto,
+  GrantOffsetDto,
   PublicFormDto,
   SubmissionCompleteDto,
   SubmissionStartResultDto,
@@ -73,6 +75,40 @@ export const publicApi = {
       },
       body: file,
     }),
+  grant: (publicId: string, sid: string, index: number, token: string, fileName = '') =>
+    call<GrantDto>(
+      'POST',
+      `${publicId}/submissions/${sid}/parts/${index}/grant`,
+      jsonInit({}, { 'x-upload-token': token, 'x-file-name': encodeURIComponent(fileName) }),
+    ),
+  grantOffset: (publicId: string, sid: string, index: number, token: string) =>
+    call<GrantOffsetDto>('GET', `${publicId}/submissions/${sid}/parts/${index}/grant`, {
+      headers: { accept: 'application/json', 'x-upload-token': token },
+    }),
+  grantComplete: (
+    publicId: string,
+    sid: string,
+    index: number,
+    token: string,
+    body: { size: number; sha256: string; providerId?: string; etag?: string },
+  ) =>
+    call<{ state: 'verifying' | 'stored' }>(
+      'POST',
+      `${publicId}/submissions/${sid}/parts/${index}/grant/complete`,
+      jsonInit(body, { 'x-upload-token': token }),
+    ),
+  grantCancel: (
+    publicId: string,
+    sid: string,
+    index: number,
+    token: string,
+    reason: 'retry' | 'blocked' | 'abandoned',
+  ) =>
+    call<{ state: string }>(
+      'POST',
+      `${publicId}/submissions/${sid}/parts/${index}/grant/cancel`,
+      jsonInit({ reason }, { 'x-upload-token': token }),
+    ),
   status: (publicId: string, sid: string, token: string) =>
     call<SubmissionStatusDto>('GET', `${publicId}/submissions/${sid}`, {
       headers: { accept: 'application/json', 'x-upload-token': token },

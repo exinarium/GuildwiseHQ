@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { RunPlanSchema, RunSettingsSchema } from './plan.ts';
 
 /**
@@ -197,6 +198,8 @@ export const RunStatusSchema = z.object({
   endReason: RunEndReasonSchema.optional(),
   /** A test environment whose card branch conflicted with its base branch while rebasing: the files. The card goes to Rework. */
   rebaseConflictFiles: z.array(z.string().max(500)).max(200).optional(),
+  /** A test environment whose card branch could not be rebased for a reason other than a conflict (never a conflict). */
+  rebaseError: RebaseErrorInfoSchema.optional(),
 });
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 

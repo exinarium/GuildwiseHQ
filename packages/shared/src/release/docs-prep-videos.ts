@@ -17,6 +17,7 @@ export const VIDEOS_STEP: ReleaseDocsPrepStepDef = {
   producesFiles: true,
   phases: ['plan', 'author', 'render'],
   serverPhases: ['author'],
+  writerPhase: 'author',
 };
 
 /** Where a repository keeps its screen map. Without it, the repository has no video harness. */

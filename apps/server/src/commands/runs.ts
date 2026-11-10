@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  branchName,
+  cardBranchName,
   DEFAULT_MAX_RUN_ENVIRONMENTS,
   DEFAULT_RUN_PORT_RANGE,
   DEFAULT_RUN_TTL_HOURS,
@@ -39,9 +39,9 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
+import { cardMessage, projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
-import { rebaseConflictEvents } from './rebase.ts';
+import { isRealConflict, rebaseConflictEvents, rebaseErrorText } from './rebase.ts';
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -548,11 +548,13 @@ export async function startRun(
         WHERE pr.project_id=$1 AND pr.removed_at IS NULL ORDER BY pr.name, pr.id`,
       [project.id, ws.id],
     );
-    const cardBranch = card
-      ? ((card.worktree_card_id
-          ? await one(tx, 'SELECT branch_name, ref, title FROM cards WHERE id=$1', [card.worktree_card_id])
-          : card
-        )?.branch_name ?? branchName(project.branch_prefix, card.ref, card.title))
+    const wcard = card?.worktree_card_id
+      ? ((await one(tx, 'SELECT branch_name, ref, title, fields FROM cards WHERE id=$1', [
+          card.worktree_card_id,
+        ])) ?? card)
+      : card;
+    const cardBranch = wcard
+      ? (wcard.branch_name ?? cardBranchName(project.branch_prefix ?? '', wcard as never).name)
       : null;
     const wanted = new Map((req.sources ?? []).map((s) => [s.repoId, s.branch]));
     for (const id of wanted.keys())
@@ -1076,6 +1078,15 @@ export async function applyRunReplayFailed(
 
 // ------------------------------------------------------------------------------- runner reports
 
+/** The branch a card's rebase targets: its repository's working branch, else the project's. */
+async function workingBranchOf(tx: Tx, card: Row): Promise<string> {
+  const repo = card.repo_id
+    ? await one(tx, 'SELECT working_branch FROM project_repos WHERE id=$1', [card.repo_id])
+    : undefined;
+  const proj = await one(tx, 'SELECT working_branch FROM projects WHERE id=$1', [card.project_id]);
+  return (repo?.working_branch ?? proj?.working_branch ?? '') as string;
+}
+
 /** `run.status` from the runner: the state of an environment of this workstation. */
 export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunStatus): Promise<void> {
   const parsed = RunStatusSchema.safeParse(raw);
@@ -1138,26 +1149,42 @@ export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunSt
       r.devops_request_id
         ? events.push(threadMessage(r.devops_request_id, r.org_id, { kind: 'system' }, 'system', text))
         : undefined;
-    if (terminal && state === 'failed' && r.purpose === 'test' && msg.rebaseConflictFiles && r.card_id) {
+    const testCardFailed = terminal && state === 'failed' && r.purpose === 'test' && !!r.card_id;
+    if (testCardFailed && isRealConflict(msg.rebaseConflictFiles)) {
       // The card branch conflicts with its base branch: no environment can run it, the card goes to Rework (like a tester
       // shift whose rebase conflicted).
       const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [r.card_id]);
       if (card && card.status === 'queued' && !card.claim_id) {
-        const repo = card.repo_id
-          ? await one(tx, 'SELECT working_branch FROM project_repos WHERE id=$1', [card.repo_id])
-          : undefined;
-        const proj = await one(tx, 'SELECT working_branch FROM projects WHERE id=$1', [card.project_id]);
         events.push(
           ...rebaseConflictEvents(
             card,
             workstationId,
             card.stage,
-            (repo?.working_branch ?? proj?.working_branch ?? '') as string,
+            await workingBranchOf(tx, card),
             msg.rebaseConflictFiles,
           ),
         );
       }
       await exec(tx, 'UPDATE run_environments SET failure_handled=true WHERE id=$1', [r.id]);
+    } else if (testCardFailed && (msg.rebaseError || msg.rebaseConflictFiles)) {
+      // The rebase failed without conflicting files: not a conflict, the environment stays on the normal failed route
+      // (handleFailedEnvironments); the card thread names the base branch and quotes git.
+      const card = await one(tx, 'SELECT * FROM cards WHERE id=$1', [r.card_id]);
+      if (card) {
+        const base = await workingBranchOf(tx, card);
+        events.push(
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            rebaseErrorText(card.stage, base, {
+              rebaseError: msg.rebaseError ?? null,
+              detail: msg.error ?? null,
+              fileLessConflict: !msg.rebaseError,
+            }),
+          ),
+        );
+      }
     }
     if (terminal) {
       events.push({

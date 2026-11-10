@@ -36,6 +36,7 @@ import { orgScope, userActor } from './common.ts';
 import { releaseClaimsOfAgentEvents } from './devops-retire.ts';
 import { mcpServerCandidates } from './mcp-servers.ts';
 
+// A name in this pool that is also an ordinary word must be added to ORDINARY_WORD_HANDLES (packages/shared/src/release/changelog-entries.ts).
 const NAMES: Record<string, string[]> = {
   default: [
     'Ada',

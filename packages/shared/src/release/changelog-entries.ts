@@ -57,7 +57,7 @@ const SECRETS: RegExp[] = [
 /** Checks one entry. Empty = the entry may be written exactly as it is. */
 export function scrubChangelogEntry(
   e: { heading: string; text: string },
-  opts: { denyList?: readonly string[]; publicText: (s: string) => string },
+  opts: { denyList?: readonly string[]; agentHandles?: readonly string[]; publicText: (s: string) => string },
 ): EntryFinding[] {
   const findings: EntryFinding[] = [];
   if (!changelogHeadingOf(e.heading))
@@ -82,15 +82,147 @@ export function scrubChangelogEntry(
   if (/\blocalhost\b/i.test(text) && !findings.some((f) => f.code === 'host_name'))
     findings.push({ code: 'host_name', detail: 'localhost' });
   if (SECRETS.some((re) => re.test(text))) findings.push({ code: 'secret' });
-  for (const term of opts.denyList ?? []) {
+  const strict: string[] = [...(opts.denyList ?? [])];
+  const loose: string[] = [];
+  for (const h of opts.agentHandles ?? [])
+    (ORDINARY_WORD_HANDLES.has(h.trim().toLowerCase()) ? loose : strict).push(h);
+  let denied = false;
+  for (const term of strict) {
     const t = term.trim();
     if (t.length < 3) continue;
     if (new RegExp(WORD_EDGE(escapeRe(t)), 'i').test(text)) {
-      findings.push({ code: 'deny_list' });
+      denied = true;
       break;
     }
   }
+  if (!denied) denied = loose.some((h) => h.trim().length >= 3 && namesAgent(text, masked, h.trim()));
+  if (denied) findings.push({ code: 'deny_list' });
   return findings;
+}
+
+/** Agent handles that are also ordinary English words: matched only where they are used as a name. Lower case. */
+export const ORDINARY_WORD_HANDLES: ReadonlySet<string> = new Set([
+  // the built-in name pool (apps/server/src/commands/agents.ts)
+  'grace',
+  'rob',
+  'swift',
+  'crane',
+  'lark',
+  'finch',
+  'robin',
+  'wren',
+  'heron',
+  'kestrel',
+  'osprey',
+  'plover',
+  'egret',
+  'merlin',
+  'tern',
+  'ibis',
+  'sparrow',
+  'falcon',
+  'curlew',
+  'magpie',
+  'starling',
+  'alder',
+  'birch',
+  'cedar',
+  'elm',
+  'hazel',
+  'juniper',
+  'larch',
+  'maple',
+  'oak',
+  'poplar',
+  'rowan',
+  'spruce',
+  'willow',
+  'yew',
+  'aspen',
+  'beech',
+  'cypress',
+  'hawthorn',
+  'linden',
+  'sycamore',
+  // common given names that are words
+  'mark',
+  'will',
+  'bill',
+  'joy',
+  'hope',
+  'faith',
+  'rose',
+  'may',
+  'june',
+  'april',
+  'august',
+  'summer',
+  'dawn',
+  'eve',
+  'amber',
+  'ruby',
+  'pearl',
+  'ivy',
+  'lily',
+  'iris',
+  'daisy',
+  'holly',
+  'violet',
+  'olive',
+  'penny',
+  'sky',
+  'storm',
+  'river',
+  'brook',
+  'chase',
+  'drew',
+  'hunter',
+  'guy',
+  'frank',
+  'art',
+  'jack',
+  'pat',
+  'sue',
+  'max',
+  'ray',
+  'gene',
+  'herb',
+  'wade',
+  'lance',
+  'miles',
+  'dean',
+  'rich',
+  'sandy',
+  'cliff',
+  'dale',
+  'glen',
+  'grant',
+  'mason',
+  'carter',
+  'cash',
+  'page',
+  'reed',
+  'bell',
+  'price',
+  'don',
+]);
+
+const ROLE_WORD =
+  '(?:agent|ba|architect|planner|builder|reviewer|tester|devops|ceo|scout|researcher|checker|curator|designer)';
+
+/** Whether text uses an ordinary-word handle as a name: @Mark, Mark (BA), agent Mark, or a capitalised Mark mid-sentence. */
+function namesAgent(text: string, masked: string, handle: string): boolean {
+  const core = escapeRe(handle);
+  const cap = escapeRe(handle[0]?.toUpperCase() + handle.slice(1));
+  if (new RegExp(`@${core}(?![A-Za-z0-9])`, 'i').test(text)) return true;
+  if (new RegExp(`${WORD_EDGE(core)}\\s*\\(\\s*(?:the\\s+)?${ROLE_WORD}\\b`, 'i').test(text)) return true;
+  for (const m of text.matchAll(new RegExp(`(?<![A-Za-z0-9])${ROLE_WORD}\\s+(${core})(?![A-Za-z0-9])`, 'gi')))
+    if (/^[A-Z]/.test(m[1] ?? '')) return true;
+  for (const m of masked.matchAll(new RegExp(WORD_EDGE(cap), 'g'))) {
+    const before = masked.slice(0, m.index).trimEnd();
+    if (before !== '' && !/[.!?:;]$/.test(before)) return true;
+  }
+  return false;
 }
 
 const FINDING_TEXT: Record<EntryFindingCode, string> = {
@@ -115,7 +247,7 @@ export const describeEntryFinding = (index: number, f: EntryFinding): string =>
 
 const HeadingSchema = z.enum(['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'] as const);
 
-/** What the changelog writer reports (`aom release-changelog --file`). Every change ends up in exactly one list. */
+/** What the changelog writer reports (`release-prep-proposal.json` of a `changelog_entries` task). Every change ends up in exactly one list. */
 export const ChangelogProposalSchema = z.object({
   entries: z
     .array(

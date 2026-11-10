@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
+
+export * from './suite-report.ts';
 
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
@@ -24,6 +27,10 @@ export const DESK_SUBKIND = {
   /** A suite that failed and passed again (flaky) three times in seven days: a notice per project and suite. */
   flakySuite: 'flaky_suite',
   bugReported: 'bug_reported',
+  /** A suite or regression run found the target app on another commit than the one it tests: no bug was filed. */
+  regressionTargetMismatch: 'regression_target_mismatch',
+  /** The regression loop stopped (redeploy failed, no DevOps engineer, cap, ...) or a rerun went green. */
+  regressionLoop: 'regression_loop',
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',
   savedWork: 'saved_work',
@@ -84,16 +91,26 @@ export const DESK_SUBKIND = {
   formOfflineLink: 'form_offline_link',
   /** A client's secure link could not be sent (hold ran out, mail failed, key unreadable) or expired unused. */
   formOfflineHoldExpired: 'form_offline_hold_expired',
+  /** A public form submission was saved but its PDF copy could not be made (one per submission, an alert). */
+  formPdfMissing: 'form_pdf_missing',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
   /** A card waits at an approval step (workflow `human` step with purpose approval). */
   approvalStep: 'approval_step',
 } as const;
 
+/** Automatic reruns of the regression loop per chain (so at most 1 + 3 runs) before it stops and asks a person. */
+export const REGRESSION_LOOP_MAX_RERUNS = 3;
+
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */
 export const SUITE_ORIGINS = ['full_suite', 'regression'] as const;
 export const isSuiteOrigin = (origin: string | null | undefined): boolean =>
   origin === 'full_suite' || origin === 'regression';
+/** A suite card (full E2E suite or regression run). A bug card spawned by one keeps the origin for lineage but is not a suite. */
+export const isSuiteCard = (
+  cardType: string | null | undefined,
+  origin: string | null | undefined,
+): boolean => cardType === 'regression' && isSuiteOrigin(origin);
 
 /** Payload of the `finalize.execute` runner command. The runner executes the completion action (no agent involved). */
 export const FinalizeExecutePayloadSchema = z.object({
@@ -116,7 +133,12 @@ export const FinalizeExecutePayloadSchema = z.object({
    * `-2`, `-3` when origin already has it. Absent (old servers): the local branch name is used.
    */
   prBranchPrefix: z.string().optional(),
+  /** The ticket part of the PR branch name (`ABC-1`, `web-12`; the card ref for a non-intake card). */
   ticket: z.string().optional(),
+  /** The card's work reference: the client ticket (`ABC-1`, `acme/web#12`). Sent only with `isClientRef`. */
+  workRef: z.string().optional(),
+  /** `workRef` is the client's ticket: titles use it, and the runner refuses commits that carry the internal ref. */
+  isClientRef: z.boolean().optional(),
   remoteBranch: z.string().optional(),
   prTitle: z.string().optional(),
   prBody: z.string().optional(),
@@ -150,6 +172,19 @@ export const FinalizeResultSchema = z.object({
   headSha: z.string().optional(),
   conflictedFiles: z.array(z.string()).optional(),
   error: z.string().optional(),
+  /**
+   * The pre-finalize rebase failed for a reason other than a conflict (with `ok: false`, never with `conflict`): the base
+   * ref, the git command, its exit code and git's message. Optional: an older server strips it and shows `error`.
+   */
+  rebaseError: RebaseErrorInfoSchema.optional(),
+  /** An intake card's commits name its internal ref (with `ok: false`): nothing was pushed, merged or opened. */
+  internalRef: z
+    .object({
+      ref: z.string(),
+      workRef: z.string(),
+      commits: z.array(z.object({ sha: z.string().max(64), subject: z.string().max(200) })).max(50),
+    })
+    .optional(),
 });
 export type FinalizeResult = z.infer<typeof FinalizeResultSchema>;
 

@@ -69,16 +69,25 @@ describe('sandbox', () => {
     async () => {
       const paths = runnerPaths(tmp());
       const id = '019e3f6a-7b1c-7a2d-8c3e-0123456789ab';
-      const sb = await ensureSandbox(paths, id, 'Kat');
-      expect(sb.tmp).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
-      expect(sandboxEnv(sb).TMPDIR).toBe(sb.tmp);
-      expect(statSync(sb.tmp).mode & 0o777).toBe(0o700);
-      const chromiumSocket = `${sb.tmp}/claude-1000/org.chromium.Chromium.AbC123/SingletonSocket`;
-      expect(Buffer.byteLength(chromiumSocket)).toBeLessThan(108);
-      // another runner data dir gets a different dir for the same agent id
-      expect(agentTmpDir(runnerPaths(tmp()), id)).not.toBe(sb.tmp);
-      await wipeAgent(paths, id);
-      expect(existsSync(sb.tmp)).toBe(false);
+      // the socket length check is about the real /tmp form: the test run's own temp root is set aside for this test
+      const saved = process.env.AOM_AGENT_TMP_ROOT;
+      delete process.env.AOM_AGENT_TMP_ROOT;
+      try {
+        const sb = await ensureSandbox(paths, id, 'Kat');
+        expect(sb.tmp).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
+        expect(sandboxEnv(sb).TMPDIR).toBe(sb.tmp);
+        expect(statSync(sb.tmp).mode & 0o777).toBe(0o700);
+        const chromiumSocket = `${sb.tmp}/claude-1000/org.chromium.Chromium.AbC123/SingletonSocket`;
+        expect(Buffer.byteLength(chromiumSocket)).toBeLessThan(108);
+        // another runner data dir gets a different dir for the same agent id
+        expect(agentTmpDir(runnerPaths(tmp()), id)).not.toBe(sb.tmp);
+        await wipeAgent(paths, id);
+        expect(existsSync(sb.tmp)).toBe(false);
+      } finally {
+        await wipeAgent(paths, id);
+        if (saved === undefined) delete process.env.AOM_AGENT_TMP_ROOT;
+        else process.env.AOM_AGENT_TMP_ROOT = saved;
+      }
     },
   );
 });

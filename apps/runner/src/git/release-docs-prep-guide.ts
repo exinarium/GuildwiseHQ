@@ -1,17 +1,18 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize, relative } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import {
   applyGuideEdits,
-  builtinPlaybookText,
   checkGuideUpdate,
   DEFAULT_GUIDE_PATH,
+  type GuideChange,
   type GuideEdit,
   type GuideProposal,
   GuideProposalSchema,
-  guideOutline,
   locateSections,
+  normalizeGuidePath,
   parseGuide,
+  type ReleaseDocsPrepGuideInput,
   ReleaseDocsPrepGuideInputSchema,
   type ReleaseDocsPrepGuideOutput,
 } from '@aom/shared';
@@ -32,15 +33,8 @@ export interface GuideChangeItem {
 const FILES_MAX = 200;
 const SUBJECTS_MAX = 20;
 const LIST_MAX = 50;
-const MODEL_MS = 15 * 60_000;
-
-/** The writer's instructions: the built-in playbook `user-guide` (packages/capabilities/playbooks/user-guide). */
-export const GUIDE_PLAYBOOK = 'user-guide';
-export function guideInstructions(): string {
-  const body = builtinPlaybookText(GUIDE_PLAYBOOK);
-  if (!body) throw new Error(`the built-in playbook ${GUIDE_PLAYBOOK} is missing`);
-  return body.trim();
-}
+/** The check report is stored on the step row (the server caps it at REPORT_MAX_BYTES = 64 KB). */
+const CHECK_REPORT_MAX_BYTES = 48 * 1024;
 
 const lines = (s: string): string[] =>
   s
@@ -133,34 +127,12 @@ async function changedPaths(wt: string): Promise<string[]> {
     .map((p) => (p.includes(' -> ') ? (p.split(' -> ')[1] as string) : p));
 }
 
-/**
- * 'Update user guide': the writer proposes section edits as JSON, the shared helpers apply and check them, and the
- * PDF guide is rebuilt with the repository's own scripts when the text changed. Edits files only; never commits.
- */
-export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
-  const wt = ctx.worktree;
-  const input = ReleaseDocsPrepGuideInputSchema.safeParse(ctx.payload.stepInput ?? {});
-  if (!input.success) return fail('the user guide step got an invalid input from the server');
-  const guidePath = normalize(input.data.guidePath || DEFAULT_GUIDE_PATH);
-  if (isAbsolute(guidePath) || guidePath.startsWith('..'))
-    return fail(`refusing the guide path ${guidePath}`);
-  const abs = join(wt, guidePath);
-  if (!existsSync(abs) || !statSync(abs).isFile())
-    return { ok: true, files: [], output: { ...empty('passed'), skipped: 'no user guide' } };
-  if (!ctx.summary)
-    return fail('Update user guide needs Analyse changes: tick it in the release prep settings');
-
-  const items = await guideChangeItems(ctx);
-  const covered = new Set(input.data.coveredSources);
-  const uncovered = items.filter((i) => i.sources.some((s) => !covered.has(s)));
-  if (uncovered.length === 0)
-    return { ok: true, files: [], output: { ...empty('passed'), nothing: 'no new changes' } };
-
-  const before = await readFile(abs, 'utf8');
+/** What the guide checks need from the repository (assets, help articles) and the scrub list. */
+export function guideCheckContext(wt: string, guidePath: string, denyList: readonly string[]) {
   const guideDir = dirname(guidePath);
   const helpDir = join(wt, 'apps/web/src/help/articles');
   const hasHelp = existsSync(helpDir);
-  const checkCtx = {
+  return {
     assetExists: (rel: string) => existsSync(join(wt, guideDir, rel)),
     ...(hasHelp
       ? {
@@ -171,90 +143,163 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
           },
         }
       : {}),
-    denyList: input.data.denyList,
+    denyList: [...denyList],
   };
+}
+
+export type GuideCheckContextOf = ReturnType<typeof guideCheckContext>;
+
+/**
+ * Applies a proposal's edits to the guide text and checks the result with `checkGuideUpdate`. The one place the edits are
+ * checked: the shift's `aom prep done` (so the writer can fix a refusal in the same shift) and the apply phase use it.
+ */
+export function tryGuideEdits(before: string, proposal: GuideProposal, checkCtx: GuideCheckContextOf) {
+  const applied = applyGuideEdits(before, proposal.edits);
+  if (applied.kind === 'error') return { applied, errors: applied.errors, warnings: [] as string[] };
+  if (applied.kind === 'unchanged') return { applied, errors: [] as string[], warnings: [] as string[] };
+  const check = checkGuideUpdate(before, applied.md, {
+    ...checkCtx,
+    changedRanges: applied.written,
+    editedSections: applied.changed.length,
+    addedSections: applied.added.length,
+  });
+  return { applied, ...check };
+}
+
+const NEWER_SERVER = 'this runner needs a newer server for Update user guide: update the server';
+
+/** The guide path of the step input, or the failure. */
+function guidePathOf(ctx: DocsPrepStepContext) {
+  const input = ReleaseDocsPrepGuideInputSchema.safeParse(ctx.payload.stepInput ?? {});
+  if (!input.success)
+    return { ok: false as const, error: 'the user guide step got an invalid input from the server' };
+  const checked = normalizeGuidePath(input.data.guidePath);
+  if (!checked.ok)
+    return {
+      ok: false as const,
+      error: `refusing the user guide path ${input.data.guidePath}: it ${checked.reason}`,
+    };
+  const guidePath = checked.path ?? DEFAULT_GUIDE_PATH;
+  const where = `${guidePath} on ${ctx.payload.releaseBranch}${input.data.repoName ? ` in ${input.data.repoName}` : ''}`;
+  return { ok: true as const, input: input.data, guidePath, where };
+}
+
+const NO_GUIDE_NOTE = 'skipped: no user guide in this repository';
+
+/** 'Update user guide', phase `check`: is there a guide, and which changes does it still have to describe? */
+async function checkPhase(ctx: DocsPrepStepContext) {
+  const wt = ctx.worktree;
+  const g = guidePathOf(ctx);
+  if (!g.ok) return fail(g.error);
+  const { input, guidePath, where } = g;
+  const abs = join(wt, guidePath);
+  // The first phase decides that the step does not apply: a repository without a guide is skipped, no writer needed.
+  if (!existsSync(abs) || !statSync(abs).isFile()) {
+    if (input.guidePathConfigured)
+      return fail(
+        `the user guide ${where} does not exist. Fix the path in Project settings > Release prep (docs and videos), or add the file.`,
+      );
+    return {
+      ok: true as const,
+      state: 'skipped' as const,
+      note: NO_GUIDE_NOTE,
+      files: [],
+      output: { ...empty('passed'), skipped: 'no user guide' },
+    };
+  }
+  // never leave the worktree, even through a symlink
+  const real = realpathSync(abs);
+  const root = realpathSync(wt);
+  if (real !== root && !real.startsWith(root + sep))
+    return fail(`refusing the user guide ${where}: it points outside the repository`);
+  if (!ctx.summary)
+    return fail('Update user guide needs Analyse changes: tick it in the release prep settings');
+
+  const items = await guideChangeItems(ctx);
+  const covered = new Set(input.coveredSources);
+  const uncovered = items.filter((i) => i.sources.some((s) => !covered.has(s)));
+  if (uncovered.length === 0)
+    return {
+      ok: true as const,
+      files: [],
+      report: { changes: [] },
+      output: { ...empty('passed'), nothing: 'no new changes' },
+    };
+
+  const before = await readFile(abs, 'utf8');
+  const checkCtx = guideCheckContext(wt, guidePath, input.denyList);
   const pre = checkGuideUpdate(null, before, checkCtx);
   if (pre.errors.length > 0)
     return fail(`the user guide has problems before the update: ${pre.errors[0]}`, pre);
 
   const doc = parseGuide(before);
-  const sectionText = (ref: string): string => {
-    const s = doc.sections.find((x) => x.heading.text === ref);
-    return s ? doc.lines.slice(s.heading.line, s.end).join('\n') : '';
-  };
-  const hinted = new Set<string>();
-  const changes = uncovered.map((i) => {
-    const hints = locateSections(doc, i).slice(0, 3);
-    for (const h of hints) hinted.add(h.section);
-    return { ...i, hints };
-  });
-  const outFile = join(ctx.outDir, 'guide.json');
-  const prompt = (extra = ''): string =>
-    [
-      `Write the JSON to ${outFile}.`,
-      `The guide is ${guidePath}. Its outline:\n${guideOutline(doc)}`,
-      `The changes (with the sections that most likely describe them):\n${JSON.stringify(changes, null, 1)}`,
-      `The current text of those sections:\n${[...hinted].map(sectionText).join('\n\n')}`,
-      extra,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-  const ask = async (extra?: string): Promise<GuideProposal | string> => {
-    const r = await ctx.runModel({
-      instructions: guideInstructions(),
-      prompt: prompt(extra),
-      readDirs: [wt],
-      writeDir: ctx.outDir,
-      timeoutMs: MODEL_MS,
-    });
-    if (!r.ok) return r.error;
-    if ((await changedPaths(wt)).length > 0) return 'the writer changed files in the repository';
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await readFile(outFile, 'utf8'));
-    } catch {
-      return 'the writer did not write a valid JSON file';
-    }
-    const p = GuideProposalSchema.safeParse(raw);
-    return p.success ? p.data : `the writer's JSON is not valid: ${p.error.issues[0]?.message ?? ''}`;
-  };
-
-  const attempt = (proposal: GuideProposal) => {
-    const applied = applyGuideEdits(before, proposal.edits);
-    if (applied.kind === 'error') return { applied, errors: applied.errors, warnings: [] as string[] };
-    if (applied.kind === 'unchanged') return { applied, errors: [] as string[], warnings: [] as string[] };
-    const check = checkGuideUpdate(before, applied.md, {
-      ...checkCtx,
-      changedRanges: applied.written,
-      editedSections: applied.changed.length,
-      addedSections: applied.added.length,
-    });
-    return { applied, ...check };
-  };
-
-  let proposal = await ask();
-  if (typeof proposal === 'string') return fail(proposal);
-  let result = attempt(proposal);
-  if (result.errors.length > 0) {
-    const named = [...new Set(proposal.edits.map((e) => (e.op === 'add_section' ? e.after : e.section)))];
-    const again = await ask(
-      `Your previous edits were refused:\n- ${result.errors.join('\n- ')}\nSections you named, as they are now:\n${named
-        .map(
-          (n) => doc.sections.find((s) => s.heading.number === n || s.heading.text === n)?.heading.text ?? n,
-        )
-        .map(sectionText)
-        .join('\n\n')}\nReturn the whole JSON again.`,
-    );
-    if (typeof again === 'string') return fail(again);
-    proposal = again;
-    result = attempt(proposal);
-    if (result.errors.length > 0)
-      return fail(`the guide update was refused: ${result.errors[0]}`, {
-        errors: result.errors,
-        warnings: result.warnings,
-      });
+  const build = (filesCap: number): GuideChange[] =>
+    uncovered.map((i) => ({
+      sources: i.sources.slice(0, 50),
+      title: i.title.slice(0, 400),
+      subjects: i.subjects.slice(0, SUBJECTS_MAX).map((x) => x.slice(0, 400)),
+      files: i.files.slice(0, filesCap).map((x) => x.slice(0, 400)),
+      areas: i.areas.slice(0, 50).map((x) => x.slice(0, 200)),
+      routes: i.routes.slice(0, 50).map((x) => x.slice(0, 200)),
+      hints: locateSections(doc, i)
+        .slice(0, 3)
+        .map((h) => ({ section: h.section.slice(0, 300), score: h.score, why: h.why.slice(0, 300) })),
+    }));
+  // The report goes on the step row and into the writer's task: keep it under the cap by trimming the file lists first.
+  let changes = build(FILES_MAX);
+  for (const cap of [50, 10, 0]) {
+    if (JSON.stringify(changes).length <= CHECK_REPORT_MAX_BYTES) break;
+    changes = build(cap);
   }
+  while (changes.length > 1 && JSON.stringify(changes).length > CHECK_REPORT_MAX_BYTES)
+    changes = changes.slice(0, -1);
+  return { ok: true as const, files: [], report: { guidePath, changes } };
+}
+
+/**
+ * 'Update user guide': `check` finds the guide and the changes it has to describe (no guide: skipped), the server has a
+ * writer agent propose section edits (a release prep task, checked at `aom prep done`), and `apply` applies and checks
+ * them with the shared helpers and rebuilds the PDF guide with the repository's own scripts when the text changed.
+ * Edits files only; never commits.
+ */
+export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
+  if (ctx.phase === 'check') return checkPhase(ctx);
+  if (ctx.phase !== 'apply') return fail(NEWER_SERVER);
+  const wt = ctx.worktree;
+  const g = guidePathOf(ctx);
+  if (!g.ok) return fail(g.error);
+  const { input, guidePath } = g;
+  const abs = join(wt, guidePath);
+  if (!existsSync(abs) || !statSync(abs).isFile())
+    return {
+      ok: true,
+      state: 'skipped',
+      note: NO_GUIDE_NOTE,
+      files: [],
+      output: { ...empty('passed'), skipped: 'no user guide' },
+    };
+  const rawProposal = ctx.input?.proposal;
+  if (rawProposal === undefined || rawProposal === null)
+    return { ok: true, files: [], output: { ...empty('passed'), nothing: 'no new changes' } };
+  const parsedProposal = GuideProposalSchema.safeParse(rawProposal);
+  if (!parsedProposal.success)
+    return fail(`the guide proposal is not valid: ${parsedProposal.error.issues[0]?.message ?? ''}`);
+  const proposal = parsedProposal.data;
+
+  const before = await readFile(abs, 'utf8');
+  const guideDir = dirname(guidePath);
+  const checkCtx = guideCheckContext(wt, guidePath, input.denyList);
+  const pre = checkGuideUpdate(null, before, checkCtx);
+  if (pre.errors.length > 0)
+    return fail(`the user guide has problems before the update: ${pre.errors[0]}`, pre);
+
+  // The writer is gone by now: a refusal can only come from the work having moved since the shift checked it.
+  const result = tryGuideEdits(before, proposal, checkCtx);
+  if (result.errors.length > 0)
+    return fail(`the guide update was refused: ${result.errors[0]}`, {
+      errors: result.errors,
+      warnings: result.warnings,
+    });
 
   const sourcesFor = (pick: (e: GuideEdit) => boolean): string[] => [
     ...new Set(proposal.edits.filter(pick).flatMap((e) => e.sources)),
@@ -299,14 +344,45 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   const scripts = join(guideDir, 'guide');
   const assemble = join(scripts, 'assemble-guide.mjs');
   const build = join(scripts, 'build-guide.mjs');
-  if (!existsSync(join(wt, assemble))) out.pdf = 'no PDF build';
-  else {
+  // The scripts read ../USER-GUIDE.md: they can only rebuild a guide of that name.
+  const pdfReadsThisFile = basename(guidePath) === 'USER-GUIDE.md';
+  if (!pdfReadsThisFile || !existsSync(join(wt, assemble))) {
+    out.pdf = 'no PDF build';
+    if (!pdfReadsThisFile && existsSync(join(wt, assemble)))
+      out.notes = [
+        ...out.notes,
+        `the PDF guide was not rebuilt: its scripts build USER-GUIDE.md, not ${guidePath}`,
+      ];
+  } else {
+    // The date and release come from the release being prepared, but only a build script that takes the flags
+    // can show them (a release branch cut before the flags existed keeps the date written in it).
+    const buildText = existsSync(join(wt, build)) ? readFileSyncSafe(join(wt, build)) : '';
+    const pdf = guidePdfMeta(input.release, new Date());
+    const buildArgs = [build];
+    if (buildText.includes('--date')) {
+      buildArgs.push('--date', pdf.date);
+      out.pdfDate = pdf.date;
+      out.pdfDateSource = pdf.source;
+      if (pdf.edition && buildText.includes('--edition')) {
+        buildArgs.push('--edition', pdf.edition);
+        out.pdfEdition = pdf.edition;
+      }
+      if (pdf.source === 'run')
+        out.notes = [
+          ...out.notes,
+          `the release has no date yet, so the PDF shows ${pdf.fromRunner ? 'today on this workstation' : 'the day this prep run started'} (${pdf.date})`,
+        ];
+    } else if (buildText)
+      out.warnings = [
+        ...out.warnings,
+        'the PDF build script takes no --date, so the PDF keeps the date written in it',
+      ];
     const steps: Array<[string, string[], number]> = [
       ['corepack', ['pnpm', 'install', '--frozen-lockfile', '--prefer-offline'], 10 * 60_000],
       ['corepack', ['pnpm', '--filter', '@aom/e2e', 'exec', 'playwright', 'install', 'chromium'], 5 * 60_000],
       ['node', [assemble], 2 * 60_000],
       ...(existsSync(join(wt, build))
-        ? ([['node', [build], 10 * 60_000]] as Array<[string, string[], number]>)
+        ? ([['node', buildArgs, 10 * 60_000]] as Array<[string, string[], number]>)
         : []),
     ];
     for (const [cmd, args, timeoutMs] of steps) {
@@ -329,6 +405,20 @@ export const runGuideStep: DocsPrepStepHandler = async (ctx) => {
   if (outside.length > 0) return fail(`the guide build changed ${outside.join(', ')}`, out);
   return { ok: true, files: changed, output: capOutput(out) };
 };
+
+/** What the PDF build gets: the release date (else the run date, else today on this runner) and the version. */
+export function guidePdfMeta(
+  release: ReleaseDocsPrepGuideInput['release'],
+  now: Date,
+): { date: string; source: 'release' | 'run'; edition: string | null; fromRunner: boolean } {
+  const date = release?.date ?? release?.runDate ?? now.toISOString().slice(0, 10);
+  return {
+    date,
+    source: release?.date ? 'release' : 'run',
+    edition: release?.version ?? null,
+    fromRunner: !release,
+  };
+}
 
 function readFileSyncSafe(f: string): string {
   try {

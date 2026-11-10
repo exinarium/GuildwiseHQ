@@ -16,8 +16,8 @@ export const blogProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO blog_posts (id, slug, content, title, summary, tags, status, content_hash, origin_key_id,
-         origin_user_id, warnings, word_count, reading_minutes, review_since, created_at, updated_at, launch, origin_system)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16,$17)
+         origin_user_id, warnings, word_count, reading_minutes, review_since, created_at, updated_at, launch, origin_system, origin_kind, author_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16,$17,$18,$19)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.postId,
@@ -37,6 +37,8 @@ export const blogProjectors: Record<string, Projector> = {
         e.createdAt,
         p.launch ?? false,
         p.origin.system ?? null,
+        p.manual ? 'manual' : 'writer',
+        p.manual?.authorName ?? null,
       ],
     );
     if (p.topicId)
@@ -54,6 +56,7 @@ export const blogProjectors: Record<string, Projector> = {
       tx,
       `UPDATE blog_posts SET content=$2, title=$3, summary=$4, tags=$5, content_hash=$6, warnings=$7,
          word_count=$8, reading_minutes=$9, updated_at=$10,
+         author_name = COALESCE($12::text, author_name), slug = COALESCE($13::text, slug),
          status = CASE WHEN $11::boolean AND status IN ('draft','rejected') THEN 'in_review' ELSE status END,
          review_since = CASE WHEN $11::boolean AND status IN ('draft','rejected') THEN $10 ELSE review_since END,
          rejection_reason = CASE WHEN $11::boolean AND status IN ('draft','rejected') THEN NULL ELSE rejection_reason END
@@ -70,6 +73,8 @@ export const blogProjectors: Record<string, Projector> = {
         s.minutes,
         e.createdAt,
         p.resubmit,
+        p.authorName ?? null,
+        p.slug ?? null,
       ],
     );
   },
@@ -105,10 +110,13 @@ export const blogProjectors: Record<string, Projector> = {
   },
   BlogPostUnpublished: async (tx, e) => {
     const p = (e.event as EventOf<'BlogPostUnpublished'>).payload;
-    await exec(tx, `UPDATE blog_posts SET status='unpublished', updated_at=$2 WHERE id=$1`, [
-      p.postId,
-      e.createdAt,
-    ]);
+    // A hand-written article goes back to a draft (its address answers 404 and it can be published again); a writer
+    // post becomes `unpublished` (410), as every event stored before `toDraft` existed.
+    await exec(
+      tx,
+      `UPDATE blog_posts SET status = CASE WHEN $3::boolean THEN 'draft' ELSE 'unpublished' END, updated_at=$2 WHERE id=$1`,
+      [p.postId, e.createdAt, p.toDraft ?? false],
+    );
   },
   // ---- the research-topic queue (docs/design/ceo-blog-topics.md): no organization appears in any of these
   BlogTopicQueued: async (tx, e) => {

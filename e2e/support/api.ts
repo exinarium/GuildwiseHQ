@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { type APIRequestContext, expect, request } from '@playwright/test';
 import { BASE_URL, DATABASE_URL, E2E_DIR, ROOT, SMTP_URL } from './env.ts';
 
@@ -21,12 +22,11 @@ export async function inviteAndAccept(
   _admin: APIRequestContext,
   user: { email: string; name: string; password: string },
 ): Promise<void> {
+  // the built CLI (the suite needs the built server anyway); pnpm refuses to run in a worktree whose node_modules is a link
   execFileSync(
-    'pnpm',
+    'node',
     [
-      '--filter',
-      '@aom/server',
-      'admin:create',
+      join(ROOT, 'apps/server/dist/admin-create.mjs'),
       '--email',
       user.email,
       '--name',

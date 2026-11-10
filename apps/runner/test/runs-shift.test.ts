@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -11,10 +12,21 @@ import { makeDevopsStart } from './vault-fixtures.ts';
 
 cleanupTmp();
 let h: Harness | undefined;
+/** Environments the tests started with real `systemd-run --user --scope` services. */
+const envIds: string[] = [];
 afterEach(async () => {
+  // A failed or timed-out test never reaches its own run.stop, and the runner deliberately leaves services running when it
+  // stops: stop the environments first, then the runner, then any scope that is still there.
+  for (const envId of h?.runner.runs.liveEnvIds() ?? [])
+    await h?.runner.runs.stop({ envId, reason: 'stopped' }).catch(() => undefined);
   await h?.stop();
   h = undefined;
-});
+  for (const id of envIds.splice(0))
+    spawnSync('systemctl', ['--user', 'stop', `aom-run-${id.slice(0, 8)}-*`], {
+      stdio: 'ignore',
+      timeout: 15_000,
+    });
+}, 60_000);
 
 const SERVER_JS = `require('http').createServer((q, s) => s.end('ok')).listen(Number(process.env.PORT), '127.0.0.1'); setInterval(() => {}, 1000);`;
 
@@ -46,6 +58,7 @@ describe('run a branch through the runner', () => {
   it('prepares the worktrees on run.start, briefs DevOps with BUILD.md, runs aom run calls and reports status and the plan', async () => {
     const repo = repoWithServer();
     const envId = randomUUID();
+    envIds.push(envId);
     const requestId = randomUUID();
     const repoId = randomUUID();
     const port = await freePort();
@@ -160,7 +173,8 @@ describe('run a branch through the runner', () => {
     const last = [...h.server.of('run.status')].reverse().find((s) => s.envId === envId)!;
     expect(last).toMatchObject({ state: 'stopped', endReason: 'stopped' });
     await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
-  });
+    // it waits up to 60 s for the shift to end: more than the default test timeout
+  }, 120_000);
 
   it('announces the capability and the cap in hello', async () => {
     const repo = repoWithServer();

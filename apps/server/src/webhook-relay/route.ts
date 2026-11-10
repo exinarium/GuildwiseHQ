@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { Transform } from 'node:stream';
 import { isOrgOperational, RELAY_STRIPPED_HEADERS, type RelayKind, type RelayOutcome } from '@aom/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { hashRelayToken, RELAY_TOKEN_RE } from '../commands/relay-integrations.ts';
@@ -57,6 +58,21 @@ export function forwardHeaders(rawHeaders: readonly string[]): [string, string][
  * Nothing of the call is stored or logged except numbers and ids: the URL (token and query), headers and body never
  * reach a log line or a table. The server does size, rate and path checks only; signatures are the runner's.
  */
+const tooLarge = (): Error & { statusCode: number } =>
+  Object.assign(new Error('relay body too large'), { statusCode: 413 });
+
+/** Passes the bytes on and fails with a 413 as soon as more than `limit` bytes have arrived. */
+function capped(limit: number): Transform {
+  let seen = 0;
+  return new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      seen += chunk.length;
+      if (seen > limit) return cb(tooLarge());
+      cb(null, chunk);
+    },
+  });
+}
+
 export function relayPublicRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const hub = () => ctx.services.webhookRelay;
@@ -159,6 +175,17 @@ export function relayPublicRoutes(ctx: Ctx) {
       return reply.code(429).header('retry-after', String(t.retryAfterSec)).send();
     };
 
+    /** The body limit of the integration's kind, before the body is read (the route limit is the largest of them). */
+    const limitBody = async (req: FastifyRequest, _reply: FastifyReply, payload: NodeJS.ReadableStream) => {
+      if (req.method !== 'POST' || !req.relay) return payload;
+      const limit = ctx.config.relay.maxBodyBytesByKind[req.relay.kind];
+      const declared = Number(req.headers['content-length']);
+      if (Number.isFinite(declared) && declared > limit) throw tooLarge();
+      const guard = capped(limit);
+      guard.on('error', () => payload.unpipe(guard));
+      return payload.pipe(guard);
+    };
+
     const forward = async (req: FastifyRequest, reply: FastifyReply) => {
       const call = req.relay as RelayCall;
       const body =
@@ -194,9 +221,10 @@ export function relayPublicRoutes(ctx: Ctx) {
       method: ['GET', 'POST'],
       url: '/relay/in/:token',
       logLevel: 'silent',
-      bodyLimit: ctx.config.relay.maxBodyBytes,
+      bodyLimit: Math.max(...Object.values(ctx.config.relay.maxBodyBytesByKind)),
       exposeHeadRoute: false,
       onRequest: lookup,
+      preParsing: limitBody,
       preHandler: rateLimit,
       handler: forward,
     });

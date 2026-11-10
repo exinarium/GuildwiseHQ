@@ -56,6 +56,10 @@ export type ReleaseDocsPrepSummary = z.infer<typeof ReleaseDocsPrepSummarySchema
 export const ReleaseDocsPrepSettingsSchema = z.object({
   enabled: z.boolean(),
   steps: z.record(z.string().max(40), z.boolean()),
+  /** Per repository id: the user guide path; '' clears it. Absent: unchanged. Only the keys sent change. */
+  guidePaths: z.record(z.uuid(), z.string().max(400)).optional(),
+  /** Start automatically when the release is ready on the test site. Absent: unchanged. */
+  autoStart: z.boolean().optional(),
 });
 
 export const ReleaseDocsPrepSettingsDtoSchema = z.object({
@@ -70,6 +74,11 @@ export const ReleaseDocsPrepSettingsDtoSchema = z.object({
     }),
   ),
   canEdit: z.boolean(),
+  autoStart: z.boolean().default(false),
+  repos: z
+    .array(z.object({ id: z.string(), name: z.string(), guidePath: z.string().nullable() }))
+    .default([]),
+  defaultGuidePath: z.string().default('docs/USER-GUIDE.md'),
 });
 export type ReleaseDocsPrepSettingsDto = z.infer<typeof ReleaseDocsPrepSettingsDtoSchema>;
 
@@ -80,9 +89,11 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
   projectId: z.string(),
   releaseBranch: z.string(),
   status: z.enum(['running', 'passed', 'failed', 'skipped']),
-  trigger: z.enum(['manual', 'retry', 'skip']),
+  trigger: z.enum(['manual', 'retry', 'skip', 'auto']),
   retryOf: z.string().nullable(),
   startedBy: z.string().nullable(),
+  /** Display name of the user who started it; null for an automatic run or an unknown user. */
+  startedByName: z.string().nullable().default(null),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   failed: z
@@ -137,6 +148,27 @@ export const ReleaseDocsPrepOverviewItemSchema = z.object({
   state: z.enum(['off', 'not_run', 'running', 'passed', 'failed', 'skipped']),
   canAct: z.boolean(),
   run: ReleaseDocsPrepRunDtoSchema.nullable(),
+  /** The run starts by itself when the release is ready on the test site. */
+  autoStart: z.boolean().default(false),
+  /** Whether the release is ready on the test site; null when automatic start is off or there is no release branch. */
+  readiness: z
+    .object({
+      ready: z.boolean(),
+      repos: z.array(
+        z.object({
+          repoId: z.string(),
+          repoName: z.string(),
+          state: z.enum(['ready', 'not_ready', 'not_checked']),
+          env: z.string().nullable(),
+          reason: z.string().nullable(),
+        }),
+      ),
+      reasons: z.array(z.string()),
+    })
+    .nullable()
+    .default(null),
+  /** Why the release is ready but the run did not start by itself (the manual start's sentence). */
+  autoStartBlocked: z.string().nullable().default(null),
 });
 export type ReleaseDocsPrepOverviewItem = z.infer<typeof ReleaseDocsPrepOverviewItemSchema>;
 
@@ -172,7 +204,7 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   signOff: z.boolean().optional(),
   /** Input of a content step, checked by the step's own schema on the runner. */
   stepInput: z.record(z.string(), z.unknown()).optional(),
-  /** The agent that writes the step's text (model-backed steps only). */
+  /** Retired (GWP-134): the writer is a release prep task now. Accepted and ignored for one version so an older server's command still parses. */
   writer: AgentRuntimeSpecSchema.optional(),
   /** Step 'changelog': the checked entries to merge into Unreleased. */
   changelog: ReleasePrepChangelogPayloadSchema.optional(),
@@ -206,6 +238,11 @@ export type ReleaseDocsPrepResult = z.infer<typeof ReleaseDocsPrepResultSchema>;
 export const RELEASE_DOCS_PREP_CAPABILITY = 'release-docs-prep:1';
 /** The runner can apply the entries of the step 'changelog'. */
 export const RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY = 'release-docs-prep-changelog:1';
+/** The runner fails a configured, missing user guide instead of skipping it. */
+export const RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY = 'release-docs-prep-guide-path:1';
+
+/** The runner takes the writer work of the content steps as release prep tasks (changelog_entries, guide_edits, new_video). */
+export const RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY = 'release-docs-prep-writer-tasks:1';
 
 /** The largest step output stored (serialised JSON). */
 export const RELEASE_DOCS_PREP_OUTPUT_MAX_BYTES = 64 * 1024;

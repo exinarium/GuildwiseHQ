@@ -20,6 +20,8 @@ const EXEMPT_PREFIXES = [
   '/api/worker/video/',
 ];
 
+const PUBLIC_FORMS_PREFIX = '/api/public/forms/';
+
 /**
  * CSRF defence (docs/ARCHITECTURE.md section 18): strict Origin check on every non-GET request, and mutating
  * endpoints accept only application/json (blocks HTML form posts).
@@ -35,6 +37,16 @@ export function checkOrigin(config: Config, req: FastifyRequest, extraExempt: re
   const path = req.url.split('?')[0] ?? '';
   if (!path.startsWith('/api/')) return;
   if (EXEMPT_PREFIXES.some((p) => path.startsWith(p)) || extraExempt.some((p) => path.startsWith(p))) return;
+  // Public form routes (a path segment must follow the prefix): the Origin value is not compared, so a form works
+  // from any address the server answers on. Safe because these routes read no cookie (the page sends
+  // credentials: omit), JSON bodies and the x-upload-token header force a CORS preflight the server never allows,
+  // and a non-browser client can forge Origin anyway. A request with no Origin header is still refused.
+  if (
+    path.startsWith(PUBLIC_FORMS_PREFIX) &&
+    path.length > PUBLIC_FORMS_PREFIX.length &&
+    req.headers.origin !== undefined
+  )
+    return;
   if (!originAllowed(config, req.headers.origin)) {
     throw new HttpError(403, 'bad_origin', 'Origin header missing or not allowed');
   }
@@ -58,6 +70,7 @@ export function checkContentType(req: FastifyRequest, formPostPaths: ReadonlySet
   if (
     /^\/api\/cards\/[^/]+\/attachments$/.test(path) ||
     path === '/api/documents/upload' ||
+    /^\/api\/platform\/blog\/posts\/[^/]+\/images$/.test(path) ||
     path === '/api/forms/logos' ||
     /^\/api\/public\/forms\/[^/]+\/submissions\/[^/]+\/parts\/\d+$/.test(path) ||
     path.startsWith('/api/runner/uploads/') ||

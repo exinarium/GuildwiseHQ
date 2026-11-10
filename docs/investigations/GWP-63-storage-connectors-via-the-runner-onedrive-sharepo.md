@@ -418,3 +418,5 @@ no persistence. Expose `ctx.services.storage.write(...)` for GWP-65 and the conn
 
 Follow-up (backlog suggestion): direct browser-to-storage uploads with runner-issued upload sessions for the cloud kinds
 (option C), once the GWP-65 security review has settled which server-side checks are required.
+
+> Update (GWP-147): option C (a grant for the browser) is now built for OneDrive, Google Drive and S3. See `GWP-147-direct-browser-to-storage-uploads-for-cloud-connec.md`.

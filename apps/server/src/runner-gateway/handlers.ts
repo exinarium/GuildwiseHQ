@@ -10,6 +10,7 @@ import {
   PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
   RELAY_FEATURE,
+  ReleaseRefCleanupResultSchema,
   RUN_USAGE_FEATURE,
   type RunnerToServer,
   type RunnerToServerOf,
@@ -479,6 +480,14 @@ export class RunnerHandlers {
       case 'storage.write.result':
         this.ctx.services.storage.onResult(conn.workstationId, msg.transferId, msg);
         return;
+      case 'storage.delete.result':
+        this.ctx.services.storage.onDeleteResult(conn.workstationId, msg.requestId, msg);
+        return;
+      case 'storage.grant.result':
+      case 'storage.grant.offset':
+      case 'storage.grant.verified':
+      case 'storage.direct.report':
+        return;
       case 'relay.serve': {
         const r = await this.ctx.services.webhookRelay.serve(conn, msg.integrations);
         this.send(conn, 'relay.serve.result', r);
@@ -605,6 +614,19 @@ export class RunnerHandlers {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseShipResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'release.ref_cleanup') {
+      // Terminal: a refusal cannot change by retrying and a missing ref is already a success; nothing else to record.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      const r = ReleaseRefCleanupResultSchema.safeParse(msg.result);
+      if (!msg.ok || !r.success || !r.data.ok)
+        this.ctx.log.warn(
+          {
+            workstationId: conn.workstationId,
+            shipId: cmd.payload.shipId,
+            error: r.data?.error ?? msg.error,
+          },
+          'the kept release ref could not be removed',
+        );
     } else if (cmd?.type === 'release.docs_prep') {
       // Terminal: the step is recorded and the run moves on (or fails with Retry/Skip); never redelivered blindly.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

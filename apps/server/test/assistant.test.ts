@@ -44,12 +44,13 @@ afterEach(async () => {
 });
 
 const user = (text: string) => ({ role: 'user' as const, content: text });
-const ask = (body: unknown, ip = '10.0.0.1') =>
+const ask = (body: unknown, ip = '10.0.0.1', remoteAddress?: string) =>
   t.app.inject({
     method: 'POST',
     url: '/api/public/assistant/chat',
     headers: { origin: 'http://aom.test', 'content-type': 'application/json', 'x-forwarded-for': ip },
     payload: JSON.stringify(body),
+    ...(remoteAddress ? { remoteAddress } : {}),
   });
 const events = (payload: string) =>
   payload
@@ -336,6 +337,21 @@ describe('limits', () => {
     const d = await ask({ messages: [user('tomorrow?')], pow: await pow() });
     expect(d.statusCode).toBe(429);
     expect(JSON.parse(d.payload).error.message).toContain('today');
+  });
+
+  it('keys on the socket address of a directly reachable client that rotates X-Forwarded-For (default trust)', async () => {
+    await boot();
+    for (let i = 0; i < 20; i++) {
+      const r = await ask(
+        { messages: [user(`q${i}`)], pow: i >= 5 ? await pow() : undefined },
+        `198.51.100.${i + 1}`,
+        '203.0.113.7',
+      );
+      expect(r.statusCode).toBe(200);
+    }
+    const r = await ask({ messages: [user('one more')], pow: await pow() }, '198.51.100.200', '203.0.113.7');
+    expect(r.statusCode).toBe(429);
+    expect(JSON.parse(r.payload).error.code).toBe('rate_limited');
   });
 });
 

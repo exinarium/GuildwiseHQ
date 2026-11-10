@@ -77,7 +77,7 @@ export function PushPrompt() {
     <section
       aria-label={kind === 'ios' ? 'Add to Home Screen' : 'Turn on notifications'}
       data-testid={kind === 'ios' ? 'push-ios-card' : 'push-prompt'}
-      className="fixed inset-x-3 bottom-[calc(var(--app-bottom-inset,0px)+0.75rem)] z-40 rounded-card border border-line bg-surface p-4 shadow-lg md:inset-x-auto md:right-4 md:bottom-4 md:w-96"
+      className="fixed right-[calc(0.75rem+var(--safe-right))] bottom-[calc(var(--app-bottom-inset,0px)+0.75rem)] left-[calc(0.75rem+var(--safe-left))] z-40 rounded-card border border-line bg-surface p-4 shadow-lg md:right-[calc(1rem+var(--safe-right))] md:bottom-[calc(var(--app-bottom-inset,0px)+1rem)] md:left-auto md:w-96"
     >
       <div className="flex items-start gap-3">
         <span

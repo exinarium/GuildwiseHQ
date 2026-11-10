@@ -13,6 +13,10 @@ export const releaseDocsPrepEvents = [
       projectId: Id,
       enabled: z.boolean(),
       steps: z.record(z.string(), z.boolean()),
+      /** The full map after the change (repository id to path). Absent in old events. */
+      guidePaths: z.record(z.string(), z.string()).optional(),
+      /** Start automatically when the release is ready. Absent in old events (off). */
+      autoStart: z.boolean().optional(),
       setBy: Id,
     }),
   ),
@@ -31,9 +35,14 @@ export const releaseDocsPrepEvents = [
           workstationId: Id,
         }),
       ),
-      trigger: z.enum(['manual', 'retry']),
+      trigger: z.enum(['manual', 'retry', 'auto']),
       retryOf: Id.optional(),
-      startedBy: Id,
+      /** Null for an automatic start. */
+      startedBy: Id.nullable(),
+      /** Release-branch head per repository when the run started. */
+      heads: z.record(z.string(), z.string()).optional(),
+      /** Automatic runs: the readiness key they started on. */
+      readyKey: z.string().optional(),
     }),
   ),
   defineEvent(
@@ -118,6 +127,10 @@ export const releaseDocsPrepEvents = [
       note: z.string(),
       commit: z.string().optional(),
       files: z.array(z.string()).default([]),
+      /** Why the task failed when no agent could write it (see prepWriterUnavailable); absent otherwise. */
+      code: z.enum(['no_writer', 'writer_unreachable', 'writer_failed']).optional(),
+      /** The checked proposal of a proposal task (changelog_entries, guide_edits). */
+      result: z.unknown().optional(),
     }),
   ),
   defineEvent(

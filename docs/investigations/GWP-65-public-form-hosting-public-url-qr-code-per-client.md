@@ -123,8 +123,13 @@ second submission.
 answers and written through `storage.write` to `definition.settings.answersDestination` with `ext: 'html'` and
 `ext: 'json'` (the relay appends the extension); nothing is kept. The HTML is static: no script, every value
 HTML-escaped, `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';
-img-src data:">`, inline CSS only. PDF is a follow-up (backlog suggestion) once the runner can render. Write order: HTML
-first, then JSON, so a present JSON file means a complete submission on the firm's side too.
+img-src data:">`, inline CSS only. Write order: HTML first, then JSON, so a present JSON file means a complete
+submission on the firm's side too.
+
+**PDF copy (GWP-142).** A third file, `<same base name>.pdf` in the same folder, is made on the runner from the HTML it
+just received (the HTML write carries `derive: { pdf: true }`; the runner reports the PDF reference in `derived.pdf`).
+The server never sees the PDF bytes. If it cannot be made the submission still completes and the desk gets one "PDF copy
+missing" notice that points to the HTML copy. See docs/investigations/GWP-142-pdf-copy-of-a-form-s-answers.md.
 
 JSON shape (`v: 1`):
 
@@ -687,3 +692,5 @@ runner-side follow-up.
 
 Follow-ups (backlog suggestions): runner-side malware scan of uploads; `storage.delete` cleanup for expired
 submissions; PDF copy of the answers; configurable proxy hop count instead of `trustProxy: true`.
+
+> Update (GWP-147): an upload now reaches the runner in two ways: through the server relay (local folders, vaults) or straight from the browser to the provider (OneDrive, Google Drive, S3). See `GWP-147-direct-browser-to-storage-uploads-for-cloud-connec.md`.

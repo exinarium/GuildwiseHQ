@@ -1,15 +1,20 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { FileTokenStore, gitAuthFor, MemoryTokenStore } from '../src/forge/index.ts';
 import type { ForgeEnv } from '../src/forge/types.ts';
 import { AzureDevOpsIntegration } from '../src/integrations/forge-tokens.ts';
 import type { AdapterEnv } from '../src/integrations/types.ts';
+import { SealedFile } from '../src/secrets/sealed-file.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
 
 const HOST = 'dev.azure.com';
+const key = () => Buffer.alloc(32, 7);
+const sealedKeys = (file: string) =>
+  Object.keys(new SealedFile(file, key, z.record(z.string(), z.unknown())).load() ?? {});
 const storeFile = () => join(mkdtempSync(join(tmp(), 'azt-')), 'secrets', 'git-tokens.json');
 const forgeEnv = (tokens: ForgeEnv['tokens'], over: Partial<ForgeEnv> = {}): ForgeEnv => ({
   exec: { run: async () => ({ exitCode: 127, stdout: '', stderr: '' }) },
@@ -22,7 +27,7 @@ const envOf = (auth: { env: Record<string, string> }): string => JSON.stringify(
 
 describe('Azure DevOps tokens are kept per organization', () => {
   it('two organizations on dev.azure.com live side by side, case-insensitively', () => {
-    const s = new FileTokenStore(storeFile());
+    const s = new FileTokenStore(storeFile(), key);
     s.set({ provider: 'azure-devops', host: HOST, token: 'PAT-ACME', organization: 'Acme' });
     s.set({ provider: 'azure-devops', host: HOST, token: 'PAT-OTHER', organization: 'other' });
     expect(s.get('azure-devops', HOST, 'acme')?.token).toBe('PAT-ACME');
@@ -39,15 +44,16 @@ describe('Azure DevOps tokens are kept per organization', () => {
 
   it('other providers stay keyed by provider and host only', () => {
     const file = storeFile();
-    const s = new FileTokenStore(file);
+    const s = new FileTokenStore(file, key);
     s.set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL' });
     expect(s.get('gitlab', 'GitLab.com')?.token).toBe('GL');
     expect(s.get('gitlab', 'gitlab.com', 'whatever')?.token).toBe('GL');
-    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual(['gitlab@gitlab.com']);
+    expect(sealedKeys(file)).toEqual(['gitlab@gitlab.com']);
+    expect(readFileSync(file, 'utf8')).not.toContain('GL');
   });
 
   it('remove drops only that organization', () => {
-    const s = new FileTokenStore(storeFile());
+    const s = new FileTokenStore(storeFile(), key);
     s.set({ provider: 'azure-devops', host: HOST, token: 'A', organization: 'acme' });
     s.set({ provider: 'azure-devops', host: HOST, token: 'B', organization: 'other' });
     expect(s.remove('azure-devops', HOST, 'acme')).toBe(true);
@@ -72,12 +78,12 @@ describe('Azure DevOps tokens are kept per organization', () => {
         'gitlab@gitlab.com': { provider: 'gitlab', host: 'gitlab.com', token: 'GL', savedAt: 'x' },
       }),
     );
-    const s = new FileTokenStore(file);
+    const s = new FileTokenStore(file, key);
     expect(s.get('azure-devops', HOST, 'acme')?.token).toBe('OLD');
     expect(s.get('gitlab', 'gitlab.com')?.token).toBe('GL');
     // A second organization added later does not overwrite the migrated one; the file is rewritten in the new shape.
     s.set({ provider: 'azure-devops', host: HOST, token: 'NEW', organization: 'other' });
-    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8'))).sort()).toEqual([
+    expect(sealedKeys(file).sort()).toEqual([
       'azure-devops@dev.azure.com#acme',
       'azure-devops@dev.azure.com#other',
       'gitlab@gitlab.com',

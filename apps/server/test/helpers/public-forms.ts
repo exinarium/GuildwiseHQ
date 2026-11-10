@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { renderStoragePath, type StorageReference, type StorageWriteError } from '@aom/shared';
@@ -84,6 +84,17 @@ export interface StorageStub {
   opens(): number;
   /** Return an error for a write to make the "firm's storage" fail; null lets it through. */
   failWhen: (open: { ext?: string; name: string; size: number }) => StorageWriteError | null;
+  /** Every `storage.delete` frame seen, in order. */
+  deleteFrames: Array<{ requestId: string; path: string; providerId?: string }>;
+  /** Return an error for a `storage.delete` to make it fail; null lets it through. Set `ignore` to stay silent. */
+  deleteBehavior: { error: StorageWriteError | null; ignore: boolean };
+  /** The `derive` field of every `storage.write.open` seen, in order (undefined where the write carried none). */
+  derives(): Array<{ ext?: string; derive?: unknown }>;
+  /**
+   * What the runner does with `derive.pdf`: 'none' (an older runner: no `derived` back, the default), 'ok' (writes
+   * `<base>.pdf` beside the html) or a failure code.
+   */
+  pdf: 'none' | 'ok' | 'pdf_unavailable' | 'pdf_failed' | 'pdf_timeout' | 'pdf_write_failed';
   stop(): void;
 }
 
@@ -94,6 +105,7 @@ export interface StorageStub {
 export function serveStorage(r: FakeRunner, dir: string, connectionId: string): StorageStub {
   const transfers = new Map<string, { open: any; chunks: Buffer[] }>();
   let opens = 0;
+  const seen: Array<{ ext?: string; derive?: unknown }> = [];
   const stub: StorageStub = {
     files: () => {
       const out: Array<{ path: string; bytes: Buffer }> = [];
@@ -109,13 +121,18 @@ export function serveStorage(r: FakeRunner, dir: string, connectionId: string): 
       return out;
     },
     opens: () => opens,
+    derives: () => seen,
+    pdf: 'none',
     failWhen: () => null,
+    deleteFrames: [],
+    deleteBehavior: { error: null, ignore: false },
     stop: () => r.ws.off('message', onMessage),
   };
   const onMessage = (data: unknown) => {
     const f = JSON.parse(String(data));
     if (f.type === 'storage.write.open') {
       opens++;
+      seen.push({ ext: f.ext, derive: f.derive });
       const err = stub.failWhen({ ext: f.ext, name: f.name, size: f.size });
       if (err) {
         r.send('storage.write.result', { transferId: f.transferId, ok: false, error: err });
@@ -158,9 +175,56 @@ export function serveStorage(r: FakeRunner, dir: string, connectionId: string): 
         contentType: o.contentType,
         writtenAt: new Date().toISOString(),
       };
-      r.send('storage.write.result', { transferId: f.transferId, ok: true, reference });
+      let derived: Record<string, unknown> | undefined;
+      if (o.derive?.pdf && stub.pdf !== 'none') {
+        if (stub.pdf === 'ok') {
+          const pdfBytes = Buffer.from('%PDF-1.4 stub');
+          const pdfRel = rel.replace(/\.html$/, '.pdf');
+          writeFileSync(join(dir, pdfRel), pdfBytes);
+          derived = {
+            pdf: {
+              ok: true,
+              reference: {
+                v: 1,
+                connectionId,
+                kind: 'local',
+                path: pdfRel,
+                size: pdfBytes.length,
+                sha256: sha(pdfBytes),
+                contentType: 'application/pdf',
+                writtenAt: new Date().toISOString(),
+              },
+            },
+          };
+        } else derived = { pdf: { ok: false, code: stub.pdf } };
+      }
+      r.send('storage.write.result', {
+        transferId: f.transferId,
+        ok: true,
+        reference,
+        ...(derived ? { derived } : {}),
+      });
     } else if (f.type === 'storage.write.abort') {
       transfers.delete(f.transferId);
+    } else if (f.type === 'storage.delete') {
+      stub.deleteFrames.push({ requestId: f.requestId, path: f.path, providerId: f.providerId });
+      if (stub.deleteBehavior.ignore) return;
+      if (stub.deleteBehavior.error) {
+        r.send('storage.delete.result', {
+          requestId: f.requestId,
+          ok: false,
+          error: stub.deleteBehavior.error,
+        });
+        return;
+      }
+      const file = join(dir, f.path);
+      const there = existsSync(file);
+      if (there) rmSync(file);
+      r.send('storage.delete.result', {
+        requestId: f.requestId,
+        ok: true,
+        result: there ? 'deleted' : 'not_found',
+      });
     }
   };
   r.ws.on('message', onMessage);
@@ -240,7 +304,7 @@ export function usePublicFormsWorld(env: Record<string, string> = {}): PfWorld {
     self.dir = mkdtempSync(join(tmpdir(), 'pf-store-'));
     self.orgId = (await q('SELECT id FROM organizations WHERE owner_user_id=$1', [self.w.owner.id]))[0]
       ?.id as string;
-    self.r = await self.w.connectRunner({ capabilities: ['storage:1'] });
+    self.r = await self.w.connectRunner({ capabilities: ['storage:1', 'storage-delete:1'] });
     self.api = (method, url, body) =>
       self.w.t.req(method, url, { cookie: self.w.owner.cookie, ...(body !== undefined ? { body } : {}) });
     const created = await ok<any>(

@@ -493,7 +493,7 @@ changed sections, a markdown link check passes, then ship succeeds.
 
 ## 9. Follow-ups (backlog suggestions, not this card)
 
-- Release prep: also update the in-app Help articles (`apps/web/src/help/articles/`) for changed features.
+- Release prep: also update the in-app Help articles (`apps/web/src/help/articles/`) for changed features. Done in GWP-136 (step `help`).
 - PDF guide: take the footer and cover date from the release instead of the hard-coded "7 October 2026".
 - A per-repository "user guide path" setting (this card uses the fixed default `docs/USER-GUIDE.md`).
 - A project setting for which agent writes the release documentation.
@@ -712,3 +712,7 @@ No criterion's design changes; the merge only renames shared pieces.
 | 4 Repo without a guide: skipped, step passes | runner handler | none |
 | 5 PDF regenerated and committed with the text | runner handler (exec faked in tests) | none |
 | 6 Step disabled: no guide change | shared + runner tests | defaults list now includes `changelog`; the unticked-guide test keeps `guide` out |
+
+---
+
+**Superseded by GWP-134 (the writer part).** The writer of Update user guide is now a release prep task (`docs/investigations/GWP-134-release-prep-one-writer-mechanism-for-the-content.md`): the writer is chosen in one place for every content step, and the BA task `release_changelog` and the headless guide call are gone. The checks and the output described above still apply.
