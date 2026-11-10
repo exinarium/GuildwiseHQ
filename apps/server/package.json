@@ -29,7 +29,7 @@
     "vapid:generate": "tsx scripts/vapid-generate.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.132.1",
+    "@anthropic-ai/sdk": "^1.6.0",
     "@aom/shared": "workspace:*",
     "@aom/video": "workspace:*",
     "@fastify/cookie": "^11.1.5",
