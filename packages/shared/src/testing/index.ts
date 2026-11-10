@@ -5,6 +5,8 @@ import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
+export * from './suite-report.ts';
+
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
  * check and the constants of the bug loop (docs/ARCHITECTURE.md sections 5.2, 9.5, 13.5, 13.6 and 24).

@@ -5,7 +5,9 @@ import {
   DevOpsAccessSchema,
   e2eOnlyFailure,
   emptyFields,
+  parseSuiteBugs,
   type RunnerToServerOf,
+  SUITE_BUGS_MAX,
   streamId,
   type TestEnvProblem,
   type TestEvidence,
@@ -143,88 +145,144 @@ export async function suiteOutcomeEvents(
       actor,
       scope,
     });
+    events.push(
+      cardMessage(card, { kind: 'agent', agentId }, 'evidence', `Suite passed: ${evidence.summary}`),
+    );
   } else {
+    // One report lists every bug of the run, a `Bug:` section each (P2); a note without sections is one bug.
     const title = evidence.title?.trim() || `E2E failure in ${card.ref}`;
-    const description = bugDescription({ note, evidence, parentRef: card.ref });
+    const { preamble, bugs, overflow } = parseSuiteBugs(note, title);
     const project = (await one(tx, 'SELECT workflow_key FROM projects WHERE id=$1', [
       card.project_id,
     ])) as Row;
-    const bug = await spawnCardEvent(tx, {
-      from: card,
-      title,
-      cardType: 'bug',
-      origin: card.origin,
-      workflowKey: project.workflow_key,
-      status: 'draft',
-      fields: { ...emptyFields('code'), context: description },
-      parentCardId: card.id,
-      completionAction: card.completion_action,
+    events.push({
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'FullSuiteFailed',
+        payload: { suiteCardId: card.id, evidence, testSideFixed: false, kind, platform },
+      },
+      actor,
+      scope,
     });
-    const deskItemId = randomUUID();
-    events.push(
-      {
-        streamId: streamId.card(card.id),
-        event: {
-          type: 'FullSuiteFailed',
-          payload: { suiteCardId: card.id, evidence, testSideFixed: false, kind, platform },
-        },
-        actor,
-        scope,
-      },
-      bug.event,
-      {
-        streamId: streamId.card(bug.cardId),
-        event: {
-          type: 'BugReported',
-          payload: {
-            ...(kind === 'regression' ? { regressionCardId: card.id } : { suiteCardId: card.id }),
-            title,
-            description,
-            evidence,
-            bugCardId: bug.cardId,
-            deskItemId,
+    // `next_card_number` is read before the projection runs: each spawned card takes the next offset.
+    let offset = 0;
+    const filed: string[] = [];
+    const seen: string[] = [];
+    for (const b of bugs) {
+      const open = await openSuiteBug(tx, card.project_id, b.failureKey, b.titleKey);
+      if (open) {
+        events.push(
+          {
+            streamId: streamId.card(open.id),
+            event: {
+              type: 'RegressionBugSeenAgain',
+              payload: {
+                runCardId: card.id,
+                bugCardId: open.id,
+                failureKey: b.failureKey,
+                titleKey: b.titleKey,
+                title: b.title,
+              },
+            },
+            actor,
+            scope,
           },
+          cardMessage(
+            open,
+            { kind: 'system' },
+            'system',
+            `${card.ref} hit this bug again (${evidence.summary.trim() || 'suite failed'}). No second bug card was filed.\n\n${b.body}`.trim(),
+          ),
+        );
+        seen.push(open.ref);
+        continue;
+      }
+      const description = bugDescription({
+        note: preamble ? `${b.body}\n\nRun notes:\n${preamble}` : b.body,
+        evidence,
+        parentRef: card.ref,
+      });
+      const bug = await spawnCardEvent(
+        tx,
+        {
+          from: card,
+          title: b.title,
+          cardType: 'bug',
+          origin: card.origin,
+          workflowKey: project.workflow_key,
+          status: 'draft',
+          fields: { ...emptyFields('code'), context: description },
+          parentCardId: card.id,
+          completionAction: card.completion_action,
         },
-        actor,
-        scope,
-      },
-      {
-        streamId: streamId.desk(deskItemId),
-        event: {
-          type: 'DeskItemCreated',
-          payload: {
-            deskItemId,
-            kind: 'alert',
-            subkind: DESK_SUBKIND.bugReported,
-            title: `${kind === 'regression' ? 'Regression' : 'Full-suite'} failure: ${title}`,
-            body: `${description}\n\nBug card ${bug.ref} is in Spec for the BA. Nothing is blocked; prioritise the fix or leave it in the queue.`,
-            options: [],
-            blocking: false,
-            pinned: false,
-            cardId: bug.cardId,
-            projectId: card.project_id,
-            affectedCardIds: [bug.cardId],
-            askedBy: { kind: 'system' },
+        offset++,
+      );
+      const deskItemId = randomUUID();
+      events.push(
+        bug.event,
+        {
+          streamId: streamId.card(bug.cardId),
+          event: {
+            type: 'BugReported',
+            payload: {
+              ...(kind === 'regression' ? { regressionCardId: card.id } : { suiteCardId: card.id }),
+              title: b.title,
+              description,
+              evidence,
+              bugCardId: bug.cardId,
+              deskItemId,
+              failureKey: b.failureKey,
+            },
           },
+          actor,
+          scope,
         },
-        actor: SYSTEM_ACTOR,
-        scope,
-      },
-      // A bug filed after finalize joins the phase it came from, and the phase waits for it (owner decision A6).
-      ...(await bugJoinEvents(tx, bug.cardId, bug.ref, card, {
-        orgId: card.org_id,
-        projectId: card.project_id,
-      })),
-    );
+        {
+          streamId: streamId.desk(deskItemId),
+          event: {
+            type: 'DeskItemCreated',
+            payload: {
+              deskItemId,
+              kind: 'alert',
+              subkind: DESK_SUBKIND.bugReported,
+              title: `${kind === 'regression' ? 'Regression' : 'Full-suite'} failure: ${b.title}`,
+              body: `${description}\n\nBug card ${bug.ref} is in Spec for the BA. Nothing is blocked; prioritise the fix or leave it in the queue.`,
+              options: [],
+              blocking: false,
+              pinned: false,
+              cardId: bug.cardId,
+              projectId: card.project_id,
+              affectedCardIds: [bug.cardId],
+              askedBy: { kind: 'system' },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        },
+        // A bug filed after finalize joins the phase it came from, and the phase waits for it (owner decision A6).
+        // Only the first bug reopens the phase: a second reopen in the same append would read a stale phase status.
+        ...(await bugJoinEvents(
+          tx,
+          bug.cardId,
+          bug.ref,
+          card,
+          { orgId: card.org_id, projectId: card.project_id },
+          { reopen: filed.length === 0 },
+        )),
+      );
+      filed.push(bug.ref);
+    }
+    const parts = [`Suite failed: ${evidence.summary}`];
+    if (bugs.length > 1 || seen.length) {
+      if (filed.length) parts.push(`Filed: ${filed.join(', ')}.`);
+      if (seen.length) parts.push(`Already open: ${seen.join(', ')}.`);
+    }
+    if (overflow)
+      parts.push(
+        `${overflow} more section(s) past the limit of ${SUITE_BUGS_MAX} were added to the last bug card.`,
+      );
+    events.push(cardMessage(card, { kind: 'agent', agentId }, 'evidence', parts.join(' ')));
   }
-  events.push(
-    cardMessage(
-      card,
-      { kind: 'agent', agentId },
-      'evidence',
-      `${pass ? 'Suite passed' : 'Suite failed'}: ${evidence.summary}`,
-    ),
-  );
   // The throwaway suite worktree and its branch are not needed any more.
   if (card.worktree_path)
     await enqueueRunnerCommand(tx, ws.id, 'worktree.remove', {
@@ -233,6 +291,23 @@ export async function suiteOutcomeEvents(
       deleteBranch: true,
     });
   return events;
+}
+
+/** The open bug card a suite run already filed for this failure (same failing test or same title), if any. */
+async function openSuiteBug(
+  tx: Tx,
+  projectId: string,
+  failureKey: string,
+  titleKey: string,
+): Promise<Row | undefined> {
+  return one(
+    tx,
+    `SELECT bc.id, bc.ref, bc.org_id, bc.project_id FROM suite_run_bugs b JOIN cards bc ON bc.id = b.bug_card_id
+      WHERE bc.project_id = $1 AND bc.card_type = 'bug' AND bc.status NOT IN ('done', 'cancelled')
+        AND bc.merged_into_working_at IS NULL AND (b.failure_key = $2 OR b.title_key = $3)
+      ORDER BY bc.created_at LIMIT 1`,
+    [projectId, failureKey, titleKey],
+  );
 }
 
 export const PROBLEM_TEXT: Record<TestEnvProblem, string> = {

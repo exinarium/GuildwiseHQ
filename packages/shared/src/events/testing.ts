@@ -83,6 +83,22 @@ export const testingEvents = [
       evidence: TestEvidence,
       bugCardId: Id,
       deskItemId: Id,
+      /** The dedupe key of the bug (`test:...` or `title:...`, see `parseSuiteBugs`). Absent on older events. */
+      failureKey: z.string().max(300).optional(),
+    }),
+  ),
+  /**
+   * A failing suite or regression run reported a bug that is already open as a bug card: no new card, a message on the
+   * open one. `runCardId` is the suite or regression card.
+   */
+  defineEvent(
+    'RegressionBugSeenAgain',
+    z.object({
+      runCardId: Id,
+      bugCardId: Id,
+      failureKey: z.string().max(300),
+      titleKey: z.string().max(300),
+      title: z.string().min(1).max(300),
     }),
   ),
   /** The manager started a regression run; one regression card per platform (`both` = web + mobile). */

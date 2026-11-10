@@ -120,6 +120,31 @@ export const testingProjectors: Record<string, Projector> = {
     await finishSuiteCard(tx, e, p.suiteCardId);
   },
 
+  // The bug cards a suite or regression run reported, with their dedupe keys (migration 2890 backfills the same way).
+  BugReported: async (tx, e) => {
+    const p = ev<'BugReported'>(e).payload;
+    const runCardId = p.regressionCardId ?? p.suiteCardId;
+    if (!runCardId) return;
+    await exec(
+      tx,
+      `INSERT INTO suite_run_bugs (run_card_id, bug_card_id, failure_key, title_key, seen_again, created_at)
+       SELECT $1::uuid, $2::uuid, COALESCE($3::text, k.key), k.key, false, $5::timestamptz
+         FROM (SELECT left('title:' || lower(btrim(regexp_replace($4::text, '\\s+', ' ', 'g'))), 300) AS key) k
+       ON CONFLICT DO NOTHING`,
+      [runCardId, p.bugCardId, p.failureKey ?? null, p.title, e.createdAt],
+    );
+  },
+
+  RegressionBugSeenAgain: async (tx, e) => {
+    const p = ev<'RegressionBugSeenAgain'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO suite_run_bugs (run_card_id, bug_card_id, failure_key, title_key, seen_again, created_at)
+       VALUES ($1,$2,$3,$4,true,$5) ON CONFLICT DO NOTHING`,
+      [p.runCardId, p.bugCardId, p.failureKey, p.titleKey, e.createdAt],
+    );
+  },
+
   TestEnvironmentParked: async (tx, e) => {
     const p = ev<'TestEnvironmentParked'>(e).payload;
     await mutateCard(tx, e, p.cardId, () =>
