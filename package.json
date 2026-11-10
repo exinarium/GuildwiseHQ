@@ -22,9 +22,9 @@
     "db:migrate": "pnpm --filter @aom/server db:migrate"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "^2.6.6",
     "@types/node": "^22.19.0",
-    "concurrently": "^10.0.5",
+    "concurrently": "^10.0.7",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^4.1.12"
