@@ -254,7 +254,8 @@ export async function suiteOutcomeEvents(
         seen.push(open.ref);
         continue;
       }
-      const caveat = target?.kind === 'unknown' ? `${UNCONFIRMED_TARGET}\n\n` : '';
+      // No target line counts as unknown (the report is refused only on regression-loop projects, P4).
+      const caveat = target?.kind === 'match' ? '' : `${UNCONFIRMED_TARGET}\n\n`;
       const description = bugDescription({
         note: caveat + (preamble ? `${b.body}\n\nRun notes:\n${preamble}` : b.body),
         evidence,

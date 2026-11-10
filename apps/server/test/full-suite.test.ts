@@ -366,5 +366,11 @@ describe('the run checks the target commit before filing bugs (P3)', () => {
     expect(b2!.fields.context).not.toContain(CAVEAT);
     const failed = (await eventsOfType('FullSuiteFailed')).filter((e) => e.suiteCardId === confirmed.id);
     expect(failed[0].targetMismatch).toBeUndefined();
+
+    // a note without the target line counts as unknown
+    const legacy = (await regression('web')).cards[0];
+    await p.run('Tess', failWith('Bug: Footer link 404\nbroken'));
+    const [b3] = await q(`SELECT fields FROM cards WHERE card_type='bug' AND parent_card_id=$1`, [legacy.id]);
+    expect(b3!.fields.context).toContain(CAVEAT);
   });
 });
