@@ -203,7 +203,8 @@ describe.skipIf(!enabled)(
           peek('SSH', `${l.home}/.ssh/id_ed25519`),
           peek('HIST', `${l.home}/.bash_history`),
           peek('RUNNER', `${l.home}/.aom-runner/config.json`),
-          'echo "NOWRITE:$({ echo x >> ' + c + '/src/app.ts; } 2>&1 | head -c 80)"',
+          // the end of the error (the reason), whatever the length of the path in front of it
+          'echo "NOWRITE:$({ echo x >> ' + c + '/src/app.ts; } 2>&1 | tail -c 120)"',
         ].join('; '),
       );
       const out = r.output;

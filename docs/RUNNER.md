@@ -1361,7 +1361,10 @@ where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (24 GB tmpf
   lists the direct entries of the dir, so a symlink is unlinked and never followed, a dir that is itself a symlink or is
   not named `aom-*` is refused, and another agent's or runner's dir is never touched.
 - **Runner start**: before shifts are resumed, the temp dirs of all agents under `<data dir>/agents/` are cleaned
-  (agents with a shift about to be resumed are skipped), which also removes what a killed runner left behind.
+  (agents with a shift about to be resumed are skipped), which also removes what a killed runner left behind. Then the
+  temp dirs of this runner's agents whose `agents/<id>` folder no longer exists are removed whole: each temp dir holds a
+  `.aom-owner` file (data dir and agent id, kept by the end-of-shift cleanup), and a dir is removed only when that file
+  names this runner and an agent whose temp dir is exactly that dir; dirs without it are never touched.
 - The reviewer instructions (role version 5) tell the reviewer to delete its build copy when done and say that
   `$TMPDIR` is emptied after the shift.
 - **Not moved to disk**: the temp dir stays under `/tmp` because of the socket length limit, and Claude Code's shell

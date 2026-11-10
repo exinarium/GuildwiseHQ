@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAuthMonitor } from '../src/adapters/claude-auth.ts';
@@ -200,7 +201,9 @@ describe('disk check before a shift (#81)', () => {
     const shiftId = send();
     const rej = await h!.server.waitFor('shift.rejected', (m) => m.shiftId === shiftId, 15_000);
     expect(rej.reason).toBe('worktree_failed');
-    expect(rej.detail).toMatch(/^disk_full: .*\/tmp has 0 MB free/);
+    expect(rej.detail).toMatch(/^disk_full: /);
+    // the OS temp folder: /tmp, or the test run's own temp root under it
+    expect(rej.detail).toContain(`${tmpdir()} has 0 MB free`);
     expect(adapter.inputs).toHaveLength(0);
     expect(h!.server.of('shift.accepted').filter((m) => m.shiftId === shiftId)).toHaveLength(0);
   });

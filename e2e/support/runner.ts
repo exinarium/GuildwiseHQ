@@ -1,6 +1,7 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { paths } from './env.ts';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { E2E_DIR, paths } from './env.ts';
 
 /**
  * Runner processes started by the tests (pair + start). The default runner (`paths.runnerData`) is the one the M1
@@ -17,6 +18,10 @@ function runnerEnv(home: string, extra: Record<string, string> = {}): NodeJS.Pro
     AOM_ALLOW_LOCAL_REMOTES: '1',
     AOM_MOCK_STEP_MS: process.env.AOM_MOCK_STEP_MS ?? '1000',
     AOM_RUNNER_HOME: home,
+    // the agents' temp dirs (`aom-<hash>`, `aom-run-*`) live in the suite's dir, which the next run deletes, not in /tmp.
+    // Only the runners get it: in the suite's own env it would read as "inside a tester shift" (test-services.ts).
+    // A tester shift's own value wins.
+    AOM_AGENT_TMP_ROOT: process.env.AOM_AGENT_TMP_ROOT ?? join(E2E_DIR, 'agent-tmp'),
     ...extra,
   };
 }
@@ -92,4 +97,38 @@ function recordPid(home: string, pid: number | undefined): void {
   if (home === paths.runnerData) all.runner = pid;
   else all.runners = { ...(all.runners ?? {}), [home]: pid };
   writeFileSync(paths.pids, JSON.stringify(all));
+}
+
+/**
+ * Linux: SIGTERM the fake web servers of our user (busybox `httpd`, python `http.server`) whose command line names `dir`.
+ * The fake docker of the deploy specs starts them in the background and nothing stops them on `compose down`. Limited to
+ * web servers because `dir` is a fixed path someone may be reading (`tail -f` of a log). Returns the number signalled.
+ */
+export function killFakeServers(dir: string): number {
+  if (process.platform !== 'linux') return 0;
+  const uid = process.getuid?.();
+  const inside = `${dir.replace(/\/+$/, '')}/`;
+  let n = 0;
+  let entries: string[] = [];
+  try {
+    entries = readdirSync('/proc');
+  } catch {
+    return 0;
+  }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    try {
+      if (uid !== undefined && statSync(`/proc/${name}`).uid !== uid) continue;
+      const args = readFileSync(`/proc/${name}/cmdline`, 'utf8').split('\0').filter(Boolean);
+      const exe = basename(args[0] ?? '');
+      const server =
+        exe === 'httpd' || (exe === 'busybox' && args[1] === 'httpd') || args.includes('http.server');
+      if (!server || !args.some((a) => a === dir || a.includes(inside))) continue;
+      process.kill(Number(name), 'SIGTERM');
+      n++;
+    } catch {
+      /* gone meanwhile, or not ours */
+    }
+  }
+  return n;
 }

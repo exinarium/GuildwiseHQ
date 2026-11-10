@@ -17,7 +17,7 @@ import {
   SUPER,
 } from './support/env.ts';
 import { deleteMailFor } from './support/mail.ts';
-import { killAllRunners } from './support/runner.ts';
+import { killAllRunners, killFakeServers } from './support/runner.ts';
 import { defaultAccounts, seedE2eAccounts } from './support/seed.ts';
 import { requireBindable } from './support/test-services.ts';
 
@@ -97,8 +97,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   // text the specs read back from the mock runner's tool output (which is cut at a fixed length)
   process.env.NODE_NO_WARNINGS ??= '1';
   process.env.AOM_E2E_DIR = E2E_DIR;
+  // a fake web server a deploy spec of an earlier run left behind (it serves a folder in E2E_DIR)
+  killFakeServers(E2E_DIR);
   rmSync(E2E_DIR, { recursive: true, force: true });
   mkdirSync(E2E_DIR, { recursive: true });
+  // the temp dirs of the suite, its server and its runners live in E2E_DIR (deleted by the next run), not in /tmp;
+  // workers and every process started from here inherit it
+  const tmp = join(E2E_DIR, 'tmp');
+  mkdirSync(tmp, { recursive: true });
+  process.env.TMPDIR = tmp;
+  process.env.TMP = tmp;
+  process.env.TEMP = tmp;
 
   await recreateDb();
   makeToyRepo();
@@ -188,5 +197,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   return async () => {
     killAllRunners('SIGTERM');
     server.kill('SIGTERM');
+    if (process.env.AOM_JOURNEY_KEEP !== '1') killFakeServers(E2E_DIR);
   };
 }
