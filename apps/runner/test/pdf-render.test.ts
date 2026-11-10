@@ -33,11 +33,14 @@ function doc(rows: Array<[string, string]>, files: Array<[string, string]> = [])
 }
 
 async function text(pdf: Buffer): Promise<{ text: string; pages: number }> {
-  const { default: parse } = (await import('pdf-parse/lib/pdf-parse.js')) as {
-    default: (b: Buffer) => Promise<{ text: string; numpages: number }>;
-  };
-  const r = await parse(pdf);
-  return { text: r.text, pages: r.numpages };
+  const { PDFParse } = await import('pdf-parse');
+  const parser = new PDFParse({ data: new Uint8Array(pdf) });
+  try {
+    const r = await parser.getText();
+    return { text: r.text, pages: r.total };
+  } finally {
+    await parser.destroy();
+  }
 }
 const squash = (s: string) => s.replace(/\s+/g, '');
 const signal = () => AbortSignal.timeout(30_000);

@@ -135,8 +135,11 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     for (const ev of spec.parseLine(line)) queue.push(ev);
   });
 
+  let exited = false;
+  let killRequested = false;
   const finished = (async () => {
     const r = await sub;
+    exited = true;
     if (pid) liveGroups.delete(pid);
     // Let readline drain remaining lines before announcing the exit.
     await new Promise<void>((resolve) => {
@@ -181,7 +184,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
   return {
     events: () => queue.iterable(),
     async stop() {
-      if (sub.exitCode === null) {
+      if (!exited) {
         if (POSIX && pid) {
           signalGroup(pid, 'SIGTERM');
           const t = setTimeout(() => signalGroup(pid, 'SIGKILL'), spec.killAfterMs ?? 10_000);
@@ -191,7 +194,10 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
           signalGroup(pid, 'SIGKILL'); // what the agent left behind in the group
           return;
         }
-        if (!sub.killed) sub.kill('SIGTERM');
+        if (!killRequested) {
+          killRequested = true;
+          sub.kill('SIGTERM');
+        }
       }
       await finished;
     },

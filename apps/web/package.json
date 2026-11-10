@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@aom/shared": "workspace:*",
-    "@dicebear/core": "^10.7.0",
+    "@dicebear/core": "^9.4.2",
     "@dicebear/lorelei": "^9.4.2",
     "@dicebear/notionists": "^9.4.2",
     "@dicebear/open-peeps": "^9.4.2",

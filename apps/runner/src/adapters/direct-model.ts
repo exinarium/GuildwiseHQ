@@ -29,7 +29,7 @@ import type {
 } from './types.ts';
 
 /** Version reported for the runtime: the pinned AI SDK (kept in step with package.json by a test). */
-export const DIRECT_MODEL_VERSION = 'ai-sdk-7.0.150';
+export const DIRECT_MODEL_VERSION = 'ai-sdk-7.0.164';
 
 export interface DirectModelOptions {
   /** The most model calls (steps) one turn may make: each tool round trip is a step. */
