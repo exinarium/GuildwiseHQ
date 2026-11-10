@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildClaudeChatCommand } from '../src/adapters/claude-code.ts';
+import { buildClaudeChatCommand, MAX_ARGV_PROMPT_BYTES } from '../src/adapters/claude-code.ts';
 import {
   buildChatSettings,
   buildDevopsChatSettings,
@@ -369,6 +369,43 @@ describe('claude code chat adapter', () => {
       HOME: '/data/agents/a1/home',
       AOM_SHIFT_TOKEN: 't',
     });
+  });
+
+  it('a short message stays on argv with no stdin payload', () => {
+    const cfg = ClaudeRuntimeConfigSchema.parse({});
+    const c = buildClaudeChatCommand(input({ message: 'hello' }), cfg);
+    expect(c.args.slice(0, 2)).toEqual(['-p', 'hello']);
+    expect(c.stdin).toBeUndefined();
+    expect('stdin' in c).toBe(false);
+  });
+
+  it('a message over 128 KiB goes on stdin, not argv', () => {
+    const cfg = ClaudeRuntimeConfigSchema.parse({});
+    const message = `start ${'long chat line. '.repeat(13000)} end`;
+    expect(Buffer.byteLength(message)).toBeGreaterThan(128 * 1024);
+    const c = buildClaudeChatCommand(input({ message }), cfg);
+    expect(c.stdin).toBe(message);
+    expect(c.args.some((a) => Buffer.byteLength(a) > MAX_ARGV_PROMPT_BYTES)).toBe(false);
+    expect(c.args.includes(message)).toBe(false);
+    expect(c.args[0]).toBe('-p');
+    expect(c.args[1]).toBe('--output-format');
+  });
+
+  it('the threshold is in UTF-8 bytes: MAX goes on argv, MAX + 1 and multi-byte text go on stdin', () => {
+    const cfg = ClaudeRuntimeConfigSchema.parse({});
+    const atMax = 'a'.repeat(MAX_ARGV_PROMPT_BYTES);
+    const at = buildClaudeChatCommand(input({ message: atMax }), cfg);
+    expect(at.args[1]).toBe(atMax);
+    expect(at.stdin).toBeUndefined();
+    const over = 'a'.repeat(MAX_ARGV_PROMPT_BYTES + 1);
+    const o = buildClaudeChatCommand(input({ message: over }), cfg);
+    expect(o.stdin).toBe(over);
+    expect(o.args[1]).toBe('--output-format');
+    const multi = 'é'.repeat(MAX_ARGV_PROMPT_BYTES / 2 + 1); // fewer characters than the limit, more bytes
+    expect(multi.length).toBeLessThan(MAX_ARGV_PROMPT_BYTES);
+    const m = buildClaudeChatCommand(input({ message: multi }), cfg);
+    expect(m.stdin).toBe(multi);
+    expect(m.args[1]).toBe('--output-format');
   });
 
   it('G-Q1: the DevOps agent chat is unsandboxed like its shifts, with the real home; other chats stay sandboxed', () => {

@@ -242,9 +242,10 @@ export function cardAttachmentDirs(sandbox: { tmp: string }): string[] {
 
 /** `claude -p <message> --resume <id> --output-format stream-json --verbose --include-partial-messages` (section 14). */
 export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig): ClaudeCommand {
+  const viaStdin = Buffer.byteLength(input.message) > MAX_ARGV_PROMPT_BYTES;
   const args = [
     '-p',
-    input.message,
+    ...(viaStdin ? [] : [input.message]),
     '--output-format',
     'stream-json',
     '--verbose',
@@ -279,6 +280,7 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
       },
       cfg,
     ),
+    ...(viaStdin ? { stdin: input.message } : {}),
   };
 }
 
@@ -1079,6 +1081,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       cwd: input.cwd,
       env: cmd.env,
       inheritEnv: false,
+      ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
       parseLine: (l) => parser.parseLine(l),
       usage: () =>
         bk
