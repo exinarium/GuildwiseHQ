@@ -21,6 +21,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { bugJoinEvents } from './phases.ts';
+import { failedRunLoop, greenRunEvents } from './regression-loop.ts';
 import { spawnCardEvent } from './spawn.ts';
 import {
   bugCardEvents,
@@ -141,6 +142,11 @@ export async function suiteOutcomeEvents(
   const actor = agentActor(agentId);
   const events: AppendInput[] = [];
   const target = pass ? null : parseTargetLine(note);
+  // P4: a failed regression run on a project with the regression loop on is followed until a rerun is green.
+  const loopOn =
+    kind === 'regression' &&
+    !!(await one(tx, 'SELECT regression_loop FROM projects WHERE id=$1', [card.project_id]))?.regression_loop;
+  const followed = !pass && loopOn ? await failedRunLoop(tx, card, ws.id, platform) : null;
   if (pass) {
     events.push({
       streamId: streamId.card(card.id),
@@ -151,6 +157,7 @@ export async function suiteOutcomeEvents(
     events.push(
       cardMessage(card, { kind: 'agent', agentId }, 'evidence', `Suite passed: ${evidence.summary}`),
     );
+    if (kind === 'regression') events.push(...(await greenRunEvents(tx, card)));
   } else if (target?.kind === 'mismatch') {
     // P3: the target app does not run the commit under test, so its failures say nothing about this code. No bug cards.
     const deskItemId = randomUUID();
@@ -171,6 +178,7 @@ export async function suiteOutcomeEvents(
               testedCommit: headSha,
               line: target.line.slice(0, 500),
             },
+            ...(followed ? { loop: followed.loop } : {}),
           },
         },
         actor,
@@ -191,7 +199,7 @@ export async function suiteOutcomeEvents(
             kind: 'alert',
             subkind: DESK_SUBKIND.regressionTargetMismatch,
             title: `${card.ref}: the ${platform ? `${platform} ` : ''}app under test runs another build`,
-            body: `${card.ref} tested commit ${tested}, but the target app runs ${target.deployed ?? 'another build'} (the tester reported: "${target.line}"). No bug cards were filed, because the failures may come from the old build.\n\nRedeploy the app so it runs the tested commit, then start the ${kind === 'regression' ? 'regression run' : 'suite'} again.`,
+            body: `${card.ref} tested commit ${tested}, but the target app runs ${target.deployed ?? 'another build'} (the tester reported: "${target.line}"). No bug cards were filed, because the failures may come from the old build.\n\n${followed ? 'The regression loop asks the DevOps engineer to redeploy the app; the run starts again when that is done.' : `Redeploy the app so it runs the tested commit, then start the ${kind === 'regression' ? 'regression run' : 'suite'} again.`}`,
             options: [],
             blocking: false,
             pinned: false,
@@ -216,7 +224,14 @@ export async function suiteOutcomeEvents(
       streamId: streamId.card(card.id),
       event: {
         type: 'FullSuiteFailed',
-        payload: { suiteCardId: card.id, evidence, testSideFixed: false, kind, platform },
+        payload: {
+          suiteCardId: card.id,
+          evidence,
+          testSideFixed: false,
+          kind,
+          platform,
+          ...(followed ? { loop: followed.loop } : {}),
+        },
       },
       actor,
       scope,
@@ -342,6 +357,8 @@ export async function suiteOutcomeEvents(
       );
     events.push(cardMessage(card, { kind: 'agent', agentId }, 'evidence', parts.join(' ')));
   }
+  // after FullSuiteFailed: its loop row must exist before a stop (cap) applies to it
+  if (followed) events.push(...followed.events);
   // The throwaway suite worktree and its branch are not needed any more.
   if (card.worktree_path)
     await enqueueRunnerCommand(tx, ws.id, 'worktree.remove', {

@@ -323,6 +323,8 @@ export const projectEvents = [
     }),
   ),
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /** The regression loop (redeploy and rerun a failed regression run once its bugs are merged) turned on or off. */
+  defineEvent('ProjectRegressionLoopSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
    * Manual QA after Finalize (docs/design/manual-qa.md) turned off or on for the project. On by default. Only cards
    * that have not yet passed Finalize are affected.

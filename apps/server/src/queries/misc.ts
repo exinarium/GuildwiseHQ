@@ -107,6 +107,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
+    regressionLoop: p.regression_loop ?? false,
     claudeAccount: { key: p.claude_account_key ?? null, fallbackToMain: p.claude_account_fallback ?? false },
     ...(p.provider_accounts && typeof p.provider_accounts === 'object'
       ? { providerAccounts: p.provider_accounts as NonNullable<ProjectDto['providerAccounts']> }

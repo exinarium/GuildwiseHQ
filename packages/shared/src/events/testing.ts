@@ -34,6 +34,18 @@ export type BuilderTestGapReason = (typeof BUILDER_TEST_GAP_REASONS)[number];
 
 /** Kind of a suite card:spawned after finalize (`full_suite`) or requested by the manager (`regression`). */
 export const SuiteKind = z.enum(['full_suite', 'regression']);
+/** Why the regression loop of a failed run stopped without a rerun. */
+export const RegressionLoopStopReason = z.enum([
+  'cap',
+  'deploy_failed',
+  'no_devops',
+  'requeue_failed',
+  'switched_off',
+  'superseded',
+  'recipe_deploy',
+  'bugs_cancelled',
+]);
+export type RegressionLoopStopReason = z.infer<typeof RegressionLoopStopReason>;
 export type SuiteKind = z.infer<typeof SuiteKind>;
 
 /**
@@ -78,6 +90,10 @@ export const testingEvents = [
           line: z.string().max(500),
         })
         .optional(),
+      /** The project runs the regression loop: this failed run is followed (`iteration` 1 = the run a person started). */
+      loop: z
+        .object({ iteration: z.number().int().positive(), rootCardId: Id, workstationId: Id.optional() })
+        .optional(),
     }),
   ),
   /** A bug card in Spec (for the BA) plus a non-blocking desk alert, both in the same append. */
@@ -107,6 +123,43 @@ export const testingEvents = [
       failureKey: z.string().max(300),
       titleKey: z.string().max(300),
       title: z.string().min(1).max(300),
+    }),
+  ),
+  /** Regression loop: every bug of the failed run merged (or the target was stale), so DevOps was asked to redeploy. */
+  defineEvent(
+    'RegressionRedeployRequested',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      requestId: Id,
+      workstationId: Id,
+      mergedBugCardIds: z.array(Id).default([]),
+      baseBranch: z.string().optional(),
+      mergeCommit: z.string().optional(),
+    }),
+  ),
+  /** Regression loop: the redeploy is done and the next regression run (`nextCardId`) is queued. */
+  defineEvent(
+    'RegressionRequeued',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      requestId: Id,
+      nextCardId: Id,
+      iteration: z.number().int().positive(),
+      deployedCommit: z.string().optional(),
+    }),
+  ),
+  /** Regression loop: the loop of this failed run ends without a rerun. */
+  defineEvent(
+    'RegressionLoopStopped',
+    z.object({
+      runCardId: Id,
+      projectId: Id,
+      reason: RegressionLoopStopReason,
+      detail: z.string().default(''),
+      requestId: Id.optional(),
+      supersededBy: Id.optional(),
     }),
   ),
   /** The manager started a regression run; one regression card per platform (`both` = web + mobile). */

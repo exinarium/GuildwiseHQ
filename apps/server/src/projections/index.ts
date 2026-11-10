@@ -257,6 +257,7 @@ export const PROJECTION_TABLES = [
   'test_runs',
   'card_test_gaps',
   'suite_run_bugs',
+  'regression_loops',
   'test_suite_results',
   'schedules',
   'schedule_runs',

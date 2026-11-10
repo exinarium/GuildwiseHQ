@@ -114,4 +114,23 @@ describe('full suite panel (project settings)', () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ repoId: TWO[0]?.id });
   });
+
+  it('the regression loop is off by default; ticking it turns it on', async () => {
+    const user = userEvent.setup();
+    renderPanel(project());
+    const box = screen.getByRole('checkbox', { name: 'Rerun regression until it passes' });
+    expect(box).not.toBeChecked();
+    await user.click(screen.getByTestId('regression-loop-toggle'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`/api/projects/${PROJECT}/regression-loop`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({ enabled: true });
+  });
+
+  it('shows the regression loop on, read-only for people who cannot change it', () => {
+    renderPanel(project({ regressionLoop: true, myRole: 'manager' }), false);
+    expect(screen.getByTestId('regression-loop-toggle')).toBeChecked();
+    expect(screen.getByTestId('regression-loop-toggle')).toBeDisabled();
+  });
 });

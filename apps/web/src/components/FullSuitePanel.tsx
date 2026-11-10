@@ -1,6 +1,6 @@
 import type { ProjectDetailResponse } from '@aom/shared';
 import { useState } from 'react';
-import { useRunFullSuite, useSetFullSuite } from '../api/queries/projects.ts';
+import { useRunFullSuite, useSetFullSuite, useSetRegressionLoop } from '../api/queries/projects.ts';
 import { Badge, Button, ErrorBox, Panel } from './ui.tsx';
 
 /**
@@ -24,6 +24,8 @@ export function FullSuitePanel({
   const set = useSetFullSuite(projectId);
   const run = useRunFullSuite(projectId);
   const on = project.fullSuiteAfterFinalize ?? true;
+  const setLoop = useSetRegressionLoop(projectId);
+  const loopOn = project.regressionLoop ?? false;
 
   return (
     <Panel>
@@ -55,6 +57,24 @@ export function FullSuitePanel({
         </p>
       )}
       <ErrorBox error={set.error} />
+      <div className="mt-4 border-t border-line pt-3">
+        <label className="flex items-start gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={loopOn}
+            disabled={!canChange || setLoop.isPending}
+            data-testid="regression-loop-toggle"
+            onChange={(e) => setLoop.mutate(e.target.checked)}
+          />
+          <span>Rerun regression until it passes</span>
+        </label>
+        <p className="mt-2 text-sm text-muted">
+          When every bug a regression run filed is merged, the DevOps engineer is asked to redeploy the app
+          under test and the run starts again (at most 3 automatic reruns).
+        </p>
+        <ErrorBox error={setLoop.error} />
+      </div>
       {/* The lean team workflow (lean team) turns the automatic run off: the full suite is a manual regression run. */}
       <div className="mt-4 border-t border-line pt-3">
         <p className="mb-2 text-sm text-muted">

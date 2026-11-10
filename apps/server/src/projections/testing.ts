@@ -118,6 +118,52 @@ export const testingProjectors: Record<string, Projector> = {
       evidence: p.evidence,
     });
     await finishSuiteCard(tx, e, p.suiteCardId);
+    // P4: the regression loop follows this failed run
+    if (p.loop && card)
+      await exec(
+        tx,
+        `INSERT INTO regression_loops (run_card_id, project_id, platform, workstation_id, root_card_id, iteration, mismatch,
+                                       state, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'waiting_fixes',$8,$8) ON CONFLICT DO NOTHING`,
+        [
+          p.suiteCardId,
+          card.project_id,
+          p.platform ?? card.fields?.platform ?? null,
+          p.loop.workstationId ?? null,
+          p.loop.rootCardId,
+          p.loop.iteration,
+          !!p.targetMismatch,
+          e.createdAt,
+        ],
+      );
+  },
+
+  RegressionRedeployRequested: async (tx, e) => {
+    const p = ev<'RegressionRedeployRequested'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE regression_loops SET state='redeploying', devops_request_id=$2, updated_at=$3 WHERE run_card_id=$1`,
+      [p.runCardId, p.requestId, e.createdAt],
+    );
+  },
+
+  RegressionRequeued: async (tx, e) => {
+    const p = ev<'RegressionRequeued'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE regression_loops SET state='requeued', next_run_card_id=$2, deployed_commit=$3, updated_at=$4
+        WHERE run_card_id=$1`,
+      [p.runCardId, p.nextCardId, p.deployedCommit ?? null, e.createdAt],
+    );
+  },
+
+  RegressionLoopStopped: async (tx, e) => {
+    const p = ev<'RegressionLoopStopped'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE regression_loops SET state='stopped', stop_reason=$2, updated_at=$3 WHERE run_card_id=$1`,
+      [p.runCardId, p.reason, e.createdAt],
+    );
   },
 
   // The bug cards a suite or regression run reported, with their dedupe keys (migration 2890 backfills the same way).
