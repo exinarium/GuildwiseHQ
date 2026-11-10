@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -225,6 +226,26 @@ describe.skipIf(process.platform === 'win32')('temp dirs of agents that no longe
     expect(existsSync(skipped)).toBe(false);
     expect(existsSync(live)).toBe(true);
   });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'keeps the temp dir when the agents folder cannot be read (only a missing folder means gone)',
+    async () => {
+      const paths = runnerPaths(tmp());
+      const id = '019e3f6a-7b1c-7a2d-8c3e-0123456789c9';
+      const sb = await ensureSandbox(paths, id, id);
+      chmodSync(paths.agents, 0o000); // lstat of agents/<id> fails with EACCES, not ENOENT
+      try {
+        expect(await removeOrphanAgentTmps(paths)).toBe(0);
+        expect(existsSync(sb.tmp)).toBe(true);
+      } finally {
+        chmodSync(paths.agents, 0o700);
+      }
+      // the folder really gone: now it goes
+      rmSync(paths.agentDir(id), { recursive: true, force: true });
+      expect(await removeOrphanAgentTmps(paths)).toBe(1);
+      expect(existsSync(sb.tmp)).toBe(false);
+    },
+  );
 
   it('is a no-op when the temp root does not exist', async () => {
     process.env.AOM_AGENT_TMP_ROOT = join(tmp(), 'missing');

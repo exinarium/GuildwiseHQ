@@ -425,7 +425,12 @@ export async function removeOrphanAgentTmps(
       if (!owner || owner.agents !== paths.agents) continue;
       if (agentTmpDir(paths, owner.agentId) !== dir) continue;
       if (skip.has(owner.agentId) || agentTmpHeld(dir)) continue;
-      if (existsSync(paths.agentDir(owner.agentId))) continue;
+      // gone only when the lookup says so: an unreadable or unmounted agents folder (EACCES, EIO, ...) keeps the dir
+      const gone = await lstat(paths.agentDir(owner.agentId)).then(
+        () => false,
+        (e: NodeJS.ErrnoException) => e?.code === 'ENOENT',
+      );
+      if (!gone) continue;
       await rm(dir, { recursive: true, force: true, maxRetries: 2 });
       removed++;
     } catch {
