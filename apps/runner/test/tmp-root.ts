@@ -3,21 +3,31 @@ import { join } from 'node:path';
 
 /*
  * One temp root per test run (test/global-setup.ts) and one dir per test file inside it (test/setup-git.ts): every
- * `tmpdir()` path and every agent temp dir a test makes lands there, and goes when the file or the run ends, also when a
- * test fails, times out or the run is interrupted.
+ * `tmpdir()` path a test makes lands in its file's dir, every agent temp dir in the run's root, and both go when the file
+ * or the run ends, also when a test fails, times out or the run is interrupted.
+ *
+ * The names are short on purpose: Unix socket paths are limited to 108 bytes, and the agents' sockets (Claude Code's
+ * bridge sockets under the agent temp dir, the IPC sockets under `tmpdir()`) sit below these dirs. The agent temp root
+ * is the run root, not the file's dir, for the same reason. Measured: the real Claude Code sandbox tests need the agent
+ * temp dir at 74 characters or less, so the suite runs from a TMPDIR of up to 46 characters.
  */
 
-/** Prefix of the per-run roots under the system temp dir (`aom-vt-runner-XXXXXX`). */
-export const ROOT_PREFIX = 'aom-vt-';
+/** Prefix of the per-run roots under the system temp dir (`aom-vtXXXXXX`; the server suite's are `aom-vt-server-*`). */
+export const ROOT_PREFIX = 'aom-vt';
+/** Prefix of the per-file dirs inside a run root (`fXXXXXX`). */
+export const FILE_PREFIX = 'f';
 /** A root this old belongs to a run that was killed before its teardown: the next run removes it. */
 const STALE_MS = 12 * 3600_000;
 
-/** Points `tmpdir()` and the runner's agent temp root at `dir` (read on every call, so later calls follow). */
-export function useTmp(dir: string): void {
+/**
+ * Points `tmpdir()` at `dir`, and the runner's agent temp root at `agentRoot` (both read on every call, so later calls
+ * follow).
+ */
+export function useTmp(dir: string, agentRoot: string = dir): void {
   process.env.TMPDIR = dir;
   process.env.TMP = dir;
   process.env.TEMP = dir;
-  process.env.AOM_AGENT_TMP_ROOT = dir;
+  process.env.AOM_AGENT_TMP_ROOT = agentRoot;
 }
 
 const uid = (): number | undefined => process.getuid?.();

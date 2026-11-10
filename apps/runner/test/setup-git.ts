@@ -2,16 +2,18 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll } from 'vitest';
-import { killProcsUnder, removeTree, useTmp } from './tmp-root.ts';
+import { FILE_PREFIX, killProcsUnder, removeTree, useTmp } from './tmp-root.ts';
 
 /*
- * Every temp dir a test file makes (its `tmpdir()` dirs, agent temp dirs, run tmp dirs, its HOME) lives in one dir of its
- * own inside the run's temp root (test/global-setup.ts). The `afterAll` below runs after the file's own hooks (hooks
- * stack): it stops what the file left running there (a service, a fake web server) and removes the dir, also when a test
- * failed or timed out.
+ * Every `tmpdir()` dir a test file makes (and its HOME) lives in one dir of its own inside the run's temp root
+ * (test/global-setup.ts); agent temp dirs and run tmp dirs stay in the run root itself (short socket paths, see
+ * tmp-root.ts). The `afterAll` below runs after the file's own hooks (hooks stack): it stops what the file left running
+ * (a service, a fake web server: their command lines name the file's dir) and removes the dir, also when a test failed or
+ * timed out. Without the global setup (another config) the file's dir is the agent temp root too.
  */
-const fileTmp = mkdtempSync(join(tmpdir(), 'aom-f-'));
-useTmp(fileTmp);
+const runRoot = tmpdir();
+const fileTmp = mkdtempSync(join(runRoot, FILE_PREFIX));
+useTmp(fileTmp, process.env.AOM_AGENT_TMP_ROOT === runRoot ? runRoot : fileTmp);
 afterAll(async () => {
   await killProcsUnder(fileTmp);
   removeTree(fileTmp);
@@ -25,7 +27,7 @@ afterAll(async () => {
  */
 export const TEST_OWNER = { name: 'Workstation Owner', email: 'owner@example.test' };
 
-const home = mkdtempSync(join(fileTmp, 'aom-test-home-'));
+const home = mkdtempSync(join(fileTmp, 'home-'));
 const global = join(home, '.gitconfig');
 writeFileSync(global, `[user]\n\tname = ${TEST_OWNER.name}\n\temail = ${TEST_OWNER.email}\n`);
 process.env.HOME = home;

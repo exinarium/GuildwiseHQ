@@ -20,7 +20,7 @@ export default function setup(): () => Promise<void> {
   const base = tmpdir();
   const saved = Object.fromEntries(VARS.map((k) => [k, process.env[k]]));
   sweepStaleRoots(base);
-  const root = mkdtempSync(join(base, `${ROOT_PREFIX}runner-`));
+  const root = mkdtempSync(join(base, ROOT_PREFIX));
   useTmp(root);
   // vitest exits on SIGINT/SIGTERM with process.exit() and skips the teardown below; its test workers are still running
   const onExit = () => killAndRemoveSync(root);
