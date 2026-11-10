@@ -338,10 +338,10 @@ export async function releasePrepTaskPass(
       `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.share_accounts, ws.runner_version, ws.runtimes,
               ws.connected, ws.last_seen_at, ws.name AS ws_name FROM agents a
          JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
-        WHERE a.workstation_id = $1 AND a.org_id = $2 AND a.role_key = ANY ($4::text[]) AND a.status = 'active'
-          AND a.paused_at IS NULL AND NOT a.is_devops
+        WHERE a.workstation_id = $1 AND a.org_id = $2 AND a.status = 'active'
+          AND a.paused_at IS NULL AND ($4::text[] @> ARRAY['devops']::text[] AND a.is_devops)
           AND (a.allowed_project_ids IS NULL OR $3::uuid = ANY (a.allowed_project_ids))
-        ORDER BY array_position($4::text[], a.role_key), a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
+        ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [t.workstation_id, t.org_id, t.project_id, roles],
     );
     const fail = async (reason: string, code: PrepWriterFailureCode = 'writer_failed') =>

@@ -92,7 +92,7 @@ import {
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
-import { cardPayload, shiftTexts } from '../devops/requests.ts';
+import { cardPayload, devopsGuardFor, shiftTexts } from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import {
@@ -1572,18 +1572,7 @@ export class ShiftSupervisor {
         ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(accountKey !== 'main' ? { account: accountKey } : {}),
-        ...(msg.kind === 'devops' && msg.agent.isDevops
-          ? {
-              devopsGuard: {
-                sessionRef: msg.shiftId,
-                protectedBranches: [msg.brief.project.workingBranch, msg.worktree?.baseBranch].filter(
-                  (b): b is string => !!b,
-                ),
-                approvedCommands: msg.devops?.approval?.commands ?? [],
-                ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true } : {}),
-              },
-            }
-          : {}),
+        ...(devopsGuardFor(msg) ? { devopsGuard: devopsGuardFor(msg) } : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,

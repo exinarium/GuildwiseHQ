@@ -156,10 +156,9 @@ describe('proposal task kinds (one writer mechanism)', () => {
     expect(() => ReleasePrepTaskSchema.parse({ ...guide, changes: [] })).toThrow();
   });
 
-  it('chooses the writer roles in one registry: BA first for the changelog, architect first for the guide, builder for videos', () => {
-    expect(PREP_TASK_KINDS.changelog_entries.roles).toEqual(['ba', 'architect', 'builder']);
-    expect(PREP_TASK_KINDS.guide_edits.roles).toEqual(['architect', 'ba', 'builder']);
-    expect(PREP_TASK_KINDS.new_video.roles).toEqual(['builder']);
+  it('chooses the writer in one registry: every kind is written by the DevOps engineer only (GWP-189)', () => {
+    for (const kind of Object.keys(PREP_TASK_KINDS) as (keyof typeof PREP_TASK_KINDS)[])
+      expect(PREP_TASK_KINDS[kind].roles).toEqual(['devops']);
     expect(PREP_TASK_KINDS.changelog_entries.result).toBe('proposal');
     expect(PREP_TASK_KINDS.new_video.result).toBe('files');
   });
@@ -172,10 +171,10 @@ describe('proposal task kinds (one writer mechanism)', () => {
       what: 'the timesheets video',
     });
     expect(c).toBe(
-      'Write changelog: no agent on ws-1 can write the changelog entries. It needs an active BA, architect or builder agent on that workstation. Hire or move one there (or turn the step off), then Retry prep. Or write the entries under ## [Unreleased] by hand and Skip prep.',
+      'Write changelog: no agent on ws-1 can write the changelog entries. Release prep is written by the DevOps engineer, so it needs the active DevOps agent of that workstation (not paused). Bring it back (or turn the step off), then Retry prep. Or write the entries under ## [Unreleased] by hand and Skip prep.',
     );
     expect(g).toContain('Update user guide: no agent on ws-1 can write the user guide update.');
-    expect(g).toContain('active architect, BA or builder agent');
+    expect(g).toContain('needs the active DevOps agent of that workstation');
     expect(v).toContain('Generate videos: no agent on ws-1 can write the timesheets video.');
     for (const m of [c, g, v]) expect(m).toContain('then Retry prep.');
   });

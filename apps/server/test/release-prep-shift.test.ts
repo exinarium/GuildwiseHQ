@@ -13,7 +13,7 @@ import {
 } from '../src/release/docs-prep-tasks.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { freshState } from './helpers/shifts.ts';
+import { freshState, hireDevopsEngineer } from './helpers/shifts.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 /**
@@ -114,7 +114,7 @@ beforeEach(async () => {
       RELEASE_SHIP_CAPABILITY,
     ],
   });
-  await w.hire('Bea', 'builder', 'junior');
+  await hireDevopsEngineer(w);
   await owner('PUT', `${base()}/settings`, {
     enabled: true,
     steps: { changelog: false, guide: false, help: false, videos: true },
@@ -300,44 +300,54 @@ describe('one chooser for the writer of every content step', () => {
     );
   }
 
-  it('gives the changelog task to a BA, the guide task to an architect and the video task to a builder', async () => {
-    const ba = await w.hire('Ada', 'ba', 'senior');
-    const architect = await w.hire('Amy', 'architect', 'senior');
+  it('gives every task kind to the workstation DevOps agent, never to a BA, architect or builder', async () => {
+    // GWP-189: release prep always runs outside the agent sandbox, so only the DevOps engineer may write it.
+    await w.hire('Ada', 'ba', 'senior');
+    await w.hire('Amy', 'architect', 'senior');
     await w.hire('Cy', 'builder', 'junior');
     await queue('changelog', 'write', changelogTask);
     await queue('guide', 'write', guideTask);
-    await r.barrier();
-    const started = await releasePrepTaskPass(w.t.app.ctx);
-    expect(started).toHaveLength(3);
-    const roleOf = async (taskId: string) =>
-      (
-        await q2(
-          `SELECT a.role_key FROM release_docs_prep_tasks t JOIN agents a ON a.id = t.agent_id WHERE t.id=$1`,
-          [taskId],
-        )
-      )[0].role_key;
-    const byKind: Record<string, string> = {};
-    for (const s of started) {
-      const t = (await q2('SELECT task FROM release_docs_prep_tasks WHERE id=$1', [s.taskId]))[0];
-      byKind[t.task.kind] = await roleOf(s.taskId);
+    const kinds: string[] = [];
+    // one release_prep shift at a time per agent: drain the three queued tasks one pass at a time
+    for (let i = 0; i < 3; i++) {
+      await r.barrier();
+      const started = await releasePrepTaskPass(w.t.app.ctx);
+      expect(started.length).toBeLessThanOrEqual(1);
+      for (const s of started) {
+        const a = (await q2('SELECT is_devops, role_key FROM agents WHERE id=$1', [s.agentId]))[0];
+        expect(a.is_devops).toBe(true);
+        expect(a.role_key).toBe('devops');
+        kinds.push(
+          (await q2('SELECT task FROM release_docs_prep_tasks WHERE id=$1', [s.taskId]))[0].task.kind,
+        );
+        await q(`UPDATE shifts SET status='ended' WHERE agent_id=$1 AND kind='release_prep'`, [s.agentId]);
+      }
     }
-    expect(byKind).toEqual({ new_video: 'builder', changelog_entries: 'ba', guide_edits: 'architect' });
-    expect([ba, architect].length).toBe(2);
-    // the start the BA gets is a release_prep shift with the proposal task, not a BA task
+    expect(kinds.sort()).toEqual(['changelog_entries', 'guide_edits', 'new_video']);
+    // the start is a release_prep shift with the proposal task, not a DevOps request
     const start = r.of('shift.start').find((f: any) => f.releasePrep?.task.kind === 'changelog_entries');
     expect(start?.kind).toBe('release_prep');
+    expect(start?.agent.isDevops).toBe(true);
     expect(start?.releasePrep?.writable).toEqual(['release-prep-proposal.json']);
     expect(start?.brief.card.title).toBe('Write the changelog entries (release/1.5.0)');
   });
 
-  it('falls back to the next role when the preferred one is not on the workstation (changelog: architect, no BA)', async () => {
+  it('starts nothing when the workstation has only non-DevOps agents (no fallback to another role)', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE is_devops AND workstation_id=$1`, [w.workstationId]);
+    await w.hire('Ada', 'ba', 'senior');
     await w.hire('Amy', 'architect', 'senior');
     await queue('changelog', 'write', changelogTask);
     await r.barrier();
-    const started = await releasePrepTaskPass(w.t.app.ctx);
-    const roles = [];
-    for (const s of started)
-      roles.push((await q2('SELECT role_key FROM agents WHERE id=$1', [s.agentId]))[0].role_key);
-    expect(roles.sort()).toEqual(['architect', 'builder']);
+    expect(await releasePrepTaskPass(w.t.app.ctx)).toEqual([]);
+    const failed = (
+      await q2("SELECT status, code FROM release_docs_prep_tasks WHERE task->>'kind'='changelog_entries'")
+    )[0];
+    expect(failed).toMatchObject({ status: 'failed', code: 'no_writer' });
+  });
+
+  it('does not use a paused DevOps agent', async () => {
+    await q(`UPDATE agents SET paused_at=now() WHERE is_devops AND workstation_id=$1`, [w.workstationId]);
+    await r.barrier();
+    expect(await releasePrepTaskPass(w.t.app.ctx)).toEqual([]);
   });
 });
