@@ -80,7 +80,10 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
       deskItemId: card.finalize_desk_item_id ?? null,
       lastError: card.finalize_error ?? null,
     },
-    suiteKind: card.origin === 'full_suite' || card.origin === 'regression' ? card.origin : null,
+    suiteKind:
+      card.card_type === 'regression' && (card.origin === 'full_suite' || card.origin === 'regression')
+        ? card.origin
+        : null,
     suiteResults: await suiteResultsOf(ctx.pool, card.id),
     testEnvironment: env
       ? {
