@@ -3,7 +3,7 @@
 # Build context is this folder:  docker build -t aom-media media/   (scripts/media-build.sh also labels the image)
 # The app server forwards /videos/* to this service (AOM_MEDIA_URL=http://media:80).
 
-FROM node:22.23-alpine AS manifest
+FROM node:26.13-alpine AS manifest
 WORKDIR /videos
 COPY videos/ /videos/
 COPY build-manifest.mjs /build-manifest.mjs
