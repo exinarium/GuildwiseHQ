@@ -306,6 +306,66 @@ describe('grace before the process is killed once the claim is released', () => 
     expect(Date.now() - t0).toBeLessThan(10_000);
   });
 
+  it('keeps the grace when the stop arrives right behind the accepted verdict (same socket read)', async () => {
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      await ctl.post('/v1/report', outcome('handoff', 'done'));
+      await sleep(500);
+      ctl.setUsage({ inputTokens: 900, outputTokens: 100 });
+      return { finalText: 'done' };
+    });
+    h = await startHarness(
+      {
+        reportResult: (m) => {
+          queueMicrotask(() => h?.server.send('shift.stop', { shiftId: m.shiftId, reason: 'claim_lost' }));
+          return { accepted: true };
+        },
+      },
+      { adapters: new Map([['mock', adapter]]), supervisorOverrides: { claimLostGraceMs: 5_000 } },
+    );
+    const shiftId = send();
+    const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === shiftId, 20_000);
+    expect(ended.outcome).toBe('reported');
+    expect(ended.usage).toMatchObject({ inputTokens: 900, outputTokens: 100 });
+  });
+
+  it('keeps the grace when the stop arrives before the verdict', async () => {
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      await ctl.post('/v1/report', outcome('handoff', 'done'));
+      await sleep(500);
+      ctl.setUsage({ inputTokens: 900, outputTokens: 100 });
+      return { finalText: 'done' };
+    });
+    h = await startHarness(
+      { reportResult: () => 'ignore' },
+      { adapters: new Map([['mock', adapter]]), supervisorOverrides: { claimLostGraceMs: 5_000 } },
+    );
+    const shiftId = send();
+    const report = await h.server.waitFor('shift.report', (m) => m.shiftId === shiftId, 20_000);
+    h.server.send('shift.stop', { shiftId, reason: 'claim_lost' });
+    await sleep(100);
+    h.server.send('shift.report.result', { reportId: report.reportId, accepted: true });
+    const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === shiftId, 20_000);
+    expect(ended.outcome).toBe('reported');
+    expect(ended.usage).toMatchObject({ inputTokens: 900, outputTokens: 100 });
+  });
+
+  it('stops anyway when the verdict never comes within the grace', async () => {
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      await ctl.post('/v1/report', outcome('handoff', 'done'));
+      await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+    });
+    h = await startHarness(
+      { reportResult: () => 'ignore' },
+      { adapters: new Map([['mock', adapter]]), supervisorOverrides: { claimLostGraceMs: 300 } },
+    );
+    const shiftId = send();
+    await h.server.waitFor('shift.report', (m) => m.shiftId === shiftId, 20_000);
+    const t0 = Date.now();
+    h.server.send('shift.stop', { shiftId, reason: 'claim_lost' });
+    await h.server.waitFor('shift.ended', (m) => m.shiftId === shiftId, 20_000);
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  });
+
   it('a claim lost before any report still stops at once and is not "reported"', async () => {
     await start(async (_i, ctl) => {
       await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));

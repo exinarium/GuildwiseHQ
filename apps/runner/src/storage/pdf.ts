@@ -16,7 +16,7 @@ export interface PdfRenderer {
   /** HTML in, PDF bytes out. Throws PdfError. Never logs or returns the HTML in an error. */
   render(html: string, signal: AbortSignal): Promise<Buffer>;
   status(): Promise<{ ready: boolean; version?: string }>;
-  install(opts: { withDeps: boolean; log: (line: string) => void }): Promise<void>;
+  install(opts: { withDeps: boolean; log: (line: string) => void; signal?: AbortSignal }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -29,6 +29,8 @@ export interface ChromiumPdfOptions {
   maxConcurrent?: number;
   /** Test seam: a browser binary at this path instead of the one playwright-core resolves. */
   executablePath?: string;
+  /** Test seam: the cli script `install` runs instead of playwright-core's cli.js. */
+  cli?: string;
 }
 
 // Only the parts of playwright-core the renderer touches.
@@ -243,15 +245,22 @@ export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
       }
     },
 
-    async install({ withDeps, log }) {
-      const cli = playwrightCli();
+    async install({ withDeps, log, signal }) {
+      const cli = o.cli ?? playwrightCli();
       if (!cli) throw new PdfError('pdf_unavailable');
       const { execa } = await import('execa');
       const env = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: o.browsersPath };
       const run = async (args: string[]) => {
-        const r = await execa(process.execPath, [cli, ...args], { env, reject: false, all: true });
+        if (signal?.aborted) throw new PdfError('pdf_failed');
+        const r = await execa(process.execPath, [cli, ...args], {
+          env,
+          reject: false,
+          all: true,
+          ...(signal ? { cancelSignal: signal } : {}),
+          forceKillAfterDelay: 2000,
+        });
         if (r.all) for (const l of String(r.all).split('\n')) if (l.trim()) log(l);
-        if (r.exitCode !== 0) throw new PdfError('pdf_failed');
+        if (signal?.aborted || r.exitCode !== 0) throw new PdfError('pdf_failed');
       };
       if (withDeps && process.platform === 'linux') await run(['install-deps', 'chromium-headless-shell']);
       await run(['install', '--only-shell', 'chromium']);

@@ -285,6 +285,10 @@ export interface RunnerOptions {
    * `role.smoke`. Default on, off with the mock runtime and under tests.
    */
   roleSmoke?: boolean;
+  /** Fetch the PDF renderer's browser in the background at start when it is missing. Default on, off under tests. */
+  pdfRepair?: boolean;
+  /** Test seam: the PDF renderer (default: chromiumPdfRenderer under <data dir>/browsers). */
+  pdfRenderer?: PdfRenderer;
   /** Test hook: the roles the smoke test goes through and the `aom` command it runs. */
   roleSmokeRoles?: NonNullable<import('./health/role-smoke.ts').RoleSmokeDeps['roles']>;
   roleSmokeAom?: string[];
@@ -342,6 +346,7 @@ export class Runner {
   readonly integrations: IntegrationService;
   readonly storage: StorageService;
   private readonly pdf: PdfRenderer;
+  private pdfRepairRun?: { abort: AbortController; done: Promise<void> };
   readonly claudeStore: ClaudeCredentialStore;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
@@ -563,7 +568,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
     });
     const quarantineDir = opts.config.uploadScan.quarantineDir;
-    this.pdf = chromiumPdfRenderer({ browsersPath: join(this.paths.root, 'browsers') });
+    this.pdf = opts.pdfRenderer ?? chromiumPdfRenderer({ browsersPath: join(this.paths.root, 'browsers') });
     this.storage = new StorageService({
       secretsDir: this.paths.secrets,
       spoolDir: join(this.paths.root, 'tmp', 'storage'),
@@ -1273,8 +1278,16 @@ export class Runner {
     // Run environments keep running (they are re-adopted by the next process); only the bookkeeping ends.
     this.runs.shutdown();
     await this.supervisor.stopAll('manager');
+    // a shift's own cleanup (temp dirs, scratch) may still be running; a stuck one must not hang the stop
+    await Promise.race([
+      this.supervisor.settledAll(),
+      new Promise((r) => setTimeout(r, this.opts.exitGraceMs ?? 10_000).unref()),
+    ]);
     await this.chat.cancelAll('runner stopped');
     await this.client.stop();
+    // an installer left running would keep writing into <data dir>/browsers
+    this.pdfRepairRun?.abort.abort();
+    await this.pdfRepairRun?.done;
     await this.pdf.close();
     await this.ipc.stop();
     this.writeStatus(false);
@@ -1282,14 +1295,21 @@ export class Runner {
 
   /** The PDF browser of a new runner version is fetched in the background; until then copies report 'unavailable'. */
   private repairPdfRenderer(): void {
-    void (async () => {
-      if ((await this.pdf.status()).ready) return;
+    // Not gated on the mock runtime: e2e and demo runners fetch the browser as before.
+    if (!(this.opts.pdfRepair ?? !process.env.VITEST)) return;
+    const abort = new AbortController();
+    const done = (async () => {
+      if ((await this.pdf.status()).ready || abort.signal.aborted) return;
       this.log.info('pdf renderer: browser missing, installing in the background');
-      await this.pdf.install({ withDeps: false, log: () => undefined });
+      await this.pdf.install({ withDeps: false, log: () => undefined, signal: abort.signal });
       this.log.info('pdf renderer: browser installed');
-    })().catch(() =>
-      this.log.warn('pdf renderer: background install failed (run `guildwise-runner pdf-renderer install`)'),
-    );
+    })().catch(() => {
+      if (!abort.signal.aborted)
+        this.log.warn(
+          'pdf renderer: background install failed (run `guildwise-runner pdf-renderer install`)',
+        );
+    });
+    this.pdfRepairRun = { abort, done };
   }
 
   /** `aom runner status|logs` and the `runner.diagnostics` command: this workstation's status and logs, secrets masked. */

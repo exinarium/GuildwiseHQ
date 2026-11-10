@@ -129,6 +129,50 @@ describe('a prompt too big for argv (reviewer shifts of a card with a long histo
   });
 });
 
+describe('a chat message too big for argv', () => {
+  it('the Claude adapter starts a chat with a huge message (fake claude reads it from stdin)', async () => {
+    const t = tmp();
+    const received = join(t, 'received.txt');
+    const bin = join(t, 'fakeclaude');
+    writeFileSync(bin, `#!/bin/sh\nwc -c > ${received}\necho '{"type":"system"}'\nexit 0\n`);
+    chmodSync(bin, 0o755);
+    const cwd = join(t, 'data', 'agents', 'scratch');
+    mkdirSync(cwd, { recursive: true });
+    const paths = runnerPaths(join(t, 'data'));
+    const sandbox = await ensureSandbox(paths, A, 'Rev');
+    const adapter = new ClaudeCodeAdapter(ClaudeRuntimeConfigSchema.parse({ bin, sandbox: 'off' }), paths);
+    const prev = process.env.AOM_CLAUDE_SMOKE;
+    process.env.AOM_CLAUDE_SMOKE = '1';
+    try {
+      const session = await adapter.startChat({
+        chatId: 'c1',
+        message: HUGE,
+        cwd,
+        sandbox,
+        env: {},
+        readOnly: false,
+        agent: {
+          agentId: A,
+          name: 'Rev',
+          roleKey: 'reviewer',
+          seniority: 'senior',
+          runtime: 'claude-code',
+          model: 'sonnet',
+          skills: [],
+          permissions: reviewer.permissions,
+          isDevops: false,
+        },
+      } as never);
+      const exit = (await drain(session)).at(-1);
+      expect(exit).toMatchObject({ kind: 'exit', code: 0 });
+      expect(Number(readFileSync(received, 'utf8').trim())).toBe(Buffer.byteLength(HUGE));
+    } finally {
+      if (prev === undefined) delete process.env.AOM_CLAUDE_SMOKE;
+      else process.env.AOM_CLAUDE_SMOKE = prev;
+    }
+  });
+});
+
 describe('supervisor: a shift whose runtime cannot start', () => {
   let h: Harness | undefined;
   afterEach(async () => {
