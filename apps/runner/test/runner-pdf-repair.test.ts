@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PdfError, type PdfRenderer, chromiumPdfRenderer } from '../src/storage/pdf.ts';
-import { startHarness, type Harness } from './harness.ts';
+import { chromiumPdfRenderer, PdfError, type PdfRenderer } from '../src/storage/pdf.ts';
+import { type Harness, startHarness } from './harness.ts';
 
 type InstallOpts = Parameters<PdfRenderer['install']>[0];
 
