@@ -27,6 +27,8 @@ export const DESK_SUBKIND = {
   /** A suite that failed and passed again (flaky) three times in seven days: a notice per project and suite. */
   flakySuite: 'flaky_suite',
   bugReported: 'bug_reported',
+  /** A suite or regression run found the target app on another commit than the one it tests: no bug was filed. */
+  regressionTargetMismatch: 'regression_target_mismatch',
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',
   savedWork: 'saved_work',

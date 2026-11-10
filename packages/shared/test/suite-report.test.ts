@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_ROLES, parseSuiteBugs, SUITE_BUGS_MAX, testKey, titleKey } from '../src/index.ts';
+import {
+  BUILTIN_ROLES,
+  parseSuiteBugs,
+  parseTargetLine,
+  SUITE_BUGS_MAX,
+  testKey,
+  titleKey,
+} from '../src/index.ts';
 
 describe('parseSuiteBugs', () => {
   it('a note without sections is one bug with the fallback title and the whole note', () => {
@@ -93,5 +100,49 @@ describe('tester instructions (v12): the multi-bug contract', () => {
     expect(tester?.instructions).toContain('never stop at the first failure');
     expect(tester?.instructions).toContain('`Bug: <short title>`');
     expect(tester?.instructions).toContain('`Test: <spec file> > <test name>`');
+  });
+});
+
+describe('parseTargetLine (P3)', () => {
+  it('reads the three forms', () => {
+    expect(parseTargetLine('Target commit: abc1234def (contains abc1234)\nBug: x')).toEqual({
+      kind: 'match',
+      deployed: 'abc1234def',
+      line: 'Target commit: abc1234def (contains abc1234)',
+    });
+    expect(parseTargetLine('  target commit: Unknown, no version endpoint')).toEqual({
+      kind: 'unknown',
+      deployed: null,
+      line: 'target commit: Unknown, no version endpoint',
+    });
+    expect(parseTargetLine('Target mismatch: 9f8e7d6 from yesterday (tests abc1234)')).toEqual({
+      kind: 'mismatch',
+      deployed: '9f8e7d6',
+      line: 'Target mismatch: 9f8e7d6 from yesterday (tests abc1234)',
+    });
+    expect(parseTargetLine('Target mismatch: an old build (tests abc1234)')?.deployed).toBe('abc1234');
+    expect(parseTargetLine('Target mismatch: the v1.2 image')).toMatchObject({
+      kind: 'mismatch',
+      deployed: null,
+    });
+  });
+  it('is null without a target line, and the first line wins', () => {
+    expect(parseTargetLine('Bug: Search\nTarget is fine')).toBeNull();
+    expect(parseTargetLine('Target commit: zzz not a sha')).toBeNull();
+    expect(parseTargetLine('Target commit: unknown\nTarget mismatch: 1234567')?.kind).toBe('unknown');
+    expect(parseTargetLine('Target mismatch: 1234567\nTarget commit: abcdef1')?.kind).toBe('mismatch');
+  });
+  it('parseSuiteBugs keeps the target line out of the run notes', () => {
+    const r = parseSuiteBugs('Target commit: unknown\nRan 40 specs.\nBug: Search\nnone', 'f');
+    expect(r.preamble).toBe('Ran 40 specs.');
+  });
+});
+
+describe('tester instructions (v13): the target check', () => {
+  it('declares the target commit before failures', () => {
+    const tester = BUILTIN_ROLES.find((r) => r.key === 'tester');
+    expect(tester?.instructions).toContain('`Target commit: unknown`');
+    expect(tester?.instructions).toContain('`Target mismatch: <what it runs> (tests <commit under test>)`');
+    expect(tester?.instructions).toContain('git merge-base --is-ancestor');
   });
 });

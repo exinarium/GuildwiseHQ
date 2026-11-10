@@ -26,6 +26,32 @@ export interface SuiteBug {
   titleKey: string;
 }
 
+/** What the tester declared about the commit the target app runs (the first line of a suite failure note). */
+export type TargetLine = { kind: 'match' | 'unknown' | 'mismatch'; deployed: string | null; line: string };
+
+const TARGET_MISMATCH = /^\s*Target mismatch:\s*(.+)$/i;
+const TARGET_UNKNOWN = /^\s*Target commit:\s*unknown\b.*$/i;
+const TARGET_MATCH = /^\s*Target commit:\s*([0-9a-f]{7,40})\b.*$/i;
+const SHA = /\b[0-9a-f]{7,40}\b/i;
+
+const targetOf = (line: string): TargetLine | null => {
+  const mismatch = TARGET_MISMATCH.exec(line);
+  if (mismatch) return { kind: 'mismatch', deployed: SHA.exec(mismatch[1]!)?.[0] ?? null, line: line.trim() };
+  if (TARGET_UNKNOWN.test(line)) return { kind: 'unknown', deployed: null, line: line.trim() };
+  const match = TARGET_MATCH.exec(line);
+  if (match) return { kind: 'match', deployed: match[1]!, line: line.trim() };
+  return null;
+};
+
+/** The first `Target commit: <sha|unknown> ...` or `Target mismatch: ...` line of a suite failure note, or null. */
+export function parseTargetLine(note: string): TargetLine | null {
+  for (const line of note.split(/\r?\n/)) {
+    const t = targetOf(line);
+    if (t) return t;
+  }
+  return null;
+}
+
 const HEADER = /^\s*(?:#{1,4}\s*)?(?:\*\*)?Bug:(?:\*\*)?\s*(\S.*?)\s*$/i;
 const TEST = /^\s*Test:\s*(\S.*)$/i;
 
@@ -40,6 +66,7 @@ export function parseSuiteBugs(
 ): { preamble: string; bugs: SuiteBug[]; overflow: number } {
   const lines = note.split(/\r?\n/);
   const pre: string[] = [];
+  let targetDropped = false;
   const sections: Array<{ title: string; test?: string; body: string[] }> = [];
   for (const line of lines) {
     const h = HEADER.exec(line);
@@ -49,7 +76,9 @@ export function parseSuiteBugs(
     }
     const cur = sections.at(-1);
     if (!cur) {
-      pre.push(line);
+      // the target line (P3) is read by `parseTargetLine`, not repeated in every bug as run notes
+      if (!targetDropped && targetOf(line)) targetDropped = true;
+      else pre.push(line);
       continue;
     }
     if (cur.test === undefined && cur.body.every((l) => !l.trim())) {

@@ -122,8 +122,8 @@
   {
     "kind": "role",
     "key": "tester",
-    "version": 12,
-    "sha256": "139fbbdf1882bd3b6b1a4853da44187c15b2af4d53c3ee8a04465ac187df8ebd"
+    "version": 13,
+    "sha256": "ae46030d606e4b31183e1110098f7023931ff14e309d3b7f1051dc50beea12df"
   },
   {
     "kind": "role",

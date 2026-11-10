@@ -511,6 +511,7 @@ export async function applyShiftReport(
           outcome.event === 'TestPassed',
           report.note,
           ev,
+          shift.start_sha ?? null,
         );
         break;
       }

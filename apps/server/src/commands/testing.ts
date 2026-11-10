@@ -6,6 +6,7 @@ import {
   e2eOnlyFailure,
   emptyFields,
   parseSuiteBugs,
+  parseTargetLine,
   type RunnerToServerOf,
   SUITE_BUGS_MAX,
   streamId,
@@ -132,12 +133,14 @@ export async function suiteOutcomeEvents(
   pass: boolean,
   note: string,
   evidence: TestEvidence,
+  headSha: string | null = null,
 ): Promise<AppendInput[]> {
   const kind = card.origin === 'regression' ? 'regression' : 'full_suite';
   const platform = card.fields?.platform as 'web' | 'mobile' | undefined;
   const scope = projectScope(card.org_id, card.project_id);
   const actor = agentActor(agentId);
   const events: AppendInput[] = [];
+  const target = pass ? null : parseTargetLine(note);
   if (pass) {
     events.push({
       streamId: streamId.card(card.id),
@@ -147,6 +150,60 @@ export async function suiteOutcomeEvents(
     });
     events.push(
       cardMessage(card, { kind: 'agent', agentId }, 'evidence', `Suite passed: ${evidence.summary}`),
+    );
+  } else if (target?.kind === 'mismatch') {
+    // P3: the target app does not run the commit under test, so its failures say nothing about this code. No bug cards.
+    const deskItemId = randomUUID();
+    const tested = headSha ? headSha.slice(0, 12) : 'unknown';
+    events.push(
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'FullSuiteFailed',
+          payload: {
+            suiteCardId: card.id,
+            evidence,
+            testSideFixed: false,
+            kind,
+            platform,
+            targetMismatch: {
+              deployedCommit: target.deployed,
+              testedCommit: headSha,
+              line: target.line.slice(0, 500),
+            },
+          },
+        },
+        actor,
+        scope,
+      },
+      cardMessage(
+        card,
+        { kind: 'agent', agentId },
+        'evidence',
+        `Suite not judged: the target runs another commit (${target.line}). No bug was filed.`,
+      ),
+      {
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: DESK_SUBKIND.regressionTargetMismatch,
+            title: `${card.ref}: the ${platform ? `${platform} ` : ''}app under test runs another build`,
+            body: `${card.ref} tested commit ${tested}, but the target app runs ${target.deployed ?? 'another build'} (the tester reported: "${target.line}"). No bug cards were filed, because the failures may come from the old build.\n\nRedeploy the app so it runs the tested commit, then start the ${kind === 'regression' ? 'regression run' : 'suite'} again.`,
+            options: [],
+            blocking: false,
+            pinned: false,
+            cardId: card.id,
+            projectId: card.project_id,
+            affectedCardIds: [card.id],
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
     );
   } else {
     // One report lists every bug of the run, a `Bug:` section each (P2); a note without sections is one bug.
@@ -197,8 +254,9 @@ export async function suiteOutcomeEvents(
         seen.push(open.ref);
         continue;
       }
+      const caveat = target?.kind === 'unknown' ? `${UNCONFIRMED_TARGET}\n\n` : '';
       const description = bugDescription({
-        note: preamble ? `${b.body}\n\nRun notes:\n${preamble}` : b.body,
+        note: caveat + (preamble ? `${b.body}\n\nRun notes:\n${preamble}` : b.body),
         evidence,
         parentRef: card.ref,
       });
@@ -292,6 +350,10 @@ export async function suiteOutcomeEvents(
     });
   return events;
 }
+
+/** The caveat on a bug card whose run could not confirm which commit the target app runs (P3). */
+export const UNCONFIRMED_TARGET =
+  'The deployed commit of the target was not confirmed; this failure may come from an older build.';
 
 /** The open bug card a suite run already filed for this failure (same failing test or same title), if any. */
 async function openSuiteBug(

@@ -291,3 +291,80 @@ describe('a failing run files every bug (P2)', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('the run checks the target commit before filing bugs (P3)', () => {
+  const failWith = (note: string) => ({
+    kind: 'outcome',
+    outcomeId: 'fail',
+    note,
+    data: {
+      summary: '1 failed',
+      commands: ['pnpm e2e'],
+      outputExcerpt: 'Error',
+      title: '1 failure in the web run',
+    },
+  });
+  const CAVEAT = 'The deployed commit of the target was not confirmed';
+
+  it('a mismatch files no bug card and raises one alert for the run', async () => {
+    await freshState();
+    await q('TRUNCATE suite_run_bugs');
+    await hireTeam(w);
+    // an open bug for the same failure: a mismatch run does not count it as seen again either
+    const earlier = (await regression('web')).cards[0];
+    await p.run('Tess', failWith('Bug: Search returns nothing\nnone'));
+    expect(
+      await q(`SELECT 1 FROM cards WHERE card_type='bug' AND parent_card_id=$1`, [earlier.id]),
+    ).toHaveLength(1);
+    const run = (await regression('web')).cards[0];
+    await p.run(
+      'Tess',
+      failWith('Target mismatch: 9f8e7d6 (tests abc123)\nBug: Search returns nothing\nnone'),
+    );
+    expect(await q(`SELECT 1 FROM cards WHERE card_type='bug' AND parent_card_id=$1`, [run.id])).toHaveLength(
+      0,
+    );
+    expect((await eventsOfType('BugReported')).filter((e) => e.regressionCardId === run.id)).toHaveLength(0);
+    expect((await eventsOfType('RegressionBugSeenAgain')).filter((e) => e.runCardId === run.id)).toHaveLength(
+      0,
+    );
+    const failed = (await eventsOfType('FullSuiteFailed')).filter((e) => e.suiteCardId === run.id);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].targetMismatch).toEqual({
+      deployedCommit: '9f8e7d6',
+      testedCommit: 'abc123',
+      line: 'Target mismatch: 9f8e7d6 (tests abc123)',
+    });
+    const items = (await desk()).items.filter((i: any) => i.subkind === 'regression_target_mismatch');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'alert', blocking: false });
+    expect(items[0].card.ref).toBe(run.ref);
+    expect(items[0].body).toContain('No bug cards were filed');
+    expect(await cardRow(run.id)).toMatchObject({ stage: 'done', status: 'done' });
+  });
+
+  it('an unknown target files the bugs with a caveat; a confirmed one without', async () => {
+    await freshState();
+    await q('TRUNCATE suite_run_bugs');
+    await hireTeam(w);
+    const unknown = (await regression('web')).cards[0];
+    await p.run('Tess', failWith('Target commit: unknown\nBug: Search returns nothing\nnone'));
+    const [b1] = await q(`SELECT fields FROM cards WHERE card_type='bug' AND parent_card_id=$1`, [
+      unknown.id,
+    ]);
+    expect(b1!.fields.context).toContain(CAVEAT);
+    expect(b1!.fields.context).not.toContain('Target commit: unknown');
+
+    const confirmed = (await regression('web')).cards[0];
+    await p.run(
+      'Tess',
+      failWith('Target commit: abc1234 (contains abc123)\nBug: Cart badge stays at 0\nzero'),
+    );
+    const [b2] = await q(`SELECT fields FROM cards WHERE card_type='bug' AND parent_card_id=$1`, [
+      confirmed.id,
+    ]);
+    expect(b2!.fields.context).not.toContain(CAVEAT);
+    const failed = (await eventsOfType('FullSuiteFailed')).filter((e) => e.suiteCardId === confirmed.id);
+    expect(failed[0].targetMismatch).toBeUndefined();
+  });
+});

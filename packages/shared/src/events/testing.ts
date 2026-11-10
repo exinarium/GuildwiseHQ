@@ -70,6 +70,14 @@ export const testingEvents = [
       testSideFixed: z.boolean().default(false),
       kind: SuiteKind.default('full_suite'),
       platform: TestPlatform.optional(),
+      /** The target app did not run the commit under test (the tester's `Target mismatch:` line): no bug was filed. */
+      targetMismatch: z
+        .object({
+          deployedCommit: z.string().nullable(),
+          testedCommit: z.string().nullable(),
+          line: z.string().max(500),
+        })
+        .optional(),
     }),
   ),
   /** A bug card in Spec (for the BA) plus a non-blocking desk alert, both in the same append. */
