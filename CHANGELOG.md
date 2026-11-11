@@ -4,9 +4,11 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+Runner 0.1.71.
+
 ### Changed
 
-- Build tooling: vite 8.3.7 (pinned exactly in the root and the web package; chosen over 8.3.6 because it is what the lockfile already resolved and differs only by a newer bundled rolldown) and jsdom 31 for the web unit tests. `build.rollupOptions` is now `build.rolldownOptions`. The web tests now run on the vitest and jsdom the web package declares (a stale jsdom 30 copy was removed from the lockfile). @vitejs/plugin-react 6.2.1, @tailwindcss/vite 4.3.5 and vitest 4.1.12 already support vite 8 and are unchanged. Deferred: vite 8.3.8.
+- Build tooling: vite 8.3.7 (pinned exactly in the root and the web package; chosen over 8.3.6 because it is what the lockfile already resolved and differs only by a newer bundled rolldown) and jsdom 31 for the web unit tests. `build.rollupOptions` is now `build.rolldownOptions`. The web tests now run on the vitest and jsdom the web package declares (a stale jsdom 30 copy was removed from the lockfile), and parse5 is held at 8.1 under parse5-parser-stream, which jsdom 31 needs to parse documents. @vitejs/plugin-react 6.2.1, @tailwindcss/vite 4.3.5 and vitest 4.1.12 already support vite 8 and are unchanged. Deferred: vite 8.3.8.
 
 ## [1.6.0] - 2026-11-10
 
