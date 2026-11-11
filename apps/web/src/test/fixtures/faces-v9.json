@@ -1,0 +1,92 @@
+[
+  {
+    "style": "notionists",
+    "seed": "agent-ada",
+    "sha256": "987d84860802b840b18d9ca584a95c1a4abfd7aa8dad1637b6b675f765cbd416",
+    "length": 11727
+  },
+  {
+    "style": "notionists",
+    "seed": "k3x9q2mz",
+    "sha256": "5dfd631c254bc67b5291578b1faa4d3f0866e56aeba9e82e6a15bdf733611772",
+    "length": 16690
+  },
+  {
+    "style": "notionists",
+    "seed": "0a1b2c3d",
+    "sha256": "171c0f3fd324fd0a1ca2768baff812fec03dadee8bdd70aef57ef7bc0cca1f0a",
+    "length": 13895
+  },
+  {
+    "style": "notionists",
+    "seed": "Zoë Ångström-Ñúñez 李雷",
+    "sha256": "9ab38f46b767915468637a030f8d23cc7fdbe2f0c80d03259a2d466088a27895",
+    "length": 18967
+  },
+  {
+    "style": "notionists",
+    "seed": "a-very-long-seed-value-0123456789abcdefghijklmnopqrstuvwxyz-0123",
+    "sha256": "b9a13a1ece364c9ab039cdf3c109be1a5cf26227c8aa45d1bed53506de6f0388",
+    "length": 16299
+  },
+  {
+    "style": "lorelei",
+    "seed": "agent-ada",
+    "sha256": "5f3ae8284487746bcd13f5168dd09ca8022b8bae8e4703ea4532c77608435fc3",
+    "length": 6782
+  },
+  {
+    "style": "lorelei",
+    "seed": "k3x9q2mz",
+    "sha256": "d3bc0398057bb8ccc9855848947732735c481ea0ba0b18aadfd8c9a0e0e51f9e",
+    "length": 6904
+  },
+  {
+    "style": "lorelei",
+    "seed": "0a1b2c3d",
+    "sha256": "ab41cb4f9840d9d66c9b05c7da0d1ef750a2b0a6f61fbe03f774d1dc6ba97c40",
+    "length": 7447
+  },
+  {
+    "style": "lorelei",
+    "seed": "Zoë Ångström-Ñúñez 李雷",
+    "sha256": "24132cace43cd9ef4b3acdbf49b9ae06fe53e5941d4d30fa2f8d2e8e1a57093b",
+    "length": 7747
+  },
+  {
+    "style": "lorelei",
+    "seed": "a-very-long-seed-value-0123456789abcdefghijklmnopqrstuvwxyz-0123",
+    "sha256": "42e1540a482e494f961f9a03873b18ace1fd5ce329e7398bc2d1e170b69b90e6",
+    "length": 7236
+  },
+  {
+    "style": "open-peeps",
+    "seed": "agent-ada",
+    "sha256": "71bc0efc5366cb93fcef77e31fd33aba406cd99668e024c04127199dadfd18dc",
+    "length": 11740
+  },
+  {
+    "style": "open-peeps",
+    "seed": "k3x9q2mz",
+    "sha256": "4de4818b9de926412b9fc1e6eef045dd3edde2ee17a46d2dbd743156be7347cb",
+    "length": 13058
+  },
+  {
+    "style": "open-peeps",
+    "seed": "0a1b2c3d",
+    "sha256": "445929a6a8f9c93e4fc00ef6f741ce0b68ff5205da76e24ff26db394b8a25f19",
+    "length": 15453
+  },
+  {
+    "style": "open-peeps",
+    "seed": "Zoë Ångström-Ñúñez 李雷",
+    "sha256": "a21d8896e112077a3247f17510eb018eb1a544ea2a04264d41cc3f54da084b33",
+    "length": 10832
+  },
+  {
+    "style": "open-peeps",
+    "seed": "a-very-long-seed-value-0123456789abcdefghijklmnopqrstuvwxyz-0123",
+    "sha256": "795e186d802efa5ea14e89f89fd34914d0dc2dfccd565d1f70b0cd13506ee917",
+    "length": 13016
+  }
+]
