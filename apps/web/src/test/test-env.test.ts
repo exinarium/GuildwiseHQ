@@ -9,7 +9,10 @@ describe('web unit-test environment', () => {
   });
 
   it('declares the multi-page build inputs with rolldownOptions, not the deprecated rollupOptions', () => {
-    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../vite.config.ts'), 'utf8');
+    const source = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../vite.config.ts'),
+      'utf8',
+    );
     expect(source).toMatch(/rolldownOptions:\s*{\s*input:\s*{\s*main:[^}]*form:/);
     expect(source).not.toMatch(/rollupOptions/);
   });
