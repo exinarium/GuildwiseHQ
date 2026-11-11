@@ -76,7 +76,7 @@ export default defineConfig(({ mode }) => {
     plugins: [extensionSources(), react(), tailwindcss(), brandHtml(), publicFormDev()],
     resolve: { alias: { '@aom/web-extension': extensionAlias } },
     build: {
-      rollupOptions: {
+      rolldownOptions: {
         input: { main: resolve(webRoot, 'index.html'), form: resolve(webRoot, 'form.html') },
       },
     },

@@ -1,10 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, PERSONA_HOST_AGENT_ID, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
+import type { ChatStartInput, RuntimeAdapter } from '../src/adapters/types.ts';
+import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { type Harness, startHarness } from './harness.ts';
-import { cleanupTmp } from './helpers.ts';
+import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
 let h: Harness | undefined;
@@ -87,6 +90,69 @@ describe('a session turn on the runner (mock adapter)', () => {
     expect(md).not.toContain('manager you are chatting with');
     expect(h.server.invalid).toEqual([]);
     expect(h.runner.chat.size).toBe(0);
+  });
+
+  it('a Claude Code session turn may write its scratch folder and is told to hand Markdown over by file', async () => {
+    h = await startHarness();
+    // the claude-code adapter is not installed in the harness: the mock runs the turn, its input is replayed below
+    const mock = h.runner.chat.deps.adapters.get('mock') as RuntimeAdapter;
+    let captured: ChatStartInput | undefined;
+    const orig = mock.startChat?.bind(mock);
+    if (!orig) throw new Error('the mock adapter has no chat');
+    const spy = Object.assign(Object.create(mock), {
+      startChat: (input: ChatStartInput) => {
+        captured = input;
+        return orig(input);
+      },
+    });
+    h.runner.chat.deps.adapters.set('claude-code', spy);
+    const msg = turn({ agent: personaAgent({ runtime: 'claude-code' }) }, { kind: 'discovery' });
+    h.server.send('chat.start', msg);
+    await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+    const md = instructionsOf(h);
+    expect(md).toContain('--content-file');
+    expect(md).toContain('scratch directory');
+    if (!captured) throw new Error('the session turn did not start a chat');
+    const input = captured;
+    expect(input.cwd).toBe(input.sandbox.scratch);
+    expect(input.readOnly).toBe(true);
+
+    // replay the real session-turn input into the real Claude Code adapter (fake claude binary)
+    const t = tmp();
+    const bin = join(t, 'fakeclaude');
+    writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\necho '{"type":"system"}'\nexit 0\n`);
+    chmodSync(bin, 0o755);
+    const adapter = new ClaudeCodeAdapter(
+      ClaudeRuntimeConfigSchema.parse({ bin, sandbox: 'off' }),
+      runnerPaths(h.dataDir),
+    );
+    const prev = process.env.AOM_CLAUDE_SMOKE;
+    process.env.AOM_CLAUDE_SMOKE = '1';
+    try {
+      const session = await adapter.startChat({
+        ...input,
+        agent: { ...input.agent, runtime: 'claude-code', model: 'sonnet' },
+      });
+      for await (const _ of session.events()) {
+        // drain
+      }
+    } finally {
+      if (prev === undefined) delete process.env.AOM_CLAUDE_SMOKE;
+      else process.env.AOM_CLAUDE_SMOKE = prev;
+    }
+    const settings = JSON.parse(readFileSync(join(input.sandbox.configDir, 'settings.json'), 'utf8')) as {
+      permissions: { allow: string[]; deny: string[] };
+    };
+    const scratch = input.sandbox.scratch;
+    expect(settings.permissions.allow).toContain(`Edit(/${scratch}/**)`);
+    expect(settings.permissions.deny).not.toContain('Edit');
+    expect(settings.permissions.deny).not.toContain('Write');
+    // no Edit/Write/NotebookEdit deny on the scratch folder or one of its parents
+    const blocking = settings.permissions.deny.filter((r) => {
+      const m = /^(?:Edit|Write|NotebookEdit)\(\/(\/.*?)(?:\/\*\*)?\)$/.exec(r);
+      return !!m?.[1] && (scratch === m[1] || scratch.startsWith(`${m[1]}/`));
+    });
+    expect(blocking).toEqual([]);
   });
 
   it('reads the text of a stored persona from its own registry when the turn carries none', async () => {

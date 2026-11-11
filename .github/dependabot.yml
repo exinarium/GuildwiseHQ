@@ -27,6 +27,12 @@ updates:
         applies-to: version-updates
         patterns: ['*']
         update-types: [minor, patch]
+    ignore:
+      # DiceBear 10 draws a different face for every stored avatar seed (new seed algorithm, and the styles moved to
+      # @dicebear/styles), and a core-only bump breaks rendering. Stay on 9.x until that is decided:
+      # docs/investigations/GWP-191-dicebear-v10-upgrade.md
+      - dependency-name: '@dicebear/*'
+        update-types: ['version-update:semver-major']
 
   # The workflows in .github/workflows. Actions are pinned by commit SHA with the version in a comment; Dependabot
   # updates both.

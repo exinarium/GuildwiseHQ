@@ -467,6 +467,26 @@ describe('claude code chat adapter', () => {
     expect(ro.permissions.deny).toContain('Edit(//data/worktrees/c1/**)');
   });
 
+  it('a read-only chat whose working folder is the scratch folder may write it; a read-only worktree stays denied', () => {
+    // `//X/**` or `//X` covers dir when X is dir or one of its parents
+    const covers = (rule: string, dir: string) => {
+      const m = /^(?:Edit|Write|NotebookEdit)\(\/(\/.*?)(?:\/\*\*)?\)$/.exec(rule);
+      return !!m?.[1] && (dir === m[1] || dir.startsWith(`${m[1]}/`));
+    };
+    for (const cwd of [POLICY_PATHS.scratch, `${POLICY_PATHS.scratch}/sub`]) {
+      const s = buildChatSettings(true, [], policyCtx({ cwd }), POLICY_PATHS);
+      expect(s.permissions.allow, cwd).toContain('Edit(//data/agents/a1/scratch/**)');
+      expect(s.permissions.deny, cwd).not.toContain('Edit');
+      expect(s.permissions.deny, cwd).not.toContain('Write');
+      expect(
+        s.permissions.deny.filter((r) => covers(r, POLICY_PATHS.scratch) || covers(r, cwd)),
+        cwd,
+      ).toEqual([]);
+    }
+    const wt = buildChatSettings(true, [], policyCtx(), POLICY_PATHS);
+    expect(wt.permissions.deny).toContain('Edit(//data/worktrees/TOY-0192abcd/TOY-1/**)');
+  });
+
   it('parses partial-message deltas, the session id, usage and the final text', () => {
     const parser = new ClaudeStreamParser();
     const events: RuntimeEvent[] = readFileSync(

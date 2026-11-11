@@ -2,8 +2,8 @@
   {
     "kind": "role",
     "key": "analyst",
-    "version": 1,
-    "sha256": "c4c8970be5ab9eb4060bc70d3316066e58fca6ebf4db53076689cb4215bffd3e"
+    "version": 2,
+    "sha256": "35c7e6a228ce2d2079ed9521dc803b0b21635777ddbb74db0ccc483b28b115a2"
   },
   {
     "kind": "role",
@@ -110,8 +110,8 @@
   {
     "kind": "role",
     "key": "reviewer",
-    "version": 9,
-    "sha256": "109cd751717f15928bcb9217921eb79b7577f680772de7d3a22a2f15a96b33ee"
+    "version": 10,
+    "sha256": "7e88dbfc59a837938a006777eec132b6e2f7d35a6a18624c2b128c56d97406a1"
   },
   {
     "kind": "role",

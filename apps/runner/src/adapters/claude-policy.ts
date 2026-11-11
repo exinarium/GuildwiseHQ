@@ -966,8 +966,10 @@ export function buildChatSettings(
     ...ALWAYS_DENIED,
     ...BRANCH_MOVING_DENIED,
     'WebSearch',
-    // A card's worktree is read-only; a bare `Edit` deny would also beat the scratch allow, so it is path-scoped.
-    ...(readOnly ? [`Edit(${ruleAbs(ctx.cwd)}/**)`] : []),
+    // A card's worktree is read-only; a bare `Edit` deny would also beat the scratch allow, so it is path-scoped. When the
+    // working folder is the agent's own scratch folder (a session turn) there is nothing to deny: it writes the files that
+    // `aom session draft --content-file` / `aom board minutes --content-file` read there (the same guard as buildShiftSettings).
+    ...(readOnly && !inside(ctx.cwd, paths.scratch) ? [`Edit(${ruleAbs(ctx.cwd)}/**)`] : []),
     ...commonDenies(ctx, paths.configDir),
   ];
   const out: ClaudeSettings = {

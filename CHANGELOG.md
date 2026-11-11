@@ -4,6 +4,23 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-11
+
+Runner 0.1.72.
+
+### Changed
+
+- Upgrade: Node.js 26 in the container images. The server image (build, video worker and runtime stages) and the media image now build on Node.js 26 instead of Node.js 22. Self-hosters who build the images themselves or extend them should rebuild and check any additions of their own against Node.js 26.
+- Build tooling: vite 8.3.7 (pinned exactly in the root and the web package; chosen over 8.3.6 because it is what the lockfile already resolved and differs only by a newer bundled rolldown) and jsdom 31 for the web unit tests. `build.rollupOptions` is now `build.rolldownOptions`. The web tests now run on the vitest and jsdom the web package declares (a stale jsdom 30 copy was removed from the lockfile), and parse5 is held at 8.1 under parse5-parser-stream, which jsdom 31 needs to parse documents. @vitejs/plugin-react 6.2.1, @tailwindcss/vite 4.3.5 and vitest 4.1.12 already support vite 8 and are unchanged. Deferred: vite 8.3.8.
+
+### Fixed
+
+- Discovery and boardroom sessions can hand over long documents again. The facilitator could not save a PRD or brief draft, and the Chair could not save the minutes: the agent's command was refused whenever the Markdown spanned several lines with headings, and the agent could not write the text to a file instead. Session agents now write long Markdown to a file in their own scratch folder and pass it with `--content-file`; a read-only card checkout stays read-only. Reviewers likewise put their risk analysis in a file in their scratch folder (`--risk-file`).
+- Release prep steps no longer fail on a read-only checkout. The release prep work (changelog, user guide and the other ticked steps) is now always given to the workstation's DevOps engineer, who may write the release files. Before, it could go to a builder, business analyst or architect whose sandbox cannot write there, and the step failed.
+- Long chat messages reach the agent. A chat message too long to pass on the command line is now handed to the agent another way, so a long mention or a big pasted text no longer makes the chat fail to start.
+- Agent sessions whose final report was accepted keep their short grace to finish, even when the stop arrives together with the acceptance. Their real usage is now recorded instead of an estimate, and they are no longer labelled as stopped.
+- Stopping the runner no longer hangs on an agent session whose cleanup is stuck: it waits only a short grace and then stops. A background download of the PDF browser is cancelled when the runner stops, so it no longer keeps writing into the runner's data folder afterwards.
+
 ## [1.6.0] - 2026-11-10
 
 Runner 0.1.71.
