@@ -1,5 +1,5 @@
 # A throwaway git host for the tests of private packs over ssh: sshd with a `git` user that logs in by key only, and git.
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache openssh git \
  && adduser -D -s /bin/sh git \
  && echo 'git:unusable-password-for-tests' | chpasswd \
