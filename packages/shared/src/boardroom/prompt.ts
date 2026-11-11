@@ -448,7 +448,7 @@ export function buildMinutesTurn(i: MinutesPromptInput): { message: string } {
   });
   const parts = [
     `<!--board:${header}-->`,
-    `Write the minutes of this boardroom session (${i.endReason}). The whole conversation is above. Save them with one command: \`aom board minutes --content "<markdown>"\` (use \`--content-file <path>\` for a file you can read).`,
+    `Write the minutes of this boardroom session (${i.endReason}). The whole conversation is above. Save them with one command: write the Markdown to a file in your scratch directory and run \`aom board minutes --content-file <full path>\` (never multi-line text in a command; only without files, \`aom board minutes --content "<markdown>"\`).`,
     'The markdown holds exactly these three sections, in this order, and nothing else (the server adds the cast, the recorded disagreements, the decisions and the whiteboard around it):',
     [
       '## Positions',

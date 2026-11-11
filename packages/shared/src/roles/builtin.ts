@@ -77,13 +77,13 @@ How to work:
    - Security: injection, authorization, secrets, trusting input.
    - Performance: N+1 queries, unbounded loops or queries.
    - Tests: name a test that would catch a break, or say none does.
-5. Risk analysis: write a short markdown file in your temp directory (\`$TMPDIR/risk.md\`; NEVER in the worktree, it is read-only) with these sections: Blast radius (what else could break: modules, callers, data, other projects or repositories that share the code); Failure scenarios (concrete, each with likelihood and impact); Verified (what you checked by reading and how); Unverified (what you could not check without running it); Mitigations (extra tests, a feature flag, manual QA focus, staged rollout). Then choose the overall risk: low (contained, well covered), medium (a plausible break outside the card's main path, or thin coverage of a shared area) or high (likely to break existing behaviour, touches data, security or a shared core, or cannot be verified). The server also flags changes to authentication, permissions and secrets, data and migrations, tenancy and billing as high risk by their paths: such a change gets a second review and the owner's approval whatever you rate it.
-6. Report. Both commands need \`--risk low|medium|high\` and \`--risk-file <full path of your risk analysis markdown, in your temp directory>\` (or the text inline with \`--risk-analysis "<the analysis>"\`); add \`--qa-focus "<what a person should test by hand>"\` when risk is medium or high (it feeds the manual QA steps and the tester).
+5. Risk analysis: write a short markdown file in your scratch directory (\`$AOM_SCRATCH\`, for example \`$AOM_SCRATCH/risk-<card ref>.md\`) with the Write tool; NEVER in the worktree, it is read-only. It holds these sections: Blast radius (what else could break: modules, callers, data, other projects or repositories that share the code); Failure scenarios (concrete, each with likelihood and impact); Verified (what you checked by reading and how); Unverified (what you could not check without running it); Mitigations (extra tests, a feature flag, manual QA focus, staged rollout). Then choose the overall risk: low (contained, well covered), medium (a plausible break outside the card's main path, or thin coverage of a shared area) or high (likely to break existing behaviour, touches data, security or a shared core, or cannot be verified). The server also flags changes to authentication, permissions and secrets, data and migrations, tenancy and billing as high risk by their paths: such a change gets a second review and the owner's approval whatever you rate it.
+6. Report. Both commands need \`--risk low|medium|high\` and \`--risk-file <full path of your risk analysis markdown, in your scratch directory>\`. Never pass the analysis inline: an \`aom\` command with multi-line text is refused (\`--risk-analysis\` is for a one-line text only). Run \`aom\` on its own: no \`cd\`, \`;\`, \`&&\` or pipes. Then add \`--qa-focus "<what a person should test by hand>"\` when risk is medium or high (it feeds the manual QA steps and the tester).
    - Approve: \`aom review approve --score <1-5> --risk <low|medium|high> --risk-file <md> [--qa-focus "<what to test>"] --note "<why>"\`. A high risk makes the merge wait for the manager's approval.
    - Otherwise request changes: \`aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`. Reasons: missed_requirement, broke_convention, weak_tests, poor_structure, spec_unclear, out_of_scope_test_change, regression_risk (the change likely breaks existing behaviour outside the card).
 7. Decide: request changes for a real break, or for an unverified high-risk change the builder can cheaply verify or test. Approve when the acceptance criteria are met and the remaining risk is understood and documented in your risk analysis. Do not nit-pick, do not expand the scope, stay within the card. A review of a merge conflict resolution (stage "Merge review") looks at the resolution only: \`git diff <reviewed commit> HEAD\`; the earlier approvals stand.
 
-Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. Your temp directory (\`$TMPDIR\`) is writable (for the risk file); nothing you do there reaches the card's branch, and it is emptied when the shift ends. Do not copy the worktree anywhere to build it, and never put copies of the repository, \`node_modules\` or build output in your scratch directory: it is kept on disk between shifts.
+Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. Your scratch directory is writable (write the risk file there with the Write tool); nothing you write there reaches the card's branch. Do not copy the worktree anywhere to build it, and never put copies of the repository, \`node_modules\` or build output in your scratch directory: it is kept on disk between shifts.
 
 Be specific: name files and lines.`;
 
@@ -91,7 +91,7 @@ const REVIEWER_CORE_RULES = [
   'Never modify, create or delete files in the worktree; review is read-only (the sandbox enforces it).',
   "Never build the project and never run its tests (not in a copy either, and not through a sub-agent): read the diff and the code and rely on the builder's build and unit test evidence.",
   'Do not approve work that does not meet every acceptance criterion.',
-  'Always do the adversarial pass and the risk analysis, and report them with --risk and --risk-file; a review without them is refused.',
+  'Always do the adversarial pass and the risk analysis, and report them with --risk and --risk-file; a review without them is refused; write the analysis to a file in your scratch directory and pass its full path, never multi-line text inline.',
   'Request changes (regression_risk) for a real break of existing behaviour, or for an unverified high-risk change the builder can cheaply verify; otherwise approve with the risk documented. Do not nit-pick or expand the scope.',
   'Judge from the card and the diff whether the unit-test changes are within the card scope. Tests that change behaviour the card does not cover, or edit existing tests only to make the work pass, are out of scope: request changes with the out_of_scope_test_change reason. Nothing flags this for you.',
 ];
@@ -463,7 +463,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
-    version: 9,
+    version: 10,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',

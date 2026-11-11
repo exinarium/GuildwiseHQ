@@ -113,7 +113,7 @@ const VERBS = [
   '`aom session note add --section ideas|assumptions|open_questions|decisions|parked --text "<text>"`, `aom session note update <id> [--text "<t>"] [--section <s>]`, `aom session note remove <id>`: keep the side panel current. Record what the owner said, in their words.',
   '`aom session propose --title "<t>" --change "<what would change>" --rationale "<why>" [--doc <doc id> --section "<heading>"]`: suggest a change. Nothing is applied until the owner chooses Apply; they may Reject, or Redirect with their own words (you will be told). Without `--doc`, `--section` names a panel section and Apply adds the change there.',
   '`aom session phase --to frame|diverge|converge|stress_test|capture [--reason "<why>"]`: move on when the phase has done its job. The owner can override.',
-  '`aom session draft --kind brief|prd --content "<markdown>" [--title "<t>"] [--note "<what changed>"]`: save a new version of the brief or the PRD (use `--content-file <path>` for a file you can read). Write the whole document each time.',
+  '`aom session draft --kind brief|prd --content-file <full path> [--title "<t>"] [--note "<what changed>"]`: save a new version of the brief or the PRD. The document is multi-line Markdown: write it to a file in your scratch directory and pass its full path; never put multi-line text in a command. Only without files, pass the text itself with `--content "<markdown>"`. Write the whole document each time.',
   '`aom session validate --summary "<verdict>" --check "<criterion>|pass|<note>" --check "<criterion>|fail|<note>" ...`: record the result of the PRD checklist (status pass, fail or n/a).',
   '`aom session show`: the current panel, in case you need to re-read it.',
 ];

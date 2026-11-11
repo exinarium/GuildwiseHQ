@@ -110,8 +110,8 @@
   {
     "kind": "role",
     "key": "reviewer",
-    "version": 9,
-    "sha256": "109cd751717f15928bcb9217921eb79b7577f680772de7d3a22a2f15a96b33ee"
+    "version": 10,
+    "sha256": "7e88dbfc59a837938a006777eec132b6e2f7d35a6a18624c2b128c56d97406a1"
   },
   {
     "kind": "role",

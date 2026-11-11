@@ -436,6 +436,9 @@ describe('prompts', () => {
       endReason: 'ended by the owner',
     }).message;
     expect(m).toContain('aom board minutes');
+    expect(m).toContain('aom board minutes --content-file <full path>');
+    expect(m).toContain('scratch directory');
+    expect(m).toContain('never multi-line text in a command');
     expect(m).toContain('## Open questions');
   });
 });

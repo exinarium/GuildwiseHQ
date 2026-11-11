@@ -137,6 +137,10 @@ describe('the facilitator turn', () => {
     ])
       expect(t.instructions).toContain(`aom ${verb}`);
     expect(t.instructions).toContain('no pipes, redirects');
+    // the document is multi-line Markdown: handed over as a scratch file, never inline
+    expect(t.instructions).toContain('aom session draft --kind brief|prd --content-file <full path>');
+    expect(t.instructions).toContain('scratch directory');
+    expect(t.instructions).toContain('never put multi-line text in a command');
     expect(t.message).toContain('The session has just started');
     expect(t.message).toContain('Starting idea: Invoices for freelancers');
     expect(t.message).toContain('Phase: Frame (1 of 5)');

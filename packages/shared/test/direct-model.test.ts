@@ -23,6 +23,7 @@ import {
   renderToolMapping,
   resolveModelChoice,
   SESSION_PURPOSE_VERBS,
+  SESSION_SCRATCH_FILE_RULE,
   SESSION_TOOLS,
   SessionTurnSpecSchema,
   sessionToolsFor,
@@ -265,6 +266,19 @@ describe('the direct runtime’s instructions', () => {
     expect(direct).toContain('You have no shell');
     expect(cli).toContain('The only command you may run is');
     expect(renderToolMapping(tools).split('\n')).toHaveLength(tools.length);
+  });
+
+  it('tells a runtime that may write its scratch folder to hand multi-line Markdown over by file', () => {
+    const plain = renderSessionTurnInstructions(spec, 'You watch the money.');
+    expect(plain).toContain('you cannot change files');
+    expect(plain).not.toContain('--content-file');
+    const files = renderSessionTurnInstructions(spec, 'You watch the money.', { scratchFiles: true });
+    expect(files).toContain(SESSION_SCRATCH_FILE_RULE);
+    expect(files).toContain('aom session draft --kind brief|prd --content-file <full path>');
+    expect(files).toContain('aom board minutes --content-file <full path>');
+    expect(files).toContain('scratch directory, which is your working directory');
+    expect(files).not.toContain('you cannot change files');
+    for (const md of [plain, files]) expect(md).toContain('`&&`, `cd` or `$(...)`');
   });
 
   it('renders a plain chat honestly about what it cannot do', () => {
