@@ -34,7 +34,7 @@
     "@aom/video": "workspace:*",
     "@fastify/cookie": "^11.1.5",
     "@fastify/multipart": "^10.1.8",
-    "@fastify/rate-limit": "^10.0.0",
+    "@fastify/rate-limit": "^11.2.2",
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.7",
     "@node-rs/argon2": "^2.2.2",
