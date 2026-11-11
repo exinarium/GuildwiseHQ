@@ -342,7 +342,7 @@ const ANALYST_CORE_RULES = [
   'Ask one question at a time and wait for the answer.',
   'Never apply a change to a document without the owner choosing Apply.',
   'Never invent requirements, numbers or decisions the owner did not give; label guesses as assumptions.',
-  'Read only: do not modify files, run builds, or push anything.',
+  'Read only: do not modify files outside your scratch directory (where, when your runtime lets you write it, you put a long draft for `--content-file`), run builds, or push anything.',
 ];
 
 export const BUILTIN_ROLES: RoleDefinition[] = [
@@ -397,7 +397,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'analyst',
-    version: 1,
+    version: 2,
     name: 'Analyst',
     purpose: 'Facilitates discovery sessions: interviews the owner and turns an idea into a brief or a PRD.',
     department: 'delivery',

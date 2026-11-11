@@ -2,8 +2,8 @@
   {
     "kind": "role",
     "key": "analyst",
-    "version": 1,
-    "sha256": "c4c8970be5ab9eb4060bc70d3316066e58fca6ebf4db53076689cb4215bffd3e"
+    "version": 2,
+    "sha256": "35c7e6a228ce2d2079ed9521dc803b0b21635777ddbb74db0ccc483b28b115a2"
   },
   {
     "kind": "role",

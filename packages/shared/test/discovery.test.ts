@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyDocSection,
+  BUILTIN_ROLES,
   buildCeoAnswerTurn,
   buildFacilitatorTurn,
   buildHandoffNote,
@@ -141,6 +142,13 @@ describe('the facilitator turn', () => {
     expect(t.instructions).toContain('aom session draft --kind brief|prd --content-file <full path>');
     expect(t.instructions).toContain('scratch directory');
     expect(t.instructions).toContain('never put multi-line text in a command');
+    // a runtime whose scratch is read-only (codex, opencode, gemini session turns) gets a clear inline fallback
+    expect(t.instructions).toContain(
+      'If your instructions say you can write files in your scratch directory',
+    );
+    expect(t.instructions).toContain(
+      'If they say you cannot change files or have no files: pass the text itself with `--content "<markdown>"`',
+    );
     expect(t.message).toContain('The session has just started');
     expect(t.message).toContain('Starting idea: Invoices for freelancers');
     expect(t.message).toContain('Phase: Frame (1 of 5)');
@@ -371,5 +379,16 @@ describe('the hand-off note', () => {
     expect(cut).toContain('b'.repeat(100));
     expect(cut).not.toContain('b'.repeat(101));
     expect(cut).toContain('the PRD continues');
+  });
+});
+
+describe('the analyst role', () => {
+  it('keeps files outside scratch read-only and allows a scratch draft for --content-file (version 2)', () => {
+    const analyst = BUILTIN_ROLES.find((r) => r.key === 'analyst');
+    expect(analyst?.version).toBe(2);
+    const rule = analyst?.coreRules.find((r) => r.startsWith('Read only:')) ?? '';
+    expect(rule).toContain('do not modify files outside your scratch directory');
+    expect(rule).toContain('--content-file');
+    expect(rule).toContain('run builds, or push anything');
   });
 });
