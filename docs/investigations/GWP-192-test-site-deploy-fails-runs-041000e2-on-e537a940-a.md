@@ -160,7 +160,82 @@ Points a guildwise-cloud fix has to keep in mind:
 The card restricts its own scope to GuildwiseHQ, so I am handing this to the manager to choose B, C or a re-scope
 rather than designing a build in GuildwiseHQ that has nothing to change.
 
-## Acceptance criteria against this finding
+## Decision and design for the build (2026-11-11)
+
+The manager chose option C (operations fix, precedent 30efa103 / run c148b631): the cloud's `pnpm-lock.yaml` is
+regenerated on guildwise-cloud `origin/development` by the workstation's DevOps engineer, pushed as a lockfile-only
+commit, and the test site is redeployed from it. **GuildwiseHQ does not change.** The card branch carries only this
+report.
+
+### Which GuildwiseHQ branch the card ships
+
+- The card branch is based on GuildwiseHQ `development`. `origin/development` is 0590196c, the same commit the cloud
+  pins in e537a940. `origin/main` (612534f4) is an ancestor of it.
+- The "two lockfile bodies" from the planning note are the pnpm environment lockfile plus the project lockfile (see
+  finding 4). The layout is the same on `origin/main` and `origin/development` (`---` at lines 1 and 158). It is not a
+  defect, so there is nothing to fix on either branch.
+
+### What the builder does (no code, no lockfile change in GuildwiseHQ)
+
+1. **GuildwiseHQ evidence from 0590196c (this worktree, clean).** With pnpm 12.8.1 (`packageManager`), in a throwaway
+   copy or with DevOps if the sandbox store lock blocks pnpm (finding 5):
+   ```
+   rm -rf node_modules apps/*/node_modules packages/*/node_modules e2e/node_modules
+   pnpm install --frozen-lockfile
+   pnpm install && git status --porcelain pnpm-lock.yaml      # must print nothing
+   pnpm why -r vitest
+   pnpm why -r jsdom
+   pnpm why -r vite
+   ```
+   Expected: one vitest 4.1.12 (its jsdom peer is jsdom@31.0.0), one jsdom 31.0.0, one vite 8.3.7. Paste the output in
+   the thread. Then run the unit suites the GuildwiseHQ CI runs (typecheck, lint, `apps/web` tests under jsdom),
+   leaving out tests that need the database or a server. Record the GuildwiseHQ CI status of 0590196c
+   (`gh run list --commit 0590196c...`) if it can be read.
+2. **Deploy log evidence.** Get the failing step and the error text of runs 041000e2 and 77dda7e3 from DevOps
+   (request 8694307b, or ask again with `aom devops`). Expected: the Dockerfile build stage `RUN pnpm install
+   --frozen-lockfile` (line 11) ends with `ERR_PNPM_OUTDATED_LOCKFILE` naming a `core/...` importer. Record it in the
+   thread with the conclusion: lockfile cause confirmed, in guildwise-cloud, not GuildwiseHQ.
+3. **Cloud fix through DevOps** (`aom devops`, not done by the builder: guildwise-cloud is read-only to card shifts).
+   The request must say:
+   - on guildwise-cloud `development` at e537a940 (or its current head if newer), with `core` checked out at the
+     pinned 0590196c (`git submodule update --init core`, then check `git -C core rev-parse HEAD`);
+   - pnpm 12.8.1: `pnpm install --lockfile-only`, then `rm -rf node_modules` and `pnpm install --frozen-lockfile`, then
+     `pnpm install` again and confirm `git status --porcelain` shows nothing new;
+   - only `pnpm-lock.yaml` changes. If pnpm asks for a change in a `package.json` or `pnpm-workspace.yaml` (for
+     example a `minimumReleaseAge` refusal, or a missing override), stop and report: that needs the manager's decision;
+   - commit message `regenerate pnpm-lock.yaml for core 0590196ce6`, push to `origin/development`, wait for cloud CI
+     (`ci.yml`: frozen install, server/web typecheck, server/web tests, no-cloud-imports check);
+   - redeploy the test site from that commit and report the run id, the deployed commit and the URL checked (the site
+     loads and `/api/health` answers).
+4. **Record** in the thread: the cloud commit, its CI result, the deploy run id, the deployed commit, the URL, and a
+   line comparing it with 041000e2 / 77dda7e3 (the frozen install step now passes).
+5. The follow-up "bump-core must regenerate and stage the cloud lockfile" is on the project backlog as a suggestion
+   (filed during design). Do not file it twice.
+
+### Traps
+
+- Do not "fix" the two YAML documents in GuildwiseHQ's lockfile. pnpm writes the first one (the pnpm 12.8.1 environment
+  lock) because of `packageManager`.
+- Do not mirror the core overrides into the cloud workspace in this fix. The Docker build and cloud CI do not run the
+  core web tests, so `parse5-parser-stream>parse5` and `jsdom@<31` are not needed for the deploy. Two jsdom majors
+  (cloud `web` 30, core `apps/web` 31) and two vite majors in the cloud lockfile are expected. Aligning them is a
+  separate cloud card.
+- The cloud and core `minimumReleaseAgeExclude` lists are the same at 0590196c, and the core lockfile resolved
+  under it, so the regenerate should not hit a release-age refusal. If it does, stop (see step 3).
+- If the cloud's `development` head has moved past e537a940 with another core pin, regenerate at that pin and say so.
+
+### Acceptance criteria mapped to this design
+
+| Criterion | How it is met |
+|---|---|
+| Failing step and error recorded, cause stated | Step 2: Dockerfile line 11 frozen install, cloud lockfile. Not GuildwiseHQ |
+| Frozen install passes with the pinned pnpm | Step 1 (GuildwiseHQ 0590196c) and step 3 (cloud lockfile commit), both pnpm 12.8.1 |
+| One vitest, one jsdom major | Step 1: `pnpm why` output for GuildwiseHQ, which is the repository this criterion is about |
+| Regenerated by pnpm, no diff on reinstall | GuildwiseHQ: unchanged, was regenerated by pnpm in GWP-190, and a reinstall shows no diff (step 1). Cloud: `--lockfile-only` plus a reinstall check (step 3) |
+| CI green | GuildwiseHQ: no new commit, so the status of 0590196c is recorded. Cloud: CI on the lockfile commit (step 3) |
+| Test-site deploy succeeds | Step 3/4: run id, commit, URL in the thread |
+
+## Acceptance criteria against this finding (first design pass)
 
 | Criterion | Status |
 |---|---|
