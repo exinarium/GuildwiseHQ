@@ -436,6 +436,13 @@ describe('prompts', () => {
       endReason: 'ended by the owner',
     }).message;
     expect(m).toContain('aom board minutes');
+    expect(m).toContain('aom board minutes --content-file <full path>');
+    expect(m).toContain('scratch directory');
+    expect(m).toContain('never multi-line text in a command');
+    expect(m).toContain('If your instructions say you can write files in your scratch directory');
+    expect(m).toContain(
+      'If they say you cannot change files or have no files: run `aom board minutes --content "<markdown>"` instead',
+    );
     expect(m).toContain('## Open questions');
   });
 });

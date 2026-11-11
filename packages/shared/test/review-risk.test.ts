@@ -76,7 +76,7 @@ describe('reviewer role v3', () => {
   const role = BUILTIN_ROLES.find((r) => r.key === 'reviewer')!;
 
   it('is version 3 and keeps high effort', () => {
-    expect(role.version).toBe(9);
+    expect(role.version).toBe(10);
     expect(role.defaultModel.effort).toBe('high');
   });
 
@@ -110,6 +110,16 @@ describe('reviewer role v3', () => {
     ])
       expect(text).toContain(phrase);
     expect(role.coreRules.join('\n')).toContain('--risk-file');
+  });
+
+  it('puts the risk analysis in a scratch file, never multi-line inline text (the analyst session fix)', () => {
+    const text = role.instructions;
+    expect(text).toContain('scratch directory');
+    expect(text).toContain('$AOM_SCRATCH');
+    expect(text).toContain('Never pass the analysis inline');
+    expect(text).toContain('Run `aom` on its own');
+    expect(text).not.toContain('$TMPDIR/risk.md');
+    expect(role.coreRules.join('\n')).toContain('scratch directory');
   });
 });
 

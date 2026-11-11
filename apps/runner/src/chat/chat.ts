@@ -1006,7 +1006,7 @@ export class ChatManager {
     if (!direct)
       await adapter.writeInstructions(
         sandbox,
-        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}${note ? `\n\n${note}\n` : ''}`,
+        `${renderSessionTurnInstructions(spec, persona ?? '', { scratchFiles: msg.agent.runtime === 'claude-code' })}${capIndex ? `\n\n${capIndex}\n` : ''}${note ? `\n\n${note}\n` : ''}`,
       );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
@@ -1025,7 +1025,8 @@ export class ChatManager {
       sandbox,
       agent: msg.agent,
       env,
-      // read-only: no edit tool in the scratch directory either (the policy denies the working directory)
+      // read-only: the working folder is the agent's own scratch folder, which stays writable (drafts for --content-file);
+      // the policy denies a read-only working folder only outside scratch
       readOnly: true,
       readDirs: [],
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),

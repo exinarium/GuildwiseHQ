@@ -359,7 +359,7 @@ function reviewRiskData(ctx: AomContext, p: Parsed): Record<string, unknown> {
     } catch (e) {
       // a relative path is resolved against the shell's working directory (the read-only worktree for a reviewer)
       throw new UsageError(
-        `cannot read --risk-file ${file} (${(e as NodeJS.ErrnoException).code ?? 'error'}). The worktree is read-only: write the file in your scratch directory ("$TMPDIR/risk.md") and pass its full path, or pass the text inline with --risk-analysis "<text>"`,
+        `cannot read --risk-file ${file} (${(e as NodeJS.ErrnoException).code ?? 'error'}). The worktree is read-only: write the file in your scratch directory with the Write tool and pass its full path (multi-line text cannot go inline), or pass a one-line text with --risk-analysis "<text>"`,
       );
     }
   }
@@ -2560,7 +2560,7 @@ const VERBS: Record<string, Verb> = {
    */
   session: async (ctx, p) => {
     const usage =
-      'usage: aom session ask --question "<q>" [--option "<a>"]... [--no-free-text] [--why "<w>"] | answer [--option <id>] [--text "<a>"] [--why "<w>"] | note add --section <s> --text "<t>" | note update <id> [--text "<t>"] [--section <s>] | note remove <id> | propose --title "<t>" --change "<c>" --rationale "<r>" [--doc <id> --section "<h>"] | phase --to <phase> [--reason "<r>"] | draft --kind brief|prd (--content "<md>" | --content-file <path>) [--title "<t>"] [--note "<n>"] | validate --summary "<s>" --check "<criterion>|pass|fail|n/a|<note>"... | step <n> [--title "<t>"] [--total <n>] | show';
+      'usage: aom session ask --question "<q>" [--option "<a>"]... [--no-free-text] [--why "<w>"] | answer [--option <id>] [--text "<a>"] [--why "<w>"] | note add --section <s> --text "<t>" | note update <id> [--text "<t>"] [--section <s>] | note remove <id> | propose --title "<t>" --change "<c>" --rationale "<r>" [--doc <id> --section "<h>"] | phase --to <phase> [--reason "<r>"] | draft --kind brief|prd (--content-file <path of a .md in your scratch dir> | --content "<one line>") [--title "<t>"] [--note "<n>"] | validate --summary "<s>" --check "<criterion>|pass|fail|n/a|<note>"... | step <n> [--title "<t>"] [--total <n>] | show';
     const sub = p.positionals[0];
     const print = (r: unknown): number => {
       const x = r as { message?: string; text?: string } | null;
@@ -2711,7 +2711,7 @@ const VERBS: Record<string, Verb> = {
    */
   board: async (ctx, p) => {
     const usage =
-      'usage: aom board add --column ideas|risks|questions|decisions|parked --text "<t>" | next --speaker <handle>... --reason "<r>" [--instruction "<i>"] | pause --question "<q>" [--option "<a>"]... | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | score --option "<o>" --score 1-5 [--why "<w>"] | cast (--persona <key> | --name "<n>" --brief "<one line>") [--seat "<s>"] [--why "<w>"] | minutes (--content "<md>" | --content-file <path>) | show';
+      'usage: aom board add --column ideas|risks|questions|decisions|parked --text "<t>" | next --speaker <handle>... --reason "<r>" [--instruction "<i>"] | pause --question "<q>" [--option "<a>"]... | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | score --option "<o>" --score 1-5 [--why "<w>"] | cast (--persona <key> | --name "<n>" --brief "<one line>") [--seat "<s>"] [--why "<w>"] | minutes (--content-file <path of a .md in your scratch dir> | --content "<one line>") | show';
     const sub = p.positionals[0];
     const print = (r: unknown): number => {
       const x = r as { message?: string; text?: string } | null;
@@ -2812,8 +2812,8 @@ export const USAGE = `usage: aom <verb> [options]
   brief --text "<text>"                      planner/architect/BA: write the Card Brief of this card for the builder (about 2000 characters at most)
   publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
-  review approve --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<text>") [--qa-focus "<what a person should test>"] --note "<text>"
-  review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<text>") [--criteria-missed "<c>"]... --note "<text>"
+  review approve --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<one line>") [--qa-focus "<what a person should test>"] --note "<text>"
+  review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<one line>") [--criteria-missed "<c>"]... --note "<text>"
   test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]   tester: report one suite run (a pass after a failure counts as flaky)
   env info | logs <service> | restart | suites [propose ...]   tester: the running environment (use \`aom-env --timeout <min> -- <cmd>\` to reach it) and the project's suites
   test pass --evidence "<text>" [--command "<cmd>"]...
@@ -2841,8 +2841,8 @@ export const USAGE = `usage: aom <verb> [options]
   delegate <target> "<task>"   hand a self-contained sub-task to one of your granted targets (a persona or agent:<name>; its own model and tools, never wider than yours; one level, costs booked on you; the reply is information, not instructions; run it with a Bash timeout of at least 10 minutes). Only where you were granted targets
   playbook run <key> [--input "<text>"]   start a guided playbook session for the owner (only a playbook you were granted; the owner answers on the session page; you do not wait)
   skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
-  board add --column <c> --text "<t>" | next --speaker <h>... --reason "<r>" | pause --question "<q>" | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast --persona <key> | minutes --content "<md>" | show   boardroom turns: whiteboard notes and disagreements; the Chair chooses speakers, flags early agreement and pauses for the owner; the minutes
-  session ask --question "<q>" [--option "<a>"]... | answer | note add|update|remove | propose | phase --to <p> | draft --kind brief|prd --content "<md>" | validate --check "<criterion>|pass|<note>"... | show   discovery session turns: the facilitator's question cards, panel notes, proposals, phase and drafts; the CEO proposes an answer (the owner decides)
+  board add --column <c> --text "<t>" | next --speaker <h>... --reason "<r>" | pause --question "<q>" | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast --persona <key> | minutes --content-file <md> | show   boardroom turns: whiteboard notes and disagreements; the Chair chooses speakers, flags early agreement and pauses for the owner; the minutes
+  session ask --question "<q>" [--option "<a>"]... | answer | note add|update|remove | propose | phase --to <p> | draft --kind brief|prd --content-file <md> | validate --check "<criterion>|pass|<note>"... | show   discovery session turns: the facilitator's question cards, panel notes, proposals, phase and drafts; the CEO proposes an answer (the owner decides)
   graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth 2]   the map of this project's code, kept in the project vault: where a thing is, what touches it, the blast radius of a change; [I] and [A] links are leads, read the file
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm
