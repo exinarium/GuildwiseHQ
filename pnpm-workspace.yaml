@@ -27,3 +27,8 @@ overrides:
   'fast-uri@>=4 <5': '^4.2.3'
   'esbuild@>=0.27.3 <0.28.1': '^0.28.1'
   'undici@>=8 <8.12.2': '^8.12.2'
+  # Keeps vitest's optional jsdom peer on the one major the web tests declare.
+  'jsdom@<31': '^31.0.0'
+  # parse5-parser-stream 8.1 (used by jsdom 31) calls tokenizer.flushCharacters, added in parse5 8.1,
+  # but declares parse5 ^8.0.0.
+  'parse5-parser-stream>parse5': '^8.1.0'
