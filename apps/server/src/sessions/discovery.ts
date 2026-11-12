@@ -93,6 +93,8 @@ const assertDiscovery = (t: Row): void => {
   if (t.kind !== 'discovery') throw notFound('session not found');
 };
 
+// Longest event author name (Author in packages/shared/src/events/discovery.ts); display names can be longer.
+const AUTHOR_NAME_MAX = 100;
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 interface PendingEntry {
@@ -1119,7 +1121,7 @@ export class DiscoveryService {
 
   private async userName(db: Queryable, userId: string): Promise<string> {
     const u = await one(db, 'SELECT display_name FROM users WHERE id=$1', [userId]);
-    return u?.display_name ?? 'Owner';
+    return clip((u?.display_name ?? '').trim(), AUTHOR_NAME_MAX) || 'Owner';
   }
 
   async answer(

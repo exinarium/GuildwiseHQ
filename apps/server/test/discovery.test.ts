@@ -252,6 +252,26 @@ describe('the facilitator verbs', () => {
     await finish(next);
   });
 
+  it('parks a question for an owner whose display name is longer than an event author name allows', async () => {
+    const long = 'N'.repeat(120);
+    const [before] = await q('SELECT display_name FROM users WHERE id=$1', [w.owner.id]);
+    const s = await create({ title: 'Long name' });
+    const { questionId } = await facilitatorAsks('Who is it for?', ['Freelancers', 'Agencies']);
+    await q('UPDATE users SET display_name=$1 WHERE id=$2', [long, w.owner.id]);
+    try {
+      const r = await raw('POST', `/api/discovery/${s.threadId}/questions/${questionId}/answer`, {
+        kind: 'park',
+      });
+      expect(r.status).toBe(200);
+      const st = await get(s.threadId);
+      expect(st.questions[0].status).toBe('parked');
+      expect(st.notes[0].byName.length).toBeLessThanOrEqual(100);
+      await finish(await nextStart());
+    } finally {
+      await q('UPDATE users SET display_name=$1 WHERE id=$2', [before.display_name, w.owner.id]);
+    }
+  });
+
   it('keeps an answer that arrives while the facilitator is still working and sends it right after', async () => {
     const s = await create({ title: 'Pending' });
     const start = await nextStart();
