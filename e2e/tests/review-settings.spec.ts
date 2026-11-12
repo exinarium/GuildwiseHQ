@@ -86,7 +86,7 @@ test('inline errors for "..", a leading "/" and a duplicate path; nothing is sav
   await page.getByTestId('review-settings-pattern').nth(0).fill('/etc');
   await page.getByTestId('review-settings-save').click();
   await expect(page.getByTestId('review-settings-row').nth(0)).toContainText(/\//);
-  await page.getByTestId('review-settings-pattern').nth(0).fill('docs');
+  await page.getByTestId('review-settings-pattern').nth(0).fill('docs/**');
   await page.getByTestId('review-settings-save').click();
   await expect(page.getByTestId('review-settings-row').nth(1)).toContainText(/duplicate|already/i);
   expect(await events()).toBe(1);
