@@ -1096,7 +1096,9 @@ export const cardProjectors: Record<string, Projector> = {
           ? 'owner'
           : p.outcome === 'owner_continue'
             ? 'continued'
-            : 'cancelled';
+            : p.outcome === 'dropped'
+              ? 'dropped'
+              : 'cancelled';
     await mutateCard(tx, e, p.cardId, () =>
       exec(
         tx,

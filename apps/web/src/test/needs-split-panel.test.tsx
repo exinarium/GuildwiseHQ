@@ -71,6 +71,12 @@ describe('NeedsSplitPanel', () => {
     expect(link.className).toContain('min-h-11');
   });
 
+  it('says the split was dropped when the BA task ended without one', () => {
+    renderPanel(record({ state: 'dropped' }));
+    expect(screen.getByText('Not split: the BA task ended')).toBeTruthy();
+    expect(screen.queryByText('With the BA to split')).toBeNull();
+  });
+
   it('shows nothing for a card that never took the route', () => {
     const { container } = renderPanel(null);
     expect(container.textContent).toBe('');

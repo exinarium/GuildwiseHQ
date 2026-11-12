@@ -3,9 +3,13 @@ import {
   NEEDS_SPLIT_DESK_SUBKIND,
   NEEDS_SPLIT_MAX_SEAMS,
   NeedsSplitProposalSchema,
+  NeedsSplitState,
   needsSplitRoute,
 } from '../src/cards/needs-split.ts';
+import { DomainEventSchema } from '../src/index.ts';
 import {
+  MIN_RUNNER_FOR_NEEDS_SPLIT,
+  runnerAtLeast,
   renderSpecCardInstructions,
   renderSpecCardPrompt,
   SPEC_CARD_MAX_SPLIT,
@@ -141,5 +145,21 @@ describe('the needs-split BA prompt', () => {
     const text = renderSpecCardInstructions(brief, plain, [{ id: 'd', label: 'd' }], (o) => o.id);
     expect(text).not.toContain('over its size budget');
     expect(renderSpecCardPrompt(plain)).toContain('## Missing');
+  });
+});
+
+describe('needs-split record and runner gate', () => {
+  it('knows the dropped state and outcome', () => {
+    expect(NeedsSplitState.options).toContain('dropped');
+    const parsed = DomainEventSchema.safeParse({
+      type: 'CardNeedsSplitResolved',
+      payload: { cardId: '00000000-0000-4000-8000-000000000001', outcome: 'dropped' },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('needs a runner newer than 0.1.73, which shipped without the needs-split prompt', () => {
+    expect(runnerAtLeast('0.1.73', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(false);
+    expect(runnerAtLeast('0.1.74', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(true);
   });
 });

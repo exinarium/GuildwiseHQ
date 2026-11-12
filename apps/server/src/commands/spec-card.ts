@@ -586,7 +586,31 @@ export async function applySpecCardReport(
     };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [task.card_id]);
   if (!card || card.status !== 'draft') {
-    await ctx.store.append([completed(task, 'cancelled', 'the card is not a draft any more')], { tx });
+    const rec = card ? needsSplitRecord(card) : null;
+    await ctx.store.append(
+      [
+        completed(task, 'cancelled', 'the card is not a draft any more'),
+        // A needs split this task carried ends here: the record must not stay "with the BA".
+        ...(card && rec?.state === 'with_ba' && rec.taskId === task.id
+          ? [
+              {
+                streamId: streamId.card(card.id),
+                event: {
+                  type: 'CardNeedsSplitResolved' as const,
+                  payload: {
+                    cardId: card.id,
+                    outcome: 'dropped' as const,
+                    note: 'the card left the draft before the BA split it',
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(card.org_id, card.project_id),
+              },
+            ]
+          : []),
+      ],
+      { tx },
+    );
     return {
       accepted: false,
       error: 'the card is not a draft any more; there is nothing left to do. Finish now.',

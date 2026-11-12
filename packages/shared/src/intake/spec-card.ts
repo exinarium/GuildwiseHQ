@@ -26,7 +26,7 @@ export const MIN_RUNNER_FOR_REPO_SCOPING = '0.1.40';
  * The oldest runner that renders the needs-split mode of `spec_card` (an over-budget card returned to the BA with the
  * architect's folder scope and seams). The dispatcher gives such a task only to a workstation at or above this version.
  */
-export const MIN_RUNNER_FOR_NEEDS_SPLIT = '0.1.73';
+export const MIN_RUNNER_FOR_NEEDS_SPLIT = '0.1.74';
 
 /** Whether `version` (`major.minor.patch`, a pre-release tag below its release) is at least `min`. Unknown: false. */
 export function runnerAtLeast(version: string | null | undefined, min: string): boolean {

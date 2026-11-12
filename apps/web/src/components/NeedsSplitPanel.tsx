@@ -15,6 +15,7 @@ const STATE_LABEL: Record<NeedsSplitState, string> = {
   split: 'Split',
   continued: 'Kept as one card',
   cancelled: 'Cancelled',
+  dropped: 'Not split: the BA task ended',
 };
 const STATE_TONE = {
   with_ba: 'warning',
@@ -22,6 +23,7 @@ const STATE_TONE = {
   split: 'success',
   continued: 'info',
   cancelled: 'danger',
+  dropped: 'info',
 } as const;
 
 /** Folders as wrapping chips: long paths break instead of overflowing a phone screen. */

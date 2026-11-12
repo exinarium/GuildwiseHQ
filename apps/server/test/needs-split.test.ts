@@ -81,6 +81,16 @@ async function dispatch() {
   r.started(start.shiftId);
   return start;
 }
+/** Earlier tests may leave queued spec_card tasks (an owner's "send it again"): the next dispatch must pick this card's. */
+async function dispatchFor(cardId: string) {
+  await q(
+    `UPDATE ba_tasks SET status='cancelled' WHERE kind='spec_card' AND status='queued' AND card_id<>$1`,
+    [cardId],
+  );
+  const start = await dispatch();
+  expect(start.baTask.taskId).toBe((await tasksOf(cardId)).at(-1)!.id);
+  return start;
+}
 async function report(start: any, outcomeId: string, data: unknown, note = 'done') {
   const sent = r.report(start.shiftId, { kind: 'outcome', outcomeId, note, data });
   return (await r.waitFor('shift.report.result', (f) => f.reportId === sent.reportId)) as any;
@@ -259,6 +269,34 @@ describe('a second over-budget verdict (AC3)', () => {
     expect(await tasksOf(card.id)).toHaveLength(2);
   });
 
+  it("after a BA failure, the owner's 'send it to the BA again' queues a new task in place", async () => {
+    const card = await cardAtDesign('Failed then again');
+    await ok(needsSplit(card.id));
+    const start = await dispatchFor(card.id);
+    expect((await report(start, 'spec_card_fail', {}, 'no clean seam')).accepted).toBe(true);
+    r.ended(start.shiftId, 'reported');
+    let row = await cardRow(card.id);
+    expect(row.stage).toBe('spec');
+    expect(row.status).toBe('draft');
+    const [item] = await openDecision(card.id);
+    expect((item!.options as any[]).map((o) => o.id)).toContain('ba_again');
+
+    // the card is already in the first stage: no refusal, no move, a new task
+    await answer(item!.id, 'ba_again');
+    row = await cardRow(card.id);
+    expect(row.stage).toBe('spec');
+    expect(row.status).toBe('draft');
+    expect(row.needs_split_count).toBe(2);
+    expect(row.needs_split).toMatchObject({ state: 'with_ba', reason: 'owner_again' });
+    const tasks = await tasksOf(card.id);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]).toMatchObject({ status: 'queued' });
+    expect(row.needs_split.taskId).toBe(tasks[1]!.id);
+    expect(await openDecision(card.id)).toHaveLength(0);
+    const desk = await q(`SELECT status FROM desk_items WHERE id=$1`, [item!.id]);
+    expect(desk[0]!.status).not.toBe('open');
+  });
+
   it('the owner can cancel the card', async () => {
     const card = await cardAtDesign('Cancel me');
     await q('UPDATE cards SET needs_split_count=1 WHERE id=$1', [card.id]);
@@ -269,5 +307,41 @@ describe('a second over-budget verdict (AC3)', () => {
     const row = await cardRow(card.id);
     expect(row.status).toBe('cancelled');
     expect(row.needs_split).toMatchObject({ state: 'cancelled' });
+  });
+});
+
+describe('a needs split whose BA task ends without a split', () => {
+  it('is dropped when the card leaves the draft, and does not block a later needs split', async () => {
+    const card = await cardAtDesign('Left the draft');
+    await ok(needsSplit(card.id));
+    const start = await dispatchFor(card.id);
+    // the card leaves the draft while the BA works on it
+    await q(`UPDATE cards SET status='queued' WHERE id=$1`, [card.id]);
+    const sent = await report(start, 'spec_card_fail', {}, 'late');
+    expect(sent.accepted).toBe(false);
+    r.ended(start.shiftId, 'reported');
+    expect((await tasksOf(card.id))[0]).toMatchObject({ status: 'cancelled' });
+    expect((await cardRow(card.id)).needs_split).toMatchObject({ state: 'dropped' });
+    const detail = await ok<any>(w.t.req('GET', `/api/cards/${card.id}`, { cookie: w.owner.cookie }));
+    expect(detail.needsSplit.state).toBe('dropped');
+
+    // back in the design stage and over budget again: the one return is used, so the owner decides (not refused)
+    await q(`UPDATE cards SET stage='investigate' WHERE id=$1`, [card.id]);
+    const again = await ok<any>(needsSplit(card.id));
+    expect(again.needsSplitRoute).toBe('owner');
+    expect(again.needsSplit).toMatchObject({ state: 'owner', reason: 'second_time' });
+  });
+
+  it('reads as dropped when its task was cancelled elsewhere, so it never stays "with the BA"', async () => {
+    const card = await cardAtDesign('Task cancelled elsewhere');
+    await ok(needsSplit(card.id));
+    const [task] = await tasksOf(card.id);
+    expect((await cardRow(card.id)).needs_split).toMatchObject({ state: 'with_ba', taskId: task!.id });
+    await q(`UPDATE ba_tasks SET status='cancelled' WHERE id=$1`, [task!.id]);
+    const detail = await ok<any>(w.t.req('GET', `/api/cards/${card.id}`, { cookie: w.owner.cookie }));
+    expect(detail.needsSplit.state).toBe('dropped');
+    await q(`UPDATE cards SET stage='investigate', status='queued' WHERE id=$1`, [card.id]);
+    const again = await ok<any>(needsSplit(card.id));
+    expect(again.needsSplitRoute).toBe('owner');
   });
 });

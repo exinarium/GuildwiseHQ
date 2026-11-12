@@ -493,7 +493,7 @@ export const cardEvents = [
     'CardNeedsSplitResolved',
     z.object({
       cardId: Id,
-      outcome: z.enum(['split', 'ba_failed', 'owner_continue', 'owner_cancel']),
+      outcome: z.enum(['split', 'ba_failed', 'owner_continue', 'owner_cancel', 'dropped']),
       childCardIds: z.array(Id).optional(),
       note: z.string().max(4000).optional(),
     }),

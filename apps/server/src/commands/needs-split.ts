@@ -46,6 +46,22 @@ export function needsSplitRecord(card: Row) {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * The record as it stands now: `with_ba` holds only while its BA task is queued or running. A task that ended without
+ * a split (cancelled because the card left the draft, retired, ...) reads as `dropped`, so a stale record never blocks
+ * a later needs split or shows "with the BA" for good.
+ */
+export async function currentNeedsSplitRecord(db: Queryable, card: Row) {
+  const rec = needsSplitRecord(card);
+  if (!rec || rec.state !== 'with_ba') return rec;
+  const open = rec.taskId
+    ? await one(db, `SELECT 1 AS x FROM ba_tasks WHERE id=$1 AND status IN ('queued','running')`, [
+        rec.taskId,
+      ])
+    : null;
+  return open ? rec : { ...rec, state: 'dropped' as const };
+}
+
 /** The card, or the card it was split out of by a needs split, already went to the BA once. */
 export async function needsSplitTaken(
   db: Queryable,
@@ -84,7 +100,7 @@ export async function needsSplitRefusal(
       code: 'needs_split_too_late',
       message: `${card.ref} is already being built: an over-budget pull request goes back to its author, not to the BA`,
     };
-  const rec = needsSplitRecord(card);
+  const rec = await currentNeedsSplitRecord(db, card);
   if (rec && rec.state === 'with_ba')
     return { code: 'needs_split_open', message: `${card.ref} is already with the BA to be split` };
   const openTask = await one(
@@ -103,7 +119,9 @@ export async function needsSplitRefusal(
       code: 'needs_split_open',
       message: `${card.ref} already waits for the owner's decision on its size`,
     };
-  if (card.stage === wf.definition.initialStage)
+  // The owner's "send it to the BA again" may find the card already back in the first stage (after a BA failure, or
+  // with no BA available): that is where it has to be, so it is not refused.
+  if (card.stage === wf.definition.initialStage && !answering)
     return {
       code: 'needs_split_too_late',
       message: `${card.ref} is already at ${initial.label}: nothing to send back`,
@@ -273,15 +291,16 @@ export async function requestNeedsSplitIn(
   const initial = wf?.definition.initialStage as string;
   const taskId = randomUUID();
   await ctx.store.append([requested({ taskId })], { tx });
-  await moveCardIn(
-    ctx,
-    tx,
-    by.user,
-    card,
-    initial,
-    "Over budget: back to the BA to split along the architect's seams",
-    { actor: by.actor, by: by.name },
-  );
+  if (card.stage !== initial)
+    await moveCardIn(
+      ctx,
+      tx,
+      by.user,
+      card,
+      initial,
+      "Over budget: back to the BA to split along the architect's seams",
+      { actor: by.actor, by: by.name },
+    );
   const fresh = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.id])) as Row;
   const queued = await queueSpecCardTask(ctx, tx, fresh, by.actor, taskId);
   await ctx.store.append(

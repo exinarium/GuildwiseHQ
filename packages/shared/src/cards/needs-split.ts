@@ -81,7 +81,8 @@ export const StoredNeedsSplitProposalSchema = z.object({
 });
 export type StoredNeedsSplitProposal = z.infer<typeof StoredNeedsSplitProposalSchema>;
 
-export const NeedsSplitState = z.enum(['with_ba', 'owner', 'split', 'continued', 'cancelled']);
+/** `dropped`: the BA task ended without a split (the card left the draft, or the task was cancelled). */
+export const NeedsSplitState = z.enum(['with_ba', 'owner', 'split', 'continued', 'cancelled', 'dropped']);
 export type NeedsSplitState = z.infer<typeof NeedsSplitState>;
 export const NeedsSplitReason = z.enum([
   'first',
