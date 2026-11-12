@@ -34,6 +34,7 @@ import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
+import { ownerPendingEvents } from './owner-pending.ts';
 import { packEvents } from './pack.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
@@ -127,6 +128,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...formEvents,
   ...journeyEvents,
   ...journeyWaitEvents,
+  ...ownerPendingEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -166,6 +168,7 @@ export * from './ledger.ts';
 export * from './mail.ts';
 export * from './org.ts';
 export * from './outbound.ts';
+export * from './owner-pending.ts';
 export * from './phase.ts';
 export * from './playbook.ts';
 export * from './project.ts';

@@ -34,6 +34,7 @@ import { journeyProjectors } from './journeys.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
+import { ownerPendingProjectors } from './owner-pending.ts';
 import { packProjectors } from './packs.ts';
 import { phaseProjectors } from './phases.ts';
 import { platformProjectors } from './platform.ts';
@@ -87,6 +88,7 @@ const domains: Array<Record<string, Projector>> = [
   subworkflowProjectors,
   journeyProjectors,
   journeyWaitProjectors,
+  ownerPendingProjectors,
   shiftProjectors,
   costProjectors,
   providerKeyProjectors,
@@ -220,6 +222,7 @@ export const PROJECTION_TABLES = [
   'journey_waits',
   'journey_webhook_calls',
   'journey_hook_triggers',
+  'owner_pending_timers',
   'card_handoffs',
   'card_transitions',
   'card_activity',

@@ -10,6 +10,7 @@ import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { sweepJourneys } from '../commands/journey-runtime.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
+import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
@@ -174,6 +175,10 @@ export class Scheduler {
       await governanceTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'governance tick failed'));
       // Follow-up and chase: open desk items past the organization's window nudge their owner (once per window).
       await followUpSweep(this.ctx).catch((err) => this.ctx.log.error({ err }, 'follow-up sweep failed'));
+      // Owner-pending items: the owner is reminded once after 2 working days without acting (the item's state is kept).
+      await ownerPendingSweep(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'owner-pending reminders failed'),
+      );
       return fired;
     });
     this.chain = next.catch(() => {});
