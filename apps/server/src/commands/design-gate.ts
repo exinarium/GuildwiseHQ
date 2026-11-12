@@ -3,9 +3,11 @@ import {
   DESIGN_GATE_STAGE,
   type DesignGateReason,
   designGateDecision,
+  designHighRiskPredicate,
   designRiskPaths,
   isOrgManager,
   type OrgRole,
+  StoredRiskMapSchema,
   streamId,
   workflowHasDesignGate,
 } from '@aom/shared';
@@ -185,19 +187,23 @@ export async function decideDesignGate(
   card: Row,
   designSummary: string | null | undefined,
 ): Promise<DesignGateOutcome> {
-  const project = await one(tx, 'SELECT design_gate FROM projects WHERE id=$1', [card.project_id]);
+  const project = await one(tx, 'SELECT design_gate, risk_map FROM projects WHERE id=$1', [card.project_id]);
+  const riskMap = StoredRiskMapSchema.safeParse(project?.risk_map).data ?? null;
   const planning = await one<{ note: string }>(
     tx,
     `SELECT note FROM card_handoffs WHERE card_id=$1 AND stage='planning' ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
     [card.id],
   );
   const fields = (card.fields ?? {}) as Record<string, unknown>;
-  const paths = designRiskPaths({
-    affectedAreas: typeof fields.affectedAreas === 'string' ? fields.affectedAreas : null,
-    planningNote: planning?.note ?? null,
-    designSummary: designSummary ?? null,
-    cardBrief: (card.card_brief as string | null) ?? null,
-  });
+  const paths = designRiskPaths(
+    {
+      affectedAreas: typeof fields.affectedAreas === 'string' ? fields.affectedAreas : null,
+      planningNote: planning?.note ?? null,
+      designSummary: designSummary ?? null,
+      cardBrief: (card.card_brief as string | null) ?? null,
+    },
+    designHighRiskPredicate(riskMap),
+  );
   const gate = designGateDecision({
     projectGate: project?.design_gate === true,
     cardGate: card.design_gate_card === true,

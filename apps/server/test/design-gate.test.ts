@@ -38,7 +38,7 @@ async function team() {
   await freshState();
   await resetLean();
   w.t.app.ctx.services.dispatcher.cooldown.clear();
-  await q('UPDATE projects SET design_gate=false WHERE id=$1', [w.projectId]);
+  await q('UPDATE projects SET design_gate=false, risk_map=NULL WHERE id=$1', [w.projectId]);
   await hireLeanTeam(w);
 }
 
@@ -182,6 +182,36 @@ describe('design gate (code v7)', () => {
     expect(row.stage).not.toBe('spec');
     const notes = await q('SELECT body FROM thread_messages WHERE thread_id=$1', [card.id]);
     expect(notes.map((n) => n.body).join('\n')).toContain('Design gate required');
+  });
+
+  it("AC5: with a path-to-risk map, the map's high paths stop at the gate and the built-in rules no longer apply", async () => {
+    await team();
+    await q('UPDATE projects SET risk_map=$2::jsonb WHERE id=$1', [
+      w.projectId,
+      JSON.stringify([
+        { pattern: 'apps/web/src/billing', risk: 'high' },
+        { pattern: 'apps/server/src/db', risk: 'low' },
+      ]),
+    ]);
+    const { card: high } = await designedCard('apps/web/src/billing/Invoice.tsx');
+    await sweep();
+    expect(await cardRow(high.id)).toMatchObject({
+      stage: 'design_gate',
+      design_gate_reason: 'high_risk',
+      design_gate_paths: ['apps/web/src/billing/Invoice.tsx'],
+    });
+
+    await team();
+    await q('UPDATE projects SET risk_map=$2::jsonb WHERE id=$1', [
+      w.projectId,
+      JSON.stringify([{ pattern: 'apps/server/src/db', risk: 'low' }]),
+    ]);
+    const { card: low } = await designedCard('apps/server/src/db/pool.ts');
+    expect(await cardRow(low.id)).toMatchObject({
+      stage: 'build',
+      design_gate_required: false,
+      design_gate_reason: 'off',
+    });
   });
 
   it('the project switch turns the gate back off and the project detail shows it', async () => {

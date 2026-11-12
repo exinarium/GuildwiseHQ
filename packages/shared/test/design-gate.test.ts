@@ -5,6 +5,7 @@ import {
   codeWorkflowV7,
   DESIGN_GATE_STAGE,
   designGateDecision,
+  designHighRiskPredicate,
   designRiskPaths,
   getBuiltinWorkflow,
   pathsInText,
@@ -100,6 +101,25 @@ describe('designRiskPaths', () => {
     expect(designRiskPaths({ affectedAreas: 'apps/web/src/x.ts' }, (p) => p.startsWith('apps/web/'))).toEqual(
       ['apps/web/src/x.ts'],
     );
+  });
+
+  it("uses the project's path-to-risk map when it has one, the built-in rules otherwise", () => {
+    const builtIn = designHighRiskPredicate(null);
+    expect(builtIn('apps/server/src/db/pool.ts')).toBe(true);
+    expect(designHighRiskPredicate([])('apps/server/src/db/pool.ts')).toBe(true);
+    const map = designHighRiskPredicate([
+      { pattern: 'apps/web/src/billing', risk: 'high' },
+      { pattern: 'apps/server/src/db', risk: 'medium' },
+    ]);
+    expect(map('apps/web/src/billing/x')).toBe(true);
+    expect(map('apps/server/src/db/pool.ts')).toBe(false);
+    expect(map('apps/web/src/components/x')).toBe(false);
+    expect(
+      designRiskPaths(
+        { affectedAreas: 'apps/server/src/db/pool.ts and apps/web/src/billing/' },
+        designHighRiskPredicate([{ pattern: 'apps/web/src/billing/**', risk: 'high' }]),
+      ),
+    ).toEqual(['apps/web/src/billing']);
   });
 });
 

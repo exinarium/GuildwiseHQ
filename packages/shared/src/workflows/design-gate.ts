@@ -1,6 +1,21 @@
+import { type RiskMapEntry, riskFromPaths } from '../projects/review-settings.ts';
 import { DESIGN_GATE_STAGE } from './builtin/code-v7.ts';
 import { isHighRiskPath } from './high-risk.ts';
 import type { WorkflowDefinition } from './schema.ts';
+
+/**
+ * Which paths count as high risk for the design gate: the project's path-to-risk map when it has one (a path whose
+ * class is high), otherwise the built-in high-risk rules.
+ */
+export function designHighRiskPredicate(
+  riskMap: readonly RiskMapEntry[] | null | undefined,
+): (path: string) => boolean {
+  if (!riskMap || riskMap.length === 0) return isHighRiskPath;
+  return (path) => {
+    const r = riskFromPaths({ paths: [path], riskMap });
+    return r.state === 'active' && r.final === 'high';
+  };
+}
 
 /**
  * The design gate (`code` version 7): the rules the server applies at the design hand-off. Pure, so the server, the web
