@@ -24,6 +24,8 @@ export const streamId = {
   agent: (id: string) => `agent-${id}`,
   thread: (id: string) => `thread-${id}`,
   desk: (id: string) => `desk-${id}`,
+  /** An owner-pending timer (a reminder after 2 working days without owner action). */
+  ownerPending: (id: string) => `owner-pending-${id}`,
   platformPause: (id: string) => `platform-pause-${id}`,
   platformTeam: () => 'platform-team',
   /** The blog writer's topic queue: one stream for the platform, with no organization in it (ceo-blog-topics.md 3.2). */

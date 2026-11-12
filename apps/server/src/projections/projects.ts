@@ -117,6 +117,7 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   // Journeys of the project, in foreign-key order (step runs point at its cards).
   const instances = 'SELECT id FROM journey_instances WHERE project_id=$1';
   await exec(tx, 'DELETE FROM journey_waits WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM owner_pending_timers WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM journey_webhook_calls WHERE project_id=$1', P);
   await exec(
     tx,
