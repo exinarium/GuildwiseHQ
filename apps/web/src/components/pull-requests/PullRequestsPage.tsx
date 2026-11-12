@@ -1,10 +1,10 @@
 import type { PrReviewDto } from '@aom/shared';
 import { GitPullRequest } from 'lucide-react';
 import { useParams } from 'react-router';
-import { usePullRequests } from '../api/queries/pr-reviews.ts';
-import { useProjects } from '../api/queries/projects.ts';
-import { ProjectTabs } from '../components/ProjectTabs.tsx';
-import { Badge, Callout, EmptyState, ErrorBox, ListSkeleton, PageHeader } from '../components/ui.tsx';
+import { usePullRequests } from '../../api/queries/pr-reviews.ts';
+import { useProjects } from '../../api/queries/projects.ts';
+import { ProjectTabs } from '../ProjectTabs.tsx';
+import { Badge, Callout, EmptyState, ErrorBox, ListSkeleton, PageHeader } from '../ui.tsx';
 
 const REVIEWER_LABEL: Record<string, string> = { first: 'Sonnet reviewer' };
 

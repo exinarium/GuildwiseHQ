@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fmtRunTime, PullRequests } from '../pages/PullRequests.tsx';
+import { fmtRunTime, PullRequests } from '../components/pull-requests/PullRequestsPage.tsx';
 
 afterEach(() => vi.unstubAllGlobals());
 
