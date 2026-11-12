@@ -791,10 +791,12 @@ function buildDevopsSettings(
         'Read',
         'Glob',
         'Grep',
-        // a scan writes only its proposal, in the scratch folder
+        // a scan writes only its proposal, in the scratch folder. Claude Code (2.1.322, dontAsk) does not let a bare
+        // `Edit` allow cover the Write tool; path-scoped Edit(...) rules do, so only this bare rule needs the explicit
+        // names. The denies below still win over it.
         ...(ctx.readOnlyScan
           ? [`Edit(${ruleAbs(paths.scratch)}/**)`, `Write(${ruleAbs(paths.scratch)}/**)`]
-          : ['Edit']),
+          : ['Edit', 'Write', 'NotebookEdit']),
         // a read-only scan has no web: nothing to send a secret to
         ...(ctx.readOnlyScan ? [] : ['WebFetch', 'WebSearch']),
         ...DEPLOY_ASK_ALLOW,

@@ -5,6 +5,7 @@ import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
 import {
   buildDevopsChatSettings,
   buildShiftSettings,
+  RUNNER_PRIVATE,
   SESSION_TOOLS_DENIED,
   toolchainReadPaths,
 } from '../src/adapters/claude-policy.ts';
@@ -692,5 +693,61 @@ describe('the DevOps engineer runs unsandboxed (owner decision)', () => {
     expect(scan.HOME).toBe('/data/agents/a1/home');
     for (const k of ['SSH_AUTH_SOCK', 'DOCKER_HOST', 'XDG_RUNTIME_DIR']) expect(scan[k], k).toBeUndefined();
     expect(scan.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+  });
+});
+
+describe('the DevOps engineer may write files (release prep writes its proposal)', () => {
+  const devopsRole = BUILTIN_ROLES.find((r) => r.key === 'devops');
+  if (!devopsRole) throw new Error('devops role');
+  const shift = (over: Parameters<typeof policyCtx>[0] = {}) =>
+    buildShiftSettings(devopsRole.permissions, policyCtx(over), POLICY_PATHS, 'devops', true);
+  const chat = (over: Parameters<typeof policyCtx>[0] = {}) =>
+    buildDevopsChatSettings(devopsRole.permissions, policyCtx(over), POLICY_PATHS);
+
+  it('a DevOps shift allows Edit, Write and NotebookEdit (a bare Edit allow does not cover Write)', () => {
+    const allow = shift().permissions.allow;
+    expect(allow).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(allow.some((a) => a.startsWith('Write(') || a.startsWith('NotebookEdit('))).toBe(false);
+    expect(shift().permissions.deny).not.toContain('Write');
+    expect(shift().permissions.deny).not.toContain('NotebookEdit');
+  });
+
+  it('a DevOps chat allows the same', () => {
+    const allow = chat().permissions.allow;
+    expect(allow).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(chat().permissions.deny).not.toContain('NotebookEdit');
+  });
+
+  it('a read-only scan is unchanged: only the scratch-scoped Edit and Write, NotebookEdit denied', () => {
+    const s = shift({ readOnlyScan: true });
+    const writes = s.permissions.allow.filter((a) => /^(Edit|Write|NotebookEdit)\b/.test(a));
+    expect(writes).toEqual(['Edit(//data/agents/a1/scratch/**)', 'Write(//data/agents/a1/scratch/**)']);
+    expect(s.permissions.deny).toContain('NotebookEdit');
+  });
+
+  it('the deny list keeps the runner-private, login and config denies next to the Write allow', () => {
+    for (const s of [shift(), chat(), shift({ guardHookCommand: 'guard' })]) {
+      expect(s.permissions.allow).toContain('Write');
+      const deny = s.permissions.deny;
+      for (const f of RUNNER_PRIVATE)
+        expect(deny).toEqual(
+          expect.arrayContaining([
+            `Read(//data/${f}/**)`,
+            `Read(//data/${f})`,
+            `Edit(//data/${f}/**)`,
+            `Edit(//data/${f})`,
+          ]),
+        );
+      expect(deny).toEqual(
+        expect.arrayContaining([
+          'Edit(//data/secrets/**)',
+          'Read(//data/secrets/**)',
+          'Read(//home/me/.claude/**)',
+          'Read(//home/me/.claude.json)',
+          'Edit(//data/agents/a1/claude/**)',
+        ]),
+      );
+    }
+    expect(shift({ addDirs: ['/srv/vault'] }).permissions.deny).toContain('Edit(//srv/vault/**)');
   });
 });

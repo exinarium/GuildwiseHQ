@@ -4,6 +4,14 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-12
+
+Runner 0.1.73.
+
+### Fixed
+
+- Release prep can write its changes again. Since 1.6.1 the release prep steps are written by the workstation's DevOps engineer, but its session was not allowed to create files with the file tool, so every writing step (the changelog first) ended with "the agent ended without `aom prep done` or `aom prep fail`". The DevOps engineer may now create files; what it may never touch (the runner's secrets and keys, its own settings, your Claude sign-in files) stays blocked.
+
 ## [1.6.1] - 2026-11-11
 
 Runner 0.1.72.
