@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/projects.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 68.5,
+  "duration": 68.9,
   "chapters": [
     {
-      "t": 5.9,
+      "t": 6.1,
       "title": "A new project"
     },
     {
-      "t": 17.1,
+      "t": 17.2,
       "title": "The priority order"
     },
     {
-      "t": 27.3,
+      "t": 27.5,
       "title": "Project settings"
     },
     {
-      "t": 43.4,
+      "t": 43.7,
       "title": "Budget and team"
     }
   ]

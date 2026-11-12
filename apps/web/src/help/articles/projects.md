@@ -22,6 +22,16 @@ You can also click **Pick from my repositories** to list the repositories of a c
 
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
 
+## PR-only repositories {#pr-only-repositories}
+
+A repository can be reviewed instead of built: its open pull requests are recorded for review, and no card is started for them.
+
+In the project's settings, under **Repos**, tick **PR-only review** under the repository. Only the project owner can change it; other members see the switch but cannot change it. It is off until the owner turns it on, and can be turned off again at any time. A **PR-only** badge next to the repository name shows which repositories are reviewed this way.
+
+About every 5 minutes, a workstation that has a clone of the repository lists its open pull requests with your own git login on that workstation. Each pull request opened after you turned PR-only on is recorded as **not reviewed**. Pull requests opened before that are not picked up, and neither are the pull requests that cards open: those keep going through the card's own review.
+
+Under the switch you see the number of pull requests waiting for review and the time of the last check, or why nothing could be read (no workstation has a clone, the runner needs an update, the git host is not supported yet, the workstation is not signed in to the git host, or the list could not be read). This works for GitHub for now. The reviews themselves come in a later release: for now the pull requests are only recorded. When you turn PR-only off, no new pull requests are recorded. When you turn it on again, only pull requests opened from then on are picked up.
+
 ## Architect settings {#architect-settings}
 
 Under **Architect** in the project settings the owner decides whether new cards are investigated and designed by an architect before the builder starts (off by default), whether the latest main branch is merged first (on by default), and where the architect's reports go (a folder in the repository, or the knowledge vault). See [The architect](/help/architect).

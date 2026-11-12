@@ -4,6 +4,15 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- PR-only review for project repositories. The owner can switch a project repository to PR-only in the project settings, and its open pull requests are then recorded as not reviewed. Waiting pull request list requests are now replaced or expire, and a connected workstation is preferred.
+- Owner reminder for pending items. When an item has been waiting on the owner for 2 working days, the owner gets one reminder. The state of the item is not changed, so nothing moves on without the owner.
+
+### Fixed
+
+- Parking or answering a discovery question no longer fails with a server error. Long display names are now shortened to the allowed length, so people with long names can park and answer questions as normal.
+
 ## [1.6.2] - 2026-11-12
 
 Runner 0.1.73.

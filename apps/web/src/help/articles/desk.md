@@ -62,6 +62,8 @@ A question, approval, escalation or digest rating that is still open after **3 d
 
 Use **Snooze** on an item to hold its next reminder back for a day up to two weeks. An Owner or Admin changes the period, or turns reminders off with 0, under **Settings > General > Reminders for open items**.
 
+A pull request that waits for you (it timed out twice within its size budget, it waits for you to start a review by hand, or it needs your approval to spend past the daily review limit) reminds you once when you have not acted for **2 working days**. Working days are Monday to Friday in your own time zone (set in your profile; UTC if none). Public holidays are not skipped, and a wait that starts on a Saturday or Sunday counts from Monday morning. You get a notification and a reminder on your Desk. Nothing else changes: the pull request stays **not reviewed** until you act, and acting on it removes the reminder.
+
 ## Standing orders {#standing-orders}
 
 **Standing orders** are recurring instructions that show up in every agent's shift. Use them for:
