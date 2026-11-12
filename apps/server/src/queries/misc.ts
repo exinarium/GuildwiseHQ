@@ -25,6 +25,7 @@ import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import { mcpServerCandidates } from '../commands/mcp-servers.ts';
+import { loadPrReviewStatus } from '../commands/pr-only.ts';
 import { UPDATE_CHECK_MIN_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_MS } from '../commands/update-check.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
@@ -340,6 +341,7 @@ export async function getProjectDetail(
     [projectId],
   );
   const limit = (await usageLimitsFor(ctx, [p])).get(p.id);
+  const prReviewStatus = await loadPrReviewStatus(ctx.pool, projectId);
   return {
     project: {
       ...toProjectDto(p, p.my_role),
@@ -357,6 +359,10 @@ export async function getProjectDetail(
       removedAt: iso(r.removed_at),
       projectPath: r.project_path ?? null,
       accessMethod: r.access_method ?? null,
+      prOnly: r.pr_only ?? false,
+      prReview: r.pr_only
+        ? (prReviewStatus.get(r.id) ?? { waiting: 0, checkedAt: null, problem: null })
+        : null,
       mainBranch: r.main_branch ?? null,
       componentRules: ComponentRulesSchema.catch([]).parse(r.component_rules ?? []),
       workingBranchCreated: r.working_branch_created_at

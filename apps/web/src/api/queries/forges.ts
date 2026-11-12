@@ -99,6 +99,16 @@ export function useSetRepoAccessMethod(projectId: string) {
   });
 }
 
+/** PR-only review on or off for one repository (owner only). */
+export function useSetRepoPrOnly(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; prOnly: boolean }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { prOnly: v.prOnly }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
 /**
  * SSH on a host (Git hosts section): the workstation prepares a key, records the access default or checks that SSH
  * works. The answer is its next report, so the Workstations list is refreshed a few times.

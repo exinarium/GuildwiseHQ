@@ -1,4 +1,4 @@
-import type { ForgeKind, GitConnection, RepoRef } from '@aom/shared';
+import type { ForgeKind, GitConnection, OpenChange, RepoRef } from '@aom/shared';
 import type { Executor } from '../toolchain/exec.ts';
 import type { SshEnv } from './ssh.ts';
 import type { TokenStore } from './tokens.ts';
@@ -105,4 +105,9 @@ export interface Forge {
   createRelease?(repo: RemoteRepo, r: CreateReleaseInput): Promise<ForgeRelease>;
   /** The commit a merged change landed as on its base branch (squash and rebase merges); null when unknown. */
   changeMergeCommit?(repo: RemoteRepo, id: string): Promise<string | null>;
+  /**
+   * The open pull requests of the repository, at most `limit` (read-only; PR-only review). `complete` is false when
+   * there were more. Absent: the git host is not supported for PR-only review yet.
+   */
+  listOpenChanges?(repo: RemoteRepo, limit: number): Promise<{ changes: OpenChange[]; complete: boolean }>;
 }

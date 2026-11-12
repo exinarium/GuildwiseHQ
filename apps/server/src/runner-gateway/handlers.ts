@@ -62,6 +62,7 @@ import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { applyPrListResult } from '../commands/pr-only.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -610,6 +611,10 @@ export class RunnerHandlers {
       // Terminal: the facts (or why not) are stored; the proposal is reconciled with them.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseFactsResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.list_prs') {
+      // Terminal: the open pull requests of a PR-only repository (or why not) are recorded; the next poll asks again.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrListResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'release.ship') {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

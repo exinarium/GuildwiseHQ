@@ -40,6 +40,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.3 Projects](#43-projects)
   - [4.3a Project vaults and the code map](#43a-project-vaults-and-the-code-map)
   - [4.3b The project backlog](#43b-the-project-backlog)
+  - [4.3c PR-only repositories](#43c-pr-only-repositories)
   - [4.4 Agents, hiring and allow-lists](#44-agents-hiring-and-allow-lists)
   - [4.5 The desk, the ledger and standing orders](#45-the-desk-the-ledger-and-standing-orders)
   - [4.6 Budgets and costs](#46-budgets-and-costs)
@@ -494,7 +495,7 @@ Owners and Admins change the order by **dragging** a project by its grip (the do
 
 What you will find there:
 
-- **Repos:** the code the agents work on, with its git host, its **Main branch** and **Working branch** (4.4) and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**, and how the repository is reached (**Access**: the workstation default, an API token / CLI login, or an SSH key); the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. In expert mode each repository also has **Component version rules** (4.4). Research projects need none.
+- **Repos:** the code the agents work on, with its git host, its **Main branch** and **Working branch** (4.4) and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**, and how the repository is reached (**Access**: the workstation default, an API token / CLI login, or an SSH key); the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. In expert mode each repository also has **Component version rules** (4.4). The owner can also switch a repository to **PR-only review** (4.3c); a **PR-only** badge then shows next to its name. Research projects need none.
 - **Reference repositories:** other repositories your agents may **read**, in card work and in chats, so they can compare code or look up how something is done elsewhere. The owner picks them under **Add a reference repository**: the repositories of the organization's other projects (organization Owners and Admins see every project's repositories, everyone else the projects they belong to, listed under **Projects**), or **any repository cloned on one of your workstations**, even one that is not in a project (listed under **On <workstation name>**; a clone without a remote shows as "no remote"). **Remove** takes one away. Nothing is added on its own: only what you pick is opened. The agents get them read-only on every workstation that has them cloned: they cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, and so does everything else on the workstation, including this platform's own code.
 - **MCP servers:** external tools such as Jira or Confluence for your agents, taken from the **Claude Code plugins** installed and enabled on your workstation (the runner reports them; nothing secret is sent). Only the **organization Owner** can grant a server to a project, under **Grant an MCP server**; **Remove** takes it away; everyone on the project can read the list. Two things are needed before an agent can use a server: the grant here **and** the server in the agent's tool permissions, either through a custom role (Organization, Roles, "What it may do", "External tools") or, for any hired agent including the built-in roles, the **External tools (MCP)** switches on its card on the Agents page (see "External tools (MCP)" under the Agents page; only the Owner can switch them on). Agents then work with the access your signed-in plugin has, so a server whose tools can write, send or delete lets an agent change data in that service as you. Each server carries a warning (judged from its tool names when they are known, otherwise a general one): prefer read-only use and grant such servers only to roles you trust with it. The tools an agent called are listed on the card under **External tools used**. The DevOps engineer is not affected. Claude.ai connectors and servers you added by hand are not offered yet.
 - **Code map for agents:** the status of the project's code map, and **Index again** (4.3a).
@@ -584,6 +585,17 @@ Every project has a **Backlog** tab next to its **Board**. It is your list of wa
 > **In the app:** Help, "Board and cards" (`/help/board-and-cards`), section "The project backlog".
 
 > **In the app:** watch the video "The project backlog" (Help, "Board and cards", `/help/board-and-cards#backlog`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
+### 4.3c PR-only repositories
+
+A repository can be reviewed instead of built: its open pull requests are recorded for review, and no card is started for them.
+
+- **Switching it on or off:** in **Project settings**, **Repos**, tick **PR-only review** under the repository. Only the project owner can change it; other members see the switch but cannot change it. It is off unless the owner turns it on, and the owner can turn it off again at any time. A **PR-only** badge next to the repository name shows which repositories are reviewed this way.
+- **Which pull requests are recorded:** about every 5 minutes, a workstation that has a clone of the repository lists its open pull requests with your own git login on that workstation. Each pull request opened after you turned PR-only on is recorded as **not reviewed**. Pull requests opened before that are not picked up, and neither are the pull requests that cards open: those keep going through the card's own review.
+- **What you see:** under the switch, the number of pull requests waiting for review and the time of the last check, or why nothing could be read (no workstation has a clone, the runner needs an update, the git host is not supported yet, the workstation is not signed in to the git host, or the list could not be read).
+- **Git hosts:** this works for GitHub for now.
+- **Reviews:** the reviewer runs that review these pull requests come in a later release. For now the pull requests are only recorded.
+- **Turning it off** stops new pull requests being recorded or queued for review. When you turn it on again, only pull requests opened from then on are picked up.
 
 ### 4.4 Agents, hiring and allow-lists
 

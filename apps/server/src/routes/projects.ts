@@ -40,6 +40,7 @@ import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
+import { setRepoPrOnly } from '../commands/pr-only.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -493,7 +494,10 @@ export function projectRoutes(ctx: Ctx) {
       },
     );
 
-    /** A repository's git provider (the manual choice, or `null` to detect it again) and/or the project path inside it. */
+    /**
+     * A repository's settings: git provider (the manual choice, or `null` to detect it again), project path, access
+     * method, main branch, component rules, release name and PR-only review (owner only).
+     */
     app.patch(
       '/api/projects/:id/repos/:repoId',
       { schema: { params: RepoParamsSchema, body: PatchRepoRequestSchema } },
@@ -511,6 +515,8 @@ export function projectRoutes(ctx: Ctx) {
           await setRepoComponentRules(ctx, s.user, req.params.id, req.params.repoId, req.body.componentRules);
         if (req.body.releaseName !== undefined)
           await setRepoReleaseName(ctx, s.user, req.params.id, req.params.repoId, req.body.releaseName);
+        if (req.body.prOnly !== undefined)
+          await setRepoPrOnly(ctx, s.user, req.params.id, req.params.repoId, req.body.prOnly);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

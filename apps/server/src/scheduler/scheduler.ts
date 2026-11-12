@@ -12,6 +12,7 @@ import { sweepJourneys } from '../commands/journey-runtime.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
+import { pollPrOnlyRepos } from '../commands/pr-only.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -154,6 +155,8 @@ export class Scheduler {
         this.ctx.log.error({ err }, 'reachability checks failed'),
       );
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
+      // PR-only repositories: ask a workstation with the clone for the open pull requests (throttled per repository).
+      await pollPrOnlyRepos(this.ctx).catch((err) => this.ctx.log.error({ err }, 'PR-only polling failed'));
       await this.blog();
       // Discovery and boardroom sessions: queued turns go out, approved documents reach the vault.
       await this.ctx.services.sessions

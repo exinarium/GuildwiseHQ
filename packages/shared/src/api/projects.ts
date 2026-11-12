@@ -28,6 +28,7 @@ import {
   RepoVisibilitySchema,
   repoNameError,
 } from '../repo/index.ts';
+import { PrReviewProblemSchema } from '../review/pr-review.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -52,6 +53,20 @@ export const ProjectRepoDtoSchema = z.object({
   projectPath: z.string().nullable().optional(),
   /** The owner's access method for this repository (`ssh` or `https`); null: the workstation default of the host. */
   accessMethod: GitAccessMethodSchema.nullable().optional(),
+  /** PR-only review: open pull requests of this repository are recorded for review and no card is built for them. */
+  prOnly: z.boolean().optional(),
+  /**
+   * While PR-only: pull requests waiting for review (`waiting`), the last time the open list was read, and why the
+   * repository is not being read (`problem`; null when it works). Null when the repository is not PR-only.
+   */
+  prReview: z
+    .object({
+      waiting: z.number().int().nonnegative(),
+      checkedAt: IsoTime.nullable(),
+      problem: PrReviewProblemSchema.nullable(),
+    })
+    .nullable()
+    .optional(),
   /** The main branch (where pull requests go) when the owner named one; null: the repository's default branch. */
   mainBranch: z.string().nullable().optional(),
   /** The component version rules (expert mode); empty: a release only gets the release version. */
@@ -593,6 +608,8 @@ export const PatchRepoRequestSchema = z
     componentRules: ComponentRulesSchema.optional(),
     /** The name in the release tag message and title (null or empty: the project name). */
     releaseName: z.string().trim().max(100).nullable().optional(),
+    /** PR-only review on or off (owner only). */
+    prOnly: z.boolean().optional(),
   })
   .refine(
     (b) =>
@@ -601,8 +618,9 @@ export const PatchRepoRequestSchema = z
       b.accessMethod !== undefined ||
       b.mainBranch !== undefined ||
       b.componentRules !== undefined ||
-      b.releaseName !== undefined,
-    { message: 'send forge, projectPath, accessMethod, mainBranch, componentRules or releaseName' },
+      b.releaseName !== undefined ||
+      b.prOnly !== undefined,
+    { message: 'send forge, projectPath, accessMethod, mainBranch, componentRules, releaseName or prOnly' },
   );
 
 /** `POST /api/projects/:id/repos/:repoId/release-pr` answer: the request was queued for the repository's workstation. */

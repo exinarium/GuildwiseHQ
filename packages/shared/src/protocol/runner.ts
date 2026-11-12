@@ -875,6 +875,21 @@ export type RepoReleaseFactsResult = z.infer<typeof RepoReleaseFactsResultSchema
 export const RELEASE_FACTS_CAPABILITY = 'release-facts:1';
 
 /**
+ * `repo.list_prs`: read-only. The open pull requests of a repository on its git host, listed with the workstation's own
+ * login. The answer is a `RepoListPrsResult`.
+ */
+export const RepoListPrsPayloadSchema = z.object({
+  requestId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+});
+export type RepoListPrsPayload = z.infer<typeof RepoListPrsPayloadSchema>;
+
+/** Announced by a runner that understands `repo.list_prs`. */
+export const PR_LIST_CAPABILITY = 'pr-list:1';
+
+/**
  * `release.ship`: the release commit on the working branch (CHANGELOG.md moved to the version, component versions
  * bumped), pushed without force. Idempotent: a branch that already has the version section answers `alreadyDone`.
  */
@@ -1250,6 +1265,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.access',
   'repo.open_pr',
   'repo.release_facts',
+  'repo.list_prs',
   'release.ship',
   'release.ref_cleanup',
   'release.docs_prep',
@@ -1364,6 +1380,7 @@ export const CommandPayloadSchemas = {
   'repo.access': RepoAccessPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
+  'repo.list_prs': RepoListPrsPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
   'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
