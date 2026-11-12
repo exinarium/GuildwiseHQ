@@ -288,7 +288,7 @@ describe('AC4: any other failure posts nothing, stays not reviewed and shows the
       state: 'not_reviewed',
       lastRun: { state: 'failed', code: 'model_error', error: 'the claude process exited with code 1' },
     });
-    // retryable, but not before the wait: no restart on the next pass for 4
+    // a failure is final: no restart on the next pass for 4, however retryable it looks
     expect(await dispatchPrReviews(ctx())).toBe(1); // pull request 5, not 4
     expect((await commandsOf('pr_review.run')).filter((c) => c.payload.prNumber === 4)).toHaveLength(1);
   });

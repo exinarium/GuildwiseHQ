@@ -30,9 +30,6 @@ import { projectScope, SYSTEM_ACTOR } from './common.ts';
 export const RUN_GRACE_MS = 5 * 60_000;
 /** A completed run whose post did not answer within this time is failed at the post stage. */
 export const POST_WAIT_MS = 15 * 60_000;
-/** A failed run that is retryable is started again by the dispatcher no sooner than this, at most MAX_RETRIES times. */
-export const RETRY_AFTER_MS = 30 * 60_000;
-export const MAX_RETRIES = 3;
 const MAX_RUNNING_PER_REPO = 1;
 const MAX_RUNNING_PER_WORKSTATION = 2;
 /** GitHub refuses a review body over 65,536 characters. */
@@ -67,7 +64,7 @@ export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
       return [];
     });
     for (const pr of list) {
-      if (!(await mayStart(ctx.pool, pr.id, ctx.clock.now()))) continue;
+      if (!(await mayStart(ctx.pool, pr.id))) continue;
       const ok = await startRun(ctx, p.id as string, pr).catch((err) => {
         ctx.log.error({ err, prReviewId: pr.id }, 'starting a pull request review failed');
         return false;
@@ -78,8 +75,8 @@ export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
   return started;
 }
 
-/** One run per pull request, except a failed run that may be repeated (see RETRY_AFTER_MS). */
-async function mayStart(db: Queryable, prReviewId: string, now: Date): Promise<boolean> {
+/** One run per pull request; only a run refused for lack of a token is tried again. */
+async function mayStart(db: Queryable, prReviewId: string): Promise<boolean> {
   const q = db;
   const runs = await rows(
     q,
@@ -90,13 +87,8 @@ async function mayStart(db: Queryable, prReviewId: string, now: Date): Promise<b
   if (runs.length === 0) return true;
   const last = runs[0] as Record<string, unknown>;
   if (last.state !== 'failed') return false; // running, completed (posting), posted, timed out: never again by itself
-  if (last.error_code === 'no_token') return true; // not an attempt: the gate decides when it is ready again
-  const attempts = runs.filter(
-    (r) => r.state === 'failed' && r.retryable && r.error_code !== 'no_token',
-  ).length;
-  if (!last.retryable || attempts >= MAX_RETRIES) return false;
-  const at = last.finished_at ? new Date(last.finished_at as string).getTime() : 0;
-  return now.getTime() - at >= RETRY_AFTER_MS;
+  // no_token is not an attempt: the gate decides when the repository is ready again. Any other failure is final.
+  return last.error_code === 'no_token';
 }
 
 async function startRun(
@@ -127,7 +119,7 @@ async function startRun(
       [pr.id],
     );
     if (!row || row.closed_at || row.review_state !== 'not_reviewed' || !row.pr_only) return false;
-    if (!(await mayStart(tx, pr.id, now))) return false;
+    if (!(await mayStart(tx, pr.id))) return false;
     // the gate again, right before the run goes out
     const gate = await reviewerGate(tx, pr.repoId);
     if (gate.state !== 'ready') return false;
