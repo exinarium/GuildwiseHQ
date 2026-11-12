@@ -1337,6 +1337,41 @@ runs its shifts **and its chats** outside this sandbox by design, so that it can
 (`docker compose -p myapp ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
 See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
+### Reviewer runs (PR-only repositories)
+
+A reviewer run reads one pull request of a PR-only repository and posts its findings. It is built so that it cannot change
+the repository and cannot reach any credential.
+
+- **A fresh, standalone checkout per run.** The runner fetches the pull request head (`refs/pull/<n>/head`) into the owner's
+  clone under a private ref, builds a separate repository from it at `<data dir>/reviews/<runId>/checkout` with one local
+  fetch of the head and base commits, detaches it, and deletes the private ref again. The checkout has its own `.git`, **no
+  remote**, no credential or include configuration and no hooks. Then the whole tree loses its write bit (`chmod -R a-w`), so a
+  write, `git add` or `git commit` fails even outside the sandbox. A push has nowhere to go.
+- **The shell is read-only and offline.** The checkout is the working directory with `readOnlyWorktree`, there is no git dir
+  or extra folder, and the sandbox profile is `offline`: no domain is allowed, so github.com is unreachable. `git push` is denied by the policy as for every role.
+- **Fresh home, scratch and tmp.** Each run gets `reviews/<runId>/{home,scratch}` and its own `/tmp/aom-r-<hash>`. They are removed when the
+  run ends, and a startup sweep removes any `reviews/*` and `aom-r-*` left by a crash. Nothing an earlier run left is visible to the next one.
+- **The runner posts, not the agent.** The runner sends **one** pull request review with the event hard-coded to `COMMENT` and the
+  `commit_id` of the head, using `fetch` and the reviewer token only. It never calls `gh` and never falls back to the owner's own
+  login. If the host rejects a line comment (422, a line outside the diff) the same findings are sent once more in the review body.
+- **No token, no run.** Before anything is created, the runner refuses with `reviewer_token_missing` when it holds no token for the
+  repository (or the sandbox is not enforced, or the git host is not GitHub). The server also lists no pull request of such a
+  repository for review (`listReviewablePrs`), and the repository shows "Reviewer token missing" in the project settings.
+
+**Token setup (DevOps / Anvil).** The token is created by DevOps, not by this card:
+
+1. Create a dedicated bot account and give it the **Read** role on the repository. Read is enough to comment on pull requests and can
+   never push or merge, even if the token were scoped too widely.
+2. Create a fine-grained personal access token for that account, limited to that one repository, with **Pull requests: read and write**,
+   **Contents: read** and **Metadata: read**, and an expiry date. (A GitHub App with the same three permissions works the same way.)
+3. On the workstation: `guildwise-runner reviewer-token set <remote url>` (`--pairing <id>` for one pairing). The token is read from a
+   hidden prompt or from stdin, never from an argument. It is checked against the repository, and a classic token that carries a write scope (`repo`, `public_repo`, `write:*`)
+   is refused. `reviewer-token status [<remote url>]` shows present or missing, `reviewer-token remove <remote url>` deletes it.
+
+The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by the normalized remote url), separate from the
+git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
+`workstation_repos.reviewer_token`), never the token.
+
 ### Per-agent directories
 
 - `agents/<agentId>/home/`: HOME directory with a `.gitconfig` that holds the commit identity of the current shift (see "Commit identity")
@@ -1990,6 +2025,8 @@ pairings the credentials go to all of them unless `--pairing` names one. A runni
 the minute (no restart); the same file posts the approved updates to Jira.
 
 ### Sealed credential files
+
+Reviewer tokens (`secrets/reviewer-tokens.json`, set with `guildwise-runner reviewer-token set`) are sealed the same way; only present or missing is reported to the server.
 
 `secrets/jira.json` and `secrets/git-tokens.json` are sealed like the storage, WhatsApp and Google Sheets secrets:
 AES-256-GCM with a key derived from `secrets/runner-key.pem` (`{ v: 1, alg: 'A256GCM', iv, ct, tag }`). A copy of

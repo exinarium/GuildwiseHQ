@@ -18,6 +18,8 @@ export interface RunnerPaths {
   bin: string;
   agents: string;
   worktrees: string;
+  /** One folder per reviewer run (`reviews/<runId>`): its standalone checkout, home and scratch. Removed when the run ends. */
+  reviews: string;
   integration: string;
   vaults: string;
   logs: string;
@@ -56,6 +58,7 @@ export function runnerPaths(root: string): RunnerPaths {
     bin: join(root, 'bin'),
     agents: join(root, 'agents'),
     worktrees: join(root, 'worktrees'),
+    reviews: join(root, 'reviews'),
     integration: join(root, 'integration'),
     vaults: join(root, 'vaults'),
     logs: join(root, 'logs'),

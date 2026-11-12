@@ -31,6 +31,7 @@ import { RepoPrOnlyControl } from '../components/RepoPrOnlyControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx';
+import { RepoReviewerTokenStatus } from '../components/RepoReviewerTokenStatus.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { Reword } from '../components/Reword.tsx';
@@ -341,6 +342,7 @@ export function ProjectSettings() {
                     {traits.usesRepos && (
                       <RepoPrOnlyControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                     )}
+                    {traits.usesRepos && <RepoReviewerTokenStatus repo={r} />}
                     {traits.usesRepos && (
                       <RepoProjectPathControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                     )}

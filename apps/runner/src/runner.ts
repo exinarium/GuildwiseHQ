@@ -170,6 +170,8 @@ import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
+import { sweepReviewRuns } from './review/reviewer-sandbox.ts';
+import { FileReviewerTokenStore, reviewerTokenFact } from './review/reviewer-tokens.ts';
 import { RunManager } from './runs/manager.ts';
 import { removeOrphanAgentTmps, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
@@ -330,6 +332,8 @@ export class Runner {
   private readonly repoAccess: RepoAccessUpdater;
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
+  /** Comment-only tokens reviewers post with: sealed here, only present/missing is ever reported. */
+  readonly reviewerTokens: FileReviewerTokenStore;
   private readonly packCredentials: PackCredentialStore;
   readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
@@ -438,6 +442,11 @@ export class Runner {
     });
     this.exec = opts.executor ?? realExecutor;
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
+    this.reviewerTokens = new FileReviewerTokenStore(
+      join(this.paths.secrets, 'reviewer-tokens.json'),
+      (n) => this.keys.deriveFileKey(n),
+      { warn: (m) => this.log.warn(m) },
+    );
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
@@ -1207,6 +1216,12 @@ export class Runner {
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     this.repairPdfRenderer();
     await this.scan();
+    // reviewer runs left by a crash: their checkouts and tmp dirs are removed (a new run always starts fresh)
+    await sweepReviewRuns(this.paths)
+      .then((n) => {
+        if (n) this.log.info(`review sweep: removed ${n} leftover reviewer run folder(s)`);
+      })
+      .catch((err) => this.log.warn(`review sweep failed: ${String(err)}`));
     // Backlog #81: temp content left by earlier shifts (and a crashed runner) goes before anything runs.
     await sweepAgentTmps(this.paths, this.supervisor.persistedAgentIds())
       .then((r) => {
@@ -1254,6 +1269,11 @@ export class Runner {
           this.lastRecheck = m;
           void this.reportGit(false);
           void this.reportIntegrations(false);
+          // a reviewer token was set or removed: tell the server whether each repository has one
+          this.client.send('repos.report', {
+            repos: this.reposWithReviewerToken(),
+            repoCatalog: this.repoCatalog(),
+          });
           if (this.whatsapp.reload()) this.announceRelay();
         }
       } catch {
@@ -1535,7 +1555,7 @@ export class Runner {
         this.lastRuntimes = JSON.stringify(r);
         return r;
       }),
-      repos: this.repos,
+      repos: this.reposWithReviewerToken(),
       repoCatalog: this.repoCatalog(),
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
@@ -1629,7 +1649,10 @@ export class Runner {
 
   private async rescan(): Promise<void> {
     await this.scan();
-    this.client.send('repos.report', { repos: this.repos, repoCatalog: this.repoCatalog() });
+    this.client.send('repos.report', {
+      repos: this.reposWithReviewerToken(),
+      repoCatalog: this.repoCatalog(),
+    });
     // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
     await this.reportRuntimes();
     await this.reportGit(false);
@@ -1853,6 +1876,14 @@ export class Runner {
           ...(this.opts.config.dotnetRoot ? { override: this.opts.config.dotnetRoot } : {}),
         }),
     });
+  }
+
+  /** The repositories as reported to the server, each with whether a reviewer token is held (never the token). */
+  private reposWithReviewerToken(): RepoReport[] {
+    return this.repos.map((r) => ({
+      ...r,
+      reviewerToken: reviewerTokenFact(this.reviewerTokens, r.remoteUrl),
+    }));
   }
 
   /** Scans the repoRoots once: project matching sees every clone with a remote, the picker catalog only what may be opened. */

@@ -185,6 +185,8 @@ export interface SandboxProfile {
   readOnlyWorktree: boolean;
   /** macOS: keeps `allowLocalBinding` (`DARWIN_LOCAL_BINDING_ROLES` / browser roles). Ignored on Linux. Default false. */
   darwinLocalBinding?: boolean;
+  /** No network for the shell at all (a reviewer reads a local checkout and needs no host): `allowedDomains` is empty. */
+  offline?: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -495,7 +497,10 @@ function sandboxBlock(
     excludedCommands: aomExcluded(ctx.aomReadPaths),
     network: {
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
-      allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains] : [],
+      allowedDomains:
+        shell && !profile.offline
+          ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains]
+          : [],
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
@@ -836,6 +841,8 @@ export function buildShiftSettings(
   paths: { home: string; configDir: string; scratch: string; tmp: string },
   roleKey?: string,
   isDevops = false,
+  /** Sandbox profile additions the caller decides (a reviewer run: `offline`). Absent: exactly as before. */
+  profileExtra: Pick<SandboxProfile, 'offline'> = {},
 ): ClaudeSettings {
   if (isDevops) return buildDevopsSettings(p, ctx, paths);
   if (roleKey === 'ceo') return buildCeoSettings(ctx, paths);
@@ -902,6 +909,7 @@ export function buildShiftSettings(
       browser: runsBrowsers(p, roleKey),
       readOnlyWorktree: isReadOnlyWorktreeRole(p),
       darwinLocalBinding: keepsLocalBindingOnDarwin(p, roleKey),
+      ...profileExtra,
     },
     testDomains,
   );

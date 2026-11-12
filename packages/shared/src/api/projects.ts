@@ -29,6 +29,7 @@ import {
   repoNameError,
 } from '../repo/index.ts';
 import { PrReviewProblemSchema } from '../review/pr-review.ts';
+import { ReviewerTokenStateSchema } from '../review/reviewer-run.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -67,6 +68,8 @@ export const ProjectRepoDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** While PR-only: whether a workstation holds the comment-only reviewer token. Null when the repository is not PR-only. */
+  reviewerToken: ReviewerTokenStateSchema.nullable().optional(),
   /** The main branch (where pull requests go) when the owner named one; null: the repository's default branch. */
   mainBranch: z.string().nullable().optional(),
   /** The component version rules (expert mode); empty: a release only gets the release version. */
