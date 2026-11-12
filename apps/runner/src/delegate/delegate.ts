@@ -1108,7 +1108,7 @@ export function renderDelegateInstructions(
 }
 
 /** Reads a session to its end: the reply text (the final text, else all streamed text) and how it exited. */
-async function readSession(
+export async function readSession(
   session: RuntimeSession,
   maxToolCalls: number | undefined,
   onCap: () => void,

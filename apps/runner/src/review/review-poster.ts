@@ -1,4 +1,4 @@
-import { parseRemote, type ReviewFinding } from '@aom/shared';
+import { parseRemote, type ReviewerRunSpec, type ReviewFinding } from '@aom/shared';
 import { redact } from '../secrets/redact.ts';
 import type { ReviewerRun } from './reviewer-sandbox.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
@@ -92,6 +92,44 @@ export class GitHubReviewPoster implements ReviewPoster {
     }
     const out = (await res.json().catch(() => ({}))) as { id?: number | string; html_url?: string };
     return { reviewId: String(out.id ?? ''), url: out.html_url ?? '' };
+  }
+
+  /**
+   * The `html_url` of the first review on the pull request whose body holds `marker`, or null. Lets a repeated post
+   * command see that its review already exists. Same token, headers and redaction as `post`.
+   */
+  async findByMarker(spec: ReviewerRunSpec, marker: string): Promise<string | null> {
+    const token = this.env.tokens.get(spec.remoteUrlNormalized)?.token;
+    if (!token)
+      throw new ReviewPostError('reviewer_token_missing', 'no reviewer token is saved for this repository');
+    const remote = parseRemote(spec.remoteUrlNormalized);
+    if (!remote || remote.kind !== 'github')
+      throw new ReviewPostError('unsupported_host', 'reviews can only be posted to GitHub');
+    const url = `${githubApiBase(remote.host)}/repos/${remote.namespace.join('/')}/${remote.name.replace(/\.git$/i, '')}/pulls/${spec.prNumber}/reviews?per_page=100`;
+    let res: Response;
+    try {
+      res = await this.env.fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+    } catch (err) {
+      throw new ReviewPostError('unreachable', redact(err instanceof Error ? err.message : String(err)));
+    }
+    if (!res.ok) {
+      const text = redact((await res.text().catch(() => '')).slice(0, 300));
+      throw new ReviewPostError(
+        'rejected',
+        `the host answered ${res.status}${text ? `: ${text}` : ''}`,
+        res.status,
+      );
+    }
+    const list = (await res.json().catch(() => [])) as Array<{ body?: string | null; html_url?: string }>;
+    const hit = Array.isArray(list) ? list.find((r) => typeof r.body === 'string' && r.body.includes(marker)) : undefined;
+    return hit ? (hit.html_url ?? '') : null;
   }
 
   private async send(url: string, token: string, body: unknown): Promise<Response> {

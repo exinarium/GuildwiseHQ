@@ -35,6 +35,7 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   PR_LIST_CAPABILITY,
+  PR_REVIEW_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -170,6 +171,7 @@ import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
+import { PrReviewCommands, sweepPrReviewAgents } from './review/pr-review-commands.ts';
 import { sweepReviewRuns } from './review/reviewer-sandbox.ts';
 import { FileReviewerTokenStore, reviewerTokenFact } from './review/reviewer-tokens.ts';
 import { RunManager } from './runs/manager.ts';
@@ -334,6 +336,8 @@ export class Runner {
   readonly keys: RunnerKeys;
   /** Comment-only tokens reviewers post with: sealed here, only present/missing is ever reported. */
   readonly reviewerTokens: FileReviewerTokenStore;
+  /** `pr_review.run` / `pr_review.post`: the first reviewer of a PR-only repository. */
+  private readonly prReviews: PrReviewCommands;
   private readonly packCredentials: PackCredentialStore;
   readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
@@ -568,6 +572,23 @@ export class Runner {
         },
         { codex: this.codexAccounts, gemini: this.geminiAccounts },
       );
+    this.prReviews = new PrReviewCommands({
+      paths: this.paths,
+      adapters: this.adapters,
+      tokens: this.reviewerTokens,
+      forgeEnv: this.forgeEnv,
+      findRepo: async (n) => {
+        const r = await this.findRepo(n);
+        return r ? { localPath: r.localPath, remoteUrl: r.remoteUrl } : undefined;
+      },
+      gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      sandboxState: (a) =>
+        a instanceof ClaudeCodeAdapter
+          ? a.sandboxStatus()
+          : { state: 'unavailable', reason: 'this runtime has no enforced sandbox' },
+      fetch: globalThis.fetch,
+      log: (l) => this.log.info(l),
+    });
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
       keys: this.keys,
@@ -1217,8 +1238,9 @@ export class Runner {
     this.repairPdfRenderer();
     await this.scan();
     // reviewer runs left by a crash: their checkouts and tmp dirs are removed (a new run always starts fresh)
-    await sweepReviewRuns(this.paths)
-      .then((n) => {
+    await sweepReviewRuns(this.paths, this.prReviews.liveRunIds())
+      .then(async (n) => {
+        n += await sweepPrReviewAgents(this.paths, this.prReviews.liveRunIds());
         if (n) this.log.info(`review sweep: removed ${n} leftover reviewer run folder(s)`);
       })
       .catch((err) => this.log.warn(`review sweep failed: ${String(err)}`));
@@ -1580,6 +1602,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         PR_LIST_CAPABILITY,
+        PR_REVIEW_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
@@ -2299,6 +2322,14 @@ export class Runner {
           true,
           await listOpenPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
         );
+      } else if (command === 'pr_review.run') {
+        // The run never posts: it answers with its findings, a timeout or a failure. A resent command for a live run
+        // awaits the same run (one model session) and answers under its own command id.
+        const p = CommandPayloadSchemas['pr_review.run'].parse(payload);
+        done(true, await this.prReviews.run(p));
+      } else if (command === 'pr_review.post') {
+        const p = CommandPayloadSchemas['pr_review.post'].parse(payload);
+        done(true, await this.prReviews.post(p));
       } else if (command === 'release.ship') {
         // "No clone here" and every git refusal are answers (ok:true, result.ok:false): the server puts them on the desk.
         const p = CommandPayloadSchemas['release.ship'].parse(payload);
