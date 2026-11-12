@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StoredBuildEvidenceSchema } from '../cards/lean-v6.ts';
+import { NeedsSplitReason, StoredNeedsSplitProposalSchema } from '../cards/needs-split.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -467,6 +468,34 @@ export const cardEvents = [
       reason: z.string(),
       cause: z.enum(['project_archived', 'project_converted', 'split']).optional(),
       childCardIds: z.array(Id).optional(),
+    }),
+  ),
+  /**
+   * Needs split was confirmed on an over-budget card. `ba`: the card goes back to the BA (spec, draft) with a `spec_card`
+   * task in needs-split mode (`taskId`); `owner`: the card already took that route (or no BA is hired) and the owner
+   * decides on a `needs_split_decision` desk item (`deskItemId`). Lenient: an old event always parses.
+   */
+  defineEvent(
+    'CardNeedsSplitRequested',
+    z.object({
+      cardId: Id,
+      route: z.enum(['ba', 'owner']),
+      reason: NeedsSplitReason,
+      fromStage: z.string(),
+      proposal: StoredNeedsSplitProposalSchema,
+      taskId: Id.optional(),
+      deskItemId: Id.optional(),
+      inheritedFromCardId: Id.optional(),
+    }),
+  ),
+  /** How a needs-split ended: the BA split the card, the BA could not, or the owner kept or cancelled it. */
+  defineEvent(
+    'CardNeedsSplitResolved',
+    z.object({
+      cardId: Id,
+      outcome: z.enum(['split', 'ba_failed', 'owner_continue', 'owner_cancel']),
+      childCardIds: z.array(Id).optional(),
+      note: z.string().max(4000).optional(),
     }),
   ),
   /**

@@ -7,6 +7,7 @@ import {
   CommentRequestSchema,
   CreateCardRequestSchema,
   MoveCardRequestSchema,
+  NeedsSplitRequestSchema,
   PatchCardRequestSchema,
   ReleaseCardRequestSchema,
   ReopenCardRequestSchema,
@@ -27,6 +28,7 @@ import {
   reopenCard,
   specifyCard,
 } from '../commands/cards.ts';
+import { confirmNeedsSplit } from '../commands/needs-split.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one } from '../db/sql.ts';
 import { getArchive, getBoard, getCardDetail, searchCards, toCardDto } from '../queries/cards.ts';
@@ -141,6 +143,22 @@ export function cardRoutes(ctx: Ctx) {
         const moved = await moveCardWithNotice(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
         const detail = await getCardDetail(ctx, s.user.id, moved.cardId);
         return moved.notice ? { ...detail, moveNotice: moved.notice } : detail;
+      },
+    );
+
+    // Needs split: the owner or a manager confirms that an over-budget card goes back to the BA (once) to be split.
+    app.post(
+      '/api/cards/:id/needs-split',
+      { schema: { params: CardParamsSchema, body: NeedsSplitRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const r = await confirmNeedsSplit(ctx, s.user, req.params.id, req.body);
+        ctx.services.dispatcher.trigger();
+        return {
+          ...(await getCardDetail(ctx, s.user.id, r.cardId)),
+          needsSplitRoute: r.route,
+          notice: r.notice,
+        };
       },
     );
 

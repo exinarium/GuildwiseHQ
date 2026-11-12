@@ -12,6 +12,7 @@ import {
   StoredReviewRisk,
   ThreadMessageKind,
 } from '../cards/types.ts';
+import { NeedsSplitProposalSchema, NeedsSplitRecordSchema } from '../cards/needs-split.ts';
 import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';
@@ -368,6 +369,10 @@ export const CardDetailResponseSchema = z.object({
     .optional(),
   /** Repository scoping: the card this one was split from. */
   splitFrom: z.object({ id: z.uuid(), ref: z.string() }).optional(),
+  /** Needs split: the latest over-budget return of this card (the architect's folder scope and seams). Null: none. */
+  needsSplit: NeedsSplitRecordSchema.nullable().optional(),
+  /** The card (or the card it was split out of) already went back to the BA once: a new over-budget verdict goes to the owner. */
+  needsSplitTaken: z.boolean().optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 
@@ -462,3 +467,13 @@ export const CancelCardRequestSchema = z.object({
 });
 export type CancelCardRequest = z.infer<typeof CancelCardRequestSchema>;
 export const CardParamsSchema = z.object({ id: z.string().min(1) });
+
+/** `POST /api/cards/:id/needs-split`: confirm needs split on an over-budget card, with the architect's proposal. */
+export const NeedsSplitRequestSchema = NeedsSplitProposalSchema;
+export type NeedsSplitRequest = z.infer<typeof NeedsSplitRequestSchema>;
+
+export const NeedsSplitResponseSchema = CardDetailResponseSchema.extend({
+  needsSplitRoute: z.enum(['ba', 'owner']),
+  notice: z.string(),
+});
+export type NeedsSplitResponse = z.infer<typeof NeedsSplitResponseSchema>;

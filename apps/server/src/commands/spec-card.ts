@@ -24,6 +24,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from '../dispatcher/ba-agent-sql.ts';
 import { needsRepoScoping, resolveRepo } from './card-repo.ts';
+import { needsSplitBaFailedIn, needsSplitRecord } from './needs-split.ts';
 import {
   architectFlags,
   cancelCardIn,
@@ -165,6 +166,8 @@ export async function queueSpecCardTask(
   tx: Tx,
   card: Row,
   actor: Parameters<Ctx['store']['append']>[0][number]['actor'],
+  /** The id to give a new task (a caller that recorded it before queueing). */
+  newTaskId?: string,
 ): Promise<{ taskId: string; existing: boolean }> {
   // Under the card's lock, so two callers cannot both see "no open task" and queue two.
   await tx.query('SELECT 1 FROM cards WHERE id=$1 FOR UPDATE', [card.id]);
@@ -174,7 +177,7 @@ export async function queueSpecCardTask(
     [card.id],
   );
   if (open) return { taskId: open.id as string, existing: true };
-  const taskId = randomUUID();
+  const taskId = newTaskId ?? randomUUID();
   await ctx.store.append(
     [
       {
@@ -220,6 +223,31 @@ export async function buildSpecCardTask(
     missing: split.fields,
     listFields: split.lists,
     ...(split.scoping ? { chooseRepo: true, repos: await scopingRepos(db, card.project_id), by } : {}),
+    ...(await needsSplitTaskPart(db, card)),
+  };
+}
+
+/** Needs split: the architect's proposal, the design and the repository names, when the card is with the BA to split. */
+async function needsSplitTaskPart(db: Queryable, card: Row): Promise<Pick<SpecCardTask, 'needsSplit'>> {
+  const rec = needsSplitRecord(card);
+  if (!rec || rec.state !== 'with_ba') return {};
+  const repos = await rows(
+    db,
+    'SELECT id, name FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name, id',
+    [card.project_id],
+  );
+  const inv = card.investigation as { reportPath?: unknown; summary?: unknown } | null;
+  return {
+    needsSplit: {
+      proposal: rec.proposal,
+      round: Math.max(1, rec.round),
+      design:
+        inv && typeof inv.reportPath === 'string'
+          ? { reportPath: inv.reportPath, summary: typeof inv.summary === 'string' ? inv.summary : '' }
+          : null,
+      repos: repos.map((r) => ({ name: r.name as string })),
+      defaultRepo: (repos.find((r) => r.id === card.repo_id)?.name as string | undefined) ?? '',
+    },
   };
 }
 
@@ -419,6 +447,7 @@ async function applySplit(
   shift: Row,
   card: Row,
   split: SpecCardSplitChild[],
+  splitMode = false,
 ): Promise<ReportResult> {
   const planned = await planSplit(tx, card, split);
   if ('problems' in planned)
@@ -508,8 +537,23 @@ async function applySplit(
       cause: 'split',
       childCardIds: made.map((c) => c.id),
       actor: agentActor(shift.agent_id),
-      note: `Split into ${made.length} cards, one per repository or section, and cancelled: ${list}. Follow the new cards.`,
+      note: `Split into ${made.length} cards, ${splitMode ? 'one per seam of the needs split' : 'one per repository or section'}, and cancelled: ${list}. Follow the new cards.`,
     });
+    if (splitMode)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.card(card.id),
+            event: {
+              type: 'CardNeedsSplitResolved',
+              payload: { cardId: card.id, outcome: 'split', childCardIds: made.map((c) => c.id) },
+            },
+            actor: agentActor(shift.agent_id),
+            scope: projectScope(card.org_id, card.project_id),
+          },
+        ],
+        { tx },
+      );
     await ctx.store.append([completed(task, 'done', `split into ${made.map((c) => c.ref).join(', ')}`)], {
       tx,
     });
@@ -550,6 +594,14 @@ export async function applySpecCardReport(
   }
   // Repository scoping is derived from the card now (no repository, several in the project), not stored on the task.
   const scoping = await needsRepoScoping(tx, card);
+  // Needs split: the card was returned to be split along the architect's seams (derived from the card, as scoping is).
+  const splitMode = needsSplitRecord(card)?.state === 'with_ba';
+  if (splitMode && report.outcomeId === SPEC_CARD_OUTCOME.fail) {
+    const why = (report.note ?? '').trim().slice(0, 500) || 'the BA could not split the card';
+    await needsSplitBaFailedIn(ctx, tx, card, why);
+    await ctx.store.append([completed(task, 'done', why)], { tx });
+    return { accepted: true };
+  }
   if (report.outcomeId === SPEC_CARD_OUTCOME.fail) {
     const why =
       (report.note ?? '').trim().slice(0, 500) ||
@@ -568,6 +620,14 @@ export async function applySpecCardReport(
   const parsed = SpecCardDataSchema.safeParse(report.data);
   if (!parsed.success) return { accepted: false, error: `invalid fields: ${parsed.error.message}` };
   const data: SpecCardData = parsed.data;
+  if (splitMode) {
+    if (!data.split)
+      return {
+        accepted: false,
+        error: `${card.ref} was returned to be split: report a split of 2 to 8 cards, or report that it cannot be split`,
+      };
+    return applySplit(ctx, tx, task, shift, card, data.split, true);
+  }
   if (scoping && !data.repo && !data.split)
     return {
       accepted: false,
@@ -635,7 +695,9 @@ export async function applySpecCardReport(
 /** No BA took the task in time, or it failed twice: the card stays a draft and an alert says so. */
 export async function runSpecCardFallback(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1', [task.card_id]);
-  if (card && card.status === 'draft') {
+  if (card && card.status === 'draft' && needsSplitRecord(card)?.state === 'with_ba')
+    await needsSplitBaFailedIn(ctx, tx, card, 'no BA was available to split it', 'no_ba');
+  else if (card && card.status === 'draft') {
     const scoping = await needsRepoScoping(tx, card);
     await needsSpecifyingItem(
       ctx,

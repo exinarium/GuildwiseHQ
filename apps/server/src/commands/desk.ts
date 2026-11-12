@@ -57,6 +57,7 @@ import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignment
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
+import { needsSplitAnswered } from './needs-split.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -251,6 +252,12 @@ export async function answerDeskItem(
       user,
       actor: userActor(user.id),
       author: { kind: 'user', userId: user.id },
+    });
+    // Needs split: the owner keeps the over-budget card, sends it to the BA anyway or cancels it.
+    await needsSplitAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      name: user.displayName,
     });
     after.item = item;
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };

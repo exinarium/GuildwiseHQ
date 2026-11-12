@@ -47,6 +47,7 @@ import { escapeLike, iso, one, type Queryable, type Row, rows } from '../db/sql.
 import { dependencyStates, landedSql } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
 import { delegationSteps } from '../sessions/delegate-grants.ts';
+import { needsSplitRecord, needsSplitTaken } from '../commands/needs-split.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
 import { startedByMap, subworkflowsPanel, waitingChildren } from './subworkflows.ts';
@@ -379,6 +380,8 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
     ...(await splitLinks(ctx, card)),
+    needsSplit: needsSplitRecord(card),
+    needsSplitTaken: (await needsSplitTaken(ctx.pool, card)).taken,
     canSendToBa: await canSendCardToBa(ctx, ctx.pool, card),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
       ? {
