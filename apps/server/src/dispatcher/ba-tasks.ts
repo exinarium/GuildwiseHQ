@@ -5,6 +5,7 @@ import {
   BA_TASK_STALL_MS,
   BATCH_MAX_IN_FLIGHT,
   MAIN_ACCOUNT,
+  MIN_RUNNER_FOR_NEEDS_SPLIT,
   MIN_RUNNER_FOR_REPO_SCOPING,
   runnerAtLeast,
   streamId,
@@ -117,9 +118,11 @@ export async function baTaskPass(
     // Repository scoping (a `spec_card` task for a card with no repository in a project with several): the BA, or an
     // architect when the graph or the vault cannot serve the BA (or none is hired). Derived from the card, as at the brief.
     let scoping: Awaited<ReturnType<typeof scopingPlan>> = null;
+    let needsSplit = false;
     if (t.kind === 'spec_card' && t.card_id) {
       const sc = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [t.card_id]);
       if (sc && (await needsRepoScoping(ctx.pool, sc))) scoping = await scopingPlan(ctx, ctx.pool, sc);
+      needsSplit = (sc?.needs_split as { state?: string } | null)?.state === 'with_ba';
     }
     const scopingRole = scoping?.role ?? null;
     const bas = await rows(
@@ -166,6 +169,8 @@ export async function baTaskPass(
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
       // The agent's model would spend the organization's key of a provider whose monthly cap is reached.
       if (await agentCapBlocked(ctx.pool, a as never, now, capCache, account?.key)) continue;
+      // The needs-split prompt is rendered on the runner too: an older runner would brief a plain specify task.
+      if (needsSplit && !runnerAtLeast(a.runner_version, MIN_RUNNER_FOR_NEEDS_SPLIT)) continue;
       if (scopingRole !== null) {
         // The prompt of a scoping task is rendered on the runner: an older runner would not know the mode.
         if (!runnerAtLeast(a.runner_version, MIN_RUNNER_FOR_REPO_SCOPING)) continue;

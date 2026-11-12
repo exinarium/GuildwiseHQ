@@ -60,6 +60,8 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   /** "Authorize this execution" and the Owner-takeover notice go straight to the people who answer them. */
   'ceo_permission',
   'order_escalation',
+  /** Needs split, second time: after one return to the BA the owner decides, never held for triage. */
+  'needs_split_decision',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

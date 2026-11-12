@@ -51,6 +51,7 @@ import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { editLedgerEntry } from './ledger.ts';
 import { findNearDuplicate } from './ledger-checks.ts';
+import { needsSplitAnswered } from './needs-split.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { relayAuthoredBundles } from './pack-authoring.ts';
 import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignmentIn } from './pack-holders.ts';
@@ -251,6 +252,12 @@ export async function answerDeskItem(
       user,
       actor: userActor(user.id),
       author: { kind: 'user', userId: user.id },
+    });
+    // Needs split: the owner keeps the over-budget card, sends it to the BA anyway or cancels it.
+    await needsSplitAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      name: user.displayName,
     });
     after.item = item;
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };

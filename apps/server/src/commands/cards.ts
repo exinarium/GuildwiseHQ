@@ -742,6 +742,24 @@ export async function moveCardWithNotice(
 ): Promise<MoveResult> {
   return withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
+    return moveCardIn(ctx, tx, user, card, toStage, reason, opts);
+  });
+}
+
+/**
+ * The body of a manual move (see `moveCardWithNotice`) in the caller's transaction, with no permission check: the caller
+ * has loaded `card` (under its lock) and decided the move is allowed.
+ */
+export async function moveCardIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  card: Row,
+  toStage: string,
+  reason: string,
+  opts: MoveOptions = {},
+): Promise<MoveResult> {
+  {
     if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
     const wf = await loadWorkflowById(tx, card.workflow_version_id);
     const stage = wf ? getStage(wf.definition, toStage) : undefined;
@@ -833,7 +851,7 @@ export async function moveCardWithNotice(
         notice = `The card moved, but nothing will run in ${stage.label} until ${unlanded.map((d) => d.ref).join(', ')} ${unlanded.length === 1 ? 'has' : 'have'} landed.`;
     }
     return { cardId: card.id as string, ...(notice ? { notice } : {}) };
-  });
+  }
 }
 
 /**

@@ -1054,4 +1054,69 @@ export const cardProjectors: Record<string, Projector> = {
       ),
     );
   },
+
+  CardNeedsSplitRequested: async (tx, e) => {
+    const p = ev<'CardNeedsSplitRequested'>(e).payload;
+    const ba = p.route === 'ba';
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET
+           needs_split = jsonb_build_object(
+             'state', $2::text, 'reason', $3::text, 'fromStage', $4::text, 'proposal', $5::jsonb,
+             'taskId', $6::text, 'deskItemId', $7::text, 'inheritedFromCardId', $8::text,
+             'requestedAt', $9::text, 'round', needs_split_count + (CASE WHEN $10 THEN 1 ELSE 0 END),
+             'childCardIds', '[]'::jsonb, 'note', NULL),
+           needs_split_count = needs_split_count + (CASE WHEN $10 THEN 1 ELSE 0 END),
+           updated_at = $11
+         WHERE id=$1`,
+        [
+          p.cardId,
+          ba ? 'with_ba' : 'owner',
+          p.reason,
+          p.fromStage,
+          JSON.stringify(p.proposal),
+          p.taskId ?? null,
+          p.deskItemId ?? null,
+          p.inheritedFromCardId ?? null,
+          new Date(e.createdAt).toISOString(),
+          ba,
+          e.createdAt,
+        ],
+      ),
+    );
+  },
+
+  CardNeedsSplitResolved: async (tx, e) => {
+    const p = ev<'CardNeedsSplitResolved'>(e).payload;
+    const state =
+      p.outcome === 'split'
+        ? 'split'
+        : p.outcome === 'ba_failed'
+          ? 'owner'
+          : p.outcome === 'owner_continue'
+            ? 'continued'
+            : p.outcome === 'dropped'
+              ? 'dropped'
+              : 'cancelled';
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET
+           needs_split = COALESCE(needs_split, '{}'::jsonb) || jsonb_build_object(
+             'state', $2::text,
+             'childCardIds', COALESCE($3::jsonb, needs_split->'childCardIds', '[]'::jsonb),
+             'note', $4::text),
+           updated_at = $5
+         WHERE id=$1`,
+        [
+          p.cardId,
+          state,
+          p.childCardIds ? JSON.stringify(p.childCardIds) : null,
+          p.note ?? null,
+          e.createdAt,
+        ],
+      ),
+    );
+  },
 };

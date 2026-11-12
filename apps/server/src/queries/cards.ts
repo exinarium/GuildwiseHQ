@@ -30,6 +30,7 @@ import { cardApprovalDto } from '../commands/approval.ts';
 import { canSendCardToBa } from '../commands/ba-intake.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
 import { effectiveCompletion } from '../commands/completion.ts';
+import { currentNeedsSplitRecord, needsSplitTaken } from '../commands/needs-split.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import { cardQaDto } from '../commands/qa.ts';
 import { humanPurposeOf } from '../commands/qa-flow.ts';
@@ -379,6 +380,8 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
     ...(await splitLinks(ctx, card)),
+    needsSplit: await currentNeedsSplitRecord(ctx.pool, card),
+    needsSplitTaken: (await needsSplitTaken(ctx.pool, card)).taken,
     canSendToBa: await canSendCardToBa(ctx, ctx.pool, card),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
       ? {
