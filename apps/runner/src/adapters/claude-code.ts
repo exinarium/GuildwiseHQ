@@ -12,6 +12,7 @@ import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
@@ -1028,13 +1029,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
-    const used = this.writeMcpConfig(
-      dir,
-      input.agent.permissions.allowedTools,
-      devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
-      intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
-    );
-    const chatSettings: ClaudeSettings = devops
+    const review = input.reviewRun;
+    const used = review
+      ? []
+      : this.writeMcpConfig(
+          dir,
+          input.agent.permissions.allowedTools,
+          devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
+          intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
+        );
+    const chatSettings: ClaudeSettings = review
+      ? reviewerPolicy(review, this.policy(chatInput, input.cwd, true)).settings
+      : devops
       ? buildDevopsChatSettings(
           input.agent.permissions,
           this.policy(input, input.cwd, false, guard?.command),
@@ -1057,11 +1063,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               this.policy(chatInput, input.cwd, true),
               input.sandbox,
             );
-    const withSkills = this.prepareSubagents(
-      dir,
-      this.prepareSkills(dir, chatInput, chatSettings),
-      chatSettings,
-    );
+    const withSkills = review
+      ? chatInput
+      : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
     if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
     else await this.linkCredentials(dir, used, account.key);

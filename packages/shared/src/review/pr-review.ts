@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { Usage } from '../events/define.ts';
+import { GitRefSchema } from '../safe.ts';
+import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
 
 /**
  * PR-only review: a project repository whose open pull requests are reviewed by reviewers instead of being built by
@@ -6,7 +9,7 @@ import { z } from 'zod';
  */
 
 /** Review states of a recorded pull request. `not_reviewed` until a reviewer run completes. */
-export const PR_REVIEW_STATES = ['not_reviewed'] as const;
+export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed'] as const;
 export const PrReviewStateSchema = z.enum(PR_REVIEW_STATES);
 export type PrReviewState = z.infer<typeof PrReviewStateSchema>;
 
@@ -50,3 +53,160 @@ export const PR_REVIEW_PROBLEMS = [
 ] as const;
 export const PrReviewProblemSchema = z.enum(PR_REVIEW_PROBLEMS);
 export type PrReviewProblem = z.infer<typeof PrReviewProblemSchema>;
+
+/** The reviewers a pull request can have; the first is the smaller model. */
+export const PR_REVIEWERS = ['first'] as const;
+export const PrReviewerSchema = z.enum(PR_REVIEWERS);
+export type PrReviewer = z.infer<typeof PrReviewerSchema>;
+
+/** Boardroom: the first run uses the smaller model. */
+export const REVIEWER_MODEL: Record<PrReviewer, { runtime: string; model: string }> = {
+  first: { runtime: 'claude-code', model: 'sonnet' },
+};
+
+/** A reviewer run stops after this long, whatever it is doing. */
+export const PR_REVIEW_TIMEOUT_MS = 10 * 60_000;
+
+/** Announced by a runner that understands `pr_review.run` and `pr_review.post`. */
+export const PR_REVIEW_CAPABILITY = 'pr-review:1';
+
+export const PR_REVIEW_RUN_STATES = ['running', 'completed', 'posted', 'timed_out', 'failed'] as const;
+export const PrReviewRunStateSchema = z.enum(PR_REVIEW_RUN_STATES);
+export type PrReviewRunState = z.infer<typeof PrReviewRunStateSchema>;
+
+const Sha40 = z.string().regex(/^[0-9a-f]{40}$/);
+
+/** What the model writes (validated on the runner). */
+export const ReviewerFindingSchema = z.object({
+  path: z.string().min(1).max(500),
+  /** A line in the new file; null: the finding is about the file or the pull request. */
+  line: z.number().int().positive().nullable(),
+  severity: z.enum(['high', 'medium', 'low']),
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(4000),
+});
+export type ReviewerFinding = z.infer<typeof ReviewerFindingSchema>;
+
+export const ReviewerOutputSchema = z.object({
+  summary: z.string().max(2000),
+  findings: z.array(ReviewerFindingSchema).max(50),
+});
+export type ReviewerOutput = z.infer<typeof ReviewerOutputSchema>;
+
+/** `anchored`: the line is in a diff hunk (right side), so the host accepts it as an inline comment. */
+export const PrReviewFindingSchema = ReviewerFindingSchema.extend({ anchored: z.boolean() });
+export type PrReviewFinding = z.infer<typeof PrReviewFindingSchema>;
+
+/** `pr_review.run`: no commit ids (the server has none: the runner looks them up). Never a token. */
+export const PrReviewRunPayloadSchema = z
+  .object({
+    runId: z.uuid(),
+    projectId: z.uuid(),
+    prReviewId: z.uuid(),
+    projectRepoId: z.uuid(),
+    remoteUrlNormalized: z.string().max(500),
+    prNumber: z.number().int().positive(),
+    baseRef: GitRefSchema,
+    title: z.string().max(300),
+    reviewer: PrReviewerSchema,
+    runtime: z.string().max(40),
+    model: z.string().max(120),
+    timeoutMs: z.number().int().positive().max(PR_REVIEW_TIMEOUT_MS),
+  })
+  .strict();
+export type PrReviewRunPayload = z.infer<typeof PrReviewRunPayloadSchema>;
+
+export const PR_REVIEW_FAILURE_CODES = [
+  'model_error',
+  'bad_output',
+  'no_checkout',
+  'head_moved',
+  'no_token',
+  'unsupported',
+  'runtime_unavailable',
+  'error',
+] as const;
+export const PrReviewFailureCodeSchema = z.enum(PR_REVIEW_FAILURE_CODES);
+export type PrReviewFailureCode = z.infer<typeof PrReviewFailureCodeSchema>;
+
+/** `command.result` of `pr_review.run`. The run never posts. */
+export const PrReviewRunResultSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('completed'),
+    headSha: Sha40,
+    baseSha: Sha40,
+    durationMs: z.number().int().nonnegative(),
+    summary: z.string().max(2000),
+    findings: z.array(PrReviewFindingSchema).max(50),
+    usage: Usage.optional(),
+  }),
+  z.object({
+    outcome: z.literal('timeout'),
+    durationMs: z.number().int().nonnegative(),
+    phase: z.enum(['checkout', 'review']),
+  }),
+  z.object({
+    outcome: z.literal('failed'),
+    durationMs: z.number().int().nonnegative(),
+    code: PrReviewFailureCodeSchema,
+    error: z.string().max(400),
+    retryable: z.boolean(),
+  }),
+]);
+export type PrReviewRunResult = z.infer<typeof PrReviewRunResultSchema>;
+
+/** `pr_review.post`: what the poster takes, plus finding ids for the result. Never a token. */
+export const PrReviewPostPayloadSchema = z
+  .object({
+    runId: z.uuid(),
+    spec: ReviewerRunSpecSchema,
+    /** Ends with the run marker (`prReviewMarker`), which makes a repeated post harmless. */
+    summary: z.string().max(60_000),
+    findings: z.array(z.object({ findingId: z.uuid(), finding: ReviewFindingSchema })).max(50),
+  })
+  .strict();
+export type PrReviewPostPayload = z.infer<typeof PrReviewPostPayloadSchema>;
+
+export const PrReviewPostResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), reviewUrl: z.string().max(500), alreadyPosted: z.boolean() }),
+  z.object({
+    ok: z.literal(false),
+    code: z.enum(['no_token', 'forbidden', 'not_found', 'stale_head', 'unsupported', 'unreachable', 'error']),
+    error: z.string().max(400),
+  }),
+]);
+export type PrReviewPostResult = z.infer<typeof PrReviewPostResultSchema>;
+
+/** The hidden line a posted review ends with, so a resent post command finds the review it already made. */
+export const prReviewMarker = (runId: string): string => `<!-- review-run:${runId} -->`;
+
+/** What the owner sees for one recorded pull request (project view, Pull requests tab). */
+export const PrReviewDtoSchema = z.object({
+  id: z.uuid(),
+  repoId: z.uuid(),
+  repoName: z.string(),
+  changeId: z.string(),
+  url: z.string(),
+  title: z.string(),
+  author: z.string().nullable(),
+  openedAt: z.string(),
+  state: PrReviewStateSchema,
+  reviewedAt: z.string().nullable(),
+  reviewer: PrReviewerSchema.nullable(),
+  /** `missing`: the repository's workstation holds no comment-only token, so no run starts. */
+  reviewerToken: z.enum(['present', 'missing']).nullable(),
+  lastRun: z
+    .object({
+      state: PrReviewRunStateSchema,
+      startedAt: z.string(),
+      finishedAt: z.string().nullable(),
+      durationMs: z.number().nullable(),
+      timeoutMs: z.number(),
+      error: z.string().nullable(),
+      code: z.string().nullable(),
+      postedCount: z.number(),
+      reviewUrl: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type PrReviewDto = z.infer<typeof PrReviewDtoSchema>;

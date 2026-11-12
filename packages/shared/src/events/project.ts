@@ -7,7 +7,12 @@ import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
-import { PrReviewStateSchema } from '../review/pr-review.ts';
+import {
+  PR_REVIEW_FAILURE_CODES,
+  PrReviewFindingSchema,
+  PrReviewerSchema,
+  PrReviewStateSchema,
+} from '../review/pr-review.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -192,6 +197,78 @@ export const projectEvents = [
   ),
   /** A recorded pull request is no longer open on the git host. */
   defineEvent('PrReviewClosed', z.object({ projectId: Id, repoId: Id, prReviewId: Id })),
+  /** A reviewer run of a recorded pull request was sent to a workstation. */
+  defineEvent(
+    'PrReviewRunStarted',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      runId: Id,
+      reviewer: PrReviewerSchema,
+      runtime: z.string().max(40),
+      model: z.string().max(120),
+      workstationId: Id,
+      timeoutMs: z.number().int().positive(),
+      at: IsoDate,
+    }),
+  ),
+  /** The run finished and handed back its findings. Nothing is on the pull request yet. */
+  defineEvent(
+    'PrReviewRunCompleted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      headSha: z.string(),
+      baseSha: z.string(),
+      durationMs: z.number().int().nonnegative(),
+      summary: z.string().max(2000),
+      findings: z.array(PrReviewFindingSchema.extend({ findingId: Id })).max(50),
+      at: IsoDate,
+    }),
+  ),
+  /** The run hit its time limit. The pull request stays not reviewed and nothing is posted. */
+  defineEvent(
+    'PrReviewRunTimedOut',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      durationMs: z.number().int().nonnegative(),
+      phase: z.enum(['checkout', 'review']),
+      by: z.enum(['runner', 'server']),
+      at: IsoDate,
+    }),
+  ),
+  /** The run (or its posting) failed. The pull request stays not reviewed and the error is kept for the owner. */
+  defineEvent(
+    'PrReviewRunFailed',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      stage: z.enum(['run', 'post']),
+      code: z.enum([...PR_REVIEW_FAILURE_CODES, 'forbidden', 'not_found', 'stale_head', 'unreachable']),
+      error: z.string().max(400),
+      retryable: z.boolean(),
+      durationMs: z.number().int().nonnegative().optional(),
+      at: IsoDate,
+    }),
+  ),
+  /** The findings are on the pull request as one review: it now counts as reviewed. */
+  defineEvent(
+    'PrReviewPosted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      reviewer: PrReviewerSchema,
+      reviewUrl: z.string().max(500),
+      postedFindingIds: z.array(Id).max(50),
+      at: IsoDate,
+    }),
+  ),
   /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */
   defineEvent(
     'ProjectRepoPathSet',

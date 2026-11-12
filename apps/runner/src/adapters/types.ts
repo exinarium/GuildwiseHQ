@@ -9,6 +9,7 @@ import type {
   Usage,
 } from '@aom/shared';
 import type { GrantedSkill } from '../capabilities/materialize.ts';
+import type { ReviewerRun } from '../review/reviewer-sandbox.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -275,6 +276,11 @@ export interface ChatStartInput {
   maxSteps?: number;
   /** The organization of the chat or session turn: its provider key (not another organization's) is the one used. */
   orgId?: string;
+  /**
+   * A reviewer run on a PR-only repository: Claude Code then uses the reviewer policy of that run (read-only checkout,
+   * no network, no git dir) instead of the chat settings. No MCP server, skill or subagent is written for it.
+   */
+  reviewRun?: ReviewerRun;
   logFile?: string;
 }
 
