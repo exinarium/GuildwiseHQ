@@ -63,6 +63,7 @@ import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyPrListResult } from '../commands/pr-only.ts';
+import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -615,6 +616,13 @@ export class RunnerHandlers {
       // Terminal: the open pull requests of a PR-only repository (or why not) are recorded; the next poll asks again.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrListResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.run') {
+      // Terminal: a timeout or a failure is recorded as it is (never redelivered: a second run would be a second review).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrReviewRunResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.post') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrReviewPostResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'release.ship') {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

@@ -41,6 +41,7 @@ import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { playbookProjectors } from './playbooks.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
+import { prReviewRunProjectors } from './pr-review-runs.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
 import { publicFormProjectors } from './public-forms.ts';
@@ -82,6 +83,7 @@ const domains: Array<Record<string, Projector>> = [
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
+  prReviewRunProjectors,
   projectWorkflowProjectors,
   agentProjectors,
   cardProjectors,
@@ -191,6 +193,8 @@ export const PROJECTION_TABLES = [
   'project_provider_accounts',
   'project_repos',
   'pr_reviews',
+  'pr_review_runs',
+  'pr_review_findings',
   'project_members',
   'project_workflows',
   'workflow_versions',
