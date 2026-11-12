@@ -192,4 +192,38 @@ describe('design gate (code v7)', () => {
     expect(off.project.designGate).toBe(false);
     expect((await eventsOfType('ProjectDesignGateSet')).map((e) => e.on).slice(-2)).toEqual([true, false]);
   });
+
+  it('AC2 (card page): the card detail carries the switch and the reason it cannot be switched on yet', async () => {
+    await team();
+    const card = await w.card({ title: 'No report', fields: fullFields({ affectedAreas: 'apps/web/src/' }) });
+    const detail = await call('GET', `/api/cards/${card.id}`);
+    expect(detail.designGate).toMatchObject({
+      on: false,
+      required: false,
+      canChange: true,
+      refusal: { code: 'no_design_report' },
+    });
+    expect(detail.designGate.refusal.message).toContain('has no design report yet');
+  });
+
+  it('AC3 (desk and card page): the desk item shows the design report and the full report text', async () => {
+    await team();
+    await call('PUT', `/api/projects/${w.projectId}/design-gate`, { on: true });
+    const card = await w.card({ title: 'Text card', fields: fullFields({ affectedAreas: 'apps/web/src/' }) });
+    await p.run('Pia', planned());
+    const report = designed(card.ref);
+    await p.run('Arc', { ...report, data: { ...report.data, reportText: '# Design\n\nThe whole report.' } });
+    await sweep();
+    expect((await cardRow(card.id)).stage).toBe('design_gate');
+    const items = (await call('GET', '/api/desk')).items as any[];
+    const item = items.find((i) => i.card?.id === card.id && i.subkind === 'approval_step');
+    expect(item?.data?.design).toMatchObject({
+      reportPath: `docs/investigations/${card.ref}-report.md`,
+      commit: 'abc1234',
+      summary: 'Build it in module X.',
+    });
+    const detail = await call('GET', `/api/cards/${card.id}`);
+    expect(detail.approval.design.text).toBe('# Design\n\nThe whole report.');
+    expect(detail.designGate).toMatchObject({ required: true, reasonText: expect.any(String) });
+  });
 });

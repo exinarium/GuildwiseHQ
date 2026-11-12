@@ -129,6 +129,11 @@ export const InvestigationDataSchema = z.object({
   commit: z.string().optional(),
   /** Filled by the runner for a `repo` report written without a card branch: the text the builder commits later. */
   body: z.string().max(200_000).optional(),
+  /**
+   * Filled by the runner for a committed `repo` report: its text, so the owner can read the design report at the design
+   * gate before the card branch is pushed. Not `body` (that one is committed later).
+   */
+  reportText: z.string().max(200_000).optional(),
   /** A design made before dependencies landed lists what it assumed about them (at least one, unless `noAssumptions`). */
   assumptions: z.array(DesignAssumptionSchema).max(50).optional(),
   /** The architect states the design assumes nothing about the unlanded dependencies. */

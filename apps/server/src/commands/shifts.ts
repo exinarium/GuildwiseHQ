@@ -697,6 +697,7 @@ export async function applyShiftReport(
                   summary: inv.summary,
                   ...(inv.commit ? { commit: inv.commit } : {}),
                   ...(inv.body ? { body: inv.body } : {}),
+                  ...(inv.reportText ? { reportText: inv.reportText } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
                 },
