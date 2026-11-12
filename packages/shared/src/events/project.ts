@@ -6,6 +6,7 @@ import { ProjectKeySchema } from '../ids.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
+import { PrReviewStateSchema } from '../review/pr-review.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -13,7 +14,7 @@ import {
   ProjectPathSchema,
   VaultFolderSchema,
 } from '../safe.ts';
-import { defineEvent, Id } from './define.ts';
+import { defineEvent, Id, IsoDate } from './define.ts';
 
 /**
  * The work/personal domain and the priority tier of a project were dropped (the organization ranks its projects; see
@@ -166,6 +167,30 @@ export const projectEvents = [
     'ProjectRepoAccessSet',
     z.object({ projectId: Id, repoId: Id, accessMethod: GitAccessMethodSchema.nullable() }),
   ),
+  /** The owner turned PR-only review on or off for a repository. On: open pull requests opened from `at` are recorded for review. */
+  defineEvent(
+    'ProjectRepoPrOnlySet',
+    z.object({ projectId: Id, repoId: Id, prOnly: z.boolean(), at: IsoDate, by: Id }),
+  ),
+  /** An open pull request of a PR-only repository was seen for the first time; it waits for review. */
+  defineEvent(
+    'PrReviewRecorded',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      changeId: z.string().min(1).max(40),
+      url: z.string().max(500),
+      title: z.string().max(300),
+      author: z.string().max(100).nullable(),
+      headBranch: z.string().max(200),
+      baseBranch: z.string().max(200),
+      openedAt: IsoDate,
+      state: PrReviewStateSchema,
+    }),
+  ),
+  /** A recorded pull request is no longer open on the git host. */
+  defineEvent('PrReviewClosed', z.object({ projectId: Id, repoId: Id, prReviewId: Id })),
   /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */
   defineEvent(
     'ProjectRepoPathSet',

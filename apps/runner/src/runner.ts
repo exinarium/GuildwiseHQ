@@ -34,6 +34,7 @@ import {
   PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
+  PR_LIST_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -123,6 +124,7 @@ import {
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
+import { listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
@@ -1557,6 +1559,7 @@ export class Runner {
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
+        PR_LIST_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
@@ -2256,6 +2259,14 @@ export class Runner {
                 auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
+        );
+      } else if (command === 'repo.list_prs') {
+        // Read-only (PR-only review). "No clone here", an unsupported git host and a missing login are answers.
+        const p = CommandPayloadSchemas['repo.list_prs'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await listOpenPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
         );
       } else if (command === 'release.ship') {
         // "No clone here" and every git refusal are answers (ok:true, result.ok:false): the server puts them on the desk.

@@ -190,6 +190,7 @@ export const PROJECTION_TABLES = [
   'projects',
   'project_provider_accounts',
   'project_repos',
+  'pr_reviews',
   'project_members',
   'project_workflows',
   'workflow_versions',

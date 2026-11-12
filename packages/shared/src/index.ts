@@ -57,6 +57,7 @@ export * from './repo/index.ts';
 export * from './reporter/index.ts';
 export * from './research/index.ts';
 export * from './review/index.ts';
+export * from './review/pr-review.ts';
 export * from './roles/index.ts';
 export * from './runs/index.ts';
 export * from './safe.ts';

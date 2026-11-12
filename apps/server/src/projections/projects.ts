@@ -482,6 +482,45 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoAccessSet'>).payload;
     await exec(tx, 'UPDATE project_repos SET access_method=$2 WHERE id=$1', [p.repoId, p.accessMethod]);
   },
+  ProjectRepoPrOnlySet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoPrOnlySet'>).payload;
+    await exec(
+      tx,
+      'UPDATE project_repos SET pr_only=$2, pr_only_since=CASE WHEN $2 THEN $3::timestamptz ELSE NULL END WHERE id=$1',
+      [p.repoId, p.prOnly, p.at],
+    );
+  },
+  PrReviewRecorded: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewRecorded'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO pr_reviews (id, project_id, project_repo_id, change_id, url, title, author, head_branch, base_branch,
+                               opened_at, recorded_at, review_state)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (project_repo_id, change_id) DO NOTHING`,
+      [
+        p.prReviewId,
+        p.projectId,
+        p.repoId,
+        p.changeId,
+        p.url,
+        p.title,
+        p.author,
+        p.headBranch,
+        p.baseBranch,
+        p.openedAt,
+        e.createdAt,
+        p.state,
+      ],
+    );
+  },
+  PrReviewClosed: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewClosed'>).payload;
+    await exec(tx, 'UPDATE pr_reviews SET closed_at=$2 WHERE id=$1 AND closed_at IS NULL', [
+      p.prReviewId,
+      e.createdAt,
+    ]);
+  },
   ProjectRepoMainBranchSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoMainBranchSet'>).payload;
     await exec(tx, 'UPDATE project_repos SET main_branch=$2 WHERE id=$1', [p.repoId, p.mainBranch]);

@@ -1,4 +1,4 @@
-import type { GitConnection, RepoRef } from '@aom/shared';
+import type { GitConnection, OpenChange, RepoRef } from '@aom/shared';
 import { errText, ForgeUnavailableError, isHttps } from './http.ts';
 import type {
   BranchRules,
@@ -12,6 +12,17 @@ import type {
   OpenChangeInput,
   RemoteRepo,
 } from './types.ts';
+
+/** One row of `gh pr list --json number,url,title,author,headRefName,baseRefName,createdAt`. */
+interface GhPr {
+  number: number;
+  url: string;
+  title?: string;
+  author?: { login?: string } | null;
+  headRefName: string;
+  baseRefName: string;
+  createdAt: string;
+}
 
 interface GhRepo {
   nameWithOwner: string;
@@ -130,6 +141,39 @@ export class GitHubForge implements Forge {
       '.defaultBranchRef.name',
     ]);
     return v.exitCode === 0 && v.stdout.trim() ? v.stdout.trim() : null;
+  }
+
+  /** The open pull requests of the repository (`gh pr list`), at most `limit`; one more is asked for to tell completeness. */
+  async listOpenChanges(
+    repo: RemoteRepo,
+    limit: number,
+  ): Promise<{ changes: OpenChange[]; complete: boolean }> {
+    const r = await this.gh([
+      'pr',
+      'list',
+      '--repo',
+      repo.fullName,
+      '--state',
+      'open',
+      '--json',
+      'number,url,title,author,headRefName,baseRefName,createdAt',
+      '--limit',
+      String(limit + 1),
+    ]);
+    if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
+    if (r.exitCode !== 0)
+      throw new Error(`gh pr list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
+    const list = JSON.parse(r.stdout || '[]') as GhPr[];
+    const changes = list.slice(0, limit).map((p) => ({
+      id: String(p.number),
+      url: p.url,
+      title: (p.title ?? '').slice(0, 300),
+      author: p.author?.login ? p.author.login.slice(0, 100) : null,
+      head: p.headRefName,
+      base: p.baseRefName,
+      createdAt: p.createdAt,
+    }));
+    return { changes, complete: list.length <= limit };
   }
 
   /** The open pull request from `head` into `base`, if any (a reopened card's branch already has one). */
