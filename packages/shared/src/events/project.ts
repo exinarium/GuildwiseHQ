@@ -3,6 +3,7 @@ import { AccountKeySchema, ClaudeAccountKeySchema } from '../claude/accounts.ts'
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
@@ -360,6 +361,21 @@ export const projectEvents = [
     z.object({ projectId: Id, services: LocalTestServicesSchema, by: Id }),
   ),
   defineEvent('ProjectManualQaSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /**
+   * The project owner set the review settings (whole value; null = not set, there are no defaults): the size budget, the
+   * unit it is measured in and the path-to-risk map. Lenient on purpose: the strict checks live in the request schema,
+   * so a later rule change never makes an old event fail to parse.
+   */
+  defineEvent(
+    'ProjectReviewSettingsSet',
+    z.object({
+      projectId: Id,
+      sizeBudget: z.number().int().min(1).nullable(),
+      sizeUnit: SizeUnitSchema.nullable(),
+      riskMap: StoredRiskMapSchema.nullable(),
+      by: Id,
+    }),
+  ),
   /**
    * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &
    * design step by default, whether the latest main branch is merged first, and where the architect's reports go.

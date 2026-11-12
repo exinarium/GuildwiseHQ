@@ -510,10 +510,11 @@ What you will find there:
 - **Workflows:** which workflows the project runs and your own steps in them (4.7).
 - **Claude account:** a second Claude subscription for the project (4.24a).
 - **Owner approval after the review:** *large and high-risk cards* (the default) or *every card* (4.26).
+- **Review settings** (project Owner only): the **size budget**, the **unit** it is measured in (*changed lines*, added plus removed, or *changed files*) and the **path-to-risk map**, which gives paths a class of low, medium or high. A folder such as `apps/server/src/auth` covers everything under it, and `*` and `**` work as in .gitignore. Nothing is set by default. Until a value is set, the checks that need it stay inactive and say what is missing, for example *inactive: no size budget set*. The highest class of any path a change touches wins. A declared class can raise it but never lower it.
 - **Manual QA before done:** whether a finalized card waits for a person's test (4.12).
 - **Testing and decisions:** testing without an environment (4.5), keeping the project's decisions at project level, and **Full test run after each card** (4.26).
 - **Pull request branch prefix** and **Remove finished card branches:** how a pull request branch is named and whether finished branches are tidied up (4.4).
-- **Budget** (4.6), **Phases** (4.10), **Environments** (4.27), **Stage** (4.13) and **Archive** (4.14). The page has jump chips at the top for Basics, Stage, Workflows, Repos, Phases, Environments, Reference repos, Merging, Budget, Team and Archive.
+- **Budget** (4.6), **Phases** (4.10), **Environments** (4.27), **Stage** (4.13) and **Archive** (4.14). The page has jump chips at the top for Basics, Stage, Workflows, Repos, Phases, Environments, Reference repos, Merging, Review settings, Budget, Team and Archive.
 
 **Who answers a card's questions.** By default only the card's creator answers them. On the card page you can let any project member answer (**Who answers its questions**).
 

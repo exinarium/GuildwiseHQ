@@ -17,6 +17,7 @@ import {
   type PatchProjectRequest,
   type ProjectImpact,
   ProviderAccountKeySchema,
+  type ReviewSettings,
   type StopLossSettings,
   streamId,
 } from '@aom/shared';
@@ -207,6 +208,46 @@ export async function setMergePolicy(
           event: {
             type: 'ProjectMergePolicyChanged',
             payload: { projectId, mergeLargeWithoutApproval, changedBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
+ * The project's review settings (size budget, unit, path-to-risk map): project owner only, whole-value replace, no
+ * defaults. An empty map is stored as not set. Nothing is appended when the value is unchanged.
+ */
+export async function setReviewSettings(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  settings: ReviewSettings,
+) {
+  const sizeBudget = settings.sizeBudget ?? null;
+  const sizeUnit = settings.sizeUnit ?? null;
+  const riskMap =
+    settings.riskMap && settings.riskMap.length > 0
+      ? settings.riskMap.map((e) => ({ pattern: e.pattern, risk: e.risk }))
+      : null;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    const unchanged =
+      (p.size_budget ?? null) === sizeBudget &&
+      (p.size_unit ?? null) === sizeUnit &&
+      JSON.stringify(p.risk_map ?? null) === JSON.stringify(riskMap);
+    if (unchanged) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectReviewSettingsSet',
+            payload: { projectId, sizeBudget, sizeUnit, riskMap, by: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),

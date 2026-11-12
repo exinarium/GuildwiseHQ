@@ -410,6 +410,15 @@ export const projectProjectors: Record<string, Projector> = {
         [p.projectId, p.scope, p.accountKey, p.fallbackToMain, e.createdAt],
       );
   },
+  ProjectReviewSettingsSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectReviewSettingsSet'>).payload;
+    await exec(tx, 'UPDATE projects SET size_budget=$2, size_unit=$3, risk_map=$4::jsonb WHERE id=$1', [
+      p.projectId,
+      p.sizeBudget,
+      p.sizeUnit,
+      p.riskMap ? JSON.stringify(p.riskMap) : null,
+    ]);
+  },
   ProjectManualQaSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectManualQaSet'>).payload;
     await exec(tx, 'UPDATE projects SET manual_qa=$2 WHERE id=$1', [p.projectId, p.enabled]);

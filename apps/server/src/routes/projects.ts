@@ -26,6 +26,7 @@ import {
   SetProviderAccountRequestSchema,
   SetReferenceReposRequestSchema,
   SetRegressionLoopRequestSchema,
+  SetReviewSettingsRequestSchema,
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
@@ -62,6 +63,7 @@ import {
   setProviderAccount,
   setReferenceRepos,
   setRegressionLoop,
+  setReviewSettings,
   setStopLoss,
   setTestServices,
   updateProject,
@@ -428,6 +430,17 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await setStopLoss(ctx, s.user, req.params.id, req.body.settings);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** Review settings (size budget, unit, path-to-risk map): project owner only, whole value, null = not set. */
+    app.put(
+      '/api/projects/:id/review-settings',
+      { schema: { params: IdParamsSchema, body: SetReviewSettingsRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setReviewSettings(ctx, s.user, req.params.id, req.body);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

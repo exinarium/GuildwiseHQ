@@ -34,6 +34,7 @@ import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx
 import { RepoReviewerTokenStatus } from '../components/RepoReviewerTokenStatus.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { ReviewSettingsPanel } from '../components/ReviewSettingsPanel.tsx';
 import { Reword } from '../components/Reword.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
@@ -158,6 +159,7 @@ export function ProjectSettings() {
           { id: 'merge', label: 'Merging' },
         ]
       : []),
+    ...(project && traits.usesRepos ? [{ id: 'review-settings', label: 'Review settings' }] : []),
     { id: 'budget', label: 'Budget' },
     { id: 'members', label: 'Team' },
     { id: 'danger', label: 'Archive' },
@@ -479,6 +481,11 @@ export function ProjectSettings() {
             project={project}
             canChange={project.myRole === 'owner' || canConvert}
           />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="review-settings" className="scroll-mt-20">
+          <ReviewSettingsPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
         </div>
       )}
       {project && traits.usesRepos && (
