@@ -12,6 +12,7 @@ import { ceoFrontDoorProjectors } from './ceo-front-door.ts';
 import { ceoTopicProjectors } from './ceo-topics.ts';
 import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
+import { designGateProjectors } from './design-gate.ts';
 import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
@@ -128,6 +129,7 @@ const domains: Array<Record<string, Projector>> = [
   ceoTopicProjectors,
   questionFlowProjectors,
   codeV6Projectors,
+  designGateProjectors,
   sessionProjectors,
   discoveryProjectors,
   boardProjectors,

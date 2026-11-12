@@ -513,6 +513,8 @@ export const cardEvents = [
       commit: z.string().optional(),
       /** A `repo` report written before the card branch existed: the text the builder commits at `reportPath`. */
       body: z.string().optional(),
+      /** The committed report's text, for the owner to read at the design gate (not committed again, unlike `body`). */
+      reportText: z.string().max(200_000).optional(),
       /** Assumptions about unlanded dependencies (a design made before they landed). */
       assumptions: z
         .array(z.object({ assumption: z.string(), dependency: z.string(), ifWrong: z.string() }))

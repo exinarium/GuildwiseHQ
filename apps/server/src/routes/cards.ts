@@ -11,12 +11,14 @@ import {
   PatchCardRequestSchema,
   ReleaseCardRequestSchema,
   ReopenCardRequestSchema,
+  SetDesignGateRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { handleMentions } from '../commands/agent-mentions.ts';
 import { sendCardToBa } from '../commands/ba-intake.ts';
+import { setCardDesignGate } from '../commands/design-gate.ts';
 import {
   cancelCard,
   commentOnCard,
@@ -159,6 +161,18 @@ export function cardRoutes(ctx: Ctx) {
           needsSplitRoute: r.route,
           notice: r.notice,
         };
+      },
+    );
+
+    /** code v7: the owner's design gate switch for one card (on only once the card has a design report). */
+    app.put(
+      '/api/cards/:id/design-gate',
+      { schema: { params: CardParamsSchema, body: SetDesignGateRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        const { card } = await loadVisibleCard(ctx.pool, a.session.user.id, req.params.id);
+        await setCardDesignGate(ctx, a.session.user, { id: a.orgId, role: a.role }, card.id, req.body.on);
+        return getCardDetail(ctx, a.session.user.id, card.id);
       },
     );
 
