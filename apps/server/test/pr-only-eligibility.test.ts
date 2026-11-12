@@ -1,6 +1,6 @@
 import { PR_LIST_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { listReviewEligiblePrs, PR_POLL_MS } from '../src/commands/pr-only.ts';
+import { listReviewEligiblePrs, PENDING_MS, PR_POLL_MS } from '../src/commands/pr-only.ts';
 import { closeAdminPool } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
@@ -151,5 +151,53 @@ describe('PR-only review: pull requests opened after the switch are recorded as 
     expect((await listReviewEligiblePrs(db(), w.projectId)).map((p) => p.changeId)).toEqual(['30']);
     await setPrOnly(false);
     expect(await listReviewEligiblePrs(db(), w.projectId)).toEqual([]);
+  });
+
+  it('an unanswered request is replaced, not piled up: at most one deliverable repo.list_prs per repository', async () => {
+    const deliverable = async () =>
+      (
+        await db().query(
+          `SELECT id, expires_at FROM runner_commands
+            WHERE type='repo.list_prs' AND payload->>'repoId' = $1 AND status IN ('pending','sent')
+              AND (expires_at IS NULL OR expires_at > $2)`,
+          [w.repoId, w.t.app.ctx.clock.now()],
+        )
+      ).rows;
+    const superseded = async () =>
+      Number(
+        (
+          await db().query(
+            `SELECT count(*) AS n FROM runner_commands
+              WHERE type='repo.list_prs' AND payload->>'repoId' = $1 AND last_error='superseded'`,
+            [w.repoId],
+          )
+        ).rows[0].n,
+      );
+    // The workstation stays paired but goes offline: nothing answers.
+    await db().query('UPDATE workstations SET connected=false');
+    try {
+      clock().advance(PR_POLL_MS + 1000);
+      const supersededBefore = await superseded();
+      await setPrOnly(true);
+      for (let i = 0; i < 3; i++) {
+        clock().advance(PENDING_MS + 1000);
+        await w.t.app.ctx.services.scheduler.run();
+        await r.barrier();
+        const live = await deliverable();
+        expect(live).toHaveLength(1);
+        // Each request expires with its pending window, so a long offline spell never builds a backlog.
+        const expiresIn = new Date(live[0].expires_at).getTime() - w.t.app.ctx.clock.now().getTime();
+        expect(expiresIn).toBeGreaterThan(0);
+        expect(expiresIn).toBeLessThanOrEqual(PENDING_MS);
+      }
+      expect((await superseded()) - supersededBefore).toBeGreaterThanOrEqual(3);
+
+      // Once expired, the request is never handed out again.
+      clock().advance(PENDING_MS + 1000);
+      expect(await deliverable()).toHaveLength(0);
+    } finally {
+      await db().query('UPDATE workstations SET connected=true');
+      await setPrOnly(false);
+    }
   });
 });

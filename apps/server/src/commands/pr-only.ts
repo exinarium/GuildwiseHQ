@@ -18,7 +18,7 @@ import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 /** A PR-only repository is asked for its open pull requests at most this often. */
 export const PR_POLL_MS = 5 * 60_000;
 /** A request still waiting for an answer is not repeated within this time. */
-const PENDING_MS = 2 * 60_000;
+export const PENDING_MS = 2 * 60_000;
 
 /**
  * The owner turns PR-only review on or off for a repository. Only the project owner may; nothing is recorded when the
@@ -101,7 +101,7 @@ export async function requestPrList(
     `SELECT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
        JOIN workstation_capabilities wc ON wc.workstation_id = w.id
       WHERE wr.project_repo_id=$1 AND w.status='active' AND $3 = ANY (wc.capabilities)
-      ORDER BY (w.user_id = $2::uuid) DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
+      ORDER BY w.connected DESC, (w.user_id = $2::uuid) DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
     [repoId, opts.userId ?? null, PR_LIST_CAPABILITY],
   );
   const requestId = randomUUID();
@@ -129,12 +129,26 @@ export async function requestPrList(
        state='pending', requested_at=EXCLUDED.requested_at`,
     [repoId, requestId, ws.id, now],
   );
-  await enqueueRunnerCommand(ctx.pool, ws.id, 'repo.list_prs', {
-    requestId,
-    repoId,
-    remoteUrlNormalized: repo.remote_url_normalized,
-    ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
-  });
+  // Only the newest request counts (older answers are dropped), so a request still waiting on any workstation is
+  // replaced, and each one expires with its pending window: an offline workstation never collects a backlog.
+  await exec(
+    ctx.pool,
+    `UPDATE runner_commands SET status='failed', last_error='superseded'
+      WHERE type='repo.list_prs' AND status IN ('pending','sent') AND payload->>'repoId' = $1`,
+    [repoId],
+  );
+  await enqueueRunnerCommand(
+    ctx.pool,
+    ws.id,
+    'repo.list_prs',
+    {
+      requestId,
+      repoId,
+      remoteUrlNormalized: repo.remote_url_normalized,
+      ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+    },
+    new Date(now.getTime() + PENDING_MS),
+  );
   void Promise.resolve(ctx.services.gateway.deliverPending(ws.id)).catch(() => undefined);
   return { queued: true, requestId };
 }
