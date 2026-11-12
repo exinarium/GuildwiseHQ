@@ -28,7 +28,12 @@ function Detail({ pr }: { pr: PrReviewDto }) {
         {run?.reviewUrl && (
           <>
             {' · '}
-            <a href={run.reviewUrl} target="_blank" rel="noreferrer" className="text-brand-text underline">
+            <a
+              href={run.reviewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center text-brand-text underline"
+            >
               View on GitHub
             </a>
           </>

@@ -1030,8 +1030,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
     const review = input.reviewRun;
+    // A review run grants no MCP server, but Claude Code still needs the (empty) file the command points at.
     const used = review
-      ? []
+      ? this.writeMcpConfig(dir, [], undefined)
       : this.writeMcpConfig(
           dir,
           input.agent.permissions.allowedTools,
