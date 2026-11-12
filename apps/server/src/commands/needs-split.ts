@@ -99,7 +99,10 @@ export async function needsSplitRefusal(
     [card.id, NEEDS_SPLIT_DESK_SUBKIND, answering ?? null],
   );
   if (openItem)
-    return { code: 'needs_split_open', message: `${card.ref} already waits for the owner's decision on its size` };
+    return {
+      code: 'needs_split_open',
+      message: `${card.ref} already waits for the owner's decision on its size`,
+    };
   if (card.stage === wf.definition.initialStage)
     return {
       code: 'needs_split_too_late',

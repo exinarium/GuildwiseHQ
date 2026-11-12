@@ -107,7 +107,12 @@ export const NEEDS_SPLIT_REASON_TEXT: Record<NeedsSplitReason, string> = {
 };
 
 /** The once-only rule: the first return goes to the BA, a second one (or one with no BA) to the owner. */
-export function needsSplitRoute(i: { taken: boolean; inherited?: boolean; force?: boolean; hasBa: boolean }): {
+export function needsSplitRoute(i: {
+  taken: boolean;
+  inherited?: boolean;
+  force?: boolean;
+  hasBa: boolean;
+}): {
   route: 'ba' | 'owner';
   reason: NeedsSplitReason;
 } {

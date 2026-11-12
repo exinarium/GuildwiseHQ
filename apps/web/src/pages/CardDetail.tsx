@@ -52,6 +52,7 @@ import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPanel.tsx';
 import { CardMailReply } from '../components/MailThreadPanel.tsx';
 import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
+import { NeedsSplitPanel } from '../components/NeedsSplitPanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
@@ -484,6 +485,7 @@ export function CardDetailView({
         </Callout>
       )}
 
+      <NeedsSplitPanel needsSplit={data.needsSplit} />
       <SplitLinks splitInto={data.splitInto} splitFrom={data.splitFrom} />
       <SubworkflowWaitLine data={data.subworkflows} />
       <StartedByLine data={data.subworkflows} />

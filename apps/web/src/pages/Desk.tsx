@@ -1,4 +1,10 @@
-import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  type DeskItemDto,
+  isPhaseDeskSubkind,
+  NEEDS_SPLIT_DESK_SUBKIND,
+  WORKING_BRANCH_SUBKIND,
+} from '@aom/shared';
 import {
   Bell,
   CheckCheck,
@@ -35,6 +41,7 @@ import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
+import { NeedsSplitSummary } from '../components/NeedsSplitPanel.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
@@ -513,6 +520,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <p className="mt-1.5 text-base whitespace-pre-wrap text-muted">{item.body}</p>
       )}
       {item.subkind === 'ceo_report' && <CeoReportBlock item={item} />}
+      {item.subkind === NEEDS_SPLIT_DESK_SUBKIND && <NeedsSplitSummary data={item.data} />}
       <CeoAnswered item={item} />
       {!usesAnswerForm(item) && <CeoRecommendation item={item} />}
       {item.floor && (

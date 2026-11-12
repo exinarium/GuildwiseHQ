@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CardAttachmentDtoSchema } from '../attachments/index.ts';
+import { NeedsSplitProposalSchema, NeedsSplitRecordSchema } from '../cards/needs-split.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -12,7 +13,6 @@ import {
   StoredReviewRisk,
   ThreadMessageKind,
 } from '../cards/types.ts';
-import { NeedsSplitProposalSchema, NeedsSplitRecordSchema } from '../cards/needs-split.ts';
 import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';

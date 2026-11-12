@@ -24,7 +24,6 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from '../dispatcher/ba-agent-sql.ts';
 import { needsRepoScoping, resolveRepo } from './card-repo.ts';
-import { needsSplitBaFailedIn, needsSplitRecord } from './needs-split.ts';
 import {
   architectFlags,
   cancelCardIn,
@@ -36,6 +35,7 @@ import {
 } from './cards.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { graphsEnabled } from './graph.ts';
+import { needsSplitBaFailedIn, needsSplitRecord } from './needs-split.ts';
 import type { ReportResult } from './shifts.ts';
 import { vaultForProject } from './vaults.ts';
 
