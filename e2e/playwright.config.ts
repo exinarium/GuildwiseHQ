@@ -50,6 +50,7 @@ const config = defineConfig({
     { name: 'research', testMatch: 'research.spec.ts', dependencies: ['sharing'] },
     { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
     // Discovery Studio (phase B): its own user, runner and project; needs only the shared stack.
+    { name: 'pr-only', testMatch: 'pr-only.spec.ts', dependencies: ['auth'] },
     { name: 'discovery', testMatch: 'discovery.spec.ts', dependencies: ['auth'] },
     // Boardroom (phase C): its own user and runner; needs only the shared stack.
     { name: 'boardroom', testMatch: 'boardroom.spec.ts', dependencies: ['auth'] },
