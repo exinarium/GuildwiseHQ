@@ -65,7 +65,7 @@ export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
       return [];
     });
     for (const pr of list) {
-      if (!(await mayStart(ctx, pr.id))) continue;
+      if (!(await mayStart(ctx.pool, pr.id, ctx.clock.now()))) continue;
       const ok = await startRun(ctx, p.id as string, pr).catch((err) => {
         ctx.log.error({ err, prReviewId: pr.id }, 'starting a pull request review failed');
         return false;
@@ -77,8 +77,8 @@ export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
 }
 
 /** One run per pull request, except a failed run that may be repeated (see RETRY_AFTER_MS). */
-async function mayStart(db: Queryable | Ctx, prReviewId: string): Promise<boolean> {
-  const q = 'pool' in db ? db.pool : db;
+async function mayStart(db: Queryable, prReviewId: string, now: Date): Promise<boolean> {
+  const q = db;
   const runs = await rows(
     q,
     `SELECT state, error_code, retryable, finished_at FROM pr_review_runs
@@ -92,7 +92,7 @@ async function mayStart(db: Queryable | Ctx, prReviewId: string): Promise<boolea
   const attempts = runs.filter((r) => r.state === 'failed' && r.retryable && r.error_code !== 'no_token').length;
   if (!last.retryable || attempts >= MAX_RETRIES) return false;
   const at = last.finished_at ? new Date(last.finished_at as string).getTime() : 0;
-  return Date.now() - at >= RETRY_AFTER_MS;
+  return now.getTime() - at >= RETRY_AFTER_MS;
 }
 
 async function startRun(
@@ -116,7 +116,7 @@ async function startRun(
       [pr.id],
     );
     if (!row || row.closed_at || row.review_state !== 'not_reviewed' || !row.pr_only) return false;
-    if (!(await mayStart(tx, pr.id))) return false;
+    if (!(await mayStart(tx, pr.id, now))) return false;
     // the gate again, right before the run goes out
     const gate = await reviewerGate(tx, pr.repoId);
     if (gate.state !== 'ready') return false;
