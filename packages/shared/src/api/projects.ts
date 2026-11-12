@@ -18,6 +18,12 @@ import {
 import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
+import {
+  ReviewSettingsSchema,
+  ReviewSettingsStatusSchema,
+  SizeUnitSchema,
+  StoredRiskMapSchema,
+} from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
 import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
@@ -274,6 +280,15 @@ export const ProjectDtoSchema = z.object({
   maxConcurrentShifts: z.number().int().nullable().optional(),
   /** Stop-loss budget by card size: build passes, review rounds and shifts before a card is parked for its architect. */
   stopLoss: StopLossSettingsSchema.optional(),
+  /** Review settings (owner only, no defaults): every value null until set, with what the dependent checks miss. */
+  reviewSettings: z
+    .object({
+      sizeBudget: z.number().int().nullable(),
+      sizeUnit: SizeUnitSchema.nullable(),
+      riskMap: StoredRiskMapSchema.nullable(),
+      status: ReviewSettingsStatusSchema,
+    })
+    .optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
   budget: BudgetDtoSchema.optional(),
   /**
@@ -330,6 +345,10 @@ export type PauseProjectRequest = z.infer<typeof PauseProjectRequestSchema>;
 /** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/2/25). */
 export const SetStopLossRequestSchema = z.object({ settings: StopLossSettingsSchema.nullable() });
 export type SetStopLossRequest = z.infer<typeof SetStopLossRequestSchema>;
+
+/** `PUT /api/projects/:id/review-settings` (project owner only): the whole value, each field null for not set. */
+export const SetReviewSettingsRequestSchema = ReviewSettingsSchema;
+export type SetReviewSettingsRequest = z.input<typeof SetReviewSettingsRequestSchema>;
 
 /** `PUT /api/projects/:id/concurrency-cap`: a number of shifts, or null to remove the cap. */
 export const SetConcurrencyCapRequestSchema = z.object({ cap: z.number().int().min(1).max(50).nullable() });

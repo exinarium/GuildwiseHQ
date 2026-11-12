@@ -14,8 +14,11 @@ import {
   RUNNER_UPDATE_CHECK_CAPABILITY,
   RunnerUpdateCheckResultSchema,
   repoTagUrl,
+  reviewSettingsStatus,
   SHIFT_LIMIT_CAPABILITY,
+  SizeUnitSchema,
   StopLossSettingsSchema,
+  StoredRiskMapSchema,
   tagVersion,
   UNLIMITED_SHIFTS,
   type WorkstationDto,
@@ -80,6 +83,18 @@ const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp
 const PROVIDER_ACCOUNTS_SQL = `(SELECT jsonb_object_agg(pa.scope, jsonb_build_object('key', pa.account_key, 'fallbackToMain', pa.fallback_to_main))
     FROM project_provider_accounts pa WHERE pa.project_id = p.id) AS provider_accounts`;
 
+/** The project's review settings as stored: unset stays null (no defaults), with what the dependent checks miss. */
+export function reviewSettingsOf(p: Row): NonNullable<ProjectDto['reviewSettings']> {
+  const budget = Number.isInteger(p.size_budget) && p.size_budget >= 1 ? (p.size_budget as number) : null;
+  const map = StoredRiskMapSchema.safeParse(p.risk_map).data ?? null;
+  const review = {
+    sizeBudget: budget,
+    sizeUnit: SizeUnitSchema.safeParse(p.size_unit).data ?? null,
+    riskMap: map && map.length > 0 ? map : null,
+  };
+  return { ...review, status: reviewSettingsStatus(review) };
+}
+
 export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
     id: p.id,
@@ -108,6 +123,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
+    reviewSettings: reviewSettingsOf(p),
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     regressionLoop: p.regression_loop ?? false,
     claudeAccount: { key: p.claude_account_key ?? null, fallbackToMain: p.claude_account_fallback ?? false },
