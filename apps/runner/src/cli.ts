@@ -57,6 +57,8 @@ import {
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
+import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-token-cli.ts';
+import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
@@ -874,6 +876,56 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
   done();
 }
 
+/**
+ * `guildwise-runner reviewer-token set|remove|status <remote url>`: the comment-only token reviewers post with. It is read
+ * from a hidden prompt (never an argument), checked against the repository and saved encrypted on this machine only.
+ */
+async function reviewerTokenCommand(
+  action: string,
+  remoteUrl: string | undefined,
+  opts: { dataDir?: string; pairing?: string },
+): Promise<void> {
+  if (!['set', 'remove', 'status'].includes(action))
+    throw new Error(
+      'use `reviewer-token set <remote url>`, `remove <remote url>` or `status [<remote url>]`',
+    );
+  if (action !== 'status' && !remoteUrl)
+    throw new Error(`reviewer-token ${action} needs the repository's remote url`);
+  const { root, entries } = selectPairings(opts);
+  const stores = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return {
+      paths,
+      store: new FileReviewerTokenStore(`${paths.secrets}/reviewer-tokens.json`, fileKeyOf(paths.secrets)),
+    };
+  });
+  if (action === 'status') {
+    for (const l of reviewerTokenStatusLines((stores[0] as (typeof stores)[number]).store, remoteUrl))
+      console.log(l);
+    return;
+  }
+  const url = remoteUrl as string;
+  if (action === 'remove') {
+    for (const s of stores) s.store.remove(url);
+    for (const s of stores) touchRecheck(s.paths.secrets);
+    console.log('Reviewer token removed from this machine.');
+    return;
+  }
+  const token = await promptSecret('Paste the reviewer token (it is not shown): ');
+  for (const s of stores) {
+    const r = await setReviewerToken({ store: s.store, remoteUrl: url, token, fetch });
+    if (!r.ok) {
+      console.error(`The token was not saved: ${r.error}.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  for (const s of stores) touchRecheck(s.paths.secrets);
+  console.log(
+    'Saved on this machine only (encrypted, mode 0600). A running runner reports "present" within a minute.',
+  );
+}
+
 interface GitConnectOpts {
   dataDir?: string;
   pairing?: string;
@@ -1405,6 +1457,14 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(gitConnect);
+  program
+    .command('reviewer-token <action> [remote-url]')
+    .description(
+      'set, remove or show the comment-only token reviewers post with (action: set | remove | status); it stays encrypted on this machine',
+    )
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(reviewerTokenCommand);
   program
     .command('whatsapp-connect [integration-id]')
     .description(

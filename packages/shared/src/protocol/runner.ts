@@ -116,6 +116,7 @@ import {
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
+import { ReviewerTokenFactSchema } from '../review/reviewer-run.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   CHECKS_MAX,
@@ -250,6 +251,8 @@ export const RepoReportSchema = z.object({
   headBranch: z.string().nullable(),
   /** The git identity commits get in this clone without a project setting (repository, global or system git config); absent: none set. Additive. */
   identity: RepoIdentityFactSchema.nullable().optional(),
+  /** Whether this workstation holds a comment-only reviewer token for the repository (never the token). Additive. */
+  reviewerToken: ReviewerTokenFactSchema.optional(),
 });
 export type RepoReport = z.infer<typeof RepoReportSchema>;
 

@@ -594,6 +594,7 @@ A repository can be reviewed instead of built: its open pull requests are record
 - **Which pull requests are recorded:** about every 5 minutes, a workstation that has a clone of the repository lists its open pull requests with your own git login on that workstation. Each pull request opened after you turned PR-only on is recorded as **not reviewed**. Pull requests opened before that are not picked up, and neither are the pull requests that cards open: those keep going through the card's own review.
 - **What you see:** under the switch, the number of pull requests waiting for review and the time of the last check, or why nothing could be read (no workstation has a clone, the runner needs an update, the git host is not supported yet, the workstation is not signed in to the git host, or the list could not be read).
 - **Git hosts:** this works for GitHub for now.
+- **Reviewer token:** reviews need a comment-only reviewer token on a workstation that has the clone (DevOps sets it with `guildwise-runner reviewer-token set`). Until one is set, the repository shows **Reviewer token missing** under the switch and no review runs; the token itself is never entered in the browser or stored on the server.
 - **Reviews:** the reviewer runs that review these pull requests come in a later release. For now the pull requests are only recorded.
 - **Turning it off** stops new pull requests being recorded or queued for review. When you turn it on again, only pull requests opened from then on are picked up.
 

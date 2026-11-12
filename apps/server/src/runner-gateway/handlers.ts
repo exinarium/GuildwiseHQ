@@ -1425,9 +1425,18 @@ export class RunnerHandlers {
           matched.add(m.id as string);
           await exec(
             tx,
-            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at, git_identity) VALUES ($1,$2,$3,$4,$5::jsonb)
-             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at, git_identity=EXCLUDED.git_identity`,
-            [conn.workstationId, m.id, r.localPath, now, r.identity ? JSON.stringify(r.identity) : null],
+            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at, git_identity, reviewer_token, reviewer_token_problem) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
+             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at, git_identity=EXCLUDED.git_identity, reviewer_token=EXCLUDED.reviewer_token, reviewer_token_problem=EXCLUDED.reviewer_token_problem`,
+            [
+              conn.workstationId,
+              m.id,
+              r.localPath,
+              now,
+              r.identity ? JSON.stringify(r.identity) : null,
+              // only whether a reviewer token is held and why it cannot be used: never the token
+              r.reviewerToken?.present ?? null,
+              r.reviewerToken?.problem ?? null,
+            ],
           );
         }
       }

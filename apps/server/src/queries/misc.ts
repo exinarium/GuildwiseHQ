@@ -33,6 +33,7 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
 import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
+import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
 import {
   effectiveShiftLimit,
@@ -342,6 +343,10 @@ export async function getProjectDetail(
   );
   const limit = (await usageLimitsFor(ctx, [p])).get(p.id);
   const prReviewStatus = await loadPrReviewStatus(ctx.pool, projectId);
+  const reviewerTokens = await reviewerTokenStates(
+    ctx.pool,
+    repos.filter((r) => r.pr_only).map((r) => r.id as string),
+  );
   return {
     project: {
       ...toProjectDto(p, p.my_role),
@@ -363,6 +368,7 @@ export async function getProjectDetail(
       prReview: r.pr_only
         ? (prReviewStatus.get(r.id) ?? { waiting: 0, checkedAt: null, problem: null })
         : null,
+      reviewerToken: r.pr_only ? (reviewerTokens.get(r.id) ?? 'missing') : null,
       mainBranch: r.main_branch ?? null,
       componentRules: ComponentRulesSchema.catch([]).parse(r.component_rules ?? []),
       workingBranchCreated: r.working_branch_created_at
