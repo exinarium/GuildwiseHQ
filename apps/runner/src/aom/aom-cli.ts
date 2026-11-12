@@ -9,6 +9,7 @@ import {
   type BaTaskShift,
   type DesignAssumption,
   DesignAssumptionSchema,
+  type DesignSizeData,
   type DevopsShift,
   formatCommandLine,
   formatLedgerMatches,
@@ -21,6 +22,7 @@ import {
   parseCommandLine,
   parseRunHealth,
   parseRunPort,
+  parseSeamFlag,
   parseWaitDuration,
   QA_FOCUS_MAX,
   QUESTION_TOPICS,
@@ -741,7 +743,40 @@ function designAssumptions(ctx: AomContext, p: Parsed): DesignAssumption[] {
   return out;
 }
 
+/**
+ * `--size <n> --path "<folder or file>"... [--risk low|medium|high] [--seam "<title>: <folder>, <folder>"]...`: the size
+ * estimate in the project's unit. Undefined when neither `--size` nor `--path` is given (the server says when it is needed).
+ */
+export function designSizeFlags(p: Parsed): DesignSizeData | undefined {
+  const rawSize = one(p, 'size');
+  const paths = many(p, 'path')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (rawSize === undefined && paths.length === 0) return undefined;
+  if (rawSize === undefined || !/^\d+$/.test(rawSize.trim()))
+    throw new UsageError(
+      `--size takes your estimate as a whole number in the project's size unit (got: ${rawSize ?? 'nothing'}); name the folders or files with --path`,
+    );
+  const risk = one(p, 'risk')?.trim();
+  if (risk !== undefined && !['low', 'medium', 'high'].includes(risk))
+    throw new UsageError(`--risk is low, medium or high (got: ${risk})`);
+  const seams = many(p, 'seam').map((raw) => {
+    try {
+      return parseSeamFlag(raw);
+    } catch (e) {
+      throw new UsageError((e as Error).message);
+    }
+  });
+  return {
+    estimate: Number(rawSize.trim()),
+    paths,
+    ...(risk ? { risk: risk as 'low' | 'medium' | 'high' } : {}),
+    seams,
+  };
+}
+
 const DESIGN_USAGE_EXTRA =
+  '\n       the size estimate (when the project has a size unit): --size <n> --path "<folder or file>" (repeatable) [--risk low|medium|high]; over the budget also --seam "<title>: <folder>, <folder>" (2 to 8)' +
   '\n       a design made before its dependencies landed also needs --assumption "<assumption> | <dependency ref> | <what changes if wrong>" (repeatable) or --no-assumptions "<why>"' +
   '\n       the assumption review: aom design confirm --summary "<how you checked>"   |   aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed>"';
 
@@ -766,8 +801,9 @@ async function investigationReport(
       );
     if (sub === 'revise' && (!one(p, 'report') || revised.length === 0))
       throw new UsageError(
-        'usage: aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>"',
+        'usage: aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>" [--size <n> --path "<folder or file>" ...]',
       );
+    const reviseSize = sub === 'revise' ? designSizeFlags(p) : undefined;
     return report(
       ctx,
       outcome(outcomeId, summary.slice(0, 20000), {
@@ -775,6 +811,7 @@ async function investigationReport(
         summary: summary.slice(0, 2000),
         location: 'repo',
         review: { decision: sub, revised, note: (one(p, 'note') ?? '').slice(0, 4000) },
+        ...(reviseSize ? { size: reviseSize } : {}),
       }),
     );
   }
@@ -786,6 +823,7 @@ async function investigationReport(
   const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
   const assumptions = verb === 'design' ? designAssumptions(ctx, p) : [];
   const none = verb === 'design' ? one(p, 'no-assumptions')?.trim() : undefined;
+  const size = verb === 'design' ? designSizeFlags(p) : undefined;
   // `location` is decided by the runner from the brief; the schema needs a value.
   return report(
     ctx,
@@ -795,6 +833,7 @@ async function investigationReport(
       location: 'repo',
       ...(assumptions.length ? { assumptions } : {}),
       ...(none ? { noAssumptions: none } : {}),
+      ...(size ? { size } : {}),
     }),
   );
 }

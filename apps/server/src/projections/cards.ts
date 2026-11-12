@@ -377,7 +377,7 @@ export const cardProjectors: Record<string, Projector> = {
 
   InvestigationReported: async (tx, e) => {
     const p = ev<'InvestigationReported'>(e).payload;
-    const prev = await one<{ investigation: { assumptions?: unknown } | null }>(
+    const prev = await one<{ investigation: { assumptions?: unknown; sizing?: unknown } | null }>(
       tx,
       'SELECT investigation FROM cards WHERE id=$1',
       [p.cardId],
@@ -392,10 +392,22 @@ export const cardProjectors: Record<string, Projector> = {
         ...(p.body ? { body: p.body } : {}),
         // a revised report keeps the assumptions it was reviewed against
         assumptions: p.assumptions ?? prev?.investigation?.assumptions ?? [],
+        // the size estimate of the design is recorded right after (DesignSized); keep the earlier one until then
+        ...(prev?.investigation?.sizing ? { sizing: prev.investigation.sizing } : {}),
         at: e.createdAt,
       }),
       e.createdAt,
     ]);
+  },
+
+  DesignSized: async (tx, e) => {
+    const p = ev<'DesignSized'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE cards SET investigation = jsonb_set(COALESCE(investigation, '{}'::jsonb), '{sizing}', $2::jsonb),
+              updated_at=$3 WHERE id=$1`,
+      [p.cardId, JSON.stringify(p.sizing), e.createdAt],
+    );
   },
 
   DesignHeld: async (tx, e) => {

@@ -42,6 +42,7 @@ import {
 } from '../sessions/playbooks.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
+import { needsSplitQuestionAnswered } from './design-size.ts';
 import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
@@ -255,6 +256,12 @@ export async function answerDeskItem(
     });
     // Needs split: the owner keeps the over-budget card, sends it to the BA anyway or cancels it.
     await needsSplitAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      name: user.displayName,
+    });
+    // The architect's needs-split question: split sends the card back to the BA, build completes the design.
+    await needsSplitQuestionAnswered(ctx, tx, item, req.optionId, req.answer, {
       user,
       actor: userActor(user.id),
       name: user.displayName,

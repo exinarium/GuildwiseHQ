@@ -9,6 +9,7 @@ import {
   checkEvidenceProblem,
   DEFAULT_OWNER_APPROVAL_POLICY,
   DESK_SUBKIND,
+  type DesignSizing,
   type DiffStats,
   type DigestData,
   getOutcome,
@@ -35,7 +36,9 @@ import {
   type ShiftCapacity,
   type ShiftEndOutcome,
   type StoredBuildEvidence,
+  type StoredNeedsSplitProposal,
   shiftLimitSourceOf,
+  sizingLine,
   streamId,
   type TestEvidence,
   UNLIMITED_SHIFTS,
@@ -57,6 +60,16 @@ import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import {
+  checkedProposal,
+  designModeOf,
+  designSizeStep,
+  needsSplitQuestionEvents,
+  needsSplitStateOf,
+  needsSplitTakenFor,
+  needsSplitTakenIn,
+  splitDecision,
+} from './design-size.ts';
 import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
@@ -321,6 +334,14 @@ export async function applyShiftReport(
   let acceptMessage: string | undefined;
   /** Refs of the unlanded dependencies when this design is held for the assumption review. */
   let holdDesign: string[] | undefined;
+  /** The design's size estimate and verdict (a design, not an investigation-only card). */
+  let designSize:
+    | { sizing: DesignSizing; split: 'none' | 'continued' | 'split'; proposal?: StoredNeedsSplitProposal }
+    | undefined;
+  /** Over budget: the design is not handed on while the needs split is decided. */
+  let stopForSplit = false;
+  /** Over budget on a card that already went to the BA once: GWP-208's owner route, after the handoff is appended. */
+  let splitTaken: StoredNeedsSplitProposal | undefined;
   switch (outcome.event) {
     case 'ReviewRequested': {
       const diffStats = msg.diffStats ?? ZERO_DIFF;
@@ -593,6 +614,28 @@ export async function applyShiftReport(
           };
         const review = inv.review;
         const confirming = pending && review?.decision === 'confirm';
+        // The size estimate and the risk class of a design (not of an investigation-only card), and the verdict.
+        if (!card.investigation_only && String(card.stage).startsWith('investigate')) {
+          const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+          const wsRow = await one(tx, 'SELECT runner_version FROM workstations WHERE id=$1', [ws.id]);
+          const step = designSizeStep({
+            card,
+            project,
+            inv,
+            mode: designModeOf(inv),
+            runnerVersion: wsRow?.runner_version ?? null,
+          });
+          if ('error' in step) return { accepted: false, error: step.error };
+          const split = splitDecision(step.sizing, await needsSplitStateOf(tx, card));
+          let proposal: StoredNeedsSplitProposal | undefined;
+          if (split === 'split') {
+            const checked = checkedProposal(step.sizing, inv.summary);
+            if ('error' in checked) return { accepted: false, error: checked.error };
+            proposal = checked.proposal;
+          }
+          designSize = { sizing: step.sizing, split, ...(proposal ? { proposal } : {}) };
+        }
+        const sizeLine = designSize ? `\n\n${sizingLine(designSize.sizing)}` : '';
         if (review) {
           const revised = [...new Set(review.revised)];
           if (revised.some((n) => n > total))
@@ -660,29 +703,70 @@ export async function applyShiftReport(
               card,
               { kind: 'agent', agentId: agent.id },
               'comment',
-              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}`,
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${sizeLine}`,
             ),
           );
+        } else if (designSize) {
+          followUps.push(
+            cardMessage(card, { kind: 'agent', agentId: agent.id }, 'comment', sizingLine(designSize.sizing)),
+          );
         }
+        // After InvestigationReported: that projector rewrites the report JSON.
+        if (designSize)
+          followUps.push(mk({ type: 'DesignSized', payload: { cardId, sizing: designSize.sizing } }));
         if (early && inv.assumptions?.length) holdDesign = unlanded.map((d) => d.ref);
         acceptMessage = holdDesign
           ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
             : 'Recorded. The card goes to the builder with your design. Finish now.';
+        // Over budget (not held, the owner has not kept it as one card): the design is not handed on. The first time the
+        // architect's needs-split question is raised; a card that already went to the BA once goes to the owner.
+        if (!holdDesign && designSize?.split === 'split' && designSize.proposal) {
+          if (await needsSplitTakenFor(tx, card)) {
+            splitTaken = designSize.proposal;
+          } else {
+            after.push(
+              ...(await needsSplitQuestionEvents(
+                ctx,
+                tx,
+                card,
+                agent,
+                shift.id,
+                designSize.sizing,
+                designSize.proposal,
+                outcome.id,
+              )),
+            );
+          }
+          stopForSplit = true;
+          acceptMessage =
+            "Recorded. The estimate is over the project's size budget: the needs-split question is raised in your name. Finish now.";
+        } else if (!holdDesign && designSize?.split === 'continued') {
+          followUps.push(
+            cardMessage(
+              card,
+              { kind: 'agent', agentId: agent.id },
+              'comment',
+              'Over budget; the owner kept the card as one card.',
+            ),
+          );
+        }
       }
       main = holdDesign
         ? mk({ type: 'DesignHeld', payload: { cardId, dependencies: holdDesign, agentId: agent.id } })
-        : mk({
-            type: 'StageCompleted',
-            payload: {
-              cardId,
-              fromStage: card.stage,
-              toStage: resolved.toStage,
-              outcome: outcome.id,
-              ...(outcome.rework ? { rework: true } : {}),
-            },
-          });
+        : stopForSplit
+          ? undefined
+          : mk({
+              type: 'StageCompleted',
+              payload: {
+                cardId,
+                fromStage: card.stage,
+                toStage: resolved.toStage,
+                outcome: outcome.id,
+                ...(outcome.rework ? { rework: true } : {}),
+              },
+            });
       if (outcome.effect === 'resume_parent' && card.parent_card_id) {
         const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
         if (parent && parent.status === 'waiting') {
@@ -784,6 +868,7 @@ export async function applyShiftReport(
     ],
     { tx },
   );
+  if (splitTaken) await needsSplitTakenIn(ctx, tx, card, agent, splitTaken, outcome.id);
   // A stage that ran against the project's environment is over: stop it (kept for a while after a failure).
   if ((await stageEnvironmentOf(tx, card)) === 'project') {
     const nudge = await endTestEnvironmentIn(ctx, tx, card, outcome.kind === 'failure');

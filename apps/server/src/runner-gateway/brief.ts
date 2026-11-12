@@ -53,6 +53,7 @@ import type { ClaimResult } from '../dispatcher/claim.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { isGated } from '../governance/gates.ts';
 import { cardLedgerEntries, standingOrdersFor, standingOrdersForProjects } from '../queries/ledger.ts';
+import { reviewSettingsOf } from '../queries/misc.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
 
@@ -590,7 +591,15 @@ function investigationBrief(
     assumptions?: Array<{ assumption: string; dependency: string; ifWrong: string }>;
   } | null;
   const held = card.design_review?.state === 'waiting';
+  const settings = reviewSettingsOf(project);
   return {
+    sizing: {
+      unit: settings.sizeUnit,
+      budget: settings.sizeBudget,
+      riskMapSet: settings.riskMap != null,
+      sizeStatus: settings.status.size.active ? null : settings.status.size.reason,
+      riskStatus: settings.status.risk.active ? null : settings.status.risk.reason,
+    },
     reportPath: target.reportPath,
     location: target.location,
     ...(target.location === 'repo' && target.folder ? { folder: target.folder } : {}),

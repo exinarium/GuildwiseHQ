@@ -949,6 +949,7 @@ aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host 
 aom git status [<provider>] | aom git connect <provider> [--host <h>]   # DevOps only: check or start this workstation's git host login
 aom git fetch | merge-main | verify-merge   # architect only (investigate stages): the runner fetches origin, merges the latest main, checks a conflict resolution (`aom git push` is refused: agents never push)
 aom design --report <path> --summary "<text>"           # architect: hand the designed card to build (outcome handoff)
+aom design|design revise ... --size <n> --path "<folder or file>"... [--risk low|medium|high] [--seam "<title>: <folder>, <folder>"...]   # architect: size estimate in the project unit, paths touched, declared risk (only raises), split seams (2-8, needed when over budget)
 aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
 aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
 aom finalize                                      # investigation-only card with the report in the vault: no git step (derived by the server)

@@ -19,6 +19,7 @@ import {
   repoFileUrl,
   type ShiftDto,
   scrubRemoteUrl,
+  storedDesignSizing,
   streamId,
   type WorkflowDefinition,
 } from '@aom/shared';
@@ -88,8 +89,9 @@ async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigatio
     summary: string;
     commit: string | null;
     at: string;
+    sizing?: unknown;
   } | null;
-  if (!inv) return null;
+  if (!inv?.reportPath) return null;
   let url: string | null = null;
   if (inv.location === 'repo' && c.repo_id && c.branch_name) {
     const repo = await one(ctx.pool, 'SELECT remote_url, forge_kind FROM project_repos WHERE id=$1', [
@@ -105,6 +107,7 @@ async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigatio
     commit: inv.commit ?? null,
     url,
     at: iso(inv.at) as string,
+    sizing: storedDesignSizing(inv.sizing),
   };
 }
 

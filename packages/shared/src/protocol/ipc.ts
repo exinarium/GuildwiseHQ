@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BuildHandoffDataSchema } from '../cards/lean-v6.ts';
-import { ReviewData, TestEvidence } from '../cards/types.ts';
+import { NEEDS_SPLIT_MAX_SEAMS } from '../cards/needs-split.ts';
+import { ReviewData, ReviewRisk, TestEvidence } from '../cards/types.ts';
 import { CeoDoneDataSchema, CeoReportDataSchema } from '../ceo/ipc.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
@@ -96,6 +97,29 @@ export const DesignReviewDataSchema = z.object({
 });
 export type DesignReviewData = z.infer<typeof DesignReviewDataSchema>;
 
+/** The architect's size estimate at design time: lenient here, the server validates the seams when it needs them. */
+export const DesignSizeDataSchema = z.object({
+  /** The estimate in the project's size unit. */
+  estimate: z.number().int().min(0).max(10_000_000),
+  /** The folders and files the change touches (the risk class is derived from them and the Affected areas). */
+  paths: z.array(z.string().min(1).max(300)).max(100).default([]),
+  /** A declared risk class: it can only raise the class from the path-to-risk map. */
+  risk: ReviewRisk.optional(),
+  /** Proposed split seams (`--seam "<title>: <folder>, <folder>"`). */
+  seams: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(200),
+        folders: z.array(z.string().min(1).max(300)).min(1).max(20),
+        repo: z.string().min(1).max(200).optional(),
+        note: z.string().max(2000).optional(),
+      }),
+    )
+    .max(NEEDS_SPLIT_MAX_SEAMS)
+    .default([]),
+});
+export type DesignSizeData = z.infer<typeof DesignSizeDataSchema>;
+
 /** Architect outcome data (`aom design` / `aom investigate`): where the report is and a short summary for the next stage. */
 export const InvestigationDataSchema = z.object({
   reportPath: z.string().min(1),
@@ -111,6 +135,8 @@ export const InvestigationDataSchema = z.object({
   noAssumptions: z.string().max(1000).optional(),
   /** Set by the assumption-review shift (`aom design confirm|revise`). */
   review: DesignReviewDataSchema.optional(),
+  /** The architect's size estimate (`aom design --size --path [--risk] [--seam]`); the server gives the verdict. */
+  size: DesignSizeDataSchema.optional(),
 });
 export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
 

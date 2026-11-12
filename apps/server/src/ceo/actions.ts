@@ -6,6 +6,7 @@ import {
   DESK_SUBKIND,
   type DeskActor,
   deskMode,
+  NEEDS_SPLIT_QUESTION_SUBKIND,
   reservedKeyOfDesk,
   streamId,
   TESTER_LOOP_OPTIONS,
@@ -15,6 +16,7 @@ import { z } from 'zod';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { patchCard, releaseBackoff, releaseCard } from '../commands/cards.ts';
 import { cardMessage, orgScope, projectScope, userActor } from '../commands/common.ts';
+import { needsSplitQuestionAnswered } from '../commands/design-size.ts';
 import { createDevOpsRequestIn, devopsAgentOn } from '../commands/devops.ts';
 import { mergedAnswerNotes } from '../commands/escalation.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from '../commands/hygiene.ts';
@@ -175,7 +177,9 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
       : undefined;
     const text = (p.text?.trim() || optionLabel || p.option) as string;
     const entryId = randomUUID();
-    const isTesterLoop = item.subkind === DESK_SUBKIND.testerLoop;
+    // An answer that performs its action (tester loop, needs-split question): re-opening the question would not undo it.
+    const performsAction =
+      item.subkind === DESK_SUBKIND.testerLoop || item.subkind === NEEDS_SPLIT_QUESTION_SUBKIND;
     const by = ceoBy(env);
     const events: AppendInput[] = [
       {
@@ -258,10 +262,23 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
           author: { kind: 'agent', agentId: env.agentId },
         });
       });
+    } else if (item.subkind === NEEDS_SPLIT_QUESTION_SUBKIND) {
+      // The architect's needs-split question: split sends the card back to the BA, build completes the design.
+      await withAppendTx(env.ctx.pool, async (tx) => {
+        const cur = await one(tx, 'SELECT status FROM desk_items WHERE id=$1 FOR UPDATE', [item.id]);
+        if (cur?.status !== 'open')
+          throw conflict('already_closed', `this item is already ${cur?.status ?? 'gone'}`);
+        await env.ctx.store.append(events, { tx });
+        await needsSplitQuestionAnswered(env.ctx, tx, item, p.option, text, {
+          user: env.owner,
+          actor: userActor(env.owner.id),
+          name: `${env.agentName} (CEO)`,
+        });
+      });
     } else await appendLocked(env, events, item.id);
     env.ctx.services.dispatcher.trigger();
     return {
-      message: `Answered. ${blocked.length ? `${blocked.length} card(s) go back to the queue. ` : ''}${isTesterLoop ? '' : 'The owner can undo it.'}`,
+      message: `Answered. ${blocked.length ? `${blocked.length} card(s) go back to the queue. ` : ''}${performsAction ? '' : 'The owner can undo it.'}`,
       result: {
         itemId: item.id,
         unblocked: blocked.map((b) => b.card_id),
@@ -269,7 +286,7 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
         answer: text,
       },
       // A tester-loop answer performs its action (bug card, rework, cancel): re-opening the question would not undo that.
-      ...(isTesterLoop
+      ...(performsAction
         ? {}
         : {
             inverse: {
