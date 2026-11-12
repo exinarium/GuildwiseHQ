@@ -64,6 +64,18 @@ export const StoredRiskMapEntrySchema = z.object({
 });
 export const StoredRiskMapSchema = z.array(StoredRiskMapEntrySchema);
 
+/**
+ * Whether a stored map (for example read back from jsonb, which does not keep object key order) holds the same entries,
+ * in the same order, as `next`. An empty or unreadable stored value counts as not set.
+ */
+export function sameRiskMap(stored: unknown, next: ReadonlyArray<RiskMapEntry> | null): boolean {
+  const parsed = stored == null ? null : (StoredRiskMapSchema.safeParse(stored).data ?? null);
+  const a = parsed && parsed.length > 0 ? parsed : null;
+  const b = next && next.length > 0 ? next : null;
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((e, i) => e.pattern === b[i]?.pattern && e.risk === b[i]?.risk);
+}
+
 /** Indexes of entries whose normalised pattern already appeared earlier in the list (case-insensitive, as matching). */
 export function duplicateRiskPatterns(entries: ReadonlyArray<{ pattern: string }>): number[] {
   const seen = new Set<string>();

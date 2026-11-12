@@ -18,6 +18,7 @@ import {
   type ProjectImpact,
   ProviderAccountKeySchema,
   type ReviewSettings,
+  sameRiskMap,
   type StopLossSettings,
   streamId,
 } from '@aom/shared';
@@ -239,7 +240,8 @@ export async function setReviewSettings(
     const unchanged =
       (p.size_budget ?? null) === sizeBudget &&
       (p.size_unit ?? null) === sizeUnit &&
-      JSON.stringify(p.risk_map ?? null) === JSON.stringify(riskMap);
+      // compared entry by entry: the stored jsonb does not keep the key order
+      sameRiskMap(p.risk_map, riskMap);
     if (unchanged) return;
     await ctx.store.append(
       [

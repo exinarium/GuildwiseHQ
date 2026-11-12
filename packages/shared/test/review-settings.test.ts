@@ -10,6 +10,7 @@ import {
   riskFromPaths,
   riskFromPathsStatus,
   riskPatternMatches,
+  sameRiskMap,
   sizeChecksStatus,
 } from '../src/projects/review-settings.ts';
 
@@ -240,5 +241,28 @@ describe('diffSize', () => {
   it('counts added + removed lines, or files', () => {
     expect(diffSize(files, 'changed_lines')).toBe(15);
     expect(diffSize(files, 'changed_files')).toBe(2);
+  });
+});
+
+describe('sameRiskMap (AC1: an identical save records nothing)', () => {
+  it('ignores the key order jsonb returns', () => {
+    const stored = JSON.parse(
+      '[{"risk":"high","pattern":"apps/server/src/auth"},{"risk":"low","pattern":"docs/**"}]',
+    );
+    expect(sameRiskMap(stored, map.slice(0, 2))).toBe(true);
+  });
+  it('sees a changed class, pattern, order or length', () => {
+    expect(sameRiskMap(map, [{ ...map[0]!, risk: 'low' }, map[1]!, map[2]!])).toBe(false);
+    expect(sameRiskMap(map, [{ ...map[0]!, pattern: 'apps/web' }, map[1]!, map[2]!])).toBe(false);
+    expect(sameRiskMap(map, [map[1]!, map[0]!, map[2]!])).toBe(false);
+    expect(sameRiskMap(map, map.slice(0, 2))).toBe(false);
+  });
+  it('treats null, empty and unreadable stored values as not set', () => {
+    expect(sameRiskMap(null, null)).toBe(true);
+    expect(sameRiskMap([], null)).toBe(true);
+    expect(sameRiskMap(null, [])).toBe(true);
+    expect(sameRiskMap({ bad: true }, null)).toBe(true);
+    expect(sameRiskMap(null, map)).toBe(false);
+    expect(sameRiskMap(map, null)).toBe(false);
   });
 });
