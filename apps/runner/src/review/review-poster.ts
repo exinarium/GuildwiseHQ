@@ -1,5 +1,5 @@
 import { parseRemote, type ReviewerRunSpec, type ReviewFinding } from '@aom/shared';
-import { redact } from '../secrets/redact.ts';
+import { redactSecrets } from '../secrets/redact.ts';
 import type { ReviewerRun } from './reviewer-sandbox.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
 
@@ -83,7 +83,7 @@ export class GitHubReviewPoster implements ReviewPoster {
       res = await this.send(url, token, inBody);
     }
     if (!res.ok) {
-      const text = redact((await res.text().catch(() => '')).slice(0, 300));
+      const text = redactSecrets((await res.text().catch(() => '')).slice(0, 300));
       throw new ReviewPostError(
         'rejected',
         `the host answered ${res.status}${text ? `: ${text}` : ''}`,
@@ -117,10 +117,10 @@ export class GitHubReviewPoster implements ReviewPoster {
         },
       });
     } catch (err) {
-      throw new ReviewPostError('unreachable', redact(err instanceof Error ? err.message : String(err)));
+      throw new ReviewPostError('unreachable', redactSecrets(err instanceof Error ? err.message : String(err)));
     }
     if (!res.ok) {
-      const text = redact((await res.text().catch(() => '')).slice(0, 300));
+      const text = redactSecrets((await res.text().catch(() => '')).slice(0, 300));
       throw new ReviewPostError(
         'rejected',
         `the host answered ${res.status}${text ? `: ${text}` : ''}`,
@@ -145,7 +145,7 @@ export class GitHubReviewPoster implements ReviewPoster {
         body: JSON.stringify(body),
       });
     } catch (err) {
-      throw new ReviewPostError('unreachable', redact(err instanceof Error ? err.message : String(err)));
+      throw new ReviewPostError('unreachable', redactSecrets(err instanceof Error ? err.message : String(err)));
     }
   }
 }
