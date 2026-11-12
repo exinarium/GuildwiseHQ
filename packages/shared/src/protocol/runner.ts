@@ -76,7 +76,6 @@ import {
 } from '../graph/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
-import { PrReviewPostPayloadSchema, PrReviewRunPayloadSchema } from '../review/pr-review.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import {
   IntegrationBeginPayloadSchema,
@@ -117,6 +116,7 @@ import {
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
+import { PrReviewPostPayloadSchema, PrReviewRunPayloadSchema } from '../review/pr-review.ts';
 import { ReviewerTokenFactSchema } from '../review/reviewer-run.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {

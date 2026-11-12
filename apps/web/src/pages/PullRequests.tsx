@@ -47,16 +47,19 @@ function Detail({ pr }: { pr: PrReviewDto }) {
   if (run?.state === 'timed_out')
     return (
       <Callout tone="warning" data-testid={`pr-review-timeout-${pr.changeId}`} role="status">
-        Not reviewed: the review run timed out after {Math.round(run.timeoutMs / 60_000)} minutes. No comments were
-        posted.
+        Not reviewed: the review run timed out after {Math.round(run.timeoutMs / 60_000)} minutes. No comments
+        were posted.
       </Callout>
     );
   if (run?.state === 'failed')
     return (
       <Callout tone="danger" role="alert" data-testid={`pr-review-error-${pr.changeId}`}>
         <p>
-          Not reviewed: the review {run.code && ['forbidden', 'not_found', 'stale_head', 'unreachable'].includes(run.code) ? 'could not be posted' : 'run failed'}.
-          No comments were posted.
+          Not reviewed: the review{' '}
+          {run.code && ['forbidden', 'not_found', 'stale_head', 'unreachable'].includes(run.code)
+            ? 'could not be posted'
+            : 'run failed'}
+          . No comments were posted.
         </p>
         {run.error && <p className="break-words">{run.error}</p>}
       </Callout>
@@ -73,7 +76,10 @@ function Detail({ pr }: { pr: PrReviewDto }) {
 function Row({ pr }: { pr: PrReviewDto }) {
   const attention = pr.lastRun?.state === 'timed_out' || pr.lastRun?.state === 'failed';
   return (
-    <li className="space-y-2 rounded-control border border-border p-3 text-sm" data-testid={`pr-review-${pr.changeId}`}>
+    <li
+      className="space-y-2 rounded-control border border-border p-3 text-sm"
+      data-testid={`pr-review-${pr.changeId}`}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <a
           href={pr.url}
@@ -83,7 +89,10 @@ function Row({ pr }: { pr: PrReviewDto }) {
         >
           {pr.title}
         </a>
-        <Badge tone={pr.state === 'reviewed' ? 'green' : 'neutral'} data-testid={`pr-review-state-${pr.changeId}`}>
+        <Badge
+          tone={pr.state === 'reviewed' ? 'green' : 'neutral'}
+          data-testid={`pr-review-state-${pr.changeId}`}
+        >
           {pr.state === 'reviewed' ? 'Reviewed' : 'Not reviewed'}
         </Badge>
         {attention && <Badge tone="amber">Needs attention</Badge>}

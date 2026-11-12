@@ -34,6 +34,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
+import { loadVisibleProject } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
@@ -43,7 +44,6 @@ import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../comman
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
 import { listPrReviews } from '../commands/pr-review-runs.ts';
-import { loadVisibleProject } from '../authz/scope.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,

@@ -22,9 +22,18 @@ const payload = (): PrReviewPostPayload => ({
   spec,
   summary: `Two things to look at.\n\n${prReviewMarker(RUN)}`,
   findings: [
-    { findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f1', finding: { path: 'a.ts', line: 2, side: 'RIGHT', title: '[high] Null deref', body: 'x may be null' } },
-    { findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f2', finding: { path: 'a.ts', line: 3, side: 'RIGHT', title: '[low] Odd name', body: 'rename' } },
-    { findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f3', finding: { path: 'b.ts', title: '[medium] Missing test', body: 'line 99, outside the diff' } },
+    {
+      findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f1',
+      finding: { path: 'a.ts', line: 2, side: 'RIGHT', title: '[high] Null deref', body: 'x may be null' },
+    },
+    {
+      findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f2',
+      finding: { path: 'a.ts', line: 3, side: 'RIGHT', title: '[low] Odd name', body: 'rename' },
+    },
+    {
+      findingId: '019e3f6a-7b1c-7a2d-8c3e-0123456789f3',
+      finding: { path: 'b.ts', title: '[medium] Missing test', body: 'line 99, outside the diff' },
+    },
   ],
 });
 
@@ -35,7 +44,11 @@ interface Call {
   auth: string | undefined;
 }
 /** A fake host: `existing` are the reviews already on the pull request; the POST statuses answer in order. */
-function host(existing: Array<{ body: string; html_url: string }> = [], statuses: number[] = [200], getStatus = 200) {
+function host(
+  existing: Array<{ body: string; html_url: string }> = [],
+  statuses: number[] = [200],
+  getStatus = 200,
+) {
   const calls: Call[] = [];
   const fetchFn = (async (url: string, init: RequestInit) => {
     const method = init.method ?? 'GET';
@@ -49,7 +62,11 @@ function host(existing: Array<{ body: string; html_url: string }> = [], statuses
     const n = calls.filter((c) => c.method === 'POST').length;
     const status = statuses[Math.min(n - 1, statuses.length - 1)] as number;
     return new Response(
-      JSON.stringify(status < 300 ? { id: 5, html_url: 'https://github.com/acme/toy/pull/7#review-5' } : { message: `no ${TOKEN}` }),
+      JSON.stringify(
+        status < 300
+          ? { id: 5, html_url: 'https://github.com/acme/toy/pull/7#review-5' }
+          : { message: `no ${TOKEN}` },
+      ),
       { status },
     );
   }) as unknown as typeof fetch;
@@ -65,7 +82,11 @@ describe('AC1: the findings of a completed run are posted as one review', () => 
   it('checks for its own review, then makes exactly one POST with the inline comments and the marker', async () => {
     const h = host();
     const out = await postPrReview(poster(h), payload());
-    expect(out).toEqual({ ok: true, reviewUrl: 'https://github.com/acme/toy/pull/7#review-5', alreadyPosted: false });
+    expect(out).toEqual({
+      ok: true,
+      reviewUrl: 'https://github.com/acme/toy/pull/7#review-5',
+      alreadyPosted: false,
+    });
     expect(h.calls.map((c) => c.method)).toEqual(['GET', 'POST']);
     const post = h.calls[1] as Call;
     expect(post.url).toBe('https://api.github.com/repos/acme/toy/pulls/7/reviews');
@@ -118,10 +139,24 @@ describe('AC4: a post that fails says why and leaves nothing partial', () => {
     expect(h.calls.filter((c) => c.method === 'POST')).toHaveLength(2);
   });
   it('an unreachable host and a server error are reported, not thrown', async () => {
-    const down = { poster: new GitHubReviewPoster({ fetch: (async () => { throw new Error(`connect ${TOKEN}`); }) as never, tokens: (() => { const t = new MemoryReviewerTokenStore(); t.set(REMOTE, TOKEN); return t; })() }) };
+    const down = {
+      poster: new GitHubReviewPoster({
+        fetch: (async () => {
+          throw new Error(`connect ${TOKEN}`);
+        }) as never,
+        tokens: (() => {
+          const t = new MemoryReviewerTokenStore();
+          t.set(REMOTE, TOKEN);
+          return t;
+        })(),
+      }),
+    };
     const out = await postPrReview(down, payload());
     expect(out).toMatchObject({ ok: false, code: 'unreachable' });
     expect(JSON.stringify(out)).not.toContain(TOKEN);
-    expect(await postPrReview(poster(host([], [500])), payload())).toMatchObject({ ok: false, code: 'error' });
+    expect(await postPrReview(poster(host([], [500])), payload())).toMatchObject({
+      ok: false,
+      code: 'error',
+    });
   });
 });

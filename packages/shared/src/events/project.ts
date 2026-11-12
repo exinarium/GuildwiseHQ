@@ -9,8 +9,8 @@ import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
 import {
   PR_REVIEW_FAILURE_CODES,
-  PrReviewFindingSchema,
   PrReviewerSchema,
+  PrReviewFindingSchema,
   PrReviewStateSchema,
 } from '../review/pr-review.ts';
 import {

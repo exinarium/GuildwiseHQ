@@ -16,8 +16,8 @@ import {
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { listReviewablePrs, reviewerGate, reviewerTokenStates } from '../review/reviewer-gate.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
 
 /**
@@ -41,7 +41,9 @@ const BODY_LIMIT = 60_000;
 const scopeOf = (orgId: string, projectId: string) => projectScope(orgId, projectId);
 
 async function orgOf(db: Queryable, projectId: string): Promise<string | undefined> {
-  return (await one(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]))?.org_id as string | undefined;
+  return (await one(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]))?.org_id as
+    | string
+    | undefined;
 }
 
 // ---- dispatch ----------------------------------------------------------------------------------------------------
@@ -89,7 +91,9 @@ async function mayStart(db: Queryable, prReviewId: string, now: Date): Promise<b
   const last = runs[0] as Record<string, unknown>;
   if (last.state !== 'failed') return false; // running, completed (posting), posted, timed out: never again by itself
   if (last.error_code === 'no_token') return true; // not an attempt: the gate decides when it is ready again
-  const attempts = runs.filter((r) => r.state === 'failed' && r.retryable && r.error_code !== 'no_token').length;
+  const attempts = runs.filter(
+    (r) => r.state === 'failed' && r.retryable && r.error_code !== 'no_token',
+  ).length;
   if (!last.retryable || attempts >= MAX_RETRIES) return false;
   const at = last.finished_at ? new Date(last.finished_at as string).getTime() : 0;
   return now.getTime() - at >= RETRY_AFTER_MS;
@@ -98,7 +102,14 @@ async function mayStart(db: Queryable, prReviewId: string, now: Date): Promise<b
 async function startRun(
   ctx: Ctx,
   projectId: string,
-  pr: { id: string; repoId: string; changeId: string; title: string; baseBranch: string; workstationIds: string[] },
+  pr: {
+    id: string;
+    repoId: string;
+    changeId: string;
+    title: string;
+    baseBranch: string;
+    workstationIds: string[];
+  },
 ): Promise<boolean> {
   const prNumber = Number(pr.changeId);
   const baseRef = GitRefSchema.safeParse(pr.baseBranch);
@@ -192,7 +203,8 @@ async function startRun(
     target = usable;
     return true;
   });
-  if (started && target) void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
+  if (started && target)
+    void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
   return started === true;
 }
 
@@ -243,10 +255,10 @@ export function buildReviewPost(
         path: f.path,
         ...(f.anchored && f.line ? { line: f.line, side: 'RIGHT' as const } : {}),
         title: `[${f.severity}] ${f.title}`.slice(0, 200),
-        body: (f.line && !f.anchored ? `Line ${f.line}, outside the changed lines.\n\n${f.body}` : f.body).slice(
-          0,
-          10_000,
-        ),
+        body: (f.line && !f.anchored
+          ? `Line ${f.line}, outside the changed lines.\n\n${f.body}`
+          : f.body
+        ).slice(0, 10_000),
       },
     })),
   };
@@ -402,7 +414,10 @@ export async function applyPrReviewPostResult(
       ...base,
       stage: 'post',
       code,
-      error: (r && !r.ok ? r.error : (error ?? 'the workstation did not answer the post properly')).slice(0, 400),
+      error: (r && !r.ok ? r.error : (error ?? 'the workstation did not answer the post properly')).slice(
+        0,
+        400,
+      ),
       retryable: code === 'unreachable' || code === 'error',
     });
   });
@@ -508,7 +523,7 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
   return list.map((l) => ({
     id: l.id as string,
     repoId: l.project_repo_id as string,
-    repoName: (l.name as string),
+    repoName: l.name as string,
     changeId: l.change_id as string,
     url: l.url as string,
     title: l.title as string,

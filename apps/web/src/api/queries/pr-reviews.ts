@@ -9,7 +9,9 @@ export function usePullRequests(projectId: string | undefined) {
     enabled: !!projectId,
     queryFn: () => get<{ pullRequests: PrReviewDto[] }>(`/projects/${projectId}/pull-requests`),
     refetchInterval: (query) =>
-      query.state.data?.pullRequests.some((p) => p.lastRun?.state === 'running' || p.lastRun?.state === 'completed')
+      query.state.data?.pullRequests.some(
+        (p) => p.lastRun?.state === 'running' || p.lastRun?.state === 'completed',
+      )
         ? 30_000
         : false,
   });

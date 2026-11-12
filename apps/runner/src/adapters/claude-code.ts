@@ -1041,28 +1041,28 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const chatSettings: ClaudeSettings = review
       ? reviewerPolicy(review, this.policy(chatInput, input.cwd, true)).settings
       : devops
-      ? buildDevopsChatSettings(
-          input.agent.permissions,
-          this.policy(input, input.cwd, false, guard?.command),
-          input.sandbox,
-        )
-      : input.agent.roleKey === 'ceo'
-        ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-        : input.work
-          ? buildMentionWorkSettings(
-              input.agent.permissions,
-              this.policy(chatInput, input.cwd, false),
-              input.sandbox,
-            )
-          : buildChatSettings(
-              input.readOnly,
-              [
-                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                ...used.map((u) => `mcp__${u.name}`),
-              ],
-              this.policy(chatInput, input.cwd, true),
-              input.sandbox,
-            );
+        ? buildDevopsChatSettings(
+            input.agent.permissions,
+            this.policy(input, input.cwd, false, guard?.command),
+            input.sandbox,
+          )
+        : input.agent.roleKey === 'ceo'
+          ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+          : input.work
+            ? buildMentionWorkSettings(
+                input.agent.permissions,
+                this.policy(chatInput, input.cwd, false),
+                input.sandbox,
+              )
+            : buildChatSettings(
+                input.readOnly,
+                [
+                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                  ...used.map((u) => `mcp__${u.name}`),
+                ],
+                this.policy(chatInput, input.cwd, true),
+                input.sandbox,
+              );
     const withSkills = review
       ? chatInput
       : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);

@@ -92,7 +92,12 @@ describe('the Pull requests tab', () => {
         state: 'reviewed',
         reviewer: 'first',
         reviewedAt: '2026-11-12T10:03:12.000Z',
-        lastRun: run({ state: 'posted', durationMs: 192_000, postedCount: 4, reviewUrl: 'https://github.com/acme/toy/pull/1#review-1' }),
+        lastRun: run({
+          state: 'posted',
+          durationMs: 192_000,
+          postedCount: 4,
+          reviewUrl: 'https://github.com/acme/toy/pull/1#review-1',
+        }),
       }),
     ]);
     expect((await screen.findByTestId('pr-review-state-1')).textContent).toBe('Reviewed');
@@ -117,7 +122,15 @@ describe('the Pull requests tab', () => {
   });
 
   it('AC4: another failure shows the error to the owner', async () => {
-    renderPage([pr(3, { lastRun: run({ state: 'failed', code: 'model_error', error: 'the claude process exited with code 1' }) })]);
+    renderPage([
+      pr(3, {
+        lastRun: run({
+          state: 'failed',
+          code: 'model_error',
+          error: 'the claude process exited with code 1',
+        }),
+      }),
+    ]);
     const e = await screen.findByTestId('pr-review-error-3');
     expect(e.textContent).toMatch(/Not reviewed/);
     expect(e.textContent).toMatch(/the claude process exited with code 1/);
@@ -131,7 +144,9 @@ describe('the Pull requests tab', () => {
       pr(5),
       pr(6, { reviewerToken: 'missing' }),
     ]);
-    expect((await screen.findByTestId('pr-review-detail-4')).textContent).toMatch(/Review running.*stops after 10 min/);
+    expect((await screen.findByTestId('pr-review-detail-4')).textContent).toMatch(
+      /Review running.*stops after 10 min/,
+    );
     expect(screen.getByTestId('pr-review-detail-5').textContent).toBe('Waiting for a review');
     expect(screen.getByTestId('pr-review-detail-6').textContent).toMatch(/Reviewer token missing/);
   });

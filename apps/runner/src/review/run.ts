@@ -16,11 +16,7 @@ import type { RunnerPaths } from '../paths.ts';
 import { cleanAgentTmp, sandboxEnv, sandboxFor, wipeAgent } from '../sandbox/sandbox.ts';
 import { REVIEW_JSON_MARKER, renderReviewerInstructions, renderReviewerPrompt } from './instructions.ts';
 import { ReviewCheckoutError, ReviewHeadMovedError } from './review-checkout.ts';
-import {
-  type ReviewerRefusal,
-  type ReviewerRun,
-  reviewerPermissions,
-} from './reviewer-sandbox.ts';
+import { type ReviewerRefusal, type ReviewerRun, reviewerPermissions } from './reviewer-sandbox.ts';
 
 export interface PrReviewRunDeps {
   adapter: RuntimeAdapter;
@@ -108,7 +104,11 @@ const REFUSAL: Record<ReviewerRefusal, { code: PrReviewFailureCode; retryable: b
     retryable: true,
     error: 'the sandbox is not enforced on this workstation, so no review can run',
   },
-  no_clone: { code: 'no_checkout', retryable: true, error: 'this workstation has no clone of the repository' },
+  no_clone: {
+    code: 'no_checkout',
+    retryable: true,
+    error: 'this workstation has no clone of the repository',
+  },
 };
 
 /**
@@ -117,7 +117,10 @@ const REFUSAL: Record<ReviewerRefusal, { code: PrReviewFailureCode; retryable: b
  * start the post. The timer covers the whole run (also a checkout that hangs); a run that hits it answers `timeout`
  * and its model session is stopped, so nothing it was still writing can reach the pull request.
  */
-export async function runPrReview(deps: PrReviewRunDeps, payload: PrReviewRunPayload): Promise<PrReviewRunResult> {
+export async function runPrReview(
+  deps: PrReviewRunDeps,
+  payload: PrReviewRunPayload,
+): Promise<PrReviewRunResult> {
   const now = deps.now ?? Date.now;
   const t0 = now();
   const elapsed = () => Math.max(0, now() - t0);
@@ -183,7 +186,12 @@ export async function runPrReview(deps: PrReviewRunDeps, payload: PrReviewRunPay
     // 4. the model
     const gate = deps.adapter.accountGate?.('main');
     if (gate && gate.state !== 'ok')
-      return fail(elapsed(), 'runtime_unavailable', `the ${payload.runtime} account is not available (${gate.state})`, true);
+      return fail(
+        elapsed(),
+        'runtime_unavailable',
+        `the ${payload.runtime} account is not available (${gate.state})`,
+        true,
+      );
     if (!deps.adapter.startChat)
       return fail(elapsed(), 'runtime_unavailable', `${payload.runtime} cannot run a review`, false);
     await mkdir(run.sandbox.configDir, { recursive: true });
@@ -236,7 +244,8 @@ export async function runPrReview(deps: PrReviewRunDeps, payload: PrReviewRunPay
         true,
       );
     const out = parseReviewerOutput(read.text);
-    if (!out) return fail(elapsed(), 'bad_output', 'the reviewer did not answer in the expected format', true);
+    if (!out)
+      return fail(elapsed(), 'bad_output', 'the reviewer did not answer in the expected format', true);
     const findings: PrReviewFinding[] = out.findings.map((f) => ({
       ...f,
       anchored: f.line !== null && (anchors.get(f.path)?.has(f.line) ?? false),

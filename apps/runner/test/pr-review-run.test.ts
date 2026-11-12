@@ -214,7 +214,12 @@ describe('AC1: a completed run hands its findings back (and never posts)', () =>
       yield { kind: 'delta', text: 'thinking' } as RuntimeEvent;
       yield {
         kind: 'final',
-        text: answer([f('src/a.ts', 2), f('src/a.ts', 3, 'Second'), f('src/a.ts', 99, 'Off the diff'), f('src/a.ts', null)]),
+        text: answer([
+          f('src/a.ts', 2),
+          f('src/a.ts', 3, 'Second'),
+          f('src/a.ts', 99, 'Off the diff'),
+          f('src/a.ts', null),
+        ]),
       } as RuntimeEvent;
       yield { kind: 'exit', code: 0 } as RuntimeEvent;
     });
@@ -257,7 +262,9 @@ describe('AC1: a completed run hands its findings back (and never posts)', () =>
   });
 
   it('has no posting code: the run result is the only output', async () => {
-    const mod = await import('node:fs').then((m) => m.readFileSync(new URL('../src/review/run.ts', import.meta.url), 'utf8'));
+    const mod = await import('node:fs').then((m) =>
+      m.readFileSync(new URL('../src/review/run.ts', import.meta.url), 'utf8'),
+    );
     expect(mod).not.toMatch(/GitHubReviewPoster|review-poster|fetch\(/);
   });
 });

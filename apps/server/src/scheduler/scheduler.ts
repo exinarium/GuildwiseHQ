@@ -159,7 +159,9 @@ export class Scheduler {
       // PR-only repositories: ask a workstation with the clone for the open pull requests (throttled per repository).
       await pollPrOnlyRepos(this.ctx).catch((err) => this.ctx.log.error({ err }, 'PR-only polling failed'));
       // The first reviewer: runs start on reviewable pull requests (a token is held); lost runs and posts are given up.
-      await dispatchPrReviews(this.ctx).catch((err) => this.ctx.log.error({ err }, 'PR review dispatch failed'));
+      await dispatchPrReviews(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'PR review dispatch failed'),
+      );
       await sweepStalePrReviewRuns(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'PR review sweep failed'),
       );

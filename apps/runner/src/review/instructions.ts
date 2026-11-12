@@ -22,7 +22,11 @@ export function renderReviewerInstructions(): string {
 }
 
 /** The one message of the run: where the diff is, and the title fenced as untrusted text. */
-export function renderReviewerPrompt(input: { diffPath: string; title: string; changedFiles: number }): string {
+export function renderReviewerPrompt(input: {
+  diffPath: string;
+  title: string;
+  changedFiles: number;
+}): string {
   const title = input.title.replace(/[\r\n]+/g, ' ').slice(0, 300);
   return [
     `Review the pull request in the current directory (${input.changedFiles} changed file${input.changedFiles === 1 ? '' : 's'}).`,

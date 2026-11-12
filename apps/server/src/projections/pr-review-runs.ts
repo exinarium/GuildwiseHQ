@@ -11,7 +11,17 @@ export const prReviewRunProjectors: Record<string, Projector> = {
       `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state, timeout_ms, started_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9)
        ON CONFLICT (id) DO NOTHING`,
-      [p.runId, p.prReviewId, p.projectId, p.reviewer, p.runtime, p.model, p.workstationId, p.timeoutMs, p.at],
+      [
+        p.runId,
+        p.prReviewId,
+        p.projectId,
+        p.reviewer,
+        p.runtime,
+        p.model,
+        p.workstationId,
+        p.timeoutMs,
+        p.at,
+      ],
     );
     await exec(tx, 'UPDATE pr_reviews SET last_run_id=$2 WHERE id=$1', [p.prReviewId, p.runId]);
   },

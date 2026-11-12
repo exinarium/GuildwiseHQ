@@ -117,7 +117,10 @@ export class GitHubReviewPoster implements ReviewPoster {
         },
       });
     } catch (err) {
-      throw new ReviewPostError('unreachable', redactSecrets(err instanceof Error ? err.message : String(err)));
+      throw new ReviewPostError(
+        'unreachable',
+        redactSecrets(err instanceof Error ? err.message : String(err)),
+      );
     }
     if (!res.ok) {
       const text = redactSecrets((await res.text().catch(() => '')).slice(0, 300));
@@ -128,7 +131,9 @@ export class GitHubReviewPoster implements ReviewPoster {
       );
     }
     const list = (await res.json().catch(() => [])) as Array<{ body?: string | null; html_url?: string }>;
-    const hit = Array.isArray(list) ? list.find((r) => typeof r.body === 'string' && r.body.includes(marker)) : undefined;
+    const hit = Array.isArray(list)
+      ? list.find((r) => typeof r.body === 'string' && r.body.includes(marker))
+      : undefined;
     return hit ? (hit.html_url ?? '') : null;
   }
 
@@ -145,7 +150,10 @@ export class GitHubReviewPoster implements ReviewPoster {
         body: JSON.stringify(body),
       });
     } catch (err) {
-      throw new ReviewPostError('unreachable', redactSecrets(err instanceof Error ? err.message : String(err)));
+      throw new ReviewPostError(
+        'unreachable',
+        redactSecrets(err instanceof Error ? err.message : String(err)),
+      );
     }
   }
 }

@@ -95,7 +95,8 @@ export class PrReviewCommands {
           try {
             return await hit.forge.changeHeads(hit.repo, String(p.prNumber));
           } catch (err) {
-            if (err instanceof ForgeUnavailableError) throw new Error(`not signed in to the git host: ${err.message}`);
+            if (err instanceof ForgeUnavailableError)
+              throw new Error(`not signed in to the git host: ${err.message}`);
             throw err;
           }
         },
@@ -126,7 +127,10 @@ export class PrReviewCommands {
 }
 
 /** Removes `agents/pr-review-<runId>` folders no live run owns (a crash left them). Returns how many it removed. */
-export async function sweepPrReviewAgents(paths: RunnerPaths, liveRunIds: Iterable<string> = []): Promise<number> {
+export async function sweepPrReviewAgents(
+  paths: RunnerPaths,
+  liveRunIds: Iterable<string> = [],
+): Promise<number> {
   const keep = new Set([...liveRunIds].map((id) => `pr-review-${id}`));
   const root = dirname(paths.agentDir('pr-review-x'));
   let removed = 0;
