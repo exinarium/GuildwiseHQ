@@ -86,7 +86,7 @@ const completed = (findings: unknown[] = [], over = {}) => ({
 const finding = (over = {}) => ({
   path: 'src/a.ts',
   line: 12,
-  severity: 'high',
+  severity: 'high' as const,
   title: 'Null deref',
   body: 'x may be null here',
   anchored: true,

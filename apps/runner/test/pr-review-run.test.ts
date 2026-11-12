@@ -1,13 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  type PrReviewRunPayload,
-  PrReviewRunPayloadSchema,
-  ReviewerRunSpecSchema,
-  type RuntimeEvent,
-} from '@aom/shared';
+import { type PrReviewRunPayload, PrReviewRunPayloadSchema, ReviewerRunSpecSchema } from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ChatStartInput, RuntimeAdapter, RuntimeSession } from '../src/adapters/types.ts';
+import type { ChatStartInput, RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { PrReviewCommands } from '../src/review/pr-review-commands.ts';
 import { ReviewHeadMovedError } from '../src/review/review-checkout.ts';

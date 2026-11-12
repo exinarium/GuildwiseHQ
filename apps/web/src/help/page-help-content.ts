@@ -39,6 +39,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+  '/p/:projectKey/pull-requests': {
+    title: 'Pull requests',
+    article: 'board-and-cards',
+    intro:
+      "The open pull requests of this project's PR-only repositories and what the reviewer did with each. A run that finishes posts its findings together as one review; a run that times out or fails posts nothing and leaves the pull request Not reviewed. Nothing here needs typing.",
+    controls: [
+      {
+        name: 'Reviewed / Not reviewed',
+        text: "Reviewed means the reviewer's comments are on the pull request. Not reviewed means it is waiting, running, timed out or failed; the line under it says which, and shows the error when there is one.",
+      },
+      {
+        name: 'View on GitHub',
+        text: 'Opens the review the reviewer posted.',
+      },
+    ],
+  },
   '/p/:projectKey/board': {
     title: 'Board',
     intro:

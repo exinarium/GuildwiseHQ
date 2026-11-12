@@ -23,7 +23,8 @@
     "apps/web/src/pages/AcceptInvite.tsx",
     "apps/web/src/pages/ChangePasswordRequired.tsx",
     "apps/web/src/pages/SecuritySetup.tsx",
-    "apps/web/src/pages/DeskActionConfirm.tsx"
+    "apps/web/src/pages/DeskActionConfirm.tsx",
+    "apps/web/src/pages/PullRequests.tsx"
   ],
   "videos": {
     "agents": {
