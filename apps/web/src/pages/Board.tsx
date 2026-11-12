@@ -293,7 +293,7 @@ export function Board() {
           )
         }
       />
-      <ProjectTabs projectKey={project.key} active="board" />
+      <ProjectTabs projectKey={project.key} projectId={project.id} active="board" />
       {board.data && <StageStrip columns={board.data.columns} />}
       <ProjectPausedBanner project={project} />
       <UsageLimitBanner limit={project.usageLimit} />

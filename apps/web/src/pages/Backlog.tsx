@@ -263,7 +263,7 @@ export function Backlog() {
         documentTitle={`${project.name} backlog`}
         sub="Wanted work, kept out of development. Nothing here is worked until you send it to the BA."
       />
-      <ProjectTabs projectKey={project.key} active="backlog" />
+      <ProjectTabs projectKey={project.key} projectId={project.id} active="backlog" />
 
       {canManage && (
         <form onSubmit={quickAdd} className="mb-4 flex items-end gap-2" aria-label="Quick add">

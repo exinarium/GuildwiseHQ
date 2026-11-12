@@ -14,6 +14,7 @@ import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
 import { Automations } from './pages/Automations.tsx';
 import { Backlog } from './pages/Backlog.tsx';
+import { PullRequests } from './pages/PullRequests.tsx';
 import { Board } from './pages/Board.tsx';
 import { BoardroomList } from './pages/Boardroom.tsx';
 import { BoardroomSession } from './pages/BoardroomSession.tsx';
@@ -121,6 +122,7 @@ export const routes = [
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/archive', element: <Archive /> },
       { path: '/p/:projectKey/backlog', element: <Backlog /> },
+      { path: '/p/:projectKey/pull-requests', element: <PullRequests /> },
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
