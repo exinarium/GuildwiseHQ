@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  allowedOutcomes,
   type DesignSizing,
   designSizing,
   type InvestigationData,
@@ -18,6 +19,8 @@ import {
   type StoredNeedsSplitProposal,
   storedDesignSizing,
   streamId,
+  type WorkflowCardView,
+  type WorkflowDefinition,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { ceoActive, ceoReachable } from '../ceo/state.ts';
@@ -162,6 +165,7 @@ export async function needsSplitQuestionEvents(
   shiftId: string | undefined,
   sizing: DesignSizing,
   proposal: StoredNeedsSplitProposal,
+  outcomeId?: string,
 ): Promise<AppendInput[]> {
   const open = await one(
     tx,
@@ -207,7 +211,7 @@ export async function needsSplitQuestionEvents(
           dedupLedgerIds: [],
           affectedCardIds: [card.id],
           pinned: true,
-          data: { sizing, proposal, fromStage: card.stage },
+          data: { sizing, proposal, fromStage: card.stage, ...(outcomeId ? { outcomeId } : {}) },
         },
       },
       actor: agentActor(agent.id),
@@ -234,17 +238,25 @@ export async function needsSplitTakenIn(
   card: Row,
   agent: Row,
   proposal: StoredNeedsSplitProposal,
+  outcomeId?: string,
 ): Promise<void> {
   const fresh = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.id])) as Row;
   const refusal = await needsSplitRefusal(tx, fresh);
   if (refusal) {
+    // Already with the BA or waiting for the owner: someone holds the card. Otherwise nobody would pick it up and the
+    // architect would be sent again, so the design is handed on as it stands.
+    const completion =
+      refusal.code === 'needs_split_open'
+        ? []
+        : await designCompletionEvents(tx, fresh, agentActor(agent.id), outcomeId);
     await ctx.store.append(
       [
+        ...completion,
         cardMessage(
           fresh,
           { kind: 'agent', agentId: agent.id },
           'system',
-          `Over budget, but the needs split was not started: ${refusal.message}.`,
+          `Over budget, but the needs split was not started: ${refusal.message}.${completion.length ? ' The design goes on as it stands.' : ''}`,
         ),
       ],
       { tx },
@@ -266,21 +278,42 @@ export async function needsSplitTakenFor(db: Queryable, card: Row): Promise<bool
   return (await needsSplitTaken(db, card)).taken;
 }
 
-/** The design stage completes now: the card goes on to the stage the `handoff` outcome leads to. */
+/**
+ * The outcome that hands the design on: the one the architect's handoff used when it still applies, else the stage's
+ * first applicable success outcome that completes the stage (the design stage of a custom workflow may call it `done`
+ * or anything else). Null when the stage has none.
+ */
+export function designCompletionOutcome(
+  def: Pick<WorkflowDefinition, 'stages'>,
+  card: WorkflowCardView,
+  stageId: string,
+  preferred: string | null | undefined,
+): string | null {
+  const completes = allowedOutcomes(def, card, stageId).filter(
+    (o) => o.kind === 'success' && o.event === 'StageCompleted',
+  );
+  return (completes.find((o) => o.id === preferred) ?? completes[0])?.id ?? null;
+}
+
+/** The design stage completes now: the card goes on to the stage the handoff's outcome (`outcomeId`) leads to. */
 export async function designCompletionEvents(
   tx: Tx,
   card: Row,
   by: AppendInput['actor'],
+  outcomeId?: string | null,
 ): Promise<AppendInput[]> {
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   if (!wf) return [];
-  const resolved = resolveOutcome(wf.definition, workflowView(card), card.stage, 'handoff');
+  const view = workflowView(card);
+  const outcome = designCompletionOutcome(wf.definition, view, card.stage, outcomeId);
+  if (!outcome) return [];
+  const resolved = resolveOutcome(wf.definition, view, card.stage, outcome);
   return [
     {
       streamId: streamId.card(card.id),
       event: {
         type: 'StageCompleted',
-        payload: { cardId: card.id, fromStage: card.stage, toStage: resolved.toStage, outcome: 'handoff' },
+        payload: { cardId: card.id, fromStage: card.stage, toStage: resolved.toStage, outcome },
       },
       actor: by,
       scope: projectScope(card.org_id, card.project_id),
@@ -309,7 +342,11 @@ export async function needsSplitQuestionAnswered(
     optionId === NEEDS_SPLIT_QUESTION_OPTIONS.split
       ? NEEDS_SPLIT_QUESTION_OPTIONS.split
       : NEEDS_SPLIT_QUESTION_OPTIONS.build;
-  const data = (item.data ?? {}) as { proposal?: StoredNeedsSplitProposal; fromStage?: string };
+  const data = (item.data ?? {}) as {
+    proposal?: StoredNeedsSplitProposal;
+    fromStage?: string;
+    outcomeId?: string;
+  };
   const note = (body: string) => ctx.store.append([cardMessage(card, author, 'comment', body)], { tx });
   if (['done', 'cancelled'].includes(card.status)) {
     await note(`The needs-split answer ("${choice}") was not carried out: ${card.ref} is ${card.status}.`);
@@ -335,9 +372,16 @@ export async function needsSplitQuestionAnswered(
     return;
   }
   const fresh = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.id])) as Row;
+  const completion = await designCompletionEvents(tx, fresh, by.actor, data.outcomeId);
+  if (!completion.length) {
+    await note(
+      `The needs-split answer ("${choice}") was not carried out: ${card.ref}'s design step has no outcome that hands the design on.`,
+    );
+    return;
+  }
   await ctx.store.append(
     [
-      ...(await designCompletionEvents(tx, fresh, by.actor)),
+      ...completion,
       cardMessage(
         fresh,
         author,

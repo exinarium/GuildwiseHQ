@@ -167,7 +167,6 @@ const indent = (text: string, pad: string): string =>
     .map((l) => pad + l)
     .join('\n');
 
-/** Investigate & design: where the architect writes, what was recorded, the investigation-only note for the BA. */
 /** The architect's size estimate at design time: one line, from the project's size settings. */
 export function designSizeLine(s: NonNullable<NonNullable<ShiftBrief['investigation']>['sizing']>): string {
   if (!s.unit)
@@ -177,6 +176,7 @@ export function designSizeLine(s: NonNullable<NonNullable<ShiftBrief['investigat
   return `- Size: estimate this change in ${words} and add \`--size <n>\` and \`--path "<folder or file>"\` (repeat; name the most specific folders or files) to \`aom design\`. The budget is ${budget}. Over budget, also name at least 2 split seams with \`--seam "<title>: <folder>, <folder>"\`: the needs-split question is then raised in your name. A declared \`--risk low|medium|high\` can only raise the risk class from the path-to-risk map.${s.riskStatus ? ` Risk class ${s.riskStatus}.` : ''}`;
 }
 
+/** Investigate & design: where the architect writes, what was recorded, the investigation-only note for the BA. */
 function investigationContext(brief: ShiftBrief): string {
   const inv = brief.investigation;
   if (!inv) return '';

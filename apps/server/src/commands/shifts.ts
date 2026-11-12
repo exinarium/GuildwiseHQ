@@ -735,6 +735,7 @@ export async function applyShiftReport(
                 shift.id,
                 designSize.sizing,
                 designSize.proposal,
+                outcome.id,
               )),
             );
           }
@@ -867,7 +868,7 @@ export async function applyShiftReport(
     ],
     { tx },
   );
-  if (splitTaken) await needsSplitTakenIn(ctx, tx, card, agent, splitTaken);
+  if (splitTaken) await needsSplitTakenIn(ctx, tx, card, agent, splitTaken, outcome.id);
   // A stage that ran against the project's environment is over: stop it (kept for a while after a failure).
   if ((await stageEnvironmentOf(tx, card)) === 'project') {
     const nudge = await endTestEnvironmentIn(ctx, tx, card, outcome.kind === 'failure');
