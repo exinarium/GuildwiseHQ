@@ -460,6 +460,18 @@ export const ShiftBriefSchema = z.object({
           }),
         )
         .optional(),
+      /** The project's size settings for the design-time size estimate (absent from older servers). */
+      sizing: z
+        .object({
+          unit: z.string().nullable(),
+          budget: z.number().nullable(),
+          riskMapSet: z.boolean(),
+          /** Why the size verdict is inactive (no budget or unit), else null. */
+          sizeStatus: z.string().nullable(),
+          /** Why the risk class is inactive (no path-to-risk map), else null. */
+          riskStatus: z.string().nullable(),
+        })
+        .optional(),
       /** The report that was recorded by the investigate stage (later stages read it). */
       report: z
         .object({

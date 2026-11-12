@@ -18,6 +18,7 @@ import {
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { AccountKeySchema } from '../claude/accounts.ts';
+import { StoredDesignSizingSchema } from '../projects/size-verdict.ts';
 import { defineEvent, Id, Note, Stage } from './define.ts';
 
 const Fields = z.record(z.string(), z.unknown());
@@ -528,6 +529,11 @@ export const cardEvents = [
     'DesignHeld',
     z.object({ cardId: Id, dependencies: z.array(z.string()), agentId: Id.optional() }),
   ),
+  /**
+   * The size estimate, the size verdict and the risk class of a design, recorded with the design report (every design
+   * handoff, also a confirmed one). Lenient: the verdict is computed by the server against the project's settings.
+   */
+  defineEvent('DesignSized', z.object({ cardId: Id, sizing: StoredDesignSizingSchema })),
   /**
    * Repair (boot data migration `design-held-status-2026-10`): a card whose design is held but whose projected status
    * still says `queued` (held before the `held` status existed) takes the `held` status. Idempotent in the projection.

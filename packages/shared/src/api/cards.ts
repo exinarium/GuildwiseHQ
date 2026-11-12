@@ -16,6 +16,7 @@ import {
 import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';
+import { StoredDesignSizingSchema } from '../projects/size-verdict.ts';
 import { CardApprovalSchema } from './approval.ts';
 import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
@@ -100,6 +101,8 @@ export const CardDtoSchema = z.object({
       /** The file on the card branch's forge page when the remote is a known forge (else null). */
       url: z.string().nullable(),
       at: IsoTime,
+      /** The design's size estimate, size verdict and risk class (null: none recorded). */
+      sizing: StoredDesignSizingSchema.nullable().optional(),
     })
     .nullable()
     .optional(),

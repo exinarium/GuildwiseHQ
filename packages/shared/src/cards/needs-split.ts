@@ -98,6 +98,15 @@ export type NeedsSplitReason = z.infer<typeof NeedsSplitReason>;
 export const NEEDS_SPLIT_DESK_SUBKIND = 'needs_split_decision';
 export const NEEDS_SPLIT_OPTIONS = { continue: 'continue', baAgain: 'ba_again', cancel: 'cancel' } as const;
 
+/**
+ * The architect's needs-split question on a design over the size budget (the first time): the CEO holds it first, then
+ * the owner. `split` sends the card back to the BA (the transition above), `build` keeps the design and goes on.
+ */
+export const NEEDS_SPLIT_QUESTION_SUBKIND = 'needs_split_question';
+export const NEEDS_SPLIT_QUESTION_OPTIONS = { split: 'split', build: 'build' } as const;
+/** Runners from this version send the size estimate with `aom design` (`--size`, `--path`, `--risk`, `--seam`). */
+export const MIN_RUNNER_FOR_DESIGN_SIZE = '0.1.75';
+
 export const NEEDS_SPLIT_REASON_TEXT: Record<NeedsSplitReason, string> = {
   first: 'over budget: back to the BA to split (the one return this card gets)',
   second_time: 'over budget again after it already went back to the BA once',

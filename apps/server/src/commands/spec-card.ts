@@ -416,7 +416,7 @@ const PARENT_LINK_ORIGINS = new Set(['test_failure', 'full_suite', 'regression',
  * Who the children belong to: the card's owner, or the project owner when the owner has left the project (the children
  * are created through the owner's project access, which a former member no longer has).
  */
-async function splitOwner(tx: Tx, card: Row): Promise<AuthSession['user']> {
+export async function splitOwner(tx: Tx, card: Row): Promise<AuthSession['user']> {
   const member = await one(
     tx,
     `SELECT 1 AS x FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,

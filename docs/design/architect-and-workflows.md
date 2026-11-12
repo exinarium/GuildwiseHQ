@@ -151,6 +151,15 @@ The server refuses `finalized` on an investigation-only card until step 2 happen
 
 BA intake instructions also gain: when to set `designNeeded` (default from the project; switch off for trivial, well-located changes), when to create an investigation-only card (comparisons, "how should we", spikes), `reportPath` when the manager names a place.
 
+### 3.6 Size estimate and size verdict at design time
+
+- **Data**: `aom design` and `aom design revise` take `--size <n>` (the estimate in the project's size unit), `--path "<folder or file>"` (repeatable), `--risk low|medium|high` (declared, only raises) and `--seam "[repo] <title>: <folder>, <folder>"` (repeatable). They travel as `InvestigationData.size`. The server computes `designSizing` (`packages/shared/src/projects/size-verdict.ts`) and records it with `DesignSized` in `cards.investigation.sizing`, right after `InvestigationReported`; the card's Design report panel shows it.
+- **Verdict**: over budget when the estimate is above the budget (equal is within). No budget: no verdict and the card line `no size budget set`. The risk class comes from the path-to-risk map over the named paths plus the paths in the card's Affected areas; without a map it is inactive.
+- **Required**: when the project has a size unit and the runner is at least `MIN_RUNNER_FOR_DESIGN_SIZE` (0.1.75), a design without `--size` and a `--path` is refused. Investigation-only cards get no sizing.
+- **Held and confirmed designs**: a held design records the sizing and raises nothing; `aom design confirm` recomputes the stored estimate against the current settings.
+- **Over budget** (`commands/design-size.ts`): an over-budget design needs a proposal that passes `NeedsSplitProposalSchema` (2 to 8 seams, folders only), else it is refused. The card does not complete Design. First time: the architect's blocking question `needs_split_question` (the CEO hold when the CEO can look, else the owner's desk); `split` calls `requestNeedsSplitIn` (back to the BA once), `build` completes the design stage. A card that already went to the BA once goes straight to GWP-208's owner item `needs_split_decision`. After the owner kept the card as one (`needs_split.state = continued`) nothing is asked again. A dismissed question runs nothing: the card goes back to the design queue.
+- **Within budget** goes on as before, whatever the risk class.
+
 ## 4. More than one workflow per project; variants (#10)
 
 ### 4.1 Data model (migration `1650_project_workflows.sql`)
