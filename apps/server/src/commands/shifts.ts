@@ -59,10 +59,10 @@ import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { checkBriefNote } from './brief-check.ts';
 import { cardView, workflowView } from './cards.ts';
-import { decideDesignGate, designGateMessage } from './design-gate.ts';
 import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { decideDesignGate, designGateMessage } from './design-gate.ts';
 import {
   checkedProposal,
   designModeOf,
@@ -730,7 +730,12 @@ export async function applyShiftReport(
           workflowHasDesignGate(wf.definition)
         ) {
           const gate = await decideDesignGate(tx, card, inv.summary ?? card.investigation?.summary);
-          resolved = resolveOutcome(wf.definition, { ...workflowCard, designGate: gate.required }, card.stage, outcome.id);
+          resolved = resolveOutcome(
+            wf.definition,
+            { ...workflowCard, designGate: gate.required },
+            card.stage,
+            outcome.id,
+          );
           if (resolved.toStage === DESIGN_GATE_STAGE) {
             // The owner's approval at the gate does not check Build's fields: check them now.
             const build = getStage(wf.definition, 'build');

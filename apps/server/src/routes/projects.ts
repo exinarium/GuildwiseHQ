@@ -296,7 +296,13 @@ export function projectRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SetDesignGateRequestSchema } },
       async (req) => {
         const a = await requireOrg(ctx, req);
-        await setProjectDesignGate(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id, req.body.on);
+        await setProjectDesignGate(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.on,
+        );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
     );

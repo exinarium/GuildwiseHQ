@@ -19,7 +19,11 @@ describe('code v7: the design gate stage', () => {
     expect(validateWorkflow(codeWorkflowV7, BUILTIN_ROLES)).toEqual([]);
     const ids = codeWorkflowV7.stages.map((s) => s.id);
     const v6 = codeWorkflowV6.stages.map((s) => s.id);
-    expect(ids).toEqual([...v6.slice(0, v6.indexOf('investigate') + 1), DESIGN_GATE_STAGE, ...v6.slice(v6.indexOf('build'))]);
+    expect(ids).toEqual([
+      ...v6.slice(0, v6.indexOf('investigate') + 1),
+      DESIGN_GATE_STAGE,
+      ...v6.slice(v6.indexOf('build')),
+    ]);
     const gate = codeWorkflowV7.stages.find((s) => s.id === DESIGN_GATE_STAGE);
     expect(gate).toMatchObject({
       kind: 'human',
@@ -35,20 +39,23 @@ describe('code v7: the design gate stage', () => {
 
   it('design hand-off goes to Build with the gate off and to the gate with it on; approve -> build, return -> investigate', () => {
     const card = { investigationOnly: false, designNeeded: true };
-    expect(resolveOutcome(codeWorkflowV7, { ...card, designGate: false }, 'investigate', 'handoff').toStage).toBe('build');
+    expect(
+      resolveOutcome(codeWorkflowV7, { ...card, designGate: false }, 'investigate', 'handoff').toStage,
+    ).toBe('build');
     expect(resolveOutcome(codeWorkflowV7, card, 'investigate', 'handoff').toStage).toBe('build');
-    expect(resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, 'investigate', 'handoff').toStage).toBe(
-      DESIGN_GATE_STAGE,
-    );
-    expect(resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, DESIGN_GATE_STAGE, 'approve').toStage).toBe(
-      'build',
-    );
-    expect(resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, DESIGN_GATE_STAGE, 'send_back').toStage).toBe(
-      'investigate',
-    );
+    expect(
+      resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, 'investigate', 'handoff').toStage,
+    ).toBe(DESIGN_GATE_STAGE);
+    expect(
+      resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, DESIGN_GATE_STAGE, 'approve').toStage,
+    ).toBe('build');
+    expect(
+      resolveOutcome(codeWorkflowV7, { ...card, designGate: true }, DESIGN_GATE_STAGE, 'send_back').toStage,
+    ).toBe('investigate');
     // investigation-only cards still report to finalize
     expect(
-      resolveOutcome(codeWorkflowV7, { investigationOnly: true, designNeeded: true }, 'investigate', 'report').toStage,
+      resolveOutcome(codeWorkflowV7, { investigationOnly: true, designNeeded: true }, 'investigate', 'report')
+        .toStage,
     ).toBe('finalize');
   });
 });
@@ -56,7 +63,9 @@ describe('code v7: the design gate stage', () => {
 describe('pathsInText', () => {
   it('finds path tokens and skips URLs and plain words', () => {
     expect(
-      pathsInText('Touches apps/server/src/db/pool.ts, packages/shared/src/orgs/ and docs/USER-GUIDE.md. See https://x.io/a/b'),
+      pathsInText(
+        'Touches apps/server/src/db/pool.ts, packages/shared/src/orgs/ and docs/USER-GUIDE.md. See https://x.io/a/b',
+      ),
     ).toEqual(['apps/server/src/db/pool.ts', 'packages/shared/src/orgs/', 'docs/USER-GUIDE.md']);
     expect(pathsInText('apps/server/src/db/** and ./apps/web')).toEqual(['apps/server/src/db/', 'apps/web']);
     expect(pathsInText('no paths here, 1/2')).toEqual([]);
@@ -78,7 +87,8 @@ describe('designRiskPaths', () => {
     expect(designRiskPaths({ cardBrief: 'apps/web/src/billing/' })).toEqual(['apps/web/src/billing']);
     expect(
       designRiskPaths({
-        affectedAreas: 'apps/web/src/components/Panel.tsx, docs/auth/guide.md, apps/server/test/auth/x.test.ts',
+        affectedAreas:
+          'apps/web/src/components/Panel.tsx, docs/auth/guide.md, apps/server/test/auth/x.test.ts',
       }),
     ).toEqual([]);
   });
@@ -87,9 +97,9 @@ describe('designRiskPaths', () => {
     expect(
       designRiskPaths({ affectedAreas: 'apps/server/src/db', designSummary: 'apps/server/src/db/ again' }),
     ).toEqual(['apps/server/src/db']);
-    expect(designRiskPaths({ affectedAreas: 'apps/web/src/x.ts' }, (p) => p.startsWith('apps/web/'))).toEqual([
-      'apps/web/src/x.ts',
-    ]);
+    expect(designRiskPaths({ affectedAreas: 'apps/web/src/x.ts' }, (p) => p.startsWith('apps/web/'))).toEqual(
+      ['apps/web/src/x.ts'],
+    );
   });
 });
 
@@ -107,7 +117,9 @@ describe('designGateDecision', () => {
       required: true,
       reason: 'card',
     });
-    expect(designGateDecision({ projectGate: false, cardGate: false, highRiskPaths: ['apps/server/src/db'] })).toEqual({
+    expect(
+      designGateDecision({ projectGate: false, cardGate: false, highRiskPaths: ['apps/server/src/db'] }),
+    ).toEqual({
       required: true,
       reason: 'high_risk',
     });

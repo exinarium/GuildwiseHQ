@@ -44,7 +44,8 @@ export async function setProjectDesignGate(
     if ((p.design_gate === true) === on) return;
     if (on) {
       const wf = await resolveWorkflow(tx, p.org_id, p.workflow_key, p.id);
-      if (!wf || !workflowHasDesignGate(wf.definition)) throw conflict('design_gate_not_supported', NOT_SUPPORTED);
+      if (!wf || !workflowHasDesignGate(wf.definition))
+        throw conflict('design_gate_not_supported', NOT_SUPPORTED);
     }
     await ctx.store.append(
       [
@@ -119,7 +120,8 @@ export async function setCardDesignGate(
     const scope = projectScope(card.org_id, card.project_id);
     const actor = userActor(user.id);
     const moveNow = on && card.stage === 'build' && card.status === 'queued' && !card.claim_id;
-    if ((card.design_gate_card === true) === on && !moveNow) return { cardId: card.id as string, moveNow: false };
+    if ((card.design_gate_card === true) === on && !moveNow)
+      return { cardId: card.id as string, moveNow: false };
     await ctx.store.append(
       [
         {
@@ -178,7 +180,11 @@ export interface DesignGateOutcome {
 }
 
 /** The decision at the design hand-off: high-risk paths of the design, the card switch, the project setting. */
-export async function decideDesignGate(tx: Tx, card: Row, designSummary: string | null | undefined): Promise<DesignGateOutcome> {
+export async function decideDesignGate(
+  tx: Tx,
+  card: Row,
+  designSummary: string | null | undefined,
+): Promise<DesignGateOutcome> {
   const project = await one(tx, 'SELECT design_gate FROM projects WHERE id=$1', [card.project_id]);
   const planning = await one<{ note: string }>(
     tx,

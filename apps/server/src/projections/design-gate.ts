@@ -13,7 +13,11 @@ export const designGateProjectors: Record<string, Projector> = {
 
   CardDesignGateSet: async (tx, e) => {
     const p = ev<'CardDesignGateSet'>(e).payload;
-    await exec(tx, 'UPDATE cards SET design_gate_card=$2, updated_at=$3 WHERE id=$1', [p.cardId, p.on, e.createdAt]);
+    await exec(tx, 'UPDATE cards SET design_gate_card=$2, updated_at=$3 WHERE id=$1', [
+      p.cardId,
+      p.on,
+      e.createdAt,
+    ]);
   },
 
   DesignGateDecided: async (tx, e) => {

@@ -18,7 +18,6 @@ import { requireOrg, requireUser } from '../auth/guards.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { handleMentions } from '../commands/agent-mentions.ts';
 import { sendCardToBa } from '../commands/ba-intake.ts';
-import { setCardDesignGate } from '../commands/design-gate.ts';
 import {
   cancelCard,
   commentOnCard,
@@ -30,6 +29,7 @@ import {
   reopenCard,
   specifyCard,
 } from '../commands/cards.ts';
+import { setCardDesignGate } from '../commands/design-gate.ts';
 import { confirmNeedsSplit } from '../commands/needs-split.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one } from '../db/sql.ts';

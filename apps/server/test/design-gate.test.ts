@@ -67,7 +67,10 @@ describe('design gate (code v7)', () => {
 
   it('AC2: switching the gate on for a card without a design report is refused with the reason', async () => {
     await team();
-    const card = await w.card({ title: 'No design yet', fields: fullFields({ affectedAreas: 'apps/web/src/' }) });
+    const card = await w.card({
+      title: 'No design yet',
+      fields: fullFields({ affectedAreas: 'apps/web/src/' }),
+    });
     const refused = await w.t.req('PUT', `/api/cards/${card.id}/design-gate`, {
       cookie: w.owner.cookie,
       body: { on: true },
@@ -109,15 +112,23 @@ describe('design gate (code v7)', () => {
   it('AC3: with the project gate on the card waits at the design gate and the desk item carries the design report', async () => {
     await team();
     await call('PUT', `/api/projects/${w.projectId}/design-gate`, { on: true });
-    expect((await q('SELECT design_gate FROM projects WHERE id=$1', [w.projectId]))[0]!.design_gate).toBe(true);
+    expect((await q('SELECT design_gate FROM projects WHERE id=$1', [w.projectId]))[0]!.design_gate).toBe(
+      true,
+    );
     const { card, res } = await designedCard();
     expect(JSON.stringify(res.res)).toContain('design gate');
     await sweep();
     const row = await cardRow(card.id);
-    expect(row).toMatchObject({ stage: 'design_gate', design_gate_required: true, design_gate_reason: 'project' });
+    expect(row).toMatchObject({
+      stage: 'design_gate',
+      design_gate_required: true,
+      design_gate_reason: 'project',
+    });
     expect(row.approval).toMatchObject({ state: 'open', stageId: 'design_gate' });
     expect(row.approval.sha ?? null).toBeNull();
-    const desk = await q(`SELECT doing, data FROM desk_items WHERE card_id=$1 AND subkind='approval_step'`, [card.id]);
+    const desk = await q(`SELECT doing, data FROM desk_items WHERE card_id=$1 AND subkind='approval_step'`, [
+      card.id,
+    ]);
     expect(desk).toHaveLength(1);
     expect(desk[0]!.doing).toContain(`docs/investigations/${card.ref}-report.md`);
     expect(desk[0]!.data.design).toMatchObject({
@@ -162,7 +173,11 @@ describe('design gate (code v7)', () => {
     const { card } = await designedCard('apps/server/src/db/pool.ts and apps/web/src/');
     await sweep();
     const row = await cardRow(card.id);
-    expect(row).toMatchObject({ stage: 'design_gate', design_gate_required: true, design_gate_reason: 'high_risk' });
+    expect(row).toMatchObject({
+      stage: 'design_gate',
+      design_gate_required: true,
+      design_gate_reason: 'high_risk',
+    });
     expect(row.design_gate_paths).toEqual(['apps/server/src/db/pool.ts']);
     expect(row.stage).not.toBe('spec');
     const notes = await q('SELECT body FROM thread_messages WHERE thread_id=$1', [card.id]);

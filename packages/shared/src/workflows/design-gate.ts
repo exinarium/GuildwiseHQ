@@ -34,7 +34,10 @@ export function pathsInText(text: string | null | undefined): string[] {
     let token = m[0].replace(/[.,:;)]+$/, '');
     // A URL is not a repository path.
     if (m.index > 0 && text.charAt(m.index - 1) === '/') continue;
-    token = token.replace(/^\.\/+/, '').replace(/\/\*\*?$/, '/').replace(/\*+/g, 'x');
+    token = token
+      .replace(/^\.\/+/, '')
+      .replace(/\/\*\*?$/, '/')
+      .replace(/\*+/g, 'x');
     if (!token.includes('/') || token.startsWith('/')) continue;
     if (!/[A-Za-z]/.test(token)) continue;
     if (!seen.has(token)) {
@@ -72,7 +75,12 @@ export function designRiskPaths(
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const text of [sources.affectedAreas, sources.planningNote, sources.designSummary, sources.cardBrief]) {
+  for (const text of [
+    sources.affectedAreas,
+    sources.planningNote,
+    sources.designSummary,
+    sources.cardBrief,
+  ]) {
     for (const token of pathsInText(text)) {
       const key = token.replace(/\/+$/, '');
       if (seen.has(key)) continue;
