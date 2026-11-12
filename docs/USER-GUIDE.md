@@ -596,8 +596,19 @@ A repository can be reviewed instead of built: its open pull requests are record
 - **What you see:** under the switch, the number of pull requests waiting for review and the time of the last check, or why nothing could be read (no workstation has a clone, the runner needs an update, the git host is not supported yet, the workstation is not signed in to the git host, or the list could not be read).
 - **Git hosts:** this works for GitHub for now.
 - **Reviewer token:** reviews need a comment-only reviewer token on a workstation that has the clone (DevOps sets it with `guildwise-runner reviewer-token set`). Until one is set, the repository shows **Reviewer token missing** under the switch and no review runs; the token itself is never entered in the browser or stored on the server.
-- **Reviews:** the reviewer runs that review these pull requests come in a later release. For now the pull requests are only recorded.
+- **Reviews:** see "PR-only reviews" below. The **Pull requests** tab of the project shows each pull request and what happened to its review.
 - **Turning it off** stops new pull requests being recorded or queued for review. When you turn it on again, only pull requests opened from then on are picked up.
+
+#### PR-only reviews
+
+Once a PR-only repository has a reviewer token (see above), each recorded pull request gets one automatic review.
+
+- **Who reviews:** a reviewer run on a workstation that has the clone and the token. It uses the Sonnet model and reads a read-only copy of the pull request; it cannot change the repository.
+- **Time limit:** a run stops after 10 minutes.
+- **When comments appear:** only when the run has finished. The findings are posted together as one review, so you never see half a review.
+- **Reviewed:** the pull request shows **Reviewed** with the time, the reviewer, how long the run took and how many comments were posted, with a link to the review on GitHub.
+- **Not reviewed:** if the run times out or fails, nothing is posted and the pull request stays **Not reviewed**. The **Pull requests** tab says which it was, and shows the error when there is one. A timed-out or failed review is not retried by itself and sends nothing back to anyone; a failure that looks temporary (a sign-in that expired, a usage limit) is tried again later, at most three times.
+- **Where to look:** **Pull requests** next to **Board** and **Backlog** in the project. It appears when a repository of the project is PR-only.
 
 ### 4.4 Agents, hiring and allow-lists
 
