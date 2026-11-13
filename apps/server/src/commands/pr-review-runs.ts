@@ -505,6 +505,17 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
 
 // ---- what the owner sees ---------------------------------------------------------------------------------------
 
+/** Blind marking: the reviewer is withheld while the pull request has posted findings the owner has not marked. */
+function blindReviewer(l: Record<string, unknown>) {
+  const unmarkedCount = Number(l.unmarked_count ?? 0);
+  const reviewersHidden = unmarkedCount > 0;
+  return {
+    reviewer: reviewersHidden ? null : ((l.reviewed_by as 'first' | null) ?? null),
+    reviewersHidden,
+    unmarkedCount,
+  };
+}
+
 /** The recorded pull requests of a project's live repositories with their latest run, open ones first. */
 export async function listPrReviews(db: Queryable, projectId: string): Promise<PrReviewDto[]> {
   const list = await rows(
@@ -515,7 +526,10 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
             run.error_code, run.review_url,
             (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count,
             (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id) AS findings_count,
-            run.held_back_count, run.findings_cap, run.changed_lines
+            run.held_back_count, run.findings_cap, run.changed_lines,
+            (SELECT count(*)::int FROM pr_review_findings f
+               LEFT JOIN pr_review_finding_marks m ON m.finding_id = f.id
+              WHERE f.pr_review_id = pr.id AND f.posted AND m.finding_id IS NULL) AS unmarked_count
        FROM pr_reviews pr
        JOIN project_repos r ON r.id = pr.project_repo_id AND r.removed_at IS NULL
        LEFT JOIN pr_review_runs run ON run.id = (
@@ -528,6 +542,7 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
   const tokens = await reviewerTokenStates(db, [...new Set(list.map((l) => l.project_repo_id as string))]);
   const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
   return list.map((l) => ({
+    ...blindReviewer(l),
     id: l.id as string,
     repoId: l.project_repo_id as string,
     repoName: l.name as string,
@@ -538,7 +553,6 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
     openedAt: iso(l.opened_at) as string,
     state: l.review_state as 'not_reviewed' | 'reviewed',
     reviewedAt: iso(l.reviewed_at),
-    reviewer: (l.reviewed_by as 'first' | null) ?? null,
     reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
     lastRun: l.run_state
       ? {

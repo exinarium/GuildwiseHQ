@@ -194,7 +194,11 @@ export const PrReviewDtoSchema = z.object({
   openedAt: z.string(),
   state: PrReviewStateSchema,
   reviewedAt: z.string().nullable(),
+  /** Null while `reviewersHidden` (blind marking). */
   reviewer: PrReviewerSchema.nullable(),
+  /** True while the pull request has posted findings the owner has not marked: the reviewer is not shown. */
+  reviewersHidden: z.boolean().optional(),
+  unmarkedCount: z.number().optional(),
   /** `missing`: the repository's workstation holds no comment-only token, so no run starts. */
   reviewerToken: z.enum(['present', 'missing']).nullable(),
   lastRun: z
