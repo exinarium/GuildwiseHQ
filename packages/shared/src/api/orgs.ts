@@ -66,7 +66,7 @@ export const ActiveOrgSchema = z.object({
   banners: z.array(BannerSchema),
   /**
    * Owner only: the organization is paused for a billing reason the Owner fixes with a card, so the app shows one full-page
-   * screen instead of the product. `setup`: a new sign-up that has not saved its card yet (starts the 7-day trial);
+   * screen instead of the product. `setup`: a new sign-up that has not saved its card yet;
    * `resubscribe`: paused after a failed payment (`payment_failed`) or a cancellation (`cancelled`).
    */
   gate: z

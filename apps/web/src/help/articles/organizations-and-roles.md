@@ -11,7 +11,7 @@ An organization is your workspace: it owns your projects, agents, the board, the
 
 Each role has different permissions. Here is what each can do:
 
-- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, reset an Admin's password or a member's two-factor login, manage [billing](/help/billing-and-plans), and hand ownership to an Admin. There is exactly one Owner per organization.
+- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, reset an Admin's password or a member's two-factor login, manage billing where a hosting service provides it, and hand ownership to an Admin. There is exactly one Owner per organization.
 - **Admin**: Create projects, invite Members and remove them, manage vaults, design roles and workflows, hire and fire any agent, set budgets, and see the plan and limits. Admins can also give a Member a temporary password (see below). Admins cannot invite Admins, change roles, reset another Admin's password or change the organization's security settings.
 - **Member**: Work in the projects they were added to: create cards, hire agents onto their own workstations for those projects, and answer the desk items they are allowed to (by default only on cards they own).
 - **Guest**: Not a member. Has access to one or more projects that were shared with them. Guests see nothing at organization level.
@@ -39,7 +39,7 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 
 Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way; they use **Forgot your password?** on the sign-in page. Their account is one account for every organization, so the new password applies in their other organizations too.
 
-The Owner can change an Admin or Member's role from the role selector on their row. On a hosted service your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Billing](/help/billing-and-plans#plans)).
+The Owner can change an Admin or Member's role from the role selector on their row. On a hosted service your plan may limit how many members you can have; the **Plan & limits** tab shows it.
 
 ## Removing a member: offboarding {#offboarding}
 
@@ -71,7 +71,7 @@ The **Guests** tab under **Organization** shows who from other organizations has
 
 A platform administrator can suspend your organization. Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
 
-Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. An organization that is paused because of billing shows a banner with a link to the Billing page: see [Billing](/help/billing-and-plans#failed-payments).
+Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. On a hosted service, an organization paused because of billing shows a banner that says what to do.
 
 ## Platform area {#platform-area}
 

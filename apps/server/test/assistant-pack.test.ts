@@ -9,7 +9,7 @@ import {
   parseArticle,
   TOPICS_DIR,
 } from '../src/assistant/pack-builder.ts';
-import { SYSTEM_RULES } from '../src/assistant/prompt.ts';
+import { COST_ANSWER, publicSystemText, SYSTEM_RULES } from '../src/assistant/prompt.ts';
 import {
   approxTokens,
   fitChunk,
@@ -38,7 +38,7 @@ describe('the assistant knowledge, split by topic', () => {
     expect(all).not.toMatch(/advanced training|paid training/i);
     expect(all).toMatch(/customization and setup support/i);
     expect(all).not.toMatch(/unlimited plan/i);
-    expect(all).toContain('from $5');
+    expect(all).not.toContain('from $5');
   });
 
   it('keeps the repository address out of the facts until the source is public', () => {
@@ -72,7 +72,7 @@ describe('the assistant knowledge, split by topic', () => {
   it('carries the curated facts and an index line for every help article, and no private company name', () => {
     const index = buildIndexPack();
     expect(index).toContain('<product_facts>');
-    expect(index).toContain('Guildwise Cloud: $30 per organization per month');
+    expect(index).toContain('## Cost (say only this)');
     expect(index).not.toMatch(/Starter|Business plan|\$149|\$19\b/);
     expect(index).not.toMatch(/Unlimited plan/i);
     expect(index).toContain('<help_topics>');
@@ -84,7 +84,7 @@ describe('the assistant knowledge, split by topic', () => {
 
   it('keeps every chunk small enough to attach: no topic is more than a quarter of the per-request budget alone', () => {
     const sizes = loadTopics().map((t) => approxTokens(t.text));
-    expect(loadTopics()).toHaveLength(41);
+    expect(loadTopics()).toHaveLength(40);
     expect(Math.max(...sizes)).toBeLessThan(TOPIC_LIMITS.budgetTokens / 2);
     expect(sizes.reduce((a, b) => a + b, 0)).toBeGreaterThan(8000); // the whole help centre is still here, just not sent every time
   });
@@ -167,10 +167,10 @@ describe('choosing the topics of a question', () => {
 
   it('keeps a follow-up on its topic through the earlier question, at half weight', () => {
     const history = [
-      { role: 'user' as const, content: 'How does billing work?' },
-      { role: 'assistant' as const, content: 'There are plans.' },
+      { role: 'user' as const, content: 'How does two-factor login work?' },
+      { role: 'assistant' as const, content: 'You use an authenticator app.' },
     ];
-    expect(ask('And what about invoices?', undefined, history)).toContain('billing-and-plans');
+    expect(ask('And what about recovery codes?', undefined, history)).toContain('two-factor');
     expect(ask('And what about invoices?')).not.toContain('desk');
   });
 
@@ -185,5 +185,43 @@ describe('choosing the topics of a question', () => {
     const block = relevantHelpBlock(selectTopics([{ role: 'user', content: 'What is the decision desk?' }]));
     expect(block?.startsWith('<relevant_help>\n### Your desk')).toBe(true);
     expect(block?.endsWith('</relevant_help>')).toBe(true);
+  });
+});
+
+describe('the assistant says Guildwise HQ is free and nothing else about money', () => {
+  const chunks = () => loadTopics().map((t) => t.text);
+
+  it('gives the cost answer in the system text', () => {
+    expect(publicSystemText()).toContain(COST_ANSWER);
+    expect(publicSystemText()).toContain('fair use');
+    expect(COST_ANSWER).toMatch(/donations through Ko-fi or GitHub Sponsors help cover running costs/);
+  });
+
+  it('carries no prices, trial, tax, payment provider or commercial license in the rules, the facts or any topic', () => {
+    const banned = [
+      /\$\d/,
+      /\bVAT\b/,
+      /\btrials?\b/i,
+      /commercial licen[cs]e/i,
+      /Paystack/i,
+      /per (additional )?member/i,
+      /US dollars/i,
+    ];
+    for (const text of [publicSystemText(), ...chunks()])
+      for (const re of banned) expect(text).not.toMatch(re);
+  });
+
+  it('names no seats, plans or billing periods in the rules or the pricing topic', () => {
+    const pricing = loadTopics().find((t) => t.slug === 'pricing')?.text ?? '';
+    expect(pricing).toContain('fair use');
+    for (const text of [SYSTEM_RULES, pricing]) {
+      expect(text).not.toMatch(/\bseats?\b/i);
+      expect(text).not.toMatch(/\b(Starter|Team|Business|Unlimited|Founding) plan\b/i);
+      expect(text).not.toMatch(/\bper (organization|month|year)\b/i);
+    }
+  });
+
+  it('has no billing-and-plans topic any more', () => {
+    expect(loadTopics().map((t) => t.slug)).not.toContain('billing-and-plans');
   });
 });

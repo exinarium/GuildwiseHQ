@@ -306,8 +306,7 @@ const PLATFORM_STEPS: TourStep[] = [
     id: 'platform-billing',
     target: 'platform-nav-billing',
     title: 'Billing',
-    body: 'The plan prices of the hosting service, VAT and the exchange rate. Every change needs a reason and is audited.',
-    more: 'billing-and-plans#platform',
+    body: "The hosting service's plans and billing settings. Every change needs a reason and is audited.",
   },
   {
     id: 'platform-support',
