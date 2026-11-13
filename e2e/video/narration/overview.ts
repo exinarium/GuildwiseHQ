@@ -240,7 +240,7 @@ export const CHAPTERS: NarratedChapter[] = [
       ),
       say(
         'c11-b',
-        'If you would rather not run a server, Guildwise Cloud hosts it for you. The price is on the pricing page, and support for setup and custom work is quoted separately.',
+        'If you would rather not run a server, Guildwise Cloud hosts it for you at no cost, subject to fair use. Help with setup and custom work comes from the community, through GitHub issues and discussions.',
       ),
     ],
   },

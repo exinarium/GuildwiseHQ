@@ -274,13 +274,13 @@
 
 - Show the project's GitHub repository README, scrolled to the self-host section, for about 10 seconds.
 - Show the platform area, `Invitations`, to illustrate inviting the first organization.
-- Show the Guildwise Cloud pricing page only if it is live when the video is recorded.
+- Show the Guildwise Cloud sign-up page only if it is live when the video is recorded.
 
 **Narration**
 
 > Guildwise H Q is free and open source, under the Apache 2.0 license. You can run it yourself. You need a server, a domain name and an email relay. The guide walks you through the rest, with the commands.
 >
-> If you would rather not run a server, Guildwise Cloud hosts it for you. The price is on the pricing page, and support for setup and custom work is quoted separately.
+> If you would rather not run a server, Guildwise Cloud hosts it for you at no cost, subject to fair use. Help with setup and custom work comes from the community, through GitHub issues and discussions.
 
 (Checked against `docs/SELF-HOSTING.md`: a server, a domain name and an SMTP relay are what the guide asks for.)
 
