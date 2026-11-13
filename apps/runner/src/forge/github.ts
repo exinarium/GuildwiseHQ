@@ -239,6 +239,16 @@ export class GitHubForge implements Forge {
     return s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
   }
 
+  async changeHeads(repo: RemoteRepo, id: string): Promise<{ headSha: string; baseSha: string }> {
+    const r = await this.gh(['pr', 'view', id, '--repo', repo.fullName, '--json', 'headRefOid,baseRefOid']);
+    if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
+    if (r.exitCode !== 0)
+      throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
+    const j = JSON.parse(r.stdout || '{}') as { headRefOid?: string; baseRefOid?: string };
+    if (!j.headRefOid || !j.baseRefOid) throw new Error('gh pr view printed no head and base commit');
+    return { headSha: j.headRefOid, baseSha: j.baseRefOid };
+  }
+
   async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {
     const r = await this.gh(['release', 'view', tag, '--repo', repo.fullName, '--json', 'url,isDraft']);
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');

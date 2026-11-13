@@ -34,6 +34,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
+import { loadVisibleProject } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
@@ -42,6 +43,7 @@ import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
+import { listPrReviews } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -107,6 +109,13 @@ export function projectRoutes(ctx: Ctx) {
     app.get('/api/projects/:id', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
+
+    /** The recorded pull requests of a PR-only project with their review state (read-only). */
+    app.get('/api/projects/:id/pull-requests', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return { pullRequests: await listPrReviews(ctx.pool, req.params.id) };
     });
 
     app.patch(

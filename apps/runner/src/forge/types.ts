@@ -110,4 +110,9 @@ export interface Forge {
    * there were more. Absent: the git host is not supported for PR-only review yet.
    */
   listOpenChanges?(repo: RemoteRepo, limit: number): Promise<{ changes: OpenChange[]; complete: boolean }>;
+  /**
+   * The head and base commits of an open pull request right now (read-only; reviewer runs). Absent: the git host is
+   * not supported for reviews.
+   */
+  changeHeads?(repo: RemoteRepo, id: string): Promise<{ headSha: string; baseSha: string }>;
 }

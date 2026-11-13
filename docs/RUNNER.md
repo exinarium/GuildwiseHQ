@@ -1369,6 +1369,17 @@ the repository and cannot reach any credential.
    hidden prompt or from stdin, never from an argument. It is checked against the repository, and a classic token that carries a write scope (`repo`, `public_repo`, `write:*`)
    is refused. `reviewer-token status [<remote url>]` shows present or missing, `reviewer-token remove <remote url>` deletes it.
 
+The first reviewer runs as two server commands (announced as `pr-review:1`):
+
+- `pr_review.run` looks up the pull request's head and base commits (`gh pr view --json headRefOid,baseRefOid`, with the owner's
+  own login), builds the read-only checkout above, writes `pr.diff` into the run's scratch and runs a Sonnet chat session under
+  the reviewer policy (offline, checkout read-only, no git dir). Each run has its own agent dir, `agents/pr-review-<runId>/`, so
+  two concurrent runs never share a `settings.json`; it is wiped at the end and swept at startup. A 10-minute timer covers the
+  whole run (also a checkout that hangs). The run never posts: it answers `completed` (findings), `timeout` or `failed`.
+- `pr_review.post` is only sent for a completed run. It first looks for a review that already holds the run marker
+  (`<!-- review-run:<runId> -->`), then posts one `COMMENT` review with the comment-only token. A command sent again for a live run
+  id awaits the same run.
+
 The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by the normalized remote url), separate from the
 git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
 `workstation_repos.reviewer_token`), never the token.

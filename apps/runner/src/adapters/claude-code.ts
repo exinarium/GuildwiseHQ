@@ -12,6 +12,7 @@ import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
@@ -1028,40 +1029,44 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
-    const used = this.writeMcpConfig(
-      dir,
-      input.agent.permissions.allowedTools,
-      devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
-      intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
-    );
-    const chatSettings: ClaudeSettings = devops
-      ? buildDevopsChatSettings(
-          input.agent.permissions,
-          this.policy(input, input.cwd, false, guard?.command),
-          input.sandbox,
-        )
-      : input.agent.roleKey === 'ceo'
-        ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-        : input.work
-          ? buildMentionWorkSettings(
-              input.agent.permissions,
-              this.policy(chatInput, input.cwd, false),
-              input.sandbox,
-            )
-          : buildChatSettings(
-              input.readOnly,
-              [
-                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                ...used.map((u) => `mcp__${u.name}`),
-              ],
-              this.policy(chatInput, input.cwd, true),
-              input.sandbox,
-            );
-    const withSkills = this.prepareSubagents(
-      dir,
-      this.prepareSkills(dir, chatInput, chatSettings),
-      chatSettings,
-    );
+    const review = input.reviewRun;
+    // A review run grants no MCP server, but Claude Code still needs the (empty) file the command points at.
+    const used = review
+      ? this.writeMcpConfig(dir, [], undefined)
+      : this.writeMcpConfig(
+          dir,
+          input.agent.permissions.allowedTools,
+          devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
+          intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
+        );
+    const chatSettings: ClaudeSettings = review
+      ? reviewerPolicy(review, this.policy(chatInput, input.cwd, true)).settings
+      : devops
+        ? buildDevopsChatSettings(
+            input.agent.permissions,
+            this.policy(input, input.cwd, false, guard?.command),
+            input.sandbox,
+          )
+        : input.agent.roleKey === 'ceo'
+          ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+          : input.work
+            ? buildMentionWorkSettings(
+                input.agent.permissions,
+                this.policy(chatInput, input.cwd, false),
+                input.sandbox,
+              )
+            : buildChatSettings(
+                input.readOnly,
+                [
+                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                  ...used.map((u) => `mcp__${u.name}`),
+                ],
+                this.policy(chatInput, input.cwd, true),
+                input.sandbox,
+              );
+    const withSkills = review
+      ? chatInput
+      : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
     if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
     else await this.linkCredentials(dir, used, account.key);

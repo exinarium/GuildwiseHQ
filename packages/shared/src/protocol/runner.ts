@@ -116,6 +116,7 @@ import {
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
+import { PrReviewPostPayloadSchema, PrReviewRunPayloadSchema } from '../review/pr-review.ts';
 import { ReviewerTokenFactSchema } from '../review/reviewer-run.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
@@ -1281,6 +1282,8 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'repo.list_prs',
+  'pr_review.run',
+  'pr_review.post',
   'release.ship',
   'release.ref_cleanup',
   'release.docs_prep',
@@ -1396,6 +1399,8 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'repo.list_prs': RepoListPrsPayloadSchema,
+  'pr_review.run': PrReviewRunPayloadSchema,
+  'pr_review.post': PrReviewPostPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
   'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
