@@ -41,7 +41,7 @@ export const DESIGN_GATE_MAX_PATHS = 50;
 const PATH_TOKEN = /[A-Za-z0-9_.@*-]+(?:\/[A-Za-z0-9_.@*-]*)+/g;
 
 /** Path-like tokens (at least one `/`) in free text: `apps/server/src/db/x.ts`, `packages/shared/src/orgs/`. */
-export function pathsInText(text: string | null | undefined): string[] {
+export function designGatePathsInText(text: string | null | undefined): string[] {
   if (!text) return [];
   const out: string[] = [];
   const seen = new Set<string>();
@@ -96,7 +96,7 @@ export function designRiskPaths(
     sources.designSummary,
     sources.cardBrief,
   ]) {
-    for (const token of pathsInText(text)) {
+    for (const token of designGatePathsInText(text)) {
       const key = token.replace(/\/+$/, '');
       if (seen.has(key)) continue;
       if (asCandidates(token).some((p) => isHighRisk(p))) {

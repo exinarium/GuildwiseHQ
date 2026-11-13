@@ -8,7 +8,7 @@ import {
   designHighRiskPredicate,
   designRiskPaths,
   getBuiltinWorkflow,
-  pathsInText,
+  designGatePathsInText,
   resolveOutcome,
   validateWorkflow,
   workflowHasDesignGate,
@@ -61,16 +61,16 @@ describe('code v7: the design gate stage', () => {
   });
 });
 
-describe('pathsInText', () => {
+describe('designGatePathsInText', () => {
   it('finds path tokens and skips URLs and plain words', () => {
     expect(
-      pathsInText(
+      designGatePathsInText(
         'Touches apps/server/src/db/pool.ts, packages/shared/src/orgs/ and docs/USER-GUIDE.md. See https://x.io/a/b',
       ),
     ).toEqual(['apps/server/src/db/pool.ts', 'packages/shared/src/orgs/', 'docs/USER-GUIDE.md']);
-    expect(pathsInText('apps/server/src/db/** and ./apps/web')).toEqual(['apps/server/src/db/', 'apps/web']);
-    expect(pathsInText('no paths here, 1/2')).toEqual([]);
-    expect(pathsInText(null)).toEqual([]);
+    expect(designGatePathsInText('apps/server/src/db/** and ./apps/web')).toEqual(['apps/server/src/db/', 'apps/web']);
+    expect(designGatePathsInText('no paths here, 1/2')).toEqual([]);
+    expect(designGatePathsInText(null)).toEqual([]);
   });
 });
 
