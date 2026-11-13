@@ -1,4 +1,4 @@
-import type { PrReviewDto } from '@aom/shared';
+import type { HeldBackFindingsResponse, PrReviewDto } from '@aom/shared';
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../client.ts';
 
@@ -14,5 +14,14 @@ export function usePullRequests(projectId: string | undefined) {
       )
         ? 30_000
         : false,
+  });
+}
+
+/** The findings the cap held back on a pull request's latest review. Fetched on request only (`enabled`), then cached. */
+export function useHeldBackFindings(prReviewId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['pr-held-back', prReviewId],
+    enabled,
+    queryFn: () => get<HeldBackFindingsResponse>(`/pr-reviews/${prReviewId}/held-back`),
   });
 }

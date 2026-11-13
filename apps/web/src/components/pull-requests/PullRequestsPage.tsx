@@ -5,6 +5,7 @@ import { usePullRequests } from '../../api/queries/pr-reviews.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { ProjectTabs } from '../ProjectTabs.tsx';
 import { Badge, Callout, EmptyState, ErrorBox, ListSkeleton, PageHeader } from '../ui.tsx';
+import { HeldBackFindings } from './HeldBackFindings.tsx';
 
 const REVIEWER_LABEL: Record<string, string> = { first: 'Sonnet reviewer' };
 
@@ -24,7 +25,13 @@ function Detail({ pr }: { pr: PrReviewDto }) {
       <p data-testid={`pr-review-detail-${pr.changeId}`}>
         Reviewed {when(pr.reviewedAt)} by {REVIEWER_LABEL[pr.reviewer ?? ''] ?? 'the reviewer'}
         {run?.durationMs != null && ` · run took ${fmtRunTime(run.durationMs)}`}
-        {run && ` · ${run.postedCount} comment${run.postedCount === 1 ? '' : 's'}`}
+        {run && (run.heldBackCount ?? 0) > 0
+          ? ` · Posted ${(run.findingsCount ?? 0) - (run.heldBackCount ?? 0)} of ${run.findingsCount} findings: ${
+              run.changedLines == null
+                ? 'the limit is 5'
+                : `${run.changedLines} changed lines allow ${run.findingsCap}`
+            } (1 per 100 lines, at most 5)`
+          : run && ` · ${run.postedCount} comment${run.postedCount === 1 ? '' : 's'}`}
         {run?.reviewUrl && (
           <>
             {' · '}
@@ -109,6 +116,11 @@ function Row({ pr }: { pr: PrReviewDto }) {
       <div className="text-xs text-muted">
         <Detail pr={pr} />
       </div>
+      {(pr.lastRun?.heldBackCount ?? 0) > 0 && (
+        <div className="text-xs">
+          <HeldBackFindings prReviewId={pr.id} count={pr.lastRun?.heldBackCount ?? 0} />
+        </div>
+      )}
     </li>
   );
 }

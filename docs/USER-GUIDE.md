@@ -607,6 +607,7 @@ Once a PR-only repository has a reviewer token (see above), each recorded pull r
 - **Time limit:** a run stops after 10 minutes.
 - **When comments appear:** only when the run has finished. The findings are posted together as one review, so you never see half a review.
 - **Reviewed:** the pull request shows **Reviewed** with the time, the reviewer, how long the run took and how many comments were posted, with a link to the review on GitHub.
+- **How many findings are posted:** at most one finding per 100 changed lines (added plus removed), rounded up: at least 1, at most 5. Findings are ordered by severity (high, medium, low), then by the reviewer's own order. Findings past the limit are not posted to the pull request and are not thrown away: on the **Pull requests** tab the pull request shows **Posted X of Y findings**, and **Show N held-back findings** opens them.
 - **Not reviewed:** if the run times out or fails, nothing is posted and the pull request stays **Not reviewed**. The **Pull requests** tab says which it was, and shows the error when there is one. A timed-out or failed review is not retried by itself and sends nothing back to anyone; it is only run again by hand.
 - **Where to look:** **Pull requests** next to **Board** and **Backlog** in the project. It appears when a repository of the project is PR-only.
 

@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  changedLinesFromNumstat,
+  normaliseSeverity,
   type PrReviewFailureCode,
   type PrReviewFinding,
   type PrReviewRunPayload,
@@ -32,6 +34,8 @@ export interface PrReviewRunDeps {
   dispose: (run: ReviewerRun) => Promise<void>;
   /** `git diff` of the checkout between the base and the head; production runs git in the checkout. */
   diff?: (run: ReviewerRun) => Promise<string>;
+  /** `git diff --numstat` of the same range; production runs git in the checkout. Used for the findings cap. */
+  numstat?: (run: ReviewerRun) => Promise<string>;
   now?: () => number;
   log?: (line: string) => void;
   /** How long a timed-out run waits for its own cleanup before it answers anyway (default 3 s). */
@@ -70,7 +74,10 @@ export function anchoredLines(diff: string): Map<string, Set<number>> {
 }
 
 /** The last `===REVIEW-JSON===` block of the reviewer's final text, validated; null when there is none or it is not valid. */
-export function parseReviewerOutput(text: string): ReturnType<typeof ReviewerOutputSchema.parse> | null {
+export function parseReviewerOutput(
+  text: string,
+  log?: (line: string) => void,
+): ReturnType<typeof ReviewerOutputSchema.parse> | null {
   const at = text.lastIndexOf(REVIEW_JSON_MARKER);
   if (at < 0) return null;
   const rest = text.slice(at + REVIEW_JSON_MARKER.length);
@@ -78,11 +85,30 @@ export function parseReviewerOutput(text: string): ReturnType<typeof ReviewerOut
   const to = rest.lastIndexOf('}');
   if (from < 0 || to <= from) return null;
   try {
-    const parsed = ReviewerOutputSchema.safeParse(JSON.parse(rest.slice(from, to + 1)));
+    const raw: unknown = JSON.parse(rest.slice(from, to + 1));
+    const parsed = ReviewerOutputSchema.safeParse(prepareOutput(raw, log));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
+}
+
+/** Unknown or missing severities become `low` and more than 50 findings are cut to the first 50, instead of losing the review. */
+function prepareOutput(raw: unknown, log?: (line: string) => void): unknown {
+  if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { findings?: unknown }).findings)) return raw;
+  const o = raw as { findings: unknown[] };
+  let coerced = 0;
+  const findings = o.findings.map((f) => {
+    if (!f || typeof f !== 'object') return f;
+    const sev = (f as { severity?: unknown }).severity;
+    const next = normaliseSeverity(sev);
+    if (sev !== next) coerced++;
+    return { ...f, severity: next };
+  });
+  if (coerced > 0)
+    log?.(`pr review: ${coerced} finding severities were not high/medium/low and were normalised`);
+  if (findings.length > 50) log?.(`pr review: ${findings.length - 50} findings past the first 50 were cut`);
+  return { ...o, findings: findings.slice(0, 50) };
 }
 
 const fail = (
@@ -178,6 +204,12 @@ export async function runPrReview(
     } catch (err) {
       return fail(elapsed(), 'no_checkout', `could not read the change: ${msg(err)}`, true);
     }
+    let changedLines: number | undefined;
+    try {
+      changedLines = changedLinesFromNumstat(await (deps.numstat ?? gitNumstat)(run));
+    } catch (err) {
+      deps.log?.(`pr review ${payload.runId}: could not count the changed lines: ${msg(err)}`);
+    }
     const anchors = anchoredLines(diffText);
     const diffPath = join(run.sandbox.scratch, 'pr.diff');
     await mkdir(run.sandbox.scratch, { recursive: true });
@@ -243,7 +275,7 @@ export async function runPrReview(
         read.exit.error ?? `the ${payload.runtime} process exited with code ${read.exit.code}`,
         true,
       );
-    const out = parseReviewerOutput(read.text);
+    const out = parseReviewerOutput(read.text, deps.log);
     if (!out)
       return fail(elapsed(), 'bad_output', 'the reviewer did not answer in the expected format', true);
     const findings: PrReviewFinding[] = out.findings.map((f) => ({
@@ -257,6 +289,7 @@ export async function runPrReview(
       durationMs: elapsed(),
       summary: out.summary,
       findings,
+      ...(changedLines !== undefined ? { changedLines } : {}),
       ...(usage ? { usage } : {}),
     };
   };
@@ -311,5 +344,12 @@ function safeUsage(session: RuntimeSession): Usage | undefined {
 async function gitDiff(run: ReviewerRun): Promise<string> {
   const r = await git(run.checkout, ['diff', '--no-color', '--unified=3', 'refs/review/base...HEAD']);
   if (r.exitCode !== 0) throw new Error(r.stderr.trim().slice(0, 200) || 'git diff failed');
+  return r.stdout;
+}
+
+/** Added and removed lines per file, between the same base and head as the diff. */
+async function gitNumstat(run: ReviewerRun): Promise<string> {
+  const r = await git(run.checkout, ['diff', '--numstat', 'refs/review/base...HEAD']);
+  if (r.exitCode !== 0) throw new Error(r.stderr.trim().slice(0, 200) || 'git diff --numstat failed');
   return r.stdout;
 }
