@@ -27,4 +27,4 @@ Hosting, backups, updates and support are yours to run when you self-host. Custo
 
 ## Supporting the project {#support}
 
-Optional ways to say thanks: star the repository, GitHub Sponsors, Ko-fi (ko-fi.com/exinarium), or the voluntary commercial license that the hosted site sells. The commercial license is optional because Apache 2.0 already allows commercial use.
+Optional ways to say thanks: star the repository, or donate through GitHub Sponsors (github.com/sponsors/GuildwiseHQ) or Ko-fi (ko-fi.com/guildwisehq). Donations help cover running costs.

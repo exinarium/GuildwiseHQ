@@ -1,7 +1,7 @@
 ---
 title: Getting started
 summary: The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
-keywords: [video, tutorial, training, sign up, free trial, login, password, tour, get started, checklist, setup, sidebar, command palette, keyboard shortcuts, help panel, ask devops, privacy, terms, legal]
+keywords: [video, tutorial, training, sign up, login, password, tour, get started, checklist, setup, sidebar, command palette, keyboard shortcuts, help panel, ask devops, privacy, terms, legal]
 order: 1
 ---
 
@@ -38,7 +38,7 @@ There are 30 short videos, one per screen, in the Help centre and on the website
 
 There are two ways in:
 
-- **Start your own organization.** If you use a hosted service, click its sign-up button on the website and fill in your organization name, your name, email and a password (12 or more characters), then open the link in the confirmation email. A hosted service may ask you to add a card to start a free trial first; see [Billing](/help/billing-and-plans#trial). If you run Guildwise HQ yourself, the platform account invites people to start an organization (see the self-hosting guide).
+- **Start your own organization.** If you use a hosted service, click its sign-up button on the website and fill in your organization name, your name, email and a password (12 or more characters), then open the link in the confirmation email. If you run Guildwise HQ yourself, the platform account invites people to start an organization (see the self-hosting guide).
 - **Join with an invitation.** Open the invitation email. It comes from the Owner or an Admin of the organization you join (or from the platform administrator for a new organization). Click the link and choose your name and a password. If you already have an account, sign in instead and confirm.
 
 After you sign in you land in the app, and the guided tour starts. For a new sign-up that is right after the card is saved: until then the tour, the Get started checklist and What's new wait.
@@ -114,4 +114,4 @@ The panel also links to related help articles if you want to read more.
 
 ## Privacy and terms {#privacy-and-terms}
 
-The **Privacy policy** (`/privacy`) says what data Guildwise HQ keeps and how it is handled. The **Terms and conditions** (`/terms`) cover using the service, the free trial and billing. Both are linked from the footer of the website and from the sign-in, sign-up and invitation pages; signing up or accepting an invitation means you accept them. Questions about them go through [Contact us](/help/writing-to-us#contact-us).
+The **Privacy policy** (`/privacy`) says what data Guildwise HQ keeps and how it is handled. The **Terms and conditions** (`/terms`) cover using the service. Both are linked from the footer of the website and from the sign-in, sign-up and invitation pages; signing up or accepting an invitation means you accept them. Questions about them go through [Contact us](/help/writing-to-us#contact-us).

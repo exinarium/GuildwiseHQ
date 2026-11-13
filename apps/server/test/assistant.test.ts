@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { COST_ANSWER } from '../src/assistant/prompt.ts';
 import type { AnthropicLike } from '../src/assistant/service.ts';
 import { TOPIC_LIMITS } from '../src/assistant/topics.ts';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
@@ -147,7 +148,7 @@ describe('a conversation', () => {
     expect(call?.system).toHaveLength(1);
     expect(call?.system[0].cache_control).toEqual({ type: 'ephemeral' });
     expect(call?.system[0].text).toContain('<product_facts>');
-    expect(call?.system[0].text).toContain('Guildwise Cloud: $30 per organization per month');
+    expect(call?.system[0].text).toContain(COST_ANSWER);
     expect(call?.messages).toEqual([
       {
         role: 'user',

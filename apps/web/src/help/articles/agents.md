@@ -24,7 +24,7 @@ To hire an agent:
 
 Above the form, **From a pack** hires one agent of an approved pack onto a role of yours (its seat) instead; see [Agents of a pack](/help/capabilities#pack-agents).
 
-There is no limit on agents. On a hosted service, a plan may limit members, workstations and projects, and **Organization, Plan & limits** shows what you use (Owner and Admin). See [Billing](/help/billing-and-plans#plans).
+There is no limit on agents. On a hosted service, a plan may limit members, workstations and projects, and **Organization, Plan & limits** shows what you use (Owner and Admin).
 
 ## Allow-lists {#allow-lists}
 

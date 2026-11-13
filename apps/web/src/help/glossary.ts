@@ -232,13 +232,6 @@ export const GLOSSARY: GlossaryEntry[] = [
     article: 'testing-and-finalization#expert-mode',
   },
   {
-    term: 'Free trial',
-    aka: ['trial', 'plan', 'sign up', 'pricing'],
-    definition:
-      'Offered by hosted services before the first charge (Guildwise Cloud gives seven days). Self-hosted servers have no trial. The hosting service says how it works.',
-    article: 'billing-and-plans#trial',
-  },
-  {
     term: 'Git host',
     aka: ['forge', 'github', 'gitlab', 'bitbucket', 'azure devops', 'plain git'],
     definition:

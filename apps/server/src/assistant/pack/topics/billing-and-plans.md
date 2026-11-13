@@ -1,7 +1,0 @@
-### Billing
-Cards, invoices and failed payments exist only where a hosting service provides billing. Self-hosted servers have none.
-- Self-hosting has no billing: If you run Guildwise HQ yourself, there are no plans, prices or billing: every feature is available, with no limit on organizations, members, agents, workstations or projects.…
-- Free trial: A hosting service may offer a free trial before its first charge. Its sign-up page and its Pricing help say whether it does and how long it lasts. Self-hosted servers have no trial: there is nothing to start.
-- Billing and invoices: Where a hosting service bills you, billing is handled by the Owner of the organization on the Billing tab under Organization: the card, the invoices and cancelling. Admins and Members do not see it. Your hosting service explains how it charges and what each invoice shows.
-- When a payment fails: On a hosted organization, repeated payment failures can pause the organization. A paused organization keeps its data; agents stop picking up work and only the Owner can sign in to fix the payment. Self-hosted servers are never paused for billing.
-- For platform administrators: On a self-hosted server there is no Billing page under Platform. A hosting service adds one, with its own help, for its plan catalogue, tax settings and the Pause, Unpause and Assign Unlimited actions on an organization. These actions need a reason and are written to the audit log.

@@ -17,6 +17,8 @@ const PAD = 6;
 const GAP = 14;
 const EDGE = 12;
 const CARD_W = 360;
+/** How long a step waits for its element before it is skipped (the drawer slides in, a page renders). */
+export const TOUR_TARGET_GRACE_MS = 1000;
 
 interface Box {
   left: number;
@@ -92,6 +94,8 @@ function Card({
   step,
   index,
   total,
+  last,
+  hasBack,
   box,
   found,
   offer,
@@ -102,8 +106,11 @@ function Card({
   onRead,
 }: {
   step: TourStep;
+  /** The position among the steps that are shown (skipped steps do not count). */
   index: number;
   total: number;
+  last: boolean;
+  hasBack: boolean;
   box: Box | null;
   found: boolean;
   offer: boolean;
@@ -130,7 +137,6 @@ function Card({
     if (el) setSize((s) => (s.h === el.offsetHeight ? s : { w: el.offsetWidth, h: el.offsetHeight }));
   }, [step.id, vp.w, offer, videoShown]);
   const sectionVideo = videoForNav(step.videoNav ?? step.id);
-  const last = index === total - 1;
   const at = place(found ? box : null, size, vp.w, vp.h);
   const pct = Math.round(((index + 1) / total) * 100);
   return (
@@ -206,7 +212,7 @@ function Card({
         )}
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-        {index > 0 && (
+        {hasBack && (
           <Button variant="ghost" onClick={onBack} data-testid="tour-back" className="max-sm:w-full">
             Back
           </Button>
@@ -277,6 +283,10 @@ export function TourProvider({
   const total = steps.length;
   const [active, setActive] = useState(false);
   const [index, setIndex] = useState(0);
+  /** Steps whose element is not on the page (a feature this server does not have): skipped, and not counted. */
+  const [missing, setMissing] = useState<ReadonlySet<string>>(() => new Set());
+  /** The way the tour last moved, so a skipped step is passed in the same direction. */
+  const direction = useRef<1 | -1>(1);
   const auto = useRef(false);
   const saved = me.data?.user.tour;
 
@@ -292,6 +302,8 @@ export function TourProvider({
     if (auto.current || !saved || total === 0) return;
     if (saved.status === 'new') {
       auto.current = true;
+      setMissing(new Set());
+      direction.current = 1;
       setIndex(0);
       setActive(true);
       persist('in_progress', 0);
@@ -317,6 +329,36 @@ export function TourProvider({
     setActive(false);
     persist(status, at);
   };
+  /** The next step from `from` in direction `d` that is not skipped, or -1. */
+  const nextFrom = (from: number, d: 1 | -1, skip: ReadonlySet<string> = missing): number => {
+    for (let j = from + d; j >= 0 && j < total; j += d) if (!skip.has((steps[j] as TourStep).id)) return j;
+    return -1;
+  };
+
+  // A step whose element does not turn up within the grace period is skipped, in the direction the tour was moving.
+  // The skipped set only grows, so this cannot loop; the step counter leaves skipped steps out.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-armed per step and per found state only
+  useEffect(() => {
+    if (!active || !step?.target || found || missing.has(step.id)) return;
+    const timer = setTimeout(() => {
+      const skip = new Set(missing).add(step.id);
+      setMissing(skip);
+      let to = nextFrom(index, direction.current, skip);
+      if (to < 0 && direction.current === -1) {
+        direction.current = 1;
+        to = nextFrom(index, 1, skip);
+      }
+      if (to < 0) close('completed', index);
+      else go(to);
+    }, TOUR_TARGET_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [active, step?.id, step?.target, found, index, missing]);
+
+  const at = Math.min(index, total - 1);
+  const shownIndex = steps.slice(0, at).filter((s) => !missing.has(s.id)).length;
+  const shownTotal = steps.filter((s) => !missing.has(s.id)).length;
+  const nextIndex = nextFrom(at, 1);
+  const backIndex = nextFrom(at, -1);
 
   const api: TourApi = {
     available: hasTour,
@@ -326,16 +368,20 @@ export function TourProvider({
     total,
     start: () => {
       if (total === 0) return;
+      setMissing(new Set());
+      direction.current = 1;
       setIndex(0);
       setActive(true);
       persist('in_progress', 0);
     },
     resume: () => {
       if (total === 0) return;
-      const at = Math.min(saved?.step ?? 0, total - 1);
-      setIndex(at);
+      const from = Math.min(saved?.step ?? 0, total - 1);
+      setMissing(new Set());
+      direction.current = 1;
+      setIndex(from);
       setActive(true);
-      persist('in_progress', at);
+      persist('in_progress', from);
     },
   };
 
@@ -365,13 +411,23 @@ export function TourProvider({
             )}
             <Card
               step={step}
-              index={Math.min(index, total - 1)}
-              total={total}
+              index={shownIndex}
+              total={shownTotal}
+              last={nextIndex < 0}
+              hasBack={backIndex >= 0}
               box={box}
               found={found}
               offer={noWorkstation}
-              onNext={() => (index >= total - 1 ? close('completed', total - 1) : go(index + 1))}
-              onBack={() => go(Math.max(0, index - 1))}
+              onNext={() => {
+                direction.current = 1;
+                if (nextIndex < 0) close('completed', at);
+                else go(nextIndex);
+              }}
+              onBack={() => {
+                if (backIndex < 0) return;
+                direction.current = -1;
+                go(backIndex);
+              }}
               onSkip={() => close('dismissed', index)}
               onOffer={() => {
                 close('completed', total - 1);

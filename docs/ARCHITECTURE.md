@@ -2365,7 +2365,7 @@ An optional stage before 28b/28c: **not** the "release prep 2/4 .. 4/4" phases a
 
 ## 32. Billing (hosted extension, not part of the open-source core)
 
-Billing (plans, Paystack and PayFast, VAT, invoices, trials and licences, add-ons, sign-up with a verified email) lives in the closed-source hosted extension, Guildwise Cloud, which registers through the extension points of section 40. The core knows only an organization's `plan`, `status` and the limits a plan-limits provider reports; without the extension every organization is unlimited, there are no billing screens and the platform super-user manages organizations directly. The design of the extension is documented in its own repository.
+Billing (plans, payments, invoices, sign-up with a verified email) lives in the closed-source hosted extension, Guildwise Cloud, which registers through the extension points of section 40. The core knows only an organization's `plan`, `status` and the limits a plan-limits provider reports; without the extension every organization is unlimited, there are no billing screens and the platform super-user manages organizations directly. The design of the extension is documented in its own repository.
 
 ## 33. Simulation organizations (built; owner request of 2026-10-10)
 

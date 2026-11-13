@@ -1262,7 +1262,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Billing tab',
-        text: 'Owner only. Your plan (US dollars, VAT included), status, next charge, card and invoices; edit the billing profile printed on invoices, open a printable tax invoice, change plan, add members, workstations or projects on Business, cancel, or resubscribe when paused.',
+        text: "Owner only, where a hosting service adds it: the plan, card and invoices. The hosting service's own help explains it.",
       },
       {
         name: 'Your role',

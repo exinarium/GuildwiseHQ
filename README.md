@@ -6,9 +6,8 @@
 [![Latest release](https://img.shields.io/github/v/release/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/releases)
 [![GitHub Discussions](https://img.shields.io/github/discussions/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/discussions)
 [![CI](https://github.com/exinarium/GuildwiseHQ/actions/workflows/ci.yml/badge.svg)](https://github.com/exinarium/GuildwiseHQ/actions/workflows/ci.yml)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20us-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/exinarium)
-[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/exinarium)
-[![Commercial supporter](https://img.shields.io/badge/Commercial%20supporter-Guildwise-2ea44f)](https://guildwisehq.com/pricing)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20us-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/guildwisehq)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/GuildwiseHQ)
 
 ---
 
@@ -217,22 +216,20 @@ Done. For upgrades, backups, optional features and troubleshooting, read **[docs
 
 Prefer not to run a server? **Guildwise Cloud** at [guildwisehq.com](https://guildwisehq.com) runs it for you.
 
-- **$30 per month** covers the organization and its owner, plus **$10 per month for each regular member**. VAT is included. A 7-day trial is available.
+- **Free to use, subject to fair use.** Everyone gets the same thing.
 - **No backups, by design.** We don't own your data, so we don't keep copies of it. Export whenever you like.
-- Hosted customers join the community, with free occasional webinars and training.
-- Customization and setup support (custom workflow and agent development, and organizational planning) is quoted on request: contact us through the site.
+- Help with setup and customization is community help, through GitHub issues and discussions.
 
-**Self-hosted installs get every feature, and any number of organizations.** There is no plan, trial or limit on your own server.
+**Self-hosted installs get every feature, and any number of organizations.** There are no limits on your own server.
 
 ---
 
 ## Support the project
 
-Guildwise HQ is **free software** (Apache 2.0). Nothing in it is paywalled. If it is useful to you and you want to help keep it going:
+Guildwise HQ is **free software** (Apache 2.0). Nothing in it is paywalled. If it is useful to you, donations help cover running costs:
 
-- **Ko-fi:** [ko-fi.com/exinarium](https://ko-fi.com/exinarium)
-- **GitHub Sponsors:** [github.com/sponsors/exinarium](https://github.com/sponsors/exinarium)
-- **Commercial supporter:** an optional, pay-what-you-want (minimum $5) commercial license with a "Commercial supporter" badge. It is voluntary, because Apache 2.0 already allows commercial use. Details on the [pricing page](https://guildwisehq.com/pricing).
+- **Ko-fi:** [ko-fi.com/guildwisehq](https://ko-fi.com/guildwisehq)
+- **GitHub Sponsors:** [github.com/sponsors/GuildwiseHQ](https://github.com/sponsors/GuildwiseHQ)
 
 ---
 

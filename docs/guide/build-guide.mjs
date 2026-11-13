@@ -28,7 +28,8 @@ try {
 const repo = path.resolve(here, '../..');
 const e2eRequire = createRequire(path.join(repo, 'e2e/package.json'));
 const { chromium } = e2eRequire('@playwright/test');
-const pdfParse = e2eRequire('pdf-parse/lib/pdf-parse.js');
+// pdf-parse 2.x: the `PDFParse` class (the 1.x `lib/pdf-parse.js` entry is no longer exported).
+const { PDFParse } = e2eRequire('pdf-parse');
 
 const OUT = meta.out ? path.resolve(meta.out) : path.join(here, 'Guildwise-HQ-User-Guide.pdf');
 
@@ -42,17 +43,15 @@ const render = (page) => page.pdf({
   scale: 0.9,
 });
 
+/** The text of every page, in order (pdf-parse 2.x `getText`, one entry per page). */
 const pageTexts = async (buf) => {
-  const texts = [];
-  await pdfParse(buf, {
-    pagerender: async (pageData) => {
-      const content = await pageData.getTextContent();
-      const text = content.items.map((i) => i.str).join('');
-      texts.push(text);
-      return text;
-    },
-  });
-  return texts;
+  const parser = new PDFParse({ data: new Uint8Array(buf) });
+  try {
+    const result = await parser.getText();
+    return [...result.pages].sort((a, b) => a.num - b.num).map((p) => p.text);
+  } finally {
+    await parser.destroy();
+  }
 };
 
 const browser = await chromium.launch();

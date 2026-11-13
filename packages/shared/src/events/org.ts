@@ -194,7 +194,7 @@ export const orgEvents = [
     }),
   ),
   defineEvent('PlatformOrgViewed', z.object({ orgId: Id, meta: EventMetaSchema })),
-  /** The super admin edited the plan catalogue or the billing settings (add-on prices, VAT, exchange-rate override). */
+  /** The super admin edited the plan catalogue or the billing settings (for example add-on prices and tax settings). */
   defineEvent(
     'PlatformBillingChanged',
     z.object({

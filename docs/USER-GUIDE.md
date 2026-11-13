@@ -242,13 +242,13 @@ By the end of this chapter you have: a working login with two-factor protection,
 
 If the link says the invitation is no longer valid, it has expired, was used already, or was withdrawn. Ask the person who invited you to send a new one.
 
-**No invitation? Sign up yourself.** On the website click **Start free trial** (or a plan's button under **Pricing**), choose a plan and enter your organization name, your name, email and a password. Open the link in the confirmation email: you are signed in and see one page, **Start your 7-day free trial**, with your plan, its price (US dollars, VAT included, and the rand amount at today's rate) and the trial's start and end dates. Add a card there: your **7-day free trial** starts and the app opens, with the tour and the Get started checklist; nothing is charged until the trial ends (4.17). Until the card is saved nothing else in the app opens, and coming back later shows the same page. A sign-up that never adds a card is removed after 14 days. You are the Owner of the new organization.
+**No invitation? Sign up yourself.** On a hosted service, its website may let you sign up yourself: click its sign-up button and enter your organization name, your name, email and a password. Open the link in the confirmation email to confirm your email and you are signed in, with the tour and the Get started checklist. You are the Owner of the new organization.
 
 ![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
 **Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. Choose a new password (at least 12 characters); every other place you were signed in is signed out. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform administrators may use it too (their two-factor code is still asked at the next sign-in). If the email never reaches you, your organization's Owner or an Admin can give you a temporary password instead (4.15).
 
-Visitors who are not signed in see the landing page, with **Log in** and **Start free trial** buttons, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
+Visitors who are not signed in see the landing page, with **Log in** and a sign-up button, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
 
 ![The landing page](guide/assets/landing.jpg)
 
@@ -1080,36 +1080,17 @@ If a member loses their phone and their recovery codes, you reset their two-fact
 
 **Reset a member's password (Owner and Admins).** An Owner may reset a Member or an Admin; an Admin may reset a Member only (never an Owner or another Admin), and nobody resets their own password this way (use **Forgot your password?** on the sign-in page). If a member cannot get the reset email, open the actions menu on their row on the **Members** tab and choose **Reset password**. Guildwise HQ makes a strong temporary password and shows it to you **once**, with a **Copy** button: send it to them yourself, in a message only they can read. No email is sent and we do not keep the password. The member is signed out everywhere, and the next time they sign in with the temporary password the app asks for a new password before anything else (two-factor login still applies). A Guildwise HQ account is one account for every organization: if the member also belongs to other organizations, the new password applies there too. The reset is recorded in the organization's activity and never contains the password.
 
-> **Tip:** a suspended organization (unpaid, trial over) keeps its data. Running shifts finish, nothing new starts, and only the Owner can still sign in to see settings and members. Everything resumes where it stopped when the platform administrator reactivates the organization.
+> **Tip:** a suspended organization keeps its data. Running shifts finish, nothing new starts, and only the Owner can still sign in to see settings and members. Everything resumes where it stopped when the platform administrator reactivates the organization.
 
 ### 4.16 Plan and limits
 
-**Organization, Plan & limits** shows your plan, status, licence date, how much you use, and which features are switched on. Organizations set up by invitation are on the free **Founding** plan with every feature and **no limits**; they stay free until the Owner subscribes (4.17). The platform administrator can also give an organization the **Unlimited** plan (no billing, no limits). If a feature is switched off, its page leaves the sidebar, but its data is kept.
+**Organization, Plan & limits** shows your plan, status, licence date, how much you use, and which features are switched on. Organizations set up by invitation are on the free **Founding** plan with every feature and **no limits**. The platform administrator can also give an organization the **Unlimited** plan (no billing, no limits). If a feature is switched off, its page leaves the sidebar, but its data is kept.
 
 ![Plan and limits](guide/assets/org-plan.jpg)
 
 ### 4.17 Billing
 
-Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (members, workstations, projects); every plan has every feature and **no limit on agents**.
-
-| Plan | Per month (US dollars, VAT included) | Members | Workstations | Projects |
-|---|---|---|---|---|
-| Starter | $19.00 | 2 | 1 | 3 |
-| Team | $49.00 | 5 | 3 | 10 |
-| Business | $149.00 | 20 | 10 | Unlimited |
-
-- **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the full-page **Start your 7-day free trial** screen that replaces the app until a card is saved (Sign out and Contact us stay available; a sign-up without a card is removed after 14 days). The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
-- **Company name.** Guildwise HQ is sold to businesses, so sign-up asks for your company name.
-- **Charged in rand, VAT included.** The price is a fixed dollar amount that includes 15% VAT. Each charge converts it at the day's exchange rate. Every invoice shows the dollar price, the VAT it contains (in dollars and rand) and "charged as R x at R y / USD on <date>". We never see or keep the card number: you enter it on Paystack's secure page and we keep a secure token with the brand, last four digits and expiry (we email you before it expires). **Update card** replaces it.
-- **Billing profile.** Under Billing the Owner edits the company name, address, country and VAT number (optional). They are printed on your invoices; paid invoices keep the details they were issued with.
-- **Tax invoice.** **View / print tax invoice** next to an invoice opens a printable page (use Print, then Save as PDF).
-- **Change plan.** Takes effect at once and is prorated for the rest of the month: you pay the difference now, or get a credit on the next invoice. A plan too small for what you use is refused.
-- **Business add-ons.** Add members, workstations or projects (priced per unit). They start with the next billing cycle and never go below the Business base.
-- **Cancel.** The organization stays active until the end of the paid term (or trial), then is paused. **Keep my subscription** takes it back before then.
-- **Failed payments.** Three attempts (now, after 1 day, after 3 days); you are emailed each time and can update the card. After the third failure the organization is **paused**: agents stop picking up work and only the Owner can sign in. The Owner sees a full-page **Resubscribe to continue** screen (reason, plan, amount due, **Update card**, **Resubscribe now**, Sign out, Contact us) instead of the app, and **Resubscribe now** charges a new month and resumes everything. The same screen appears when the subscription was cancelled and its term ended. Members see a banner asking them to contact their Owner.
-- **Platform administrators** see the active payment provider and its sandbox or live mode, and edit prices (VAT included), limits, add-on prices, the VAT rate, the invoice details (company name, address, VAT number printed on tax invoices) and the exchange-rate override under **Platform, Billing**, and can pause, unpause or assign **Unlimited** from an organization's page (each with a reason, audited).
-
-See the help article *Plans and billing*.
+Self-hosted servers have no billing: every feature, no limits. A hosting service may add a **Billing** tab for the Owner; its own help explains it.
 
 ### 4.18 Chatting with agents
 
@@ -1732,9 +1713,9 @@ A platform account is created on the server with a command (see `docs/SELF-HOSTI
 
 On the detail page you can:
 
-- **Suspend** an organization (unpaid, trial over, licence date passed). Running shifts finish and nothing new starts. Scheduled runs are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. **Reactivate** it and everything resumes where it stopped.
+- **Suspend** an organization (for example when its licence date has passed). Running shifts finish and nothing new starts. Scheduled runs are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. **Reactivate** it and everything resumes where it stopped.
 - **Cancel** an organization.
-- Change the **plan, limits, licence date, grace period and feature switches** (Interests, Integrations and intake, Outbound updates, Research, Phases, Browser tools, Custom roles and workflows). Every change needs a **reason**, and it goes into the audit log. Organizations you invite start on **Founding** (free, no limits) until their Owner chooses a paid plan; self-service sign-ups use **Starter**, **Team** or **Business** (4.17); **Unlimited** is assigned from the organization's **Billing** panel.
+- Change the **plan, limits, licence date, grace period and feature switches** (Interests, Integrations and intake, Outbound updates, Research, Phases, Browser tools, Custom roles and workflows). Every change needs a **reason**, and it goes into the audit log. Organizations you invite start on **Founding** (free, no limits). A hosting service may add its own plans (4.17).
 - **Transfer ownership** to one of the organization's Admins, for example when the Owner left the company. This needs a written reason and is audited.
 
 ### 7.3 Invitations: starting a new organization
@@ -1817,7 +1798,7 @@ Guildwise repairs itself with a normal team. You, the platform administrator, on
 
 ### 7.10 Billing
 
-**Billing** (platform menu) is where the plans are priced. The page names the payment provider and whether it is in test mode, and has these panels: **Payment provider**, **Plans** (price in US dollars with VAT included, and the limits of each plan) and **Add-ons, VAT, exchange rate and invoice details** (the Business add-on prices, the VAT rate, the company details printed on tax invoices and the exchange-rate override). Every change needs a **reason** and is written to the audit log. How customers see their plan and invoices is in 4.17.
+A hosting service may add a **Billing** page to the platform menu; its own help explains it.
 
 ### 7.11 API keys
 
@@ -2020,7 +2001,7 @@ On your workstations and in your git remotes, exactly as before. The Guildwise H
 Only after review and test, and only if the project's **How finished work lands** is *Commit and push to the working branch* (the default). Choose *Pull request I approve* to merge everything yourself. Large changes wait for your approval either way, unless you turned that off in the project settings. If the working branch is protected on your git host, a pull request is opened instead.
 
 **What does it cost?**
-Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars including VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
+Guildwise HQ is free and open source. The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
 
 **How many agents do I need?**
 Start with a builder, a reviewer, a tester and a BA (3.5). Add more when cards queue up.

@@ -7,7 +7,6 @@ import { deleteMailFor, waitForMail } from '../support/mail.ts';
 import { click, type } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
 import { allCues, CHAPTERS, TEASER_CHAPTERS, TEASER_CUES } from './narration/overview.ts';
-import { platformLogin } from './platform.ts';
 import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
 import { monthSpendMicros, seedDemoHistory } from './seed-history.ts';
 
@@ -287,10 +286,7 @@ test('record the overview video', async ({ browser }) => {
   );
 
   seeded = { api, qId, discoveryUrl };
-  // the platform administrator signs in off camera (two-factor setup); the video swaps to its session for one page
-  const platform = await platformLogin(browser);
   const ownerCookies = (await api.storageState()).cookies;
-  const platformCookies = (await platform.api.storageState()).cookies;
 
   // ---- voice and camera ----------------------------------------------------------------------------------------------
   const { page, narrate, chapter, finish } = await startRecording(prepared, browser, api);
@@ -684,13 +680,6 @@ test('record the overview video', async ({ browser }) => {
     ]);
     await pause(6000);
     await clearCard(page);
-  });
-  await narrate('c11-b', async () => {
-    await ctx.clearCookies();
-    await ctx.addCookies(platformCookies);
-    await page.goto('/platform/invitations');
-    await expect(page.getByTestId('new-org-form')).toBeVisible();
-    await pause(3000);
   });
 
   // ---- 12. Closing ---------------------------------------------------------------------------------------------------------------
