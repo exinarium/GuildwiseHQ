@@ -43,7 +43,7 @@ import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
-import { listPrReviews } from '../commands/pr-review-runs.ts';
+import { heldBackFindings, listPrReviews } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -73,7 +73,8 @@ import {
 import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
-import { gone } from '../errors.ts';
+import { one } from '../db/sql.ts';
+import { gone, notFound } from '../errors.ts';
 import { getProjectClaudeAccounts } from '../queries/claude-accounts.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { getProjectProviderAccounts } from '../queries/provider-accounts.ts';
@@ -116,6 +117,17 @@ export function projectRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
       return { pullRequests: await listPrReviews(ctx.pool, req.params.id) };
+    });
+
+    /** The findings the cap held back on a pull request's latest review, on request (not posted to the pull request). */
+    app.get('/api/pr-reviews/:id/held-back', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const pr = await one(ctx.pool, 'SELECT project_id FROM pr_reviews WHERE id=$1', [req.params.id]);
+      if (!pr) throw notFound('pull request not found');
+      await loadVisibleProject(ctx.pool, s.user.id, pr.project_id as string);
+      const out = await heldBackFindings(ctx.pool, req.params.id);
+      if (!out) throw notFound('pull request not found');
+      return out;
     });
 
     app.patch(

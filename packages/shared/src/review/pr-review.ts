@@ -138,6 +138,8 @@ export const PrReviewRunResultSchema = z.discriminatedUnion('outcome', [
     durationMs: z.number().int().nonnegative(),
     summary: z.string().max(2000),
     findings: z.array(PrReviewFindingSchema).max(50),
+    /** Added + removed lines of the change; absent when the runner could not count them (the cap is then 5). */
+    changedLines: z.number().int().nonnegative().optional(),
     usage: Usage.optional(),
   }),
   z.object({
@@ -206,6 +208,11 @@ export const PrReviewDtoSchema = z.object({
       code: z.string().nullable(),
       postedCount: z.number(),
       reviewUrl: z.string().nullable(),
+      /** Findings the run produced, how many were held back by the cap, the cap, and the lines it came from. */
+      findingsCount: z.number().optional(),
+      heldBackCount: z.number().optional(),
+      findingsCap: z.number().nullable().optional(),
+      changedLines: z.number().nullable().optional(),
     })
     .nullable(),
 });

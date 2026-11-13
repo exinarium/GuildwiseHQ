@@ -29,17 +29,41 @@ export const prReviewRunProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'PrReviewRunCompleted'>).payload;
     await exec(
       tx,
-      `UPDATE pr_review_runs SET state='completed', finished_at=$2, duration_ms=$3, head_sha=$4, base_sha=$5, summary=$6
+      `UPDATE pr_review_runs SET state='completed', finished_at=$2, duration_ms=$3, head_sha=$4, base_sha=$5, summary=$6,
+              changed_lines=$7, findings_cap=$8, held_back_count=$9
         WHERE id=$1`,
-      [p.runId, p.at, p.durationMs, p.headSha, p.baseSha, p.summary],
+      [
+        p.runId,
+        p.at,
+        p.durationMs,
+        p.headSha,
+        p.baseSha,
+        p.summary,
+        p.changedLines ?? null,
+        p.findingsCap ?? null,
+        p.findings.filter((f) => f.disposition === 'held_back').length,
+      ],
     );
     for (const [idx, f] of p.findings.entries()) {
       await exec(
         tx,
-        `INSERT INTO pr_review_findings (id, run_id, pr_review_id, idx, path, line, anchored, severity, title, body)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO pr_review_findings (id, run_id, pr_review_id, idx, path, line, anchored, severity, title, body, rank, disposition)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (id) DO NOTHING`,
-        [f.findingId, p.runId, p.prReviewId, idx, f.path, f.line, f.anchored, f.severity, f.title, f.body],
+        [
+          f.findingId,
+          p.runId,
+          p.prReviewId,
+          idx,
+          f.path,
+          f.line,
+          f.anchored,
+          f.severity,
+          f.title,
+          f.body,
+          f.rank ?? null,
+          f.disposition ?? 'posted',
+        ],
       );
     }
   },
