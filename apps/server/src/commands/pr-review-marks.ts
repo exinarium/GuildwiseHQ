@@ -1,14 +1,14 @@
 import {
   type FindingMark,
   type FindingMarkReplayRow,
+  findingView,
   type MarkFindingRequest,
-  PR_REVIEWER_LABEL,
   type PostedFindingDto,
   type PostedFindingRow,
+  PR_REVIEWER_LABEL,
   type PrReviewer,
-  type ReviewerPrecision,
-  findingView,
   precisionOf,
+  type ReviewerPrecision,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';

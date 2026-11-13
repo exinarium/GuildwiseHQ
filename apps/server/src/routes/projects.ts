@@ -170,7 +170,10 @@ export function projectRoutes(ctx: Ctx) {
       {
         schema: {
           params: IdParamsSchema,
-          querystring: z.object({ since: z.iso.datetime({ offset: true }).optional(), reviewer: z.string().max(40).optional() }),
+          querystring: z.object({
+            since: z.iso.datetime({ offset: true }).optional(),
+            reviewer: z.string().max(40).optional(),
+          }),
         },
       },
       async (req) => {

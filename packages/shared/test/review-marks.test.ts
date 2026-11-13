@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   FindingMarkSchema,
-  type PostedFindingRow,
   findingView,
+  type PostedFindingRow,
   reviewerPrecision,
   reviewersRevealed,
 } from '../src/index.ts';

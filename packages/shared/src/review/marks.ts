@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PrReviewerSchema, type PrReviewer } from './pr-review.ts';
+import { type PrReviewer, PrReviewerSchema } from './pr-review.ts';
 
 /** One mark per posted finding: useful or noise. */
 export const FindingMarkSchema = z.enum(['useful', 'noise']);
@@ -150,3 +150,4 @@ export const FindingMarkReplayRowSchema = z.object({
 export type FindingMarkReplayRow = z.infer<typeof FindingMarkReplayRowSchema>;
 
 export const FindingMarkReplayResponseSchema = z.object({ marks: z.array(FindingMarkReplayRowSchema) });
+export type FindingMarkReplayResponse = z.infer<typeof FindingMarkReplayResponseSchema>;
