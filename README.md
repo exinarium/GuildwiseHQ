@@ -6,8 +6,8 @@
 [![Latest release](https://img.shields.io/github/v/release/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/releases)
 [![GitHub Discussions](https://img.shields.io/github/discussions/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/discussions)
 [![CI](https://github.com/exinarium/GuildwiseHQ/actions/workflows/ci.yml/badge.svg)](https://github.com/exinarium/GuildwiseHQ/actions/workflows/ci.yml)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20us-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/exinarium)
-[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/exinarium)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20us-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/guildwisehq)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/GuildwiseHQ)
 [![Commercial supporter](https://img.shields.io/badge/Commercial%20supporter-Guildwise-2ea44f)](https://guildwisehq.com/pricing)
 
 ---
