@@ -176,7 +176,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   organization: {
     title: 'Organization',
-    body: 'Members, invitations, guests, the e-mail inbox, project links, plan and billing of the whole organization.',
+    body: 'Members, invitations, guests, the e-mail inbox and project links of the whole organization.',
     more: 'organizations-and-roles#members-and-invitations',
   },
 };
@@ -286,7 +286,7 @@ const PLATFORM_STEPS: TourStep[] = [
     id: 'platform-orgs',
     target: 'platform-nav-orgs',
     title: 'Organizations',
-    body: 'Every organization with its owner, plan and limits. Open one to suspend or reinstate it, change its limits, see its billing, or give it the Unlimited plan.',
+    body: 'Every organization with its owner, plan and limits. Open one to suspend or reinstate it, change its limits, or give it the Unlimited plan.',
     more: 'organizations-and-roles#suspension',
   },
   {

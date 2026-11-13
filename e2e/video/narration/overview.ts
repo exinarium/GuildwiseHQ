@@ -238,10 +238,6 @@ export const CHAPTERS: NarratedChapter[] = [
         'c11-a',
         'Guildwise HQ is free and open source, under the Apache 2.0 license. You can run it yourself. You need a server, a domain name and an email relay. The guide walks you through the rest, with the commands.',
       ),
-      say(
-        'c11-b',
-        'If you would rather not run a server, Guildwise Cloud hosts it for you at no cost, subject to fair use. Help with setup and custom work comes from the community, through GitHub issues and discussions.',
-      ),
     ],
   },
   {

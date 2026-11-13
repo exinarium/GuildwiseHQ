@@ -455,3 +455,79 @@ describe('the first-login tour', () => {
     expect(puts.at(-1)).toEqual({ status: 'dismissed', step: 0 });
   });
 });
+
+/** Every target of the manager tour on the page except the ones listed (a feature this server does not have). */
+function mountWithout(absent: string[]) {
+  const targets = [
+    'nav-board',
+    'nav-desk',
+    'nav-workstations',
+    'nav-settings',
+    'palette',
+    'page-help',
+    'ask-devops',
+    'nav-help',
+  ];
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter>
+        <TourProvider navIds={NAV} mobile={false}>
+          {targets
+            .filter((t) => !absent.includes(t))
+            .map((t) => (
+              <button key={t} type="button" data-tour={t} style={{ width: 10, height: 10 }}>
+                {t}
+              </button>
+            ))}
+          <Replay />
+        </TourProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+const title = () => screen.getByTestId('tour-title').textContent;
+const progress = () => screen.getByTestId('tour-progress').textContent;
+
+describe('a step whose element is not on the page', () => {
+  it('is skipped going forward, left out of the counter, and passed over by Back once known', async () => {
+    me = makeMe({ status: 'completed', step: 0 });
+    const user = userEvent.setup();
+    mountWithout(['nav-desk']);
+    await user.click(await screen.findByText('replay'));
+    await screen.findByRole('dialog');
+    const total = Number(/of (\d+)/.exec(progress() ?? '')?.[1]);
+    await user.click(screen.getByTestId('tour-next'));
+    await user.click(screen.getByTestId('tour-next'));
+    expect(title()).toBe('Board');
+    expect(progress()).toBe(`Step 3 of ${total}`);
+    await user.click(screen.getByTestId('tour-next'));
+    expect(title()).toBe('Desk'); // shown until the grace period runs out
+    await waitFor(() => expect(title()).toBe('Workstations'), { timeout: 3000 });
+    expect(progress()).toBe(`Step 4 of ${total - 1}`);
+    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 4 });
+    await user.click(screen.getByTestId('tour-back'));
+    expect(title()).toBe('Board');
+    expect(progress()).toBe(`Step 3 of ${total - 1}`);
+    await user.click(screen.getByTestId('tour-next'));
+    expect(title()).toBe('Workstations');
+    // and it still runs to the end: Next until Finish, then completed
+    for (let i = 0; i < 20 && screen.queryByRole('dialog'); i++)
+      await user.click(screen.getByTestId('tour-next'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(puts.at(-1)?.status).toBe('completed');
+  });
+
+  it('is skipped going back as well, without ending the tour or bouncing forward', async () => {
+    me = makeMe({ status: 'dismissed', step: 4 }); // Workstations
+    const user = userEvent.setup();
+    mountWithout(['nav-desk']);
+    await user.click(await screen.findByText('resume'));
+    await screen.findByRole('dialog');
+    expect(title()).toBe('Workstations');
+    await user.click(screen.getByTestId('tour-back'));
+    expect(title()).toBe('Desk');
+    await waitFor(() => expect(title()).toBe('Board'), { timeout: 3000 });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 2 });
+  });
+});
