@@ -12,6 +12,7 @@ import {
   PrReviewerSchema,
   PrReviewFindingSchema,
   PrReviewStateSchema,
+  PrReviewTriggerSchema,
 } from '../review/pr-review.ts';
 import {
   BranchPrefixSchema,
@@ -193,6 +194,17 @@ export const projectEvents = [
       baseBranch: z.string().max(200),
       openedAt: IsoDate,
       state: PrReviewStateSchema,
+      changedLines: z.number().int().nonnegative().nullable().default(null),
+    }),
+  ),
+  /** The size (added + removed lines) of a recorded pull request changed or became known. */
+  defineEvent(
+    'PrReviewSizeChanged',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      changedLines: z.number().int().nonnegative().nullable(),
     }),
   ),
   /** A recorded pull request is no longer open on the git host. */
@@ -210,6 +222,9 @@ export const projectEvents = [
       model: z.string().max(120),
       workstationId: Id,
       timeoutMs: z.number().int().positive(),
+      /** Events from before the daily cap read as automatic. */
+      trigger: PrReviewTriggerSchema.default('auto'),
+      requestedBy: Id.nullable().default(null),
       at: IsoDate,
     }),
   ),
@@ -472,6 +487,10 @@ export const projectEvents = [
    * A project member set (or cleared, with null) the cap on shifts that may run at once on this project, whatever the
    * number of agents. Off by default (restructure.md decision 11).
    */
+  defineEvent(
+    'ProjectPrReviewCapSet',
+    z.object({ projectId: Id, cap: z.number().int().min(1).max(100), by: Id }),
+  ),
   defineEvent(
     'ProjectConcurrencyCapSet',
     z.object({ projectId: Id, cap: z.number().int().min(1).max(50).nullable(), by: Id }),

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   GitRefSchema,
+  type OrgRole,
   PR_REVIEW_CAPABILITY,
   PR_REVIEW_TIMEOUT_MS,
   type PrReviewDto,
@@ -15,10 +16,18 @@ import {
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
-import { listReviewablePrs, reviewerGate, reviewerTokenStates } from '../review/reviewer-gate.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
+import { conflict, notFound } from '../errors.ts';
+import { mayStart } from '../review/may-start.ts';
+import {
+  MAX_RUNNING_PER_WORKSTATION,
+  pickReviewerWorkstation,
+  reviewerGate,
+  reviewerTokenStates,
+} from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
+import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 
 /**
  * The first reviewer on PR-only pull requests. The server decides WHEN a run starts and is the only party that starts a
@@ -31,7 +40,6 @@ export const RUN_GRACE_MS = 5 * 60_000;
 /** A completed run whose post did not answer within this time is failed at the post stage. */
 export const POST_WAIT_MS = 15 * 60_000;
 const MAX_RUNNING_PER_REPO = 1;
-const MAX_RUNNING_PER_WORKSTATION = 2;
 /** GitHub refuses a review body over 65,536 characters. */
 const BODY_LIMIT = 60_000;
 
@@ -45,10 +53,13 @@ async function orgOf(db: Queryable, projectId: string): Promise<string | undefin
 
 // ---- dispatch ----------------------------------------------------------------------------------------------------
 
+export { mayStart };
+
 /**
  * The scheduler pass: for each active project with a PR-only repository, starts the first reviewer on the pull
- * requests `listReviewablePrs` returns (the gate: a comment-only token is held). One run per pull request: a timed-out
- * or model-error pull request is not started again by itself (the owner re-runs it by hand).
+ * requests of the project's queue that fall inside today's admission window (`prReviewQueue`: the oldest `cap - used`
+ * that have a ready reviewer). Pull requests past the cap wait for a following day. One run per pull request: a
+ * timed-out or model-error pull request is not started again by itself (the owner re-runs it by hand).
  */
 export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
   const projects = await rows(
@@ -59,145 +70,202 @@ export async function dispatchPrReviews(ctx: Ctx): Promise<number> {
   );
   let started = 0;
   for (const p of projects) {
-    const list = await listReviewablePrs(ctx.pool, p.id as string).catch((err) => {
-      ctx.log.error({ err, projectId: p.id }, 'listing reviewable pull requests failed');
-      return [];
+    const targets = await dispatchProject(ctx, p.id as string).catch((err) => {
+      ctx.log.error({ err, projectId: p.id }, 'starting pull request reviews failed');
+      return [] as string[];
     });
-    for (const pr of list) {
-      if (!(await mayStart(ctx.pool, pr.id))) continue;
-      const ok = await startRun(ctx, p.id as string, pr).catch((err) => {
-        ctx.log.error({ err, prReviewId: pr.id }, 'starting a pull request review failed');
-        return false;
-      });
-      if (ok) started++;
-    }
+    started += targets.length;
+    for (const target of new Set(targets))
+      void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
   }
   return started;
 }
 
-/** One run per pull request; only a run refused for lack of a token is tried again. */
-async function mayStart(db: Queryable, prReviewId: string): Promise<boolean> {
-  const q = db;
-  const runs = await rows(
-    q,
-    `SELECT state, error_code, retryable, finished_at FROM pr_review_runs
-      WHERE pr_review_id=$1 AND reviewer='first' ORDER BY started_at DESC`,
-    [prReviewId],
-  );
-  if (runs.length === 0) return true;
-  const last = runs[0] as Record<string, unknown>;
-  if (last.state !== 'failed') return false; // running, completed (posting), posted, timed out: never again by itself
-  // no_token is not an attempt: the gate decides when the repository is ready again. Any other failure is final.
-  return last.error_code === 'no_token';
+/** One project, one transaction: the project row lock keeps two passes (or a pass and a manual trigger) from both using the last slot. */
+async function dispatchProject(ctx: Ctx, projectId: string): Promise<string[]> {
+  return withAppendTx(ctx.pool, async (tx) => {
+    await one(tx, 'SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
+    const queue = await prReviewQueue(tx, ctx, projectId);
+    const targets: string[] = [];
+    for (const item of queue.items) {
+      if (item.slot !== 'today') continue; // later and blocked ones never start: this is the cap
+      const r = await startPrReviewRun(ctx, tx, {
+        projectId,
+        prReviewId: item.prReviewId,
+        trigger: 'auto',
+        requestedBy: null,
+        enforceConcurrency: true,
+      });
+      if (r.started) targets.push(r.target); // not started (concurrency): keeps its place in the window
+    }
+    return targets;
+  });
 }
 
-async function startRun(
+export type StartResult =
+  | { started: true; target: string; runId: string }
+  | {
+      started: false;
+      reason: 'gone' | 'not_eligible' | 'running' | 'closed' | 'not_ready' | 'concurrency';
+      detail?: string;
+    };
+
+/**
+ * The only place a reviewer run starts. Inside the caller's transaction: locks the pull request row, appends
+ * `PrReviewRunStarted` and queues `pr_review.run` on the workstation. `auto` (the dispatcher) checks `mayStart` and the
+ * concurrency limits; `manual` (the owner) checks neither the cap nor the concurrency limits. The caller delivers the
+ * command after the commit.
+ */
+export async function startPrReviewRun(
   ctx: Ctx,
-  projectId: string,
-  pr: {
-    id: string;
-    repoId: string;
-    changeId: string;
-    title: string;
-    baseBranch: string;
-    workstationIds: string[];
+  tx: Tx,
+  input: {
+    projectId: string;
+    prReviewId: string;
+    trigger: 'auto' | 'manual';
+    requestedBy: string | null;
+    enforceConcurrency: boolean;
   },
-): Promise<boolean> {
-  const prNumber = Number(pr.changeId);
-  const baseRef = GitRefSchema.safeParse(pr.baseBranch);
-  if (!Number.isInteger(prNumber) || prNumber <= 0 || !baseRef.success) return false;
+): Promise<StartResult> {
   const model = REVIEWER_MODEL.first;
   const now = ctx.clock.now();
-  let target: string | undefined;
-  const started = await withAppendTx(ctx.pool, async (tx) => {
-    // the pull request row is the lock: two passes never start two runs for it
-    const row = await one(
+  // the pull request row is the lock: two passes never start two runs for it
+  const row = await one(
+    tx,
+    `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.title, pr.base_branch, pr.review_state, pr.closed_at,
+            r.remote_url_normalized, r.pr_only
+       FROM pr_reviews pr JOIN project_repos r ON r.id = pr.project_repo_id
+      WHERE pr.id=$1 AND pr.project_id=$2 FOR UPDATE OF pr`,
+    [input.prReviewId, input.projectId],
+  );
+  if (!row) return { started: false, reason: 'gone' };
+  if (row.closed_at) return { started: false, reason: 'closed' };
+  if (row.review_state !== 'not_reviewed' || !row.pr_only) return { started: false, reason: 'not_eligible' };
+  if (input.trigger === 'auto') {
+    if (!(await mayStart(tx, input.prReviewId))) return { started: false, reason: 'not_eligible' };
+  } else {
+    const live = await one(
       tx,
-      `SELECT pr.id, pr.review_state, pr.closed_at, r.remote_url_normalized, r.pr_only
-         FROM pr_reviews pr JOIN project_repos r ON r.id = pr.project_repo_id
-        WHERE pr.id=$1 FOR UPDATE OF pr`,
-      [pr.id],
+      `SELECT 1 AS x FROM pr_review_runs WHERE pr_review_id=$1 AND state IN ('running','completed')`,
+      [input.prReviewId],
     );
-    if (!row || row.closed_at || row.review_state !== 'not_reviewed' || !row.pr_only) return false;
-    if (!(await mayStart(tx, pr.id))) return false;
-    // the gate again, right before the run goes out
-    const gate = await reviewerGate(tx, pr.repoId);
-    if (gate.state !== 'ready') return false;
-    const capable = await rows(
-      tx,
-      `SELECT w.id, w.connected,
-              (SELECT count(*)::int FROM pr_review_runs x WHERE x.workstation_id = w.id AND x.state='running') AS busy
-         FROM workstations w JOIN workstation_capabilities wc ON wc.workstation_id = w.id
-        WHERE w.id = ANY($1::uuid[]) AND $2 = ANY (wc.capabilities)`,
-      [gate.workstationIds, PR_REVIEW_CAPABILITY],
-    );
-    const usable = gate.workstationIds.find((id) => {
-      const w = capable.find((c) => c.id === id);
-      return w?.connected && Number(w.busy) < MAX_RUNNING_PER_WORKSTATION;
-    });
-    if (!usable) return false;
+    if (live) return { started: false, reason: 'running' };
+  }
+  const repoId = row.project_repo_id as string;
+  const prNumber = Number(row.change_id);
+  const baseRef = GitRefSchema.safeParse(row.base_branch);
+  if (!Number.isInteger(prNumber) || prNumber <= 0 || !baseRef.success)
+    return { started: false, reason: 'not_eligible' };
+  // the gate again, right before the run goes out
+  const gate = await reviewerGate(tx, repoId);
+  if (gate.state !== 'ready')
+    return { started: false, reason: 'not_ready', detail: 'reviewer_token_missing' };
+  const pick = await pickReviewerWorkstation(tx, gate, { ignoreBusy: !input.enforceConcurrency });
+  if ('blocked' in pick) return { started: false, reason: 'not_ready', detail: pick.blocked };
+  if ('busy' in pick) return { started: false, reason: 'concurrency' };
+  if (input.enforceConcurrency) {
     const busyRepo = await one(
       tx,
       `SELECT count(*)::int AS n FROM pr_review_runs x JOIN pr_reviews p2 ON p2.id = x.pr_review_id
         WHERE p2.project_repo_id=$1 AND x.state='running'`,
-      [pr.repoId],
+      [repoId],
     );
-    if (Number(busyRepo?.n ?? 0) >= MAX_RUNNING_PER_REPO) return false;
-    const orgId = await orgOf(tx, projectId);
-    if (!orgId) return false;
-    const runId = randomUUID();
-    const payload = PrReviewRunPayloadSchema.parse({
-      runId,
-      projectId,
-      prReviewId: pr.id,
-      projectRepoId: pr.repoId,
-      remoteUrlNormalized: row.remote_url_normalized,
-      prNumber,
-      baseRef: baseRef.data,
-      title: pr.title.slice(0, 300),
-      reviewer: 'first',
-      runtime: model.runtime,
-      model: model.model,
-      timeoutMs: PR_REVIEW_TIMEOUT_MS,
-    });
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.project(projectId),
-          event: {
-            type: 'PrReviewRunStarted' as const,
-            payload: {
-              projectId,
-              repoId: pr.repoId,
-              prReviewId: pr.id,
-              runId,
-              reviewer: 'first' as const,
-              runtime: model.runtime,
-              model: model.model,
-              workstationId: usable,
-              timeoutMs: PR_REVIEW_TIMEOUT_MS,
-              at: now.toISOString(),
-            },
-          },
-          actor: SYSTEM_ACTOR,
-          scope: scopeOf(orgId, projectId),
-        },
-      ],
-      { tx },
-    );
-    await enqueueRunnerCommand(
-      tx,
-      usable,
-      'pr_review.run',
-      payload,
-      new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
-    );
-    target = usable;
-    return true;
+    if (Number(busyRepo?.n ?? 0) >= MAX_RUNNING_PER_REPO) return { started: false, reason: 'concurrency' };
+  }
+  const orgId = await orgOf(tx, input.projectId);
+  if (!orgId) return { started: false, reason: 'gone' };
+  const runId = randomUUID();
+  const payload = PrReviewRunPayloadSchema.parse({
+    runId,
+    projectId: input.projectId,
+    prReviewId: input.prReviewId,
+    projectRepoId: repoId,
+    remoteUrlNormalized: row.remote_url_normalized,
+    prNumber,
+    baseRef: baseRef.data,
+    title: String(row.title).slice(0, 300),
+    reviewer: 'first',
+    runtime: model.runtime,
+    model: model.model,
+    timeoutMs: PR_REVIEW_TIMEOUT_MS,
   });
-  if (started && target)
-    void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
-  return started === true;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.project(input.projectId),
+        event: {
+          type: 'PrReviewRunStarted' as const,
+          payload: {
+            projectId: input.projectId,
+            repoId,
+            prReviewId: input.prReviewId,
+            runId,
+            reviewer: 'first' as const,
+            runtime: model.runtime,
+            model: model.model,
+            workstationId: pick.id,
+            timeoutMs: PR_REVIEW_TIMEOUT_MS,
+            trigger: input.trigger,
+            requestedBy: input.requestedBy,
+            at: now.toISOString(),
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: scopeOf(orgId, input.projectId),
+      },
+    ],
+    { tx },
+  );
+  await enqueueRunnerCommand(
+    tx,
+    pick.id,
+    'pr_review.run',
+    payload,
+    new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
+  );
+  return { started: true, target: pick.id, runId };
+}
+
+/**
+ * The owner starts a review by hand. It goes past the daily cap and the concurrency limits and is never counted
+ * toward the cap (the owner decides extra spend). Only the project Owner or an organization Owner/Admin.
+ */
+export async function triggerPrReview(
+  ctx: Ctx,
+  user: { id: string },
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  prReviewId: string,
+): Promise<PrReviewDto> {
+  let target: string | undefined;
+  await withAppendTx(ctx.pool, async (tx) => {
+    await requireSpendOwner(tx, user, org, projectId);
+    await one(tx, 'SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
+    const r = await startPrReviewRun(ctx, tx, {
+      projectId,
+      prReviewId,
+      trigger: 'manual',
+      requestedBy: user.id,
+      enforceConcurrency: false,
+    });
+    if (r.started) {
+      target = r.target;
+      return;
+    }
+    if (r.reason === 'gone') throw notFound('pull request not found');
+    if (r.reason === 'closed') throw conflict('pr_closed', 'this pull request is closed');
+    if (r.reason === 'running') throw conflict('review_running', 'a review of this pull request is running');
+    if (r.reason === 'not_ready')
+      throw conflict('reviewer_not_ready', 'no reviewer workstation is ready for this repository', {
+        reason: r.detail,
+      });
+    throw conflict('not_reviewable', 'this pull request cannot be reviewed now');
+  });
+  if (target) void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
+  const list = await listPrReviews(ctx.pool, projectId, ctx);
+  const dto = list.find((p) => p.id === prReviewId);
+  if (!dto) throw notFound('pull request not found');
+  return dto;
 }
 
 // ---- the findings the review posts -----------------------------------------------------------------------------
@@ -493,13 +561,19 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
 // ---- what the owner sees ---------------------------------------------------------------------------------------
 
 /** The recorded pull requests of a project's live repositories with their latest run, open ones first. */
-export async function listPrReviews(db: Queryable, projectId: string): Promise<PrReviewDto[]> {
+export async function listPrReviews(
+  db: Queryable,
+  projectId: string,
+  ctx?: Pick<Ctx, 'clock'>,
+): Promise<PrReviewDto[]> {
+  const queue = ctx ? await prReviewQueue(db, ctx, projectId) : undefined;
+  const queued = new Map((queue?.items ?? []).map((q) => [q.prReviewId, q]));
   const list = await rows(
     db,
     `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.url, pr.title, pr.author, pr.opened_at, pr.review_state,
             pr.reviewed_at, pr.reviewed_by, pr.closed_at, r.remote_url_normalized, r.name,
             run.state AS run_state, run.started_at, run.finished_at, run.duration_ms, run.timeout_ms, run.error,
-            run.error_code, run.review_url,
+            run.error_code, run.review_url, run.trigger,
             (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count
        FROM pr_reviews pr
        JOIN project_repos r ON r.id = pr.project_repo_id AND r.removed_at IS NULL
@@ -525,6 +599,8 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
     reviewedAt: iso(l.reviewed_at),
     reviewer: (l.reviewed_by as 'first' | null) ?? null,
     reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
+    queuePosition: queued.get(l.id as string)?.position ?? null,
+    queueSlot: queued.get(l.id as string)?.slot ?? null,
     lastRun: l.run_state
       ? {
           state: l.run_state as 'running' | 'completed' | 'posted' | 'timed_out' | 'failed',
@@ -536,6 +612,7 @@ export async function listPrReviews(db: Queryable, projectId: string): Promise<P
           code: (l.error_code as string | null) ?? null,
           postedCount: Number(l.posted_count ?? 0),
           reviewUrl: (l.review_url as string | null) ?? null,
+          trigger: (l.trigger as 'auto' | 'manual' | null) ?? 'auto',
         }
       : null,
   }));

@@ -235,13 +235,32 @@ export async function applyPrListResult(
     );
     const known = new Map(
       (
-        await rows(tx, 'SELECT id, change_id, closed_at FROM pr_reviews WHERE project_repo_id=$1', [repoId])
+        await rows(
+          tx,
+          'SELECT id, change_id, closed_at, changed_lines FROM pr_reviews WHERE project_repo_id=$1',
+          [repoId],
+        )
       ).map((k) => [k.change_id as string, k]),
     );
     const scope = projectScope(repo.org_id as string, projectId);
     const events = [];
     for (const c of r.changes) {
-      if (known.has(c.id)) continue;
+      const k = known.get(c.id);
+      if (k) {
+        // the size of a known open pull request follows the forge (new commits change it)
+        const size = c.changedLines ?? null;
+        if (!k.closed_at && size !== null && size !== (k.changed_lines ?? null))
+          events.push({
+            streamId: streamId.project(projectId),
+            event: {
+              type: 'PrReviewSizeChanged' as const,
+              payload: { projectId, repoId, prReviewId: k.id as string, changedLines: size },
+            },
+            actor: SYSTEM_ACTOR,
+            scope,
+          });
+        continue;
+      }
       if (new Date(c.createdAt).getTime() < since) continue;
       if (cardBranches.has(c.head)) continue;
       events.push({
@@ -260,6 +279,7 @@ export async function applyPrListResult(
             baseBranch: c.base,
             openedAt: new Date(c.createdAt).toISOString(),
             state: 'not_reviewed' as const,
+            changedLines: c.changedLines ?? null,
           },
         },
         actor: SYSTEM_ACTOR,
@@ -295,6 +315,7 @@ export type ReviewEligiblePr = {
   headBranch: string;
   baseBranch: string;
   openedAt: Date;
+  changedLines: number | null;
 };
 
 /**
@@ -305,7 +326,7 @@ export async function listReviewEligiblePrs(db: Queryable, projectId: string): P
   const list = await rows(
     db,
     `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.url, pr.title, pr.author, pr.head_branch, pr.base_branch,
-            pr.opened_at
+            pr.opened_at, pr.changed_lines
        FROM pr_reviews pr JOIN project_repos r ON r.id = pr.project_repo_id
       WHERE pr.project_id=$1 AND pr.closed_at IS NULL AND pr.review_state='not_reviewed'
         AND r.pr_only AND r.removed_at IS NULL
@@ -322,6 +343,7 @@ export async function listReviewEligiblePrs(db: Queryable, projectId: string): P
     headBranch: p.head_branch as string,
     baseBranch: p.base_branch as string,
     openedAt: new Date(p.opened_at),
+    changedLines: p.changed_lines === null || p.changed_lines === undefined ? null : Number(p.changed_lines),
   }));
 }
 

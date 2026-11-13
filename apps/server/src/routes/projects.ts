@@ -24,6 +24,7 @@ import {
   SetProjectMcpServersRequestSchema,
   SetProjectPolicyRequestSchema,
   SetProviderAccountRequestSchema,
+  SetPrReviewCapRequestSchema,
   SetReferenceReposRequestSchema,
   SetRegressionLoopRequestSchema,
   SetReviewSettingsRequestSchema,
@@ -43,7 +44,8 @@ import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
-import { listPrReviews } from '../commands/pr-review-runs.ts';
+import { prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
+import { listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -115,8 +117,47 @@ export function projectRoutes(ctx: Ctx) {
     app.get('/api/projects/:id/pull-requests', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
-      return { pullRequests: await listPrReviews(ctx.pool, req.params.id) };
+      return { pullRequests: await listPrReviews(ctx.pool, req.params.id, ctx) };
     });
+
+    /** Today's used count and the queue of waiting pull requests in run order. */
+    app.get('/api/projects/:id/pull-requests/queue', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return prReviewQueue(ctx.pool, ctx, req.params.id);
+    });
+
+    /** The owner starts a review by hand: it goes past the daily cap and is not counted. */
+    app.post(
+      '/api/projects/:id/pull-requests/:prReviewId/review',
+      { schema: { params: z.object({ id: z.uuid(), prReviewId: z.uuid() }) } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        return triggerPrReview(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.params.prReviewId,
+        );
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/pr-review-cap',
+      { schema: { params: IdParamsSchema, body: SetPrReviewCapRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setPrReviewDailyCap(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.cap,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
 
     app.patch(
       '/api/projects/:id',

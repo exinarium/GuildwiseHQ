@@ -430,6 +430,10 @@ export const projectProjectors: Record<string, Projector> = {
       JSON.stringify(p.services),
     ]);
   },
+  ProjectPrReviewCapSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectPrReviewCapSet'>).payload;
+    await exec(tx, 'UPDATE projects SET pr_review_daily_cap=$2 WHERE id=$1', [p.projectId, p.cap]);
+  },
   ProjectConcurrencyCapSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;
     await exec(tx, 'UPDATE projects SET max_concurrent_shifts=$2 WHERE id=$1', [p.projectId, p.cap]);
@@ -504,8 +508,8 @@ export const projectProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO pr_reviews (id, project_id, project_repo_id, change_id, url, title, author, head_branch, base_branch,
-                               opened_at, recorded_at, review_state)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                               opened_at, recorded_at, review_state, changed_lines)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        ON CONFLICT (project_repo_id, change_id) DO NOTHING`,
       [
         p.prReviewId,
@@ -520,8 +524,13 @@ export const projectProjectors: Record<string, Projector> = {
         p.openedAt,
         e.createdAt,
         p.state,
+        p.changedLines ?? null,
       ],
     );
+  },
+  PrReviewSizeChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewSizeChanged'>).payload;
+    await exec(tx, 'UPDATE pr_reviews SET changed_lines=$2 WHERE id=$1', [p.prReviewId, p.changedLines]);
   },
   PrReviewClosed: async (tx, e) => {
     const p = (e.event as EventOf<'PrReviewClosed'>).payload;
