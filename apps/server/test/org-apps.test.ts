@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { APP_INTEGRATIONS_CAPABILITY, INTEGRATION_ENVELOPE_ALG } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sendAppSync } from '../src/commands/org-apps.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -247,5 +248,111 @@ describe('automated apps: add, fail, remove', () => {
     ]);
     expect(commandsOf('app.remove', from)).toHaveLength(1);
     expect(await q(`SELECT 1 FROM events WHERE type='OrgAppIntegrationRemoved'`)).toHaveLength(1);
+  });
+});
+
+describe('automated apps: app.sync and offline removal', () => {
+  const syncRows = () =>
+    q(
+      `SELECT id, status, last_error, payload FROM runner_commands
+        WHERE workstation_id=$1 AND type='app.sync' ORDER BY created_at, id`,
+      [w.workstationId],
+    );
+  const reconnect = async () => {
+    r1.close();
+    await r1.waitClosed().catch(() => undefined);
+    r1 = await w.connectRunner({ hello: false });
+    r1.hello({ capabilities: [APP_INTEGRATIONS_CAPABILITY], sudoKey: KEY1 });
+    await r1.waitFor('welcome');
+    await w.t.app.ctx.notifier.flush();
+  };
+  let appId = '';
+
+  it('skips app.sync while this workstation owes an answer to a share, and syncs once it is answered', async () => {
+    const from = r1.received.length;
+    const body = addBody({ installationId: '900' });
+    expect((await call(w.owner, 'POST', '/api/org/apps', body)).status).toBe(202);
+    const c = await r1.waitFor('command', (x) => x.command === 'app.connect', 5000, from);
+    const before = (await syncRows()).length;
+    await sendAppSync(w.t.app.ctx, w.workstationId);
+    expect(await syncRows()).toHaveLength(before);
+    r1.send('command.result', {
+      commandId: c.commandId,
+      ok: true,
+      result: { ok: true, instance: '4242:900', identity: { ...IDENTITY, installationId: '900' } },
+    });
+    await poll(body.requestId, (s) => s !== 'pending');
+    appId = (await call(w.owner, 'GET', '/api/org/apps')).body.apps[0].id as string;
+    await sendAppSync(w.t.app.ctx, w.workstationId);
+    expect(await syncRows()).toHaveLength(before + 1);
+  });
+
+  it('queues app.sync after welcome with the apps of the projection and replaces an older pending one', async () => {
+    r1.close();
+    await r1.waitClosed().catch(() => undefined);
+    await sendAppSync(w.t.app.ctx, w.workstationId); // queued while the runner is away
+    const stale = (await syncRows()).at(-1) as { id: string; status: string };
+    expect(stale.status).toBe('pending');
+    const from = 0;
+    r1 = await w.connectRunner({ hello: false });
+    r1.hello({ capabilities: [APP_INTEGRATIONS_CAPABILITY], sudoKey: KEY1 });
+    await r1.waitFor('welcome');
+    await w.t.app.ctx.notifier.flush();
+    const sync = await r1.waitFor(
+      'command',
+      (x) => x.command === 'app.sync' && x.commandId !== stale.id,
+      5000,
+      from,
+    );
+    expect(sync.payload.orgIds).toContain(orgId);
+    expect(sync.payload.apps).toEqual([{ orgId, integrationId: appId, instance: '4242:900' }]);
+    const replaced = (await q(`SELECT status, last_error FROM runner_commands WHERE id=$1`, [stale.id]))[0];
+    expect(replaced).toEqual({ status: 'failed', last_error: 'replaced' });
+  });
+
+  it('does not queue app.sync for a runner without the capability', async () => {
+    const before = (await syncRows()).length;
+    r1.close();
+    await r1.waitClosed().catch(() => undefined);
+    r1 = await w.connectRunner({ hello: false });
+    r1.hello({ capabilities: [], sudoKey: KEY1 });
+    await r1.waitFor('welcome');
+    await w.t.app.ctx.notifier.flush();
+    expect(await syncRows()).toHaveLength(before);
+    await reconnect();
+  });
+
+  it('removing an app while the workstation is offline queues app.remove without expiry; it arrives on reconnect', async () => {
+    r1.close();
+    await r1.waitClosed().catch(() => undefined);
+    expect((await call(w.owner, 'DELETE', `/api/org/apps/${appId}`)).status).toBe(202);
+    const queued = await q(
+      `SELECT id, status, expires_at, payload FROM runner_commands
+        WHERE workstation_id=$1 AND type='app.remove' AND payload->>'integrationId'=$2`,
+      [w.workstationId, appId],
+    );
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ status: 'pending', expires_at: null });
+    expect(queued[0]?.payload).toMatchObject({ orgId, integrationId: appId, instance: '4242:900' });
+    r1 = await w.connectRunner({ hello: false });
+    r1.hello({ capabilities: [APP_INTEGRATIONS_CAPABILITY], sudoKey: KEY1 });
+    await r1.waitFor('welcome');
+    await w.t.app.ctx.notifier.flush();
+    // an unacknowledged app.remove of an earlier test is delivered again too: wait for this one by id
+    const rc = await r1.waitFor('command', (x) => x.commandId === queued[0]?.id, 5000, 0);
+    expect(rc.command).toBe('app.remove');
+    // the sync after this welcome no longer lists the removed app
+    // welcome goes out before the server queues app.sync: wait for the new row
+    type SyncRow = { id: string; status: string; payload: { apps: unknown[] } };
+    await until(
+      async () => ((await syncRows()).at(-1) as SyncRow).payload.apps?.length === 0,
+      5000,
+      'app.sync after welcome',
+    );
+    const latest = (await syncRows()).at(-1) as SyncRow;
+    const sync = await r1.waitFor('command', (x) => x.commandId === latest.id, 5000, 0);
+    expect(sync.payload.apps).toEqual([]);
+    // the older sync that still listed the app was replaced, so it can no longer be delivered
+    expect((await syncRows()).filter((x: any) => x.status === 'pending' && x.id !== latest.id)).toEqual([]);
   });
 });

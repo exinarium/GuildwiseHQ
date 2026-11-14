@@ -766,22 +766,23 @@ export async function sendAppSync(ctx: Ctx, workstationId: string): Promise<void
       WHERE w.workstation_id=$1 AND i.status='active'`,
     [workstationId],
   );
-  // A share answered while the runner was away is not in the projection yet: keep refs of requests still in flight.
-  const pending = await rows<{
-    org_id: string;
-    integration_id: string;
-    payload: { appRef?: string; installationId?: string };
-  }>(
+  // Intended: while this workstation still owes an answer to an add/share (an app.connect it has not reported yet), the
+  // runner may already hold a key the projection does not know about, and app.sync would drop that ref. So no sync is
+  // queued now; the next welcome reconciles once the answer is in. Removals are not delayed by this: unshare/remove
+  // queue app.remove directly, without expiry, so an offline runner still gets them on reconnect.
+  const inFlight = await one(
     ctx.pool,
-    `SELECT r.org_id, r.integration_id, '{}'::jsonb AS payload FROM app_integration_requests r
-      WHERE r.state IN ('pending','needs_choice') AND r.results @> $2::jsonb AND r.expires_at > $3`,
-    [workstationId, JSON.stringify([{ workstationId }]), ctx.clock.now()],
+    `SELECT 1 AS x FROM app_integration_requests r, jsonb_array_elements(r.results) e
+      WHERE r.op IN ('add','share') AND e->>'workstationId' = $1 AND NOT (e ? 'ok') AND r.expires_at > $2
+      LIMIT 1`,
+    [workstationId, ctx.clock.now()],
   );
-  if (pending.length) return; // reconcile on the next welcome, once the in-flight shares are answered
+  if (inFlight) return;
   await exec(
     ctx.pool,
+    // an older sync still waiting, or handed out on a connection whose answer may never come, is out of date
     `UPDATE runner_commands SET status='failed', last_error='replaced'
-      WHERE workstation_id=$1 AND type='app.sync' AND status='pending'`,
+      WHERE workstation_id=$1 AND type='app.sync' AND status IN ('pending','sent')`,
     [workstationId],
   );
   await enqueueRunnerCommand(ctx.pool, workstationId, 'app.sync', {
