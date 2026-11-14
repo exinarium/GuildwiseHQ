@@ -1,5 +1,11 @@
-import type { JourneyTemplate } from '@aom/shared';
-import { Button } from '../ui.tsx';
+import type { JourneyTemplate, JourneyTemplateIndustry } from '@aom/shared';
+import { Badge, Button } from '../ui.tsx';
+
+const INDUSTRY_LABEL: Record<JourneyTemplateIndustry, string> = {
+  real_estate: 'Real estate',
+  accounting: 'Accounting',
+  law: 'Law',
+};
 
 /** The journey templates to start from (same layout idea as the workflow template gallery). */
 export function JourneyTemplateGallery({
@@ -15,7 +21,10 @@ export function JourneyTemplateGallery({
     <ul className="grid gap-3 sm:grid-cols-2" data-testid="journey-templates">
       {templates.map((t) => (
         <li key={t.id} className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
-          <h3 className="text-base font-semibold text-fg">{t.name}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold text-fg">{t.name}</h3>
+            {t.industry ? <Badge>{INDUSTRY_LABEL[t.industry]}</Badge> : null}
+          </div>
           <p className="text-sm text-muted">{t.description}</p>
           <p className="text-xs text-subtle">
             {t.definition.steps.length} steps · for a {t.definition.recordType}
