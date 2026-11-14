@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS pr_review_rounds (
   posting_at timestamptz,
   rerun_of_round_id uuid
 );
+ALTER TABLE pr_review_rounds ADD COLUMN IF NOT EXISTS rerun_of_round_id uuid;
 CREATE INDEX IF NOT EXISTS pr_review_rounds_pr ON pr_review_rounds (pr_review_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS pr_review_rounds_active ON pr_review_rounds (state) WHERE state IN ('running', 'posting');
 

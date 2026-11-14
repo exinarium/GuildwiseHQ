@@ -63,7 +63,10 @@ export const prReviewRunProjectors: Record<string, Projector> = {
       ],
     );
     if (p.rerunOfRunId)
-      await exec(tx, 'UPDATE pr_review_rounds SET rerun_of_round_id=$2 WHERE id=$1', [roundId, p.rerunOfRunId]);
+      await exec(tx, 'UPDATE pr_review_rounds SET rerun_of_round_id=$2 WHERE id=$1', [
+        roundId,
+        p.rerunOfRunId,
+      ]);
     await exec(tx, 'UPDATE pr_reviews SET last_run_id=$2 WHERE id=$1', [p.prReviewId, p.runId]);
   },
   PrReviewRunCompleted: async (tx, e) => {

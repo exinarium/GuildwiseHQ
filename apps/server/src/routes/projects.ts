@@ -51,7 +51,6 @@ import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../comman
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
 import { isSpendOwner, prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
-import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import {
   findingMarksForReplay,
   listPostedFindings,

@@ -59,16 +59,33 @@ async function addRun(
   prId: string,
   over: { startedAt: Date; trigger?: 'auto' | 'manual'; state?: string; code?: string },
 ) {
+  const id = randomUUID();
+  const state = over.state ?? 'posted';
+  // a review is a round of one run with the run's own id
+  await db().query(
+    `INSERT INTO pr_review_rounds (id, pr_review_id, project_id, reviewers, trigger, workstation_id, state, started_at, end_code)
+     VALUES ($1,$2,$3,ARRAY['first'],$4,$5,$6,$7,$8)`,
+    [
+      id,
+      prId,
+      w.projectId,
+      over.trigger ?? 'auto',
+      w.workstationId,
+      state === 'completed' ? 'posting' : state,
+      over.startedAt,
+      over.code ?? null,
+    ],
+  );
   await db().query(
     `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state, timeout_ms,
-                                 started_at, trigger, error_code)
-     VALUES ($1,$2,$3,'first','claude-code','sonnet',$4,$5,600000,$6,$7,$8)`,
+                                 started_at, trigger, error_code, round_id)
+     VALUES ($1,$2,$3,'first','claude-code','sonnet',$4,$5,600000,$6,$7,$8,$1)`,
     [
-      randomUUID(),
+      id,
       prId,
       w.projectId,
       w.workstationId,
-      over.state ?? 'posted',
+      state,
       over.startedAt,
       over.trigger ?? 'auto',
       over.code ?? null,
