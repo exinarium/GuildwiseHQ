@@ -108,6 +108,7 @@ const BOOLEAN_FLAGS = new Set([
   'drop',
   'allow-free-text',
   'no-free-text',
+  'tests-only',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -742,6 +743,8 @@ function designAssumptions(ctx: AomContext, p: Parsed): DesignAssumption[] {
 }
 
 const DESIGN_USAGE_EXTRA =
+  ' [--tests-only]' +
+  '\n       --tests-only: the whole change is in the end-to-end tests (no product code, no unit tests): the tester works the build stage' +
   '\n       a design made before its dependencies landed also needs --assumption "<assumption> | <dependency ref> | <what changes if wrong>" (repeatable) or --no-assumptions "<why>"' +
   '\n       the assumption review: aom design confirm --summary "<how you checked>"   |   aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed>"';
 
@@ -786,6 +789,11 @@ async function investigationReport(
   const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
   const assumptions = verb === 'design' ? designAssumptions(ctx, p) : [];
   const none = verb === 'design' ? one(p, 'no-assumptions')?.trim() : undefined;
+  if (verb !== 'design' && has(p, 'tests-only'))
+    throw new UsageError(
+      '--tests-only is for `aom design` (a card that will be built), not `aom investigate`',
+    );
+  const testsOnly = verb === 'design' && has(p, 'tests-only');
   // `location` is decided by the runner from the brief; the schema needs a value.
   return report(
     ctx,
@@ -795,6 +803,7 @@ async function investigationReport(
       location: 'repo',
       ...(assumptions.length ? { assumptions } : {}),
       ...(none ? { noAssumptions: none } : {}),
+      ...(testsOnly ? { testsOnly: true } : {}),
     }),
   );
 }
@@ -2213,7 +2222,7 @@ const VERBS: Record<string, Verb> = {
   batch: async (ctx, p) => {
     const sub = p.positionals[0];
     const usage =
-      'usage: aom batch done --note "<cards created>" | ask --text "<question>" [--option "<a>"]... [--recommend <n>] | skip --note "<why>" | fail --note "<why>"';
+      'usage: aom batch done --note "<cards created>" | ask --text "<question>" [--option "<a>"]... [--recommend <n, from 0>] | skip --note "<why>" | fail --note "<why>"';
     if (sub === 'ask') {
       const rec = one(p, 'recommend');
       return report(
@@ -2803,7 +2812,7 @@ export const USAGE = `usage: aom <verb> [options]
   bug triage --invalid --reason "<why>" | --severity critical|degraded|minor [--size small|medium|large]   platform architect: close a platform bug card as invalid, or rate it (critical pauses the affected scope until it is fixed)
   ledger retire <id> --reason "<why>"         BA: withdraw a ledger entry (never briefed or found again)
   comment --note "<text>"                    post a note without ending the shift
-  question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic environment|sandbox|tooling|tests|dependency|order|requirements|design|code] [--wait [10m]] [--non-blocking] [--force]   --wait: keep working in this shift until it is answered (default 10 minutes); no answer in time parks the card on the question and you resume it when it is answered
+  question --text "<q>" [--option "<a>"]... [--recommend <n, from 0>] [--doing "<x>"] [--topic environment|sandbox|tooling|tests|dependency|order|requirements|design|code] [--wait [10m]] [--non-blocking] [--force]   --wait: keep working in this shift until it is answered (default 10 minutes); no answer in time parks the card on the question and you resume it when it is answered
   card facts [<REF>]                         what the server knows: environment, whether each dependency has merged, branch, stage, blockers (look here before you ask)
   block --on dependency <REF> [--card <REF>]   architect/planner/BA: this card waits for another card (only its design may run until that one has merged)
   handoff --note "<text>" [--data-file <json>] [--build-command "<c>" --build-result "<r>" --test-command "<c>" --test-result "<r>" [--lint-command "<c>" --lint-result "<r>"] | --no-evidence "<why>"]   builder/scout/researcher: hand the card on (builder: with the build and unit test evidence; scout: candidates)

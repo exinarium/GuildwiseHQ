@@ -9,7 +9,7 @@
     "kind": "role",
     "key": "architect",
     "version": 6,
-    "sha256": "2a820a81bbc471d7613ac084f1b80f27b4d485ecef509958c876c348fecba860"
+    "sha256": "43c0c4f7f45de835a0a36c6a13612bfdcd1d464552c270cba64434a1a698f5e1"
   },
   {
     "kind": "role",
@@ -27,7 +27,7 @@
     "kind": "role",
     "key": "builder",
     "version": 8,
-    "sha256": "4f8174a5ec22e2bff54fd2c7f33054292602c3322909f4d33a12546697f822fc"
+    "sha256": "bc35ab9c418929726ec9d4d5b170ca6a9aadf4046c798e8a4198f330e9834bd5"
   },
   {
     "kind": "role",
@@ -122,8 +122,8 @@
   {
     "kind": "role",
     "key": "tester",
-    "version": 13,
-    "sha256": "ae46030d606e4b31183e1110098f7023931ff14e309d3b7f1051dc50beea12df"
+    "version": 14,
+    "sha256": "47b69f094bb56f8d59ac9f6c123db6162c3648a2e07df5b49c5190ed36bbb5d1"
   },
   {
     "kind": "role",

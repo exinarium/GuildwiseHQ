@@ -111,6 +111,11 @@ export const InvestigationDataSchema = z.object({
   noAssumptions: z.string().max(1000).optional(),
   /** Set by the assumption-review shift (`aom design confirm|revise`). */
   review: DesignReviewDataSchema.optional(),
+  /**
+   * `aom design --tests-only`: the change is only in end-to-end test files, so the build stage is worked by the tester
+   * instead of a builder (BLOCKERS.md section 2). Old runners drop it; the card then goes to a builder as before.
+   */
+  testsOnly: z.boolean().optional(),
 });
 export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
 

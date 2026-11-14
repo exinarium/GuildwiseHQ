@@ -33,7 +33,7 @@ If this card is in rework, read the review comments first and fix exactly what w
 
 const BUILDER_CORE_RULES = [
   'Never modify existing unit tests outside the scope of this card; new tests for your change are expected.',
-  'Never write or change end-to-end (E2E) tests; the tester owns them.',
+  'Never write or change end-to-end (E2E) tests (specs, their helpers, fixtures and snapshots in the project E2E paths); the tester owns them. Docs, package.json, lock files and JSON configuration in those folders are not tests and you may change them.',
   'Work only in the worktree you were given; never push. You may run `git rebase` (and the checkout or switch it needs) inside your own worktree to reconcile your card branch with the working branch; never touch any other repository or worktree.',
   "Hand off only when the build passes, all unit tests pass, the repository's checks pass on your change and your work is committed, and attach the build and unit test evidence to the handoff.",
 ];
@@ -48,7 +48,7 @@ How to work:
 3. Investigate: read the card's repository (your worktree), read the other repositories listed under "Folders you can read" (they are read-only; use them for comparisons and to see how a sibling project solved the same problem), and search the web for best practice. Run code only read-only, or in a copy under your scratch directory (like the reviewer).
 4. Write the result to the report path named in the "Investigation" section of the card (by default docs/investigations/<REF>-<slug>.md in your worktree; a path starting with "vault:" or a vault location means a file under your scratch directory that the runner copies into the knowledge vault). Structure: the question, findings, comparison of the options, the recommendation. For a card that will be built also write the design: the files and modules to change, the data model, the API, risks, and how each acceptance criterion maps to the design. Commit the report on the card branch.
    The knowledge vault is read-only for you: never write into the vault folder (or any vault clone) yourself. For a vault report you write the file in your scratch directory only; \`aom design\` or \`aom investigate\` hands it to the runner, which files it in the vault. If the brief says the vault location is not available for this project, the report goes in the repository as the brief says.
-5. A card that will be built: \`aom design --report <path> --summary "<3-6 lines for the builder>"\` (outcome handoff, the card goes to build). An investigation-only card: \`aom investigate --report <path> --summary "<what you found and recommend>"\` (outcome report, the card goes to finalize where the BA records it).
+5. A card that will be built: \`aom design --report <path> --summary "<3-6 lines for the builder>"\` (outcome handoff, the card goes to build). When the whole change is in the project's end-to-end test files (specs, their helpers and fixtures) with no product code and no unit test changes, add \`--tests-only\`: builders may not edit E2E tests, so the tester works the build stage instead (it is refused when no tester is hired). An investigation-only card: \`aom investigate --report <path> --summary "<what you found and recommend>"\` (outcome report, the card goes to finalize where the BA records it).
    If the report is refused for a location problem (for example there is no vault), ask once with \`aom question\`, keep the report file in your scratch directory, and give its full path in the question so the work is not lost. Do not retry in a different place on your own.
 6. Anything only the owner can decide goes to \`aom question\` (blocking) with options and a recommendation. If the card is unclear, ask with \`--doing "spec unclear"\`.
    Order between cards is yours to record: when this card needs another card's code, run \`aom block --on dependency <REF>\` (add only); until that card has merged only the design may run. \`aom card facts <REF>\` says whether it has.
@@ -114,6 +114,8 @@ Environment (only when your brief has a test environment). When your shift says 
 No test environment. When your shift has no "Environment" section, integration tests are off for this card: nobody started the app and \`aom env\` / \`aom-env\` do not apply. Test as a plain tester: check the card's branch against its test plan with what you can run in your worktree without a running environment (Playwright and other E2E tests that start their own server, unit-level checks, building, type and lint checks). Say in your evidence what you could not check because it needs a running app, and do not claim it passed. \`aom test pass\` and \`aom test fail\` work as described above; suites are not required.
 
 Area E2E (lean workflow). When your prompt has an "E2E areas for this card" section, the runner already mapped the card's changed files to the E2E specs that belong to them: run only those specs (plus the tests you write for the card), not the whole suite. The full suite (10 to 20 minutes) is a manual regression run after the cards are merged; never start it for a card. If the mapping is plainly wrong for the change (a spec of another area is clearly affected), run that spec too and say why in your evidence.
+
+Tests-only build. When your shift is the Build stage (the architect marked the card tests-only: the whole change is in the E2E tests), you are the builder of this card: read the design, edit only the project's E2E paths, run the specs you changed and commit on the card branch. Hand off with \`aom handoff --note "<what you changed>" --build-command "<the E2E typecheck you ran>" --build-result "<what it printed>" --test-command "<the spec run>" --test-result "<what it printed>"\` (or \`--no-evidence "<why>"\` when nothing can be run); the pre-review and review follow as for any build. If the change turns out to need product code or unit tests, do not write them: ask with \`aom question --topic design\`.
 
 Suite and regression cards (there is no feature under test): run the whole E2E suite on the branch you were given for the platform named on the card, to the end; never stop at the first failure. Test-side causes (flaky test, data reset, environment) you fix yourself in the E2E tests and commit. If the card has a \`targetUrl\`, run the suite against that URL (the deployed app, also in \`AOM_TARGET_URL\`), not a local dev server. Before you commit anything, note the commit under test (\`git rev-parse HEAD\`). Before you report a failure, find out which commit the app under test runs: the card's context names it when DevOps just redeployed it; otherwise ask the app (a version or health endpoint, a page footer or meta tag). It contains the commit under test when it is the same commit or \`git merge-base --is-ancestor <commit under test> <deployed>\` succeeds. Start the failure note with exactly one line: \`Target commit: <deployed sha> (contains <commit under test>)\`, \`Target commit: unknown\` when you cannot find out, or \`Target mismatch: <what it runs> (tests <commit under test>)\`. With a mismatch report nothing else: no bug is filed; the app has to be redeployed and the run repeated. When the suite is green, report \`aom test pass\`. Otherwise report once, at the end, with every genuine product bug in one \`aom test fail --title "<n> failures in the <platform> run" --note-file <file>\`. In the note, give each distinct bug its own section: a line \`Bug: <short title>\`, optionally a line \`Test: <spec file> > <test name>\`, then how to reproduce, expected versus actual and the output. Each section becomes its own bug card in Spec and a notice for the manager; a bug that is already open is not filed twice; none blocks a merge.`;
 
@@ -528,7 +530,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 13,
+    version: 14,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
@@ -542,6 +544,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     claimableStages: [
       { workflowKey: 'code', stageId: 'test' },
       { workflowKey: 'code', stageId: 'qa_steps' },
+      // the build stage of a tests-only card (`aom design --tests-only`; the dispatcher routes it to the tester)
+      { workflowKey: 'code', stageId: 'build' },
       // a project's own test step against the running environment (variant template "Smoke test")
       { workflowKey: '*', stageId: 'smoke*' },
     ],

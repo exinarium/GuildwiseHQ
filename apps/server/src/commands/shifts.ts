@@ -591,6 +591,27 @@ export async function applyShiftReport(
             accepted: false,
             error: `${card.ref} is designed before ${unlanded.map((d) => d.ref).join(', ')} landed: record the assumptions you made about them (\`--assumption "<assumption> | <dependency ref> | <what changes if wrong>"\`, repeatable) or say there are none with \`--no-assumptions "<why>"\``,
           };
+        // A tests-only card (`aom design --tests-only`): its build stage is worked by the tester (BLOCKERS.md section 2).
+        if (inv.testsOnly) {
+          if (card.investigation_only)
+            return {
+              accepted: false,
+              error:
+                '--tests-only is for a card that will be built: an investigation-only card has no build stage',
+            };
+          const tester = await one(
+            tx,
+            `SELECT 1 FROM agents fa WHERE fa.org_id = $1 AND fa.status = 'active' AND fa.role_key = 'tester'
+                AND (fa.allowed_project_ids IS NULL OR $2 = ANY (fa.allowed_project_ids)) LIMIT 1`,
+            [card.org_id, card.project_id],
+          );
+          if (!tester)
+            return {
+              accepted: false,
+              error:
+                '--tests-only hands the build to the tester, but no active tester may work this project: hand off without --tests-only (a builder builds it) or ask the manager to hire a tester',
+            };
+        }
         const review = inv.review;
         const confirming = pending && review?.decision === 'confirm';
         if (review) {
@@ -651,6 +672,7 @@ export async function applyShiftReport(
                   ...(inv.body ? { body: inv.body } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
+                  ...(inv.testsOnly ? { testsOnly: true } : {}),
                 },
               },
               actor,
@@ -660,7 +682,7 @@ export async function applyShiftReport(
               card,
               { kind: 'agent', agentId: agent.id },
               'comment',
-              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}`,
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${inv.testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}`,
             ),
           );
         }
@@ -669,7 +691,9 @@ export async function applyShiftReport(
           ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
-            : 'Recorded. The card goes to the builder with your design. Finish now.';
+            : inv.testsOnly
+              ? 'Recorded. The card is tests-only: the tester works the build stage with your design. Finish now.'
+              : 'Recorded. The card goes to the builder with your design. Finish now.';
       }
       main = holdDesign
         ? mk({ type: 'DesignHeld', payload: { cardId, dependencies: holdDesign, agentId: agent.id } })

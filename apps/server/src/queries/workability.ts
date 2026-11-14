@@ -107,11 +107,14 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
     agents: Row[],
     nowDate: Date,
   ): Promise<Workability> {
-    const role = await roleName(c.org_id, st.claimRole as string);
+    // A tests-only card's build stage is worked by the tester (dispatcher `stageRoleSql`).
+    const roleKey =
+      st.claimRole === 'builder' && c.investigation?.testsOnly === true ? 'tester' : (st.claimRole as string);
+    const role = await roleName(c.org_id, roleKey);
     const roleLower = role.toLowerCase();
     const seniorWord = st.seniorOnly ? 'senior ' : '';
     const hire = {
-      roleKey: st.claimRole as string,
+      roleKey,
       ...(st.seniorOnly ? { seniority: 'senior' as const } : {}),
     };
     const blocked = (reason: string): Workability => ({

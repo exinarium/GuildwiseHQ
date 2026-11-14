@@ -21,9 +21,15 @@ export interface EnvCheckInput {
 /** Returns what is wrong with the test environment, or null when a tester can start. */
 export type EnvChecker = (input: EnvCheckInput) => Promise<EnvProblem | null>;
 
-/** Only testers actioning a card need the application and Docker (spec "Test environment"). */
+/**
+ * Only testers actioning a card need the application and Docker (spec "Test environment"). A tester working the build
+ * stage of a tests-only card (an outcome hands off a build) only edits and runs specs: no environment, else it is parked.
+ */
 export const needsTestEnvironment = (msg: ShiftStartMsg): boolean =>
-  msg.kind === 'card' && msg.agent.roleKey === 'tester' && !msg.agent.isDevops;
+  msg.kind === 'card' &&
+  msg.agent.roleKey === 'tester' &&
+  !msg.agent.isDevops &&
+  !msg.brief.shift.outcomes.some((o) => o.data === 'buildHandoff');
 
 /**
  * Mock runtime (CI, E2E): the card's `mockEnv` field names a problem that persists until the mock DevOps engineer

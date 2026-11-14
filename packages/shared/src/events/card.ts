@@ -489,6 +489,8 @@ export const cardEvents = [
         .optional(),
       /** The card only investigated (no build follows). */
       investigationOnly: z.boolean().default(false),
+      /** The change is only in E2E test files: the build stage is worked by the tester (`aom design --tests-only`). */
+      testsOnly: z.boolean().optional(),
     }),
   ),
   /**
