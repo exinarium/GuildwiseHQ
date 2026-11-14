@@ -529,8 +529,7 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
   };
 
   if (sub === 'push') {
-    if (flags.some((f) => f === '--all' || f === '--mirror' || f === '--prune'))
-      return frozenRefusal(first);
+    if (flags.some((f) => f === '--all' || f === '--mirror' || f === '--prune')) return frozenRefusal(first);
     const refspecs = positional.slice(1);
     if (refspecs.length === 0) return frozenRefusal(first);
     for (const spec of refspecs) {

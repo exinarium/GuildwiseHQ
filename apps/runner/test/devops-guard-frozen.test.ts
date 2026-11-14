@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { ClaudeCodeAdapter, GUARD_DIR, guardFileFor } from '../src/adapters/claude-code.ts';
+import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import {
   auditEntry,
   classifyCommand,
@@ -124,7 +124,12 @@ describe('frozen release branch (release prep guard)', () => {
   it('leaves devops shifts and chats alone: no frozen rule, no git lookup', () => {
     let called = 0;
     const deps: GuardDeps = { headBranch: () => (called++, B) };
-    for (const cmd of [`git push origin ${B}`, 'git push origin dev-working', 'git commit -m x', 'git reset --hard x'])
+    for (const cmd of [
+      `git push origin ${B}`,
+      'git push origin dev-working',
+      'git commit -m x',
+      'git reset --hard x',
+    ])
       expect(classifyCommand(cmd, devopsCfg(), CWD, deps).decision).toBe('allowed');
     expect(called).toBe(0);
   });
@@ -178,16 +183,44 @@ describe('guard file per session', () => {
     const adapter = new ClaudeCodeAdapter(ClaudeRuntimeConfigSchema.parse({}), runnerPaths(t));
     const dir = join(t, 'agents', 'a1', 'claude');
     mkdirSync(dir, { recursive: true });
-    const guard = (adapter as unknown as {
-      devopsGuard: (d: string, g: object, k: 'shift' | 'chat') => { file: string } | undefined;
-    }).devopsGuard.bind(adapter);
-    const a = guard(dir, { sessionRef: 'p1', shiftKind: 'release_prep', protectedBranches: [B], frozenBranches: [B], approvedCommands: [] }, 'shift');
-    const b = guard(dir, { sessionRef: 'd1', shiftKind: 'devops', protectedBranches: ['main'], approvedCommands: ['ssh x'] }, 'shift');
-    const c = guard(dir, { sessionRef: 'c1', protectedBranches: ['main'], approvedCommands: ['ssh y'] }, 'chat');
+    const guard = (
+      adapter as unknown as {
+        devopsGuard: (d: string, g: object, k: 'shift' | 'chat') => { file: string } | undefined;
+      }
+    ).devopsGuard.bind(adapter);
+    const a = guard(
+      dir,
+      {
+        sessionRef: 'p1',
+        shiftKind: 'release_prep',
+        protectedBranches: [B],
+        frozenBranches: [B],
+        approvedCommands: [],
+      },
+      'shift',
+    );
+    const b = guard(
+      dir,
+      { sessionRef: 'd1', shiftKind: 'devops', protectedBranches: ['main'], approvedCommands: ['ssh x'] },
+      'shift',
+    );
+    const c = guard(
+      dir,
+      { sessionRef: 'c1', protectedBranches: ['main'], approvedCommands: ['ssh y'] },
+      'chat',
+    );
     expect(new Set([a?.file, b?.file, c?.file]).size).toBe(3);
     const read = (f?: string) => JSON.parse(readFileSync(f as string, 'utf8'));
-    expect(read(a?.file)).toMatchObject({ shiftKind: 'release_prep', frozenBranches: [B], approvedCommands: [] });
-    expect(read(b?.file)).toMatchObject({ shiftKind: 'devops', frozenBranches: [], approvedCommands: ['ssh x'] });
+    expect(read(a?.file)).toMatchObject({
+      shiftKind: 'release_prep',
+      frozenBranches: [B],
+      approvedCommands: [],
+    });
+    expect(read(b?.file)).toMatchObject({
+      shiftKind: 'devops',
+      frozenBranches: [],
+      approvedCommands: ['ssh x'],
+    });
     expect(read(c?.file)).toMatchObject({ kind: 'chat', approvedCommands: ['ssh y'] });
     expect(a?.file).toContain(`/${GUARD_DIR}/`);
   });

@@ -20,7 +20,8 @@ describe('guardedShift: which shifts run behind the DevOps guard hook', () => {
   it('is true for devops and release_prep shifts of a DevOps agent only', () => {
     expect(guardedShift(msg('devops', true))).toBe(true);
     expect(guardedShift(prep(true))).toBe(true);
-    for (const kind of ['card', 'question', 'ba_task', 'ceo']) expect(guardedShift(msg(kind, true))).toBe(false);
+    for (const kind of ['card', 'question', 'ba_task', 'ceo'])
+      expect(guardedShift(msg(kind, true))).toBe(false);
     expect(guardedShift(prep(false))).toBe(false);
     expect(guardedShift(msg('devops', false))).toBe(false);
   });
