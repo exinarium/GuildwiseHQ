@@ -15,7 +15,7 @@ export function findingsCap(changedLines: number | null | undefined): number {
   return Math.min(FINDINGS_CAP_MAX, Math.max(FINDINGS_CAP_MIN, n));
 }
 
-export const FindingDispositionSchema = z.enum(['posted', 'held_back']);
+export const FindingDispositionSchema = z.enum(['posted', 'held_back', 'merged']);
 export type FindingDisposition = z.infer<typeof FindingDispositionSchema>;
 
 export type FindingSeverity = 'high' | 'medium' | 'low';

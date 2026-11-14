@@ -625,6 +625,10 @@ export class RunnerHandlers {
       // Terminal: a timeout or a failure is recorded as it is (never redelivered: a second run would be a second review).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrReviewRunResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.cancel') {
+      // Terminal and log only: the server already marked the run cancelled; `found: false` means it had not started.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      this.ctx.log.info({ runId: (cmd.payload as { runId?: string }).runId, ok: msg.ok }, 'pull request review cancel answered');
     } else if (cmd?.type === 'pr_review.post') {
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrReviewPostResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);

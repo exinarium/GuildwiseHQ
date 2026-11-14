@@ -78,10 +78,29 @@ export const REVIEWER_MODEL: Record<PrReviewer, { runtime: string; model: string
 };
 
 /**
- * The reviewers that review live pull requests. The second reviewer (Opus) runs only offline, in the 20-PR replay,
- * until a later card adds it here.
+ * The reviewers of every live review round. The second reviewer (Opus) is added per project, by the owner's switch and
+ * only after a replay has been recorded (`reviewersFor` on the server).
  */
 export const LIVE_REVIEWERS = ['first'] as const satisfies readonly PrReviewer[];
+
+/** Announced by a runner that can stop a live reviewer run (`pr_review.cancel`). A two-reviewer round needs it. */
+export const PR_REVIEW_PAIR_CAPABILITY = 'pr-review-pair:1';
+
+/** A review round: one or two reviewer runs on one pull request, merged and posted once. */
+export const PR_REVIEW_ROUND_STATES = ['running', 'posting', 'posted', 'timed_out', 'failed'] as const;
+export const PrReviewRoundStateSchema = z.enum(PR_REVIEW_ROUND_STATES);
+export type PrReviewRoundState = z.infer<typeof PrReviewRoundStateSchema>;
+
+/** `pr_review.cancel`: stops a live run whose partner timed out or failed. */
+export const PrReviewCancelPayloadSchema = z
+  .object({ runId: z.uuid(), reason: z.enum(['partner_timeout', 'partner_failed']) })
+  .strict();
+export type PrReviewCancelPayload = z.infer<typeof PrReviewCancelPayloadSchema>;
+export const PrReviewCancelResultSchema = z.object({ found: z.boolean() });
+export type PrReviewCancelResult = z.infer<typeof PrReviewCancelResultSchema>;
+
+export const SetSecondReviewerRequestSchema = z.object({ enabled: z.boolean() }).strict();
+export type SetSecondReviewerRequest = z.infer<typeof SetSecondReviewerRequestSchema>;
 
 /** A reviewer run stops after this long, whatever it is doing. */
 export const PR_REVIEW_TIMEOUT_MS = 10 * 60_000;
@@ -96,6 +115,7 @@ export const PR_REVIEW_RUN_STATES = [
   'timed_out',
   'failed',
   'offline_completed',
+  'cancelled',
 ] as const;
 export const PrReviewRunStateSchema = z.enum(PR_REVIEW_RUN_STATES);
 export type PrReviewRunState = z.infer<typeof PrReviewRunStateSchema>;
@@ -165,6 +185,7 @@ export const PR_REVIEW_FAILURE_CODES = [
   'no_token',
   'unsupported',
   'runtime_unavailable',
+  'cancelled',
   'error',
 ] as const;
 export const PrReviewFailureCodeSchema = z.enum(PR_REVIEW_FAILURE_CODES);
@@ -201,6 +222,7 @@ export type PrReviewRunResult = z.infer<typeof PrReviewRunResultSchema>;
 /** `pr_review.post`: what the poster takes, plus finding ids for the result. Never a token. */
 export const PrReviewPostPayloadSchema = z
   .object({
+    /** The posting id: the round id (for a round of one it equals the run id). */
     runId: z.uuid(),
     spec: ReviewerRunSpecSchema,
     /** Ends with the run marker (`prReviewMarker`), which makes a repeated post harmless. */
@@ -252,6 +274,8 @@ export const PrReviewDtoSchema = z.object({
   reviewedAt: z.string().nullable(),
   /** Null while `reviewersHidden` (blind marking). */
   reviewer: PrReviewerSchema.nullable(),
+  /** Every reviewer of the posted round; null while hidden or before a review. */
+  reviewers: z.array(PrReviewerSchema).nullable().optional(),
   /** True while the pull request has posted findings the owner has not marked: the reviewer is not shown. */
   reviewersHidden: z.boolean().optional(),
   unmarkedCount: z.number().optional(),
@@ -281,6 +305,19 @@ export const PrReviewDtoSchema = z.object({
       heldBackCount: z.number().optional(),
       findingsCap: z.number().nullable().optional(),
       changedLines: z.number().nullable().optional(),
+      /** The latest review round: how many runs it had, duplicates combined, and each run. Reviewer and model are null while hidden. */
+      runCount: z.number().optional(),
+      mergedCount: z.number().nullable().optional(),
+      runs: z
+        .array(
+          z.object({
+            state: PrReviewRunStateSchema,
+            durationMs: z.number().nullable(),
+            reviewer: PrReviewerSchema.nullable(),
+            model: z.string().nullable(),
+          }),
+        )
+        .optional(),
     })
     .nullable(),
 });

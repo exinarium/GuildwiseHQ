@@ -3,7 +3,9 @@ import {
   compareQueue,
   isOrgManager,
   type OrgRole,
+  PR_REVIEW_CAPABILITY,
   PR_REVIEW_DAILY_CAP_DEFAULT,
+  PR_REVIEW_PAIR_CAPABILITY,
   type PrReviewBlockedReason,
   type PrReviewQueueDto,
   type PrReviewQueueItem,
@@ -17,6 +19,7 @@ import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden } from '../errors.ts';
 import { mayStart } from '../review/may-start.ts';
+import { reviewersFor } from '../review/reviewers-for.ts';
 import { listQueueCandidates, pickReviewerWorkstation } from '../review/reviewer-gate.ts';
 import { projectScope, userActor } from './common.ts';
 
@@ -80,6 +83,7 @@ export async function prReviewQueue(
     ]),
   );
   // the reviewer workstation is looked up once per repository
+  const pair = (await reviewersFor(db, projectId)).length > 1; // a pair needs a runner that can cancel
   const blockedByRepo = new Map<string, { reason: PrReviewBlockedReason; problem: string | null } | null>();
   const blockedOf = async (c: (typeof candidates)[number]) => {
     if (blockedByRepo.has(c.repoId)) return blockedByRepo.get(c.repoId) ?? null;
@@ -90,7 +94,10 @@ export async function prReviewQueue(
         problem: c.gate.state === 'reviewer_token_missing' ? c.gate.problem : null,
       };
     else {
-      const pick = await pickReviewerWorkstation(db, c.gate);
+      const pick = await pickReviewerWorkstation(db, c.gate, {
+        capabilities: pair ? [PR_REVIEW_CAPABILITY, PR_REVIEW_PAIR_CAPABILITY] : [PR_REVIEW_CAPABILITY],
+        slots: pair ? 2 : 1,
+      });
       if ('blocked' in pick) b = { reason: pick.blocked, problem: null };
     }
     blockedByRepo.set(c.repoId, b);

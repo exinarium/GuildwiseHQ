@@ -87,7 +87,7 @@ export function reviewerPrecision(
   rows: ReadonlyArray<{
     reviewer: PrReviewer;
     model?: string | null;
-    disposition: 'posted' | 'held_back';
+    disposition: 'posted' | 'held_back' | 'merged';
     posted?: boolean;
     mark: FindingMark | null;
   }>,

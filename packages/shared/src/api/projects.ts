@@ -285,6 +285,17 @@ export const ProjectDtoSchema = z.object({
   maxConcurrentShifts: z.number().int().nullable().optional(),
   /** Automatic PR reviews per day (default 20). */
   prReviewDailyCap: z.number().int().optional(),
+  /** Second reviewer (Opus) on live PR-only pull requests: the switch, and the replay that allows it. */
+  secondReviewer: z
+    .object({
+      enabled: z.boolean(),
+      replayId: z.uuid().nullable(),
+      replayRecordedAt: z.string().nullable(),
+      precision: z
+        .object({ first: z.number().nullable(), second: z.number().nullable() })
+        .nullable(),
+    })
+    .optional(),
   /** Stop-loss budget by card size: build passes, review rounds and shifts before a card is parked for its architect. */
   stopLoss: StopLossSettingsSchema.optional(),
   /** Review settings (owner only, no defaults): every value null until set, with what the dependent checks miss. */

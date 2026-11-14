@@ -28,6 +28,7 @@ import {
   SetProjectPolicyRequestSchema,
   SetProviderAccountRequestSchema,
   SetPrReviewCapRequestSchema,
+  SetSecondReviewerRequestSchema,
   SetReferenceReposRequestSchema,
   SetRegressionLoopRequestSchema,
   SetReviewSettingsRequestSchema,
@@ -50,6 +51,7 @@ import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../comman
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
 import { isSpendOwner, prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
+import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import {
   findingMarksForReplay,
   listPostedFindings,
@@ -178,6 +180,23 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.body.cap,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** The owner switches the second reviewer (Opus) on or off; on needs a recorded replay (409 replay_required). */
+    app.put(
+      '/api/projects/:id/second-reviewer',
+      { schema: { params: IdParamsSchema, body: SetSecondReviewerRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setSecondReviewer(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.enabled,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
