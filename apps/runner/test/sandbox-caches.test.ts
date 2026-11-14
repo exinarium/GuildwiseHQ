@@ -8,8 +8,11 @@ import { sessionEnv } from '../src/adapters/claude-code.ts';
 import { buildShiftSettings, denyAround, REGISTRY_DOMAINS } from '../src/adapters/claude-policy.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { runnerPaths } from '../src/paths.ts';
+import { RunManager } from '../src/runs/manager.ts';
 import {
+  CACHE_ENV_KEYS,
   CACHE_KINDS,
+  cacheEnv,
   DOTNET_SHM_DIR,
   ensureSandbox,
   sandboxEnv,
@@ -55,6 +58,7 @@ describe('shared package caches (one set per runner)', () => {
       NUGET_PLUGINS_CACHE_PATH: c('nuget-plugins'),
       npm_config_cache: c('npm'),
       npm_config_store_dir: c('pnpm'),
+      pnpm_config_store_dir: c('pnpm'),
       YARN_CACHE_FOLDER: c('yarn'),
       PIP_CACHE_DIR: c('pip'),
       GRADLE_USER_HOME: c('gradle'),
@@ -62,8 +66,33 @@ describe('shared package caches (one set per runner)', () => {
       GOMODCACHE: c('go-mod'),
       GOCACHE: c('go-build'),
     });
+    // pnpm 8-10 and pnpm 11+ share one store
+    expect(sandboxEnv(sb).pnpm_config_store_dir).toBe(sandboxEnv(sb).npm_config_store_dir);
     // cargo's home also holds credentials and installed binaries: not shared
     expect(sandboxEnv(sb).CARGO_HOME).toBeUndefined();
+  });
+
+  it('cacheEnv points pnpm 8-10 and pnpm 11+ at the same shared store; both keys are cache keys', () => {
+    const env = cacheEnv('/r/cache');
+    expect(env.npm_config_store_dir).toBe(join('/r/cache', 'pnpm'));
+    expect(env.pnpm_config_store_dir).toBe(env.npm_config_store_dir);
+    expect(CACHE_ENV_KEYS).toEqual(expect.arrayContaining(['npm_config_store_dir', 'pnpm_config_store_dir']));
+  });
+
+  it('a sandboxed run environment points pnpm 11+ at the shared store', () => {
+    const paths = runnerPaths(tmp());
+    const mgr = new RunManager({
+      paths,
+      findRepo: async () => undefined,
+      send: () => {},
+      log: { info() {}, warn() {}, error() {} },
+      maxEnvironments: () => 1,
+      portRange: () => ({ from: 40000, to: 40010 }),
+    });
+    // baseEnv is private
+    const env = (mgr as any).baseEnv(true) as Record<string, string>;
+    expect(env.pnpm_config_store_dir).toBe(join(paths.root, 'cache', 'pnpm'));
+    expect(env.npm_config_store_dir).toBe(join(paths.root, 'cache', 'pnpm'));
   });
 
   it('sets the .NET variables: a private writable CLI home, no first-run noise, no build servers', async () => {
@@ -106,6 +135,8 @@ describe('shared package caches (one set per runner)', () => {
       'NUGET_PACKAGES',
       'DOTNET_CLI_HOME',
       'npm_config_cache',
+      'npm_config_store_dir',
+      'pnpm_config_store_dir',
       'MAVEN_OPTS',
       'MSBUILDDISABLENODEREUSE',
       'DOTNET_PROCESSOR_COUNT',
