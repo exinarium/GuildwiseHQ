@@ -1,4 +1,5 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resetSubmoduleDrift, submoduleResetNote } from '../src/git/submodule-drift.ts';
@@ -75,16 +76,52 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
   });
 
-  it('fetches a pin the submodule clone does not have yet, once', async () => {
+  it('never fetches: a pin the submodule clone lacks is refused, even with a file:// origin that has it (B3)', async () => {
     const { x, d, pin } = twoRepos();
     const newer = advanceX(x, 'feature.txt');
-    // the branch pins X's newer commit; the submodule clone has never seen it and is still at the old one
+    const core = join(d.clone, 'core');
+    sh(core, 'git', ['remote', 'set-url', 'origin', `file://${x.origin}`]);
+    // the branch pins X's newer commit; the submodule clone has never seen it
     sh(d.clone, 'git', ['update-index', '--cacheinfo', `160000,${newer},core`]);
     sh(d.clone, 'git', ['commit', '-m', 'pin core']);
     const r = await resetSubmoduleDrift(d.clone);
-    expect(r.refused).toBeUndefined();
-    expect(r.reset).toEqual([{ path: 'core', from: pin, pin: newer }]);
-    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain("the pinned commit is not in the submodule's clone");
+    expect(r.refused).toContain('aom question --topic environment');
+    // nothing was fetched into the submodule's clone, and it was not moved
+    expect(spawnSync('git', ['cat-file', '-e', `${newer}^{commit}`], { cwd: core }).status).not.toBe(0);
+    expect(sh(core, 'git', ['rev-parse', 'HEAD'])).toBe(pin);
+  });
+
+  it('a redirected core/.git is not operated on: refused, the repository it points at is untouched (B3)', async () => {
+    const { x, d } = twoRepos();
+    const newer = advanceX(x, 'feature.txt');
+    // a repository the agent owns, with a hook-free config of its own, checked out at the newer commit
+    const owned = join(tmp(), 'owned');
+    sh(x.root, 'git', ['clone', '-q', x.origin, owned]);
+    sh(owned, 'git', ['checkout', '-q', newer]);
+    writeFileSync(join(d.clone, 'core', '.git'), `gitdir: ${join(owned, '.git')}\n`);
+    const r = await resetSubmoduleDrift(d.clone);
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain('the submodule core is not a checkout the runner manages');
+    expect(sh(owned, 'git', ['rev-parse', 'HEAD'])).toBe(newer);
+    expect(sh(owned, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
+  it('a gitlink the agent made over a fresh git init is not operated on: refused (B3)', async () => {
+    const d = makeRepo();
+    const evil = join(d.clone, 'evil');
+    mkdirSync(evil);
+    sh(evil, 'git', ['init', '-q', '-b', 'main']);
+    writeFileSync(join(evil, 'a.txt'), 'a\n');
+    sh(evil, 'git', ['add', '-A']);
+    sh(evil, 'git', ['commit', '-q', '-m', 'a']);
+    const head = sh(evil, 'git', ['rev-parse', 'HEAD']);
+    sh(d.clone, 'git', ['update-index', '--add', '--cacheinfo', `160000,${'e'.repeat(40)},evil`]);
+    const r = await resetSubmoduleDrift(d.clone);
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain('the submodule evil is not a checkout the runner manages');
+    expect(sh(evil, 'git', ['rev-parse', 'HEAD'])).toBe(head);
   });
 
   it('resets even when .gitmodules says update = none or rebase (it always checks the pin out)', async () => {
@@ -102,16 +139,6 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
       // nothing was rebased onto the pin: X's newer commit is untouched
       expect(sh(join(d.clone, 'core'), 'git', ['cat-file', '-t', newer])).toBe('commit');
     }
-  });
-
-  it('a pin that cannot be fetched is refused with what the builder can do about it', async () => {
-    const { d } = twoRepos();
-    sh(d.clone, 'git', ['update-index', '--cacheinfo', `160000,${'e'.repeat(40)},core`]);
-    sh(d.clone, 'git', ['commit', '-m', 'pin core to a commit nobody has']);
-    const r = await resetSubmoduleDrift(d.clone, { fetchTimeoutMs: 30_000 });
-    expect(r.reset).toEqual([]);
-    expect(r.refused).toContain('the runner could not reset it');
-    expect(r.refused).toContain('aom question --topic environment');
   });
 
   it('a repository without submodules, or with one not initialised, has nothing to reset', async () => {

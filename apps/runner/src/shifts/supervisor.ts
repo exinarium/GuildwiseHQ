@@ -2927,9 +2927,8 @@ export class ShiftSupervisor {
         // the guard and the leftovers commit: a role that commits is judged on every changed path, so the drift would
         // refuse a tester it cannot fix, and `git add -A` would commit it as a pin change. Not during a merge.
         if (msg.agent.permissions.mayCommit && !(await mergeInProgress(s.worktree.path))) {
-          const drift = await resetSubmoduleDrift(s.worktree.path, {
-            ...(this.deps.gitAuth ? { auth: (url: string) => (this.deps.gitAuth as GitAuth)(url) } : {}),
-          });
+          // (never a fetch: this runs on the host, on content the agent can write)
+          const drift = await resetSubmoduleDrift(s.worktree.path);
           if (drift.reset.length) {
             const note = submoduleResetNote(drift.reset);
             this.log.info(`${msg.brief.card.ref}: ${note}`);
