@@ -14,6 +14,7 @@ import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { devopsQueueSentence } from '../dispatcher/devops.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createDevOpsRequestIn, devopsAgentOn } from './devops.ts';
@@ -313,6 +314,7 @@ export async function devopsTopicQuestion(
   }
 
   let events: AppendInput[];
+  let parkedOn: string | undefined;
   if (open) {
     events = [
       {
@@ -328,10 +330,11 @@ export async function devopsTopicQuestion(
         card,
         { kind: 'system' },
         'system',
-        `${agent.name} asked about ${topic}. The DevOps engineer is already working a request for this card; ${card.ref} is parked until it completes.`,
+        `${agent.name} asked about ${topic}. The DevOps engineer is already working a request for this card; ${card.ref} is parked until it completes.${await devopsQueueSentence(tx, open.id, { asWaited: true, now: ctx.clock.now() })}`,
         { requestId: open.id, problem },
       ),
     ];
+    parkedOn = open.id;
   } else {
     events = await environmentNotReadyEvents(
       ctx,
@@ -354,9 +357,19 @@ export async function devopsTopicQuestion(
     ]),
     { tx },
   );
+  // The card is parked now (projections run in this transaction): tell the agent where its request stands.
+  const parkedReq =
+    parkedOn ??
+    ((await one(tx, 'SELECT parked_request_id FROM cards WHERE id=$1', [card.id]))?.parked_request_id as
+      | string
+      | null
+      | undefined);
+  const queue = parkedReq
+    ? await devopsQueueSentence(tx, parkedReq, { asWaited: true, now: ctx.clock.now() })
+    : '';
   return {
     accepted: true,
-    message: `Recorded. The DevOps engineer was asked about ${topic} and ${card.ref} is parked until the request completes. Finish now; do not make further changes.`,
+    message: `Recorded. The DevOps engineer was asked about ${topic} and ${card.ref} is parked until the request completes.${queue} Finish now; do not make further changes.`,
   };
 }
 
@@ -592,12 +605,13 @@ export async function convertWaitingQuestion(
       message:
         'Recorded. The DevOps engineer has not finished yet; the card is not parked. Carry on without those tests, do not record them as passed, and say in your handoff note that they were not run.',
     };
+  const queue = await devopsQueueSentence(tx, req.id, { asWaited: true, now: ctx.clock.now() });
   await ctx.store.append(
     await releaseClaimEvents(
       tx,
       card,
       'question',
-      `${agent.name} waited for the DevOps engineer and it did not finish in time; ${card.ref} is parked until the request completes.`,
+      `${agent.name} waited for the DevOps engineer and it did not finish in time; ${card.ref} is parked until the request completes.${queue}`,
       null,
       [
         {
@@ -616,8 +630,7 @@ export async function convertWaitingQuestion(
   );
   return {
     accepted: true,
-    message:
-      'Recorded. The DevOps engineer did not finish in time, so the card is parked on its request and you keep it. Finish now; do not make further changes.',
+    message: `Recorded. The DevOps engineer did not finish in time, so the card is parked on its request and you keep it.${queue} Finish now; do not make further changes.`,
   };
 }
 

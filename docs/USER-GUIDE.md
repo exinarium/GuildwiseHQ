@@ -686,7 +686,7 @@ The **Desk** is where every question and approval reaches you. Cards do not move
 
 ![The Desk](guide/assets/desk.jpg)
 
-An agent can wait for an answer without losing its work, and an agent's answer can say **keep this card parked until** something happens. If the same question is asked again on a card with nothing changed, the card is parked with a back-off and you get one item about it instead of another round of questions. A card that uses up its passes, review rounds or shifts (small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25, adjustable per project) goes to its architect first and reaches you only if the architect cannot resolve it. Cards that already existed when stop-loss was introduced are counted from that day, not from their whole history; a card the crash-loop breaker has already parked does not get a second stop-loss item, and a stop-loss question about mostly crashed shifts names the crashes and the last error.
+An agent can wait for an answer without losing its work, and an agent's answer can say **keep this card parked until** something happens. If the same question is asked again on a card with nothing changed, the card is parked with a back-off and you get one item about it instead of another round of questions. A card that uses up its passes, review rounds or shifts (small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 3 / 25, adjustable per project) goes to its architect first and reaches you only if the architect cannot resolve it. Cards that already existed when stop-loss was introduced are counted from that day, not from their whole history; a card the crash-loop breaker has already parked does not get a second stop-loss item, and a stop-loss question about mostly crashed shifts names the crashes and the last error.
 
 The items are grouped (**Needs you first**, **Blocking work**, **Decisions**, **Heads-up**) and the filter chips narrow the list: **All**, **Blocking**, **Questions**, **Approvals**, **Notices**, **Handled by CEO** and **CEO decisions**. **Handled by CEO** shows the items your CEO answered or passed on.
 
@@ -1306,7 +1306,7 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 **Merge conflicts.** DevOps resolves a conflict at Finalize in a scratch worktree, so the card's own worktree is never left on a conflict branch. A card that was reviewed and approved stays in Finalize while DevOps works; the resolution then gets a *merge review* (the reviewer reads only the difference between the reviewed and the resolved commit) and the earlier approvals stand. If the resolution changed more than the merge, the reviewer sends the card back to Build for a full review. The branch is rebased on its base before the review starts, so the review sees what will merge.
 
-**Review rounds.** Two Opus review rounds at most, then the card's architect decides (the existing stop-loss); the pre-review is not counted as a review round, but its loop is capped by the build passes.
+**Review rounds.** Two Opus review rounds at most (three on a large card), then the card's architect decides (the existing stop-loss); the pre-review is not counted as a review round, but its loop is capped by the build passes.
 
 **Existing projects.** There is nothing to switch: the lean team workflow is version 6 of the built-in **Code** workflow, and every project on Code starts its new cards on the newest version, as it did for the earlier versions. Cards in flight finish on the version they started on. Hire a planner and a pre-reviewer for the intended cost; until then the architect plans and the reviewer does the pre-review, and a role nobody covers makes a card wait at its stage until you hire one.
 
@@ -1763,7 +1763,7 @@ Guildwise repairs itself with a normal team. You, the platform administrator, on
 
 **Safe mode.** If a runner release is bad, pin one workstation or all of them to the last good version (Platform team, Safe mode). The runner downloads exactly that version, even an older one, and does not follow newer releases until you unpin. The Workstations page shows "Pinned to 0.1.20".
 
-**For the platform organisation.** Its members open Platform team (`/platform-team`) to read pauses, bugs, pins and the audit trail; its Owner and Admins can pause, resume and pin there. Fix cards that use up their budget (small 2 rework rounds / 2 reviews / 10 shifts, medium 3/2/15, large 4/2/25) go to the architect, then to the desk.
+**For the platform organisation.** Its members open Platform team (`/platform-team`) to read pauses, bugs, pins and the audit trail; its Owner and Admins can pause, resume and pin there. Fix cards that use up their budget (small 2 rework rounds / 2 reviews / 10 shifts, medium 3/2/15, large 4/3/25) go to the architect, then to the desk.
 
 ### 7.10 Billing
 

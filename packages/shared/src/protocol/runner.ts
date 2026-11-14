@@ -1725,6 +1725,25 @@ export const ShiftStartedSchema = msg('shift.started', {
       files: z.array(z.string()).optional(),
     })
     .optional(),
+  /**
+   * Additive (1.7.0): the runner prepared the card worktree it just created (submodules at their pinned commits, the
+   * project's dependencies installed in the run-step sandbox). Absent: nothing was prepared (a reused worktree, an older runner).
+   */
+  worktreePrep: z
+    .object({
+      ok: z.boolean(),
+      steps: z
+        .array(
+          z.object({
+            name: z.string().max(200),
+            status: z.enum(['done', 'failed', 'skipped']),
+            detail: z.string().max(1000).optional(),
+            ms: z.number().int().nonnegative(),
+          }),
+        )
+        .max(20),
+    })
+    .optional(),
 });
 /** What the runner did with the `resumeSessionId` of a `shift.start`. */
 export const RESUME_STATES = [

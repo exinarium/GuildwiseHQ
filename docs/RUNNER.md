@@ -513,6 +513,7 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 - **Precedence of the limit (GWP-95).** (1) The server's value from the last `welcome` or `shifts.limit` of this process: the workstation setting, or the platform cap over it. (2) Before the server has answered since the runner started: `server-limits.json` (the last value the server sent), else `config.json` `maxConcurrentShifts`; this is the *local fallback* and lasts only until the first `welcome`. (3) When the owner chose "Runner's own value" (null): `config.json` under the platform cap, source *runner config*. A runner that announces `shift-limit:2` reports the limit it enforces and its source in every heartbeat (`load.maxShifts`, `load.limitSource`; sources `workstation_setting`, `platform_cap`, `runner_config`, `local_fallback`, `pairing_budget`). The Workstations page shows it next to the server's view, flags a mismatch, and shows "unknown" for an older runner. A `busy` rejection carries `capacity` (limit, source, running count and the shifts holding the slots, identifiers only), and the card's message names them.
 - **What takes a slot.** Card, question, DevOps and BA task shifts. Chat turns (owner chat, CEO owner/order turns, @mention work) and the CEO shift do not (`SHIFT_KINDS_OUTSIDE_LIMIT`). The runner, the dispatcher and the Workstations page count with this one rule; the page shows chat/CEO turns apart as "not counted". Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
+- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (the project's dependencies in the run-step sandbox; submodules are not filled) before the agent starts; see "A new card worktree is prepared".
 - **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
 - **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
 
@@ -890,7 +891,7 @@ Agents must run `aom ledger search` before raising a question: every answer (fro
 - Repeat guard: the second similar question on the same card and stage with no handoff in between does not reach anybody. The card is parked with a back-off and exactly one desk item says so. Five question shifts about one card within two hours put it in loop back-off, whatever the wording. A question shift the runner refused (no agent ran) does not count, and neither does a routing hop (peer, BA, CEO, desk): one question counts once. Only questions an agent asked count; the stop-loss arbitration the system asks the architect does not (the stop-loss is its own guard).
 - `aom card facts` answers what the agent would otherwise ask: the environment status, whether each dependency has merged, the branch, the stage and the blockers. `aom card facts <REF>` does the same for another card of the project.
 - `aom block --on dependency <REF>` records that this card waits for another card (add only, any open card, no cycles, same project). Until the dependency has merged only the design stage may run; build, review and test wait.
-- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
+- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 3 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
 
 **DevOps engineer of a "Run request" (run a branch), only for the environment of its own request:**
 ```sh
@@ -1633,6 +1634,25 @@ Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (projec
 organization, so the project id keeps two same-keyed projects on one workstation apart) and reused across stages of the
 same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
 the server recorded for the card. They are removed after finalize (`worktree.remove`), when the card ends without a merge, and by the sweep below.
+
+#### A new card worktree is prepared (1.7.0)
+
+When a card shift's `git worktree add` creates the card worktree (not when it reuses one, and never for a resumed shift),
+the runner prepares it after it accepted the shift and before the agent starts: the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
+`uv sync`, `go mod download`, ...; the same steps the Development environment check runs) run in the project folder, in
+the run-step sandbox the handoff checks use (shared package caches, credentials masked) with `CI=true` (poetry and pipenv keep their virtualenv in the project; `bundle install` and `cargo fetch`, whose output
+would stay in the sandbox's private home, are not run). Without a run-step sandbox on the workstation the installs are
+skipped, not failed. It does not depend on the "Install packages and tools" DevOps access, which governs installing tools on
+the workstation itself. The whole preparation has a 5-minute budget and stops with the shift. Afterwards `git status` is as before: a tracked file an
+install rewrote (a lockfile) is restored, a new file outside `.gitignore` is removed, and both are reported. Nothing is
+retried: a failed or cut-off preparation is a line in the shift's progress, a note on the card, `shift.started.worktreePrep`,
+and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The
+config switch `prepareWorktrees` (default `true`) turns it off.
+
+Submodules are not filled (1.7.0): the preparation runs no `git submodule`, `fetch` or `clone` on the host, because every
+ref and object a trust check could anchor on is writable by the agents working in the clone. A repository with
+submodules gets one fixed line ("the runner does not fill submodules when it prepares a worktree; ask DevOps if you need
+them"), and submodules stay a DevOps request. Deploy checkouts fill their submodules as before.
 
 #### Base branch and the per-clone lock
 
@@ -2611,6 +2631,10 @@ runs the build and tests, and only moves the real branch if they pass. The attem
 notice on the desk, and the request in the DevOps thread. The card waits for the attempt and then goes on to Rework, so
 review and test run again. After two attempts that did not hold, the conflict goes to the desk as an escalation and the
 builder (who may rebase, above) takes the card as before.
+
+The runner's rebase and merge are plain `git rebase` / `git merge` in the card worktree, so they honour the repository's
+`.gitattributes` merge drivers: a file marked `merge=union` (Guildwise HQ marks its own `CHANGELOG.md`) keeps both sides'
+added lines instead of conflicting. A pull request merged on the forge may not honour the attribute.
 
 What this implies: a DevOps shift has the full privileges of the runner's OS user on that workstation, and root through
 `sudo` or the Docker socket (access to `docker.sock` is root). The `devops_access` flags (install, Docker, sudo, paths) and

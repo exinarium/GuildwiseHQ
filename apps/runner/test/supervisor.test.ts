@@ -481,6 +481,63 @@ describe('supervisor', () => {
     expect(h!.server.invalid).toEqual([]);
   });
 
+  it('prepares a card worktree it just added; a failed preparation still starts the shift and the agent is told', async () => {
+    let instructions = '';
+    const calls: string[] = [];
+    await start(
+      async (i) => {
+        instructions = i.instructionsMarkdown;
+      },
+      {},
+      {
+        prepareWorktree: async (p) => {
+          calls.push(p.worktree);
+          return {
+            ok: false,
+            steps: [
+              { name: 'pnpm install', status: 'failed', detail: 'exit 1: registry unreachable', ms: 1200 },
+            ],
+          };
+        },
+      },
+    );
+    const { shiftId, ended } = await h!.runShift({ stage: 'build' });
+    expect(calls).toEqual([worktreeOf(h!)]);
+    expect(ended.outcome).toBe('no_report');
+    const started = h!.server.of('shift.started').find((m) => m.shiftId === shiftId);
+    expect(started?.worktreePrep).toEqual({
+      ok: false,
+      steps: [{ name: 'pnpm install', status: 'failed', detail: 'exit 1: registry unreachable', ms: 1200 }],
+    });
+    expect(instructions).toMatch(/Not prepared:\n- pnpm install: exit 1: registry unreachable/);
+    const progress = h!.server.of('shift.progress').flatMap((m) => m.items.map((x: any) => x.text));
+    expect(progress.some((t: string) => /not fully prepared/.test(t))).toBe(true);
+    // the next shift reuses the worktree: nothing is prepared again
+    const second = await h!.runShift({ stage: 'review', mode: 'reuse' });
+    expect(calls).toHaveLength(1);
+    expect(
+      h!.server.of('shift.started').find((m) => m.shiftId === second.shiftId)?.worktreePrep,
+    ).toBeUndefined();
+    expect(h!.server.invalid).toEqual([]);
+  });
+
+  it('the prepareWorktrees switch off: a new worktree is not prepared', async () => {
+    let called = false;
+    await start(
+      async () => {},
+      {},
+      {
+        prepareWorktree: async () => {
+          called = true;
+          return { ok: true, steps: [] };
+        },
+      },
+    );
+    (h!.runner as any).opts.config.prepareWorktrees = false;
+    await h!.runShift({ stage: 'build' });
+    expect(called).toBe(false);
+  });
+
   it('creates a base branch the clone lacks from the default branch and says so on shift.started', async () => {
     await start(async () => {});
     const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-9' }) as any;

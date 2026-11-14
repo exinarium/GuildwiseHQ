@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { devopsLane, devopsQueuePosition } from '../src/dispatcher/devops.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -460,5 +462,235 @@ describe('DevOps request queue', () => {
       body: { workstationId: w.workstationId, summary: 'sneaky' },
     });
     expect(make.status).toBe(404);
+  });
+});
+
+describe('DevOps queue: waited-on first, plus an express slot', () => {
+  const min = 60_000;
+  const at = (agoMs: number) => new Date(w.t.clock.now().getTime() - agoMs);
+
+  it('devopsLane: one slot at the head; a second only for a waited-on request of another card behind a 5-minute run', () => {
+    const now = new Date('2026-11-14T12:00:00Z');
+    const ago = (ms: number) => new Date(now.getTime() - ms);
+    expect(devopsLane([], { cardId: null, waited: false }, now)).toBe('normal');
+    const long = [{ startedAt: ago(6 * min), cardId: 'card-a' }];
+    expect(devopsLane(long, { cardId: 'card-b', waited: true }, now)).toBe('express');
+    expect(devopsLane(long, { cardId: 'card-b', waited: false }, now)).toBeNull();
+    expect(devopsLane(long, { cardId: 'card-a', waited: true }, now)).toBeNull();
+    expect(devopsLane(long, { cardId: null, waited: true }, now)).toBeNull();
+    expect(
+      devopsLane([{ startedAt: ago(1 * min), cardId: 'card-a' }], { cardId: 'card-b', waited: true }, now),
+    ).toBeNull();
+    const two = [...long, { startedAt: ago(10 * min), cardId: 'card-c' }];
+    expect(devopsLane(two, { cardId: 'card-b', waited: true }, now)).toBeNull();
+  });
+
+  it('with a long request running, a waited-on request of another card starts before an older one nobody waits for', async () => {
+    // A clean queue for this engineer.
+    await q(
+      `UPDATE devops_requests SET status='failed' WHERE status IN ('queued','running','needs_approval')`,
+    );
+    await q(`UPDATE shifts SET status='ended' WHERE kind='devops' AND status <> 'ended'`);
+    // Card Y: a builder holds a shift on it.
+    await w.hire('Cid', 'builder', 'junior');
+    const cardY = await w.card({ title: 'Needs a port' });
+    const mark0 = r.received.length;
+    let start: any;
+    await until(
+      async () => {
+        await dispatcher().run();
+        start = r.received
+          .slice(mark0)
+          .find((f: any) => f.type === 'shift.start' && f.kind === 'card' && f.brief.card.id === cardY.id);
+        return Boolean(start);
+      },
+      10_000,
+      'a card shift on card Y',
+    );
+    r.accepted(start.shiftId);
+    r.started(start.shiftId, {
+      path: '/work/y',
+      branchName: start.worktree?.branchName ?? 'y',
+      baseBranch: 'main',
+      created: true,
+      headSha: 'abc',
+    });
+    await until(
+      async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [start.shiftId, 'running']))[0],
+      3000,
+      'card shift running',
+    );
+
+    // A: a long request runs.
+    const a = await request('migrate the whole database');
+    const sA = await nextDevopsShift(r.received.length);
+    expect(sA.devops?.requestId).toBe(a.request.id);
+    await accept(sA);
+    await q('UPDATE shifts SET started_at=$2 WHERE id=$1', [sA.shiftId, at(1 * min)]);
+    // B: nobody waits for it. C: card Y's builder asks during its shift and waits.
+    const b = await request('tidy the scratch folder');
+    const rpcId = `rpc-${Math.random()}`;
+    r.send('rpc.request', {
+      rpcId,
+      shiftId: start.shiftId,
+      method: 'devops.request',
+      params: { text: 'open port 8080' },
+    });
+    const c = await r.waitFor('rpc.response', (f) => f.rpcId === rpcId);
+    expect(c.ok).toBe(true);
+    const idC = (c.result as any).requestId as string;
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, idC, { now: w.t.clock.now() })).toEqual({
+      state: 'queued',
+      position: 1,
+      of: 2,
+    });
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, b.request.id, { now: w.t.clock.now() })).toEqual({
+      state: 'queued',
+      position: 2,
+      of: 2,
+    });
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, a.request.id, { now: w.t.clock.now() })).toEqual({
+      state: 'running',
+    });
+
+    // A has run for a minute: capacity one still holds.
+    const mark1 = r.received.length;
+    await dispatcher().run();
+    await r.barrier();
+    expect(
+      r.received.slice(mark1).filter((f) => f.type === 'shift.start' && f.kind === 'devops'),
+    ).toHaveLength(0);
+
+    // A has run for six minutes: the express slot takes C (the old FIFO, capacity one, would have started nothing).
+    await q('UPDATE shifts SET started_at=$2 WHERE id=$1', [sA.shiftId, at(6 * min)]);
+    const sC = await nextDevopsShift(r.received.length);
+    expect(sC.devops?.requestId).toBe(idC);
+    await dispatcher().run();
+    await r.barrier();
+    expect(await statusOf(b.request.id)).toBe('queued');
+    const open = await q(
+      `SELECT 1 FROM shifts s JOIN agents ag ON ag.id = s.agent_id WHERE ag.is_devops AND s.kind='devops' AND s.status <> 'ended'`,
+    );
+    expect(open).toHaveLength(2);
+    expect(
+      r.received.slice(mark1).filter((f) => f.type === 'shift.start' && f.kind === 'devops'),
+    ).toHaveLength(1);
+
+    for (const s of [sA, sC]) {
+      if (s === sC) await accept(sC);
+      await report(s.shiftId, done('finished'));
+      r.ended(s.shiftId, 'reported');
+    }
+    r.ended(start.shiftId, 'stopped');
+  });
+  it('a request nobody waits for joins the waited-on tier after 30 minutes; a Test deploy environment request is waited on', async () => {
+    await q(
+      `UPDATE devops_requests SET status='failed' WHERE status IN ('queued','running','needs_approval')`,
+    );
+    await q(`UPDATE shifts SET status='ended' WHERE kind='devops' AND status <> 'ended'`);
+    const now = () => w.t.clock.now();
+    const pos = async (id: string) => devopsQueuePosition(w.t.app.ctx.pool, id, { now: now() });
+    const old = (await request('nobody waits for this')).request.id as string;
+    const parked = (await request('a card is parked on this')).request.id as string;
+    const card = await w.card({ title: 'Parked on DevOps' });
+    await q(`UPDATE cards SET status='waiting', parked_request_id=$2 WHERE id=$1`, [card.id, parked]);
+    expect(await pos(parked)).toEqual({ state: 'queued', position: 1, of: 2 });
+    expect(await pos(old)).toEqual({ state: 'queued', position: 2, of: 2 });
+    // 29 minutes old: still behind; 31 minutes old: in the waited-on tier, and the older of the two
+    await q('UPDATE devops_requests SET created_at=$2 WHERE id=$1', [
+      old,
+      new Date(now().getTime() - 29 * 60_000),
+    ]);
+    expect(await pos(old)).toEqual({ state: 'queued', position: 2, of: 2 });
+    await q('UPDATE devops_requests SET created_at=$2 WHERE id=$1', [
+      old,
+      new Date(now().getTime() - 31 * 60_000),
+    ]);
+    expect(await pos(old)).toEqual({ state: 'queued', position: 1, of: 2 });
+    expect(await pos(parked)).toEqual({ state: 'queued', position: 2, of: 2 });
+    // the dispatcher uses the same order: the aged request starts first
+    const s1 = await nextDevopsShift(r.received.length);
+    expect(s1.devops?.requestId).toBe(old);
+    await accept(s1);
+    await report(s1.shiftId, done('done'));
+    r.ended(s1.shiftId, 'reported');
+    await until(
+      async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [s1.shiftId, 'ended']))[0],
+    );
+
+    // The server's environment request for a card held at Test deploy counts as waited on from the start.
+    const plain = (await request('another one nobody waits for')).request.id as string;
+    const envReq = (await request('make the app run for the integration tests')).request.id as string;
+    const row = (await q('SELECT org_id FROM devops_requests WHERE id=$1', [envReq]))[0]!;
+    await q(
+      `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, state, devops_request_id,
+          branch_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'test',$5,'requested',$6,'k',$7,$7)`,
+      [randomUUID(), row.org_id, w.projectId, w.workstationId, card.id, envReq, now()],
+    );
+    expect(await pos(envReq)).toEqual({ state: 'queued', position: 2, of: 3 });
+    expect(await pos(plain)).toEqual({ state: 'queued', position: 3, of: 3 });
+    for (const id of [parked, plain, envReq])
+      await q(`UPDATE devops_requests SET status='failed' WHERE id=$1`, [id]);
+    await q(`UPDATE cards SET status='queued', parked_request_id=NULL WHERE id=$1`, [card.id]);
+  });
+  it('the express slot is only for requests an agent or a parked card waits on: aged and Test deploy requests wait for slot 1', async () => {
+    await q(
+      `UPDATE devops_requests SET status='failed' WHERE status IN ('queued','running','needs_approval')`,
+    );
+    await q(`UPDATE shifts SET status='ended' WHERE kind='devops' AND status <> 'ended'`);
+    const now = () => w.t.clock.now();
+    // A long request runs (6 minutes: the express window is open).
+    const a = await request('a long migration');
+    const sA = await nextDevopsShift(r.received.length);
+    await accept(sA);
+    await q('UPDATE shifts SET started_at=$2 WHERE id=$1', [
+      sA.shiftId,
+      new Date(now().getTime() - 6 * 60_000),
+    ]);
+    // An aged request of card P, and the Test deploy environment request of card Q: both in the waited-on tier.
+    const p = await w.card({ title: 'Aged card' });
+    const qc = await w.card({ title: 'Held at Test deploy' });
+    const aged = (await request('nobody waits, but it is old')).request.id as string;
+    await q('UPDATE devops_requests SET card_id=$2, created_at=$3 WHERE id=$1', [
+      aged,
+      p.id,
+      new Date(now().getTime() - 31 * 60_000),
+    ]);
+    const envReq = (await request('make the app run for the integration tests')).request.id as string;
+    await q('UPDATE devops_requests SET card_id=$2 WHERE id=$1', [envReq, qc.id]);
+    const row = (await q('SELECT org_id FROM devops_requests WHERE id=$1', [envReq]))[0]!;
+    await q(
+      `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, state, devops_request_id,
+          branch_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'test',$5,'requested',$6,'k2',$7,$7)`,
+      [randomUUID(), row.org_id, w.projectId, w.workstationId, qc.id, envReq, now()],
+    );
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, aged, { now: now() })).toEqual({
+      state: 'queued',
+      position: 1,
+      of: 2,
+    });
+    const mark = r.received.length;
+    await dispatcher().run();
+    await r.barrier();
+    expect(
+      r.received.slice(mark).filter((f) => f.type === 'shift.start' && f.kind === 'devops'),
+    ).toHaveLength(0);
+    expect(await statusOf(aged)).toBe('queued');
+    // Never dispatched (the later test-environment pass of the same run may fail it: its environment row is a stub).
+    expect((await q('SELECT shift_id FROM devops_requests WHERE id=$1', [envReq]))[0]!.shift_id).toBeNull();
+    // A card parked on the aged request: now an agent's card waits on it, and the express slot takes it.
+    await q(`UPDATE cards SET status='waiting', parked_request_id=$2 WHERE id=$1`, [p.id, aged]);
+    const sX = await nextDevopsShift(mark);
+    expect(sX.devops?.requestId).toBe(aged);
+    for (const s of [sA, sX]) {
+      if (s === sX) await accept(sX);
+      await report(s.shiftId, done('finished'));
+      r.ended(s.shiftId, 'reported');
+    }
+    await q(`UPDATE devops_requests SET status='failed' WHERE id=$1`, [envReq]);
+    await q(`UPDATE cards SET status='queued', parked_request_id=NULL WHERE id=$1`, [p.id]);
+    expect(a.request.id).toBeTruthy();
   });
 });
