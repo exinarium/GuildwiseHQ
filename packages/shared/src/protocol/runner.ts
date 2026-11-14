@@ -141,6 +141,13 @@ import {
   RunStopPayloadSchema,
 } from '../runs/types.ts';
 import { VaultFolderSchema } from '../safe.ts';
+import {
+  AppAdoptPayloadSchema,
+  AppConnectPayloadSchema,
+  AppRemovePayloadSchema,
+  AppSyncPayloadSchema,
+  AppTestPayloadSchema,
+} from '../apps/index.ts';
 import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import {
   DIRECT_UNAVAILABLE_REASONS,
@@ -1332,6 +1339,11 @@ export const RunnerCommandNameSchema = z.enum([
   'storage.remove',
   'storage.sync',
   'storage.discard',
+  'app.connect',
+  'app.test',
+  'app.adopt',
+  'app.remove',
+  'app.sync',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1451,6 +1463,11 @@ export const CommandPayloadSchemas = {
   'storage.remove': StorageRemovePayloadSchema,
   'storage.sync': StorageSyncPayloadSchema,
   'storage.discard': StorageDiscardPayloadSchema,
+  'app.connect': AppConnectPayloadSchema,
+  'app.test': AppTestPayloadSchema,
+  'app.adopt': AppAdoptPayloadSchema,
+  'app.remove': AppRemovePayloadSchema,
+  'app.sync': AppSyncPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,

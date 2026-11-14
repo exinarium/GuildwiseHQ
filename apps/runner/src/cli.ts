@@ -12,6 +12,7 @@ import {
   INTEGRATION_STATE_LABELS,
   RunnerPairRequestSchema,
   RunnerPairResponseSchema,
+  APP_ERROR_TEXT,
 } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
@@ -39,6 +40,15 @@ import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
 import { ClaudeCredentialStore, claudeAccountFile, claudeFile } from './integrations/claude-store.ts';
 import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
+import { AutomatedAppIntegration } from './integrations/automated-app.ts';
+import {
+  type AppsConnectOptions,
+  appProviderOf,
+  appsConnect,
+  appsList,
+  readAppKey,
+  readHiddenPem,
+} from './apps/cli.ts';
 import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';
@@ -1163,6 +1173,64 @@ async function integrationsList(opts: { dataDir?: string; pairing?: string }): P
   }
 }
 
+/** The automated app adapters of one pairing (CLI). */
+function appAdapters(opts: { dataDir?: string; pairing?: string }): AutomatedAppIntegration[] {
+  const { adapters } = headlessAdapters(pairingPaths(opts));
+  return [...adapters.values()].filter(
+    (a): a is AutomatedAppIntegration => a instanceof AutomatedAppIntegration,
+  );
+}
+
+function appAdapter(opts: { dataDir?: string; pairing?: string }, provider: string): AutomatedAppIntegration {
+  const a = appAdapters(opts).find((x) => x.kind === provider);
+  if (!a) throw new Error(`This runner does not support ${provider}.`);
+  return a;
+}
+
+async function appsListCmd(opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  for (const l of await appsList(appAdapters(opts))) console.log(l);
+}
+
+async function appsConnectCmd(
+  provider: string,
+  opts: AppsConnectOptions & { dataDir?: string; pairing?: string },
+): Promise<void> {
+  const adapter = appAdapter(opts, appProviderOf(provider));
+  const key = await readAppKey(opts, {
+    isTTY: !!process.stdin.isTTY,
+    stdin: async () => {
+      let v = '';
+      for await (const chunk of process.stdin) v += String(chunk);
+      return v;
+    },
+    prompt: () => readHiddenPem(process.stdin, process.stdout),
+  });
+  const r = await appsConnect(adapter, opts, key);
+  for (const l of r.lines) console.log(l);
+  if (!r.ok) process.exitCode = 1;
+}
+
+async function appsTestCmd(instance: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const r = await appAdapter(opts, 'github-app').verifyStored(instance);
+  console.log(
+    r.ok
+      ? `${instance}: connected as ${r.identity?.botLogin} ("${r.identity?.commitName} <${r.identity?.commitEmail}>").`
+      : `${instance}: ${r.message ?? APP_ERROR_TEXT[r.code ?? 'unexpected']}`,
+  );
+  if (!r.ok) process.exitCode = 1;
+}
+
+async function appsRemoveCmd(instance: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const a = appAdapter(opts, 'github-app');
+  const had = a.broker().store.get(instance);
+  await a.remove(instance);
+  console.log(
+    had
+      ? `Removed ${instance}: the sealed key is deleted on this workstation.`
+      : `${instance} is not on this workstation.`,
+  );
+}
+
 /** `aom-runner accounts list`: the Claude accounts of this machine, as the runner reports them. */
 function accountsList(opts: { dataDir?: string; pairing?: string }): void {
   const { env } = headlessAdapters(pairingPaths(opts));
@@ -1509,6 +1577,42 @@ export function buildProgram(): Command {
     .description('the pairing that may change machine-wide logins (~/.claude, gh, MCP) from the web')
     .option(...dataDirOpt)
     .action(integrationsMachineAdmin);
+  const apps = program
+    .command('apps')
+    .description(
+      'automated apps (a GitHub App) this workstation can act as; the key is sealed here, tokens stay in memory',
+    );
+  apps
+    .command('list', { isDefault: true })
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsListCmd);
+  apps
+    .command('connect <provider>')
+    .description('connect an app installation from this terminal (provider: github)')
+    .requiredOption('--app-id <id>', 'the App ID or client ID')
+    .option(
+      '--installation <id>',
+      'the installation ID (empty: the only installation, or a list to pick from)',
+    )
+    .option('--host <host>', 'GitHub Enterprise Server host', 'github.com')
+    .option('--key-file <path>', 'read the private key (.pem) from this file')
+    .option('--key-stdin', 'read the private key from stdin')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsConnectCmd);
+  apps
+    .command('test <instance>')
+    .description('check an app with its provider (signs a JWT, reads the installation, mints a token)')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsTestCmd);
+  apps
+    .command('remove <instance>')
+    .description('delete the sealed key of an app on this workstation')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsRemoveCmd);
   const accounts = program
     .command('accounts')
     .description(

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SealedEnvelopeSchema } from '../integrations/schema.ts';
 
 /**
  * Automated app integrations (a GitHub App first; GitLab, Bitbucket and Azure DevOps bot apps later). An organization
@@ -137,3 +138,147 @@ export const AppCommandResultSchema = z
   })
   .strict();
 export type AppCommandResult = z.infer<typeof AppCommandResultSchema>;
+
+// ------------------------------------------------------------------------------------------- runner commands
+
+/** Numeric App ID or a client ID (`Iv1.…`, `Iv23…`). */
+export const AppRefSchema = z.string().regex(/^(\d{1,12}|Iv[0-9A-Za-z.]{4,40})$/);
+export const AppInstallationIdSchema = z.string().regex(/^\d{1,15}$/);
+export const AppHostSchema = z
+  .string()
+  .max(200)
+  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/i);
+
+const AppRefPairSchema = z.object({
+  orgId: z.string().min(1).max(80),
+  integrationId: z.string().min(1).max(80),
+});
+
+/**
+ * `app.connect`: the envelope seals `{ privateKey }` for kind `github-app`, op `connect`, instance = the instance as
+ * entered (`appRef` or `appRef:installationId`) and ref = the share's `ref`.
+ */
+export const AppConnectPayloadSchema = z.object({
+  requestId: z.string().min(1).max(64),
+  orgId: z.string().min(1).max(80),
+  integrationId: z.string().min(1).max(80).optional(),
+  provider: AppProviderIdSchema,
+  host: AppHostSchema,
+  appRef: AppRefSchema,
+  installationId: AppInstallationIdSchema.optional(),
+  /** Replacing the key of a registered integration: a key for another app or installation is `app_mismatch`. */
+  expect: z.string().max(200).optional(),
+  ref: z.string().min(1).max(64),
+  /** Opaque sealed envelope (`SealedEnvelopeSchema`); checked by the runner. */
+  envelope: SealedEnvelopeSchema,
+});
+export type AppConnectPayload = z.infer<typeof AppConnectPayloadSchema>;
+
+export const AppTestPayloadSchema = z.object({
+  requestId: z.string().min(1).max(64),
+  instance: z.string().max(200),
+});
+export const AppAdoptPayloadSchema = AppRefPairSchema.extend({
+  requestId: z.string().min(1).max(64),
+  instance: z.string().max(200),
+});
+export const AppRemovePayloadSchema = AppRefPairSchema.extend({ instance: z.string().max(200) });
+/** After every `welcome`: the apps the server still has for these organizations; other refs of theirs are dropped. */
+export const AppSyncPayloadSchema = z.object({
+  orgIds: z.array(z.string().min(1).max(80)).max(200),
+  apps: z.array(AppRefPairSchema.extend({ instance: z.string().max(200) })).max(1000),
+});
+
+// ------------------------------------------------------------------------------------------------- org API
+
+export const ORG_APP_REQUEST_STATES = ['pending', 'needs_choice', 'done', 'failed', 'expired'] as const;
+export type OrgAppRequestState = (typeof ORG_APP_REQUEST_STATES)[number];
+
+export interface OrgAppWorkstationDto {
+  id: string;
+  name: string;
+  ownerName: string;
+  state: 'connected' | 'error' | 'pending' | 'missing';
+  refreshedAt?: string;
+  errorCode?: string;
+  message?: string;
+  checkedAt?: string;
+}
+
+export interface OrgAppDto {
+  id: string;
+  provider: AppProviderId;
+  label: string;
+  host: string;
+  appId: string;
+  appSlug: string;
+  appName: string;
+  installationId: string;
+  account: string;
+  botLogin: string;
+  commitName: string;
+  commitEmail: string;
+  permissions: AppPermissions;
+  missingPermissions: string[];
+  createdAt: string;
+  state: 'connected' | 'error' | 'pending';
+  /** Owner only. */
+  workstations?: OrgAppWorkstationDto[];
+}
+
+export interface OrgAppTargetDto {
+  id: string;
+  name: string;
+  ownerName: string;
+  keyId: string;
+  publicKey: string;
+  online: boolean;
+  supported: boolean;
+}
+
+export interface OrgAppsResponse {
+  apps: OrgAppDto[];
+  canManage: boolean;
+  targets?: OrgAppTargetDto[];
+  serverTime: string;
+}
+
+export const OrgAppShareSchema = z
+  .object({
+    workstationId: z.uuid(),
+    ref: z.string().min(8).max(64),
+    keyId: z.string().min(1).max(200),
+    envelope: SealedEnvelopeSchema,
+  })
+  .strict();
+export type OrgAppShare = z.infer<typeof OrgAppShareSchema>;
+
+export const AddOrgAppRequestSchema = z
+  .object({
+    requestId: z.uuid(),
+    provider: AppProviderIdSchema,
+    label: z.string().trim().min(1).max(80),
+    host: AppHostSchema.default('github.com'),
+    appRef: AppRefSchema,
+    installationId: AppInstallationIdSchema.optional(),
+    shares: z.array(OrgAppShareSchema).min(1).max(50),
+  })
+  .strict();
+export type AddOrgAppRequest = z.infer<typeof AddOrgAppRequestSchema>;
+
+export const ShareOrgAppRequestSchema = z
+  .object({ requestId: z.uuid(), shares: z.array(OrgAppShareSchema).min(1).max(50) })
+  .strict();
+export const RenameOrgAppRequestSchema = z.object({ label: z.string().trim().min(1).max(80) }).strict();
+
+export interface OrgAppRequestDto {
+  id: string;
+  state: OrgAppRequestState;
+  integrationId?: string;
+  identity?: AppIdentity;
+  installations?: AppInstallation[];
+  results: Array<{ workstationId: string; ok?: boolean; code?: string; message?: string }>;
+}
+
+/** A raw request body that holds a PEM in the clear is refused before it is parsed or logged. */
+export const containsPlaintextKey = (raw: string): boolean => /PRIVATE KEY-----/.test(raw);

@@ -59,6 +59,7 @@ import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
 import { storageEvents } from './storage.ts';
+import { appIntegrationEvents } from './apps.ts';
 import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
 import { vaultEvents } from './vault.ts';
@@ -129,6 +130,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...agentUxEvents,
   ...relayEvents,
   ...storageEvents,
+  ...appIntegrationEvents,
   ...formEvents,
   ...journeyEvents,
   ...journeyWaitEvents,
@@ -191,6 +193,7 @@ export * from './session.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
 export * from './storage.ts';
+export * from './apps.ts';
 export * from './testing.ts';
 export * from './user.ts';
 export * from './vault.ts';
