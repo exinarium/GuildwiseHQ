@@ -21,6 +21,7 @@ import {
 import { currentBranch, git } from '../git/git.ts';
 import { commitsWithInternalRef, describeCommits } from '../git/internal-ref.ts';
 import { baseTarget } from '../git/rebase.ts';
+import { managedGitDir, modulesRoot } from '../git/submodule-drift.ts';
 
 export interface BranchSnapshot {
   [branch: string]: string;
@@ -138,7 +139,11 @@ export const DIRTY_SNAPSHOT_MAX = 500;
  * checked-out submodule (`empty` when it is not initialised), or the file's blob id. Null when it cannot be read: such a
  * path never counts as untouched.
  */
-async function dirtyFingerprint(worktree: string, path: string): Promise<string | null> {
+async function dirtyFingerprint(
+  worktree: string,
+  path: string,
+  modules: string | null,
+): Promise<string | null> {
   const abs = join(worktree, path);
   let st: Awaited<ReturnType<typeof lstat>>;
   try {
@@ -156,10 +161,13 @@ async function dirtyFingerprint(worktree: string, path: string): Promise<string 
   if (st.isDirectory()) {
     // without its own .git, git would answer for the superproject
     if (!existsSync(join(abs, '.git'))) return 'empty';
+    // git runs inside only for a submodule this runner manages (its gitdir under the modules folder); anything else is
+    // agent-owned configuration: no fingerprint, so the path is never "untouched" and is judged as before
+    if (!modules || !managedGitDir(abs, modules)) return null;
     const head = await git(abs, ['rev-parse', 'HEAD']);
     if (head.exitCode !== 0) return null;
     const status = await git(abs, ['status', '--porcelain', '--untracked-files=all']);
-    const diff = await git(abs, ['diff', 'HEAD']);
+    const diff = await git(abs, ['diff', '--no-ext-diff', '--no-textconv', 'HEAD']);
     if (status.exitCode !== 0 || diff.exitCode !== 0) return null;
     const sum = createHash('sha1').update(status.stdout).update('\0').update(diff.stdout).digest('hex');
     return `sub:${head.stdout.trim()}:${sum}`;
@@ -171,8 +179,9 @@ async function dirtyFingerprint(worktree: string, path: string): Promise<string 
 /** Fingerprints of the paths that are dirty now (at the shift start), at most `DIRTY_SNAPSHOT_MAX` of them. */
 export async function snapshotDirty(worktree: string): Promise<DirtySnapshot> {
   const snap: DirtySnapshot = {};
+  const modules = await modulesRoot(worktree);
   for (const p of (await dirtyPaths(worktree)).slice(0, DIRTY_SNAPSHOT_MAX)) {
-    const f = await dirtyFingerprint(worktree, p);
+    const f = await dirtyFingerprint(worktree, p, modules);
     if (f !== null) snap[p] = f;
   }
   return snap;
@@ -186,10 +195,11 @@ export async function untouchedSinceStart(
 ): Promise<Set<string>> {
   const out = new Set<string>();
   if (!snap) return out;
+  const modules = await modulesRoot(worktree);
   for (const p of paths) {
     const before = snap[p];
     if (before === undefined) continue;
-    if ((await dirtyFingerprint(worktree, p)) === before) out.add(p);
+    if ((await dirtyFingerprint(worktree, p, modules)) === before) out.add(p);
   }
   return out;
 }

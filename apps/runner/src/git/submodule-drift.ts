@@ -40,7 +40,7 @@ const short = (sha: string): string => sha.slice(0, 10);
  * Where this superproject keeps its submodules' repositories (`<git dir>/modules`; per worktree for a linked one), as a
  * real path. Null when git cannot say.
  */
-async function modulesRoot(worktree: string): Promise<string | null> {
+export async function modulesRoot(worktree: string): Promise<string | null> {
   const r = await git(worktree, ['rev-parse', '--path-format=absolute', '--git-path', 'modules']);
   const dir = r.stdout.trim();
   if (r.exitCode !== 0 || !dir) return null;
@@ -56,7 +56,7 @@ async function modulesRoot(worktree: string): Promise<string | null> {
  * that resolves (real path) under the superproject's `modules/` folder. A `.git` directory (a fresh `git init`), a
  * symbolic link, or a gitdir anywhere else is agent-owned content, not a submodule this runner manages: null.
  */
-function managedGitDir(abs: string, modules: string): string | null {
+export function managedGitDir(abs: string, modules: string): string | null {
   const dotGit = join(abs, '.git');
   try {
     if (!lstatSync(dotGit).isFile()) return null;

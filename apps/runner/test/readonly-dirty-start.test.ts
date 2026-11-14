@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -63,6 +63,25 @@ describe('read-only roles are judged on their own shift only (BLOCKERS.md sectio
     // the old behaviour, for comparison
     const { dirtyAtStart: _drop, ...without } = t.input();
     expect((await runGuard(without)).map((v) => v.rule)).toEqual(['reviewer_modified_code']);
+  });
+
+  it('git is never run with diff drivers inside a nested repository the runner does not manage (S4)', async () => {
+    const d = makeRepo();
+    const nested = join(d.clone, 'nested');
+    mkdirSync(nested);
+    sh(nested, 'git', ['init', '-q', '-b', 'main']);
+    writeFileSync(join(nested, 'a.txt'), 'a\n');
+    sh(nested, 'git', ['add', '-A']);
+    sh(nested, 'git', ['commit', '-q', '-m', 'a']);
+    writeFileSync(join(nested, 'a.txt'), 'changed\n');
+    const marker = join(tmp(), 'marker');
+    const script = join(tmp(), 'ext-diff.sh');
+    writeFileSync(script, `#!/bin/sh\ntouch ${marker}\n`);
+    chmodSync(script, 0o755);
+    sh(nested, 'git', ['config', 'diff.external', script]);
+    const snap = await snapshotDirty(d.clone);
+    expect(existsSync(marker)).toBe(false);
+    expect(Object.keys(snap).filter((p) => p.startsWith('nested'))).toEqual([]);
   });
 
   it('a real edit is still refused', async () => {
