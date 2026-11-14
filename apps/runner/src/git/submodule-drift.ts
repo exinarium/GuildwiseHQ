@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { git } from './git.ts';
+import { trustedSubmoduleGitDir } from './harden.ts';
 
 /** A submodule checked out at another commit than the one the card branch pins (its index entry). */
 export interface SubmoduleDrift {
@@ -54,9 +55,19 @@ export async function modulesRoot(worktree: string): Promise<string | null> {
 /**
  * The submodule's repository, read without running git inside it: `<path>/.git` must be a plain file naming a gitdir
  * that resolves (real path) under the superproject's `modules/` folder. A `.git` directory (a fresh `git init`), a
- * symbolic link, or a gitdir anywhere else is agent-owned content, not a submodule this runner manages: null.
+ * symbolic link, a gitdir anywhere else, or a repository the shift start did not record as trusted is agent-owned
+ * content, not a submodule this runner manages: null.
  */
 export function managedGitDir(abs: string, modules: string): string | null {
+  const dir = moduleGitDir(abs, modules);
+  // ... and the runner trusts only a repository that was there, with an inert configuration, when the shift
+  // started (harden.ts `trustSubmodulesAtShiftStart`): the sandbox kept its config read-only since. One the agent
+  // made or re-pointed during the shift could carry a filter or a diff driver, which git would run here.
+  return dir && trustedSubmoduleGitDir(dir) ? dir : null;
+}
+
+/** The shape half of `managedGitDir`: a `.git` file whose gitdir resolves under `modules/`. Says nothing about trust. */
+export function moduleGitDir(abs: string, modules: string): string | null {
   const dotGit = join(abs, '.git');
   try {
     if (!lstatSync(dotGit).isFile()) return null;
@@ -67,6 +78,35 @@ export function managedGitDir(abs: string, modules: string): string | null {
   } catch {
     return null;
   }
+}
+
+const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/**
+ * The commit a repository's HEAD is at, read from its files (`HEAD`, a loose ref, `packed-refs`) without running git:
+ * for a repository whose configuration the runner does not trust. Null when it cannot be told.
+ */
+export function headShaFromFiles(gitDir: string): string | null {
+  const read = (f: string): string | null => {
+    try {
+      const st = lstatSync(f);
+      return st.isFile() && st.size <= 1_000_000 ? readFileSync(f, 'utf8') : null;
+    } catch {
+      return null;
+    }
+  };
+  const head = read(join(gitDir, 'HEAD'))?.trim();
+  if (!head) return null;
+  if (SHA.test(head)) return head;
+  const ref = /^ref:\s*(refs\/[A-Za-z0-9._/-]+)$/.exec(head)?.[1];
+  if (!ref || ref.includes('..')) return null;
+  const loose = read(join(gitDir, ref))?.trim();
+  if (loose && SHA.test(loose)) return loose;
+  for (const line of (read(join(gitDir, 'packed-refs')) ?? '').split('\n')) {
+    const [sha, name] = line.split(' ');
+    if (name === ref && sha && SHA.test(sha)) return sha;
+  }
+  return null;
 }
 
 /**
@@ -95,10 +135,22 @@ export async function resetSubmoduleDrift(worktree: string): Promise<SubmoduleDr
     const abs = join(worktree, path);
     // not initialised (no .git of its own): nothing is checked out, and git would answer for the superproject
     if (!existsSync(join(abs, '.git'))) continue;
-    if (!modules || !managedGitDir(abs, modules)) {
+    const gitDir = modules ? moduleGitDir(abs, modules) : null;
+    if (!gitDir) {
       problems.push(
         `the submodule ${path} is not a checkout the runner manages (its .git does not lead to the repository's modules folder), so the runner will not touch it: remove what you put at ${path}, or ask with \`aom question --topic environment\``,
       );
+      continue;
+    }
+    if (!trustedSubmoduleGitDir(gitDir)) {
+      // Set up during this shift (or its configuration is not the plain one git writes): the runner runs no git inside
+      // it. Its commit is read from the files; the leftovers commit never stages it (`git add` excludes it). On its pin
+      // or unreadable: nothing to do. Off its pin: the agent can check the pin out itself.
+      const at = headShaFromFiles(gitDir);
+      if (at && at !== pin)
+        problems.push(
+          `the submodule ${path} is at ${short(at)} instead of its pinned ${short(pin)}. It was set up during this shift, so the runner does not reset it yet: check the pinned commit out yourself (\`git -C ${path} checkout ${pin}\`) and report again, commit a pin change if the card really needs one, or ask with \`aom question --topic environment\``,
+        );
       continue;
     }
     const headR = await git(abs, ['rev-parse', 'HEAD']);

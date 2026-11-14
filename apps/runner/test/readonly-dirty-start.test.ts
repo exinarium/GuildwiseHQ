@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
+import { trustSubmodulesAtShiftStart } from '../src/git/harden.ts';
 import {
   discardOutOfScope,
   type GuardInput,
@@ -36,6 +37,7 @@ async function driftedWorktree() {
   // a file someone left behind before the shift as well
   writeFileSync(join(d.clone, 'notes.txt'), 'left behind\n');
   const wt = d.clone;
+  trustSubmodulesAtShiftStart(wt); // what the supervisor does before the snapshot
   const startSha = sh(wt, 'git', ['rev-parse', 'HEAD']);
   const branchesAtStart = await snapshotBranches(wt);
   const dirtyAtStart = await snapshotDirty(wt);

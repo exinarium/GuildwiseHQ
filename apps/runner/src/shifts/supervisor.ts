@@ -105,6 +105,7 @@ import {
 import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
+import { trustSubmodulesAtShiftStart } from '../git/harden.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
@@ -1286,6 +1287,9 @@ export class ShiftSupervisor {
       await this.recordBaseTips(s);
       // What was already dirty before the agent started. A resumed shift keeps the snapshot of its first start; one
       // persisted without a snapshot (an older runner) gets none, since by now the worktree holds the agent's own edits.
+      // Which submodule repositories the runner may run git inside during this shift: the ones that are there now, before
+      // the agent runs, with a configuration that starts no program (the sandbox keeps it read-only from here on).
+      trustSubmodulesAtShiftStart(cwd);
       if (!s.resumed) s.dirtyAtStart ??= await snapshotDirty(cwd);
       s.branchesAtStart = await snapshotBranches(cwd);
       const seen = await originBranchNames(repo.localPath);

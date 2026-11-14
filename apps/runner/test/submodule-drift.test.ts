@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resetSubmoduleDrift, submoduleResetNote } from '../src/git/submodule-drift.ts';
+import { forgetTrustedSubmodules, trustSubmodulesAtShiftStart } from '../src/git/harden.ts';
+import { headShaFromFiles, resetSubmoduleDrift, submoduleResetNote } from '../src/git/submodule-drift.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -15,6 +16,8 @@ function twoRepos() {
   sh(d.clone, 'git', ['commit', '-m', 'add core']);
   sh(d.clone, 'git', ['push', 'origin', 'main']);
   const pin = sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD']);
+  // the submodule was there, with the configuration git wrote, when the shift started: the runner may run git inside it
+  trustSubmodulesAtShiftStart(d.clone);
   return { x, d, pin };
 }
 
@@ -147,5 +150,41 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     const fresh = join(tmp(), 'fresh');
     sh(d.root, 'git', ['clone', d.origin, fresh]);
     expect(await resetSubmoduleDrift(fresh)).toEqual({ reset: [] });
+  });
+});
+
+describe('a submodule set up during the shift (not trusted: no git is run inside it)', () => {
+  /** As `twoRepos`, but the shift started before the submodule existed. */
+  function lateSubmodule() {
+    const r = twoRepos();
+    forgetTrustedSubmodules();
+    trustSubmodulesAtShiftStart(tmp()); // some other folder: nothing of this repository is trusted
+    return r;
+  }
+
+  it('on its pin: nothing to do, nothing refused', async () => {
+    const { d } = lateSubmodule();
+    expect(await resetSubmoduleDrift(d.clone)).toEqual({ reset: [] });
+  });
+
+  it('off its pin: refused with the checkout the agent can do itself, read from the files', async () => {
+    const { x, d, pin } = lateSubmodule();
+    const newer = advanceX(x, 'later.txt');
+    drift(d, newer);
+    expect(headShaFromFiles(join(d.clone, '.git', 'modules', 'core'))).toBe(newer);
+    const r = await resetSubmoduleDrift(d.clone);
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain(`git -C core checkout ${pin}`);
+    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer); // untouched
+  });
+
+  it('reads a HEAD that names a branch, loose or packed', () => {
+    const { d, pin } = lateSubmodule();
+    const core = join(d.clone, 'core');
+    sh(core, 'git', ['checkout', '-q', '-B', 'work', pin]);
+    const gitDir = join(d.clone, '.git', 'modules', 'core');
+    expect(headShaFromFiles(gitDir)).toBe(pin);
+    sh(core, 'git', ['pack-refs', '--all']);
+    expect(headShaFromFiles(gitDir)).toBe(pin);
   });
 });

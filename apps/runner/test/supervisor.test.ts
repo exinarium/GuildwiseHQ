@@ -285,44 +285,43 @@ describe('supervisor', () => {
     expect(h!.server.of('shift.report').filter((r) => r.shiftId === shiftId)).toHaveLength(1);
   });
 
-  it('a builder handoff resets a submodule left off its pin and says so; the drift is never committed (BLOCKERS.md section 3)', async () => {
+  it('a submodule set up during the shift and left off its pin: the builder is told to check the pin out, the runner runs no git inside it, the drift is never committed (BLOCKERS.md section 3)', async () => {
     const { repo, pin, newer } = submoduleRepo();
-    const seen: { r?: Post; cwd?: string } = {};
+    const seen: { first?: Post; r?: Post; cwd?: string } = {};
     const adapter = new ScriptedAdapter(async (i, ctl) => {
-      // the submodule ends up on another commit than the pin (what an agent's tooling did in production)
+      // the submodule appears during the shift (DevOps set it up) and ends up on another commit than the pin
       sh(i.cwd, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--', 'core']);
       sh(join(i.cwd, 'core'), 'git', ['fetch', 'origin']);
       sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', newer]);
       writeFileSync(join(i.cwd, 'feature.ts'), 'export const x = 1;\n');
+      seen.first = await ctl.post('/v1/report', outcome('handoff', 'built'));
+      // what the refusal tells the agent to do, from its own sandbox
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', pin]);
       seen.r = await ctl.post('/v1/report', outcome('handoff', 'built'));
       seen.cwd = i.cwd;
     });
     h = await startHarness({}, { adapters: new Map([['mock', adapter]]) }, repo);
-    const { shiftId, ended } = await h.runShift({ stage: 'build' });
+    const { ended } = await h.runShift({ stage: 'build' });
+    expect(seen.first?.status).not.toBe(200);
+    expect(JSON.stringify(seen.first?.json)).toContain(`git -C core checkout ${pin}`);
     expect(seen.r?.status).toBe(200);
-    expect(seen.r?.json.message).toContain('The runner reset a submodule');
     expect(ended.outcome).toBe('reported');
-    expect(sh(join(seen.cwd as string, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
     // the card branch pins the same commit as before; the builder's own file was committed
     expect(sh(seen.cwd as string, 'git', ['rev-parse', 'HEAD:core'])).toBe(pin);
     expect(sh(seen.cwd as string, 'git', ['diff', '--name-only', 'origin/main', 'HEAD'])).toBe('feature.ts');
-    const comments = h.server
-      .of('shift.report')
-      .filter((r) => r.shiftId === shiftId && r.report.kind === 'comment');
-    expect((comments[0]?.report as { note?: string } | undefined)?.note).toContain(
-      `core (${newer.slice(0, 10)} -> ${pin.slice(0, 10)})`,
-    );
   }, 60_000);
 
-  it('a tester whose submodule went off its pin is not refused for it: the drift is reset before the guard', async () => {
+  it('a tester whose late-set-up submodule went off its pin gets the same instruction, not a guard violation for core', async () => {
     const { repo, pin, newer } = submoduleRepo();
-    const seen: { r?: Post; cwd?: string } = {};
+    const seen: { first?: Post; r?: Post; cwd?: string } = {};
     const adapter = new ScriptedAdapter(async (i, ctl) => {
       sh(i.cwd, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--', 'core']);
       sh(join(i.cwd, 'core'), 'git', ['fetch', 'origin']);
       sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', newer]);
       mkdirSync(join(i.cwd, 'e2e'), { recursive: true });
       writeFileSync(join(i.cwd, 'e2e', 'login.spec.ts'), 'test\n');
+      seen.first = await ctl.post('/v1/report', outcome('handoff', 'spec fixed'));
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', pin]);
       seen.r = await ctl.post(
         '/v1/report',
         outcome('handoff', 'spec fixed', {
@@ -347,6 +346,8 @@ describe('supervisor', () => {
     });
     h.server.send('shift.start', msg);
     const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    expect(JSON.stringify(seen.first?.json)).toContain(`git -C core checkout ${pin}`);
+    expect(JSON.stringify(seen.first?.json)).not.toContain('tester_edited_non_e2e');
     expect(seen.r?.json.error).toBeUndefined();
     expect(seen.r?.status).toBe(200);
     expect(ended.guardViolations ?? []).toEqual([]);

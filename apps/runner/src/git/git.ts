@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import { execa } from 'execa';
 import { clearLockStub } from './config-lock.ts';
-import { GIT_HARDEN_ENV, gitPointerProblem, hardenedGitArgs } from './harden.ts';
+import { GIT_HARDEN_ENV, gitPointerProblem, hardenedGitArgs, untrustedGitlinkExcludes } from './harden.ts';
 
 export interface GitResult {
   stdout: string;
@@ -47,6 +47,39 @@ async function clearConfigLockStub(cwd: string): Promise<boolean> {
   return clearLockStub(isAbsolute(out) ? out : resolve(cwd, out)).length > 0;
 }
 
+/**
+ * `git add ...` with an exclude pathspec for every gitlink of the index whose repository the runner does not trust.
+ * Reads the index (`ls-files -s`, which starts nothing) with the same environment, so a private index file is honoured.
+ * Unchanged when the index has no gitlink.
+ */
+async function excludeUntrustedGitlinks(
+  cwd: string,
+  args: string[],
+  env: Record<string, string> | undefined,
+): Promise<string[]> {
+  const run = (a: string[]) =>
+    execa('git', hardenedGitArgs(a), {
+      cwd,
+      reject: false,
+      stdin: 'ignore',
+      env: { ...GIT_HARDEN_ENV, ...env },
+      extendEnv: true,
+    });
+  const ls = await run(['ls-files', '-s', '-z', '--full-name', ':/']);
+  if (ls.exitCode !== 0) return args;
+  const links: string[] = [];
+  for (const entry of String(ls.stdout ?? '').split('\0')) {
+    const tab = entry.indexOf('\t');
+    if (tab > 0 && entry.startsWith('160000 ')) links.push(entry.slice(tab + 1));
+  }
+  if (links.length === 0) return args;
+  const top = String((await run(['rev-parse', '--show-toplevel'])).stdout ?? '').trim();
+  if (!top) return args;
+  const excludes = untrustedGitlinkExcludes(top, [...new Set(links)]);
+  if (excludes.length === 0) return args;
+  return args.includes('--') ? [...args, ...excludes] : [...args, '--', ...excludes];
+}
+
 /** Pauses (ms) between the retries of a command that hit a lock error; tests shorten them. */
 export const lockRetry = { delaysMs: [100, 250, 500, 1000, 2000] };
 
@@ -58,6 +91,8 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
   // a worktree whose .git file points somewhere it should not is not a place to run git (docs/RUNNER.md, "the repository's configuration")
   const pointer = gitPointerProblem(cwd);
   if (pointer) return { stdout: '', stderr: `refusing to run git: ${pointer}`, exitCode: 128 };
+  // every `git add` the runner starts stays out of submodules it does not trust (harden.ts, `untrustedGitlinkExcludes`)
+  if (args[0] === 'add') args = await excludeUntrustedGitlinks(cwd, args, opts.env);
   for (let attempt = 0; ; attempt++) {
     const r = await execa('git', hardenedGitArgs(args), {
       cwd,
