@@ -522,6 +522,86 @@ describe('supervisor', () => {
     expect(h!.server.invalid).toEqual([]);
   });
 
+  it("fills a card worktree's submodules after the accept, fresh or reopened; a failure is told and the shift still starts", async () => {
+    let instructions = '';
+    const fills: string[] = [];
+    const prepGot: unknown[] = [];
+    await start(
+      async (i) => {
+        instructions = i.instructionsMarkdown;
+      },
+      {},
+      {
+        initWorktreeSubmodules: async (p) => {
+          fills.push(p);
+          return [
+            {
+              name: 'core',
+              path: 'core',
+              status: 'failed',
+              detail: 'could not connect to https://***@h/x.git',
+            },
+          ];
+        },
+        prepareWorktree: async (p) => {
+          prepGot.push(p.submodules);
+          return { ok: false, steps: p.submodules ? [p.submodules] : [] };
+        },
+      },
+    );
+    writeFileSync(
+      join(h!.repo.clone, '.gitmodules'),
+      '[submodule "core"]\n\tpath = core\n\turl = ../x.git\n',
+    );
+    sh(h!.repo.clone, 'git', ['add', '-A']);
+    sh(h!.repo.clone, 'git', ['commit', '-m', 'gitmodules']);
+    sh(h!.repo.clone, 'git', ['push', 'origin', 'main']);
+    const step = {
+      name: 'submodules',
+      status: 'failed',
+      detail: 'core: could not connect to https://***@h/x.git',
+    };
+    const { shiftId, ended } = await h!.runShift({ stage: 'build' });
+    expect(ended.outcome).toBe('no_report');
+    expect(fills).toEqual([worktreeOf(h!)]);
+    expect(prepGot).toEqual([expect.objectContaining(step)]);
+    const started = h!.server.of('shift.started').find((m) => m.shiftId === shiftId);
+    expect(started?.worktreePrep?.steps).toEqual([expect.objectContaining(step)]);
+    expect(instructions).toMatch(/submodules: core: could not connect/);
+    const progress = h!.server.of('shift.progress').flatMap((m) => m.items.map((x: any) => x.text));
+    expect(progress).toContain('filling the submodules');
+    expect(progress).toContain(
+      'the submodule core could not be filled: could not connect to https://***@h/x.git',
+    );
+    // a reopened worktree: filled again (only what is uninitialised), no preparation, the step still reported
+    const second = await h!.runShift({ stage: 'review', mode: 'reuse' });
+    expect(fills).toHaveLength(2);
+    expect(prepGot).toHaveLength(1);
+    expect(h!.server.of('shift.started').find((m) => m.shiftId === second.shiftId)?.worktreePrep).toEqual({
+      ok: false,
+      steps: [expect.objectContaining(step)],
+    });
+    expect(h!.server.invalid).toEqual([]);
+  });
+
+  it('a card repository without .gitmodules: no submodule fill runs', async () => {
+    let called = false;
+    await start(
+      async () => {},
+      {},
+      {
+        initWorktreeSubmodules: async () => {
+          called = true;
+          return [];
+        },
+      },
+    );
+    const { shiftId } = await h!.runShift({ stage: 'build' });
+    expect(called).toBe(false);
+    const started = h!.server.of('shift.started').find((m) => m.shiftId === shiftId);
+    expect(JSON.stringify(started?.worktreePrep ?? {})).not.toContain('submodules');
+  });
+
   it('the prepareWorktrees switch off: a new worktree is not prepared', async () => {
     let called = false;
     await start(

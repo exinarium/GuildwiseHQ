@@ -114,6 +114,7 @@ import {
   removePrepTaskWorktree,
 } from '../git/release-prep-task.ts';
 import { resetSubmoduleDrift, submoduleResetNote } from '../git/submodule-drift.ts';
+import { redactGitError } from '../git/submodule-fill.ts';
 import {
   abortMerge,
   mergeInProgress,
@@ -126,6 +127,7 @@ import {
   ensureReadOnlyCheckout,
   ensureWorktree,
   type GitAuth,
+  initWorktreeSubmodules,
   RebaseConflictError,
   RebaseError,
   rebaseOntoBase,
@@ -177,7 +179,7 @@ import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../tes
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
-import { type PrepResult, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
+import { type PrepResult, type PrepStep, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
 import {
   agentPath,
   describeToolchains,
@@ -356,6 +358,8 @@ export interface SupervisorDeps {
   runs?: RunManager;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
   prepareWorktree?: typeof prepareWorktree;
+  /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
+  initWorktreeSubmodules?: typeof initWorktreeSubmodules;
   /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
   onTestServices?: () => void;
   /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
@@ -465,6 +469,8 @@ interface ActiveShift {
   prepAbort?: AbortController;
   /** What preparing the new card worktree did (reported with `shift.started`, told to the agent). */
   worktreePrep?: PrepResult;
+  /** What filling the card worktree's submodules did (one `submodules` step; part of `worktreePrep`). */
+  submodulesStep?: PrepStep;
   /** Check results by head, check and command: a second handoff at the same head does not run them again. */
   checkCache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
@@ -1336,8 +1342,13 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
-    // A card worktree this shift just added is prepared before the agent starts (after the accept: the server releases a
-    // shift that is not accepted within 30 s): submodules, then the project's dependencies in the run-step sandbox.
+    // The card worktree's submodules are filled before the agent starts (after the accept: the server releases a shift
+    // that is not accepted within 30 s, and a submodule clone can take minutes). Fresh or reopened, never for a resumed
+    // shift; only what is still uninitialised.
+    if (msg.kind === 'card' && s.worktree && msg.worktree && !s.resumed) await this.fillWorktreeSubmodules(s);
+
+    // A card worktree this shift just added is prepared before the agent starts: the project's dependencies in the
+    // run-step sandbox (the submodule step above is carried into its result).
     if (
       msg.kind === 'card' &&
       s.worktree?.added &&
@@ -1347,6 +1358,8 @@ export class ShiftSupervisor {
       msg.worktree
     )
       await this.prepareNewWorktree(s, msg.brief.project.projectPath);
+    else if (s.submodulesStep)
+      s.worktreePrep = { ok: s.submodulesStep.status !== 'failed', steps: [s.submodulesStep] };
 
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
@@ -2030,6 +2043,67 @@ export class ShiftSupervisor {
     this.deps.transport.send('run.usage', { kind: 'shift', id: s.msg.shiftId, usage: u });
   }
 
+  /**
+   * Fills the card worktree's uninitialised submodules at their pinned commits (never throws, never fails the shift).
+   * The outcome becomes the `submodules` step of the worktree preparation; each failure is logged and told to the owner
+   * with the submodule's path and git's error, credentials redacted.
+   */
+  private async fillWorktreeSubmodules(s: ActiveShift): Promise<void> {
+    const wt = s.worktree;
+    if (!wt || !existsSync(join(wt.path, '.gitmodules'))) return;
+    this.addProgress(s, 'status', 'filling the submodules');
+    this.flushProgress(s);
+    const started = Date.now();
+    const fill = this.deps.initWorktreeSubmodules ?? initWorktreeSubmodules;
+    let fills: Awaited<ReturnType<typeof initWorktreeSubmodules>>;
+    try {
+      fills = await fill(wt.path, {
+        findRepo: this.deps.findRepo,
+        ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      });
+    } catch (err) {
+      fills = [{ name: '', path: '', status: 'failed', detail: redactGitError(String(err)) }];
+    }
+    const ms = Date.now() - started;
+    if (fills.length === 0) return;
+    const failed = fills.filter((f) => f.status === 'failed');
+    for (const f of failed) {
+      const what = f.path || f.name || 'submodules';
+      this.log.warn(
+        `could not fill the submodule ${f.name || what} of ${s.msg.shiftId}: ${f.detail ?? 'failed'}`,
+      );
+      this.addProgress(s, 'status', `the submodule ${what} could not be filled: ${f.detail ?? 'failed'}`);
+    }
+    const describe = (f: (typeof fills)[number]) =>
+      `${f.path || f.name || 'submodules'}: ${f.detail ?? f.status}`;
+    if (failed.length) {
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'failed',
+        detail: failed.map(describe).join('; ').slice(0, 400),
+        ms,
+      };
+    } else if (fills.every((f) => f.status === 'skipped')) {
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'skipped',
+        detail: fills.map(describe).join('; ').slice(0, 400),
+        ms,
+      };
+    } else {
+      const skipped = fills.filter((f) => f.status === 'skipped');
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'done',
+        ...(skipped.length
+          ? { detail: `not filled: ${skipped.map(describe).join('; ')}`.slice(0, 400) }
+          : {}),
+        ms,
+      };
+    }
+    this.flushProgress(s);
+  }
+
   /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
   private async prepareNewWorktree(s: ActiveShift, projectPath: string | undefined): Promise<void> {
     const wt = s.worktree;
@@ -2052,6 +2126,7 @@ export class ShiftSupervisor {
           : {}),
         platform: process.platform as Platform,
         signal: s.prepAbort.signal,
+        ...(s.submodulesStep ? { submodules: s.submodulesStep } : {}),
       });
     } catch (err) {
       s.worktreePrep = {

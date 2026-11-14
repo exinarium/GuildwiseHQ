@@ -513,7 +513,7 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 - **Precedence of the limit (GWP-95).** (1) The server's value from the last `welcome` or `shifts.limit` of this process: the workstation setting, or the platform cap over it. (2) Before the server has answered since the runner started: `server-limits.json` (the last value the server sent), else `config.json` `maxConcurrentShifts`; this is the *local fallback* and lasts only until the first `welcome`. (3) When the owner chose "Runner's own value" (null): `config.json` under the platform cap, source *runner config*. A runner that announces `shift-limit:2` reports the limit it enforces and its source in every heartbeat (`load.maxShifts`, `load.limitSource`; sources `workstation_setting`, `platform_cap`, `runner_config`, `local_fallback`, `pairing_budget`). The Workstations page shows it next to the server's view, flags a mismatch, and shows "unknown" for an older runner. A `busy` rejection carries `capacity` (limit, source, running count and the shifts holding the slots, identifiers only), and the card's message names them.
 - **What takes a slot.** Card, question, DevOps and BA task shifts. Chat turns (owner chat, CEO owner/order turns, @mention work) and the CEO shift do not (`SHIFT_KINDS_OUTSIDE_LIMIT`). The runner, the dispatcher and the Workstations page count with this one rule; the page shows chat/CEO turns apart as "not counted". Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
-- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (the project's dependencies in the run-step sandbox; submodules are not filled) before the agent starts; see "A new card worktree is prepared".
+- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (the project's dependencies in the run-step sandbox; the submodules are filled separately, see "A new card worktree is prepared") before the agent starts; see "A new card worktree is prepared".
 - **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
 - **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
 
@@ -1697,10 +1697,36 @@ retried: a failed or cut-off preparation is a line in the shift's progress, a no
 and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The
 config switch `prepareWorktrees` (default `true`) turns it off.
 
-Submodules are not filled (1.7.0): the preparation runs no `git submodule`, `fetch` or `clone` on the host, because every
-ref and object a trust check could anchor on is writable by the agents working in the clone. A repository with
-submodules gets one fixed line ("the runner does not fill submodules when it prepares a worktree; ask DevOps if you need
-them"), and submodules stay a DevOps request. Deploy checkouts fill their submodules as before.
+**Submodules are filled before the preparation.** For every card shift with a card worktree (fresh or reopened, never a
+resumed shift, DevOps conflict attempts included) the runner fills the submodules listed in the worktree's `.gitmodules`
+at the commits the index pins, after it accepted the shift and before the agent starts (not inside the worktree creation,
+which runs before the 30-second accept and under the clone's lock). A repository without `.gitmodules` gets no extra git
+call. The url comes from the one shared resolver (`apps/runner/src/git/submodule-fill.ts`, also used by run worktrees and
+deploy checkouts): the submodule's repository registered on this workstation (a pinned commit it lacks is fetched into it
+first, under that clone's lock), else the submodule's own url with the credentials of that url's host. Nothing is written
+to any git config: each submodule is one `git -c submodule.<name>.active=true -c submodule.<name>.url=<url> submodule
+update -- <path>` (no `--init`, no `--recursive`), so `.git/config` stays byte-for-byte the same (also when it is
+read-only) and `git status --porcelain` stays empty. A failed submodule does not stop the shift: the runner logs the
+submodule's name and git's error (url userinfo and secret shapes removed), adds a progress line and reports a
+`submodules` step in `shift.started.worktreePrep` and the agent's instructions. The fill has a 10-minute timeout.
+
+The trust conditions (they replace the 1.7.0 rule "never fill submodules on the host"):
+1. Only into a submodule repository created in that call. A submodule whose repository (`<git dir>/modules/<name>`)
+   already exists in any form, or whose folder holds anything, counts as initialised or as agent content: it is left as
+   it is and no git runs inside it. That is also why reopening a worktree never clones again. A `modules` folder that is
+   a symbolic link skips the fill.
+2. Through the runner's hardened git (hooks off, no fsmonitor, no system config, pointer check), with
+   `GIT_LFS_SKIP_SMUDGE=1`; submodule names and paths that could escape a `-c` key or the worktree are skipped.
+3. `protocol.file.allow=always` only when the url is a registered local clone. A `.gitmodules` url that is a local path
+   or `file://` with no registered clone gets no file protocol, so git refuses it and the failure is reported.
+4. Credentials are those of the submodule url's own host, so an agent that points `.gitmodules` at another host gets no
+   token sent there.
+5. It runs before the agent session starts, so the sandbox keeps the new `modules/<name>/config` and `hooks` read-only
+   for the whole session.
+
+The preparation itself still runs no `git submodule`, `fetch` or `clone`; without a fill (an older caller) a repository
+with submodules gets the fixed line "the runner does not fill submodules when it prepares a worktree; ask DevOps if you
+need them".
 
 #### Base branch and the per-clone lock
 
@@ -2474,8 +2500,10 @@ and the DevOps engineer split the work:
   worktree* (`pathMap`) with the instruction to map paths in a guide accordingly. The plan fingerprint (the runner's `buildHash`)
   covers the repository guides and every parent or configured guide (path and content hash; a README fallback is not part of
   it, and with no guide above the repositories the value is the same as before). A new parent guide, or a changed one, makes
-  the plan stale. **Submodules:** a new run worktree runs `git submodule update --init --recursive` with the repository's git
-  auth (the origin's token or ssh key); a failure does not stop the start, the runner logs it and `aom run info` shows
+  the plan stale. **Submodules:** a new run worktree fills its submodules through the shared resolver of card worktrees (the
+  registered local clone first, else the submodule's own url with that host's credentials; nothing written to the clone's
+  `.git/config`), then runs `git submodule update --init --recursive` inside each filled submodule that has submodules of
+  its own; a failure does not stop the start, the runner logs it (credentials redacted) and `aom run info` shows
   "WARNING: the submodules could not be initialised: ...".
 - **The DevOps engineer works out how.** Its brief carries the guides above, the project's run instructions and the declared
   services, and the rules of the role: follow the guide first and literally, check the environment's own configuration

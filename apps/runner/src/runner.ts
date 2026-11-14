@@ -233,6 +233,8 @@ export interface RunnerOptions {
   probeTarget?: (url: string) => Promise<string | null>;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`, submodules and dependencies). */
   prepareWorktree?: SupervisorDeps['prepareWorktree'];
+  /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
+  initWorktreeSubmodules?: SupervisorDeps['initWorktreeSubmodules'];
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
   /** Test hook: milliseconds between the periodic scratch and worktree sweeps (default: `scratch.sweepIntervalHours`). */
@@ -781,6 +783,7 @@ export class Runner {
       envChecker: opts.envChecker,
       ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
+      ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,
