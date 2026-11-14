@@ -129,7 +129,8 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     regressionLoop: p.regression_loop ?? false,
     reviewTargets: {
       precisionTarget: p.review_precision_target == null ? null : Number(p.review_precision_target),
-      effortTargetHoursPerWeek: p.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
+      effortTargetHoursPerWeek:
+        p.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
       replayId: p.review_targets_replay_id ?? null,
       setAt: iso(p.review_targets_set_at),
     },

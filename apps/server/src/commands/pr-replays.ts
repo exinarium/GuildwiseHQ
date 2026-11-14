@@ -16,10 +16,10 @@ import {
   REPLAY_MAX_ATTEMPTS,
   REPLAY_PR_COUNT,
   REPLAY_REVIEWERS,
+  REVIEWER_MODEL,
   type ReplayDto,
   type ReplayFailureReason,
   RepoListMergedPrsResultSchema,
-  REVIEWER_MODEL,
   replayResult,
   type SetReviewTargetsRequest,
   streamId,
@@ -28,8 +28,8 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
 import type { Tx } from '../db/tx.ts';
+import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { getReplayDto, replayFindingStep } from '../queries/pr-replays.ts';
 import { listReviewablePrs } from '../review/reviewer-gate.ts';
@@ -176,11 +176,9 @@ export async function applyMergedPrList(
     }
     const cardBranches = new Set(
       (
-        await rows(
-          tx,
-          'SELECT branch_name FROM cards WHERE project_id=$1 AND branch_name IS NOT NULL',
-          [projectId],
-        )
+        await rows(tx, 'SELECT branch_name FROM cards WHERE project_id=$1 AND branch_name IS NOT NULL', [
+          projectId,
+        ])
       ).map((c) => c.branch_name as string),
     );
     const seen = new Set<string>();
@@ -271,7 +269,8 @@ async function settleReplay(ctx: Ctx, tx: Tx, replayId: string): Promise<void> {
     `SELECT count(*)::int AS n FROM pr_review_findings WHERE replay_id=$1 AND disposition='posted'`,
     [replayId],
   );
-  if (Number(toMark?.n ?? 0) === 0) await emit(replayId, 'PrReplayMarkingFinished', { result: await buildResult(tx, replayId) });
+  if (Number(toMark?.n ?? 0) === 0)
+    await emit(replayId, 'PrReplayMarkingFinished', { result: await buildResult(tx, replayId) });
 }
 
 /** The scheduler pass: one replay run per workstation at a time, live reviews first. */
@@ -381,7 +380,8 @@ async function dispatchOne(ctx: Ctx, replayId: string): Promise<boolean> {
     target = ws.id as string;
     return true;
   });
-  if (started && target) void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
+  if (started && target)
+    void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
   return started === true;
 }
 
@@ -408,7 +408,12 @@ export async function applyReplayRunResult(
       retryable: true,
     });
   } else if (r.outcome === 'timeout') {
-    await emit(replayId, 'PrReplayRunTimedOut', { ...base, durationMs: r.durationMs, phase: r.phase, by: 'runner' });
+    await emit(replayId, 'PrReplayRunTimedOut', {
+      ...base,
+      durationMs: r.durationMs,
+      phase: r.phase,
+      by: 'runner',
+    });
   } else if (r.outcome === 'failed') {
     await emit(replayId, 'PrReplayRunFailed', {
       ...base,
@@ -538,12 +543,21 @@ export async function recordFindingShown(
     if (rp?.state !== 'marking') throw conflict('replay_not_marking', 'the replay is not in marking');
     if (f.disposition !== 'posted') throw conflict('finding_not_markable', 'this finding is not marked');
     if (await one(tx, 'SELECT 1 FROM pr_review_finding_marks WHERE finding_id=$1', [findingId])) return;
-    const last = await one(tx, 'SELECT last_shown_at FROM pr_replay_finding_views WHERE finding_id=$1', [findingId]);
-    if (last && ctx.clock.now().getTime() - new Date(last.last_shown_at as string).getTime() < SHOWN_THROTTLE_MS)
-      return;
-    await emitter(ctx, tx, await replayScope(tx, f.project_id as string))(f.replay_id as string, 'PrReplayFindingShown', {
+    const last = await one(tx, 'SELECT last_shown_at FROM pr_replay_finding_views WHERE finding_id=$1', [
       findingId,
-    });
+    ]);
+    if (
+      last &&
+      ctx.clock.now().getTime() - new Date(last.last_shown_at as string).getTime() < SHOWN_THROTTLE_MS
+    )
+      return;
+    await emitter(ctx, tx, await replayScope(tx, f.project_id as string))(
+      f.replay_id as string,
+      'PrReplayFindingShown',
+      {
+        findingId,
+      },
+    );
   });
 }
 
@@ -559,7 +573,8 @@ export async function markReplayFinding(
     await ownerOf(tx, user, projectId, 'marks findings');
     const rp = await one(tx, 'SELECT * FROM pr_replays WHERE id=$1 FOR UPDATE', [f.replay_id]);
     if (rp?.state !== 'marking') throw conflict('replay_not_marking', 'the replay is not in marking');
-    if (f.disposition !== 'posted') throw conflict('finding_not_markable', 'held-back findings are not marked');
+    if (f.disposition !== 'posted')
+      throw conflict('finding_not_markable', 'held-back findings are not marked');
     const prev = await one(tx, 'SELECT mark FROM pr_review_finding_marks WHERE finding_id=$1', [findingId]);
     if (prev?.mark !== req.mark) {
       const scope = await replayScope(tx, projectId);
@@ -595,9 +610,13 @@ export async function markReplayFinding(
       [f.replay_id],
     );
     if (Number(left?.n ?? 0) === 0)
-      await emitter(ctx, tx, await replayScope(tx, projectId))(f.replay_id as string, 'PrReplayMarkingFinished', {
-        result: await buildResult(tx, f.replay_id as string),
-      });
+      await emitter(ctx, tx, await replayScope(tx, projectId))(
+        f.replay_id as string,
+        'PrReplayMarkingFinished',
+        {
+          result: await buildResult(tx, f.replay_id as string),
+        },
+      );
     return f.replay_id as string;
   });
   const dto = await getReplayDto(ctx.pool, replayId, true);
@@ -621,7 +640,11 @@ export async function cancelReplay(ctx: Ctx, user: AuthSession['user'], replayId
     if (!['listing', 'reviewing', 'marking'].includes(rp.state as string))
       throw conflict('replay_not_active', 'the replay is not active');
     const emit = emitter(ctx, tx, await replayScope(tx, rp.project_id as string), userActor(user.id));
-    const running = await rows(tx, `SELECT id, replay_pr_id FROM pr_review_runs WHERE replay_id=$1 AND state='running'`, [replayId]);
+    const running = await rows(
+      tx,
+      `SELECT id, replay_pr_id FROM pr_review_runs WHERE replay_id=$1 AND state='running'`,
+      [replayId],
+    );
     for (const r of running)
       await emit(replayId, 'PrReplayRunFailed', {
         replayPrId: r.replay_pr_id,
@@ -647,15 +670,17 @@ export async function cancelReplay(ctx: Ctx, user: AuthSession['user'], replayId
 export async function retryFailedReplayRuns(ctx: Ctx, user: AuthSession['user'], replayId: string) {
   await withAppendTx(ctx.pool, async (tx) => {
     const rp = await ownedReplay(tx, user, replayId);
-    if (rp.state !== 'marking') throw conflict('replay_not_marking', 'only a replay in marking can retry reviews');
+    if (rp.state !== 'marking')
+      throw conflict('replay_not_marking', 'only a replay in marking can retry reviews');
     const slots = await loadSlots(tx, replayId);
     if (!slots.some((s) => s.last?.state !== 'offline_completed'))
       throw conflict('nothing_to_retry', 'every review finished');
-    await emitter(ctx, tx, await replayScope(tx, rp.project_id as string), userActor(user.id))(
-      replayId,
-      'PrReplayRetryRequested',
-      { by: user.id },
-    );
+    await emitter(
+      ctx,
+      tx,
+      await replayScope(tx, rp.project_id as string),
+      userActor(user.id),
+    )(replayId, 'PrReplayRetryRequested', { by: user.id });
   });
   const dto = await getReplayDto(ctx.pool, replayId, true);
   if (!dto) throw notFound('replay not found');

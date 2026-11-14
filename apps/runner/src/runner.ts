@@ -52,6 +52,7 @@ import {
   RELEASE_PUBLISH_CAPABILITY,
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
+  REPLAY_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -125,7 +126,7 @@ import {
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
-import { listOpenPrs } from './forge/list-prs.ts';
+import { listMergedPrs, listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
@@ -1603,6 +1604,7 @@ export class Runner {
         RELEASE_FACTS_CAPABILITY,
         PR_LIST_CAPABILITY,
         PR_REVIEW_CAPABILITY,
+        REPLAY_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
@@ -2321,6 +2323,14 @@ export class Runner {
         done(
           true,
           await listOpenPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+        );
+      } else if (command === 'repo.list_merged_prs') {
+        // Read-only (20-PR replay). "No clone here", an unsupported git host and a missing login are answers.
+        const p = CommandPayloadSchemas['repo.list_merged_prs'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await listMergedPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
         );
       } else if (command === 'pr_review.run') {
         // The run never posts: it answers with its findings, a timeout or a failure. A resent command for a live run

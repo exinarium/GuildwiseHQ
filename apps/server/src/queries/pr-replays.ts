@@ -4,16 +4,16 @@ import {
   type PostedFindingRow,
   PR_REVIEWER_LABEL,
   type PrReviewer,
+  REPLAY_REVIEWERS,
   type ReplayDto,
   type ReplayFailureReason,
   type ReplayFindingStep,
   type ReplayResult,
   type ReviewTargetsDto,
-  REPLAY_REVIEWERS,
   replayFindingView,
 } from '@aom/shared';
-import { one, type Queryable, rows } from '../db/sql.ts';
 import { projectRole } from '../authz/scope.ts';
+import { one, type Queryable, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 
 const iso = (v: unknown): string | null => (v ? new Date(v as string).toISOString() : null);
@@ -22,7 +22,11 @@ const iso = (v: unknown): string | null => (v ? new Date(v as string).toISOStrin
  * Blind: before the replay is finished the DTO has totals only. No reviewer, model, per-reviewer count, run duration
  * or run summary appears in it.
  */
-export async function getReplayDto(db: Queryable, replayId: string, canManage: boolean): Promise<ReplayDto | undefined> {
+export async function getReplayDto(
+  db: Queryable,
+  replayId: string,
+  canManage: boolean,
+): Promise<ReplayDto | undefined> {
   const rp = await one(
     db,
     `SELECT rp.*, r.name AS repo_name FROM pr_replays rp LEFT JOIN project_repos r ON r.id = rp.project_repo_id WHERE rp.id=$1`,
@@ -82,7 +86,9 @@ export async function getReplayDto(db: Queryable, replayId: string, canManage: b
 export async function listReplays(db: Queryable, userId: string, projectId: string): Promise<ReplayDto[]> {
   const role = await projectRole(db, userId, projectId);
   if (!role) throw notFound('project not found');
-  const ids = await rows(db, 'SELECT id FROM pr_replays WHERE project_id=$1 ORDER BY started_at DESC', [projectId]);
+  const ids = await rows(db, 'SELECT id FROM pr_replays WHERE project_id=$1 ORDER BY started_at DESC', [
+    projectId,
+  ]);
   const out: ReplayDto[] = [];
   for (const i of ids) {
     const d = await getReplayDto(db, i.id as string, role === 'owner');
@@ -105,11 +111,13 @@ const SELECT_FINDINGS = (withReviewers: boolean) => `
     LEFT JOIN pr_review_finding_marks m ON m.finding_id = f.id`;
 
 function toRow(r: Record<string, unknown>): PostedFindingRow {
-  const reviewers = ((r.reviewers as Array<{ key: PrReviewer; model: string | null }> | undefined) ?? []).map((x) => ({
-    key: x.key,
-    label: PR_REVIEWER_LABEL[x.key] ?? x.key,
-    model: x.model ?? null,
-  }));
+  const reviewers = ((r.reviewers as Array<{ key: PrReviewer; model: string | null }> | undefined) ?? []).map(
+    (x) => ({
+      key: x.key,
+      label: PR_REVIEWER_LABEL[x.key] ?? x.key,
+      model: x.model ?? null,
+    }),
+  );
   return {
     id: r.id as string,
     prReviewId: r.replay_pr_id as string,
@@ -140,7 +148,9 @@ export async function replayFindingStep(
   findingId: string,
   canMark: boolean,
 ): Promise<PostedFindingDto | undefined> {
-  const f = await one(db, 'SELECT replay_id FROM pr_review_findings WHERE id=$1 AND replay_id IS NOT NULL', [findingId]);
+  const f = await one(db, 'SELECT replay_id FROM pr_review_findings WHERE id=$1 AND replay_id IS NOT NULL', [
+    findingId,
+  ]);
   if (!f) return undefined;
   const revealed = await isFinished(db, f.replay_id as string);
   const r = await one(db, `${SELECT_FINDINGS(revealed)} WHERE f.id=$1`, [findingId]);
@@ -181,7 +191,9 @@ export async function listReplayFindings(
     `${SELECT_FINDINGS(revealed)} WHERE f.replay_id=$1 AND f.disposition=$2 ORDER BY p.idx, md5(f.id::text)`,
     [replayId, opts.held ? 'held_back' : 'posted'],
   );
-  return list.map((r) => replayFindingView(toRow(r), { revealed, canMark: opts.canMark && !opts.held && !revealed }));
+  return list.map((r) =>
+    replayFindingView(toRow(r), { revealed, canMark: opts.canMark && !opts.held && !revealed }),
+  );
 }
 
 export async function getReviewTargets(db: Queryable, projectId: string): Promise<ReviewTargetsDto> {
@@ -193,7 +205,8 @@ export async function getReviewTargets(db: Queryable, projectId: string): Promis
   );
   return {
     precisionTarget: p?.review_precision_target == null ? null : Number(p.review_precision_target),
-    effortTargetHoursPerWeek: p?.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
+    effortTargetHoursPerWeek:
+      p?.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
     replayId: (p?.review_targets_replay_id as string | null) ?? null,
     setAt: iso(p?.review_targets_set_at),
   };

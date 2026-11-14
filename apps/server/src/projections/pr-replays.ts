@@ -138,7 +138,10 @@ export const prReplayProjectors: Record<string, Projector> = {
   },
   PrReplayReviewsDone: async (tx, e) => {
     const p = (e.event as EventOf<'PrReplayReviewsDone'>).payload;
-    await exec(tx, `UPDATE pr_replays SET state='marking', reviews_done_at=$2 WHERE id=$1`, [p.replayId, p.at]);
+    await exec(tx, `UPDATE pr_replays SET state='marking', reviews_done_at=$2 WHERE id=$1`, [
+      p.replayId,
+      p.at,
+    ]);
   },
   PrReplayFindingShown: async (tx, e) => {
     const p = (e.event as EventOf<'PrReplayFindingShown'>).payload;

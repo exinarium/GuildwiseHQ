@@ -15,6 +15,7 @@ import type { GitAuth } from '../git/worktrees.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { wipeAgent } from '../sandbox/sandbox.ts';
 import { postPrReview } from './post.ts';
+import { resolveReplayBase } from './replay-base.ts';
 import { GitHubReviewPoster } from './review-poster.ts';
 import { disposeReviewerRun, prepareReviewerRun } from './reviewer-sandbox.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
@@ -90,6 +91,17 @@ export class PrReviewCommands {
           const repo = await e.findRepo(p.remoteUrlNormalized);
           if (!repo) throw new Error('this workstation has no clone of the repository');
           this.clones.set(p.remoteUrlNormalized, repo.localPath);
+          if (p.replay) {
+            // an already merged pull request: the head is pinned and the base comes from the merge commit
+            return resolveReplayBase({
+              repoPath: repo.localPath,
+              baseRef: p.baseRef,
+              prNumber: p.prNumber,
+              headSha: p.replay.headSha,
+              mergeCommitSha: p.replay.mergeCommitSha,
+              auth: e.gitAuth,
+            });
+          }
           const hit = forgeForUrl(e.forgeEnv, repo.remoteUrl);
           if (!hit?.forge.changeHeads) throw new Error('this git host cannot be reviewed yet');
           try {
@@ -112,6 +124,7 @@ export class PrReviewCommands {
               auth: e.gitAuth,
             },
             spec,
+            { requireToken: !payload.offline },
           ),
         dispose: disposeReviewerRun,
       },

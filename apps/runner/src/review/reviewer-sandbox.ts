@@ -61,8 +61,11 @@ const tmpDirOf = (runId: string): string => `${agentTmpRoot()}/${tmpName(runId)}
 export async function prepareReviewerRun(
   deps: ReviewerSandboxDeps,
   spec: ReviewerRunSpec,
+  opts: { requireToken?: boolean } = {},
 ): Promise<ReviewerRun | { refused: ReviewerRefusal }> {
-  if (!deps.tokens.has(spec.remoteUrlNormalized)) return { refused: 'reviewer_token_missing' };
+  // an offline run (20-PR replay) posts nothing, so it needs no comment-only token; every other check stays
+  if ((opts.requireToken ?? true) && !deps.tokens.has(spec.remoteUrlNormalized))
+    return { refused: 'reviewer_token_missing' };
   if (parseRemote(spec.remoteUrlNormalized)?.kind !== 'github') return { refused: 'unsupported_host' };
   if (deps.sandboxState.state !== 'enforced') return { refused: 'sandbox_unavailable' };
   const repoPath = deps.findRepo(spec.remoteUrlNormalized);
