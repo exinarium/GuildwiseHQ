@@ -9,6 +9,7 @@ import {
   type ReplayFailureReason,
   type ReplayFindingStep,
   type ReplayResult,
+  ReplayResultSchema,
   type ReviewTargetsDto,
   replayFindingView,
 } from '@aom/shared';
@@ -210,4 +211,32 @@ export async function getReviewTargets(db: Queryable, projectId: string): Promis
     replayId: (p?.review_targets_replay_id as string | null) ?? null,
     setAt: iso(p?.review_targets_set_at),
   };
+}
+
+/**
+ * The latest finished replay on a live PR-only repository of the project in which BOTH reviewers reviewed at least one
+ * pull request: the "recorded replay" that lets the owner switch the second reviewer on. A replay in which one reviewer
+ * timed out on every pull request measured nothing about it and does not count.
+ */
+export async function latestRecordedReplay(
+  db: Queryable,
+  projectId: string,
+): Promise<{ id: string; finishedAt: string | null; result: ReplayResult } | null> {
+  const list = await rows(
+    db,
+    `SELECT rp.id, rp.finished_at, rp.result FROM pr_replays rp
+       JOIN project_repos r ON r.id = rp.project_repo_id AND r.pr_only AND r.removed_at IS NULL
+      WHERE rp.project_id=$1 AND rp.state='finished' AND rp.result IS NOT NULL
+      ORDER BY rp.finished_at DESC NULLS LAST`,
+    [projectId],
+  );
+  for (const l of list) {
+    const parsed = ReplayResultSchema.safeParse(l.result);
+    if (!parsed.success) continue;
+    const reviewed = (who: PrReviewer) =>
+      parsed.data.reviewers.some((r) => r.reviewer === who && r.prsReviewed >= 1);
+    if (reviewed('first') && reviewed('second'))
+      return { id: l.id as string, finishedAt: iso(l.finished_at), result: parsed.data };
+  }
+  return null;
 }

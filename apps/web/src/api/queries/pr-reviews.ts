@@ -99,6 +99,18 @@ export function useSetPrReviewCap(projectId: string) {
   });
 }
 
+/** The second reviewer (Opus) switch of a project. A 409 `replay_required` comes back as an error with that code. */
+export function useSetSecondReviewer(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => put(`/projects/${projectId}/second-reviewer`, { enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 /** Useful findings out of posted findings per reviewer. Fetched when the panel is opened. */
 export function useReviewerPrecision(projectId: string | undefined, enabled: boolean) {
   return useQuery({

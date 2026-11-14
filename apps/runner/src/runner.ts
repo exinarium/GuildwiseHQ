@@ -36,6 +36,7 @@ import {
   PACKS_CAPABILITY,
   PR_LIST_CAPABILITY,
   PR_REVIEW_CAPABILITY,
+  PR_REVIEW_PAIR_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -1624,6 +1625,7 @@ export class Runner {
         RELEASE_FACTS_CAPABILITY,
         PR_LIST_CAPABILITY,
         PR_REVIEW_CAPABILITY,
+        PR_REVIEW_PAIR_CAPABILITY,
         REPLAY_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
@@ -2357,6 +2359,9 @@ export class Runner {
         // awaits the same run (one model session) and answers under its own command id.
         const p = CommandPayloadSchemas['pr_review.run'].parse(payload);
         done(true, await this.prReviews.run(p));
+      } else if (command === 'pr_review.cancel') {
+        const p = CommandPayloadSchemas['pr_review.cancel'].parse(payload);
+        done(true, this.prReviews.cancel(p));
       } else if (command === 'pr_review.post') {
         const p = CommandPayloadSchemas['pr_review.post'].parse(payload);
         done(true, await this.prReviews.post(p));

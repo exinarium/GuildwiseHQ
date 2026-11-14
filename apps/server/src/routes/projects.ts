@@ -31,6 +31,7 @@ import {
   SetReferenceReposRequestSchema,
   SetRegressionLoopRequestSchema,
   SetReviewSettingsRequestSchema,
+  SetSecondReviewerRequestSchema,
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
@@ -56,6 +57,7 @@ import {
   markFinding,
   reviewerPrecisionForProject,
 } from '../commands/pr-review-marks.ts';
+import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import { heldBackFindings, listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
@@ -178,6 +180,23 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.body.cap,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** The owner switches the second reviewer (Opus) on or off; on needs a recorded replay (409 replay_required). */
+    app.put(
+      '/api/projects/:id/second-reviewer',
+      { schema: { params: IdParamsSchema, body: SetSecondReviewerRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setSecondReviewer(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.enabled,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },

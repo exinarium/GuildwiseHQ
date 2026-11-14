@@ -53,20 +53,29 @@ export async function manualWorld() {
     over: { state: string; agoMin?: number; trigger?: 'auto' | 'manual'; code?: string },
   ): Promise<string> => {
     const id = randomUUID();
+    const startedAt = new Date(Date.now() - (over.agoMin ?? 30) * 60_000);
+    const trigger = over.trigger ?? 'auto';
+    // a review is a round of one run with the run's own id
     await db().query(
-      `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state,
-                                   timeout_ms, started_at, trigger, error_code)
-       VALUES ($1,$2,$3,'first','claude-code','sonnet',$4,$5,600000,$6,$7,$8)`,
+      `INSERT INTO pr_review_rounds (id, pr_review_id, project_id, reviewers, trigger, workstation_id, state, started_at,
+                                     end_code)
+       VALUES ($1,$2,$3,ARRAY['first'],$4,$5,$6,$7,$8)`,
       [
         id,
         prId,
         w.projectId,
+        trigger,
         w.workstationId,
-        over.state,
-        new Date(Date.now() - (over.agoMin ?? 30) * 60_000),
-        over.trigger ?? 'auto',
+        over.state === 'completed' ? 'posting' : over.state,
+        startedAt,
         over.code ?? null,
       ],
+    );
+    await db().query(
+      `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state,
+                                   timeout_ms, started_at, trigger, error_code, round_id)
+       VALUES ($1,$2,$3,'first','claude-code','sonnet',$4,$5,600000,$6,$7,$8,$1)`,
+      [id, prId, w.projectId, w.workstationId, over.state, startedAt, trigger, over.code ?? null],
     );
     await db().query('UPDATE pr_reviews SET last_run_id=$2 WHERE id=$1', [prId, id]);
     return id;
@@ -99,6 +108,7 @@ export async function manualWorld() {
   };
   const clean = async () => {
     await db().query('DELETE FROM pr_review_runs');
+    await db().query('DELETE FROM pr_review_rounds');
     await db().query('DELETE FROM pr_reviews');
     await db().query(`DELETE FROM runner_commands WHERE type LIKE 'pr_review.%'`);
     await db().query(`UPDATE workstations SET connected=true WHERE id=$1`, [w.workstationId]);

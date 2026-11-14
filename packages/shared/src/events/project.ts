@@ -219,6 +219,8 @@ export const projectEvents = [
       repoId: Id,
       prReviewId: Id,
       runId: Id,
+      /** The review round this run belongs to. Events from before rounds: the round is the run itself. */
+      roundId: Id.optional(),
       reviewer: PrReviewerSchema,
       runtime: z.string().max(40),
       model: z.string().max(120),
@@ -286,6 +288,73 @@ export const projectEvents = [
       at: IsoDate,
     }),
   ),
+  /** The owner switched the second reviewer (Opus) on or off for live pull requests. `replayId`: the replay that allowed it. */
+  defineEvent(
+    'ProjectSecondReviewerSet',
+    z.object({ projectId: Id, enabled: z.boolean(), by: Id, replayId: Id.nullable().default(null) }),
+  ),
+  /** A review round started: the reviewers' runs follow as `PrReviewRunStarted` with this round id. */
+  defineEvent(
+    'PrReviewRoundStarted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      reviewers: z.array(PrReviewerSchema).min(1).max(2),
+      trigger: PrReviewTriggerSchema.default('auto'),
+      requestedBy: Id.nullable().default(null),
+      workstationId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** The server stopped a run because its partner in the round timed out or failed. */
+  defineEvent(
+    'PrReviewRunCancelled',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      runId: Id,
+      reason: z.enum(['partner_timeout', 'partner_failed']),
+      at: IsoDate,
+    }),
+  ),
+  /** The runs of the round are merged and capped as one list. Overwrites rank and disposition of every finding of the round. */
+  defineEvent(
+    'PrReviewRoundMerged',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      changedLines: z.number().int().nonnegative().nullable(),
+      findingsCap: z.number().int().min(1).max(5),
+      findings: z
+        .array(
+          z.object({
+            findingId: Id,
+            disposition: FindingDispositionSchema,
+            rank: z.number().int().positive().nullable(),
+            mergedInto: Id.nullable(),
+            severity: z.enum(['high', 'medium', 'low']),
+          }),
+        )
+        .max(100),
+      at: IsoDate,
+    }),
+  ),
+  /** The round ended without a post: a run timed out or failed, the heads differ, or the post did not finish. Nothing was posted. */
+  defineEvent(
+    'PrReviewRoundEnded',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      outcome: z.enum(['timed_out', 'failed']),
+      causeRunId: Id.nullable(),
+      code: z.string().max(60).nullable(),
+      at: IsoDate,
+    }),
+  ),
   /** The findings are on the pull request as one review: it now counts as reviewed. */
   defineEvent(
     'PrReviewPosted',
@@ -293,6 +362,10 @@ export const projectEvents = [
       projectId: Id,
       prReviewId: Id,
       runId: Id,
+      /** The round that was posted (absent on events from before rounds: the round id is the run id). */
+      roundId: Id.optional(),
+      /** Every reviewer of the posted round. */
+      reviewers: z.array(PrReviewerSchema).optional(),
       reviewer: PrReviewerSchema,
       reviewUrl: z.string().max(500),
       postedFindingIds: z.array(Id).max(50),

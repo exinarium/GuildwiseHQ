@@ -40,6 +40,8 @@ export interface PrReviewRunDeps {
   log?: (line: string) => void;
   /** How long a timed-out run waits for its own cleanup before it answers anyway (default 3 s). */
   graceMs?: number;
+  /** Aborted when the server cancels the run (its partner timed out or failed): the run stops and answers `cancelled`. */
+  signal?: AbortSignal;
 }
 
 /** Added and context lines of the new file, per path: the lines a review comment can be attached to. */
@@ -153,6 +155,7 @@ export async function runPrReview(
   const agentId = `pr-review-${payload.runId}`;
   let phase: 'checkout' | 'review' = 'checkout';
   let timedOut = false;
+  let cancelled = false;
   let session: RuntimeSession | undefined;
   let run: ReviewerRun | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -275,6 +278,7 @@ export async function runPrReview(
     if (timedOut) void session.stop('pr_review.timeout');
     const read = await readSession(session, undefined, () => undefined);
     const usage: Usage | undefined = safeUsage(session);
+    if (cancelled) return fail(elapsed(), 'cancelled', 'the review was stopped', false);
     if (timedOut) return { outcome: 'timeout', durationMs: elapsed(), phase };
     if (read.exit.authFailed)
       return fail(elapsed(), 'runtime_unavailable', 'the Claude login on this workstation has expired', true);
@@ -321,17 +325,25 @@ export async function runPrReview(
   const settled = work()
     .catch((err): PrReviewRunResult => fail(elapsed(), 'error', msg(err), false))
     .finally(cleanup);
-  const timeout = new Promise<'timeout'>((resolve) => {
+  const timeout = new Promise<'timeout' | 'cancelled'>((resolve) => {
     timer = setTimeout(() => {
       timedOut = true;
       void session?.stop('pr_review.timeout').catch(() => undefined);
       resolve('timeout');
     }, payload.timeoutMs);
     timer.unref?.();
+    const onAbort = () => {
+      cancelled = true;
+      timedOut = true; // the steps check this flag and stop at the next step
+      void session?.stop('pr_review.cancel').catch(() => undefined);
+      resolve('cancelled');
+    };
+    if (deps.signal?.aborted) onAbort();
+    else deps.signal?.addEventListener('abort', onAbort, { once: true });
   });
   try {
     const first = await Promise.race([settled, timeout]);
-    if (first !== 'timeout') return first;
+    if (first !== 'timeout' && first !== 'cancelled') return first;
     deps.log?.(`pr review ${payload.runId} hit its time limit in the ${phase} phase`);
     // give the stopped session and the checkout a moment to clean up; the answer is `timeout` whatever they do
     await Promise.race([
@@ -341,6 +353,7 @@ export async function runPrReview(
         g.unref?.();
       }),
     ]);
+    if (cancelled) return fail(elapsed(), 'cancelled', 'the review was stopped', false);
     return { outcome: 'timeout', durationMs: elapsed(), phase };
   } finally {
     if (timer) clearTimeout(timer);

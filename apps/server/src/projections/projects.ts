@@ -439,6 +439,10 @@ export const projectProjectors: Record<string, Projector> = {
       JSON.stringify(p.services),
     ]);
   },
+  ProjectSecondReviewerSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectSecondReviewerSet'>).payload;
+    await exec(tx, 'UPDATE projects SET pr_review_second_reviewer=$2 WHERE id=$1', [p.projectId, p.enabled]);
+  },
   ProjectPrReviewCapSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectPrReviewCapSet'>).payload;
     await exec(tx, 'UPDATE projects SET pr_review_daily_cap=$2 WHERE id=$1', [p.projectId, p.cap]);

@@ -1,6 +1,8 @@
 import { readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {
+  PrReviewCancelPayload,
+  PrReviewCancelResult,
   PrReviewPostPayload,
   PrReviewPostResult,
   PrReviewRunPayload,
@@ -36,6 +38,9 @@ export interface PrReviewCommandsEnv {
   log: (line: string) => void;
 }
 
+/** How long a cancel for a run that has not arrived yet is remembered. */
+const CANCEL_MEMORY_MS = 15 * 60_000;
+
 /**
  * `pr_review.run` and `pr_review.post` on this workstation. Each is answered once per run id while it is live: a command
  * the server sent again after a reconnect awaits the same promise (so one run never starts two model sessions and one
@@ -44,6 +49,9 @@ export interface PrReviewCommandsEnv {
 export class PrReviewCommands {
   private readonly runs = new Map<string, Promise<PrReviewRunResult>>();
   private readonly posts = new Map<string, Promise<PrReviewPostResult>>();
+  private readonly aborts = new Map<string, AbortController>();
+  /** Run ids cancelled before their run command arrived (run id -> when), kept for CANCEL_MEMORY_MS. */
+  private readonly cancelled = new Map<string, number>();
 
   constructor(private readonly env: PrReviewCommandsEnv) {}
 
@@ -55,9 +63,48 @@ export class PrReviewCommands {
   run(payload: PrReviewRunPayload): Promise<PrReviewRunResult> {
     const live = this.runs.get(payload.runId);
     if (live) return live;
-    const p = this.start(payload).finally(() => this.runs.delete(payload.runId));
+    if (this.wasCancelled(payload.runId))
+      return Promise.resolve({
+        outcome: 'failed',
+        durationMs: 0,
+        code: 'cancelled',
+        error: 'the review was stopped before it started',
+        retryable: false,
+      });
+    const abort = new AbortController();
+    this.aborts.set(payload.runId, abort);
+    const p = this.start(payload, abort.signal).finally(() => {
+      this.runs.delete(payload.runId);
+      this.aborts.delete(payload.runId);
+    });
     this.runs.set(payload.runId, p);
     return p;
+  }
+
+  /**
+   * `pr_review.cancel`: stops a live run (it answers `failed`/`cancelled`). A run that is not here yet is remembered, so
+   * its command, arriving later, answers `cancelled` at once without a checkout or a session.
+   */
+  cancel(payload: PrReviewCancelPayload): PrReviewCancelResult {
+    const abort = this.aborts.get(payload.runId);
+    if (abort) {
+      abort.abort();
+      return { found: true };
+    }
+    const now = Date.now();
+    for (const [id, at] of this.cancelled) if (now - at > CANCEL_MEMORY_MS) this.cancelled.delete(id);
+    this.cancelled.set(payload.runId, now);
+    return { found: false };
+  }
+
+  private wasCancelled(runId: string): boolean {
+    const at = this.cancelled.get(runId);
+    if (at === undefined) return false;
+    if (Date.now() - at > CANCEL_MEMORY_MS) {
+      this.cancelled.delete(runId);
+      return false;
+    }
+    return true;
   }
 
   post(payload: PrReviewPostPayload): Promise<PrReviewPostResult> {
@@ -71,7 +118,7 @@ export class PrReviewCommands {
     return p;
   }
 
-  private async start(payload: PrReviewRunPayload): Promise<PrReviewRunResult> {
+  private async start(payload: PrReviewRunPayload, signal: AbortSignal): Promise<PrReviewRunResult> {
     const e = this.env;
     const adapter = e.adapters.get(payload.runtime);
     if (!adapter)
@@ -87,6 +134,7 @@ export class PrReviewCommands {
         adapter,
         paths: e.paths,
         log: e.log,
+        signal,
         heads: async (p) => {
           const repo = await e.findRepo(p.remoteUrlNormalized);
           if (!repo) throw new Error('this workstation has no clone of the repository');

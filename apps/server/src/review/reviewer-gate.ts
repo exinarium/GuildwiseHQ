@@ -68,28 +68,29 @@ export type WorkstationPick =
 
 /**
  * The workstation a reviewer run goes to, among those that hold the token (`gate.workstationIds`, best first):
- * needs the `pr-review:1` capability (else `runner_outdated`), to be connected (else `workstation_offline`) and, unless
- * `ignoreBusy`, fewer than `MAX_RUNNING_PER_WORKSTATION` running reviews (else `busy`: a concurrency wait, not blocked).
+ * needs the `pr-review:1` capability (and every capability in `opts.capabilities`; a pair also needs `pr-review-pair:1`)
+ * (else `runner_outdated`), to be connected (else `workstation_offline`) and, unless
+ * `ignoreBusy`, room for `opts.slots` more runs under `MAX_RUNNING_PER_WORKSTATION` (else `busy`: a concurrency wait, not blocked).
  */
 export async function pickReviewerWorkstation(
   db: Queryable,
   gate: { workstationIds: string[] },
-  opts: { ignoreBusy?: boolean } = {},
+  opts: { ignoreBusy?: boolean; capabilities?: string[]; slots?: number } = {},
 ): Promise<WorkstationPick> {
   const capable = await rows(
     db,
     `SELECT w.id, w.connected,
             (SELECT count(*)::int FROM pr_review_runs x WHERE x.workstation_id = w.id AND x.state='running') AS busy
        FROM workstations w JOIN workstation_capabilities wc ON wc.workstation_id = w.id
-      WHERE w.id = ANY($1::uuid[]) AND $2 = ANY (wc.capabilities)`,
-    [gate.workstationIds, PR_REVIEW_CAPABILITY],
+      WHERE w.id = ANY($1::uuid[]) AND wc.capabilities @> $2::text[]`,
+    [gate.workstationIds, opts.capabilities ?? [PR_REVIEW_CAPABILITY]],
   );
   if (capable.length === 0) return { blocked: 'runner_outdated' };
   const connected = gate.workstationIds.filter((id) => capable.find((c) => c.id === id)?.connected);
   if (connected.length === 0) return { blocked: 'workstation_offline' };
   const usable = connected.find((id) => {
     const w = capable.find((c) => c.id === id);
-    return opts.ignoreBusy || Number(w?.busy ?? 0) < MAX_RUNNING_PER_WORKSTATION;
+    return opts.ignoreBusy || Number(w?.busy ?? 0) + (opts.slots ?? 1) <= MAX_RUNNING_PER_WORKSTATION;
   });
   return usable ? { id: usable } : { busy: true };
 }

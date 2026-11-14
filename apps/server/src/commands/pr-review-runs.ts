@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   applyFindingsCap,
   type FindingDisposition,
-  GitRefSchema,
   type HeldBackFindingsResponse,
+  type MergeInput,
+  mergeFindings,
   type OrgRole,
-  PR_REVIEW_CAPABILITY,
   PR_REVIEW_TIMEOUT_MS,
   type PrReviewDto,
+  type PrReviewer,
   type PrReviewFinding,
   type PrReviewManualAction,
   type PrReviewPostPayload,
@@ -18,7 +19,6 @@ import {
   type PrReviewState,
   type PrReviewTriggerRequest,
   prReviewMarker,
-  REVIEWER_MODEL,
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
@@ -27,16 +27,12 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
 import { manualReviewAction } from '../review/manual-action.ts';
 import { mayStart } from '../review/may-start.ts';
-import {
-  MAX_RUNNING_PER_WORKSTATION,
-  pickReviewerWorkstation,
-  reviewerGate,
-  reviewerTokenStates,
-} from '../review/reviewer-gate.ts';
+import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
-import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
+import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
+import { RUN_GRACE_MS, type StartResult, startPrReviewRound } from './pr-review-rounds.ts';
 
 /**
  * The first reviewer on PR-only pull requests. The server decides WHEN a run starts and is the only party that starts a
@@ -44,11 +40,9 @@ import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
  * stays `not_reviewed`, nothing is posted, nothing is restarted by itself, and no card, shift or transition is touched.
  */
 
-/** A run still waiting past its limit plus this grace is timed out by the server (the runner or its answer is lost). */
-export const RUN_GRACE_MS = 5 * 60_000;
-/** A completed run whose post did not answer within this time is failed at the post stage. */
+export { RUN_GRACE_MS, type StartResult, startPrReviewRound };
+/** A round whose post did not answer within this time is failed at the post stage. */
 export const POST_WAIT_MS = 15 * 60_000;
-const MAX_RUNNING_PER_REPO = 1;
 /** GitHub refuses a review body over 65,536 characters. */
 const BODY_LIMIT = 60_000;
 
@@ -98,7 +92,7 @@ async function dispatchProject(ctx: Ctx, projectId: string): Promise<string[]> {
     const targets: string[] = [];
     for (const item of queue.items) {
       if (item.slot !== 'today') continue; // later and blocked ones never start: this is the cap
-      const r = await startPrReviewRun(ctx, tx, {
+      const r = await startPrReviewRound(ctx, tx, {
         projectId,
         prReviewId: item.prReviewId,
         trigger: 'auto',
@@ -109,143 +103,6 @@ async function dispatchProject(ctx: Ctx, projectId: string): Promise<string[]> {
     }
     return targets;
   });
-}
-
-export type StartResult =
-  | { started: true; target: string; runId: string }
-  | {
-      started: false;
-      reason: 'gone' | 'not_eligible' | 'running' | 'closed' | 'not_ready' | 'concurrency' | 'stale';
-      detail?: string;
-    };
-
-/**
- * The only place a reviewer run starts. Inside the caller's transaction: locks the pull request row, appends
- * `PrReviewRunStarted` and queues `pr_review.run` on the workstation. `auto` (the dispatcher) checks `mayStart` and the
- * concurrency limits; `manual` (the owner) checks neither the cap nor the concurrency limits. The caller delivers the
- * command after the commit.
- */
-export async function startPrReviewRun(
-  ctx: Ctx,
-  tx: Tx,
-  input: {
-    projectId: string;
-    prReviewId: string;
-    trigger: 'auto' | 'manual';
-    requestedBy: string | null;
-    enforceConcurrency: boolean;
-    /** Manual only: the timed-out run the page showed. A different latest run means the page is out of date. */
-    expectedPreviousRunId?: string;
-  },
-): Promise<StartResult> {
-  const model = REVIEWER_MODEL.first;
-  const now = ctx.clock.now();
-  // the pull request row is the lock: two passes never start two runs for it
-  const row = await one(
-    tx,
-    `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.title, pr.base_branch, pr.review_state, pr.closed_at,
-            r.remote_url_normalized, r.pr_only
-       FROM pr_reviews pr JOIN project_repos r ON r.id = pr.project_repo_id
-      WHERE pr.id=$1 AND pr.project_id=$2 FOR UPDATE OF pr`,
-    [input.prReviewId, input.projectId],
-  );
-  if (!row) return { started: false, reason: 'gone' };
-  if (row.closed_at) return { started: false, reason: 'closed' };
-  if (row.review_state !== 'not_reviewed' || !row.pr_only) return { started: false, reason: 'not_eligible' };
-  let rerunOfRunId: string | null = null;
-  if (input.trigger === 'auto') {
-    if (!(await mayStart(tx, input.prReviewId))) return { started: false, reason: 'not_eligible' };
-  } else {
-    const last = await one(
-      tx,
-      `SELECT id, state FROM pr_review_runs WHERE pr_review_id=$1 AND reviewer='first' ORDER BY started_at DESC LIMIT 1`,
-      [input.prReviewId],
-    );
-    const action = manualReviewAction({
-      reviewState: 'not_reviewed',
-      closed: false,
-      prOnly: true,
-      lastRun: last ? { id: last.id as string, state: last.state as PrReviewRunState } : null,
-    });
-    if ('refused' in action) return { started: false, reason: action.refused };
-    if (input.expectedPreviousRunId && input.expectedPreviousRunId !== action.previousRunId)
-      return { started: false, reason: 'stale' };
-    rerunOfRunId = action.previousRunId;
-  }
-  const repoId = row.project_repo_id as string;
-  const prNumber = Number(row.change_id);
-  const baseRef = GitRefSchema.safeParse(row.base_branch);
-  if (!Number.isInteger(prNumber) || prNumber <= 0 || !baseRef.success)
-    return { started: false, reason: 'not_eligible' };
-  // the gate again, right before the run goes out
-  const gate = await reviewerGate(tx, repoId);
-  if (gate.state !== 'ready')
-    return { started: false, reason: 'not_ready', detail: 'reviewer_token_missing' };
-  const pick = await pickReviewerWorkstation(tx, gate, { ignoreBusy: !input.enforceConcurrency });
-  if ('blocked' in pick) return { started: false, reason: 'not_ready', detail: pick.blocked };
-  if ('busy' in pick) return { started: false, reason: 'concurrency' };
-  if (input.enforceConcurrency) {
-    const busyRepo = await one(
-      tx,
-      `SELECT count(*)::int AS n FROM pr_review_runs x JOIN pr_reviews p2 ON p2.id = x.pr_review_id
-        WHERE p2.project_repo_id=$1 AND x.state='running'`,
-      [repoId],
-    );
-    if (Number(busyRepo?.n ?? 0) >= MAX_RUNNING_PER_REPO) return { started: false, reason: 'concurrency' };
-  }
-  const orgId = await orgOf(tx, input.projectId);
-  if (!orgId) return { started: false, reason: 'gone' };
-  const runId = randomUUID();
-  const payload = PrReviewRunPayloadSchema.parse({
-    runId,
-    projectId: input.projectId,
-    prReviewId: input.prReviewId,
-    projectRepoId: repoId,
-    remoteUrlNormalized: row.remote_url_normalized,
-    prNumber,
-    baseRef: baseRef.data,
-    title: String(row.title).slice(0, 300),
-    reviewer: 'first',
-    runtime: model.runtime,
-    model: model.model,
-    timeoutMs: PR_REVIEW_TIMEOUT_MS,
-  });
-  await ctx.store.append(
-    [
-      {
-        streamId: streamId.project(input.projectId),
-        event: {
-          type: 'PrReviewRunStarted' as const,
-          payload: {
-            projectId: input.projectId,
-            repoId,
-            prReviewId: input.prReviewId,
-            runId,
-            reviewer: 'first' as const,
-            runtime: model.runtime,
-            model: model.model,
-            workstationId: pick.id,
-            timeoutMs: PR_REVIEW_TIMEOUT_MS,
-            trigger: input.trigger,
-            requestedBy: input.requestedBy,
-            rerunOfRunId,
-            at: now.toISOString(),
-          },
-        },
-        actor: SYSTEM_ACTOR,
-        scope: scopeOf(orgId, input.projectId),
-      },
-    ],
-    { tx },
-  );
-  await enqueueRunnerCommand(
-    tx,
-    pick.id,
-    'pr_review.run',
-    payload,
-    new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
-  );
-  return { started: true, target: pick.id, runId };
 }
 
 /**
@@ -264,7 +121,7 @@ export async function triggerPrReview(
   await withAppendTx(ctx.pool, async (tx) => {
     await requireSpendOwner(tx, user, org, projectId);
     await one(tx, 'SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
-    const r = await startPrReviewRun(ctx, tx, {
+    const r = await startPrReviewRound(ctx, tx, {
       projectId,
       prReviewId,
       trigger: 'manual',
@@ -305,9 +162,9 @@ type StoredFinding = PrReviewFinding & {
   disposition?: FindingDisposition;
 };
 
-/** The findings that go to the pull request: everything the cap did not hold back (no disposition counts as posted). */
+/** The findings that go to the pull request: the posted ones (no disposition counts as posted). Held back and merged ones stay out. */
 export function selectFindingsToPost<T extends { disposition?: FindingDisposition }>(findings: T[]): T[] {
-  return findings.filter((f) => f.disposition !== 'held_back');
+  return findings.filter((f) => f.disposition === undefined || f.disposition === 'posted');
 }
 
 /**
@@ -373,10 +230,236 @@ export async function enqueueReviewPost(
   await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', post, expiresAt);
 }
 
+type Emit = (type: string, payload: Record<string, unknown>) => Promise<unknown>;
+
+function emitterFor(ctx: Ctx, tx: Tx, projectId: string, orgId: string): Emit {
+  return (type, payload) =>
+    ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type, payload } as never,
+          actor: SYSTEM_ACTOR,
+          scope: scopeOf(orgId, projectId),
+        },
+      ],
+      { tx },
+    );
+}
+
 /**
- * `command.result` of `pr_review.run`. A result for a run that is no longer `running` (a duplicate after a requeue, or an
- * answer after the server gave the run up) is ignored. `completed` stores the findings and sends the post to the same
- * workstation (it holds the token). A timeout or a failure records one event and does nothing else.
+ * Ends a round that cannot be posted: one run timed out or failed, the heads differ, or the post did not finish. Nothing
+ * is posted. Every partner run still running is cancelled (its pending command is dropped and the runner is told to
+ * stop it). Returns the workstation to deliver the cancels to.
+ */
+async function endRound(
+  tx: Tx,
+  emit: Emit,
+  round: Record<string, unknown>,
+  end: {
+    outcome: 'timed_out' | 'failed';
+    causeRunId: string | null;
+    code: string | null;
+    partnerReason: 'partner_timeout' | 'partner_failed';
+    at: string;
+    now: Date;
+  },
+): Promise<string | undefined> {
+  const roundId = round.id as string;
+  const base = { projectId: round.project_id as string, prReviewId: round.pr_review_id as string, roundId };
+  // a round of one ends with its run's own event (the projection of `PrReviewRunTimedOut`/`PrReviewRunFailed`)
+  if ((round.reviewers as string[]).length > 1)
+    await emit('PrReviewRoundEnded', {
+      ...base,
+      outcome: end.outcome,
+      causeRunId: end.causeRunId,
+      code: end.code,
+      at: end.at,
+    });
+  let target: string | undefined;
+  const partners = await rows(
+    tx,
+    `SELECT id, workstation_id FROM pr_review_runs WHERE round_id=$1 AND state='running' ORDER BY id`,
+    [roundId],
+  );
+  for (const partner of partners) {
+    await emit('PrReviewRunCancelled', {
+      ...base,
+      runId: partner.id,
+      reason: end.partnerReason,
+      at: end.at,
+    });
+    await exec(
+      tx,
+      `UPDATE runner_commands SET status='failed', last_error='superseded'
+        WHERE type='pr_review.run' AND status='pending' AND payload->>'runId' = $1`,
+      [partner.id],
+    );
+    if (partner.workstation_id) {
+      target = partner.workstation_id as string;
+      await enqueueRunnerCommand(
+        tx,
+        target,
+        'pr_review.cancel',
+        { runId: partner.id as string, reason: end.partnerReason },
+        new Date(end.now.getTime() + PR_REVIEW_TIMEOUT_MS),
+      );
+    }
+  }
+  return target;
+}
+
+interface RoundFinding extends MergeInput {
+  runId: string;
+}
+
+/**
+ * The last run of a round is in: the heads must agree, the findings of the runs are merged (duplicates combined), the
+ * findings cap applies to the MERGED list, and one post goes out for the round (its id rides in the payload's `runId`).
+ * A pair's review text is a neutral line written here, so neither model's summary shows who wrote what.
+ * Returns the workstation to send the post to, or undefined when the round ended instead.
+ */
+async function mergeAndPostRound(
+  ctx: Ctx,
+  tx: Tx,
+  emit: Emit,
+  round: Record<string, unknown>,
+  at: string,
+  now: Date,
+): Promise<string | undefined> {
+  const roundId = round.id as string;
+  const projectId = round.project_id as string;
+  const prReviewId = round.pr_review_id as string;
+  const runs = await rows(
+    tx,
+    `SELECT * FROM pr_review_runs WHERE round_id=$1 AND state='completed' ORDER BY reviewer, id`,
+    [roundId],
+  );
+  const reviewers = round.reviewers as PrReviewer[];
+  if (runs.length === 0 || runs.length !== reviewers.length) return undefined;
+  if (new Set(runs.map((r) => r.head_sha)).size > 1) {
+    await endRound(tx, emit, round, {
+      outcome: 'failed',
+      causeRunId: null,
+      code: 'heads_differ',
+      partnerReason: 'partner_failed',
+      at,
+      now,
+    });
+    return undefined;
+  }
+  const perRun: RoundFinding[][] = [];
+  for (const run of runs) {
+    const list = await rows(
+      tx,
+      `SELECT id, idx, path, line, anchored, severity, title, body FROM pr_review_findings WHERE run_id=$1 ORDER BY idx`,
+      [run.id],
+    );
+    perRun.push(
+      list.map((f) => ({
+        id: f.id as string,
+        runId: run.id as string,
+        reviewer: run.reviewer as PrReviewer,
+        idx: Number(f.idx),
+        path: f.path as string,
+        line: f.line === null ? null : Number(f.line),
+        anchored: Boolean(f.anchored),
+        severity: f.severity as 'high' | 'medium' | 'low',
+        title: f.title as string,
+        body: f.body as string,
+      })),
+    );
+  }
+  const merged = mergeFindings(perRun);
+  const known = runs.map((r) => r.changed_lines).find((v) => v !== null && v !== undefined);
+  let changedLines: number | null = known === undefined ? null : Number(known);
+  if (changedLines === null && runs.length > 1) {
+    const pr = await one(tx, 'SELECT changed_lines FROM pr_reviews WHERE id=$1', [prReviewId]);
+    if (pr?.changed_lines !== null && pr?.changed_lines !== undefined)
+      changedLines = Number(pr.changed_lines);
+  }
+  const { cap, ordered } = applyFindingsCap(
+    merged.map((m) => ({ ...m.canonical, severity: m.severity })),
+    changedLines,
+  );
+  await emit('PrReviewRoundMerged', {
+    projectId,
+    prReviewId,
+    roundId,
+    changedLines,
+    findingsCap: cap,
+    findings: [
+      ...ordered.map((o) => ({
+        findingId: o.id,
+        disposition: o.disposition,
+        rank: o.rank,
+        mergedInto: null,
+        severity: o.severity,
+      })),
+      ...merged.flatMap((m) =>
+        m.duplicates.map((d) => ({
+          findingId: d.id,
+          disposition: 'merged' as const,
+          rank: null,
+          mergedInto: m.canonical.id,
+          severity: d.severity,
+        })),
+      ),
+    ],
+    at,
+  });
+  const first = runs[0] as Record<string, unknown>;
+  const chosen = ordered.filter((o) => o.disposition === 'posted');
+  const summary =
+    runs.length === 1
+      ? (first.summary as string)
+      : chosen.length === 0
+        ? 'Automated review: no findings.'
+        : `Automated review: ${chosen.length} finding${chosen.length === 1 ? '' : 's'} posted.`;
+  const spec = await one(
+    tx,
+    `SELECT r.remote_url_normalized, r.id AS repo_id, pr.change_id, pr.base_branch
+       FROM pr_reviews pr JOIN project_repos r ON r.id = pr.project_repo_id WHERE pr.id=$1`,
+    [prReviewId],
+  );
+  if (!spec) return undefined;
+  const post = buildReviewPost(
+    {
+      runId: roundId,
+      summary,
+      headSha: first.head_sha as string,
+      baseSha: first.base_sha as string,
+    },
+    {
+      projectId,
+      projectRepoId: spec.repo_id as string,
+      remoteUrlNormalized: spec.remote_url_normalized as string,
+      prNumber: Number(spec.change_id),
+      baseRef: spec.base_branch as string,
+    },
+    ordered.map((o) => ({
+      findingId: o.id,
+      path: o.path,
+      line: o.line,
+      anchored: o.anchored,
+      severity: o.severity,
+      title: o.title,
+      body: o.body,
+      rank: o.rank,
+      disposition: o.disposition,
+    })),
+  );
+  const postTo = round.workstation_id as string;
+  await enqueueReviewPost(tx, first, postTo, post, new Date(now.getTime() + POST_WAIT_MS));
+  return postTo;
+}
+
+/**
+ * `command.result` of `pr_review.run`. A result for a run that is no longer `running` (a duplicate after a requeue, an
+ * answer after the server gave the run up, or a run cancelled because its partner failed) is ignored. A `completed` run
+ * stores its findings and waits for its partner; the last run of the round merges and sends the one post to the same
+ * workstation (it holds the token). A timeout or a failure ends the whole round: the partner is cancelled and nothing is
+ * posted (the pull request stays `not_reviewed`). Lock order everywhere: the round row, then the run row.
  */
 export async function applyPrReviewRunResult(
   ctx: Ctx,
@@ -390,8 +473,13 @@ export async function applyPrReviewRunResult(
   const p = payload.data;
   const parsed = PrReviewRunResultSchema.safeParse(result);
   const now = ctx.clock.now();
-  let postTo: string | undefined;
+  const deliver = new Set<string>();
   await withAppendTx(ctx.pool, async (tx) => {
+    const peek = await one(tx, 'SELECT round_id, replay_id FROM pr_review_runs WHERE id=$1', [p.runId]);
+    const round =
+      peek?.round_id && !peek.replay_id
+        ? await one(tx, 'SELECT * FROM pr_review_rounds WHERE id=$1 FOR UPDATE', [peek.round_id])
+        : undefined;
     const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [p.runId]);
     if (!run || run.state !== 'running') {
       ctx.log.info({ runId: p.runId }, 'ignored a pull request review result for a run that is not running');
@@ -402,23 +490,31 @@ export async function applyPrReviewRunResult(
       await applyReplayRunResult(ctx, tx, run, ok, parsed.success ? parsed.data : undefined, error);
       return;
     }
+    if (!round) {
+      ctx.log.warn({ runId: p.runId }, 'a pull request review result for a run without a round');
+      return;
+    }
     const orgId = await orgOf(tx, p.projectId);
     if (!orgId) return;
-    const scope = scopeOf(orgId, p.projectId);
     const at = now.toISOString();
     const base = { projectId: p.projectId, prReviewId: p.prReviewId, runId: p.runId, at };
-    const emit = (type: string, payload2: Record<string, unknown>) =>
-      ctx.store.append(
-        [
-          {
-            streamId: streamId.project(p.projectId),
-            event: { type, payload: payload2 } as never,
-            actor: SYSTEM_ACTOR,
-            scope,
-          },
-        ],
-        { tx },
-      );
+    const emit = emitterFor(ctx, tx, p.projectId, orgId);
+    const end = async (
+      outcome: 'timed_out' | 'failed',
+      code: string,
+      reason: 'partner_timeout' | 'partner_failed',
+    ) => {
+      if (round.state !== 'running') return;
+      const t = await endRound(tx, emit, round, {
+        outcome,
+        causeRunId: p.runId,
+        code,
+        partnerReason: reason,
+        at,
+        now,
+      });
+      if (t) deliver.add(t);
+    };
     const r = ok && parsed.success ? parsed.data : undefined;
     if (!r) {
       await emit('PrReviewRunFailed', {
@@ -428,10 +524,12 @@ export async function applyPrReviewRunResult(
         error: (error ?? 'the workstation did not answer the review properly').slice(0, 400),
         retryable: true,
       });
+      await end('failed', 'error', 'partner_failed');
       return;
     }
     if (r.outcome === 'timeout') {
       await emit('PrReviewRunTimedOut', { ...base, durationMs: r.durationMs, phase: r.phase, by: 'runner' });
+      await end('timed_out', 'timeout', 'partner_timeout');
       return;
     }
     if (r.outcome === 'failed') {
@@ -443,13 +541,15 @@ export async function applyPrReviewRunResult(
         retryable: r.retryable,
         durationMs: r.durationMs,
       });
+      await end('failed', r.code, 'partner_failed');
       return;
     }
-    // the cap is decided here, from the runner's line count; held-back findings are stored and never sent to the poster
+    if (round.state !== 'running') return;
+    // the cap is decided here, from the runner's line count (the round decides it again over the merged findings)
     const { cap, ordered } = applyFindingsCap(r.findings, r.changedLines);
     if (r.changedLines === undefined)
       ctx.log.info({ runId: p.runId }, 'no changed-line count from the runner; findings cap 5');
-    const findings: StoredFinding[] = ordered.map((f) => ({ ...f, findingId: randomUUID() }));
+    const findings = ordered.map((f) => ({ ...f, findingId: randomUUID() }));
     await emit('PrReviewRunCompleted', {
       ...base,
       changedLines: r.changedLines ?? null,
@@ -460,27 +560,23 @@ export async function applyPrReviewRunResult(
       summary: r.summary,
       findings,
     });
-    const post = buildReviewPost(
-      { runId: p.runId, summary: r.summary, headSha: r.headSha, baseSha: r.baseSha },
-      {
-        projectId: p.projectId,
-        projectRepoId: p.projectRepoId,
-        remoteUrlNormalized: p.remoteUrlNormalized,
-        prNumber: p.prNumber,
-        baseRef: p.baseRef,
-      },
-      findings,
+    const waiting = await one(
+      tx,
+      `SELECT count(*)::int AS n FROM pr_review_runs WHERE round_id=$1 AND state='running'`,
+      [round.id],
     );
-    postTo = run.workstation_id as string;
-    await enqueueReviewPost(tx, run, postTo, post, new Date(now.getTime() + POST_WAIT_MS));
+    if (Number(waiting?.n ?? 0) > 0) return; // the partner is still working
+    const postTo = await mergeAndPostRound(ctx, tx, emit, round, at, now);
+    if (postTo) deliver.add(postTo);
   });
-  if (postTo) void Promise.resolve(ctx.services.gateway.deliverPending(postTo)).catch(() => undefined);
+  for (const target of deliver)
+    void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
 }
 
 /**
- * `command.result` of `pr_review.post`. The pull request becomes `reviewed` only now, when the comments exist on the git
- * host: also when the run had already been given up at the post stage (the review is there). A failed post keeps it
- * `not_reviewed` and keeps the error for the owner.
+ * `command.result` of `pr_review.post`. The payload's `runId` is the round id. The pull request becomes `reviewed` only
+ * now, when the comments exist on the git host: also when the round had already been given up at the post stage (the
+ * review is there). A failed post keeps it `not_reviewed` and keeps the error for the owner.
  */
 export async function applyPrReviewPostResult(
   ctx: Ctx,
@@ -489,59 +585,76 @@ export async function applyPrReviewPostResult(
   result: unknown,
   error: string | undefined,
 ): Promise<void> {
-  const runId = typeof commandPayload.runId === 'string' ? commandPayload.runId : '';
+  const roundId = typeof commandPayload.runId === 'string' ? commandPayload.runId : '';
   const ids = Array.isArray(commandPayload.findings)
     ? (commandPayload.findings as Array<{ findingId?: unknown }>).flatMap((f) =>
         typeof f.findingId === 'string' ? [f.findingId] : [],
       )
     : [];
   const parsed = PrReviewPostResultSchema.safeParse(result);
-  const at = ctx.clock.now().toISOString();
+  const now = ctx.clock.now();
+  const at = now.toISOString();
   await withAppendTx(ctx.pool, async (tx) => {
-    const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [runId]);
-    if (!run || run.state === 'posted') return;
-    if (run.replay_id) {
-      ctx.log.warn({ runId }, 'ignored a post result for a replay run');
+    const round = await one(tx, 'SELECT * FROM pr_review_rounds WHERE id=$1 FOR UPDATE', [roundId]);
+    if (!round) {
+      ctx.log.warn({ roundId }, 'ignored a post result for a run that is not in a live round');
       return;
     }
-    const projectId = run.project_id as string;
+    if (round.state === 'posted') return;
+    const runs = await rows(
+      tx,
+      'SELECT * FROM pr_review_runs WHERE round_id=$1 ORDER BY reviewer, id FOR UPDATE',
+      [roundId],
+    );
+    const first = runs[0];
+    if (!first) return;
+    const projectId = round.project_id as string;
     const orgId = await orgOf(tx, projectId);
     if (!orgId) return;
-    const base = { projectId, prReviewId: run.pr_review_id as string, runId, at };
+    const prReviewId = round.pr_review_id as string;
+    const emit = emitterFor(ctx, tx, projectId, orgId);
     const r = ok && parsed.success ? parsed.data : undefined;
-    const emit = (type: string, payload: Record<string, unknown>) =>
-      ctx.store.append(
-        [
-          {
-            streamId: streamId.project(projectId),
-            event: { type, payload } as never,
-            actor: SYSTEM_ACTOR,
-            scope: scopeOf(orgId, projectId),
-          },
-        ],
-        { tx },
-      );
     if (r?.ok) {
+      const reviewers = round.reviewers as PrReviewer[];
       await emit('PrReviewPosted', {
-        ...base,
-        reviewer: run.reviewer,
+        projectId,
+        prReviewId,
+        runId: first.id,
+        roundId,
+        reviewers,
+        reviewer: reviewers[0] ?? first.reviewer,
         reviewUrl: r.reviewUrl,
         postedFindingIds: ids,
+        at,
       });
       return;
     }
-    if (run.state !== 'completed') return; // timed out or failed already: nothing more to say
+    if (round.state !== 'posting') return; // timed out or failed already: nothing more to say
     const code = r && !r.ok ? r.code : 'error';
-    await emit('PrReviewRunFailed', {
-      ...base,
-      stage: 'post',
-      code,
-      error: (r && !r.ok ? r.error : (error ?? 'the workstation did not answer the post properly')).slice(
-        0,
-        400,
-      ),
-      retryable: code === 'unreachable' || code === 'error',
-    });
+    for (const run of runs.filter((x) => x.state === 'completed'))
+      await emit('PrReviewRunFailed', {
+        projectId,
+        prReviewId,
+        runId: run.id,
+        at,
+        stage: 'post',
+        code,
+        error: (r && !r.ok ? r.error : (error ?? 'the workstation did not answer the post properly')).slice(
+          0,
+          400,
+        ),
+        retryable: code === 'unreachable' || code === 'error',
+      });
+    if (runs.length > 1)
+      await emit('PrReviewRoundEnded', {
+        projectId,
+        prReviewId,
+        roundId,
+        outcome: 'failed',
+        causeRunId: null,
+        code,
+        at,
+      });
   });
 }
 
@@ -549,22 +662,29 @@ export async function applyPrReviewPostResult(
 
 /**
  * The scheduler pass that gives up on lost work: a run still `running` past its limit plus a grace is timed out by the
- * server (its late answer is then ignored); a completed run whose post never answered fails at the post stage.
+ * server (its late answer is then ignored, and its round ends); a round whose post never answered fails at the post
+ * stage. A run waiting for its partner is normal, not stale: only the round's post wait counts.
  */
 export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
   const now = ctx.clock.now();
   const stale = await rows(
     ctx.pool,
-    `SELECT id, state FROM pr_review_runs
-      WHERE (state='running' AND started_at + (timeout_ms + $1) * interval '1 millisecond' < $3)
-         OR (state='completed' AND replay_id IS NULL AND finished_at + $2 * interval '1 millisecond' < $3)`,
-    [RUN_GRACE_MS, POST_WAIT_MS, now],
+    `SELECT id FROM pr_review_runs
+      WHERE state='running' AND started_at + (timeout_ms + $1) * interval '1 millisecond' < $2
+      ORDER BY replay_id NULLS LAST, started_at`,
+    [RUN_GRACE_MS, now],
   );
+  const deliver = new Set<string>();
   let n = 0;
   for (const s of stale) {
     const done = await withAppendTx(ctx.pool, async (tx) => {
+      const peek = await one(tx, 'SELECT round_id, replay_id FROM pr_review_runs WHERE id=$1', [s.id]);
+      const round =
+        peek?.round_id && !peek.replay_id
+          ? await one(tx, 'SELECT * FROM pr_review_rounds WHERE id=$1 FOR UPDATE', [peek.round_id])
+          : undefined;
       const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [s.id]);
-      if (!run || run.state !== s.state) return false;
+      if (!run || run.state !== 'running') return false;
       if (run.replay_id) {
         await timeOutReplayRun(ctx, tx, run);
         await exec(
@@ -578,82 +698,139 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
       const projectId = run.project_id as string;
       const orgId = await orgOf(tx, projectId);
       if (!orgId) return false;
-      const base = {
+      const at = now.toISOString();
+      const emit = emitterFor(ctx, tx, projectId, orgId);
+      await emit('PrReviewRunTimedOut', {
         projectId,
         prReviewId: run.pr_review_id as string,
         runId: run.id as string,
-        at: now.toISOString(),
-      };
-      const event =
-        run.state === 'running'
-          ? {
-              type: 'PrReviewRunTimedOut',
-              payload: {
-                ...base,
-                durationMs: Math.max(0, now.getTime() - new Date(run.started_at as string).getTime()),
-                phase: 'review',
-                by: 'server',
-              },
-            }
-          : {
-              type: 'PrReviewRunFailed',
-              payload: {
-                ...base,
-                stage: 'post',
-                code: 'error',
-                error: 'posting did not finish',
-                retryable: false,
-              },
-            };
-      await ctx.store.append(
-        [
-          {
-            streamId: streamId.project(projectId),
-            event: event as never,
-            actor: SYSTEM_ACTOR,
-            scope: scopeOf(orgId, projectId),
-          },
-        ],
-        { tx },
-      );
+        at,
+        durationMs: Math.max(0, now.getTime() - new Date(run.started_at as string).getTime()),
+        phase: 'review',
+        by: 'server',
+      });
       // the command may still wait for an offline workstation: it must not run later
       await exec(
         tx,
         `UPDATE runner_commands SET status='failed', last_error='superseded'
-          WHERE type = ANY ($2::text[]) AND status IN ('pending','sent') AND payload->>'runId' = $1`,
-        [run.id, ['pr_review.run', 'pr_review.post']],
+          WHERE type='pr_review.run' AND status IN ('pending','sent') AND payload->>'runId' = $1`,
+        [run.id],
+      );
+      if (round && round.state === 'running') {
+        const t = await endRound(tx, emit, round, {
+          outcome: 'timed_out',
+          causeRunId: run.id as string,
+          code: 'timeout',
+          partnerReason: 'partner_timeout',
+          at,
+          now,
+        });
+        if (t) deliver.add(t);
+      }
+      return true;
+    });
+    if (done) n++;
+  }
+  const waiting = await rows(
+    ctx.pool,
+    `SELECT id FROM pr_review_rounds
+      WHERE state='posting' AND posting_at + $1 * interval '1 millisecond' < $2`,
+    [POST_WAIT_MS, now],
+  );
+  for (const w of waiting) {
+    const done = await withAppendTx(ctx.pool, async (tx) => {
+      const round = await one(tx, 'SELECT * FROM pr_review_rounds WHERE id=$1 FOR UPDATE', [w.id]);
+      if (!round || round.state !== 'posting') return false;
+      const projectId = round.project_id as string;
+      const orgId = await orgOf(tx, projectId);
+      if (!orgId) return false;
+      const at = now.toISOString();
+      const emit = emitterFor(ctx, tx, projectId, orgId);
+      const runs = await rows(
+        tx,
+        `SELECT id FROM pr_review_runs WHERE round_id=$1 AND state='completed' ORDER BY reviewer, id FOR UPDATE`,
+        [round.id],
+      );
+      for (const run of runs)
+        await emit('PrReviewRunFailed', {
+          projectId,
+          prReviewId: round.pr_review_id as string,
+          runId: run.id as string,
+          at,
+          stage: 'post',
+          code: 'error',
+          error: 'posting did not finish',
+          retryable: false,
+        });
+      if (runs.length > 1)
+        await emit('PrReviewRoundEnded', {
+          projectId,
+          prReviewId: round.pr_review_id as string,
+          roundId: round.id as string,
+          outcome: 'failed',
+          causeRunId: null,
+          code: 'post_unfinished',
+          at,
+        });
+      // the post may still wait for an offline workstation: it must not run later
+      await exec(
+        tx,
+        `UPDATE runner_commands SET status='failed', last_error='superseded'
+          WHERE type='pr_review.post' AND status IN ('pending','sent') AND payload->>'runId' = $1`,
+        [round.id],
       );
       return true;
     });
     if (done) n++;
   }
+  for (const target of deliver)
+    void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
   return n;
 }
 
 // ---- what the owner sees ---------------------------------------------------------------------------------------
 
-/** Blind marking: the reviewer is withheld while the pull request has posted findings the owner has not marked. */
+/**
+ * Blind marking: the reviewer is withheld while the pull request has posted findings the owner has not marked. A pair
+ * has no single reviewer: `reviewer` is null for it, and `reviewers` lists them once the owner may see them.
+ */
 function blindReviewer(l: Record<string, unknown>) {
   const unmarkedCount = Number(l.unmarked_count ?? 0);
   const reviewersHidden = unmarkedCount > 0;
+  const all =
+    (l.reviewed_by_all as PrReviewer[] | null) ?? (l.reviewed_by ? [l.reviewed_by as PrReviewer] : null);
   return {
-    reviewer: reviewersHidden ? null : ((l.reviewed_by as 'first' | null) ?? null),
+    reviewer: reviewersHidden || (all?.length ?? 0) > 1 ? null : ((l.reviewed_by as 'first' | null) ?? null),
+    reviewers: reviewersHidden ? null : all,
     reviewersHidden,
     unmarkedCount,
   };
 }
 
-/** The recorded pull requests of a project's live repositories with their latest run, open ones first. */
 function manualActionOf(l: Record<string, unknown>): PrReviewManualAction {
   const a = manualReviewAction({
     reviewState: l.review_state as PrReviewState,
     closed: Boolean(l.closed_at),
     prOnly: Boolean(l.pr_only),
-    lastRun: l.run_id ? { id: l.run_id as string, state: l.run_state as PrReviewRunState } : null,
+    lastRun: l.round_id
+      ? {
+          id: l.round_id as string,
+          state: l.round_state === 'posting' ? 'completed' : (l.round_state as PrReviewRunState),
+        }
+      : null,
   });
   return 'refused' in a ? null : a;
 }
 
+const ROUND_STATE: Record<string, 'running' | 'completed' | 'posted' | 'timed_out' | 'failed'> = {
+  running: 'running',
+  posting: 'completed',
+  posted: 'posted',
+  timed_out: 'timed_out',
+  failed: 'failed',
+};
+
+/** The recorded pull requests of a project's live repositories with their latest review round, open ones first. */
 export async function listPrReviews(
   db: Queryable,
   projectId: string,
@@ -665,93 +842,129 @@ export async function listPrReviews(
   const list = await rows(
     db,
     `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.url, pr.title, pr.author, pr.opened_at, pr.review_state,
-            pr.reviewed_at, pr.reviewed_by, pr.closed_at, r.remote_url_normalized, r.name,
-            run.state AS run_state, run.started_at, run.finished_at, run.duration_ms, run.timeout_ms, run.error,
-            run.error_code, run.review_url, run.trigger, run.id AS run_id, run.reviewer AS run_reviewer, r.pr_only,
-            run.rerun_of_run_id, prev.started_at AS rerun_of_started_at,
-            (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count,
-            (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id) AS findings_count,
-            run.held_back_count, run.findings_cap, run.changed_lines,
+            pr.reviewed_at, pr.reviewed_by, pr.reviewed_by_all, pr.closed_at, r.pr_only, r.remote_url_normalized, r.name,
+            rd.id AS round_id, rd.state AS round_state, rd.started_at, rd.finished_at, rd.end_code, rd.review_url,
+            rd.trigger, rd.rerun_of_round_id, prev.started_at AS rerun_of_started_at, rd.held_back_count, rd.findings_cap, rd.changed_lines, rd.merged_count, rd.reviewers,
+            (SELECT max(x.duration_ms) FROM pr_review_runs x WHERE x.round_id = rd.id) AS duration_ms,
+            (SELECT max(x.timeout_ms) FROM pr_review_runs x WHERE x.round_id = rd.id) AS timeout_ms,
+            (SELECT x.error FROM pr_review_runs x WHERE x.round_id = rd.id AND x.error IS NOT NULL
+              ORDER BY x.finished_at DESC NULLS LAST LIMIT 1) AS error,
+            (SELECT count(*)::int FROM pr_review_findings f JOIN pr_review_runs x ON x.id = f.run_id
+              WHERE x.round_id = rd.id AND f.posted) AS posted_count,
+            (SELECT count(*)::int FROM pr_review_findings f JOIN pr_review_runs x ON x.id = f.run_id
+              WHERE x.round_id = rd.id AND f.disposition <> 'merged') AS findings_count,
             (SELECT count(*)::int FROM pr_review_findings f
                LEFT JOIN pr_review_finding_marks m ON m.finding_id = f.id
               WHERE f.pr_review_id = pr.id AND f.posted AND m.finding_id IS NULL) AS unmarked_count
        FROM pr_reviews pr
        JOIN project_repos r ON r.id = pr.project_repo_id AND r.removed_at IS NULL
-       LEFT JOIN pr_review_runs run ON run.id = (
-              SELECT x.id FROM pr_review_runs x WHERE x.pr_review_id = pr.id ORDER BY x.started_at DESC LIMIT 1)
-       LEFT JOIN pr_review_runs prev ON prev.id = run.rerun_of_run_id
+       LEFT JOIN pr_review_rounds rd ON rd.id = (
+              SELECT x.id FROM pr_review_rounds x WHERE x.pr_review_id = pr.id ORDER BY x.started_at DESC LIMIT 1)
+       LEFT JOIN pr_review_rounds prev ON prev.id = rd.rerun_of_round_id
       WHERE pr.project_id=$1
       ORDER BY (pr.closed_at IS NULL) DESC, pr.opened_at DESC, pr.change_id DESC
       LIMIT 200`,
     [projectId],
   );
+  const roundIds = list.flatMap((l) => (l.round_id ? [l.round_id as string] : []));
+  const runList = roundIds.length
+    ? await rows(
+        db,
+        `SELECT round_id, state, duration_ms, reviewer, model FROM pr_review_runs
+          WHERE round_id = ANY($1::uuid[]) ORDER BY started_at, reviewer`,
+        [roundIds],
+      )
+    : [];
   const tokens = await reviewerTokenStates(db, [...new Set(list.map((l) => l.project_repo_id as string))]);
   const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
-  return list.map((l) => ({
-    ...blindReviewer(l),
-    id: l.id as string,
-    repoId: l.project_repo_id as string,
-    repoName: l.name as string,
-    changeId: l.change_id as string,
-    url: l.url as string,
-    title: l.title as string,
-    author: (l.author as string | null) ?? null,
-    openedAt: iso(l.opened_at) as string,
-    state: l.review_state as 'not_reviewed' | 'reviewed',
-    reviewedAt: iso(l.reviewed_at),
-    reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
-    queuePosition: queued.get(l.id as string)?.position ?? null,
-    queueSlot: queued.get(l.id as string)?.slot ?? null,
-    manualAction: viewer?.canTrigger ? manualActionOf(l) : null,
-    lastRun: l.run_state
-      ? {
-          state: l.run_state as 'running' | 'completed' | 'posted' | 'timed_out' | 'failed',
-          startedAt: iso(l.started_at) as string,
-          finishedAt: iso(l.finished_at),
-          durationMs: l.duration_ms === null ? null : Number(l.duration_ms),
-          timeoutMs: Number(l.timeout_ms),
-          error: (l.error as string | null) ?? null,
-          code: (l.error_code as string | null) ?? null,
-          postedCount: Number(l.posted_count ?? 0),
-          reviewUrl: (l.review_url as string | null) ?? null,
-          trigger: (l.trigger as 'auto' | 'manual' | null) ?? 'auto',
-          rerunOf: l.rerun_of_run_id
-            ? { runId: l.rerun_of_run_id as string, startedAt: iso(l.rerun_of_started_at) ?? '' }
-            : null,
-          findingsCount: Number(l.findings_count ?? 0),
-          heldBackCount: Number(l.held_back_count ?? 0),
-          findingsCap:
-            l.findings_cap === null || l.findings_cap === undefined ? null : Number(l.findings_cap),
-          changedLines:
-            l.changed_lines === null || l.changed_lines === undefined ? null : Number(l.changed_lines),
-        }
-      : null,
-  }));
+  return list.map((l) => {
+    const blind = blindReviewer(l);
+    // nothing was posted by a round that timed out or failed: nothing is blind, the owner sees which run failed
+    const open = l.round_state === 'timed_out' || l.round_state === 'failed';
+    const hide = blind.reviewersHidden && !open;
+    const runs = runList
+      .filter((x) => x.round_id === l.round_id)
+      .map((x) => ({
+        state: x.state as PrReviewRunState,
+        durationMs: x.duration_ms === null ? null : Number(x.duration_ms),
+        reviewer: hide ? null : (x.reviewer as PrReviewer),
+        model: hide ? null : (x.model as string),
+      }));
+    return {
+      ...blind,
+      id: l.id as string,
+      repoId: l.project_repo_id as string,
+      repoName: l.name as string,
+      changeId: l.change_id as string,
+      url: l.url as string,
+      title: l.title as string,
+      author: (l.author as string | null) ?? null,
+      openedAt: iso(l.opened_at) as string,
+      state: l.review_state as 'not_reviewed' | 'reviewed',
+      reviewedAt: iso(l.reviewed_at),
+      reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
+      queuePosition: queued.get(l.id as string)?.position ?? null,
+      queueSlot: queued.get(l.id as string)?.slot ?? null,
+      manualAction: viewer?.canTrigger ? manualActionOf(l) : null,
+      lastRun: l.round_state
+        ? {
+            state: ROUND_STATE[l.round_state as string] ?? 'failed',
+            startedAt: iso(l.started_at) as string,
+            finishedAt: iso(l.finished_at),
+            durationMs: l.duration_ms === null ? null : Number(l.duration_ms),
+            timeoutMs: Number(l.timeout_ms),
+            error: (l.error as string | null) ?? null,
+            code: (l.end_code as string | null) ?? null,
+            postedCount: Number(l.posted_count ?? 0),
+            reviewUrl: (l.review_url as string | null) ?? null,
+            trigger: (l.trigger as 'auto' | 'manual' | null) ?? 'auto',
+            rerunOf: l.rerun_of_round_id
+              ? { runId: l.rerun_of_round_id as string, startedAt: iso(l.rerun_of_started_at) ?? '' }
+              : null,
+            findingsCount: Number(l.findings_count ?? 0),
+            heldBackCount: Number(l.held_back_count ?? 0),
+            findingsCap:
+              l.findings_cap === null || l.findings_cap === undefined ? null : Number(l.findings_cap),
+            changedLines:
+              l.changed_lines === null || l.changed_lines === undefined ? null : Number(l.changed_lines),
+            runCount: ((l.reviewers as string[] | null) ?? []).length || runs.length,
+            mergedCount: hide ? null : Number(l.merged_count ?? 0),
+            runs,
+          }
+        : null,
+    };
+  });
 }
 
 /**
- * The findings the cap held back for a pull request's latest run (the run the Pull requests tab shows), most important
- * first. No reviewer name. `undefined`: no such pull request.
+ * The findings the cap held back for a pull request's latest review round (the round the Pull requests tab shows), most
+ * important first. No reviewer name. Findings merged into another are never listed. `undefined`: no such pull request.
  */
 export async function heldBackFindings(
   db: Queryable,
   prReviewId: string,
 ): Promise<HeldBackFindingsResponse | undefined> {
   if (!(await one(db, 'SELECT id FROM pr_reviews WHERE id=$1', [prReviewId]))) return undefined;
-  const run = await one(
+  const latest = await one(
     db,
-    'SELECT id FROM pr_review_runs WHERE pr_review_id=$1 ORDER BY started_at DESC LIMIT 1',
+    `SELECT id, round_id FROM pr_review_runs WHERE pr_review_id=$1 AND replay_id IS NULL
+      ORDER BY started_at DESC, reviewer LIMIT 1`,
     [prReviewId],
   );
-  if (!run) return { runId: null, findings: [] };
+  if (!latest) return { runId: null, findings: [] };
+  const runs = latest.round_id
+    ? await rows(db, 'SELECT id FROM pr_review_runs WHERE round_id=$1 ORDER BY started_at, reviewer', [
+        latest.round_id,
+      ])
+    : [{ id: latest.id }];
   const list = await rows(
     db,
     `SELECT id, rank, severity, path, line, title, body FROM pr_review_findings
-      WHERE run_id=$1 AND disposition='held_back' ORDER BY rank NULLS LAST, idx`,
-    [run.id],
+      WHERE run_id = ANY($1::uuid[]) AND disposition='held_back' ORDER BY rank NULLS LAST, idx`,
+    [runs.map((r) => r.id as string)],
   );
   return {
-    runId: run.id as string,
+    runId: (runs[0]?.id ?? latest.id) as string,
     findings: list.map((f) => ({
       id: f.id as string,
       rank: f.rank === null ? null : Number(f.rank),

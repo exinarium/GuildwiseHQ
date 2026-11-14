@@ -38,6 +38,7 @@ import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { ReviewSettingsPanel } from '../components/ReviewSettingsPanel.tsx';
 import { Reword } from '../components/Reword.tsx';
+import { SecondReviewerPanel } from '../components/SecondReviewerPanel.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
@@ -554,6 +555,16 @@ export function ProjectSettings() {
       {project && activeRepos.some((r) => r.prOnly) && (
         <div id="pr-review-cap" className="scroll-mt-20">
           <PrReviewCapPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
+        </div>
+      )}
+      {project && activeRepos.some((r) => r.prOnly) && (
+        <div id="second-reviewer" className="scroll-mt-20">
+          <SecondReviewerPanel
+            projectId={id}
+            projectKey={project.key}
+            project={project}
+            canChange={project.myRole === 'owner'}
+          />
         </div>
       )}
       <div id="members" className="scroll-mt-20">
