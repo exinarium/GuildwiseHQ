@@ -23,7 +23,13 @@ import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
-import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import {
+  agentTmpDir,
+  CACHE_ENV_KEYS,
+  DOTNET_SHM_DIR,
+  usablePnpmLockDirs,
+  userNugetPackages,
+} from '../sandbox/sandbox.ts';
 import { sessionEnvDirOf } from '../session/shift-credential.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
@@ -602,7 +608,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ]),
       sharedCacheDir: input.sandbox.cacheRoot ?? join(root, 'cache'),
       ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() } : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
       ...(readOnlyScan ? { readOnlyScan: true } : {}),

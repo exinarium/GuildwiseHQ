@@ -14,7 +14,7 @@ import { protectedGitPaths } from '../git/harden.ts';
  * - a filesystem that is empty except for: `/usr` and the system links (read-only), `/etc` (read-only), a fresh `/proc` and `/dev`,
  *   a private `/tmp`, and the paths below, each at its own absolute path;
  * - writable: the working folder (read-only for a role that cannot edit), the agent's private home, scratch and temp folders, the
- *   shared package caches, the harness's own state folder and, for a role that commits, the worktree's git admin folder, `objects`,
+ *   shared package caches, `/tmp/.dotnet` and the pnpm lock folders, the harness's own state folder and, for a role that commits, the worktree's git admin folder, `objects`,
  *   `refs` and `logs` of the main repository (its `config` and `hooks` stay read-only);
  * - read-only: the toolchain folders, the runner's `bin/` and the `aom` script's folder, the CLI's install, the vault and the
  *   reference repositories (their secret files masked with /dev/null, whole folders that are too big to check left out);
@@ -59,6 +59,8 @@ export interface HarnessSandboxInput {
   shellOverride?: { shim: string; real: string };
   nugetFallbackDir?: string;
   dotnetShmDir?: string;
+  /** pnpm 12's fixed lock folders under /tmp that passed `usablePnpmLockDirs` (Linux); writable. */
+  pnpmLockDirs?: string[];
   /** The `bwrap` binary (default: `bwrap` on PATH). */
   bwrap?: string;
 }
@@ -142,6 +144,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
   if (!(i.readOnlyCwd && (inside(i.scratch, i.cwd) || inside(i.cwd, i.scratch)))) bind(i.scratch, true);
   if (i.cacheRoot) bind(i.cacheRoot, true);
   if (i.dotnetShmDir) bind(i.dotnetShmDir, true);
+  for (const p of i.pnpmLockDirs ?? []) bind(p, true);
   for (const p of i.writable) bind(p, true);
   for (const p of i.readonly) bind(p, false);
   if (i.nugetFallbackDir) bind(i.nugetFallbackDir, false);
