@@ -10,6 +10,7 @@ import { ClaudeAccountPanel } from '../components/ClaudeAccountPanel.tsx';
 import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
+import { DesignGatePanel } from '../components/DesignGatePanel.tsx';
 import { EnvironmentsPointer } from '../components/environments/Pointer.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
 import { GraphStatusPanel } from '../components/GraphStatusPanel.tsx';
@@ -486,6 +487,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="review-settings" className="scroll-mt-20">
           <ReviewSettingsPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="design-gate" className="scroll-mt-20">
+          <DesignGatePanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
         </div>
       )}
       {project && traits.usesRepos && (

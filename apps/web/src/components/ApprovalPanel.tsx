@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useApprovalSendBack, useApprove } from '../api/queries/approval.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { ApprovalReview } from './ApprovalReview.tsx';
+import { ApprovalDesign } from './DesignGatePanel.tsx';
 import { Badge, Button, ErrorBox, Panel, TextArea } from './ui.tsx';
 
 const STATE_LABEL: Record<CardApproval['state'], string> = {
@@ -22,6 +23,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
   const [failing, setFailing] = useState(false);
   const busy = approve.isPending || sendBack.isPending;
   const open = approval.state === 'open';
+  const design = approval.design;
   const tone = approval.state === 'approved' ? 'green' : approval.state === 'sent_back' ? 'red' : 'amber';
 
   return (
@@ -49,6 +51,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
               : ''}
           </p>
         )}
+        {design && <ApprovalDesign design={design} defaultOpen={open} />}
         {approval.review && <ApprovalReview cardId={cardId} review={approval.review} defaultOpen={open} />}
         {approval.decision && (
           <p className="text-sm text-muted" data-testid="approval-decision">
@@ -69,7 +72,9 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
               rows={failing ? 4 : 2}
               data-testid="approval-note"
             />
-            <div className="sticky-actions sticky-actions-page flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+            <div
+              className={`sticky-actions sticky-actions-page flex flex-wrap gap-2 max-md:[&>button]:flex-1${design ? ' [&>button]:min-h-11' : ''}`}
+            >
               {!failing ? (
                 <>
                   <Button
@@ -85,7 +90,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
                       })
                     }
                   >
-                    Approve
+                    {design ? 'Approve the design' : 'Approve'}
                   </Button>
                   <Button
                     variant="danger"
@@ -93,7 +98,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
                     data-testid="approval-fail"
                     onClick={() => setFailing(true)}
                   >
-                    Send back
+                    {design ? 'Return to design' : 'Send back'}
                   </Button>
                 </>
               ) : (

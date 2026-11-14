@@ -506,6 +506,8 @@ export const IDLE_LIMITS: IdleLimits = {
 
 /** The workflow stage of the QA-steps shifts (the server's `QA_STEPS_STAGE`); they are short. */
 const QA_STEPS_STAGE = 'qa_steps';
+/** The longest design report text attached to an investigation hand-off (the schema's cap). */
+const REPORT_TEXT_MAX = 200_000;
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
 
@@ -2552,7 +2554,8 @@ export class ShiftSupervisor {
       }
       if (!real.startsWith(`${realpathSync(wt)}/`) || !statSync(real).isFile())
         return { error: `the report '${rel}' must be a file inside the worktree` };
-      const leak = secretsIn(readFileSync(real, 'utf8'));
+      const reportText = readFileSync(real, 'utf8');
+      const leak = secretsIn(reportText);
       if (leak) return { error: leak };
       if ((await git(wt, ['cat-file', '-e', `HEAD:${rel}`])).exitCode !== 0)
         return {
@@ -2567,6 +2570,8 @@ export class ShiftSupervisor {
           summary: data.summary,
           location: 'repo',
           commit,
+          // the design gate shows the full report to the owner (the card branch is not pushed yet)
+          reportText: reportText.slice(0, REPORT_TEXT_MAX),
           ...(data.assumptions ? { assumptions: data.assumptions } : {}),
           ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
           ...(data.review ? { review: data.review } : {}),

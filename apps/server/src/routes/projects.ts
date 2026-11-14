@@ -17,6 +17,7 @@ import {
   SetArchitectSettingsRequestSchema,
   SetClaudeAccountRequestSchema,
   SetConcurrencyCapRequestSchema,
+  SetDesignGateRequestSchema,
   SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
   SetManualQaRequestSchema,
@@ -39,6 +40,7 @@ import { loadVisibleProject, projectRole } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
+import { setProjectDesignGate } from '../commands/design-gate.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
@@ -288,6 +290,23 @@ export function projectRoutes(ctx: Ctx) {
     );
 
     /** lean team: when the owner approves a card after the review; the mapping of changed paths to E2E specs. */
+    /** code v7: every design stops for the owner's approval before Build (default off). */
+    app.put(
+      '/api/projects/:id/design-gate',
+      { schema: { params: IdParamsSchema, body: SetDesignGateRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setProjectDesignGate(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.on,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
     app.put(
       '/api/projects/:id/owner-approval',
       { schema: { params: IdParamsSchema, body: SetOwnerApprovalRequestSchema } },

@@ -94,6 +94,8 @@ export function workflowView(c: Row): WorkflowCardView {
     ...(c.qa ? { manualQa: true, qaAgent: true } : {}),
     // lean team: decided by the last review approval; `mergeReview` is only ever moved to by the server.
     ownerApproval: c.owner_approval_required === true,
+    // code v7: decided at the design hand-off (project setting, card switch, high-risk paths).
+    designGate: c.design_gate_required === true,
   };
 }
 

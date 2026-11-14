@@ -390,6 +390,7 @@ export const cardProjectors: Record<string, Projector> = {
         summary: p.summary,
         commit: p.commit ?? null,
         ...(p.body ? { body: p.body } : {}),
+        ...(p.reportText ? { text: p.reportText } : {}),
         // a revised report keeps the assumptions it was reviewed against
         assumptions: p.assumptions ?? prev?.investigation?.assumptions ?? [],
         // the size estimate of the design is recorded right after (DesignSized); keep the earlier one until then

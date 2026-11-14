@@ -7,7 +7,7 @@ import {
   SpecifyMissingResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, get, patch, post } from '../client.ts';
+import { ApiError, get, patch, post, put } from '../client.ts';
 
 export function useCard(ref: string | undefined) {
   return useQuery({
@@ -79,3 +79,15 @@ export const useCancelCard = (id: string) =>
   useCardAction(id, (b: { reason: string; alsoCancelChildren?: boolean }) =>
     post(`/cards/${id}/cancel`, b.alsoCancelChildren ? b : { reason: b.reason }),
   );
+
+/** code v7: the owner's design gate switch for one card (refused without a design report). */
+export function useSetCardDesignGate(cardId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) =>
+      put<CardDetailResponse>(`/cards/${encodeURIComponent(cardId)}/design-gate`, { on }),
+    onSuccess: () => {
+      for (const key of ['card', 'board', 'desk']) void qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
