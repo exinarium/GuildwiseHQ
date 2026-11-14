@@ -277,3 +277,38 @@ describe('AC4: targets saved on the project', () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe('live first, but only for live PRs that will get a run', () => {
+  const insertLive = async (n: number) =>
+    (
+      await db().query(
+        `INSERT INTO pr_reviews (id, project_id, project_repo_id, change_id, url, title, author, head_branch, base_branch, opened_at, recorded_at, review_state)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'dev', $6, 'main', now(), now(), 'not_reviewed') RETURNING id`,
+        [w.projectId, w.repoId, String(n), `https://github.com/acme/toy/pull/${n}`, `Live ${n}`, `live/${n}`],
+      )
+    ).rows[0].id as string;
+
+  it('a live PR whose review timed out does not hold the replay back; a startable one does', async () => {
+    await db().query(`UPDATE pr_replays SET state='cancelled'`);
+    await db().query('UPDATE workstation_repos SET reviewer_token=true WHERE project_repo_id=$1', [w.repoId]);
+    const timedOut = await insertLive(901);
+    await db().query(
+      `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, state, timeout_ms, started_at, finished_at, error_code)
+       VALUES (gen_random_uuid(), $1, $2, 'first', 'claude', 'sonnet', 'timed_out', 600000, now(), now(), 'timeout')`,
+      [timedOut, w.projectId],
+    );
+    await listAndSelect(20);
+    // the timed-out live PR never restarts by itself, so the replay goes on
+    const from = r.received.length;
+    expect(await dispatchReplayRuns(ctx())).toBe(1);
+    await r.waitFor('command', (f: any) => f.command === 'pr_review.run', 5000, from);
+    await r.barrier();
+    await db().query(`UPDATE pr_replays SET state='cancelled'`);
+    await db().query(`UPDATE runner_commands SET status='failed' WHERE type='pr_review.run'`);
+    await db().query(`UPDATE pr_review_runs SET state='failed' WHERE state='running'`);
+    // a live PR with no run yet goes first
+    await insertLive(902);
+    await listAndSelect(20);
+    expect(await dispatchReplayRuns(ctx())).toBe(0);
+  });
+});

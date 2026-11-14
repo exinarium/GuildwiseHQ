@@ -35,6 +35,7 @@ import { getReplayDto, replayFindingStep } from '../queries/pr-replays.ts';
 import { listReviewablePrs } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { mayStart } from './pr-review-runs.ts';
 
 /**
  * The 20-PR replay. Nothing here ever posts: replay runs are answered through `applyReplayRunResult`, which has no
@@ -304,7 +305,17 @@ async function dispatchOne(ctx: Ctx, replayId: string): Promise<boolean> {
     }
     const slot = slots[idx] as Slot;
     // live first: a waiting live pull request or a live run on the workstation goes before the replay
-    if ((await listReviewablePrs(tx, projectId).catch(() => [])).length > 0) return false;
+    // only live pull requests that will actually get a run hold the replay back (a timed-out or failed one never restarts)
+    const waiting = await listReviewablePrs(tx, projectId).catch(() => []);
+    for (const lp of waiting) {
+      if (await mayStart(tx, lp.id)) return false;
+      const live = await one(
+        tx,
+        `SELECT 1 AS x FROM pr_review_runs WHERE pr_review_id=$1 AND state='running' LIMIT 1`,
+        [lp.id],
+      );
+      if (live) return false;
+    }
     const ws = await one(
       tx,
       `SELECT w.id,
@@ -636,6 +647,12 @@ async function ownedReplay(tx: Tx, user: AuthSession['user'], replayId: string) 
 
 export async function cancelReplay(ctx: Ctx, user: AuthSession['user'], replayId: string) {
   await withAppendTx(ctx.pool, async (tx) => {
+    // same lock order as a run result: run rows first, then the replay row
+    await exec(
+      tx,
+      `SELECT id FROM pr_review_runs WHERE replay_id=$1 AND state='running' ORDER BY id FOR UPDATE`,
+      [replayId],
+    );
     const rp = await ownedReplay(tx, user, replayId);
     if (!['listing', 'reviewing', 'marking'].includes(rp.state as string))
       throw conflict('replay_not_active', 'the replay is not active');
