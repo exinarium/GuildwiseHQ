@@ -54,11 +54,11 @@ import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { editLedgerEntry } from './ledger.ts';
 import { findNearDuplicate } from './ledger-checks.ts';
 import { needsSplitAnswered } from './needs-split.ts';
-import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { relayAuthoredBundles } from './pack-authoring.ts';
 import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignmentIn } from './pack-holders.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
+import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
@@ -524,7 +524,8 @@ async function closeItem(
     // The owner decided about a "timed out twice" pull request (re-run it elsewhere, or leave it): the reminder stops.
     if (item.subkind === PR_TIMED_OUT_TWICE_SUBKIND && !retryClosedAlert && !partial) {
       const prReviewId = (item.data as { prReviewId?: string } | null)?.prReviewId;
-      if (prReviewId) await resolveTimedOutTwice(ctx, tx, prReviewId, 'owner_acted', user.id, { skipAlertClose: true });
+      if (prReviewId)
+        await resolveTimedOutTwice(ctx, tx, prReviewId, 'owner_acted', user.id, { skipAlertClose: true });
     }
     if (!retryClosedAlert && !partial)
       await ctx.store.append(

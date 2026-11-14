@@ -1382,6 +1382,12 @@ The first reviewer runs as two server commands (announced as `pr-review:1`):
   (`<!-- review-run:<runId> -->`), then posts one `COMMENT` review with the comment-only token. A command sent again for a live run
   id awaits the same run.
 
+- `pr_review.notice` (announced as `pr-notice:1`) tells the author of a pull request that is over the size budget to split it. It
+  looks for a review that already holds the notice marker (`<!-- size-check:<noticeId> -->`), then posts one body-only `COMMENT`
+  review with the same comment-only token (Pull requests: read and write). It never uses `gh`. `repo.list_prs` also asks `gh pr list`
+  for `changedFiles`, `isCrossRepository` and `headRefOid` next to the added and removed lines; the server adds the sizes of stacked
+  pull requests.
+
 The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by the normalized remote url), separate from the
 git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
 `workstation_repos.reviewer_token`), never the token.

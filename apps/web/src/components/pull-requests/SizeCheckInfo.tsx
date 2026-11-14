@@ -19,7 +19,12 @@ function NoticeLine({ pr }: { pr: PrReviewDto }) {
       {n?.state === 'posted' && n.url && (
         <>
           {' · '}
-          <a href={n.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-brand-text hover:underline">
+          <a
+            href={n.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center text-brand-text hover:underline"
+          >
             View
           </a>
         </>
@@ -49,7 +54,8 @@ export function SizeCheckInfo({ pr }: { pr: PrReviewDto }) {
       )}
       {pr.attention === 'timed_out_twice' && (
         <p data-testid={`pr-timed-out-twice-${pr.changeId}`}>
-          Timed out twice. It is within the size budget, so it waits for your decision: re-run the review or leave it.
+          Timed out twice. It is within the size budget, so it waits for your decision: re-run the review or
+          leave it.
           {pr.reminder
             ? pr.reminder.remindedAt
               ? ` Reminder sent ${when(pr.reminder.remindedAt)}.`

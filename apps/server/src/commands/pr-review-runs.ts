@@ -35,10 +35,10 @@ import {
 } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
-import { loadSizeContext, onPrReviewTimedOut, resolveTimedOutTwice, verdictOf } from './pr-size-check.ts';
 import { ownerPendingOf } from './owner-pending.ts';
-import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
+import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
+import { loadSizeContext, onPrReviewTimedOut, resolveTimedOutTwice, verdictOf } from './pr-size-check.ts';
 
 /**
  * The first reviewer on PR-only pull requests. The server decides WHEN a run starts and is the only party that starts a

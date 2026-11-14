@@ -39,8 +39,7 @@ export function prChain(changeId: string, open: readonly ChainCandidate[]): Chai
   const start = live.find((c) => c.changeId === changeId);
   if (!start) return [];
   const linked = (a: ChainCandidate, b: ChainCandidate): boolean =>
-    a.changeId !== b.changeId &&
-    ((b.base === a.head && !a.crossRepo) || (a.base === b.head && !b.crossRepo));
+    a.changeId !== b.changeId && ((b.base === a.head && !a.crossRepo) || (a.base === b.head && !b.crossRepo));
   const seen = new Map<string, ChainCandidate>([[start.changeId, start]]);
   const queue = [start];
   while (queue.length) {
@@ -141,7 +140,10 @@ export const PR_TIMED_OUT_TWICE_SUBKIND = 'pr_review_timed_out_twice';
 
 export const splitNoticeMarker = (noticeId: string): string => `<!-- size-check:${noticeId} -->`;
 
-const UNIT_WORD: Record<SizeUnit, string> = { changed_lines: 'changed lines', changed_files: 'changed files' };
+const UNIT_WORD: Record<SizeUnit, string> = {
+  changed_lines: 'changed lines',
+  changed_files: 'changed files',
+};
 export const sizeUnitWord = (unit: SizeUnit): string => UNIT_WORD[unit];
 
 /** The review body: neutral, names the chain and the numbers, no reviewer or model names, ends with the marker. */
