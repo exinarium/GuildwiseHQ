@@ -3,13 +3,19 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeProjectPath } from '@aom/shared';
 import { type CheckLaunch, capture } from '../checks/run.ts';
-import { fillDeploySubmodules } from '../delivery/submodules.ts';
-import { git, revParse } from '../git/git.ts';
-import { readSubmodules } from '../git/submodule-pin.ts';
+import { git } from '../git/git.ts';
 import { detectStacks, viewOf } from './detect.ts';
 import { depCommand } from './ensure.ts';
 import { STACKS } from './stacks.ts';
 import type { DepStep, Platform } from './types.ts';
+
+/**
+ * The one sentence a repository with submodules gets: the preparation never fills them (no host-side `git submodule`,
+ * `fetch` or `clone`: every ref and object it could anchor on is writable by the clone's agents). Fixed text: nothing of
+ * the worktree's `.gitmodules` is read into it.
+ */
+export const SUBMODULES_NOT_PREPARED =
+  'the runner does not fill submodules when it prepares a worktree; ask DevOps if you need them';
 
 /** The whole preparation of one new worktree may take this long; what is left over is reported as not prepared. */
 export const PREPARE_BUDGET_MS = 5 * 60_000;
@@ -31,17 +37,8 @@ export interface PrepResult {
 export interface PrepareWorktreeInput {
   /** The card worktree that was just added. */
   worktree: string;
-  /** The local clone the worktree belongs to (submodules are cloned from the workstation's clones). */
-  repoPath: string;
-  /**
-   * The project's trusted branches, first that exists wins: its working branch, then the repository's main branch (never
-   * a card's base, which for a suite card is a card branch). Submodules are filled only when the card worktree's
-   * `.gitmodules` is the very same blob as on that branch. Absent: no submodule is filled.
-   */
-  trustedBranches?: string[];
   /** The project's sub directory in the repository (absent: the root): dependencies are installed there. */
   projectPath?: string;
-  findRepo: (remoteUrlNormalized: string) => Promise<{ localPath: string } | undefined>;
   /** The run-step sandbox command line (`RunsManager.checkLaunch`); may throw. Absent: dependencies are skipped. */
   launch?: (argv: string[], key: string) => Promise<CheckLaunch>;
   platform: Platform;
@@ -93,16 +90,15 @@ async function changedPaths(dir: string): Promise<Array<{ path: string; untracke
 }
 
 /**
- * Prepares a card worktree the runner just added, so the agent can build and test without asking DevOps: each submodule
- * at its pinned commit (from the workstation's clones, `fillDeploySubmodules`), then the project's dependency installs
- * (`pnpm install`, `dotnet restore`, ...) in the run-step sandbox with `CI=true` (the worktree may hold agent-written
- * scripts, so nothing it holds runs unsandboxed). Submodules are filled on the host by git, but only when the worktree's
- * `.gitmodules` is the same blob as on the project's working branch (else none is), only from the workstation's own clone
- * of the submodule's repository, and the file protocol is allowed
- * only for that clone's path: no url from the branch's `.gitmodules` is ever fetched. Never throws: a failure is a step
- * with its detail. The whole run, submodules included, has one budget
- * and stops on `signal`. Afterwards no tracked file is left changed and no new unignored file is left behind (a rewritten
- * lockfile is restored, and said so), so the guard and the autocommit see nothing.
+ * Prepares a card worktree the runner just added, so the agent can build and test without asking DevOps: the project's
+ * dependency installs (`pnpm install`, `dotnet restore`, ...) in the run-step sandbox with `CI=true` (the worktree may hold
+ * agent-written scripts, so nothing it holds runs unsandboxed). Submodules are not filled (1.7.0): no host-side
+ * `git submodule`, `fetch` or `clone` runs here, because any ref or object a trust check could read is writable by the
+ * agents of the clone; a repository with submodules gets `SUBMODULES_NOT_PREPARED` and they stay a DevOps request.
+ * On the host only read-only git queries, the restore below and stack detection run. Never throws: a failure is a step
+ * with its detail. The whole run has one budget and stops on `signal`. Afterwards no tracked file is left changed and no
+ * new unignored file is left behind (a rewritten lockfile is restored, and said so), so the guard and the autocommit see
+ * nothing.
  *
  * It does not depend on the workstation's "Install packages and tools" DevOps setting: that setting governs installing
  * tools on the workstation itself (the toolchain step, unsandboxed). This only fills the project's own dependencies,
@@ -120,53 +116,9 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   try {
     const before = new Set((await changedPaths(i.worktree)).map((c) => c.path));
 
-    // 1. Submodules at the commits the checkout pins: only the trusted ones, only from local clones (see above).
-    if (await hasGitmodules(i.worktree)) {
-      const t = now();
-      const skipped: string[] = [];
-      const filled: string[] = [];
-      const trusted = await trustedGitmodules(i.repoPath, i.trustedBranches ?? []);
-      const mine = (
-        await git(i.worktree, ['rev-parse', '--verify', '--quiet', 'HEAD:.gitmodules'])
-      ).stdout.trim();
-      if (!trusted || !mine || mine !== trusted.blob) {
-        // A changed `.gitmodules` (an added entry can take over a trusted path): nothing is filled.
-        const why = trusted
-          ? ".gitmodules differs from the project's working branch, so no submodule was filled"
-          : "the project's working branch has no .gitmodules (or is not in this clone), so no submodule was filled";
-        const originUrl = (await git(i.repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
-        const paths = [...new Set((await readSubmodules(i.worktree, originUrl)).map((x) => x.path))];
-        add({
-          name: 'submodules not filled',
-          status: 'skipped',
-          detail: `${paths.join(', ') || 'all submodules'}: ${why}`,
-          ms: 0,
-        });
-      } else {
-        try {
-          const problem = await fillDeploySubmodules(i.worktree, i.repoPath, i.findRepo, {
-            localOnly: true,
-            allowed: trusted.submodules,
-            deadline: started + budget,
-            ...(i.signal ? { signal: i.signal } : {}),
-            now,
-            skipped,
-            filled,
-          });
-          if (problem || filled.length)
-            add({
-              name: 'submodules',
-              status: problem ? 'failed' : 'done',
-              ...(problem ? { detail: problem } : {}),
-              ms: now() - t,
-            });
-        } catch (err) {
-          add({ name: 'submodules', status: 'failed', detail: errText(err), ms: now() - t });
-        }
-      }
-      if (skipped.length)
-        add({ name: 'submodules not filled', status: 'skipped', detail: skipped.join('; '), ms: 0 });
-    }
+    // 1. Submodules are never filled here (see above): the agent is told, with one fixed sentence.
+    if (await hasGitmodules(i.worktree))
+      add({ name: 'submodules', status: 'skipped', detail: SUBMODULES_NOT_PREPARED, ms: 0 });
 
     // 2. The project's dependencies, in its folder, sandboxed.
     let dir = i.worktree;
@@ -288,29 +240,6 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   }
 }
 
-/** The `.gitmodules` of the first trusted branch that exists (on origin, else locally): its blob and its submodules. */
-async function trustedGitmodules(
-  repoPath: string,
-  branches: string[],
-): Promise<{ blob: string; submodules: Array<{ name: string; path: string; normalized: string }> } | null> {
-  for (const b of branches) {
-    if (!b) continue;
-    const ref = (await revParse(repoPath, `refs/remotes/origin/${b}`))
-      ? `refs/remotes/origin/${b}`
-      : (await revParse(repoPath, `refs/heads/${b}`))
-        ? `refs/heads/${b}`
-        : null;
-    if (!ref) continue;
-    const blob = (
-      await git(repoPath, ['rev-parse', '--verify', '--quiet', `${ref}:.gitmodules`])
-    ).stdout.trim();
-    if (!blob) return null;
-    const originUrl = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
-    return { blob, submodules: await readSubmodules(repoPath, originUrl, [`--blob=${ref}:.gitmodules`]) };
-  }
-  return null;
-}
-
 async function hasGitmodules(dir: string): Promise<boolean> {
   return (await git(dir, ['ls-files', '--', '.gitmodules'])).stdout.trim() !== '';
 }
@@ -336,8 +265,9 @@ export function prepNote(prep: PrepResult | undefined): string {
     lines.push('Not prepared:');
     for (const s of notDone) lines.push(`- ${s.name}: ${s.detail ?? s.status}`);
     lines.push('Ask DevOps only for what is listed as not prepared, and only if you need it.');
+    if (done.length) lines.push(`${done.join(', ')}: done, do not ask DevOps for it.`);
   } else {
-    lines.push('Do not ask DevOps to initialise submodules or install the dependencies.');
+    lines.push('Do not ask DevOps to install the dependencies.');
   }
   return lines.join('\n');
 }

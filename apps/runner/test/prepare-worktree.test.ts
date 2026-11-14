@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CheckLaunch } from '../src/checks/run.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
-import { prepareWorktree, prepNote } from '../src/toolchain/prepare-worktree.ts';
+import { prepareWorktree, prepNote, SUBMODULES_NOT_PREPARED } from '../src/toolchain/prepare-worktree.ts';
 import type { DepStep } from '../src/toolchain/types.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
@@ -45,168 +45,45 @@ function commit(dir: string, files: Record<string, string>, message: string) {
 }
 
 describe('preparing a new card worktree', () => {
-  it('a repository with a submodule: the submodule is checked out at its pinned commit', async () => {
+  it('a repository with submodules: no git submodule, fetch or clone runs; one fixed sentence, dependencies still prepared', async () => {
     const x = makeRepo();
     const d = makeRepo();
+    commit(d.clone, { '.gitignore': 'deps/\n' }, 'ignore deps');
     sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
     sh(d.clone, 'git', ['commit', '-m', 'add core']);
     sh(d.clone, 'git', ['push', 'origin', 'main']);
-    const pinned = sh(d.clone, 'git', ['rev-parse', 'HEAD:core']);
-    const path = await newWorktree(d);
-    expect(existsSync(join(path, 'core', 'README.md'))).toBe(false);
-
-    const prep = await prepareWorktree({
-      worktree: path,
-      repoPath: d.clone,
-      findRepo: async (n) => (n === x.remoteNormalized ? { localPath: x.clone } : undefined),
-      launch,
-      platform: 'linux',
-      stacks: noStacks,
-      trustedBranches: ['main'],
-    });
-    expect(prep.ok).toBe(true);
-    expect(prep.steps.map((s) => [s.name, s.status])).toEqual([['submodules', 'done']]);
-    expect(sh(join(path, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pinned);
-    expect(existsSync(join(path, 'core', 'README.md'))).toBe(true);
-    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
-    expect(prepNote(prep)).toMatch(/submodules done/);
-  });
-
-  it('a submodule the card branch adds is never cloned: no fetch of its .gitmodules url, not even from a known clone', async () => {
-    const secret = makeRepo(); // a repository the agent's sandbox hides
-    const other = makeRepo(); // another project's clone on this workstation
-    const d = makeRepo();
-    // The card branch (an agent can commit .gitmodules with git plumbing) points two submodules elsewhere.
-    sh(d.clone, 'git', ['checkout', '-b', spec.branchName]);
-    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', secret.clone, 'loot']);
-    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', other.origin, 'other']);
-    sh(d.clone, 'git', ['commit', '-m', 'add submodules']);
-    sh(d.clone, 'git', ['checkout', 'main']);
-    rmSync(join(d.clone, '.git', 'modules'), { recursive: true, force: true }); // what submodule add cloned for the test
-    const path = await newWorktree(d);
-    const seen: string[] = [];
-    const prep = await prepareWorktree({
-      worktree: path,
-      repoPath: d.clone,
-      findRepo: async (n) => {
-        seen.push(n);
-        return n === other.remoteNormalized ? { localPath: other.clone } : undefined;
-      },
-      launch,
-      platform: 'linux',
-      stacks: noStacks,
-      trustedBranches: ['main'], // main declares no submodule
-    });
-    expect(prep.ok).toBe(true);
-    expect(prep.steps.map((s) => [s.name, s.status])).toEqual([['submodules not filled', 'skipped']]);
-    expect(prep.steps[0]!.detail).toMatch(/^loot, other: the project's working branch has no \.gitmodules/);
-    expect(seen).toEqual([]); // not even looked up
-    expect(existsSync(join(path, 'loot', 'README.md'))).toBe(false);
-    expect(existsSync(join(path, 'other', 'README.md'))).toBe(false);
-    const modules = sh(path, 'git', ['rev-parse', '--git-path', 'modules']);
-    expect(existsSync(modules)).toBe(false);
-    expect(prepNote(prep)).toMatch(/Not prepared:\n- submodules not filled: loot/);
-  });
-
-  it('a second .gitmodules entry at a trusted path is not followed: nothing is cloned, the clone config gains no url', async () => {
-    const x = makeRepo();
-    const secret = makeRepo(); // a repository the workstation does not know as a clone and the sandbox hides
-    const d = makeRepo();
-    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
-    sh(d.clone, 'git', ['commit', '-m', 'add core']);
-    sh(d.clone, 'git', ['push', 'origin', 'main']);
-    // The card branch keeps the trusted entry and adds another one with the same path and an unknown url.
-    sh(d.clone, 'git', ['checkout', '-b', spec.branchName]);
+    // A card branch .gitmodules entry pointing elsewhere: nothing of it may be read or followed.
+    const secret = makeRepo();
     sh(d.clone, 'git', ['config', '-f', '.gitmodules', 'submodule.evil.path', 'core']);
     sh(d.clone, 'git', ['config', '-f', '.gitmodules', 'submodule.evil.url', secret.clone]);
     sh(d.clone, 'git', ['commit', '-am', 'second entry']);
-    sh(d.clone, 'git', ['checkout', 'main']);
-    const configBefore = sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.']);
+    sh(d.clone, 'git', ['push', 'origin', 'main']);
+    const configBefore = sh(d.clone, 'git', ['config', '--list', '--local']);
+    const modulesBefore = readdirSync(join(d.clone, '.git', 'modules')); // what submodule add made for the test: core
     const path = await newWorktree(d);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: d.clone,
-      findRepo: async (n) => (n === x.remoteNormalized ? { localPath: x.clone } : undefined),
       launch,
       platform: 'linux',
-      stacks: noStacks,
-      trustedBranches: ['main'],
-    });
-    expect(sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.'])).toBe(configBefore);
-    expect(sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.']).includes(secret.clone)).toBe(
-      false,
-    );
-    const modules = sh(path, 'git', ['rev-parse', '--git-path', 'modules']);
-    expect(existsSync(join(modules, 'evil'))).toBe(false);
-    expect(existsSync(join(path, 'core', 'README.md'))).toBe(false);
-    expect(prep.ok).toBe(true);
-    expect(prep.steps).toEqual([
-      expect.objectContaining({ name: 'submodules not filled', status: 'skipped' }),
-    ]);
-    expect(prep.steps[0]!.detail).toMatch(/\.gitmodules differs from the project's working branch/);
-    expect(prep.steps[0]!.detail).toMatch(/core/);
-  });
-
-  it('a submodule the base branch declares but this workstation has no clone of is skipped, not fetched', async () => {
-    const x = makeRepo();
-    const d = makeRepo();
-    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
-    sh(d.clone, 'git', ['commit', '-m', 'add core']);
-    sh(d.clone, 'git', ['push', 'origin', 'main']);
-    const path = await newWorktree(d);
-    const prep = await prepareWorktree({
-      worktree: path,
-      repoPath: d.clone,
-      findRepo: async () => undefined,
-      launch,
-      platform: 'linux',
-      stacks: noStacks,
-      trustedBranches: ['main'],
+      stacks: steps(shStep('fake install', 'mkdir -p deps && echo ok > deps/ok')),
     });
     expect(prep.ok).toBe(true);
     expect(prep.steps).toEqual([
-      expect.objectContaining({
-        name: 'submodules not filled',
-        status: 'skipped',
-        detail: 'core: no clone of its repository on this workstation',
-      }),
+      { name: 'submodules', status: 'skipped', detail: SUBMODULES_NOT_PREPARED, ms: 0 },
+      expect.objectContaining({ name: 'fake install', status: 'done' }),
     ]);
+    // nothing was fetched or cloned: no submodule git dir, no new clone config, the submodule folder stays empty
+    expect(sh(d.clone, 'git', ['config', '--list', '--local'])).toBe(configBefore);
+    expect(readdirSync(join(d.clone, '.git', 'modules'))).toEqual(modulesBefore);
+    expect(modulesBefore).toEqual(['core']);
     expect(existsSync(join(path, 'core', 'README.md'))).toBe(false);
-  });
-
-  it('the submodule step keeps to the budget and the stop', async () => {
-    const x = makeRepo();
-    const d = makeRepo();
-    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
-    sh(d.clone, 'git', ['commit', '-m', 'add core']);
-    sh(d.clone, 'git', ['push', 'origin', 'main']);
-    const base = {
-      repoPath: d.clone,
-      findRepo: async (n: string) => (n === x.remoteNormalized ? { localPath: x.clone } : undefined),
-      launch,
-      platform: 'linux' as const,
-      stacks: noStacks,
-      trustedBranches: ['main'],
-    };
-    let calls = 0;
-    const late = await prepareWorktree({
-      ...base,
-      worktree: await newWorktree(d),
-      now: () => (calls++ === 0 ? 0 : 10 * 60_000), // the budget is gone once the step starts
-    });
-    expect(late.ok).toBe(false);
-    expect(late.steps[0]).toMatchObject({ name: 'submodules', status: 'failed' });
-    expect(late.steps[0]!.detail).toMatch(/over the preparation budget/);
-    const ac = new AbortController();
-    ac.abort();
-    const d2 = makeRepo();
-    sh(d2.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
-    sh(d2.clone, 'git', ['commit', '-m', 'add core']);
-    sh(d2.clone, 'git', ['push', 'origin', 'main']);
-    const wt2 = await newWorktree(d2);
-    const stopped = await prepareWorktree({ ...base, repoPath: d2.clone, worktree: wt2, signal: ac.signal });
-    expect(stopped.steps[0]!.detail).toMatch(/stopped/);
-    expect(existsSync(join(wt2, 'core', 'README.md'))).toBe(false);
+    expect(readFileSync(join(path, 'deps', 'ok'), 'utf8')).toBe('ok\n');
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
+    // the note names no path from .gitmodules, says submodules are a DevOps request and dependencies were prepared
+    const note = prepNote(prep);
+    expect(note).toContain(`- submodules: ${SUBMODULES_NOT_PREPARED}`);
+    expect(note).toMatch(/fake install: done, do not ask DevOps for it/);
+    expect(note).not.toMatch(/evil|secret/);
   });
 
   it('a repository with an install step: it runs in the project folder with CI=true; its output is ignored', async () => {
@@ -215,8 +92,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       stacks: steps(shStep('fake install', 'mkdir -p deps && printf "$CI" > deps/ok')),
@@ -235,8 +110,6 @@ describe('preparing a new card worktree', () => {
     const seen: string[][] = [];
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch: async (argv) => {
         seen.push(argv);
         return { cmd: 'true', args: [], env: { PATH: process.env.PATH ?? '' } };
@@ -252,8 +125,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
     });
@@ -266,8 +137,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       stacks: steps(shStep('install', 'echo "registry unreachable" >&2; exit 3'), shStep('build', 'true')),
@@ -286,8 +155,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const base = {
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       platform: 'linux' as const,
     };
     const refused = await prepareWorktree({
@@ -310,8 +177,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       stacks: () => [
@@ -343,8 +208,6 @@ describe('preparing a new card worktree', () => {
     const path = await newWorktree(repo);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       stacks: steps(shStep('install', 'echo v2 > lock.txt && echo junk > stray.txt')),
@@ -365,8 +228,6 @@ describe('preparing a new card worktree', () => {
     const t0 = Date.now();
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       budgetMs: 300,
@@ -385,8 +246,6 @@ describe('preparing a new card worktree', () => {
     setTimeout(() => ac.abort(), 200);
     const prep = await prepareWorktree({
       worktree: path,
-      repoPath: repo.clone,
-      findRepo: async () => undefined,
       launch,
       platform: 'linux',
       signal: ac.signal,

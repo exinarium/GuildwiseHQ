@@ -1331,7 +1331,7 @@ export class ShiftSupervisor {
       this.deps.config.prepareWorktrees !== false &&
       msg.worktree
     )
-      await this.prepareNewWorktree(s, msg.worktree.remoteUrlNormalized, msg.brief.project.projectPath);
+      await this.prepareNewWorktree(s, msg.brief.project.projectPath);
 
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
@@ -2016,15 +2016,9 @@ export class ShiftSupervisor {
   }
 
   /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
-  private async prepareNewWorktree(
-    s: ActiveShift,
-    remoteUrlNormalized: string,
-    projectPath: string | undefined,
-  ): Promise<void> {
+  private async prepareNewWorktree(s: ActiveShift, projectPath: string | undefined): Promise<void> {
     const wt = s.worktree;
     if (!wt) return;
-    const repo = await this.deps.findRepo(remoteUrlNormalized).catch(() => undefined);
-    if (!repo) return;
     s.prepAbort = new AbortController();
     this.addProgress(s, 'status', 'preparing the new worktree (submodules, dependencies)');
     this.flushProgress(s); // the owner sees it now, not after the session started
@@ -2034,15 +2028,7 @@ export class ShiftSupervisor {
     try {
       s.worktreePrep = await prep({
         worktree: wt.path,
-        repoPath: repo.localPath,
-        // The trust anchor for submodules: the project's working branch, then the main branch (never the card's base,
-        // which is a card branch for a suite card).
-        trustedBranches: [
-          s.msg.kind === 'card' ? s.msg.brief.project.workingBranch : '',
-          s.msg.worktree?.mainBranch ?? '',
-        ].filter(Boolean),
         ...(projectPath ? { projectPath } : {}),
-        findRepo: (n) => this.deps.findRepo(n),
         ...(runs
           ? {
               launch: (argv: string[], key: string) =>
