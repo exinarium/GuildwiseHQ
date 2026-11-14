@@ -1,6 +1,11 @@
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { lstat, readlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type AgentPermissions,
   CARD_BRANCH_PREFIXES,
+  e2eTestPathMatcher,
   type GuardViolation,
   guardsInternalRef,
   isRunnerOwnedBranch,
@@ -16,6 +21,7 @@ import {
 import { currentBranch, git } from '../git/git.ts';
 import { commitsWithInternalRef, describeCommits } from '../git/internal-ref.ts';
 import { baseTarget } from '../git/rebase.ts';
+import { managedGitDir, modulesRoot } from '../git/submodule-drift.ts';
 
 export interface BranchSnapshot {
   [branch: string]: string;
@@ -105,6 +111,97 @@ export interface GuardInput {
    * shift's commits and branches must not name the card's internal ref (`cardRef`).
    */
   clientRef?: string;
+  /**
+   * Fingerprints of the paths that were already dirty when the shift started (`snapshotDirty`). For a role that may not
+   * commit, a path whose fingerprint is unchanged at the end is not this shift's change (a submodule left off its pin, a
+   * file the sandbox or a person left behind) and is not counted (BLOCKERS.md section 3). Roles that commit are judged
+   * on every path: their leftovers commit would commit it.
+   */
+  dirtyAtStart?: DirtySnapshot;
+}
+
+/**
+ * The builder guard's E2E rule: a changed path inside the project's E2E globs that is real test content (a spec or its
+ * support code; not docs, package.json, lock files or JSON configuration). One shared rule (`e2eTestPathMatcher`), here
+ * with the guard's picomatch semantics.
+ */
+export const builderE2eMatcher = (globs: readonly string[]): ((path: string) => boolean) =>
+  e2eTestPathMatcher(globs, (g) => picomatch([...g], { dot: true }));
+
+/** `{ path: fingerprint }` of the paths that were dirty at the shift start. */
+export type DirtySnapshot = Record<string, string>;
+
+/** At most this many dirty paths are fingerprinted at the shift start (the rest are judged as before). */
+export const DIRTY_SNAPSHOT_MAX = 500;
+
+/**
+ * What a dirty path looks like now: `gone` (missing), `link:<target>`, `sub:<HEAD>:<sha1 of status and diff>` for a
+ * checked-out submodule (`empty` when it is not initialised), or the file's blob id. Null when it cannot be read: such a
+ * path never counts as untouched.
+ */
+async function dirtyFingerprint(
+  worktree: string,
+  path: string,
+  modules: string | null,
+): Promise<string | null> {
+  const abs = join(worktree, path);
+  let st: Awaited<ReturnType<typeof lstat>>;
+  try {
+    st = await lstat(abs);
+  } catch {
+    return 'gone';
+  }
+  if (st.isSymbolicLink()) {
+    try {
+      return `link:${await readlink(abs)}`;
+    } catch {
+      return null;
+    }
+  }
+  if (st.isDirectory()) {
+    // without its own .git, git would answer for the superproject
+    if (!existsSync(join(abs, '.git'))) return 'empty';
+    // git runs inside only for a submodule this runner manages (its gitdir under the modules folder); anything else is
+    // agent-owned configuration: no fingerprint, so the path is never "untouched" and is judged as before
+    if (!modules || !managedGitDir(abs, modules)) return null;
+    const head = await git(abs, ['rev-parse', 'HEAD']);
+    if (head.exitCode !== 0) return null;
+    const status = await git(abs, ['status', '--porcelain', '--untracked-files=all']);
+    const diff = await git(abs, ['diff', '--no-ext-diff', '--no-textconv', 'HEAD']);
+    if (status.exitCode !== 0 || diff.exitCode !== 0) return null;
+    const sum = createHash('sha1').update(status.stdout).update('\0').update(diff.stdout).digest('hex');
+    return `sub:${head.stdout.trim()}:${sum}`;
+  }
+  const h = await git(worktree, ['hash-object', '--', path]);
+  return h.exitCode === 0 && h.stdout.trim() ? `file:${h.stdout.trim()}` : null;
+}
+
+/** Fingerprints of the paths that are dirty now (at the shift start), at most `DIRTY_SNAPSHOT_MAX` of them. */
+export async function snapshotDirty(worktree: string): Promise<DirtySnapshot> {
+  const snap: DirtySnapshot = {};
+  const modules = await modulesRoot(worktree);
+  for (const p of (await dirtyPaths(worktree)).slice(0, DIRTY_SNAPSHOT_MAX)) {
+    const f = await dirtyFingerprint(worktree, p, modules);
+    if (f !== null) snap[p] = f;
+  }
+  return snap;
+}
+
+/** Of `paths`, those that were dirty at the shift start and look exactly the same now. */
+export async function untouchedSinceStart(
+  worktree: string,
+  snap: DirtySnapshot | undefined,
+  paths: readonly string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!snap) return out;
+  const modules = await modulesRoot(worktree);
+  for (const p of paths) {
+    const before = snap[p];
+    if (before === undefined) continue;
+    if ((await dirtyFingerprint(worktree, p, modules)) === before) out.add(p);
+  }
+  return out;
 }
 
 /**
@@ -307,7 +404,14 @@ export async function fetchedRemoteTip(worktree: string, branch: string): Promis
 
 /** Uncommitted paths (tracked and untracked), minus the sandbox stubs and test output dirs. */
 async function dirtyPaths(worktree: string): Promise<string[]> {
-  const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  // unquoted non-ASCII names, so the fingerprint finds them on disk
+  const dirty = await git(worktree, [
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain',
+    '--untracked-files=all',
+  ]);
   const out = new Set<string>();
   // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
   const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
@@ -499,7 +603,13 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     ];
   }
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-  const changed = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
+  const all = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
+  // A read-only role is judged on its own shift only: paths already dirty at the start and unchanged are not its doing
+  // (BLOCKERS.md section 3). A role that commits is judged on every path, since its leftovers commit would commit them.
+  const untouched = input.permissions.mayCommit
+    ? new Set<string>()
+    : await untouchedSinceStart(input.worktree, input.dirtyAtStart, all);
+  const changed = all.filter((p) => !untouched.has(p));
 
   if (!input.permissions.mayCommit && (head !== input.startSha || changed.length > 0)) {
     violations.push({
@@ -535,8 +645,9 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
 
   // Builders never do E2E testing: the tester owns the E2E paths (spec "Testing strategy").
+  // Only real test content counts (docs, package.json, lock files and JSON configuration in the E2E folders do not).
   if (input.roleKey === 'builder' && input.e2eGlobs.length > 0) {
-    const isE2e = picomatch(input.e2eGlobs, { dot: true });
+    const isE2e = builderE2eMatcher(input.e2eGlobs);
     const touched = await netChangedFromBase(
       input.worktree,
       input.baseBranch,

@@ -421,3 +421,32 @@ describe('aom CLI', () => {
     expect(t.err.join('')).toContain('shift is over');
   });
 });
+
+describe('aom design --tests-only (BLOCKERS.md section 2)', () => {
+  it('parses as a switch and sets testsOnly on the design report; investigate refuses it', async () => {
+    const t = await setup();
+    expect(
+      await t.run(
+        'design',
+        '--report',
+        'docs/investigations/TOY-1.md',
+        '--summary',
+        'only the spec',
+        '--tests-only',
+      ),
+    ).toBe(0);
+    expect(t.reports.at(-1)).toMatchObject({
+      kind: 'outcome',
+      outcomeId: 'handoff',
+      data: { reportPath: 'docs/investigations/TOY-1.md', testsOnly: true },
+    });
+    expect(
+      await t.run('design', '--report', 'docs/investigations/TOY-1.md', '--summary', 'product code'),
+    ).toBe(0);
+    expect((t.reports.at(-1) as { data: Record<string, unknown> }).data.testsOnly).toBeUndefined();
+    const before = t.reports.length;
+    expect(await t.run('investigate', '--report', 'r.md', '--summary', 's', '--tests-only')).not.toBe(0);
+    expect(t.reports).toHaveLength(before);
+    expect(t.err.join('')).toContain('--tests-only is for `aom design`');
+  });
+});

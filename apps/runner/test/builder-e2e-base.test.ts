@@ -53,7 +53,7 @@ async function setup() {
       e2eGlobs: E2E,
       ...(baseBranch ? { baseBranch } : {}),
     });
-  return { path, write, guard };
+  return { path, write, guard, startSha, branchesAtStart };
 }
 
 describe('builder_edited_e2e is judged against the branch base', () => {
@@ -83,5 +83,49 @@ describe('builder_edited_e2e is judged against the branch base', () => {
     const t = await setup();
     sh(t.path, 'git', ['rm', '-q', 'e2e/a.spec.ts']);
     expect((await t.guard()).map((v) => v.rule)).toEqual(['builder_edited_e2e']);
+  });
+});
+
+describe('builder_edited_e2e counts only real test content (BLOCKERS.md section 2)', () => {
+  it('editing e2e/README.md, e2e/package.json or e2e/video/screens.json passes; editing a spec fails as before', async () => {
+    const t = await setup();
+    t.write('e2e/README.md', '# how to run\n', true);
+    t.write('e2e/package.json', '{"name":"e2e"}\n', true);
+    t.write('e2e/video/screens.json', '{"screens":[]}\n');
+    expect(await t.guard()).toEqual([]);
+    t.write('e2e/a.spec.ts', 'builder edit\n');
+    const v = await t.guard();
+    expect(v.map((x) => x.rule)).toEqual(['builder_edited_e2e']);
+    expect(v[0]?.detail).toContain('e2e/a.spec.ts');
+    expect(v[0]?.detail).not.toContain('README');
+  });
+
+  it('a base merge that brings E2E changes, then the guard, passes', async () => {
+    const t = await setup();
+    // main moves on: another card's tester added and changed specs
+    const repo = String(
+      sh(t.path, 'git', ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+    ).trim();
+    const clone = join(repo, '..');
+    mkdirSync(join(clone, 'e2e'), { recursive: true });
+    writeFileSync(join(clone, 'e2e', 'b.spec.ts'), 'from main\n');
+    sh(clone, 'git', ['add', '-A']);
+    sh(clone, 'git', ['commit', '-m', 'another card: e2e b']);
+    sh(clone, 'git', ['push', 'origin', 'main']);
+    const tip = String(sh(t.path, 'git', ['rev-parse', 'origin/main'])).trim();
+    sh(t.path, 'git', ['merge', '--no-edit', 'origin/main']);
+    t.write('src/feature.ts', 'export const x = 1;\n', true);
+    const guard = await runGuard({
+      worktree: t.path,
+      roleKey: 'builder',
+      permissions: builder.permissions,
+      branchName: 'aom/toy-1-x',
+      startSha: t.startSha,
+      branchesAtStart: t.branchesAtStart,
+      e2eGlobs: E2E,
+      baseBranch: 'main',
+      baseTipShas: [tip],
+    });
+    expect(guard).toEqual([]);
   });
 });

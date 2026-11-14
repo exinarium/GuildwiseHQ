@@ -235,6 +235,50 @@ export const TESTER_LOOP_OPTIONS = {
   cancel: 'cancel',
 } as const;
 
+const E2E_NOT_TEST_EXT = /\.(?:md|mdx|txt)$/i;
+const E2E_MANIFEST =
+  /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i;
+const E2E_DATA_DIR =
+  /(?:^|\/)(?:fixtures|__fixtures__|snapshots|__snapshots__|testdata|test-data|mocks|data|expected|golden|[^/]+-snapshots)\//i;
+/** JSON files that configure a test runner (they select or skip specs): test content wherever they are. */
+const E2E_RUNNER_CONFIG = /(?:^|\/)(?:cypress\.json|\.mocharc\.json|jest\.config\.json|\.detoxrc\.json)$/i;
+
+/**
+ * Is a path inside the E2E globs real test content (a spec or its support code: helpers, scripts, config, fixtures,
+ * snapshots)? Docs (`*.md|mdx|txt`), `package.json` and lock files, and JSON configuration outside fixture or snapshot
+ * folders (the help-video `screens.json`, `tsconfig.json`) are not: a builder may change them (BLOCKERS.md section 2).
+ * Anything in a fixture, data or snapshot folder (a `.txt` text snapshot included) and a JSON test-runner config
+ * (`cypress.json`, `.mocharc.json`, ...) is test content. Conservative: anything else counts as test content. The path is repository-relative, forward slashes.
+ */
+export function isE2eTestContent(path: string): boolean {
+  const p = path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+  // fixtures and snapshots (a Playwright text snapshot is a .txt) and runner configs are always test content
+  if (E2E_DATA_DIR.test(p) || E2E_RUNNER_CONFIG.test(p)) return true;
+  if (E2E_NOT_TEST_EXT.test(p)) return false;
+  if (E2E_MANIFEST.test(p)) return false;
+  if (/\.json$/i.test(p)) return false;
+  return true;
+}
+
+/**
+ * The one rule that classifies a changed path as E2E test content: inside the project's E2E globs AND
+ * `isE2eTestContent`. `inGlobs` compiles the globs (default `globToRegExp`; the runner passes picomatch). No globs: nothing
+ * matches. Used by the builder guard, the builder's handoff checks and `e2eOnlyFailure`.
+ */
+export function e2eTestPathMatcher(
+  globs: readonly string[],
+  inGlobs?: (globs: readonly string[]) => (path: string) => boolean,
+): (path: string) => boolean {
+  if (globs.length === 0) return () => false;
+  const within =
+    inGlobs?.(globs) ??
+    ((): ((path: string) => boolean) => {
+      const res = globs.map((g) => globToRegExp(g));
+      return (path) => res.some((re) => re.test(path));
+    })();
+  return (path) => within(path) && isE2eTestContent(path);
+}
+
 const PATH_TOKEN = /(?:[A-Za-z0-9_.@~-]*\/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,8}\b/g;
 
 /**
@@ -249,16 +293,16 @@ export function e2eOnlyFailure(
 ): { e2eOnly: boolean; paths: string[]; reason: string } {
   const none = { e2eOnly: false, paths: [] as string[] };
   if (e2eGlobs.length === 0) return { ...none, reason: 'the project has no E2E paths' };
-  const res = e2eGlobs.map((g) => globToRegExp(g));
+  const matches = e2eTestPathMatcher(e2eGlobs);
   const clean = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ');
   const tokens = [...new Set(clean.match(PATH_TOKEN) ?? [])];
   const isE2e = (raw: string): boolean => {
     const path = raw.replace(/^(?:\.\/)+/, '');
-    if (res.some((re) => re.test(path))) return true;
+    if (matches(path)) return true;
     if (!path.startsWith('/')) return false;
     // An absolute path (a worktree): any tail of it that is an E2E path.
     const parts = path.split('/').filter(Boolean);
-    return parts.some((_, i) => res.some((re) => re.test(parts.slice(i).join('/'))));
+    return parts.some((_, i) => matches(parts.slice(i).join('/')));
   };
   const e2e = tokens.filter(isE2e);
   const other = tokens.filter((t) => !isE2e(t));

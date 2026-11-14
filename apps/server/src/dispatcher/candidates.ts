@@ -37,6 +37,14 @@ export function agentView(a: Row, capabilities: string[]): AgentView {
 }
 
 /**
+ * The role that works stage `st` of card `c`: the stage's claim role, except that a tests-only card's build stage
+ * (`aom design --tests-only`, the change is only in E2E test files) is worked by the tester (BLOCKERS.md section 2).
+ * A text compare, so a malformed flag can never break the query.
+ */
+export const stageRoleSql = (c: string, st: string): string =>
+  `(CASE WHEN ${st}.claim_role = 'builder' AND ${c}.investigation->>'testsOnly' = 'true' THEN 'tester' ELSE ${st}.claim_role END)`;
+
+/**
  * How the eligibility clauses name the agent they test: the dispatcher binds one agent as query parameters
  * ($1..$8); the workability check (`queries/workability.ts`) tests every hired agent of a card's scope in one query,
  * so it names columns of `agents a` / `workstations ws` instead. Both build their clauses from `eligibility()` below,
@@ -92,7 +100,7 @@ export function eligibility(A: AgentRefs) {
                    WHERE aw.id = ${A.workstationId} AND apm.project_id = c.project_id AND apm.status = 'active')`,
     // A stage with a `fallback_role` (the QA steps: tester, else BA) is also taken by the fallback role while the
     // organization has no active agent of the stage's own role that may work the project.
-    role: `st.kind = 'agent' AND (st.claim_role = ${A.roleKey}
+    role: `st.kind = 'agent' AND (${stageRoleSql('c', 'st')} = ${A.roleKey}
       OR (st.fallback_role = ${A.roleKey} AND NOT EXISTS (
             SELECT 1 FROM agents fa WHERE fa.org_id = c.org_id AND fa.status = 'active' AND fa.role_key = st.claim_role
                AND (fa.allowed_project_ids IS NULL OR c.project_id = ANY (fa.allowed_project_ids)))))`,
@@ -204,7 +212,7 @@ WHERE c.status = 'queued'
                        AND aa.paused_at IS NULL AND ${reserveHolderCanTake('aa')}))
   -- Group builder affinity (lean team): the first builder of a group keeps the rest of its build cards, a hard clause, until it
   -- is gone or paused or the assignment expired. Review, test and the other roles are not held back.
-  AND (c.group_id IS NULL OR st.claim_role IS DISTINCT FROM 'builder' OR NOT EXISTS (
+  AND (c.group_id IS NULL OR ${stageRoleSql('c', 'st')} IS DISTINCT FROM 'builder' OR NOT EXISTS (
         SELECT 1 FROM card_groups g JOIN agents ga ON ga.id = g.builder_agent_id AND ga.status = 'active' AND ga.paused_at IS NULL
          WHERE g.project_id = c.project_id AND g.group_id = c.group_id AND g.until > $9::timestamptz
            AND ${reserveHolderCanTake('ga')}

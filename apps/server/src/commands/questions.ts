@@ -37,6 +37,25 @@ export interface QuestionResult {
   continueShift?: boolean;
 }
 
+/**
+ * Reads `--recommend <n>` against the question's options (BLOCKERS.md "Smaller friction seen"). Options count from 0; an
+ * agent that counts from 1 writes the number of the last option, which is one past the end: that one value is read as
+ * 1-based (`n - 1`). Any other value outside 0..count-1 is refused with the valid values listed.
+ */
+export function recommendIndex(
+  n: number,
+  labels: readonly string[],
+): { index: number; oneBased: boolean } | { error: string } {
+  const count = labels.length;
+  if (count === 0)
+    return { error: `--recommend ${n} needs an --option to recommend: add the options, or drop --recommend` };
+  if (Number.isInteger(n) && n >= 0 && n < count) return { index: n, oneBased: false };
+  if (n === count) return { index: count - 1, oneBased: true };
+  return {
+    error: `--recommend ${n} does not match an --option: options count from 0: ${labels.map((l, i) => `${i} = ${l}`).join(', ')}`,
+  };
+}
+
 /** The card plus the open cards that depend on it: what a blocking question holds up. */
 async function affectedCards(tx: Tx, card: Row): Promise<string[]> {
   const dependents = await rows<{ id: string }>(
@@ -80,11 +99,14 @@ export async function raiseQuestion(
       matches,
     };
   }
-  if (report.recommend !== undefined && report.recommend >= report.options.length) {
-    return {
-      accepted: false,
-      error: `--recommend ${report.recommend} does not match an --option (you gave ${report.options.length}; the first option is 0)`,
-    };
+  let recommend: number | undefined;
+  let recommendNote = '';
+  if (report.recommend !== undefined) {
+    const r = recommendIndex(report.recommend, report.options);
+    if ('error' in r) return { accepted: false, error: r.error };
+    recommend = r.index;
+    // always echoed, so an agent that counts from 1 sees which option it actually recommended
+    recommendNote = `\n--recommend ${report.recommend} was read as option ${r.index} ("${report.options[r.index]}"): options count from 0.`;
   }
   const repeated = await repeatGuard(ctx, tx, card, agent, report);
   if (repeated) return repeated;
@@ -129,7 +151,7 @@ export async function raiseQuestion(
         doing: report.doing,
         question: report.text,
         options,
-        ...(report.recommend !== undefined ? { recommendation: optionId(report.recommend) } : {}),
+        ...(recommend !== undefined ? { recommendation: optionId(recommend) } : {}),
         blocking: report.blocking,
         routedTo: route.routedTo,
         ...(route.routedAgentId ? { routedAgentId: route.routedAgentId } : {}),
@@ -185,12 +207,12 @@ export async function raiseQuestion(
   if (duplicate)
     return {
       accepted: true,
-      message: `Recorded. The same question is already open ("${duplicate.title}"), so yours was attached to it.${report.blocking ? ' The card is Blocked until it is answered. Finish now; do not make further changes.' : ' Carry on with your best assumption.'}${seen}`,
+      message: `Recorded. The same question is already open ("${duplicate.title}"), so yours was attached to it.${report.blocking ? ' The card is Blocked until it is answered. Finish now; do not make further changes.' : ' Carry on with your best assumption.'}${recommendNote}${seen}`,
       matches,
     };
   return {
     accepted: true,
-    message: routedMessage(route, report.blocking, seen),
+    message: routedMessage(route, report.blocking, `${recommendNote}${seen}`),
     matches,
   };
 }

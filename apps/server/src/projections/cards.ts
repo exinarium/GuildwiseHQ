@@ -392,6 +392,8 @@ export const cardProjectors: Record<string, Projector> = {
         ...(p.body ? { body: p.body } : {}),
         // a revised report keeps the assumptions it was reviewed against
         assumptions: p.assumptions ?? prev?.investigation?.assumptions ?? [],
+        // a tests-only card's build stage is worked by the tester (dispatcher stageRoleSql); a new report without it clears it
+        ...(p.testsOnly ? { testsOnly: true } : {}),
         at: e.createdAt,
       }),
       e.createdAt,

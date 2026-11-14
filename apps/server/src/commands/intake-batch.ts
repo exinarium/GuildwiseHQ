@@ -31,6 +31,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { type Responder, visibleProjects } from './intake.ts';
 import { agentBy, systemBy } from './phase-events.ts';
+import { recommendIndex } from './questions.ts';
 import type { ReportResult } from './shifts.ts';
 
 const COUNT_KEYS: BatchItemStatus[] = [
@@ -690,8 +691,12 @@ export async function applyBatchReport(
         return bad('the batch was cancelled. Finish now.');
       }
       const q = data.data;
-      if (q.recommend !== undefined && q.recommend >= q.options.length)
-        return bad(`--recommend ${q.recommend} does not match an --option (the first option is 0)`);
+      let recommend: number | undefined;
+      if (q.recommend !== undefined) {
+        const r = recommendIndex(q.recommend, q.options);
+        if ('error' in r) return bad(r.error);
+        recommend = r.index;
+      }
       const deskItemId = randomUUID();
       await ctx.store.append(
         [
@@ -705,7 +710,7 @@ export async function applyBatchReport(
                 doing: `Batch intake of ${item.external_key} (ticket ${item.position + 1} of the batch started ${iso(batch.created_at)?.slice(0, 16).replace('T', ' ')})`,
                 question: `${item.external_key}: ${q.question}`.slice(0, 20000),
                 options: q.options.map((label, i) => ({ id: optionId(i), label })),
-                ...(q.recommend !== undefined ? { recommendation: optionId(q.recommend) } : {}),
+                ...(recommend !== undefined ? { recommendation: optionId(recommend) } : {}),
                 blocking: false,
                 routedTo: 'manager',
                 chainLevel: 'desk',

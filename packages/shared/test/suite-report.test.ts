@@ -138,7 +138,7 @@ describe('parseTargetLine (P3)', () => {
   });
 });
 
-describe('tester instructions (v13): the target check', () => {
+describe('tester instructions (v14): the target check', () => {
   it('declares the target commit before failures', () => {
     const tester = BUILTIN_ROLES.find((r) => r.key === 'tester');
     expect(tester?.instructions).toContain('`Target commit: unknown`');
