@@ -214,6 +214,36 @@ describe('the public form page', () => {
     expect(calls.filter((c) => path(c) === '/submissions' && c.method === 'POST')).toHaveLength(2);
   });
 
+  it('shows the expired message, not the confirmation, when complete says the submission expired', async () => {
+    server();
+    const base = handler;
+    let expired = true;
+    handler = (c) => {
+      if (path(c) === `/submissions/${SID}/complete` && expired) {
+        expired = false;
+        return err(410, 'submission_expired');
+      }
+      return base(c);
+    };
+    render(<PublicFormPage publicId={PID} />);
+    const u = setup();
+    await fill(u);
+    await u.click(screen.getByTestId('form-submit'));
+    expect(await screen.findByTestId('public-notice')).toHaveTextContent(
+      /timed out before it was saved.*send the form again/i,
+    );
+    expect(screen.queryByTestId('form-confirmation')).toBeNull();
+    // no restart on its own: one submission so far, and the answers are still on the page
+    expect(calls.filter((c) => path(c) === '/submissions' && c.method === 'POST')).toHaveLength(1);
+    expect(screen.getByLabelText(/Full name/)).toHaveValue('Ann Example');
+    // Try again starts a new submission with the kept answers and file
+    await u.click(screen.getByTestId('public-retry'));
+    expect(await screen.findByTestId('form-confirmation')).toBeInTheDocument();
+    const starts = calls.filter((c) => path(c) === '/submissions' && c.method === 'POST');
+    expect(starts).toHaveLength(2);
+    expect(starts[1]?.body.answers).toEqual({ full_name: 'Ann Example' });
+  });
+
   it('shows the offline flow answer as the final state', async () => {
     server();
     const base = handler;

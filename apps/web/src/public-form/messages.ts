@@ -79,6 +79,12 @@ export function describePublicError(
     case 'invalid_answers':
     case 'too_many_files':
       return msg('Some answers need attention. Please check the form and send again.');
+    // the submission timed out while it was being saved: "Try again" starts a new one with what is kept
+    case 'submission_expired':
+      return msg(
+        'This submission timed out before it was saved. Please send the form again. Your answers and files are still here.',
+        true,
+      );
     case 'submission_refused':
       return msg('We could not accept this submission. Please try again.', true);
     // raised by the page itself: this browser cannot do the check the form needs before sending
