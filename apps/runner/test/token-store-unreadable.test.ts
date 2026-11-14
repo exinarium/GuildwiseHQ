@@ -8,7 +8,7 @@ import { cleanupTmp, tmp } from './helpers.ts';
 cleanupTmp();
 
 const key = () => Buffer.alloc(32, 9);
-const TOKENS = ['made-up-token-one', 'made-up-token-two', 'made-up-token-new'];
+const TOKENS: [string, string, string] = ['made-up-token-one', 'made-up-token-two', 'made-up-token-new'];
 afterEach(() => {
   for (const t of TOKENS) unregisterSecret(t);
 });
@@ -51,7 +51,7 @@ describe('git-tokens.json that is not a readable token file is kept, not migrate
       s.set({ provider: 'gitlab', host: 'gitlab.com', token: TOKENS[2] });
       const kept = quarantined(dir);
       expect(kept).toHaveLength(1);
-      expect(readFileSync(join(dir, kept[0]), 'utf8')).toBe(bytes);
+      expect(readFileSync(join(dir, kept[0] ?? ''), 'utf8')).toBe(bytes);
       expect(s.problem()).toBeUndefined();
       expect(s.get('gitlab', 'gitlab.com')?.token).toBe(TOKENS[2]);
     });
@@ -100,13 +100,13 @@ describe('files that still read', () => {
     const { file } = setup();
     const s = new FileTokenStore(file, key);
     s.set({ provider: 'gitlab', host: 'gitlab.com', token: TOKENS[0] });
-    s.set({ provider: 'bitbucket', host: 'bitbucket.org', token: TOKENS[1], user: 'me' });
+    s.set({ provider: 'bitbucket-cloud', host: 'bitbucket.org', token: TOKENS[1], user: 'me' });
     const again = new FileTokenStore(file, key);
     expect(again.problem()).toBeUndefined();
     expect(again.get('gitlab', 'gitlab.com')?.token).toBe(TOKENS[0]);
     expect(again.list()).toHaveLength(2);
     expect(again.remove('gitlab', 'gitlab.com')).toBe(true);
     expect(again.get('gitlab', 'gitlab.com')).toBeUndefined();
-    expect(again.get('bitbucket', 'bitbucket.org')?.token).toBe(TOKENS[1]);
+    expect(again.get('bitbucket-cloud', 'bitbucket.org')?.token).toBe(TOKENS[1]);
   });
 });
