@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { createApp } from './app.ts';
-import { loadConfig } from './config.ts';
+import { loadConfig, parseEncodeThreads } from './config.ts';
 import { clipCatalogForPrompt, loadClipCatalog } from './video/clips.ts';
 import { startPushServer } from './video/push.ts';
 import { renderScriptFile } from './video/renders.ts';
@@ -71,6 +71,8 @@ async function main(): Promise<void> {
     outDir: values.out,
     silentFallback: values.silent,
     coverName: values.cover,
+    encodeThreads: parseEncodeThreads(process.env.AOM_VIDEO_ENCODE_THREADS),
+    renderLabel: `script ${values.render}`,
     log: (l) => console.log(l),
   });
   console.log(
