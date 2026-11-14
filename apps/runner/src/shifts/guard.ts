@@ -1,6 +1,11 @@
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { lstat, readlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type AgentPermissions,
   CARD_BRANCH_PREFIXES,
+  e2eTestPathMatcher,
   type GuardViolation,
   guardsInternalRef,
   isRunnerOwnedBranch,
@@ -105,6 +110,87 @@ export interface GuardInput {
    * shift's commits and branches must not name the card's internal ref (`cardRef`).
    */
   clientRef?: string;
+  /**
+   * Fingerprints of the paths that were already dirty when the shift started (`snapshotDirty`). A path whose fingerprint
+   * is unchanged at the end is not this shift's change (a submodule left off its pin, a file the sandbox or a person left
+   * behind): no role check counts it, and the out-of-scope discard leaves it alone (BLOCKERS.md section 3).
+   */
+  dirtyAtStart?: DirtySnapshot;
+}
+
+/**
+ * The builder guard's E2E rule: a changed path inside the project's E2E globs that is real test content (a spec or its
+ * support code; not docs, package.json, lock files or JSON configuration). One shared rule (`e2eTestPathMatcher`), here
+ * with the guard's picomatch semantics.
+ */
+export const builderE2eMatcher = (globs: readonly string[]): ((path: string) => boolean) =>
+  e2eTestPathMatcher(globs, (g) => picomatch([...g], { dot: true }));
+
+/** `{ path: fingerprint }` of the paths that were dirty at the shift start. */
+export type DirtySnapshot = Record<string, string>;
+
+/** At most this many dirty paths are fingerprinted at the shift start (the rest are judged as before). */
+export const DIRTY_SNAPSHOT_MAX = 500;
+
+/**
+ * What a dirty path looks like now: `gone` (missing), `link:<target>`, `sub:<HEAD>:<sha1 of status and diff>` for a
+ * checked-out submodule (`empty` when it is not initialised), or the file's blob id. Null when it cannot be read: such a
+ * path never counts as untouched.
+ */
+async function dirtyFingerprint(worktree: string, path: string): Promise<string | null> {
+  const abs = join(worktree, path);
+  let st: Awaited<ReturnType<typeof lstat>>;
+  try {
+    st = await lstat(abs);
+  } catch {
+    return 'gone';
+  }
+  if (st.isSymbolicLink()) {
+    try {
+      return `link:${await readlink(abs)}`;
+    } catch {
+      return null;
+    }
+  }
+  if (st.isDirectory()) {
+    // without its own .git, git would answer for the superproject
+    if (!existsSync(join(abs, '.git'))) return 'empty';
+    const head = await git(abs, ['rev-parse', 'HEAD']);
+    if (head.exitCode !== 0) return null;
+    const status = await git(abs, ['status', '--porcelain', '--untracked-files=all']);
+    const diff = await git(abs, ['diff', 'HEAD']);
+    if (status.exitCode !== 0 || diff.exitCode !== 0) return null;
+    const sum = createHash('sha1').update(status.stdout).update('\0').update(diff.stdout).digest('hex');
+    return `sub:${head.stdout.trim()}:${sum}`;
+  }
+  const h = await git(worktree, ['hash-object', '--', path]);
+  return h.exitCode === 0 && h.stdout.trim() ? `file:${h.stdout.trim()}` : null;
+}
+
+/** Fingerprints of the paths that are dirty now (at the shift start), at most `DIRTY_SNAPSHOT_MAX` of them. */
+export async function snapshotDirty(worktree: string): Promise<DirtySnapshot> {
+  const snap: DirtySnapshot = {};
+  for (const p of (await dirtyPaths(worktree)).slice(0, DIRTY_SNAPSHOT_MAX)) {
+    const f = await dirtyFingerprint(worktree, p);
+    if (f !== null) snap[p] = f;
+  }
+  return snap;
+}
+
+/** Of `paths`, those that were dirty at the shift start and look exactly the same now. */
+export async function untouchedSinceStart(
+  worktree: string,
+  snap: DirtySnapshot | undefined,
+  paths: readonly string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!snap) return out;
+  for (const p of paths) {
+    const before = snap[p];
+    if (before === undefined) continue;
+    if ((await dirtyFingerprint(worktree, p)) === before) out.add(p);
+  }
+  return out;
 }
 
 /**
@@ -463,8 +549,10 @@ export async function discardOutOfScope(input: GuardInput): Promise<DiscardResul
   if (bad.length === 0) return result;
   const ex = await mergeExemptions(input.worktree, input.startSha, opts);
   const own = new Set([...(await dirtyPaths(input.worktree)), ...(await ownCommitPaths(input))]);
+  // already dirty when the shift started and unchanged since: not the shift's own change
+  const before = await untouchedSinceStart(input.worktree, input.dirtyAtStart, bad);
   for (const p of bad) {
-    if (!own.has(p)) {
+    if (!own.has(p) || before.has(p)) {
       result.kept.push(p);
       continue;
     }
@@ -499,7 +587,10 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     ];
   }
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-  const changed = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
+  const all = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
+  // Paths that were already dirty at the shift start and are unchanged are not this shift's doing (BLOCKERS.md section 3).
+  const untouched = await untouchedSinceStart(input.worktree, input.dirtyAtStart, all);
+  const changed = all.filter((p) => !untouched.has(p));
 
   if (!input.permissions.mayCommit && (head !== input.startSha || changed.length > 0)) {
     violations.push({
@@ -535,8 +626,9 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
 
   // Builders never do E2E testing: the tester owns the E2E paths (spec "Testing strategy").
+  // Only real test content counts (docs, package.json, lock files and JSON configuration in the E2E folders do not).
   if (input.roleKey === 'builder' && input.e2eGlobs.length > 0) {
-    const isE2e = picomatch(input.e2eGlobs, { dot: true });
+    const isE2e = builderE2eMatcher(input.e2eGlobs);
     const touched = await netChangedFromBase(
       input.worktree,
       input.baseBranch,
