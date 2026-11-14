@@ -91,7 +91,7 @@ describe('buildHashtags', () => {
     ).toEqual(['a1', 'b2', 'c3']);
   });
 
-  it('fits a character room: pool tags are dropped first, then topical ones', () => {
+  it('fits the room the text leaves: pool tags only while they fit, topical tags are never dropped here', () => {
     const full = buildHashtags({ topical: ['Topical'], pools: POOLS, max: 3, seed: 'r' });
     expect(full).toHaveLength(3);
     const first = full[0] as string;
@@ -108,7 +108,39 @@ describe('buildHashtags', () => {
     expect(
       buildHashtags({ topical: ['Topical'], pools: POOLS, max: 3, seed: 'r', room: hashtagRun([first]) }),
     ).toEqual(['Topical']);
-    expect(buildHashtags({ topical: ['Topical'], pools: POOLS, max: 3, seed: 'r', room: 3 })).toEqual([]);
+    // no room at all: the topical tag stays (the composer cuts the text for it), no pool tag
+    expect(buildHashtags({ topical: ['Topical'], pools: POOLS, max: 3, seed: 'r', room: 3 })).toEqual([
+      'Topical',
+    ]);
+    expect(buildHashtags({ topical: ['Topical'], pools: POOLS, max: 3, seed: 'r', room: -20 })).toEqual([
+      'Topical',
+    ]);
+  });
+
+  it('a slot a dropped pool tag frees goes back to a topical tag the reserve had cut', () => {
+    // three topical tags on X (max 3): the reserve keeps one, the pools take two; with no room the topical tags return
+    expect(buildHashtags({ topical: ['a1', 'b2', 'c3'], pools: POOLS, max: 3, seed: 'r', room: 0 })).toEqual([
+      'a1',
+      'b2',
+      'c3',
+    ]);
+    // the full set fits exactly: kept; one character less: the last pool tag goes and b2 takes its slot
+    const full = buildHashtags({ topical: ['a1', 'b2', 'c3'], pools: POOLS, max: 3, seed: 'r' });
+    expect(full[0]).toBe('a1');
+    expect(
+      buildHashtags({ topical: ['a1', 'b2', 'c3'], pools: POOLS, max: 3, seed: 'r', room: hashtagRun(full) }),
+    ).toEqual(full);
+    const less = buildHashtags({
+      topical: ['a1', 'b2', 'c3'],
+      pools: POOLS,
+      max: 3,
+      seed: 'r',
+      room: hashtagRun(full) - 1,
+    });
+    expect(less.slice(0, 2)).toEqual(['a1', 'b2']);
+    expect(
+      hashtagRun(less.slice(2)) <= hashtagRun(full) - 1 - hashtagRun(['a1', 'b2']) || less[2] === 'c3',
+    ).toBe(true);
   });
 });
 

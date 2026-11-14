@@ -107,8 +107,11 @@ export interface BuildHashtagsInput {
   /** What the rotation is derived from (a slug, a version, a title): the same seed gives the same tags. */
   seed: string;
   /**
-   * Characters the tag run (` #a #b`) may take, for networks where the text and the tags share one limit (X, Bluesky).
-   * When the tags do not fit, they are dropped from the end: pool tags first, then topical ones.
+   * Characters the text leaves for the tag run (` #a #b`), for networks where the text and the tags share one limit
+   * (X, Bluesky): `total - text`. Pool tags are kept only while the run fits it (the text is never cut for a pool tag);
+   * a slot a dropped pool tag frees goes back to a topical tag. Topical tags are never dropped here: they follow the
+   * composer's rule (`composeCaption`: the text is cut for them, and they go only when it would be left with almost
+   * no room).
    */
   room?: number | undefined;
   /** At most this many tags from each pool (default 2). */
@@ -148,8 +151,17 @@ export function buildHashtags(o: BuildHashtagsInput): string[] {
       progress = true;
     }
   }
-  if (o.room !== undefined) while (out.length && hashtagRun(out) > o.room) out.pop();
-  return out;
+  if (o.room === undefined) return out;
+  const room = o.room;
+  const pool = out.slice(Math.min(topical.length, Math.max(0, max - reserve)));
+  const isDup = (t: string) => pool.some((x) => x.toLowerCase() === t.toLowerCase());
+  const withTopical = () => [...topical.filter((t) => !isDup(t)).slice(0, max - pool.length), ...pool];
+  let fitted = withTopical();
+  while (pool.length && hashtagRun(fitted) > room) {
+    pool.pop();
+    fitted = withTopical();
+  }
+  return fitted;
 }
 
 /**
