@@ -54,11 +54,11 @@ test('the chart shows the manager, the BA, the departments and every agent with 
   await expect(page.locator('[data-edge="peer"]').first()).toBeAttached();
   await expect(page.locator('[data-edge="ba"]').first()).toBeAttached();
   await expect(page.locator('[data-edge="desk"]').first()).toBeAttached();
-  // the junior builder's label says where its questions go
+  // the junior builder's accessible name says where its questions go
   const bud = tile(page, 'Bud');
-  await expect(bud).toHaveAttribute('aria-label', /Escalates to Sam \(senior builder\)/);
+  await expect(bud).toHaveAccessibleName(/Escalates to Sam \(senior builder\)/);
   const sam = tile(page, 'Sam');
-  await expect(sam).toHaveAttribute('aria-label', /Escalates to the BA \(Bea\)/);
+  await expect(sam).toHaveAccessibleName(/Escalates to the BA \(Bea\)/);
   await expect(page.getByTestId('org-summary')).toContainText('agents');
 });
 

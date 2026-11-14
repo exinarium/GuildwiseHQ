@@ -33,6 +33,11 @@ export function AgentTile({
   const meta = STATUS_META[agent.status];
   const Icon = ICON[agent.status];
   const line = statusLine(agent);
+  const senior = agent.seniority === 'senior';
+  // No aria-label: the button is named by what it shows, in the order it is shown (WCAG 2.5.3 "Label in Name": someone
+  // who speaks what they see must hit the name), followed by what is not shown, as screen-reader-only text. The face is
+  // decoration here (the name is next to it). The spaces between the parts are real text, so the name reads as words
+  // whether or not a style sheet makes the parts blocks.
   return (
     <button
       type="button"
@@ -42,7 +47,6 @@ export function AgentTile({
       data-paused={paused || undefined}
       onClick={() => onOpen(agent)}
       aria-haspopup="dialog"
-      aria-label={`${agent.name}, ${agent.seniority} ${agent.roleLabel}. ${line}${paused ? ', paused' : ''}.${escalation ? ` Escalates to ${escalation}.` : ''} Open details`}
       style={style}
       className={cx(
         'group flex items-center gap-2.5 rounded-card border border-line bg-surface p-2.5 text-left shadow-sm transition-[border-color,box-shadow] duration-100',
@@ -52,7 +56,10 @@ export function AgentTile({
         className,
       )}
     >
-      <span className={cx('shrink-0 rounded-full p-0.5 ring-2 ring-offset-2 ring-offset-surface', meta.ring)}>
+      <span
+        aria-hidden="true"
+        className={cx('shrink-0 rounded-full p-0.5 ring-2 ring-offset-2 ring-offset-surface', meta.ring)}
+      >
         <AgentAvatar
           agentId={agent.id}
           name={agent.name}
@@ -63,14 +70,14 @@ export function AgentTile({
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-base leading-tight font-semibold text-fg">{agent.name}</span>
+        <span className="block truncate text-base leading-tight font-semibold text-fg">{agent.name}</span>{' '}
         <span
           className="line-clamp-2 text-xs leading-snug text-muted"
           title={`${agent.roleLabel}, ${agent.seniority}`}
         >
           {agent.roleLabel}
-          {agent.seniority === 'senior' ? ' · senior' : ''}
-        </span>
+          {senior ? ' · senior' : ''}
+        </span>{' '}
         <span
           className={cx(
             'mt-0.5 flex items-center gap-1 truncate text-xs',
@@ -82,16 +89,23 @@ export function AgentTile({
         >
           <Icon aria-hidden="true" className="size-3 shrink-0" />
           <span className="truncate">{line}</span>
-        </span>
+        </span>{' '}
         {paused && (
           <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-warning-soft-fg">
             <PauseCircle aria-hidden="true" className="size-3 shrink-0" />
             Paused
           </span>
         )}
+        {paused && ' '}
         {agent.workstation && (
           <span className="block truncate text-[11px] text-subtle">{agent.workstation.name}</span>
         )}
+        {agent.workstation && ' '}
+        <span className="sr-only">
+          {senior ? '' : `${agent.seniority}. `}
+          {escalation ? `Escalates to ${escalation}. ` : ''}
+          Open details
+        </span>
       </span>
     </button>
   );
