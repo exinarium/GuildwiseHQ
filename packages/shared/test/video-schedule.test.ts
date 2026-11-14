@@ -197,10 +197,10 @@ describe('schedule validation', () => {
 });
 
 describe('captions per destination', () => {
-  it('limits: the four networks as before, Instagram and TikTok 2,200 with 3 to 5 tags, YouTube a 100-character title', () => {
+  it('limits: the four networks as before, Instagram 2,200 with 3 to 5 tags, TikTok 2,200 with 3 to 8, YouTube a 100-character title', () => {
     expect(VIDEO_CAPTION_LIMITS.x).toMatchObject({ total: 256 });
     expect(VIDEO_CAPTION_LIMITS.instagram).toMatchObject({ total: 2200, tags: [3, 5] });
-    expect(VIDEO_CAPTION_LIMITS.tiktok).toMatchObject({ total: 2200, tags: [3, 5] });
+    expect(VIDEO_CAPTION_LIMITS.tiktok).toMatchObject({ total: 2200, tags: [3, 8] });
     expect(VIDEO_CAPTION_LIMITS.youtube.title).toBe(100);
   });
   it('composes Instagram and TikTok as one block that fits, hashtags last', () => {

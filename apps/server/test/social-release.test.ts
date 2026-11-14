@@ -201,7 +201,12 @@ describe('release posts: sharing', () => {
       'http://aom.test/releases/1.6.0?utm_source=facebook&utm_medium=social&utm_campaign=release-1.6.0',
     );
     expect(fb?.imageUrl).toBe('http://aom.test/blog/cover/release.png');
-    expect(fb?.tags).toEqual(['GuildwiseHQ']);
+    // the release's own tag first, then the hashtag pools (the default pools: no setting is stored)
+    expect(fb?.tags?.[0]).toBe('GuildwiseHQ');
+    expect(fb?.tags).toEqual(
+      draftFromRelease(getRelease('1.6.0', t.app.ctx) as NonNullable<ReturnType<typeof getRelease>>).captions
+        .hashtags?.facebook,
+    );
     expect(fb?.text).toContain('1.6.0');
     expect(fb?.title).toContain('1.6.0');
     expect(fb?.accessToken).toBe(TOKEN);

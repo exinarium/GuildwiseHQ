@@ -7,6 +7,7 @@ import {
   DestinationError,
   type DestinationIO,
   type DestinationPayload,
+  IG_PROCESSING_ATTEMPTS,
 } from '../src/video/destinations.ts';
 
 /**
@@ -177,6 +178,107 @@ describe('Instagram Reels', () => {
     router = () => ({ json: { status_code: 'ERROR', status: 'bad codec' } });
     await expect(client.publish(payload('instagram'), state)).rejects.toMatchObject({ kind: 'final' });
     expect(state.state.igContainer).toBeUndefined();
+  });
+
+  it('a ProcessingFailedError on the upload is retried (bounded) with a new container; nothing is published twice', async () => {
+    let containers = 0;
+    let uploads = 0;
+    router = (c) => {
+      if (path(c).endsWith('/ig-1/media')) return { json: { id: `c${++containers}` } };
+      if (c.url.startsWith('https://rupload.facebook.com/ig-api-upload/'))
+        return ++uploads === 1
+          ? {
+              status: 400,
+              json: {
+                debug_info: {
+                  retriable: false,
+                  type: 'ProcessingFailedError',
+                  message: 'Request processing failed',
+                },
+              },
+            }
+          : { json: { success: true } };
+      if (c.url.includes('?fields=status_code')) return { json: { status_code: 'FINISHED' } };
+      if (path(c).endsWith('/ig-1/media_publish')) return { json: { id: 'm7' } };
+      if (c.url.includes('/m7?fields=permalink'))
+        return { json: { permalink: 'https://www.instagram.com/reel/m7/' } };
+      return undefined;
+    };
+    const state = io();
+    const err = await client.publish(payload('instagram', { accountId: 'ig-1' }), state).catch((e) => e);
+    expect(err).toBeInstanceOf(DestinationError);
+    expect(err).toMatchObject({ kind: 'retry', code: 'ig_processing', maxAttempts: IG_PROCESSING_ATTEMPTS });
+    expect(err.message).toMatch(/Instagram upload: HTTP 400: .*ProcessingFailedError/);
+    expect(state.state.igContainer).toBeUndefined(); // the next attempt does not reuse the container
+    expect(calls.some((c) => c.url.includes('media_publish'))).toBe(false);
+    // the retry: a new container, the upload, then one publish
+    const out = await client.publish(payload('instagram', { accountId: 'ig-1' }), state);
+    expect(out).toMatchObject({ done: true, externalId: 'm7' });
+    expect(calls.filter((c) => c.url.startsWith('https://rupload')).map((c) => path(c))).toEqual([
+      '/ig-api-upload/v26.0/c1',
+      '/ig-api-upload/v26.0/c2',
+    ]);
+    expect(calls.filter((c) => c.url.includes('media_publish'))).toHaveLength(1);
+  });
+
+  it("classifies Instagram's errors: the transient Graph 100 is retried, the token is auth, other refusals stay final", async () => {
+    const container = (status: number, json: unknown) => {
+      router = (c) => (path(c).endsWith('/media') ? { status, json } : undefined);
+      return client.publish(payload('instagram'), io());
+    };
+    await expect(
+      container(400, {
+        error: {
+          code: 100,
+          message:
+            "Unsupported post request. Object with ID '1784' does not exist, cannot be loaded due to missing permissions, or does not support this operation",
+        },
+      }),
+    ).rejects.toMatchObject({ kind: 'retry', maxAttempts: IG_PROCESSING_ATTEMPTS });
+    await expect(
+      container(400, { error: { code: 36000, message: 'x', is_transient: true } }),
+    ).rejects.toMatchObject({ kind: 'retry', maxAttempts: IG_PROCESSING_ATTEMPTS });
+    // a rate limit keeps its own rule: retried within the posting window, not counted as processing
+    const rate = await container(400, { error: { code: 4, message: 'x' } }).catch((e) => e);
+    expect(rate).toMatchObject({ kind: 'retry' });
+    expect(rate.maxAttempts).toBeUndefined();
+    // final: an invalid parameter (the media does not meet the spec) and an unknown refusal
+    const invalid = await container(400, {
+      error: { code: 100, message: 'The video file you selected is in a format that we do not support.' },
+    }).catch((e) => e);
+    expect(invalid).toMatchObject({ kind: 'final' });
+    expect(invalid.maxAttempts).toBeUndefined();
+    await expect(
+      container(400, { error: { code: 9004, message: 'media type not supported' } }),
+    ).rejects.toMatchObject({
+      kind: 'final',
+    });
+    // the token and permissions: auth, never retried as processing
+    const auth = await container(400, { error: { code: 190, message: 'expired', is_transient: true } }).catch(
+      (e) => e,
+    );
+    expect(auth).toMatchObject({ kind: 'auth' });
+    await expect(container(400, { error: { code: 10, message: 'no permission' } })).rejects.toMatchObject({
+      kind: 'auth',
+    });
+    // a 400 upload that is not ProcessingFailedError keeps the general rule (final)
+    router = (c) => {
+      if (path(c).endsWith('/media')) return { json: { id: 'c9' } };
+      if (c.url.startsWith('https://rupload'))
+        return { status: 400, json: { debug_info: { type: 'InvalidVideo' } } };
+      return undefined;
+    };
+    await expect(client.publish(payload('instagram'), io())).rejects.toMatchObject({ kind: 'final' });
+  });
+
+  it('Facebook keeps its rules: Graph 100 stays final there', async () => {
+    router = () => ({
+      status: 400,
+      json: { error: { code: 100, message: 'Unsupported post request. Object with ID does not exist' } },
+    });
+    const err = await client.publish(payload('facebook'), io()).catch((e) => e);
+    expect(err).toMatchObject({ kind: 'final' });
+    expect(err.maxAttempts).toBeUndefined();
   });
 
   it('checks an account id', async () => {

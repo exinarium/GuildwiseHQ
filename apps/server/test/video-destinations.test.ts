@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { VideoScript } from '@aom/shared';
+import { HASHTAG_POOLS, type VideoScript } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { encryptSecret, signingKey } from '../src/auth/secrets.ts';
 import { slipVideoPost } from '../src/commands/video-posts.ts';
@@ -11,6 +11,7 @@ import {
   type DestinationIO,
   type DestinationOutcome,
   type DestinationPayload,
+  IG_PROCESSING_ATTEMPTS,
   type TikTokCreatorInfo,
   type TikTokTokens,
   type VideoDestinationClient,
@@ -23,7 +24,7 @@ import { CaptureMailer } from './helpers/blog.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { ok } from './helpers/world.ts';
 
-type Step = 'ok' | 'auth' | 'retry' | 'final' | 'processing';
+type Step = 'ok' | 'auth' | 'retry' | 'final' | 'processing' | 'igfail';
 
 /** Every destination at once, scripted per network. Nothing here reaches a real network. */
 class FakeDestinations implements VideoDestinationClient {
@@ -50,6 +51,13 @@ class FakeDestinations implements VideoDestinationClient {
     if (step === 'auth') throw new DestinationError('auth', 'HTTP 401: token expired');
     if (step === 'retry') throw new DestinationError('retry', 'HTTP 503: try later');
     if (step === 'final') throw new DestinationError('final', 'HTTP 400: the video is not acceptable');
+    if (step === 'igfail')
+      throw new DestinationError(
+        'retry',
+        'Instagram upload: HTTP 400: ProcessingFailedError',
+        'ig_processing',
+        IG_PROCESSING_ATTEMPTS,
+      );
     if (step === 'processing') {
       io.state.stage = 'uploaded';
       await io.save();
@@ -348,6 +356,29 @@ describe('posting at the slot', () => {
     expect((await post(p.id)).render.files).not.toContain('video');
   });
 
+  it('a default caption carries the hashtag pools in force: the settings override the built-in ones, empty is off', async () => {
+    try {
+      await q(
+        `INSERT INTO platform_settings (key, value, updated_at) VALUES
+           ('blog_writer_hashtags_standing', '[]'::jsonb, now()),
+           ('blog_writer_hashtags_popular', '["OwnersPick"]'::jsonb, now())`,
+      );
+      const status = await ok(api('GET', '/api/platform/video/status'));
+      expect(status.hashtagPools).toEqual({ standing: [], popular: ['OwnersPick'] });
+      const p = await submit('pools-override');
+      await ok(sched(p.id, { mode: 'now', destinations: ['instagram'] }));
+      await tick();
+      await tick();
+      const text = dest.payloads.find((x) => x.network === 'instagram')?.text ?? '';
+      const tagLine = text.split('\n').at(-1) ?? '';
+      expect(tagLine).toContain('#OwnersPick');
+      for (const t of HASHTAG_POOLS.standing) expect(tagLine).not.toContain(`#${t}`);
+      expect(tagLine.split(' ').length).toBeLessThanOrEqual(5);
+    } finally {
+      await q(`DELETE FROM platform_settings WHERE key LIKE 'blog_writer_hashtags_%'`);
+    }
+  });
+
   it('"publish now" posts as soon as the file exists', async () => {
     const p = await submit('publish-now');
     await ok(sched(p.id, { mode: 'now', destinations: ['facebook'] }));
@@ -483,6 +514,52 @@ describe('errors', () => {
     expect(mail.sent.filter((m) => /Posting videos to Bluesky/.test(m.subject))).toHaveLength(1);
     expect(s.id).toBe(p.id);
     expect(s2.id).toBe(q2.id);
+  });
+
+  it('an Instagram processing failure is retried with back-off, then posted', async () => {
+    dest.script.instagram = ['igfail', 'igfail'];
+    const { p } = await setup('ig-retry-ok', ['instagram']);
+    await tick();
+    const r1 = await share(p.id, 'instagram');
+    expect([r1?.status, r1?.attempts]).toEqual(['pending', 1]);
+    expect(r1?.error).toMatch(/ProcessingFailedError/);
+    t.clock.advance(61_000);
+    await tick();
+    const r2 = await share(p.id, 'instagram');
+    expect([r2?.status, r2?.attempts]).toEqual(['pending', 2]);
+    const wait = Date.parse(r2?.next_attempt_at) - t.clock.now().getTime();
+    expect(wait).toBeGreaterThan(4 * 60_000); // the back-off grows: 1 minute, then 5
+    expect(wait).toBeLessThanOrEqual(5 * 60_000);
+    t.clock.advance(5 * 60_000 + 1000);
+    await tick();
+    expect((await share(p.id, 'instagram'))?.status).toBe('sent');
+    expect(dest.payloads.filter((x) => x.network === 'instagram')).toHaveLength(3);
+  });
+
+  it('an Instagram processing failure gives up after its number of attempts, with an alert', async () => {
+    dest.script.instagram = Array(10).fill('igfail');
+    const { p } = await setup('ig-retry-exhausted', ['instagram']);
+    await tick();
+    for (let i = 0; i < 10 && (await share(p.id, 'instagram'))?.status !== 'failed'; i++) {
+      t.clock.advance(31 * 60_000);
+      await tick();
+    }
+    const f = await share(p.id, 'instagram');
+    expect(f?.status).toBe('failed');
+    expect(f?.error).toMatch(
+      new RegExp(`gave up after ${IG_PROCESSING_ATTEMPTS} attempts: Instagram upload`),
+    );
+    expect(dest.payloads.filter((x) => x.network === 'instagram')).toHaveLength(IG_PROCESSING_ATTEMPTS);
+    expect(mail.sent.filter((m) => /Posting videos to Instagram/.test(m.subject))).toHaveLength(1);
+  });
+
+  it('an Instagram error that cannot succeed on retry stays final at once', async () => {
+    dest.script.instagram = ['final'];
+    const { p } = await setup('ig-final', ['instagram']);
+    await tick();
+    const f = await share(p.id, 'instagram');
+    expect([f?.status, f?.error]).toEqual(['failed', 'HTTP 400: the video is not acceptable']);
+    expect(dest.payloads.filter((x) => x.network === 'instagram')).toHaveLength(1);
   });
 
   it('a processing destination is polled again later without counting as a failure', async () => {

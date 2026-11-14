@@ -86,7 +86,7 @@ export interface Caption {
   text: string;
   tags: string[];
 }
-/** The caption the owner starts from for a destination: the description's hook and the hashtags (no link). */
+/** The caption the owner starts from for a destination: the description's hook and the hashtags plus pool tags (no link). */
 export const defaultCaption = defaultVideoCaption;
 
 const UNLIMITED = { total: 1_000_000, text: 1_000_000, title: 1_000_000 };
