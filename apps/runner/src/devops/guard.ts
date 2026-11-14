@@ -601,7 +601,8 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
     }
   }
   if (!moves) return null;
-  const head = dir === null ? 'unknown' : (c.deps.headBranch?.(dir) ?? 'unknown');
+  // null (detached) must stay null: only a missing lookup counts as unknown
+  const head = dir === null || !c.deps.headBranch ? 'unknown' : c.deps.headBranch(dir);
   if (head === null) return null;
   if (head === 'unknown') return frozenRefusal(first);
   return frozen.has(head) ? frozenRefusal(head) : null;
