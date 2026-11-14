@@ -88,7 +88,8 @@ describe('neutraliseOutsideSymlinks', () => {
     const { root } = setup();
     symlinkSync('b', join(root, 'a'));
     symlinkSync('a', join(root, 'b'));
-    expect(neutraliseOutsideSymlinks(root).map((d) => d.path)).toEqual(['a', 'b']);
+    // once a is replaced by a file, b points at an in-tree file: neither leads outside
+    expect(neutraliseOutsideSymlinks(root).map((d) => d.path)).toEqual(['a']);
   });
 
   it('judges links that go through an in-tree directory link by the real path', () => {

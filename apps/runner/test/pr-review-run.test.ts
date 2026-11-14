@@ -381,7 +381,9 @@ describe('AC4: any other failure returns no findings and says why', () => {
     fx.deps.log = (l: string) => lines.push(l);
     await run();
     const msg = (fx.starts[0] as ChatStartInput).message;
-    expect(msg).toContain('<untrusted>\n"docs/notes.txt" -> "/home/someone/.bashrc"\n"weird\\nname" -> "b"\n</untrusted>');
+    expect(msg).toContain(
+      '<untrusted>\n"docs/notes.txt" -> "/home/someone/.bashrc"\n"weird\\nname" -> "b"\n</untrusted>',
+    );
     const line = lines.find((l) => l.includes('neutralised'));
     expect(line).toContain('neutralised 2 symlinks');
     expect(line).toContain('"docs/notes.txt"');
