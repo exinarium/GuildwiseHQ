@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { nextDay, zonedDayStart } from '../costs/index.ts';
 import { Usage } from '../events/define.ts';
+import { localParts } from '../reporter/index.ts';
 import { GitRefSchema } from '../safe.ts';
 import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
 
@@ -13,6 +15,14 @@ export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed'] as const;
 export const PrReviewStateSchema = z.enum(PR_REVIEW_STATES);
 export type PrReviewState = z.infer<typeof PrReviewStateSchema>;
 
+export const PR_REVIEW_TRIGGERS = ['auto', 'manual'] as const;
+export const PrReviewTriggerSchema = z.enum(PR_REVIEW_TRIGGERS);
+export type PrReviewTrigger = z.infer<typeof PrReviewTriggerSchema>;
+
+/** today: inside today's admission window; later: waits for a following day; blocked: no ready reviewer workstation. */
+export const PrReviewQueueSlotSchema = z.enum(['today', 'later', 'blocked']);
+export type PrReviewQueueSlot = z.infer<typeof PrReviewQueueSlotSchema>;
+
 /** At most this many open pull requests are listed per repository and poll; above it the list is not complete. */
 export const PR_LIST_LIMIT = 200;
 
@@ -25,6 +35,8 @@ export const OpenChangeSchema = z.object({
   head: z.string().max(200),
   base: z.string().max(200),
   createdAt: z.iso.datetime({ offset: true }),
+  /** Added + removed lines as the forge reports them; null/absent when it does not say. */
+  changedLines: z.number().int().nonnegative().nullable().optional(),
 });
 export type OpenChange = z.infer<typeof OpenChangeSchema>;
 
@@ -201,6 +213,9 @@ export const PrReviewDtoSchema = z.object({
   unmarkedCount: z.number().optional(),
   /** `missing`: the repository's workstation holds no comment-only token, so no run starts. */
   reviewerToken: z.enum(['present', 'missing']).nullable(),
+  /** Place in the run queue and why it waits; null when the pull request is not waiting in the queue. */
+  queuePosition: z.number().int().positive().nullable().optional(),
+  queueSlot: PrReviewQueueSlotSchema.nullable().optional(),
   lastRun: z
     .object({
       state: PrReviewRunStateSchema,
@@ -212,6 +227,7 @@ export const PrReviewDtoSchema = z.object({
       code: z.string().nullable(),
       postedCount: z.number(),
       reviewUrl: z.string().nullable(),
+      trigger: PrReviewTriggerSchema.optional(),
       /** Findings the run produced, how many were held back by the cap, the cap, and the lines it came from. */
       findingsCount: z.number().optional(),
       heldBackCount: z.number().optional(),
@@ -221,3 +237,86 @@ export const PrReviewDtoSchema = z.object({
     .nullable(),
 });
 export type PrReviewDto = z.infer<typeof PrReviewDtoSchema>;
+
+// ---- daily cap on automatic reviews (PRD v22 F1.4) --------------------------------------------------------------
+
+/** Boardroom default; the owner sets the cap per project. */
+export const PR_REVIEW_DAILY_CAP_DEFAULT = 20;
+export const PR_REVIEW_DAILY_CAP_MAX = 100;
+export const PrReviewDailyCapSchema = z.number().int().min(1).max(PR_REVIEW_DAILY_CAP_MAX);
+export const SetPrReviewCapRequestSchema = z.object({ cap: PrReviewDailyCapSchema });
+export type SetPrReviewCapRequest = z.infer<typeof SetPrReviewCapRequestSchema>;
+
+/** The local calendar day of `at` in `timeZone` (UTC when unknown or unset), with its [start, next) instants. */
+export function reviewDayOf(
+  at: Date,
+  timeZone: string | null | undefined,
+): { day: string; start: Date; next: Date } {
+  const day = localParts(at, timeZone).date;
+  return { day, start: zonedDayStart(day, timeZone), next: zonedDayStart(nextDay(day), timeZone) };
+}
+
+export interface QueueCandidate {
+  id: string;
+  openedAt: Date;
+  changedLines: number | null;
+}
+
+/**
+ * Run order of the queue: oldest first by the local day the pull request was opened; the same day: fewer changed lines
+ * first (unknown size last); then the earlier open time; then the id (stable).
+ */
+export function compareQueue(tz: string | null | undefined) {
+  return (a: QueueCandidate, b: QueueCandidate): number => {
+    const da = localParts(a.openedAt, tz).date;
+    const db = localParts(b.openedAt, tz).date;
+    if (da !== db) return da < db ? -1 : 1;
+    const la = a.changedLines ?? Number.POSITIVE_INFINITY;
+    const lb = b.changedLines ?? Number.POSITIVE_INFINITY;
+    if (la !== lb) return la < lb ? -1 : 1;
+    if (a.openedAt.getTime() !== b.openedAt.getTime()) return a.openedAt.getTime() - b.openedAt.getTime();
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+}
+
+/** How many automatic reviews may still start today (never negative: the owner may lower the cap mid-day). */
+export const autoReviewsLeft = (used: number, cap: number): number => Math.max(0, cap - used);
+
+export const PR_REVIEW_BLOCKED_REASONS = [
+  'reviewer_token_missing',
+  'runner_outdated',
+  'workstation_offline',
+] as const;
+export const PrReviewBlockedReasonSchema = z.enum(PR_REVIEW_BLOCKED_REASONS);
+export type PrReviewBlockedReason = z.infer<typeof PrReviewBlockedReasonSchema>;
+
+export const PrReviewQueueItemSchema = z.object({
+  prReviewId: z.uuid(),
+  /** 1 = runs next; blocked pull requests keep their place in run order. */
+  position: z.number().int().positive(),
+  repoId: z.uuid(),
+  repoName: z.string(),
+  changeId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  author: z.string().nullable(),
+  openedAt: z.string(),
+  openedDay: z.string(),
+  changedLines: z.number().int().nullable(),
+  slot: PrReviewQueueSlotSchema,
+  blockedReason: PrReviewBlockedReasonSchema.nullable(),
+  blockedProblem: z.string().nullable(),
+});
+export type PrReviewQueueItem = z.infer<typeof PrReviewQueueItemSchema>;
+
+export const PrReviewQueueDtoSchema = z.object({
+  day: z.string(),
+  timeZone: z.string(),
+  resetsAt: z.string(),
+  used: z.number().int().nonnegative(),
+  cap: z.number().int().positive(),
+  /** Reviews the owner started by hand today: shown, never counted. */
+  manualToday: z.number().int().nonnegative(),
+  items: z.array(PrReviewQueueItemSchema),
+});
+export type PrReviewQueueDto = z.infer<typeof PrReviewQueueDtoSchema>;

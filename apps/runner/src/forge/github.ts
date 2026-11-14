@@ -22,6 +22,8 @@ interface GhPr {
   headRefName: string;
   baseRefName: string;
   createdAt: string;
+  additions?: number;
+  deletions?: number;
 }
 
 interface GhRepo {
@@ -156,7 +158,7 @@ export class GitHubForge implements Forge {
       '--state',
       'open',
       '--json',
-      'number,url,title,author,headRefName,baseRefName,createdAt',
+      'number,url,title,author,headRefName,baseRefName,createdAt,additions,deletions',
       '--limit',
       String(limit + 1),
     ]);
@@ -172,6 +174,9 @@ export class GitHubForge implements Forge {
       head: p.headRefName,
       base: p.baseRefName,
       createdAt: p.createdAt,
+      ...(Number.isInteger(p.additions) && Number.isInteger(p.deletions)
+        ? { changedLines: (p.additions as number) + (p.deletions as number) }
+        : {}),
     }));
     return { changes, complete: list.length <= limit };
   }

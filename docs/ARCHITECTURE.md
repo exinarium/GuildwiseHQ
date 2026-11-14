@@ -2064,6 +2064,9 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `POST /api/workstations/:id/hygiene/run` | "Run hygiene now": one hygiene DevOps request (201), or the one already queued/running (200, `alreadyRunning`); 409 `no_repositories` when the workstation holds no clone of a project repository | hygiene |
 | `PUT /api/projects/ranking` `{projectIds[]}` | the Owner or an Admin orders the organization's active projects, most important first; the list must name every active project once (409 `ranking_stale` otherwise) → `{projects}` | `ProjectsRanked` |
 | `PUT /api/projects/:id/repos/:repoId/working-branch` `{branch}` | the project owner confirms or changes the repository's working branch (`ProjectRepoWorkingBranchSet`) → project detail | hygiene |
+| `GET /api/projects/:id/pull-requests/queue` | the daily cap on automatic PR reviews: `{day, timeZone, resetsAt, used, cap, manualToday, items[]}`, items in run order (oldest opened day, then fewer changed lines) with `slot` today / later / blocked (any member) | PR review |
+| `POST /api/projects/:id/pull-requests/:prReviewId/review` | the project owner starts a review by hand: goes past the daily cap, not counted (`trigger='manual'`); 409 `review_running` / `pr_closed` / `reviewer_not_ready` → the pull request DTO | PR review |
+| `PUT /api/projects/:id/pr-review-cap` `{cap: 1..100}` | the project owner sets the daily cap on automatic PR reviews (default 20) → project detail | PR review |
 | `POST /api/auth/login` `{email,password}` | set session cookie | M1 |
 | `POST /api/auth/logout` | | M1 |
 | `GET /api/auth/me` | user, isAdmin, visible project ids | M1 |

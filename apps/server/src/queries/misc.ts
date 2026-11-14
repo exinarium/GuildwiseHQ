@@ -122,6 +122,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
+    prReviewDailyCap: (p.pr_review_daily_cap as number | undefined) ?? 20,
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
     reviewSettings: reviewSettingsOf(p),
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,

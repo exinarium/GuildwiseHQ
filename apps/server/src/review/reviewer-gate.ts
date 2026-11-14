@@ -1,4 +1,4 @@
-import type { ReviewerTokenState } from '@aom/shared';
+import { PR_REVIEW_CAPABILITY, type ReviewerTokenState } from '@aom/shared';
 import { listReviewEligiblePrs, type ReviewEligiblePr } from '../commands/pr-only.ts';
 import { type Queryable, rows } from '../db/sql.ts';
 
@@ -58,21 +58,65 @@ export async function reviewerTokenStates(
   return out;
 }
 
+/** At most this many reviewer runs at once on one workstation. */
+export const MAX_RUNNING_PER_WORKSTATION = 2;
+
+export type WorkstationPick =
+  | { id: string }
+  | { busy: true }
+  | { blocked: 'runner_outdated' | 'workstation_offline' };
+
 /**
- * The open pull requests that may get a reviewer run now: the eligible pull requests (`listReviewEligiblePrs`) of the
- * repositories whose gate is ready, each with the workstations to send the run to. THE ONLY LIST a reviewer dispatcher
- * may take work from: using `listReviewEligiblePrs` directly would start runs without a reviewer token. A pull request
- * on a gated repository stays `not_reviewed`; the owner sees the reason on the repository.
+ * The workstation a reviewer run goes to, among those that hold the token (`gate.workstationIds`, best first):
+ * needs the `pr-review:1` capability (else `runner_outdated`), to be connected (else `workstation_offline`) and, unless
+ * `ignoreBusy`, fewer than `MAX_RUNNING_PER_WORKSTATION` running reviews (else `busy`: a concurrency wait, not blocked).
+ */
+export async function pickReviewerWorkstation(
+  db: Queryable,
+  gate: { workstationIds: string[] },
+  opts: { ignoreBusy?: boolean } = {},
+): Promise<WorkstationPick> {
+  const capable = await rows(
+    db,
+    `SELECT w.id, w.connected,
+            (SELECT count(*)::int FROM pr_review_runs x WHERE x.workstation_id = w.id AND x.state='running') AS busy
+       FROM workstations w JOIN workstation_capabilities wc ON wc.workstation_id = w.id
+      WHERE w.id = ANY($1::uuid[]) AND $2 = ANY (wc.capabilities)`,
+    [gate.workstationIds, PR_REVIEW_CAPABILITY],
+  );
+  if (capable.length === 0) return { blocked: 'runner_outdated' };
+  const connected = gate.workstationIds.filter((id) => capable.find((c) => c.id === id)?.connected);
+  if (connected.length === 0) return { blocked: 'workstation_offline' };
+  const usable = connected.find((id) => {
+    const w = capable.find((c) => c.id === id);
+    return opts.ignoreBusy || Number(w?.busy ?? 0) < MAX_RUNNING_PER_WORKSTATION;
+  });
+  return usable ? { id: usable } : { busy: true };
+}
+
+export type QueueCandidateWithGate = ReviewEligiblePr & { gate: ReviewerGate };
+
+/** The eligible pull requests of a project, each with its repository's gate (one gate call per repository). */
+export async function listQueueCandidates(
+  db: Queryable,
+  projectId: string,
+): Promise<QueueCandidateWithGate[]> {
+  const eligible = await listReviewEligiblePrs(db, projectId);
+  const gates = new Map<string, ReviewerGate>();
+  for (const id of new Set(eligible.map((p) => p.repoId))) gates.set(id, await reviewerGate(db, id));
+  return eligible.map((p) => ({ ...p, gate: gates.get(p.repoId) ?? { state: 'not_pr_only' as const } }));
+}
+
+/**
+ * The open pull requests that may get a reviewer run now: the eligible pull requests of the repositories whose gate is
+ * ready, each with the workstations to send the run to. A filter over `listQueueCandidates`: a pull request on a gated
+ * repository stays `not_reviewed`; the owner sees the reason on the repository and in the queue.
  */
 export async function listReviewablePrs(
   db: Queryable,
   projectId: string,
 ): Promise<Array<ReviewEligiblePr & { workstationIds: string[] }>> {
-  const eligible = await listReviewEligiblePrs(db, projectId);
-  const gates = new Map<string, ReviewerGate>();
-  for (const id of new Set(eligible.map((p) => p.repoId))) gates.set(id, await reviewerGate(db, id));
-  return eligible.flatMap((p) => {
-    const g = gates.get(p.repoId);
-    return g?.state === 'ready' ? [{ ...p, workstationIds: g.workstationIds }] : [];
-  });
+  return (await listQueueCandidates(db, projectId)).flatMap(({ gate, ...p }) =>
+    gate.state === 'ready' ? [{ ...p, workstationIds: gate.workstationIds }] : [],
+  );
 }
