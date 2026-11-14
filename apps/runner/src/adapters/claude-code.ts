@@ -14,6 +14,7 @@ import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '..
 import type { RunnerPaths } from '../paths.ts';
 import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { sessionEnvDirOf } from '../session/shift-credential.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
 import {
@@ -348,7 +349,7 @@ export function buildClaudeOwnerTurnCommand(
   // Without the classifier or the relay in front of the shell, the runner's provider credential must not be readable by it
   // (`env`, `printenv`): Claude Code strips Anthropic and cloud-provider credentials from the subprocesses it starts.
   // The scrub also removes credential-named variables such as AOM_SHIFT_TOKEN from the Bash children, so `aom` refills
-  // them from `<turnDir>/shift-env.json` (see ceo/shift-env.ts).
+  // them from the file named by AOM_SHIFT_ENV_FILE (see session/shift-credential.ts).
   if (ownerBypasses(input)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
 }
@@ -533,8 +534,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
     const nugetFallbackDir = userNugetPackages(this.realHome());
+    const sessionEnvDir = sessionEnvDirOf(input.env.AOM_SHIFT_ENV_FILE, root);
     return {
       runnerRoot: root,
+      ...(sessionEnvDir ? { sessionEnvDir } : {}),
       agentDir: dirname(input.sandbox.home),
       cwd,
       addDirs: input.addDirs ?? [],

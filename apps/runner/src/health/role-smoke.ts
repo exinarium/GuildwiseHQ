@@ -7,6 +7,7 @@ import { buildShiftSettings, type ClaudePolicyContext, ruleAbs } from '../adapte
 import type { IpcServer } from '../ipc/server.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
 
 /**
  * The role smoke test (Lean Team v3, runner 0.1.24). On runner start and after every update each built-in role goes down
@@ -185,7 +186,7 @@ export async function runRoleSmoke(deps: RoleSmokeDeps): Promise<SmokeResult[]> 
     const agentDir = dirname(sb.home);
     const cwd = join(agentDir, 'smoke-worktree');
     const received: IpcReportRequest['report'][] = [];
-    let token: string | undefined;
+    let credential: IssuedShiftCredential | undefined;
     try {
       mkdirSync(cwd, { recursive: true });
       const policy = settingsProblem(role, paths, sb.scratch, cwd, agentDir);
@@ -194,13 +195,19 @@ export async function runRoleSmoke(deps: RoleSmokeDeps): Promise<SmokeResult[]> 
         continue;
       }
       for (const [name, content] of Object.entries(c.files)) writeFileSync(join(sb.scratch, name), content);
-      token = ipc.registerShift({
-        report: async (req) => {
-          received.push(req.report);
-          return { accepted: true, message: 'Recorded (smoke test).' };
+      credential = issueShiftCredential(
+        { ipc, runnerRoot: paths.root },
+        {
+          sessionId: agentId,
+          handler: {
+            report: async (req) => {
+              received.push(req.report);
+              return { accepted: true, message: 'Recorded (smoke test).' };
+            },
+            rpc: async () => ({ ok: true, result: {} }) as IpcRpcResponse,
+          },
         },
-        rpc: async () => ({ ok: true, result: {} }) as IpcRpcResponse,
-      });
+      );
       const argv = c.argv.map((a) => a.replaceAll('{scratch}', sb.scratch));
       const [bin, ...pre] = deps.aom ?? [join(paths.bin, 'aom')];
       const r = await execa(bin as string, [...pre, ...argv], {
@@ -211,10 +218,7 @@ export async function runRoleSmoke(deps: RoleSmokeDeps): Promise<SmokeResult[]> 
         extendEnv: false,
         env: {
           ...sandboxEnv(sb, undefined, undefined, { name: 'Smoke Test', email: 'smoke@localhost' }),
-          AOM_IPC_URL: ipc.url,
-          ...(ipc.socketPath ? { AOM_IPC_SOCKET: ipc.socketPath } : {}),
-          AOM_SHIFT_TOKEN: token,
-          AOM_SHIFT_ID: `smoke-${role.key}`,
+          ...credential.env,
           PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
         },
       });
@@ -246,7 +250,7 @@ export async function runRoleSmoke(deps: RoleSmokeDeps): Promise<SmokeResult[]> 
         detail: (err instanceof Error ? err.message : String(err)).slice(0, 400),
       });
     } finally {
-      if (token) ipc.revoke(token);
+      credential?.revoke();
       rmSync(agentDir, { recursive: true, force: true });
       rmSync(sb.tmp, { recursive: true, force: true });
     }

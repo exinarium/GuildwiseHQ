@@ -284,7 +284,7 @@ sections 3 and 5). It is a cap the machine owner holds against any server:
   existing opt-in: the Claude Code classifier plus the desk relay) or `bypass`. `guildwise-runner ceo full-power on --bypass` is the
   explicit opt-in to `--permission-mode bypassPermissions` for the Owner's own chat: nothing is judged or asked, like his terminal,
   and the runner sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so his shell cannot print the runner's provider credential.
-  That scrub also strips `AOM_SHIFT_TOKEN` from the shell, so every owner turn writes its shift variables to a 0600 `shift-env.json` in its turn dir and `aom` fills in only the missing ones from `<AOM_CEO_TURN_DIR>/shift-env.json` (variables already set win).
+  That scrub also strips `AOM_SHIFT_TOKEN` from the shell, so the owner turn, like every other session, gets its shift variables in a 0600 file named by `AOM_SHIFT_ENV_FILE` (see `scrubSubprocessEnv` below) and `aom` fills in only the missing ones from it (variables already set win). A `<AOM_CEO_TURN_DIR>/shift-env.json` written by an older runner is still read as a last fallback for one release.
   `on --strict` sets `auto` again; plain `on` keeps the current choice. **A standing-order turn always runs `auto` with the desk
   relay**, whatever this says. The classifier's refusals are final and never reach the desk, so in `auto` an ordinary step can still be
   refused; that is the price of not choosing `--bypass`.
@@ -1777,7 +1777,7 @@ cannot loosen anything.
 | --- | --- | --- |
 | `permissions.defaultMode` | `dontAsk` | anything no allow rule approves is denied (`acceptEdits` approved every edit in the worktree whatever the role) |
 | `permissions.allow` | per `allowedTools`: `Read, Glob, Grep`; `Bash`; `WebFetch, WebSearch`; `Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per `writableGlobs` entry | explicit allow |
-| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
+| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs`, `session-env` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
 | `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir, the vault and the project's read-only folders (`--add-dir`; see "Reference repositories and other read-only folders" below); other agents' sandboxes and other cards' worktrees are out of reach |
 | `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the copied `.credentials.json` |
@@ -1862,9 +1862,15 @@ makes the mock runtime report that state.
 
 `scrubSubprocessEnv: true` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code then strips credentials from the
 environment of everything its shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other
-processes is unreadable. It is off by default because Claude Code also removes variables it recognizes as credentials,
-and we could not verify (without running a real session) that `AOM_SHIFT_TOKEN` survives. Turn it on for one
-workstation, run a shift and check that `aom card` still works; the per-shift IPC token is the only secret it protects.
+processes is unreadable. Since Claude Code 2.1.251 the scrub also removes `AOM_SHIFT_TOKEN` from the shell. So every
+session that gets a shift token (background shifts, chats, CEO owner turns, delegates, the role smoke test) also gets
+`AOM_SHIFT_ENV_FILE`, the absolute path of `<data dir>/session-env/<session>.<8 hex>/env.json` (dir 0700, file 0600,
+written atomically). The file holds `AOM_IPC_URL`, `AOM_IPC_SOCKET`, `AOM_SHIFT_TOKEN`, `AOM_SHIFT_ID` (and
+`AOM_CEO_TURN_DIR` for an owner turn). `aom` uses `AOM_SHIFT_TOKEN` from the environment when it is there and reads
+nothing; otherwise it fills the missing variables from that file. Only the session's own dir is added to its sandbox
+`allowRead`; `session-env` is runner-private for every other agent. The runner removes the dir when the session ends and
+sweeps leftovers at start and stop. It is still off by default: turn it on for one workstation, run a shift and check
+that `aom card` works.
 
 ### macOS: local binding (loopback) per role
 
@@ -2654,7 +2660,7 @@ every agent, DevOps included, because the runtime is reported unavailable as a w
   `blockReadsOutsideWorkingDirectories`; `defaultMode` stays `dontAsk` (no human at the terminal);
 - deny: the session tools (`ListAgents`, `SendMessage`, ...), the role's shell patterns (`rm -rf /*`), Read and
   Edit of the runner's private files (`config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`,
-  `logs`, `mock-state`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
+  `logs`, `mock-state`, `session-env`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
   `git push` is not denied for DevOps (it is for the other roles). The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
 - environment: `HOME` is the user's real home (docker, ssh and kube configs work); `CLAUDE_CONFIG_DIR` and `TMPDIR` stay the
   agent's own; `SSH_AUTH_SOCK`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `KUBECONFIG` and `XDG_RUNTIME_DIR` are

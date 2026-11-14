@@ -111,7 +111,7 @@ export interface ShiftStartInput {
   cwd: string;
   sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
+  /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_SHIFT_ENV_FILE, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
   /** Read access: vault folder of the card's project. */
   addDirs: string[];
@@ -226,7 +226,7 @@ export interface ChatStartInput {
   cwd: string;
   sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
+  /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, AOM_SHIFT_ENV_FILE, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
   /** Previous runtime session of this conversation. */
   resumeSessionId?: string;
@@ -296,7 +296,7 @@ export interface OwnerTurnInput {
   /** The conversation's fixed working directory (`--resume` keys sessions by it). */
   cwd: string;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_CEO_TURN_DIR, PATH (runner bin first). */
+  /** AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_CEO_TURN_DIR, AOM_SHIFT_ENV_FILE, PATH (runner bin first). */
   env: Record<string, string>;
   /** `<runner root>/ceo-turns/<chatId>`: holds ceo-brief.md, aom-permission.json, floor.json, guard.json. */
   turnDir: string;

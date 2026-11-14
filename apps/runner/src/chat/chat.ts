@@ -46,7 +46,6 @@ import type { PackViewer } from '../capabilities/packs.ts';
 import { type CapabilityRegistry, makePackScriptGate, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
-import { ownerTurnShiftEnv } from '../ceo/shift-env.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
 import {
   type DelegateCaller,
@@ -70,6 +69,7 @@ import { playbookNote } from '../playbooks/note.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import type { RestartAfterReply } from '../restart-after-reply.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
 import { agentPath, type ToolchainRegistry, toolchainRpc } from '../toolchain/registry.ts';
 import { readVaultContext } from '../vaults/context.ts';
 
@@ -132,6 +132,8 @@ interface ActiveChat {
   msg: ChatStartMsg;
   session?: RuntimeSession;
   token?: string;
+  /** The token's env file; `revoke()` ends both (see session/shift-credential.ts). */
+  credential?: IssuedShiftCredential;
   sandbox?: Sandbox;
   releaseTmp?: () => void;
   stopReason?: 'cancelled' | string;
@@ -336,7 +338,8 @@ export class ChatManager {
       this.log.error(`chat ${msg.chatId} failed unexpectedly`, err);
       this.error(msg, err instanceof Error ? err.message : String(err));
     } finally {
-      if (chat.token) this.deps.ipc.revoke(chat.token);
+      if (chat.credential) chat.credential.revoke();
+      else if (chat.token) this.deps.ipc.revoke(chat.token);
       this.delegates.endCaller(msg.chatId, 'the turn ended');
       this.active.delete(msg.chatId);
       this.remember(msg.chatId);
@@ -407,6 +410,26 @@ export class ChatManager {
           await c.session?.stop(`chat.${reason}`);
         }),
     );
+  }
+
+  /** Registers the turn's token, writes its env file and returns the shift variables (revoked in `start`'s `finally`). */
+  private issueCredential(
+    chat: ActiveChat,
+    opts: { extra?: { AOM_CEO_TURN_DIR: string }; socket?: boolean } = {},
+  ): Record<string, string> {
+    chat.credential?.revoke();
+    const cred = issueShiftCredential(
+      { ipc: this.deps.ipc, runnerRoot: this.deps.paths.root, log: this.log },
+      {
+        sessionId: chat.msg.chatId,
+        handler: this.handlerFor(chat),
+        ...(opts.extra ? { extra: opts.extra } : {}),
+        ...(opts.socket === false ? { socket: false } : {}),
+      },
+    );
+    chat.token = cred.token;
+    chat.credential = cred;
+    return cred.env;
   }
 
   private handlerFor(chat: ActiveChat): ShiftIpcHandler {
@@ -757,14 +780,7 @@ export class ChatManager {
     this.auditCommands(msg.chatId, [`# ${mode} turn, permission mode: ${effective}`]);
     const turnDir = turnDirOf(paths.root, msg.chatId);
     chat.turnDir = turnDir;
-    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
-    const shiftEnv = ownerTurnShiftEnv({
-      ipcUrl: this.deps.ipc.url,
-      socketPath: this.deps.ipc.socketPath,
-      token: chat.token,
-      chatId: msg.chatId,
-      turnDir,
-    });
+    const shiftEnv = this.issueCredential(chat, { extra: { AOM_CEO_TURN_DIR: turnDir } });
     writeTurnFiles({
       turnDir,
       brief: msg.context.ceo?.brief ?? '',
@@ -1008,14 +1024,10 @@ export class ChatManager {
         sandbox,
         `${renderSessionTurnInstructions(spec, persona ?? '', { scratchFiles: msg.agent.runtime === 'claude-code' })}${capIndex ? `\n\n${capIndex}\n` : ''}${note ? `\n\n${note}\n` : ''}`,
       );
-    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
     const env = {
       ...sandboxEnv(sandbox, undefined, tc?.env),
-      AOM_IPC_URL: this.deps.ipc.url,
-      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-      AOM_SHIFT_TOKEN: chat.token,
-      AOM_SHIFT_ID: msg.chatId,
+      ...this.issueCredential(chat),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
     chat.session = await adapter.startChat({
@@ -1087,12 +1099,9 @@ export class ChatManager {
       }),
       capabilityIndex: `${capIndex}${this.mayDelegate(msg) && delegateNote(msg.delegation) ? `\n\n${delegateNote(msg.delegation)}` : ''}`,
     });
-    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const env = {
       ...sandboxEnv(sandbox),
-      AOM_IPC_URL: this.deps.ipc.url,
-      AOM_SHIFT_TOKEN: chat.token,
-      AOM_SHIFT_ID: msg.chatId,
+      ...this.issueCredential(chat, { socket: false }),
     };
     chat.session = await adapter.startChat({
       chatId: msg.chatId,
@@ -1258,14 +1267,10 @@ export class ChatManager {
         },
       )}`,
     );
-    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
     const env = {
       ...sandboxEnv(sandbox, undefined, tc?.env),
-      AOM_IPC_URL: this.deps.ipc.url,
-      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-      AOM_SHIFT_TOKEN: chat.token,
-      AOM_SHIFT_ID: msg.chatId,
+      ...this.issueCredential(chat),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
     chat.session = await adapter.startChat({

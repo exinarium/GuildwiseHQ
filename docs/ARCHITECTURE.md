@@ -1721,7 +1721,7 @@ export interface ShiftStartInput {
   cwd: string;                                   // worktree path or agent scratch dir
   sandbox: { home: string; configDir: string; scratch: string };
   agent: AgentRuntimeSpec;
-  env: Record<string, string>;                   // AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, PATH prefix
+  env: Record<string, string>;                   // AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_SHIFT_ENV_FILE, PATH prefix
   addDirs: string[];                             // read access: the vault folder of the card's project
   maxShiftMinutes: number;
   resumeSessionId?: string;                      // chat only
@@ -1764,6 +1764,7 @@ claude -p <prompt> --output-format stream-json --verbose
 env (not inherited from the runner: an allow-list of PATH/LANG/TERM/TZ/proxy and CA variables plus):
      CLAUDE_CONFIG_DIR=<configDir> HOME=<home> USERPROFILE=<home>
      PATH=<dataDir>/bin:<PATH>  AOM_IPC_URL AOM_IPC_SOCKET AOM_SHIFT_TOKEN AOM_SHIFT_ID
+     AOM_SHIFT_ENV_FILE=<dataDir>/session-env/<session>/env.json (0600; `aom` reads it when the token was scrubbed)
      + auth: CLAUDE_CODE_OAUTH_TOKEN (from runner config, created with `claude setup-token`) or ANTHROPIC_API_KEY
      + optional CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 (runtime config `scrubSubprocessEnv`)
 ```

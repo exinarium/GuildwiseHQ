@@ -48,7 +48,6 @@ import {
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
-import { resolveShiftEnv } from '../ceo/shift-env.ts';
 import {
   denyHook,
   loadSubagentGuardConfig,
@@ -59,6 +58,7 @@ import {
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
+import { missingTokenMessage, resolveShiftEnv, type ShiftEnvAttempt } from '../session/shift-credential.ts';
 
 export interface AomIo {
   out(s: string): void;
@@ -70,6 +70,8 @@ export interface AomContext {
   io: AomIo;
   fetch: typeof fetch;
   readFile: (path: string) => string;
+  /** What the entry tried when AOM_SHIFT_TOKEN was not in the environment (named in the missing-token error). */
+  shiftEnvAttempts?: ShiftEnvAttempt[];
   /** Test hooks for `aom question --wait` (real timers when absent). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -199,7 +201,8 @@ function textFlag(ctx: AomContext, p: Parsed, key: string, required: boolean): s
 function ipc(ctx: AomContext): { url: string; token: string } {
   const url = ctx.env.AOM_IPC_URL;
   const token = ctx.env.AOM_SHIFT_TOKEN;
-  if (!url || !token)
+  if (!token) throw new UsageError(missingTokenMessage(ctx.env, ctx.shiftEnvAttempts));
+  if (!url)
     throw new UsageError('AOM_IPC_URL / AOM_SHIFT_TOKEN are not set: `aom` only works inside an agent shift');
   return { url, token };
 }
@@ -3061,7 +3064,7 @@ async function preloadGuardStdin(): Promise<string> {
 
 if (isEntry) {
   // a bypass owner turn's Bash child has its credential-named variables scrubbed: refill what is missing from the turn dir
-  const entryEnv = resolveShiftEnv(process.env);
+  const { env: entryEnv, attempts: shiftEnvAttempts } = resolveShiftEnv(process.env);
   const confined = confinedReader(entryEnv, process.cwd());
   const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
   // the two time-limit hooks of a native subagent read their input the same way (the deadline fails closed, the done hook has nothing to protect)
@@ -3075,6 +3078,7 @@ if (isEntry) {
       io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
       fetch: entryEnv.AOM_IPC_SOCKET ? socketFetch(entryEnv.AOM_IPC_SOCKET, fetch) : fetch,
       readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
+      shiftEnvAttempts,
     });
   })().then(
     (code) => process.exit(isGuard && code !== 0 ? 2 : code),

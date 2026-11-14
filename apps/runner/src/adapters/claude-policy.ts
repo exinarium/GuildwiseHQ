@@ -40,6 +40,13 @@ export interface ClaudePolicyContext {
   accountDirs?: string[];
   /** The runner data dir (`~/.aom-runner`): config (runner token, provider credentials), outbox, all agents. */
   runnerRoot: string;
+  /**
+   * The session's own env-file dir (`<runnerRoot>/session-env/<id>`, see session/shift-credential.ts): readable to this
+   * session's shell, never to another's. Set only from a strictly validated `AOM_SHIFT_ENV_FILE`. Concurrent sessions of
+   * one agent share its settings file, so the later session's dir replaces the earlier one's (aom runs outside the OS
+   * sandbox and still reads its own file).
+   */
+  sessionEnvDir?: string;
   /** This agent's own sandbox root (`<runnerRoot>/agents/<id>`: HOME, CLAUDE_CONFIG_DIR, scratch). */
   agentDir: string;
   /** Worktree of the card, or the agent's scratch dir. */
@@ -279,6 +286,7 @@ export const RUNNER_PRIVATE = [
   'mock-state',
   'secrets',
   'keys',
+  'session-env',
 ];
 
 /**
@@ -487,6 +495,8 @@ function sandboxBlock(
         ...ctx.aomReadPaths,
         ...(ctx.toolchainReadPaths ?? []),
         ...(ctx.nugetFallbackDir ? [ctx.nugetFallbackDir] : []),
+        // the session's own env file (the shift variables the subprocess scrub removes); holds no writable path
+        ...(ctx.sessionEnvDir ? [ctx.sessionEnvDir] : []),
       ],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
@@ -749,6 +759,7 @@ export function scanSandboxBlock(
       paths.scratch,
       ...ctx.aomReadPaths,
       ...(ctx.toolchainReadPaths ?? []),
+      ...(ctx.sessionEnvDir ? [ctx.sessionEnvDir] : []),
       // a clone too large to check is not opened at all
       ...masks
         .filter((m) => m.masks !== null)
