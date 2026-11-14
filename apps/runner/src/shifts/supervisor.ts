@@ -2923,6 +2923,21 @@ export class ShiftSupervisor {
 
       if (s.worktree && s.startSha) {
         await this.recordBaseTips(s, true);
+        // A submodule left off its pin (agent sandboxes cannot run `git submodule update`) goes back to the pin before
+        // the guard and the leftovers commit: a role that commits is judged on every changed path, so the drift would
+        // refuse a tester it cannot fix, and `git add -A` would commit it as a pin change. Not during a merge.
+        if (msg.agent.permissions.mayCommit && !(await mergeInProgress(s.worktree.path))) {
+          const drift = await resetSubmoduleDrift(s.worktree.path, {
+            ...(this.deps.gitAuth ? { auth: (url: string) => (this.deps.gitAuth as GitAuth)(url) } : {}),
+          });
+          if (drift.reset.length) {
+            const note = submoduleResetNote(drift.reset);
+            this.log.info(`${msg.brief.card.ref}: ${note}`);
+            await this.submit(s, { kind: 'comment', note });
+            checkNote = note;
+          }
+          if (drift.refused) return rejected(drift.refused);
+        }
         const violations = await runGuard(this.guardInput(s, s.worktree.path, s.startSha));
         if (violations.length > 0) {
           for (const v of violations) {
@@ -2948,18 +2963,6 @@ export class ShiftSupervisor {
         }
         if (outcome.kind === 'success' && (outcome.data === 'diffStats' || outcome.data === 'buildHandoff')) {
           if (msg.agent.permissions.mayCommit) {
-            // A submodule left off its pin (agent sandboxes cannot run `git submodule update`) goes back to the pin
-            // before the leftovers commit, whose `git add -A` would otherwise commit the drift as a pin change.
-            const drift = await resetSubmoduleDrift(s.worktree.path, {
-              ...(this.deps.gitAuth ? { auth: (url: string) => (this.deps.gitAuth as GitAuth)(url) } : {}),
-            });
-            if (drift.reset.length) {
-              const note = submoduleResetNote(drift.reset);
-              this.log.info(`${msg.brief.card.ref}: ${note}`);
-              await this.submit(s, { kind: 'comment', note });
-              checkNote = note;
-            }
-            if (drift.refused) return rejected(drift.refused);
             const ac = await this.leftoversCommit(s, 'report');
             if (ac.refused) return rejected(refusedReport(ac.refused));
           }

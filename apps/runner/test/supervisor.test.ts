@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BUILTIN_ROLES } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractFallbackReport } from '../src/shifts/supervisor.ts';
 import { makeShiftStart } from './fixtures.ts';
@@ -27,6 +28,25 @@ async function start(
   const adapter = new ScriptedAdapter(script);
   h = await startHarness(serverOpts, { adapters: new Map([['mock', adapter]]), ...runnerOpts });
   return { adapter, h };
+}
+
+/** A card repository that holds X as a submodule at `core`, and a newer commit of X than the pin. */
+function submoduleRepo() {
+  // the card repository holds X as a submodule at `core`
+  const x = makeRepo();
+  const repo = makeRepo();
+  sh(repo.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
+  sh(repo.clone, 'git', ['commit', '-m', 'add core']);
+  sh(repo.clone, 'git', ['push', 'origin', 'main']);
+  const pin = sh(join(repo.clone, 'core'), 'git', ['rev-parse', 'HEAD']);
+  const other = join(tmp(), 'x-other');
+  sh(x.root, 'git', ['clone', x.origin, other]);
+  writeFileSync(join(other, 'feature.txt'), 'feature\n');
+  sh(other, 'git', ['add', '-A']);
+  sh(other, 'git', ['commit', '-m', 'feature']);
+  sh(other, 'git', ['push', 'origin', 'main']);
+  const newer = sh(other, 'git', ['rev-parse', 'HEAD']);
+  return { repo, pin, newer };
 }
 
 describe('supervisor', () => {
@@ -266,20 +286,7 @@ describe('supervisor', () => {
   });
 
   it('a builder handoff resets a submodule left off its pin and says so; the drift is never committed (BLOCKERS.md section 3)', async () => {
-    // the card repository holds X as a submodule at `core`
-    const x = makeRepo();
-    const repo = makeRepo();
-    sh(repo.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
-    sh(repo.clone, 'git', ['commit', '-m', 'add core']);
-    sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const pin = sh(join(repo.clone, 'core'), 'git', ['rev-parse', 'HEAD']);
-    const other = join(tmp(), 'x-other');
-    sh(x.root, 'git', ['clone', x.origin, other]);
-    writeFileSync(join(other, 'feature.txt'), 'feature\n');
-    sh(other, 'git', ['add', '-A']);
-    sh(other, 'git', ['commit', '-m', 'feature']);
-    sh(other, 'git', ['push', 'origin', 'main']);
-    const newer = sh(other, 'git', ['rev-parse', 'HEAD']);
+    const { repo, pin, newer } = submoduleRepo();
     const seen: { r?: Post; cwd?: string } = {};
     const adapter = new ScriptedAdapter(async (i, ctl) => {
       // the submodule ends up on another commit than the pin (what an agent's tooling did in production)
@@ -304,6 +311,48 @@ describe('supervisor', () => {
       .filter((r) => r.shiftId === shiftId && r.report.kind === 'comment');
     expect((comments[0]?.report as { note?: string } | undefined)?.note).toContain(
       `core (${newer.slice(0, 10)} -> ${pin.slice(0, 10)})`,
+    );
+  }, 60_000);
+
+  it('a tester whose submodule went off its pin is not refused for it: the drift is reset before the guard', async () => {
+    const { repo, pin, newer } = submoduleRepo();
+    const seen: { r?: Post; cwd?: string } = {};
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      sh(i.cwd, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--', 'core']);
+      sh(join(i.cwd, 'core'), 'git', ['fetch', 'origin']);
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', newer]);
+      mkdirSync(join(i.cwd, 'e2e'), { recursive: true });
+      writeFileSync(join(i.cwd, 'e2e', 'login.spec.ts'), 'test\n');
+      seen.r = await ctl.post(
+        '/v1/report',
+        outcome('handoff', 'spec fixed', {
+          buildEvidence: {
+            commands: [{ kind: 'test', command: 'playwright', status: 'passed', result: '1 passed' }],
+          },
+        }),
+      );
+      seen.cwd = i.cwd;
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) }, repo);
+    const tester = BUILTIN_ROLES.find((r) => r.key === 'tester')!;
+    const base = makeShiftStart({ stage: 'build', remoteNormalized: repo.remoteNormalized }) as {
+      agent: Record<string, unknown>;
+    };
+    // the tester works the build stage of a tests-only card
+    const msg = makeShiftStart({
+      stage: 'build',
+      remoteNormalized: repo.remoteNormalized,
+      outcomes: [{ id: 'handoff', label: 'Hand off for review', kind: 'success', data: 'buildHandoff' }],
+      startExtra: { agent: { ...base.agent, roleKey: 'tester', permissions: tester.permissions } },
+    });
+    h.server.send('shift.start', msg);
+    const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    expect(seen.r?.json.error).toBeUndefined();
+    expect(seen.r?.status).toBe(200);
+    expect(ended.guardViolations ?? []).toEqual([]);
+    expect(sh(join(seen.cwd as string, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
+    expect(sh(seen.cwd as string, 'git', ['diff', '--name-only', 'origin/main', 'HEAD'])).toBe(
+      'e2e/login.spec.ts',
     );
   }, 60_000);
 

@@ -111,9 +111,10 @@ export interface GuardInput {
    */
   clientRef?: string;
   /**
-   * Fingerprints of the paths that were already dirty when the shift started (`snapshotDirty`). A path whose fingerprint
-   * is unchanged at the end is not this shift's change (a submodule left off its pin, a file the sandbox or a person left
-   * behind): no role check counts it, and the out-of-scope discard leaves it alone (BLOCKERS.md section 3).
+   * Fingerprints of the paths that were already dirty when the shift started (`snapshotDirty`). For a role that may not
+   * commit, a path whose fingerprint is unchanged at the end is not this shift's change (a submodule left off its pin, a
+   * file the sandbox or a person left behind) and is not counted (BLOCKERS.md section 3). Roles that commit are judged
+   * on every path: their leftovers commit would commit it.
    */
   dirtyAtStart?: DirtySnapshot;
 }
@@ -393,7 +394,14 @@ export async function fetchedRemoteTip(worktree: string, branch: string): Promis
 
 /** Uncommitted paths (tracked and untracked), minus the sandbox stubs and test output dirs. */
 async function dirtyPaths(worktree: string): Promise<string[]> {
-  const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  // unquoted non-ASCII names, so the fingerprint finds them on disk
+  const dirty = await git(worktree, [
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain',
+    '--untracked-files=all',
+  ]);
   const out = new Set<string>();
   // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
   const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
@@ -549,10 +557,8 @@ export async function discardOutOfScope(input: GuardInput): Promise<DiscardResul
   if (bad.length === 0) return result;
   const ex = await mergeExemptions(input.worktree, input.startSha, opts);
   const own = new Set([...(await dirtyPaths(input.worktree)), ...(await ownCommitPaths(input))]);
-  // already dirty when the shift started and unchanged since: not the shift's own change
-  const before = await untouchedSinceStart(input.worktree, input.dirtyAtStart, bad);
   for (const p of bad) {
-    if (!own.has(p) || before.has(p)) {
+    if (!own.has(p)) {
       result.kept.push(p);
       continue;
     }
@@ -588,8 +594,11 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
   const all = await changedPaths(input.worktree, input.startSha, exemptOpts(input));
-  // Paths that were already dirty at the shift start and are unchanged are not this shift's doing (BLOCKERS.md section 3).
-  const untouched = await untouchedSinceStart(input.worktree, input.dirtyAtStart, all);
+  // A read-only role is judged on its own shift only: paths already dirty at the start and unchanged are not its doing
+  // (BLOCKERS.md section 3). A role that commits is judged on every path, since its leftovers commit would commit them.
+  const untouched = input.permissions.mayCommit
+    ? new Set<string>()
+    : await untouchedSinceStart(input.worktree, input.dirtyAtStart, all);
   const changed = all.filter((p) => !untouched.has(p));
 
   if (!input.permissions.mayCommit && (head !== input.startSha || changed.length > 0)) {

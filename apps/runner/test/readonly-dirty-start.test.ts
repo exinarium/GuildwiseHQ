@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -86,12 +86,14 @@ describe('read-only roles are judged on their own shift only (BLOCKERS.md sectio
     expect(v[0]?.detail).toContain('core');
   });
 
-  it('a scoped role keeps paths that were dirty at the start: the discard leaves them alone', async () => {
+  it('a role that commits is judged on every path: leftovers from before the shift are flagged and discarded', async () => {
     const t = await driftedWorktree();
     const scoped = t.input({ roleKey: 'writer', permissions: writer.permissions });
-    expect(await runGuard(scoped)).toEqual([]);
+    const v = await runGuard(scoped);
+    expect(v.map((x) => x.rule)).toEqual(['writer_edited_non_docs']);
+    expect(v[0]?.detail).toContain('notes.txt');
     const r = await discardOutOfScope(scoped);
-    expect(r.discarded).toEqual([]);
-    expect(r.kept.sort()).toEqual(['core', 'notes.txt']);
+    expect(r.discarded).toContain('notes.txt');
+    expect(existsSync(join(t.wt, 'notes.txt'))).toBe(false);
   });
 });
