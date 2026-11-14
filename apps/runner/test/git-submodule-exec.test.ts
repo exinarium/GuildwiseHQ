@@ -243,6 +243,88 @@ describe('fetch does not go into a nested repository (its remote settings name p
   });
 });
 
+describe("the workstation user's own git settings cannot bring it back (autostash)", () => {
+  it('a rebase or merge of a dirty tree takes no autostash, so nothing looks inside', async () => {
+    const evil = nestedRepo();
+    writeFileSync(
+      join(superRepo, '.gitmodules'),
+      '[submodule "evil"]\n\tpath = evil\n\turl = ./evil\n\tignore = none\n',
+    );
+    sh(superRepo, 'add', '.gitmodules');
+    sh(superRepo, 'commit', '-qm', 'hostile .gitmodules');
+    sh(superRepo, 'branch', 'base');
+    writeFileSync(join(superRepo, 'g.txt'), 'g\n');
+    sh(superRepo, 'add', 'g.txt');
+    sh(superRepo, 'commit', '-qm', 'ahead');
+    sh(superRepo, 'checkout', '-q', '-B', 'card', 'base');
+    const global = join(dir, 'gitconfig');
+    writeFileSync(global, '[rebase]\n\tautoStash = true\n[merge]\n\tautoStash = true\n');
+    const prev = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = global;
+    try {
+      // control: plain git with the user's settings takes an autostash and runs the nested program
+      dirty(evil);
+      writeFileSync(join(superRepo, 'f.txt'), 'dirty tracked file\n');
+      try {
+        sh(superRepo, 'rebase', 'main');
+      } catch {
+        // whether the rebase itself succeeds does not matter here
+      }
+      expect(ran()).toBe(true);
+      for (const c of [
+        ['rebase', 'main'],
+        ['merge', 'main'],
+        ['pull', '--rebase', '.', 'main'],
+      ]) {
+        try {
+          sh(superRepo, 'rebase', '--abort');
+        } catch {
+          // no rebase in progress
+        }
+        sh(superRepo, 'checkout', '-q', '-f', '-B', 'card', 'base');
+        dirty(evil);
+        writeFileSync(join(superRepo, 'f.txt'), `dirty tracked file ${tick}\n`);
+        await git(superRepo, c);
+        expect(ran(), `git ${c.join(' ')}`).toBe(false);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = prev;
+    }
+  });
+});
+
+describe('the guards cannot be talked out of by a path or an option', () => {
+  it('a file named like the option, after --, does not switch the inserted option off', async () => {
+    const evil = nestedRepo();
+    writeFileSync(
+      join(superRepo, '.gitmodules'),
+      '[submodule "evil"]\n\tpath = evil\n\turl = ./evil\n\tignore = none\n',
+    );
+    writeFileSync(join(superRepo, '--ignore-submodules=none'), 'x\n');
+    sh(superRepo, 'add', '--', '.gitmodules', '--ignore-submodules=none');
+    sh(superRepo, 'commit', '-qm', 'hostile');
+    dirty(evil);
+    await git(superRepo, ['status', '--porcelain', '--', '--ignore-submodules=none', 'evil']);
+    await git(superRepo, ['diff', 'HEAD', '--', '--ignore-submodules=none', 'evil']);
+    expect(ran()).toBe(false);
+  });
+
+  it('refuses a weaker option form and an unknown leading global option', async () => {
+    for (const c of [
+      ['status', '--ignore-submodules=none'],
+      ['diff', '--ignore-submodules=untracked', 'HEAD'],
+      ['fetch', '--recurse-submodules', 'origin'],
+      ['--no-pager', 'status'],
+      ['--git-dir=/tmp/x', 'status'],
+    ]) {
+      const r = await git(superRepo, c);
+      expect(r.exitCode, c.join(' ')).toBe(128);
+      expect(r.stderr).toContain('refusing to run git');
+    }
+  });
+});
+
 describe('git add never stages a gitlink, and the submodule repositories are protected', () => {
   /** A real submodule: its repository lives under `<git dir>/modules/core`. */
   function realSubmodule(): { path: string; gitDir: string } {

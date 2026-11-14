@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { headShaFromFiles, resetSubmoduleDrift } from '../src/git/submodule-drift.ts';
+import { resetSubmoduleDrift, submoduleCommitOffPin } from '../src/git/submodule-drift.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -45,7 +45,7 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3): the drift is reported, no
     const { x, d, pin } = twoRepos();
     const newer = advanceX(x, 'feature.txt');
     drift(d, newer);
-    expect(headShaFromFiles(join(d.clone, '.git', 'modules', 'core'))).toBe(newer);
+    expect(await submoduleCommitOffPin(d.clone, 'core')).toBe(newer);
     const r = await resetSubmoduleDrift(d.clone);
     expect(r.reset).toEqual([]);
     expect(r.refused).toContain(`git -C core checkout ${pin}`);
@@ -117,13 +117,17 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3): the drift is reported, no
     expect(await resetSubmoduleDrift(fresh)).toEqual({ reset: [] });
   });
 
-  it('reads a HEAD that names a branch, loose or packed', () => {
-    const { d, pin } = twoRepos();
+  it('reads the commit whatever the submodule HEAD looks like: a branch, packed refs, an odd branch name', async () => {
+    const { x, d, pin } = twoRepos();
+    const newer = advanceX(x, 'feature.txt');
+    drift(d, newer);
     const core = join(d.clone, 'core');
-    sh(core, 'git', ['checkout', '-q', '-B', 'work', pin]);
-    const gitDir = join(d.clone, '.git', 'modules', 'core');
-    expect(headShaFromFiles(gitDir)).toBe(pin);
+    sh(core, 'git', ['checkout', '-q', '-B', 'work+odd@name', newer]);
+    expect(await submoduleCommitOffPin(d.clone, 'core')).toBe(newer);
     sh(core, 'git', ['pack-refs', '--all']);
-    expect(headShaFromFiles(gitDir)).toBe(pin);
+    expect(await submoduleCommitOffPin(d.clone, 'core')).toBe(newer);
+    expect((await resetSubmoduleDrift(d.clone)).refused).toContain(`git -C core checkout ${pin}`);
+    sh(core, 'git', ['checkout', '-q', '-B', 'work+odd@name', pin]);
+    expect(await submoduleCommitOffPin(d.clone, 'core')).toBeNull();
   });
 });

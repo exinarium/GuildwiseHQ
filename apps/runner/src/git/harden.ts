@@ -41,6 +41,13 @@ export const GIT_HARDEN_ARGS: readonly string[] = [
   'diff.submodule=short',
   '-c',
   'status.submoduleSummary=false',
+  // The workstation user's own ~/.gitconfig is read too. With `rebase.autoStash` or `merge.autoStash` there, a rebase or
+  // merge of a dirty tree runs `git stash create`, `git stash apply` and a plain `git status` as children, none of which
+  // carry the option forms `git()` adds: an agent-written `.gitmodules` then switches the looking-inside back on.
+  '-c',
+  'rebase.autoStash=false',
+  '-c',
+  'merge.autoStash=false',
 ];
 
 /** Environment of every git the runner starts: no system-wide configuration, no prompts. */

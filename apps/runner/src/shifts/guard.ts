@@ -21,7 +21,7 @@ import {
 import { currentBranch, git } from '../git/git.ts';
 import { commitsWithInternalRef, describeCommits } from '../git/internal-ref.ts';
 import { baseTarget } from '../git/rebase.ts';
-import { headShaFromFiles, managedGitDir, modulesRoot } from '../git/submodule-drift.ts';
+import { managedGitDir, modulesRoot, submoduleCommitOffPin } from '../git/submodule-drift.ts';
 
 export interface BranchSnapshot {
   [branch: string]: string;
@@ -162,10 +162,10 @@ async function dirtyFingerprint(
     // without its own .git, git would answer for the superproject
     if (!existsSync(join(abs, '.git'))) return 'empty';
     // A submodule this runner manages (its gitdir under the modules folder) is fingerprinted by the commit it is at,
-    // read from its files: no git runs inside it (its configuration is agent-writable). Anything else is agent-owned:
-    // no fingerprint, so the path is never "untouched" and is judged as before.
-    const gitDir = modules ? managedGitDir(abs, modules) : null;
-    const at = gitDir ? headShaFromFiles(gitDir) : null;
+    // asked of the superproject: no git runs inside it (its configuration is agent-writable). Anything else is
+    // agent-owned: no fingerprint, so the path is never "untouched" and is judged as before.
+    if (!modules || !managedGitDir(abs, modules)) return null;
+    const at = await submoduleCommitOffPin(worktree, path);
     return at ? `sub:${at}` : null;
   }
   const h = await git(worktree, ['hash-object', '--', path]);

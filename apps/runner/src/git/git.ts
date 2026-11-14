@@ -47,11 +47,14 @@ async function clearConfigLockStub(cwd: string): Promise<boolean> {
   return clearLockStub(isAbsolute(out) ? out : resolve(cwd, out)).length > 0;
 }
 
-/** Index of the subcommand in `args`: after any leading `-c <setting>` / `-C <dir>` pairs. */
+/**
+ * Index of the subcommand in `args`: after any leading `-c <setting>` / `-C <dir>` pairs. -1 when another global
+ * option comes first: the guards below would then look at the wrong word, so such a call is refused.
+ */
 function subcommandIndex(args: readonly string[]): number {
   let i = 0;
   while (i < args.length && (args[i] === '-c' || args[i] === '-C')) i += 2;
-  return i;
+  return args[i]?.startsWith('-') ? -1 : i;
 }
 
 /**
@@ -60,6 +63,9 @@ function subcommandIndex(args: readonly string[]): number {
  * - `status`, `diff`: `--ignore-submodules=dirty` (the command-line option beats `submodule.<name>.ignore`).
  * - `checkout`, `switch`: quiet, so they do not report local changes (that report looks into submodules).
  * - `fetch`, `pull`: `--no-recurse-submodules` (beats `submodule.<name>.fetchRecurseSubmodules`).
+ * An autostash (`git stash` and a plain `git status` as children, without these option forms) is switched off as a
+ * configuration default in `GIT_HARDEN_ARGS`; only the vault sync asks for one explicitly (`pull --rebase --autostash`
+ * in the runner's own vault clone, which agents cannot write).
  * - `add`: an exclude pathspec for every gitlink of the index (read with `ls-files -s`, which starts nothing, in the
  *   same environment so a private index file is honoured). When the index cannot be read the add is not run.
  * Returns the arguments to run, or a refusal.
@@ -70,22 +76,30 @@ async function withSubmoduleGuards(
   env: Record<string, string> | undefined,
 ): Promise<{ args: string[] } | { refused: string }> {
   const at = subcommandIndex(args);
+  if (at < 0) return { refused: `an option before the subcommand that the runner does not use (${args[0]})` };
   const sub = args[at];
   const head = args.slice(0, at + 1);
   const rest = args.slice(at + 1);
+  // The options are the words before `--`; what follows are paths, which a caller may take from an agent (a file
+  // named `--ignore-submodules=none` must not be read as "the option is already there"). An inserted option goes right
+  // after the subcommand, so it is an option whatever follows. A weaker form among the options is refused, since git
+  // lets the last one win.
+  const options = rest.includes('--') ? rest.slice(0, rest.indexOf('--')) : rest;
   if (sub === 'status' || sub === 'diff') {
-    if (rest.some((a) => a.startsWith('--ignore-submodules'))) return { args };
-    return { args: [...head, '--ignore-submodules=dirty', ...rest] };
+    const given = options.filter((a) => a.startsWith('--ignore-submodules'));
+    if (given.some((a) => a !== '--ignore-submodules=dirty' && a !== '--ignore-submodules=all'))
+      return { refused: `${sub} asked to look inside submodules (${given.join(' ')})` };
+    return given.length ? { args } : { args: [...head, '--ignore-submodules=dirty', ...rest] };
   }
   if (sub === 'checkout' || sub === 'switch') {
-    const options = rest.includes('--') ? rest.slice(0, rest.indexOf('--')) : rest;
     if (options.includes('-q') || options.includes('--quiet')) return { args };
     return { args: [...head, '-q', ...rest] };
   }
   if (sub === 'fetch' || sub === 'pull') {
     // `submodule.<name>.fetchRecurseSubmodules` in an agent-written .gitmodules beats the config default; the option wins
-    if (rest.some((a) => a.startsWith('--recurse-submodules') || a === '--no-recurse-submodules'))
-      return { args };
+    if (options.some((a) => a.startsWith('--recurse-submodules')))
+      return { refused: `${sub} asked to recurse into submodules` };
+    if (options.includes('--no-recurse-submodules')) return { args };
     return { args: [...head, '--no-recurse-submodules', ...rest] };
   }
   if (sub !== 'add') return { args };
