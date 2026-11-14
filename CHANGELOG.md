@@ -10,6 +10,8 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - Owner reminder for pending items. When an item has been waiting on the owner for 2 working days, the owner gets one reminder. The state of the item is not changed, so nothing moves on without the owner.
 - Design gate. New cards on the lean team workflow (code version 7) can stop after Investigate & design until the project owner approves the design. The gate is off by default; switch it on per project in Project settings, or for one card once its design report exists. The owner reads the existing design report on the desk item and approves it (the card moves to Build) or returns it with a note. Designs that touch high-risk paths stop at the gate even with the gate off. Cards already in flight keep their workflow.
 
+- Second reviewer (Opus) on live PR-only pull requests. After a 20-PR replay has been recorded, the project owner can switch it on in Project settings. Both reviewers then review each pull request, their findings are merged (duplicates posted once and credited to both reviewers), the findings cap applies to the merged set, and a timeout or failure of either run posts nothing. A pair counts as one automatic review against the daily limit. Needs a runner that supports review pairs.
+
 ### Fixed
 
 - Parking or answering a discovery question no longer fails with a server error. Long display names are now shortened to the allowed length, so people with long names can park and answer questions as normal.
