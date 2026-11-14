@@ -23,7 +23,7 @@
 				request>headers>Authorization delete
 				request>headers>Proxy-Authorization delete
 				resp_headers>Set-Cookie delete
-				request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms|api/invitations|invite)/)[^/?#]+|((?:/|%2F|%252F)m(?:/|%2F|%252F)desk(?:/|%2F|%252F))(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f][0-9A-Fa-f])+|([?&](?:token|code|invite|pairing[_-]?code)=)[^&#]*" "${1}${2}${3}${4}[redacted]"
+				request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms|api/invitations|invite)/)[^/?#]+|((?:/|%2F|%252F)m(?:/|%2F|%252F)desk(?:/|%2F|%252F))(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f][0-9A-Fa-f])+|([?&](?:token|code|invite|pairing[_-]?code)=)[^&#]*|(/api/hooks/[^/?#]+/)[^/?#]+" "${1}${2}${3}${4}${5}[redacted]"
 			}
 		}
 	}

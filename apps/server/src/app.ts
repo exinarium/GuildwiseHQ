@@ -218,7 +218,8 @@ const DESK_LINK_TOKEN =
 
 /**
  * Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`), pairing codes and the one-time
- * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
+ * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`)
+ * and the secret of a journey hook called in the path form (`/api/hooks/<id>/<secret>`).
  */
 export function redactUrl(url: string): string {
   return (
@@ -231,6 +232,8 @@ export function redactUrl(url: string): string {
       .replace(DESK_LINK_TOKEN, '$1[redacted]')
       .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
       .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+      // a journey hook called as `/api/hooks/<id>/<secret>`: keep the id, hide the secret
+      .replace(/(\/api\/hooks\/[^/?#\s]+\/)[^/?#\s]+/gi, '$1[redacted]')
   );
 }
 

@@ -47,10 +47,12 @@ function uriRule(): (u: string) => string {
   if (!m) throw new Error('no uri regexp');
   const re = new RegExp(m[1]!.replace(/^\(\?i\)/, ''), 'gi');
   const repl = m[2]!.replace(/\$\{(\d)\}/g, '$$$1');
+  // every capture group of the pattern, so a new alternative is never dropped silently
+  const groupCount = new RegExp(`${re.source}|`).exec('')!.length - 1;
   return (u) =>
     u.replace(re, (...a: unknown[]) => {
       // RE2 expands unmatched groups to '', JS passes undefined
-      const groups = a.slice(1, 5).map((g) => (typeof g === 'string' ? g : ''));
+      const groups = a.slice(1, 1 + groupCount).map((g) => (typeof g === 'string' ? g : ''));
       return repl
         .replace(/\$(\d)/g, (_, n: string) => groups[Number(n) - 1] ?? '')
         .replace(/\[redacted\]$/, '[redacted]');
@@ -113,6 +115,53 @@ describe('deploy/Caddyfile log filter', () => {
     for (const s of samples) {
       expect(redactUrl(s)).not.toContain('FAKE');
       expect(f(s)).not.toContain('FAKE');
+    }
+  });
+
+  it('lists every capture group of the pattern in the replacement', () => {
+    const m = code.match(/request>uri regexp "([^"]+)" "([^"]+)"/)!;
+    const groups = new RegExp(`${m[1]!.replace(/^\(\?i\)/, '')}|`).exec('')!.length - 1;
+    const refs = [...m[2]!.matchAll(/\$\{(\d)\}/g)].map((r) => Number(r[1]));
+    expect(refs).toEqual(Array.from({ length: groups }, (_, i) => i + 1));
+  });
+
+  // [input, expected] for a journey hook called with its secret in the path
+  const HOOK_SECRET_CASES: Array<[string, string]> = [
+    ['/api/hooks/abc123/FAKESECRET', '/api/hooks/abc123/[redacted]'],
+    ['/api/hooks/abc123/FAKESECRET?x=1', '/api/hooks/abc123/[redacted]?x=1'],
+    ['/api/hooks/abc123/FAKESECRET/', '/api/hooks/abc123/[redacted]/'],
+    ['/api/hooks/abc123/FAKESECRET#frag', '/api/hooks/abc123/[redacted]#frag'],
+    ['/api/hooks/abc123/FAKE%2BSECRET%3D%3D', '/api/hooks/abc123/[redacted]'],
+    ['/api/hooks/abc123/FAKE-SE_CR.ET~1', '/api/hooks/abc123/[redacted]'],
+    ['/api/hooks/abc123/FAKE+SECRET=!$', '/api/hooks/abc123/[redacted]'],
+    ['/API/Hooks/abc123/FAKESECRET', '/API/Hooks/abc123/[redacted]'],
+    ['/api/hooks/abc123/FAKESECRET?token=FAKET&x=1', '/api/hooks/abc123/[redacted]?token=[redacted]&x=1'],
+  ];
+
+  it('redacts the hook secret path segment the same way in the app and the proxy', async () => {
+    const { redactUrl } = await import('../src/app.ts');
+    const f = uriRule();
+    for (const [input, out] of HOOK_SECRET_CASES) {
+      expect(redactUrl(input)).toBe(out);
+      expect(f(input)).toBe(out);
+      expect(out).not.toContain('FAKE');
+      expect(out).toContain('/abc123/');
+    }
+  });
+
+  it('leaves a hook without a secret segment and other routes unchanged in both', async () => {
+    const { redactUrl } = await import('../src/app.ts');
+    const f = uriRule();
+    for (const u of [
+      '/api/hooks/abc123',
+      '/api/hooks/abc123?x=1',
+      '/api/hooks',
+      '/api/hooks/',
+      '/api/health',
+      '/api/journeys/abc123/runs',
+    ]) {
+      expect(redactUrl(u)).toBe(u);
+      expect(f(u)).toBe(u);
     }
   });
 });
