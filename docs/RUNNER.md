@@ -890,7 +890,7 @@ Agents must run `aom ledger search` before raising a question: every answer (fro
 - Repeat guard: the second similar question on the same card and stage with no handoff in between does not reach anybody. The card is parked with a back-off and exactly one desk item says so. Five question shifts about one card within two hours put it in loop back-off, whatever the wording. A question shift the runner refused (no agent ran) does not count, and neither does a routing hop (peer, BA, CEO, desk): one question counts once. Only questions an agent asked count; the stop-loss arbitration the system asks the architect does not (the stop-loss is its own guard).
 - `aom card facts` answers what the agent would otherwise ask: the environment status, whether each dependency has merged, the branch, the stage and the blockers. `aom card facts <REF>` does the same for another card of the project.
 - `aom block --on dependency <REF>` records that this card waits for another card (add only, any open card, no cycles, same project). Until the dependency has merged only the design stage may run; build, review and test wait.
-- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
+- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 3 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
 
 **DevOps engineer of a "Run request" (run a branch), only for the environment of its own request:**
 ```sh
@@ -2611,6 +2611,10 @@ runs the build and tests, and only moves the real branch if they pass. The attem
 notice on the desk, and the request in the DevOps thread. The card waits for the attempt and then goes on to Rework, so
 review and test run again. After two attempts that did not hold, the conflict goes to the desk as an escalation and the
 builder (who may rebase, above) takes the card as before.
+
+The runner's rebase and merge are plain `git rebase` / `git merge` in the card worktree, so they honour the repository's
+`.gitattributes` merge drivers: a file marked `merge=union` (Guildwise HQ marks its own `CHANGELOG.md`) keeps both sides'
+added lines instead of conflicting. A pull request merged on the forge may not honour the attribute.
 
 What this implies: a DevOps shift has the full privileges of the runner's OS user on that workstation, and root through
 `sudo` or the Docker socket (access to `docker.sock` is root). The `devops_access` flags (install, Docker, sudo, paths) and

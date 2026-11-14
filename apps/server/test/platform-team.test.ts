@@ -626,7 +626,7 @@ describe('pure pieces', () => {
     const cardId = out.cardId as string;
     expect(await budget('small')).toEqual({ buildPasses: 2, reviewRounds: 2, shifts: 10 });
     expect(await budget('medium')).toEqual({ buildPasses: 3, reviewRounds: 2, shifts: 15 });
-    expect(await budget('large')).toEqual({ buildPasses: 4, reviewRounds: 2, shifts: 25 });
+    expect(await budget('large')).toEqual({ buildPasses: 4, reviewRounds: 3, shifts: 25 });
   });
 
   it('masks paths, secrets and e-mail addresses; keeps function plus file name of frames', () => {

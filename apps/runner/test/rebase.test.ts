@@ -1,5 +1,6 @@
-import { existsSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RebaseConflictError, rebaseOntoBase } from '../src/git/rebase.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
@@ -128,5 +129,29 @@ describe('rebase step before test and finalize (section 13.6)', () => {
     sh(repo.clone, 'git', ['commit', '-m', 'b on main']);
     await rebaseOntoBase(path, 'main');
     expect(existsSync(join(path, 'b.txt'))).toBe(true);
+  });
+  it("two cards' changelog entries rebase without a conflict under the repository's own .gitattributes (merge=union)", async () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const repo = makeRepo();
+    copyFileSync(join(repoRoot, '.gitattributes'), join(repo.clone, '.gitattributes'));
+    copyFileSync(join(repoRoot, 'CHANGELOG.md'), join(repo.clone, 'CHANGELOG.md'));
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'changelog']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main']);
+    const changelog = readFileSync(join(repo.clone, 'CHANGELOG.md'), 'utf8');
+    const add = (text: string, line: string) => text.replace('## [Unreleased]\n', `## [Unreleased]\n\n${line}\n`);
+    expect(add(changelog, 'x')).not.toBe(changelog);
+    const path = join(tmp(), 'wt');
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
+    writeFileSync(join(path, 'CHANGELOG.md'), add(changelog, '- Mine: card A.'));
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'mine']);
+    advanceOrigin(repo.root, repo.origin, 'CHANGELOG.md', add(changelog, '- Theirs: card B.'));
+
+    expect(await rebaseOntoBase(path, 'main')).toBe('rebased');
+    const merged = readFileSync(join(path, 'CHANGELOG.md'), 'utf8');
+    expect(merged).toContain('- Mine: card A.');
+    expect(merged).toContain('- Theirs: card B.');
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
   });
 });

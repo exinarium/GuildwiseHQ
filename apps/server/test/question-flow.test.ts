@@ -879,6 +879,29 @@ describe('stop-loss per card', () => {
     expect((await cardRow(card.id)).stage).toBe('test');
   });
 
+  it('a large card gets three review rounds: two "changes" verdicts leave it queued, the third parks it', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await w.hire('Rex', 'reviewer', 'senior');
+    await w.hire('Arch', 'architect', 'senior');
+    const card = await w.card({ title: 'Big one', designNeeded: false });
+    const set = await w.t.req('PATCH', `/api/cards/${card.id}`, {
+      cookie: w.owner.cookie,
+      body: { riskTier: 'large', reason: 'It touches many areas' },
+    });
+    expect(set.status).toBe(200);
+    await toChangesRequested('Bea', 'Rex');
+    expect((await cardRow(card.id)).status).toBe('queued');
+    await toChangesRequested('Bea', 'Rex');
+    expect((await cardRow(card.id)).status).toBe('queued');
+    expect((await itemsOf(card.id)).filter((i) => i.subkind === 'stop_loss')).toHaveLength(0);
+    await toChangesRequested('Bea', 'Rex');
+    expect((await cardRow(card.id)).status).toBe('blocked');
+    const stop = (await itemsOf(card.id)).filter((i) => i.subkind === 'stop_loss');
+    expect(stop).toHaveLength(1);
+    expect(stop[0]!.title).toMatch(/3\/3 review rounds/);
+  });
+
   it('an architect who cannot resolve it sends one item to the owner', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
@@ -903,7 +926,7 @@ describe('stop-loss per card', () => {
     expect(before.project.stopLoss).toEqual({
       small: { buildPasses: 2, reviewRounds: 2, shifts: 10 },
       medium: { buildPasses: 3, reviewRounds: 2, shifts: 15 },
-      large: { buildPasses: 4, reviewRounds: 2, shifts: 25 },
+      large: { buildPasses: 4, reviewRounds: 3, shifts: 25 },
     });
     const settings = {
       small: { buildPasses: 1, reviewRounds: 1, shifts: 3 },
