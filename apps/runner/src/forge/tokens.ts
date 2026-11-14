@@ -70,14 +70,21 @@ const StoredTokensSchema = z.record(z.string(), StoredTokenSchema) as unknown as
   Record<string, StoredToken>
 >;
 
+const ENVELOPE_KEYS = ['v', 'alg', 'iv', 'ct', 'tag'];
+
 /** The old plaintext file: keep every entry that has the token shape, drop the rest (one bad entry never fails it). */
 function legacyTokens(raw: unknown): Record<string, StoredToken> | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  // a damaged or newer sealed envelope is not a plaintext file: never migrate it (that would drop every token)
+  if (ENVELOPE_KEYS.some((k) => Object.hasOwn(raw, k))) return undefined;
+  const entries = Object.entries(raw);
   const out: Record<string, StoredToken> = {};
-  for (const [k, v] of Object.entries(raw)) {
+  for (const [k, v] of entries) {
     const p = StoredTokenSchema.safeParse(v);
     if (p.success) out[k] = p.data as StoredToken;
   }
+  // a non-empty object with no token in it is not a token file: keep it rather than seal an empty map
+  if (entries.length > 0 && Object.keys(out).length === 0) return undefined;
   return out;
 }
 
