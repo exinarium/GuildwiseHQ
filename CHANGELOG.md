@@ -4,6 +4,41 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-14
+
+Runner 0.1.74. No migrations and no new environment variables. Roles changed: tester v14, planner v3, architect v6, builder v8.
+
+### Added
+
+- Metrics shows where the time and money go. Two new tables on the Metrics page: **Time and cost by role** (shifts, cards, shift time, median shift, cost and cost per card, per role, seniority and model) and **Builder rework by seniority, model and card size** (cards a builder submitted, how many came back from review, rework rounds and the rate). Use them to judge, for example, whether the stronger model pays off on large cards; read a rate together with its card count. New `team` object on `GET /api/metrics`.
+- Planner and architect can mark a card large (`aom risk large --reason "<why>"`) before its first build, so a senior builder takes it. They never lower a card's size; the business analyst and the manager still set either size.
+- Cards that only need tests are worked by the tester. The architect marks such a card with `aom design --tests-only`; its Build stage then goes to a tester (the hire hint names the tester when none is hired) and the tester needs no test environment for it. The server refuses the flag on an investigation-only card and when no active tester may work the project. A runner older than 1.7.0 ignores the flag and the card goes to a builder as before.
+- More hashtags on every social post. Facebook now takes 0 to 5 (was 3), LinkedIn 3 to 8 (was 5), X and Bluesky 1 to 3 (was 2), TikTok 3 to 8; Instagram stays at 5 and YouTube is unchanged. Besides the topical hashtags, each post gets one standing tag and one popular tag (at most two from either kind), rotated by a fixed rule so the same post always gets the same tags. Defaults: standing OpenSource, Free, FreeSoftware, SelfHosted, FOSS; popular AI, Automation, DevOps, Tech, Productivity, AIAgents, GenerativeAI, MachineLearning, Programming, SoftwareDevelopment. On X and Bluesky the standing and popular tags are dropped first when the text does not leave room for them.
+- Two platform settings, `blog_writer_hashtags_standing` and `blog_writer_hashtags_popular`, replace those lists; an unset key uses the defaults and an empty list turns that kind of tag off. `PATCH /api/platform/blog/writer` accepts `hashtagPools`, and the blog writer and video status responses carry it.
+- Worktree preparation. When the runner creates a card's worktree it installs the project's dependencies (pnpm, npm, dotnet, uv, go and the other toolchain steps) in the run-step sandbox before the agent starts, within 5 minutes, so the agent no longer spends its first minutes or a DevOps request on it. A failed or cut-off preparation does not fail the shift: it is noted on the card and the agent is told what was not prepared. New runner config key `prepareWorktrees` (default `true`) turns it off. **Submodules are not prepared**: a repository with submodules gets one line telling the agent to ask DevOps.
+- Queue position for parked cards. A card parked on a DevOps request says where the request stands ("number 2 of 3 in the DevOps queue" or "running now") in its park messages and in `aom card facts`.
+
+### Changed
+
+- DevOps requests are served in a better order. Requests somebody waits on (a parked card, an agent still holding a card shift on that card, or a card held at Test deploy) go first; any request older than 30 minutes joins them, so nothing starves; the rest keep their order of arrival. While one DevOps shift has run for 5 minutes or more, a second DevOps shift may start for such a waited-on request of another card, so a short setup request no longer waits behind a 10-minute shift. At most two DevOps shifts run per engineer.
+- Stop-loss: a large card gets three review rounds (was two) before it is parked; its budget is now 4 build passes, 3 review rounds and 25 shifts. An agent (the architect, when there is no CEO) may extend one card's budget at most three times; after that the owner's desk decides, and the stop-loss item shows how often the budget was extended.
+- Builders run the whole unit test command of each package they changed once, after their last change, as their evidence; while working they run only the test files they touch. (Builder v8.)
+- A builder is no longer stopped for editing documentation, `package.json`, lock files or configuration inside an E2E folder, or for E2E fixtures and snapshots (those count as test content); the builder's handoff checks ignore E2E test content. A tester on a tests-only card is still held to its specs.
+- A read-only role (such as the reviewer) is judged on what it changed during its own shift: files that were already modified when the shift started no longer get it refused.
+- `aom question --recommend` counts from 0. A number equal to the option count is read as the 1-based number of the last option, and the accept message always says how the number was read; any other wrong number is refused with the valid ones listed.
+- `CHANGELOG.md` merges with git's union strategy (`.gitattributes`), so two cards' changelog entries rebase without a conflict.
+
+### Fixed
+
+- Instagram video uploads that ended in a processing failure are retried. A processing failure, a Graph "unsupported request" or "does not exist" answer and an answer marked transient are retried up to 4 attempts with a new container, using the existing back-off of 1, 5 and 30 minutes; an authorization or rate-limit refusal, a server error and invalid media keep their old handling, and nothing is ever published twice.
+- MP4 files are written without edit lists (`-use_editlist 0`, with the index at the front): the rendered videos and the MP4 copies of help videos that Instagram refused.
+- Org chart: an agent tile is named by what it shows (name, role, status, workstation), followed by where its questions go; the screen-reader name no longer differs from the visible text.
+- A drifted submodule no longer blocks a card. A submodule found off its pinned commit is reported to the agent with the one command that puts it back (`git -C <path> checkout <pin>`); the runner does not reset it. If the pin is not available locally the agent asks DevOps (`aom question --topic environment`).
+
+### Security
+
+- The runner no longer runs a program planted in a nested repository or submodule of an agent's worktree: its own git commands stay out of them. Update workstations to runner 0.1.74.
+
 ## [1.6.2] - 2026-11-12
 
 Runner 0.1.73.
