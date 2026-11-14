@@ -102,7 +102,10 @@ function Detail({ pr }: { pr: PrReviewDto }) {
           {run.code && ['forbidden', 'not_found', 'stale_head', 'unreachable'].includes(run.code)
             ? 'could not be posted'
             : 'run failed'}
-          . {(run.runCount ?? 1) > 1 ? 'No comments were posted by either reviewer.' : 'No comments were posted.'}
+          .{' '}
+          {(run.runCount ?? 1) > 1
+            ? 'No comments were posted by either reviewer.'
+            : 'No comments were posted.'}
         </p>
         {run.error && <p className="break-words">{run.error}</p>}
       </Callout>

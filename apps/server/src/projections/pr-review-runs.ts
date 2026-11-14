@@ -30,7 +30,16 @@ export const prReviewRunProjectors: Record<string, Projector> = {
       `INSERT INTO pr_review_rounds (id, pr_review_id, project_id, reviewers, trigger, requested_by, workstation_id, state, started_at)
        VALUES ($1,$2,$3,ARRAY[$4::text],$5,$6,$7,'running',$8)
        ON CONFLICT (id) DO NOTHING`,
-      [roundId, p.prReviewId, p.projectId, p.reviewer, p.trigger ?? 'auto', p.requestedBy ?? null, p.workstationId, p.at],
+      [
+        roundId,
+        p.prReviewId,
+        p.projectId,
+        p.reviewer,
+        p.trigger ?? 'auto',
+        p.requestedBy ?? null,
+        p.workstationId,
+        p.at,
+      ],
     );
     await exec(
       tx,

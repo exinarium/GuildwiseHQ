@@ -22,7 +22,9 @@ const f = (over: Partial<MergeInput> & Pick<MergeInput, 'reviewer'>): MergeInput
 
 describe('titleSimilarity', () => {
   it('is the share of words in common', () => {
-    expect(titleSimilarity('Null check missing on user', 'Missing null check for user')).toBeGreaterThanOrEqual(0.3);
+    expect(
+      titleSimilarity('Null check missing on user', 'Missing null check for user'),
+    ).toBeGreaterThanOrEqual(0.3);
     expect(titleSimilarity('Null check missing', 'Rename the variable')).toBe(0);
     expect(titleSimilarity('', '')).toBe(0);
   });
@@ -52,7 +54,9 @@ describe('isDuplicate (AC3)', () => {
     expect(isDuplicate(f({ reviewer: 'first', line: 10 }), f({ reviewer: 'second', line: 18 }))).toBe(false);
   });
   it('a line against a file-level finding is not', () => {
-    expect(isDuplicate(f({ reviewer: 'first', line: 10 }), f({ reviewer: 'second', line: null }))).toBe(false);
+    expect(isDuplicate(f({ reviewer: 'first', line: 10 }), f({ reviewer: 'second', line: null }))).toBe(
+      false,
+    );
   });
   it('two file-level findings need a closer title', () => {
     expect(
@@ -121,7 +125,9 @@ describe('mergeFindings', () => {
 
   it('the cap over the merged list never posts more than 5 (AC2)', () => {
     const a = Array.from({ length: 4 }, (_, i) => f({ reviewer: 'first', idx: i, line: 10 + i * 20 }));
-    const b = Array.from({ length: 4 }, (_, i) => f({ reviewer: 'second', idx: i, line: 10 + i * 20 + 1000 }));
+    const b = Array.from({ length: 4 }, (_, i) =>
+      f({ reviewer: 'second', idx: i, line: 10 + i * 20 + 1000 }),
+    );
     const merged = mergeFindings([a, b]);
     expect(merged).toHaveLength(8);
     const { ordered } = applyFindingsCap(

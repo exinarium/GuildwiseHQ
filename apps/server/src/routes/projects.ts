@@ -28,10 +28,10 @@ import {
   SetProjectPolicyRequestSchema,
   SetProviderAccountRequestSchema,
   SetPrReviewCapRequestSchema,
-  SetSecondReviewerRequestSchema,
   SetReferenceReposRequestSchema,
   SetRegressionLoopRequestSchema,
   SetReviewSettingsRequestSchema,
+  SetSecondReviewerRequestSchema,
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
@@ -58,6 +58,7 @@ import {
   markFinding,
   reviewerPrecisionForProject,
 } from '../commands/pr-review-marks.ts';
+import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import { heldBackFindings, listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {

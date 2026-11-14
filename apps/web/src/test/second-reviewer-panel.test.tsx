@@ -41,7 +41,9 @@ describe('the second reviewer switch (AC1)', () => {
     const sw = screen.getByTestId('second-reviewer-switch') as HTMLInputElement;
     expect(sw.disabled).toBe(true);
     expect(sw.getAttribute('role')).toBe('switch');
-    expect(screen.getByTestId('second-reviewer-replay-required').textContent).toContain('Record a 20-PR replay first');
+    expect(screen.getByTestId('second-reviewer-replay-required').textContent).toContain(
+      'Record a 20-PR replay first',
+    );
     fireEvent.click(sw);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -72,11 +74,14 @@ describe('the second reviewer switch (AC1)', () => {
   });
 
   it('a 409 replay_required from the server (a race) is shown next to the switch', async () => {
-    renderPanel(recorded, true, () =>
-      new Response(JSON.stringify({ error: { code: 'replay_required', message: 'record a replay' } }), {
-        status: 409,
-        headers: { 'content-type': 'application/json' },
-      }),
+    renderPanel(
+      recorded,
+      true,
+      () =>
+        new Response(JSON.stringify({ error: { code: 'replay_required', message: 'record a replay' } }), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     fireEvent.click(screen.getByTestId('second-reviewer-switch'));
     await waitFor(() => expect(screen.getByTestId('second-reviewer-race')).toBeTruthy());

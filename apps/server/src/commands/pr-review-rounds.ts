@@ -51,11 +51,9 @@ export async function setSecondReviewer(
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await requireSpendOwner(tx, user, org, projectId);
-    const row = await one(
-      tx,
-      'SELECT pr_review_second_reviewer FROM projects WHERE id=$1 FOR UPDATE',
-      [projectId],
-    );
+    const row = await one(tx, 'SELECT pr_review_second_reviewer FROM projects WHERE id=$1 FOR UPDATE', [
+      projectId,
+    ]);
     let replayId: string | null = null;
     if (enabled) {
       const repo = await one(
@@ -181,7 +179,8 @@ export async function startPrReviewRound(
     const busyRepo = await one(
       tx,
       `SELECT count(*)::int AS n FROM pr_review_rounds x JOIN pr_reviews p2 ON p2.id = x.pr_review_id
-        WHERE p2.project_repo_id=$1 AND x.state='running'`,
+        WHERE p2.project_repo_id=$1 AND x.state='running'
+          AND EXISTS (SELECT 1 FROM pr_review_runs r WHERE r.round_id = x.id AND r.state='running')`,
       [repoId],
     );
     if (Number(busyRepo?.n ?? 0) >= MAX_RUNNING_PER_REPO) return { started: false, reason: 'concurrency' };
@@ -249,7 +248,12 @@ export async function startPrReviewRound(
     };
   });
   await ctx.store.append(
-    events.map((event) => ({ streamId: streamId.project(input.projectId), event: event as never, actor: SYSTEM_ACTOR, scope })),
+    events.map((event) => ({
+      streamId: streamId.project(input.projectId),
+      event: event as never,
+      actor: SYSTEM_ACTOR,
+      scope,
+    })),
     { tx },
   );
   for (const r of runs)

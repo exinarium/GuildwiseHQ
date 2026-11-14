@@ -1,5 +1,5 @@
-import { PR_LIST_CAPABILITY, PR_REVIEW_CAPABILITY, PR_REVIEW_PAIR_CAPABILITY } from '@aom/shared';
 import { randomUUID } from 'node:crypto';
+import { PR_LIST_CAPABILITY, PR_REVIEW_CAPABILITY, PR_REVIEW_PAIR_CAPABILITY } from '@aom/shared';
 import type { FakeRunner } from './fake-runner.ts';
 import { createWorld, ok, REPO_SSH, type World } from './world.ts';
 
@@ -51,7 +51,9 @@ export async function createPairWorld(
   await r.barrier();
   await w.t.app.ctx.notifier.flush();
   r.send('repos.report', {
-    repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main', reviewerToken: { present: true } }],
+    repos: [
+      { remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main', reviewerToken: { present: true } },
+    ],
   });
   await r.barrier();
   const prIds: Record<string, string> = {};

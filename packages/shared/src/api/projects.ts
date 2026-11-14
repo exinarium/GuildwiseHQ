@@ -291,9 +291,7 @@ export const ProjectDtoSchema = z.object({
       enabled: z.boolean(),
       replayId: z.uuid().nullable(),
       replayRecordedAt: z.string().nullable(),
-      precision: z
-        .object({ first: z.number().nullable(), second: z.number().nullable() })
-        .nullable(),
+      precision: z.object({ first: z.number().nullable(), second: z.number().nullable() }).nullable(),
     })
     .optional(),
   /** Stop-loss budget by card size: build passes, review rounds and shifts before a card is parked for its architect. */

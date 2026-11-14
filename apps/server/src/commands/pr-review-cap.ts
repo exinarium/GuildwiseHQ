@@ -19,8 +19,8 @@ import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden } from '../errors.ts';
 import { mayStart } from '../review/may-start.ts';
-import { reviewersFor } from '../review/reviewers-for.ts';
 import { listQueueCandidates, pickReviewerWorkstation } from '../review/reviewer-gate.ts';
+import { reviewersFor } from '../review/reviewers-for.ts';
 import { projectScope, userActor } from './common.ts';
 
 /**

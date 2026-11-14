@@ -35,7 +35,6 @@ import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts 
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
-import { latestRecordedReplay } from './pr-replays.ts';
 import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
 import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
@@ -52,6 +51,7 @@ import {
   type StoredWorkstationRepo,
   workstationRepoCandidates,
 } from '../runner-gateway/workstation-repos.ts';
+import { latestRecordedReplay } from './pr-replays.ts';
 import { usageLimitsFor } from './usage-limit.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
@@ -279,10 +279,7 @@ function releasePrOf(r: Record<string, any> | undefined) {
 }
 
 /** The second-reviewer switch and the replay that allows it (precision per reviewer, no longer blind once the replay is finished). */
-async function secondReviewerDto(
-  ctx: Ctx,
-  p: Row,
-): Promise<NonNullable<ProjectDto['secondReviewer']>> {
+async function secondReviewerDto(ctx: Ctx, p: Row): Promise<NonNullable<ProjectDto['secondReviewer']>> {
   const replay = await latestRecordedReplay(ctx.pool, p.id as string);
   const precisionOf = (who: 'first' | 'second') =>
     replay?.result.reviewers.find((r) => r.reviewer === who)?.precision ?? null;

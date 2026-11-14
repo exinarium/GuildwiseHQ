@@ -18,19 +18,21 @@ const put = (enabled: unknown, cookie?: string) =>
     body: { enabled },
   });
 const events = async () =>
-  (await p.db().query(`SELECT payload FROM events WHERE type='ProjectSecondReviewerSet' ORDER BY seq`)).rows.map(
-    (x) => x.payload as any,
-  );
+  (
+    await p.db().query(`SELECT payload FROM events WHERE type='ProjectSecondReviewerSet' ORDER BY seq`)
+  ).rows.map((x) => x.payload as any);
 const detail = async () => (await p.owner('GET', `/api/projects/${p.w.projectId}`)).body.project;
 
 beforeAll(async () => {
   p = await createPairWorld(3);
   const manager = await p.w.t.userSession(uniqueEmail('manager'));
   managerCookie = manager.cookie;
-  await p.db().query(
-    `INSERT INTO project_members (project_id, user_id, role, status, joined_at) VALUES ($1,$2,'manager','active',now())`,
-    [p.w.projectId, manager.id],
-  );
+  await p
+    .db()
+    .query(
+      `INSERT INTO project_members (project_id, user_id, role, status, joined_at) VALUES ($1,$2,'manager','active',now())`,
+      [p.w.projectId, manager.id],
+    );
   strangerCookie = (await p.w.t.userSession(uniqueEmail('stranger'))).cookie;
 });
 afterAll(async () => {
@@ -44,7 +46,11 @@ describe('AC1: no recorded replay, no second reviewer', () => {
     expect(res.status).toBe(409);
     expect(JSON.stringify(res.body)).toContain('replay_required');
     expect(await events()).toEqual([]);
-    expect((await detail()).secondReviewer).toMatchObject({ enabled: false, replayId: null, replayRecordedAt: null });
+    expect((await detail()).secondReviewer).toMatchObject({
+      enabled: false,
+      replayId: null,
+      replayRecordedAt: null,
+    });
   });
 
   it('a finished replay in which the second reviewer reviewed no pull request still does not count', async () => {
@@ -59,7 +65,9 @@ describe('AC1: no recorded replay, no second reviewer', () => {
     const rounds = (await p.db().query('SELECT reviewers FROM pr_review_rounds')).rows;
     expect(rounds.length).toBeGreaterThan(0);
     expect(rounds.every((r) => r.reviewers.join() === 'first')).toBe(true);
-    expect((await p.db().query(`SELECT count(*)::int AS n FROM pr_review_runs WHERE reviewer='second'`)).rows[0].n).toBe(0);
+    expect(
+      (await p.db().query(`SELECT count(*)::int AS n FROM pr_review_runs WHERE reviewer='second'`)).rows[0].n,
+    ).toBe(0);
     await p.db().query('UPDATE projects SET pr_review_second_reviewer=false WHERE id=$1', [p.w.projectId]);
   });
 

@@ -25,7 +25,6 @@ import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { PrReviewCapPanel } from '../components/PrReviewCapPanel.tsx';
-import { SecondReviewerPanel } from '../components/SecondReviewerPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { ReleaseDocsPrepPanel } from '../components/ReleaseDocsPrepPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
@@ -39,6 +38,7 @@ import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { ReviewSettingsPanel } from '../components/ReviewSettingsPanel.tsx';
 import { Reword } from '../components/Reword.tsx';
+import { SecondReviewerPanel } from '../components/SecondReviewerPanel.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {

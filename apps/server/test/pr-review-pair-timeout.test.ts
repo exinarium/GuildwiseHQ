@@ -17,8 +17,11 @@ import { ok } from './helpers/world.ts';
 
 let p: PairWorld;
 const commandsOf = async (type: string) =>
-  (await p.db().query('SELECT id, payload, status FROM runner_commands WHERE type=$1 ORDER BY created_at', [type]))
-    .rows;
+  (
+    await p
+      .db()
+      .query('SELECT id, payload, status FROM runner_commands WHERE type=$1 ORDER BY created_at', [type])
+  ).rows;
 const answer = async (cmd: any, result: unknown, okFlag = true) => {
   p.r.send('command.result', { commandId: cmd.commandId, ok: okFlag, result });
   await p.r.barrier();
@@ -37,11 +40,19 @@ const roundOf = async (changeId: string) =>
     )
   ).rows[0];
 const runState = async (reviewer: string, roundId: string) =>
-  (await p.db().query('SELECT state, error_code FROM pr_review_runs WHERE round_id=$1 AND reviewer=$2', [roundId, reviewer]))
-    .rows[0];
+  (
+    await p
+      .db()
+      .query('SELECT state, error_code FROM pr_review_runs WHERE round_id=$1 AND reviewer=$2', [
+        roundId,
+        reviewer,
+      ])
+  ).rows[0];
 const noPostsAndNoPostedFindings = async () => {
   expect(await commandsOf('pr_review.post')).toHaveLength(0);
-  expect((await p.db().query('SELECT count(*)::int AS n FROM pr_review_findings WHERE posted')).rows[0].n).toBe(0);
+  expect(
+    (await p.db().query('SELECT count(*)::int AS n FROM pr_review_findings WHERE posted')).rows[0].n,
+  ).toBe(0);
 };
 const timeout = { outcome: 'timeout', durationMs: 600_000, phase: 'review' };
 
@@ -85,12 +96,23 @@ describe('AC4: either run timing out or failing ends the round with nothing post
     const dto = (await pr('1')).lastRun;
     expect(dto).toMatchObject({ state: 'timed_out', code: 'timeout', postedCount: 0, runCount: 2 });
     // nothing was posted, so nothing is blind: the owner sees which run timed out
-    expect(dto.runs.find((r: any) => r.state === 'timed_out')).toMatchObject({ reviewer: 'second', model: 'opus' });
+    expect(dto.runs.find((r: any) => r.state === 'timed_out')).toMatchObject({
+      reviewer: 'second',
+      model: 'opus',
+    });
     // no cancel: the partner was already done
     expect(await commandsOf('pr_review.cancel')).toHaveLength(0);
     // the next pass starts another pull request, never this one again
     expect(await dispatchPrReviews(p.ctx())).toBe(1);
-    expect((await p.db().query(`SELECT count(*)::int AS n FROM pr_review_rounds rd JOIN pr_reviews x ON x.id = rd.pr_review_id WHERE x.change_id='1'`)).rows[0].n).toBe(1);
+    expect(
+      (
+        await p
+          .db()
+          .query(
+            `SELECT count(*)::int AS n FROM pr_review_rounds rd JOIN pr_reviews x ON x.id = rd.pr_review_id WHERE x.change_id='1'`,
+          )
+      ).rows[0].n,
+    ).toBe(1);
     // clean up: end round of PR 2 so the next test starts from a known place
     const r2 = await roundOf('2');
     await p.db().query(`UPDATE pr_review_rounds SET state='failed', end_code='timeout' WHERE id=$1`, [r2.id]);
@@ -105,11 +127,22 @@ describe('AC4: either run timing out or failing ends the round with nothing post
     const roundId = (await roundOf('3')).id;
     expect(await roundOf('3')).toMatchObject({ state: 'timed_out' });
     expect(await runState('first', roundId)).toMatchObject({ state: 'cancelled', error_code: 'cancelled' });
-    const cancel: any = await p.r.waitFor('command', (f: any) => f.command === 'pr_review.cancel', 5000, from);
+    const cancel: any = await p.r.waitFor(
+      'command',
+      (f: any) => f.command === 'pr_review.cancel',
+      5000,
+      from,
+    );
     expect(cancel.payload).toMatchObject({ runId: first.payload.runId, reason: 'partner_timeout' });
     await answer(cancel, { found: true });
     // the runner's answer for the cancelled run, and even a "completed" one, change nothing
-    await answer(first, { outcome: 'failed', durationMs: 1, code: 'cancelled', error: 'stopped', retryable: false });
+    await answer(first, {
+      outcome: 'failed',
+      durationMs: 1,
+      code: 'cancelled',
+      error: 'stopped',
+      retryable: false,
+    });
     await answer(first, completedResult([finding()]));
     await noPostsAndNoPostedFindings();
     expect(await runState('first', roundId)).toMatchObject({ state: 'cancelled' });
@@ -120,14 +153,29 @@ describe('AC4: either run timing out or failing ends the round with nothing post
   it('Opus fails: the same, and the failure text is kept', async () => {
     await p.db().query(`UPDATE pr_reviews SET closed_at=now() WHERE change_id='3'`);
     const { first, second, from } = await startPair(4);
-    await answer(second, { outcome: 'failed', durationMs: 5000, code: 'model_error', error: 'Opus refused', retryable: true });
+    await answer(second, {
+      outcome: 'failed',
+      durationMs: 5000,
+      code: 'model_error',
+      error: 'Opus refused',
+      retryable: true,
+    });
     const roundId = (await roundOf('4')).id;
     expect(await roundOf('4')).toMatchObject({ state: 'failed', end_code: 'model_error' });
     expect(await runState('first', roundId)).toMatchObject({ state: 'cancelled' });
-    const cancel: any = await p.r.waitFor('command', (f: any) => f.command === 'pr_review.cancel', 5000, from);
+    const cancel: any = await p.r.waitFor(
+      'command',
+      (f: any) => f.command === 'pr_review.cancel',
+      5000,
+      from,
+    );
     expect(cancel.payload).toMatchObject({ runId: first.payload.runId, reason: 'partner_failed' });
     await noPostsAndNoPostedFindings();
-    expect((await pr('4')).lastRun).toMatchObject({ state: 'failed', code: 'model_error', error: 'Opus refused' });
+    expect((await pr('4')).lastRun).toMatchObject({
+      state: 'failed',
+      code: 'model_error',
+      error: 'Opus refused',
+    });
   });
 
   it('the backstop: Opus never answers, the sweep times it out and the round posts nothing', async () => {
@@ -154,6 +202,14 @@ describe('AC4: either run timing out or failing ends the round with nothing post
     // heads_differ is retried by the next pass (at most 3 rounds)
     const again = await startPair(6);
     expect(again.first.payload.runId).not.toBe(first.payload.runId);
-    expect((await p.db().query(`SELECT count(*)::int AS n FROM pr_review_rounds rd JOIN pr_reviews x ON x.id = rd.pr_review_id WHERE x.change_id='6'`)).rows[0].n).toBe(2);
+    expect(
+      (
+        await p
+          .db()
+          .query(
+            `SELECT count(*)::int AS n FROM pr_review_rounds rd JOIN pr_reviews x ON x.id = rd.pr_review_id WHERE x.change_id='6'`,
+          )
+      ).rows[0].n,
+    ).toBe(2);
   });
 });

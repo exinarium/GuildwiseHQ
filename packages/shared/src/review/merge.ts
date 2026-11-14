@@ -38,7 +38,20 @@ export interface MergedFinding<T extends MergeInput> {
   severity: FindingSeverity;
 }
 
-const STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'not', 'are', 'can', 'may', 'does', 'from']);
+const STOP = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'not',
+  'are',
+  'can',
+  'may',
+  'does',
+  'from',
+]);
 const WEIGHT: Record<FindingSeverity, number> = { high: 2, medium: 1, low: 0 };
 const REVIEWER_ORDER: PrReviewer[] = ['first', 'second'];
 
@@ -97,7 +110,9 @@ function pickCanonical<T extends MergeInput>(a: T, b: T): T {
  * found by both first; then the best relative position in its run; then the first reviewer; then the id. With one run
  * the findings come back unchanged, in idx order. Inputs are not mutated.
  */
-export function mergeFindings<T extends MergeInput>(runs: ReadonlyArray<ReadonlyArray<T>>): MergedFinding<T>[] {
+export function mergeFindings<T extends MergeInput>(
+  runs: ReadonlyArray<ReadonlyArray<T>>,
+): MergedFinding<T>[] {
   const lengths = new Map<T, number>();
   for (const run of runs) for (const f of run) lengths.set(f, Math.max(1, run.length));
   const all = runs.flatMap((r) => [...r]);

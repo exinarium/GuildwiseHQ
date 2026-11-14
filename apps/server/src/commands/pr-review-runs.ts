@@ -30,8 +30,8 @@ import { mayStart } from '../review/may-start.ts';
 import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
-import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
+import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 import { RUN_GRACE_MS, type StartResult, startPrReviewRound } from './pr-review-rounds.ts';
 
 /**
@@ -375,7 +375,8 @@ async function mergeAndPostRound(
   let changedLines: number | null = known === undefined ? null : Number(known);
   if (changedLines === null && runs.length > 1) {
     const pr = await one(tx, 'SELECT changed_lines FROM pr_reviews WHERE id=$1', [prReviewId]);
-    if (pr?.changed_lines !== null && pr?.changed_lines !== undefined) changedLines = Number(pr.changed_lines);
+    if (pr?.changed_lines !== null && pr?.changed_lines !== undefined)
+      changedLines = Number(pr.changed_lines);
   }
   const { cap, ordered } = applyFindingsCap(
     merged.map((m) => ({ ...m.canonical, severity: m.severity })),
@@ -600,9 +601,11 @@ export async function applyPrReviewPostResult(
       return;
     }
     if (round.state === 'posted') return;
-    const runs = await rows(tx, 'SELECT * FROM pr_review_runs WHERE round_id=$1 ORDER BY reviewer, id FOR UPDATE', [
-      roundId,
-    ]);
+    const runs = await rows(
+      tx,
+      'SELECT * FROM pr_review_runs WHERE round_id=$1 ORDER BY reviewer, id FOR UPDATE',
+      [roundId],
+    );
     const first = runs[0];
     if (!first) return;
     const projectId = round.project_id as string;
@@ -794,7 +797,8 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
 function blindReviewer(l: Record<string, unknown>) {
   const unmarkedCount = Number(l.unmarked_count ?? 0);
   const reviewersHidden = unmarkedCount > 0;
-  const all = (l.reviewed_by_all as PrReviewer[] | null) ?? (l.reviewed_by ? [l.reviewed_by as PrReviewer] : null);
+  const all =
+    (l.reviewed_by_all as PrReviewer[] | null) ?? (l.reviewed_by ? [l.reviewed_by as PrReviewer] : null);
   return {
     reviewer: reviewersHidden || (all?.length ?? 0) > 1 ? null : ((l.reviewed_by as 'first' | null) ?? null),
     reviewers: reviewersHidden ? null : all,

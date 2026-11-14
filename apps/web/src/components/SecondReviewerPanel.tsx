@@ -41,8 +41,8 @@ export function SecondReviewerPanel({
         {!recorded && (
           <Callout tone="info" role="status" data-testid="second-reviewer-replay-required">
             <span>
-              Record a 20-PR replay first. It measures both reviewers offline so you can compare them before the
-              second reviewer comments on live pull requests.{' '}
+              Record a 20-PR replay first. It measures both reviewers offline so you can compare them before
+              the second reviewer comments on live pull requests.{' '}
               <Link
                 to={`/p/${projectKey}/pull-requests/replay`}
                 className="inline-flex min-h-11 items-center text-brand-text underline"
