@@ -13,8 +13,13 @@ import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
-import { codexFilesystem } from '../src/adapters/codex.ts';
-import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
+import { CodexAdapter, codexFilesystem } from '../src/adapters/codex.ts';
+import { GeminiAdapter } from '../src/adapters/gemini.ts';
+import {
+  ClaudeRuntimeConfigSchema,
+  CodexRuntimeConfigSchema,
+  GeminiRuntimeConfigSchema,
+} from '../src/config.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { type HarnessSandboxInput, harnessBwrapArgs } from '../src/sandbox/harness-sandbox.ts';
 import {
@@ -214,6 +219,59 @@ describe('Claude Code: allowWrite carries exactly the three lock folders under /
     const ctx = (a as any).policy({ env: {}, sandbox }, root);
     if (process.platform === 'linux') expect(ctx.pnpmLockDirs).toEqual(usablePnpmLockDirs());
     else expect(ctx.pnpmLockDirs).toBeUndefined();
+  });
+});
+
+describe('Codex and Gemini adapters fill pnpmLockDirs beside dotnetShmDir', () => {
+  const handBuilt = () => {
+    const root = tmp();
+    return {
+      cwd: root,
+      env: {},
+      sandbox: {
+        agentId: 'x',
+        root,
+        home: join(root, 'home'),
+        configDir: join(root, 'c'),
+        scratch: root,
+        tmp: root,
+      },
+    };
+  };
+  const codex = (platform: NodeJS.Platform) =>
+    new CodexAdapter(CodexRuntimeConfigSchema.parse({ bin: 'no-such-codex-binary' }) as never, undefined, {
+      platform,
+      home: tmp(),
+    } as never);
+
+  it('Codex native profile: on a Linux host it carries the usable lock folders, elsewhere none', () => {
+    // profile() is private
+    const linux = (codex('linux') as any).profile(handBuilt(), false, false);
+    expect(linux.dotnetShmDir).toBe(DOTNET_SHM_DIR);
+    expect(linux.pnpmLockDirs).toEqual(usablePnpmLockDirs());
+    const mac = (codex('darwin') as any).profile(handBuilt(), false, false);
+    expect(mac.pnpmLockDirs).toBeUndefined();
+    expect(mac.dotnetShmDir).toBeUndefined();
+  });
+
+  it('Codex harness box: the box input carries the usable lock folders on Linux', () => {
+    // harnessSpec() is private
+    const spec = (codex('linux') as any).harnessSpec(handBuilt(), false, false, tmp());
+    if (process.platform === 'linux') expect(spec.pnpmLockDirs).toEqual(usablePnpmLockDirs());
+    else expect(spec.pnpmLockDirs).toBeUndefined();
+  });
+
+  it('Gemini harness box: the box input carries the usable lock folders on Linux', () => {
+    const g = new GeminiAdapter(
+      GeminiRuntimeConfigSchema.parse({ bin: 'no-such-gemini-binary' }) as never,
+      undefined,
+      undefined,
+      { home: tmp() } as never,
+    );
+    // launchSpec() is private
+    const spec = (g as any).launchSpec(handBuilt(), false, false, tmp());
+    if (process.platform === 'linux') expect(spec.pnpmLockDirs).toEqual(usablePnpmLockDirs());
+    else expect(spec.pnpmLockDirs).toBeUndefined();
   });
 });
 
