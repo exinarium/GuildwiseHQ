@@ -67,7 +67,9 @@ export function cacheEnv(cacheRoot: string): Record<string, string> {
     NUGET_HTTP_CACHE_PATH: d('nuget-http'),
     NUGET_PLUGINS_CACHE_PATH: d('nuget-plugins'),
     npm_config_cache: d('npm'),
+    // pnpm 8-10 read npm_config_*, pnpm 11 and later only pnpm_config_*: same store for both
     npm_config_store_dir: d('pnpm'),
+    pnpm_config_store_dir: d('pnpm'),
     YARN_CACHE_FOLDER: d('yarn'),
     PIP_CACHE_DIR: d('pip'),
     // caches only: the agents' homes are empty, so there is no gradle.properties with credentials to share
