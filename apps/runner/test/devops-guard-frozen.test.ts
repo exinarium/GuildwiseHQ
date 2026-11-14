@@ -257,3 +257,47 @@ describe('guard file per session', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('guard attachment of a release prep shift', () => {
+  const setup = () => {
+    const t = tmp();
+    const adapter = new ClaudeCodeAdapter(ClaudeRuntimeConfigSchema.parse({}), runnerPaths(t));
+    const dir = join(t, 'agents', 'a1', 'claude');
+    mkdirSync(dir, { recursive: true });
+    return { adapter, dir };
+  };
+
+  it('a DevOps release prep shift without guard settings does not start', async () => {
+    const { adapter, dir } = setup();
+    const input = {
+      shiftId: 's1',
+      kind: 'release_prep',
+      agent: { isDevops: true, model: 'm' },
+      sandbox: { configDir: dir },
+    };
+    const start = (
+      adapter as unknown as { startShiftSession: (i: object, a: unknown, b: unknown) => Promise<unknown> }
+    ).startShiftSession.bind(adapter);
+    await expect(start(input, undefined, undefined)).rejects.toThrow(/guard could not be attached/);
+  });
+
+  it('a start that failed after the guard file was written leaves no file behind', () => {
+    const { adapter, dir } = setup();
+    const g = adapter as unknown as {
+      devopsGuard: (d: string, g: object, k: 'shift') => { file: string };
+      dropGuardFile: (i: object, k: 'shift', ref: string | undefined) => void;
+    };
+    const { file } = g.devopsGuard(dir, { sessionRef: 'p9', approvedCommands: [] }, 'shift');
+    expect(readFileSync(file, 'utf8')).toContain('p9');
+    // another session's file stays
+    const other = g.devopsGuard(dir, { sessionRef: 'p10', approvedCommands: [] }, 'shift').file;
+    const input = { agent: { isDevops: true }, sandbox: { configDir: dir } };
+    g.dropGuardFile(input, 'shift', 'p9');
+    expect(() => readFileSync(file)).toThrow();
+    expect(readFileSync(other, 'utf8')).toContain('p10');
+    // a non-DevOps agent and a missing ref are left alone
+    g.dropGuardFile({ agent: {}, sandbox: { configDir: dir } }, 'shift', 'p10');
+    g.dropGuardFile(input, 'shift', undefined);
+    expect(readFileSync(other, 'utf8')).toContain('p10');
+  });
+});
