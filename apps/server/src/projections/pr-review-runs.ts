@@ -105,4 +105,14 @@ export const prReviewRunProjectors: Record<string, Projector> = {
       [p.prReviewId, p.reviewer, p.at, p.runId],
     );
   },
+  PrReviewFindingMarked: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewFindingMarked'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO pr_review_finding_marks (finding_id, pr_review_id, run_id, project_id, mark, blind_mark, marked_by, marked_at, first_marked_at)
+       VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$7)
+       ON CONFLICT (finding_id) DO UPDATE SET mark=EXCLUDED.mark, marked_by=EXCLUDED.marked_by, marked_at=EXCLUDED.marked_at`,
+      [p.findingId, p.prReviewId, p.runId, p.projectId, p.mark, p.markedBy, p.at],
+    );
+  },
 };

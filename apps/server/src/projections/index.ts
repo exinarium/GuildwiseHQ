@@ -195,6 +195,7 @@ export const PROJECTION_TABLES = [
   'pr_reviews',
   'pr_review_runs',
   'pr_review_findings',
+  'pr_review_finding_marks',
   'project_members',
   'project_workflows',
   'workflow_versions',
