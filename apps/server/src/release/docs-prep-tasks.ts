@@ -544,6 +544,7 @@ export async function buildReleasePrepShiftStart(
       remoteUrlNormalized: t.remote_url_normalized,
       workRef: `refs/guildwise/docs-prep/${t.run_id}/work`,
       startSha: t.head_sha,
+      releaseBranch: t.release_branch,
       task: task.data,
       writable: writableFilesFor(task.data),
     },

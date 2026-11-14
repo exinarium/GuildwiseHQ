@@ -172,6 +172,54 @@ describe('devops.audit: every command of the DevOps engineer is stored', () => {
     expect(refused.map((e) => e.rule)).toEqual(['user_admin', 'off_workstation']);
     expect(all.every((e) => e.workstation_id === w.workstationId)).toBe(true);
   });
+
+  it('keeps the shift kind of a release prep shift and null for chats and older runners', async () => {
+    r.send('devops.audit', {
+      entries: [
+        {
+          at: '2026-11-14T10:00:00.000Z',
+          sessionRef: 'prep-1',
+          kind: 'shift',
+          shiftKind: 'release_prep',
+          decision: 'refused',
+          rule: 'frozen_branch',
+          command: 'git push origin release/1.6.0',
+        },
+        {
+          at: '2026-11-14T10:00:01.000Z',
+          sessionRef: 'shift-2',
+          kind: 'shift',
+          shiftKind: 'devops',
+          decision: 'allowed',
+          rule: 'ok',
+          command: 'docker ps',
+        },
+        {
+          at: '2026-11-14T10:00:02.000Z',
+          sessionRef: 'chat-2',
+          kind: 'chat',
+          decision: 'allowed',
+          rule: 'ok',
+          command: 'ls',
+        },
+      ],
+    });
+    await r.barrier();
+    const rows = await listDevopsAudit(w.t.app.ctx);
+    expect(rows.map((e) => [e.session_ref, e.shift_kind])).toEqual([
+      ['chat-2', null],
+      ['shift-2', 'devops'],
+      ['prep-1', 'release_prep'],
+    ]);
+    // the column only takes the two known kinds
+    await expect(
+      q(
+        `INSERT INTO devops_audit (workstation_id, at, session_ref, kind, shift_kind, decision, rule, command)
+         VALUES ($1, now(), 'x', 'shift', 'card', 'allowed', 'ok', 'ls')`,
+        [w.workstationId],
+      ),
+    ).rejects.toThrow();
+  });
 });
 
 describe('role.smoke: a failed role gets no work on this workstation', () => {

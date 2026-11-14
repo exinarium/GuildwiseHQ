@@ -92,7 +92,7 @@ import {
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
-import { cardPayload, devopsGuardFor, shiftTexts } from '../devops/requests.ts';
+import { cardPayload, devopsGuardFor, guardedShift, shiftTexts } from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import {
@@ -1171,6 +1171,14 @@ export class ShiftSupervisor {
         this.reject(msg.shiftId, 'internal', 'a release prep shift without its task');
         return;
       }
+      if (msg.agent.isDevops && !rp.releaseBranch?.trim()) {
+        this.reject(
+          msg.shiftId,
+          'internal',
+          'a release prep shift without its release branch: the DevOps guard cannot protect it, so the shift does not start',
+        );
+        return;
+      }
       const repo = await this.deps.findRepo(rp.remoteUrlNormalized);
       if (!repo) {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${rp.remoteUrlNormalized}`);
@@ -1653,6 +1661,11 @@ export class ShiftSupervisor {
       msg.kind === 'ceo' ||
       msg.kind === 'devops' ||
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
+    const devopsGuard = devopsGuardFor(msg);
+    if (guardedShift(msg) && !devopsGuard) {
+      this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
+      return;
+    }
     try {
       s.session = await adapter.start({
         shiftId: msg.shiftId,
@@ -1663,7 +1676,7 @@ export class ShiftSupervisor {
         ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(accountKey !== 'main' ? { account: accountKey } : {}),
-        ...(devopsGuardFor(msg) ? { devopsGuard: devopsGuardFor(msg) } : {}),
+        ...(devopsGuard ? { devopsGuard } : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,

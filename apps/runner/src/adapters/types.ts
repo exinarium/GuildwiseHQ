@@ -60,6 +60,10 @@ export interface DevopsGuardInput {
   approvedCommands?: string[];
   /** A "Scan with DevOps" shift: read-only. The guard refuses commands that start, build, install, connect or write (devops/guard.ts). */
   readOnlyScan?: boolean;
+  /** For a shift: its kind, copied into every audit entry. */
+  shiftKind?: 'devops' | 'release_prep';
+  /** Branches the session may not change at all (release prep: the release branch). */
+  frozenBranches?: string[];
 }
 
 /**

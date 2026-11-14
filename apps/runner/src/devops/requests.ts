@@ -21,6 +21,7 @@ import {
   type ServerToRunnerOf,
   type ShiftBrief,
 } from '@aom/shared';
+import type { DevopsGuardInput } from '../adapters/types.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 
@@ -33,17 +34,23 @@ export const devopsOf = (msg: ShiftStartMsg): DevopsShift | undefined =>
  * is its guardrail). Its own requests (`devops`) and, since GWP-189, the release prep tasks (`release_prep`) it writes; no
  * other shift kind, and no other agent, gets a guard. The working branch of the project is protected from force-pushes.
  */
-export function devopsGuardFor(msg: ShiftStartMsg):
-  | {
-      sessionRef: string;
-      protectedBranches: string[];
-      approvedCommands: string[];
-      readOnlyScan?: true;
-    }
-  | undefined {
-  if (!msg.agent.isDevops || (msg.kind !== 'devops' && msg.kind !== 'release_prep')) return undefined;
+export function devopsGuardFor(msg: ShiftStartMsg): DevopsGuardInput | undefined {
+  if (!guardedShift(msg)) return undefined;
+  if (msg.kind === 'release_prep') {
+    // the release branch is frozen for the whole shift; nothing is pre-approved
+    const branch = msg.releasePrep?.releaseBranch?.trim();
+    if (!branch) return undefined;
+    return {
+      sessionRef: msg.shiftId,
+      shiftKind: 'release_prep',
+      protectedBranches: [branch],
+      frozenBranches: [branch],
+      approvedCommands: [],
+    };
+  }
   return {
     sessionRef: msg.shiftId,
+    shiftKind: 'devops',
     protectedBranches: [msg.brief.project.workingBranch, msg.worktree?.baseBranch].filter(
       (b): b is string => !!b,
     ),
@@ -51,6 +58,10 @@ export function devopsGuardFor(msg: ShiftStartMsg):
     ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true as const } : {}),
   };
 }
+
+/** The one shift-kind decision of the guard: DevOps requests and release prep tasks of a DevOps agent. */
+export const guardedShift = (msg: ShiftStartMsg): boolean =>
+  !!msg.agent.isDevops && (msg.kind === 'devops' || msg.kind === 'release_prep');
 
 /** A BA task shift (phases): a report, briefs or a custom follow-up for the manager's phase; no card, no worktree. */
 export const baTaskOf = (msg: ShiftStartMsg): BaTaskShift | undefined =>
