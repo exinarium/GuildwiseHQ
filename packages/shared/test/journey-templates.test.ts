@@ -110,7 +110,9 @@ describe('journey template catalogue', () => {
 
   it('keeps rentals the only client template with 10 steps', () => {
     // e2e/tests/journeys.spec.ts matches the text "10 steps · for a client" and must find one template.
-    const ten = JOURNEY_TEMPLATES.filter((t) => t.definition.recordType === 'client' && t.definition.steps.length === 10);
+    const ten = JOURNEY_TEMPLATES.filter(
+      (t) => t.definition.recordType === 'client' && t.definition.steps.length === 10,
+    );
     expect(ten.map((t) => t.id)).toEqual(['rentals']);
   });
 });
