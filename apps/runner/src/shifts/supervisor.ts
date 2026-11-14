@@ -2584,6 +2584,7 @@ export class ShiftSupervisor {
           ...(data.assumptions ? { assumptions: data.assumptions } : {}),
           ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
           ...(data.review ? { review: data.review } : {}),
+          ...(data.testsOnly ? { testsOnly: true } : {}),
         },
       };
     }
@@ -2650,6 +2651,7 @@ export class ShiftSupervisor {
         ...(data.assumptions ? { assumptions: data.assumptions } : {}),
         ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
         ...(data.review ? { review: data.review } : {}),
+        ...(data.testsOnly ? { testsOnly: true } : {}),
       },
     };
   }
