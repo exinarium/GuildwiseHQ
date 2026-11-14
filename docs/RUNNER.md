@@ -513,6 +513,7 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 - **Precedence of the limit (GWP-95).** (1) The server's value from the last `welcome` or `shifts.limit` of this process: the workstation setting, or the platform cap over it. (2) Before the server has answered since the runner started: `server-limits.json` (the last value the server sent), else `config.json` `maxConcurrentShifts`; this is the *local fallback* and lasts only until the first `welcome`. (3) When the owner chose "Runner's own value" (null): `config.json` under the platform cap, source *runner config*. A runner that announces `shift-limit:2` reports the limit it enforces and its source in every heartbeat (`load.maxShifts`, `load.limitSource`; sources `workstation_setting`, `platform_cap`, `runner_config`, `local_fallback`, `pairing_budget`). The Workstations page shows it next to the server's view, flags a mismatch, and shows "unknown" for an older runner. A `busy` rejection carries `capacity` (limit, source, running count and the shifts holding the slots, identifiers only), and the card's message names them.
 - **What takes a slot.** Card, question, DevOps and BA task shifts. Chat turns (owner chat, CEO owner/order turns, @mention work) and the CEO shift do not (`SHIFT_KINDS_OUTSIDE_LIMIT`). The runner, the dispatcher and the Workstations page count with this one rule; the page shows chat/CEO turns apart as "not counted". Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
+- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (submodules, the project's dependencies in the run-step sandbox) before the agent starts; see "A new card worktree is prepared".
 - **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
 - **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
 
@@ -1633,6 +1634,20 @@ Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (projec
 organization, so the project id keeps two same-keyed projects on one workstation apart) and reused across stages of the
 same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
 the server recorded for the card. They are removed after finalize (`worktree.remove`), when the card ends without a merge, and by the sweep below.
+
+#### A new card worktree is prepared (1.7.0)
+
+When a card shift's `git worktree add` creates the card worktree (not when it reuses one, and never for a resumed shift),
+the runner prepares it after it accepted the shift and before the agent starts: each git submodule is checked out at the
+commit the branch pins (cloned from the workstation's own clone of that repository when there is one, as deploy checkouts
+do), then the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
+`uv sync`, `go mod download`, ...; the same steps the Development environment check runs) run in the project folder, in
+the run-step sandbox the handoff checks use (shared package caches, credentials masked) with `CI=true`. The whole
+preparation has a 5-minute budget and stops with the shift. Afterwards `git status` is as before: a tracked file an
+install rewrote (a lockfile) is restored, a new file outside `.gitignore` is removed, and both are reported. Nothing is
+retried: a failed or cut-off preparation is a line in the shift's progress, a note on the card, `shift.started.worktreePrep`,
+and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The
+config switch `prepareWorktrees` (default `true`) turns it off.
 
 #### Base branch and the per-clone lock
 

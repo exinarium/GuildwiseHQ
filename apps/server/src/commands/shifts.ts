@@ -910,6 +910,21 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
           ]
         : []),
       ...(card && msg.syncMain ? await mainSyncEvents(tx, ws, card, msg.syncMain) : []),
+      // The runner could not fully prepare the new card worktree (submodules, dependencies): a note on the card.
+      ...(card && msg.worktreePrep && !msg.worktreePrep.ok
+        ? [
+            cardMessage(
+              card,
+              { kind: 'system' },
+              'system',
+              `The runner could not fully prepare the new worktree of ${card.ref}: ${msg.worktreePrep.steps
+                .filter((x) => x.status === 'failed')
+                .map((x) => `${x.name}${x.detail ? ` (${x.detail.slice(0, 300)})` : ''}`)
+                .join('; ')}. The agent was told; it asks DevOps for what is missing if it needs it.`,
+              { worktreePrep: msg.worktreePrep },
+            ),
+          ]
+        : []),
       ...(card && created
         ? [
             cardMessage(

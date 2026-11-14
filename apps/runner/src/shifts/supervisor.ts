@@ -176,6 +176,7 @@ import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../tes
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
+import { type PrepResult, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
 import {
   agentPath,
   describeToolchains,
@@ -183,6 +184,7 @@ import {
   toolchainNote,
   toolchainRpc,
 } from '../toolchain/registry.ts';
+import type { Platform } from '../toolchain/types.ts';
 import type { TranscriptDeps, TranscriptResult } from '../transcript/fetch.ts';
 import {
   defaultTranscriptDeps,
@@ -348,6 +350,8 @@ export interface SupervisorDeps {
   toolchains?: ToolchainRegistry;
   /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
   runs?: RunManager;
+  /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
+  prepareWorktree?: typeof prepareWorktree;
   /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
   onTestServices?: () => void;
   /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
@@ -451,6 +455,10 @@ interface ActiveShift {
   checksRunning?: boolean;
   /** Aborted when the shift ends: kills the running checks. */
   checkAbort?: AbortController;
+  /** Aborted when the shift is stopped: ends the preparation of a new worktree. */
+  prepAbort?: AbortController;
+  /** What preparing the new card worktree did (reported with `shift.started`, told to the agent). */
+  worktreePrep?: PrepResult;
   /** Check results by head, check and command: a second handoff at the same head does not run them again. */
   checkCache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
@@ -823,6 +831,7 @@ export class ShiftSupervisor {
       if (done) return;
     }
     if (!afterAccepted) s.stopReason ??= reason;
+    s.prepAbort?.abort();
     if (reason === 'claim_lost') {
       s.reportState = 'accepted'; // no further reports for a shift the server no longer holds
       this.deps.outbox.discard((e) => e.type === 'shift.report' && e.frame.shiftId === shiftId);
@@ -1312,6 +1321,18 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
+    // A card worktree this shift just added is prepared before the agent starts (after the accept: the server releases a
+    // shift that is not accepted within 30 s): submodules, then the project's dependencies in the run-step sandbox.
+    if (
+      msg.kind === 'card' &&
+      s.worktree?.added &&
+      !s.resumed &&
+      !msg.agent.isDevops &&
+      this.deps.config.prepareWorktrees !== false &&
+      msg.worktree
+    )
+      await this.prepareNewWorktree(s, msg.worktree.remoteUrlNormalized, msg.brief.project.projectPath);
+
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
     const shiftVaults = shiftVaultsOf(msg);
@@ -1364,6 +1385,8 @@ export class ShiftSupervisor {
       }) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
     if (playbookNote(msg.playbookGrants)) texts.instructions += `\n${playbookNote(msg.playbookGrants)}\n`;
+    const prepText = prepNote(s.worktreePrep);
+    if (prepText) texts.instructions += `\n${prepText}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
       this.deps.capabilities?.grantedSkills(
@@ -1662,6 +1685,18 @@ export class ShiftSupervisor {
         ...(s.worktree?.createdBranch ? { branchCreated: s.worktree.createdBranch } : {}),
         ...(s.originBranches ? { originBranches: s.originBranches } : {}),
         ...(s.syncMain ? { syncMain: s.syncMain } : {}),
+        ...(s.worktreePrep
+          ? {
+              worktreePrep: {
+                ok: s.worktreePrep.ok,
+                steps: s.worktreePrep.steps.slice(0, 20).map((x) => ({
+                  ...x,
+                  ...(x.detail ? { detail: x.detail.slice(0, 1000) } : {}),
+                  ms: Math.max(0, Math.round(x.ms)),
+                })),
+              },
+            }
+          : {}),
       });
     if (s.worktree?.createdBranch && !s.startedSent) {
       const b = s.worktree.createdBranch;
@@ -1978,6 +2013,61 @@ export class ShiftSupervisor {
     if (!u || u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens <= 0) return;
     s.usageSentAt = now;
     this.deps.transport.send('run.usage', { kind: 'shift', id: s.msg.shiftId, usage: u });
+  }
+
+  /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
+  private async prepareNewWorktree(
+    s: ActiveShift,
+    remoteUrlNormalized: string,
+    projectPath: string | undefined,
+  ): Promise<void> {
+    const wt = s.worktree;
+    if (!wt) return;
+    const repo = await this.deps.findRepo(remoteUrlNormalized).catch(() => undefined);
+    if (!repo) return;
+    s.prepAbort = new AbortController();
+    this.addProgress(s, 'status', 'preparing the new worktree (submodules, dependencies)');
+    const runs = this.deps.runs;
+    const shiftKey = s.msg.shiftId.slice(0, 8);
+    const prep = this.deps.prepareWorktree ?? prepareWorktree;
+    try {
+      s.worktreePrep = await prep({
+        worktree: wt.path,
+        repoPath: repo.localPath,
+        ...(projectPath ? { projectPath } : {}),
+        findRepo: (n) => this.deps.findRepo(n),
+        ...(runs
+          ? {
+              launch: (argv: string[], key: string) =>
+                runs.checkLaunch({ key: `${shiftKey}-${key}`, worktree: wt.path, argv }),
+            }
+          : {}),
+        platform: process.platform as Platform,
+        signal: s.prepAbort.signal,
+      });
+    } catch (err) {
+      s.worktreePrep = {
+        ok: false,
+        steps: [{ name: 'prepare', status: 'failed', detail: String(err).slice(0, 400), ms: 0 }],
+      };
+    } finally {
+      s.prepAbort = undefined;
+    }
+    const r = s.worktreePrep;
+    if (r.steps.length === 0) return;
+    const secs = Math.round(r.steps.reduce((a, x) => a + x.ms, 0) / 1000);
+    const failed = r.steps.filter((x) => x.status === 'failed');
+    if (failed.length) {
+      const what = failed.map((x) => `${x.name}: ${x.detail ?? 'failed'}`).join('; ');
+      this.addProgress(s, 'status', `the worktree was not fully prepared (${what})`);
+      this.log.warn(`worktree preparation of ${s.msg.shiftId} failed: ${what}`);
+    } else {
+      this.addProgress(
+        s,
+        'status',
+        `worktree prepared in ${secs}s (${r.steps.map((x) => x.name).join(', ')})`,
+      );
+    }
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {

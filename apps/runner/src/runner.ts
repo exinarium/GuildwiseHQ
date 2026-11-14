@@ -224,6 +224,8 @@ export interface RunnerOptions {
   envChecker?: import('./testing/environment.ts').EnvChecker;
   /** Test hook: how a deployed target is probed before a tester shift (default: an HTTP request to its URL). */
   probeTarget?: (url: string) => Promise<string | null>;
+  /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`, submodules and dependencies). */
+  prepareWorktree?: SupervisorDeps['prepareWorktree'];
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
   /** Test hook: milliseconds between the periodic scratch and worktree sweeps (default: `scratch.sweepIntervalHours`). */
@@ -745,6 +747,7 @@ export class Runner {
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
       ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
+      ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,

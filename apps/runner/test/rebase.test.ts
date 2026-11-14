@@ -139,7 +139,8 @@ describe('rebase step before test and finalize (section 13.6)', () => {
     sh(repo.clone, 'git', ['commit', '-m', 'changelog']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
     const changelog = readFileSync(join(repo.clone, 'CHANGELOG.md'), 'utf8');
-    const add = (text: string, line: string) => text.replace('## [Unreleased]\n', `## [Unreleased]\n\n${line}\n`);
+    const add = (text: string, line: string) =>
+      text.replace('## [Unreleased]\n', `## [Unreleased]\n\n${line}\n`);
     expect(add(changelog, 'x')).not.toBe(changelog);
     const path = join(tmp(), 'wt');
     await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });

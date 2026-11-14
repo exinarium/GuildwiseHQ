@@ -55,7 +55,7 @@ const slug = (s: string) =>
     .slice(0, 40) || 'check';
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-interface Captured {
+export interface Captured {
   output: string;
   capped: boolean;
   exitCode: number | null;
@@ -76,7 +76,8 @@ function killGroup(
   }
 }
 
-function capture(
+/** Runs one launched command in `cwd` and collects its output (capped), with a timeout and an abort signal. */
+export function capture(
   l: CheckLaunch,
   cwd: string,
   timeoutMs: number,
