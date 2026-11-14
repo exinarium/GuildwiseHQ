@@ -76,7 +76,14 @@ export function managedGitDir(abs: string, modules: string): string | null {
  * `git()`) starts nothing inside it. So this agrees with what `git status` shows for the gitlink, by construction.
  */
 export async function submoduleCommitOffPin(worktree: string, path: string): Promise<string | null> {
-  const r = await git(worktree, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]);
+  const r = await git(worktree, [
+    'diff',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--no-color',
+    '--',
+    `:(literal,top)${path}`, // the path as it is: no glob, no pathspec magic from an agent-chosen name
+  ]);
   if (r.exitCode !== 0) return null;
   return /^\+Subproject commit ([0-9a-f]{40,64})/m.exec(r.stdout)?.[1] ?? null;
 }
