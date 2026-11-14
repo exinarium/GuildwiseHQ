@@ -62,15 +62,14 @@ describe('deploy checkout of a repository with a submodule', () => {
     expect(sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.']).includes(x.clone)).toBe(false);
   });
 
-  it('without a local clone of the submodule, git fetches it from its own url', async () => {
+  it('without a local clone of the submodule, its own url is used; a local path there gets no file protocol', async () => {
     const { x, d } = twoRepos();
     const sha = advanceX(x, 'other.txt');
     pinD(d, sha);
     const dest = checkout(d);
     const err = await fillDeploySubmodules(dest, d.clone, async () => undefined);
-    // the url in .gitmodules is a local path in this fixture: allowed for the command only
-    expect(err).toBeNull();
-    expect(sh(join(dest, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(sha);
+    // the url in .gitmodules is a local path in this fixture: only a registered local clone may be read over file://
+    expect(err).toMatch(/^the submodule core \([0-9a-f]{10}\) could not be checked out: /);
   });
 
   it('the deploy cleanup (remove, else delete and prune) leaves no worktree behind for a checkout with a submodule', async () => {

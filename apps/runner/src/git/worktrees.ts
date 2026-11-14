@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ForgeKind, WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
 import { confineAny } from '../fs-safe.ts';
@@ -15,6 +15,7 @@ import {
   revParse,
 } from './git.ts';
 import { withRepoLock } from './repo-lock.ts';
+import { type FindRepo, fillSubmodules, type SubmoduleFill } from './submodule-fill.ts';
 
 export class WorktreeError extends Error {}
 
@@ -387,6 +388,29 @@ async function removeWorktreeLocked(
 }
 
 export { RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
+
+/** A card worktree's submodule fill may take this long (a remote clone of a large submodule). */
+export const WORKTREE_SUBMODULE_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Fills the submodules of a card worktree (fresh or reopened) at the commits it pins, without writing the superproject's
+ * config (one-shot `-c` options, see `git/submodule-fill.ts`). Only submodules that are still uninitialised are filled:
+ * an existing submodule repository or a non-empty submodule folder is left as it is (no re-clone, and no git runs
+ * inside a repository the runner did not just create). Without `.gitmodules` no git runs at all. Never throws.
+ * Called by the supervisor after the shift was accepted, not by `ensureWorktree` (that runs before the accept, under the
+ * clone's lock).
+ */
+export async function initWorktreeSubmodules(
+  path: string,
+  deps: { findRepo: FindRepo; auth?: GitAuth },
+): Promise<SubmoduleFill[]> {
+  if (!existsSync(join(path, '.gitmodules'))) return [];
+  return fillSubmodules(path, deps, {
+    onlyUninitialised: true,
+    skipLfsSmudge: true,
+    timeoutMs: WORKTREE_SUBMODULE_TIMEOUT_MS,
+  });
+}
 
 export interface ReadOnlyCheckout {
   path: string;

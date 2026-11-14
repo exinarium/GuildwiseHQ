@@ -40,6 +40,7 @@ import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
 import { RebaseConflictError, RebaseError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
+import { fillSubmodules, redactGitError } from '../git/submodule-fill.ts';
 import { type GitAuth, removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -420,19 +421,41 @@ export class RunManager {
   }
 
   /**
-   * `git submodule update --init --recursive` in a new run worktree (a worktree starts with empty submodule folders), with
-   * the repository's git auth. Not fatal: the warning is kept and shown to the DevOps engineer by `aom run info`.
+   * Fills the submodules of a new run worktree (a worktree starts with empty submodule folders) through the shared
+   * resolver (`git/submodule-fill.ts`: the registered local clone first, else the submodule's own url with its host's
+   * auth; nothing written to the clone's config). A filled submodule that has submodules of its own then gets the nested
+   * `git submodule update --init --recursive` inside it (that writes only the run-owned submodule repository). Not
+   * fatal: the warning is kept and shown to the DevOps engineer by `aom run info`.
    */
-  private async initSubmodules(clone: string, worktree: string, name: string): Promise<string | null> {
+  private async initSubmodules(_clone: string, worktree: string, name: string): Promise<string | null> {
     if (!existsSync(join(worktree, '.gitmodules'))) return null;
-    const url = (await git(clone, ['remote', 'get-url', 'origin'])).stdout.trim();
-    const a = this.deps.gitAuth && url ? await this.deps.gitAuth(url) : { args: [], env: {} };
-    const r = await git(worktree, [...a.args, 'submodule', 'update', '--init', '--recursive'], {
-      env: a.env,
-      timeoutMs: 15 * 60_000,
-    });
-    if (r.exitCode === 0) return null;
-    const why = r.stderr.trim().slice(-400) || `exit code ${r.exitCode}`;
+    const timeoutMs = 15 * 60_000;
+    const fills = await fillSubmodules(
+      worktree,
+      { findRepo: this.deps.findRepo, ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}) },
+      { timeoutMs },
+    );
+    const problems = fills
+      .filter((f) => f.status === 'failed' || f.status === 'skipped')
+      .map((f) => `${f.path || 'submodules'}: ${f.detail ?? f.status}`);
+    for (const f of fills) {
+      if (f.status !== 'filled' || !existsSync(join(worktree, f.path, '.gitmodules'))) continue;
+      const a = this.deps.gitAuth && f.url ? await this.deps.gitAuth(f.url) : { args: [], env: {} };
+      const r = await git(
+        join(worktree, f.path),
+        [...a.args, 'submodule', 'update', '--init', '--recursive'],
+        {
+          env: a.env,
+          timeoutMs,
+        },
+      );
+      if (r.exitCode !== 0)
+        problems.push(
+          `${f.path}: ${redactGitError(r.stderr.trim().slice(-400) || `exit code ${r.exitCode}`)}`,
+        );
+    }
+    if (problems.length === 0) return null;
+    const why = redactGitError(problems.join('; '));
     this.deps.log.warn(`could not initialise the submodules of the run worktree of ${name}: ${why}`);
     return why;
   }

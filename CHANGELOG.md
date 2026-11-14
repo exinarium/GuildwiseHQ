@@ -10,6 +10,12 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 - Owner reminder for pending items. When an item has been waiting on the owner for 2 working days, the owner gets one reminder. The state of the item is not changed, so nothing moves on without the owner.
 - Design gate. New cards on the lean team workflow (code version 7) can stop after Investigate & design until the project owner approves the design. The gate is off by default; switch it on per project in Project settings, or for one card once its design report exists. The owner reads the existing design report on the desk item and approves it (the card moves to Build) or returns it with a note. Designs that touch high-risk paths stop at the gate even with the gate off. Cards already in flight keep their workflow.
 
+- Card worktrees get their submodules. When a card shift starts on a card worktree (new or reopened), the runner fills the submodules at the commits the branch pins, from the repository registered on the workstation or else from the submodule's own url, before the agent starts. No git config is written, `git status` stays clean, and a submodule that cannot be filled is reported on the card without stopping the shift. Run worktrees use the same lookup and no longer write the clone's git config.
+
+### Changed
+
+- Deploy checkouts allow a local (`file://` or path) submodule url only when it is a repository registered on the workstation.
+
 ### Fixed
 
 - Parking or answering a discovery question no longer fails with a server error. Long display names are now shortened to the allowed length, so people with long names can park and answer questions as normal.
