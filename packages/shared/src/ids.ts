@@ -40,6 +40,8 @@ export const streamId = {
   release: (id: string) => `release-${id}`,
   /** Release prep (docs and videos) runs. The kind must not start with `release-` so the web can route it. */
   releaseDocsPrep: (id: string) => `releasedocs-${id}`,
+  /** One 20-PR replay (offline reviewer measurement). The kind must not start with `release-`. */
+  prReplay: (id: string) => `prreplay-${id}`,
   schedule: (id: string) => `schedule-${id}`,
   relayIntegration: (id: string) => `relay-${id}`,
   storageConnection: (id: string) => `storage-${id}`,

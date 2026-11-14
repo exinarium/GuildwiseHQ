@@ -9,7 +9,10 @@ export const MarkFindingRequestSchema = z.object({ mark: FindingMarkSchema }).st
 export type MarkFindingRequest = z.infer<typeof MarkFindingRequestSchema>;
 
 /** Display names of the reviewers. */
-export const PR_REVIEWER_LABEL: Record<PrReviewer, string> = { first: 'Sonnet reviewer' };
+export const PR_REVIEWER_LABEL: Record<PrReviewer, string> = {
+  first: 'Sonnet reviewer',
+  second: 'Opus reviewer',
+};
 
 /** Who produced a finding; present only once the finding is marked. */
 export const FindingReviewerSchema = z.object({

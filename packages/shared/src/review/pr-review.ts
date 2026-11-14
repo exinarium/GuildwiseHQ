@@ -67,14 +67,21 @@ export const PrReviewProblemSchema = z.enum(PR_REVIEW_PROBLEMS);
 export type PrReviewProblem = z.infer<typeof PrReviewProblemSchema>;
 
 /** The reviewers a pull request can have; the first is the smaller model. */
-export const PR_REVIEWERS = ['first'] as const;
+export const PR_REVIEWERS = ['first', 'second'] as const;
 export const PrReviewerSchema = z.enum(PR_REVIEWERS);
 export type PrReviewer = z.infer<typeof PrReviewerSchema>;
 
 /** Boardroom: the first run uses the smaller model. */
 export const REVIEWER_MODEL: Record<PrReviewer, { runtime: string; model: string }> = {
   first: { runtime: 'claude-code', model: 'sonnet' },
+  second: { runtime: 'claude-code', model: 'opus' },
 };
+
+/**
+ * The reviewers that review live pull requests. The second reviewer (Opus) runs only offline, in the 20-PR replay,
+ * until a later card adds it here.
+ */
+export const LIVE_REVIEWERS = ['first'] as const satisfies readonly PrReviewer[];
 
 /** A reviewer run stops after this long, whatever it is doing. */
 export const PR_REVIEW_TIMEOUT_MS = 10 * 60_000;
@@ -82,11 +89,29 @@ export const PR_REVIEW_TIMEOUT_MS = 10 * 60_000;
 /** Announced by a runner that understands `pr_review.run` and `pr_review.post`. */
 export const PR_REVIEW_CAPABILITY = 'pr-review:1';
 
-export const PR_REVIEW_RUN_STATES = ['running', 'completed', 'posted', 'timed_out', 'failed'] as const;
+export const PR_REVIEW_RUN_STATES = [
+  'running',
+  'completed',
+  'posted',
+  'timed_out',
+  'failed',
+  'offline_completed',
+] as const;
 export const PrReviewRunStateSchema = z.enum(PR_REVIEW_RUN_STATES);
 export type PrReviewRunState = z.infer<typeof PrReviewRunStateSchema>;
 
 const Sha40 = z.string().regex(/^[0-9a-f]{40}$/);
+
+/** The replay block of an offline run: the merged pull request to review at its recorded head. */
+export const ReplayRunBlockSchema = z
+  .object({
+    replayId: z.uuid(),
+    replayPrId: z.uuid(),
+    headSha: Sha40,
+    mergeCommitSha: Sha40,
+  })
+  .strict();
+export type ReplayRunBlock = z.infer<typeof ReplayRunBlockSchema>;
 
 /** What the model writes (validated on the runner). */
 export const ReviewerFindingSchema = z.object({
@@ -124,8 +149,12 @@ export const PrReviewRunPayloadSchema = z
     runtime: z.string().max(40),
     model: z.string().max(120),
     timeoutMs: z.number().int().positive().max(PR_REVIEW_TIMEOUT_MS),
+    /** Offline run (20-PR replay): nothing is posted and no reviewer token is needed. `prReviewId` is the replay PR id. */
+    offline: z.literal(true).optional(),
+    replay: ReplayRunBlockSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((p) => !p.replay || p.offline === true, { message: 'replay requires offline' });
 export type PrReviewRunPayload = z.infer<typeof PrReviewRunPayloadSchema>;
 
 export const PR_REVIEW_FAILURE_CODES = [
