@@ -26,6 +26,7 @@ import { formProjectors } from './forms.ts';
 import { governanceProjectors } from './governance.ts';
 import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
+import { industryBundleProjectors } from './industry-bundles.ts';
 import { intakeProjectors } from './intake.ts';
 import { intakeBatchProjectors } from './intake-batch.ts';
 import { interestRunProjectors } from './interest-runs.ts';
@@ -100,6 +101,7 @@ const domains: Array<Record<string, Projector>> = [
   threadProjectors,
   deskProjectors,
   ledgerProjectors,
+  industryBundleProjectors,
   chatProjectors,
   vaultProjectors,
   graphProjectors,
@@ -254,6 +256,7 @@ export const PROJECTION_TABLES = [
   'ledger_entries',
   'ledger_entry_versions',
   'org_rule_packs',
+  'org_industry_bundles',
   'vaults',
   'project_graphs',
   'shift_context_metrics',

@@ -26,6 +26,7 @@ import { governanceEvents } from './governance.ts';
 import { graphEvents } from './graph.ts';
 import { hrEvents } from './hr.ts';
 import { hygieneEvents } from './hygiene.ts';
+import { industryBundleEvents } from './industry-bundles.ts';
 import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
 import { interestEvents } from './interest.ts';
@@ -82,6 +83,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...ceoTopicEvents,
   ...deskEvents,
   ...ledgerEvents,
+  ...industryBundleEvents,
   ...chatEvents,
   ...vaultEvents,
   ...graphEvents,
@@ -165,6 +167,7 @@ export * from './form.ts';
 export * from './governance.ts';
 export * from './hr.ts';
 export * from './hygiene.ts';
+export * from './industry-bundles.ts';
 export * from './intake.ts';
 export * from './intake-batch.ts';
 export * from './interest.ts';
