@@ -194,7 +194,9 @@ describe('AC1: a completed run posts its findings and the pull request shows rev
     });
     expect(await prOf('1')).toMatchObject({
       state: 'reviewed',
-      reviewer: 'first',
+      reviewer: null,
+      reviewersHidden: true,
+      unmarkedCount: 3,
       lastRun: {
         state: 'posted',
         durationMs: 192_000,
