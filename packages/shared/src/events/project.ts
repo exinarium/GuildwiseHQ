@@ -227,6 +227,8 @@ export const projectEvents = [
       /** Events from before the daily cap read as automatic. */
       trigger: PrReviewTriggerSchema.default('auto'),
       requestedBy: Id.nullable().default(null),
+      /** The timed-out run a manual re-run replaces. */
+      rerunOfRunId: Id.nullable().default(null),
       at: IsoDate,
     }),
   ),

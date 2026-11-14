@@ -12,6 +12,7 @@ import {
   PatchRepoRequestSchema,
   PauseProjectRequestSchema,
   ProjectsQuerySchema,
+  PrReviewTriggerRequestSchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
   SetArchitectSettingsRequestSchema,
@@ -37,6 +38,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject, projectRole } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
@@ -47,7 +49,7 @@ import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
-import { prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
+import { isSpendOwner, prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
 import {
   findingMarksForReplay,
   listPostedFindings,
@@ -126,8 +128,14 @@ export function projectRoutes(ctx: Ctx) {
     /** The recorded pull requests of a PR-only project with their review state (read-only). */
     app.get('/api/projects/:id/pull-requests', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
-      return { pullRequests: await listPrReviews(ctx.pool, req.params.id, ctx) };
+      const p = await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      // the org role only decides whether the viewer is offered the by-hand action; every project reader can list
+      const org = await orgRoleOf(ctx.pool, s.user.id, p.org_id as string);
+      return {
+        pullRequests: await listPrReviews(ctx.pool, req.params.id, ctx, {
+          canTrigger: isSpendOwner({ id: p.org_id as string, role: org }, p),
+        }),
+      };
     });
 
     /** Today's used count and the queue of waiting pull requests in run order. */
@@ -140,7 +148,12 @@ export function projectRoutes(ctx: Ctx) {
     /** The owner starts a review by hand: it goes past the daily cap and is not counted. */
     app.post(
       '/api/projects/:id/pull-requests/:prReviewId/review',
-      { schema: { params: z.object({ id: z.uuid(), prReviewId: z.uuid() }) } },
+      {
+        schema: {
+          params: z.object({ id: z.uuid(), prReviewId: z.uuid() }),
+          body: PrReviewTriggerRequestSchema.nullish(),
+        },
+      },
       async (req) => {
         const a = await requireOrg(ctx, req);
         return triggerPrReview(
@@ -149,6 +162,7 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.params.prReviewId,
+          req.body ?? {},
         );
       },
     );
