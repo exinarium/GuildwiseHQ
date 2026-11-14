@@ -56,7 +56,7 @@ import {
   runSubagentGuard,
 } from '../delegate/subagent-guard.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
-import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
+import { gitHeadBranch, loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
 import { missingTokenMessage, resolveShiftEnv, type ShiftEnvAttempt } from '../session/shift-credential.ts';
 
@@ -2092,9 +2092,12 @@ const VERBS: Record<string, Verb> = {
    * records the command through the runner and prints the permission decision. Not listed in `aom help`: agents never call it.
    */
   'devops-guard': async (ctx) => {
+    const guardCfg = loadGuardConfig(ctx.env.AOM_DEVOPS_GUARD);
     const r = await runGuardHook({
       stdin: ctx.readFile('-'),
-      cfg: loadGuardConfig(ctx.env.AOM_DEVOPS_GUARD),
+      cfg: guardCfg,
+      // only a session with frozen branches asks git which branch is checked out
+      ...(guardCfg.frozenBranches?.length ? { deps: { headBranch: gitHeadBranch } } : {}),
       report: async (entries) => {
         try {
           await rpc(ctx, 'devops.audit', { entries });

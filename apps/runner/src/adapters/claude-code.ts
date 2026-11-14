@@ -1,5 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
@@ -396,6 +406,41 @@ export function accountClaudeConfig(base: ClaudeConfig, credential: AccountCrede
 /** `RuntimeInfoSchema.accounts` allows 20. */
 const MAX_REPORTED_ACCOUNTS = 20;
 
+/** The folder of the per-session DevOps guard files inside an agent's config dir. */
+export const GUARD_DIR = 'devops-guard';
+/** Guard files older than this are removed when a new one is written (a running session has a fresh file). */
+const GUARD_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The guard file of one session: no two sessions of an agent share one (`kind` is 'shift' or 'chat'). */
+export function guardFileFor(configDir: string, kind: 'shift' | 'chat', sessionRef: string): string {
+  const safe = /^[A-Za-z0-9-]{1,80}$/.test(sessionRef)
+    ? sessionRef
+    : createHash('sha256').update(sessionRef).digest('hex').slice(0, 32);
+  return join(configDir, GUARD_DIR, `${kind}-${safe}.json`);
+}
+
+/** Removes guard files (and the legacy shared `devops-guard.json`) that are over a day old. Never throws. */
+function pruneGuardFiles(configDir: string, now: number = Date.now()): void {
+  const old = (f: string): boolean => {
+    try {
+      return now - statSync(f).mtimeMs > GUARD_FILE_MAX_AGE_MS;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    const legacy = join(configDir, 'devops-guard.json');
+    if (old(legacy)) rmSync(legacy, { force: true });
+    const folder = join(configDir, GUARD_DIR);
+    for (const name of readdirSync(folder)) {
+      const f = join(folder, name);
+      if (name.endsWith('.json') && old(f)) rmSync(f, { force: true });
+    }
+  } catch {
+    // a prune that fails must not stop a start
+  }
+}
+
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
 
@@ -582,13 +627,31 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       protectedBranches: guard.protectedBranches ?? [],
       approvedCommands: guard.approvedCommands ?? [],
       ...(guard.readOnlyScan ? { readOnlyScan: true } : {}),
+      ...(guard.shiftKind ? { shiftKind: guard.shiftKind } : {}),
+      frozenBranches: guard.frozenBranches ?? [],
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
-    const file = join(configDir, 'devops-guard.json');
+    const file = guardFileFor(configDir, kind, guard.sessionRef);
+    pruneGuardFiles(configDir);
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file };
+  }
+
+  /** A start that failed after the guard file was written leaves nothing behind. */
+  private dropGuardFile(
+    input: { agent: { isDevops?: boolean }; sandbox: { configDir: string } },
+    kind: 'shift' | 'chat',
+    ref: string | undefined,
+  ): void {
+    if (!input.agent.isDevops || !ref) return;
+    try {
+      rmSync(guardFileFor(input.sandbox.configDir, kind, ref), { force: true });
+    } catch {
+      // nothing to remove
+    }
   }
 
   private warnedTruncated = false;
@@ -887,6 +950,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       return await this.startShiftSession(input, account, bk);
     } catch (err) {
       bk?.cleanup();
+      this.dropGuardFile(input, 'shift', input.devopsGuard?.sessionRef);
       throw err;
     }
   }
@@ -899,6 +963,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
+    if (input.agent.isDevops && input.kind === 'release_prep' && !guard)
+      throw new Error(
+        'the DevOps guard could not be attached to this release prep shift (no guard settings or no runner paths)',
+      );
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // A role that edits or commits must not get its own main clone as a read-only folder: that bind would cover the
     // writable git dir (GWP-86). Read-only roles and DevOps keep their folders unchanged.
@@ -984,6 +1052,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           dropPlaceholders();
           releaseRepo();
           bk?.cleanup();
+          if (guard) rmSync(guard.file, { force: true });
         }
       },
     });
@@ -1015,6 +1084,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       return await this.startChatSession(input, chatInput, devops, account, bk);
     } catch (err) {
       bk?.cleanup();
+      this.dropGuardFile(input, 'chat', input.devopsGuard?.sessionRef);
       throw err;
     }
   }
@@ -1100,7 +1170,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
-      ...(bk || releaseRepo
+      ...(bk || releaseRepo || guard
         ? {
             onExit: async (r: Parameters<NonNullable<typeof hooks.onExit>>[0]) => {
               try {
@@ -1108,6 +1178,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               } finally {
                 releaseRepo?.();
                 bk?.cleanup();
+                if (guard) rmSync(guard.file, { force: true });
               }
             },
           }

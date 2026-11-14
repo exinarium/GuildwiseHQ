@@ -1848,6 +1848,8 @@ export const DevopsAuditEntrySchema = z.object({
   /** The DevOps shift or chat the command ran in. */
   sessionRef: z.string().max(100),
   kind: z.enum(['shift', 'chat']),
+  /** For a shift: which kind (a DevOps request or a release prep task). Absent for chats and older runners. */
+  shiftKind: z.enum(['devops', 'release_prep']).optional(),
   decision: z.enum(['allowed', 'refused']),
   /** The rule that refused it, or the class an allowed command fell in. */
   rule: z.string().max(80),
