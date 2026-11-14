@@ -30,6 +30,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [3.3 Take the tour (1 minute)](#33-take-the-tour-1-minute)
   - [3.4 Add a workstation (5 minutes)](#34-add-a-workstation-5-minutes)
   - [3.4a Connect your integrations](#34a-connect-your-integrations)
+  - [3.4b Add a GitHub App for your organization](#34b-add-a-github-app-for-your-organization)
   - [3.5 Hire your first agents (2 minutes)](#35-hire-your-first-agents-2-minutes)
   - [3.6 Create your first project (1 minute)](#36-create-your-first-project-1-minute)
   - [3.7 Create your first card (2 minutes)](#37-create-your-first-card-2-minutes)
