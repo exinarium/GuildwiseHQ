@@ -46,7 +46,7 @@ describe('the architect role', () => {
   });
   it('is a senior Opus role that reads the organization and writes documentation only', () => {
     expect(architect).toMatchObject({
-      version: 5,
+      version: 6,
       builtIn: true,
       department: 'delivery',
       seniorityLevels: ['senior'],
@@ -122,7 +122,7 @@ describe('the architect role', () => {
     // agents never choose the completion action (#52): not even `none` for an investigation-only card
     expect(ba?.instructions).not.toMatch(/--action (pr|merge|push_branch|none)/);
     const builder = getBuiltinRole('builder');
-    expect(builder?.version).toBe(7);
+    expect(builder?.version).toBe(8);
     expect(builder?.instructions).toMatch(/design report/i);
   });
 });

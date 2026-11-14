@@ -428,7 +428,7 @@ export const PatchCardRequestSchema = CardChangesSchema.omit({
 });
 export type PatchCardRequest = z.infer<typeof PatchCardRequestSchema>;
 
-/** The BA's `card.risk` RPC (`aom risk <small|large> --reason "..."`), checked on the server. */
+/** The `card.risk` RPC (`aom risk <small|large> --reason "..."`), checked on the server (BA; planner and architect: large only). */
 export const RiskTierRpcParamsSchema = z.object({
   tier: RiskTier,
   reason: z.string().trim().min(1).max(1000),

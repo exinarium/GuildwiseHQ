@@ -227,7 +227,7 @@ export const RpcMethodSchema = z.enum([
   'source.read',
   /** M8, the BA's finalize shift: draft the update for the card's ticket (the manager approves it on the desk). */
   'outbound.draft',
-  /** The BA's finalize shift: override the card's risk tier (small or large) with a reason. */
+  /** Override the card's risk tier with a reason: the BA (small or large), the planner and the architect (large only). */
   'card.risk',
   /** M10, the BA's design chat: draft roles and workflows for the owner's organization (they approve on the desk). */
   'org.catalogue',

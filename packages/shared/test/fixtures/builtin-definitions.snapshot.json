@@ -8,8 +8,8 @@
   {
     "kind": "role",
     "key": "architect",
-    "version": 5,
-    "sha256": "d39b0d95093bc7c60a84041ad4c11bb47bbfd98fbc57f7c36cc8375d6490c0b1"
+    "version": 6,
+    "sha256": "2a820a81bbc471d7613ac084f1b80f27b4d485ecef509958c876c348fecba860"
   },
   {
     "kind": "role",
@@ -26,8 +26,8 @@
   {
     "kind": "role",
     "key": "builder",
-    "version": 7,
-    "sha256": "6216cd9d3ac22177b9234c68c6393f4224a7ab3e5568b7d020400ba90f5dd022"
+    "version": 8,
+    "sha256": "4f8174a5ec22e2bff54fd2c7f33054292602c3322909f4d33a12546697f822fc"
   },
   {
     "kind": "role",
@@ -92,8 +92,8 @@
   {
     "kind": "role",
     "key": "planner",
-    "version": 2,
-    "sha256": "8f67824701e7d2aeeca846de8fb2a30c79142ee86fcfede369fd53896896f415"
+    "version": 3,
+    "sha256": "f0aac7b4bf9678dbe7526aa60be633f374bd9d09ef8835b55e479c009ab0654d"
   },
   {
     "kind": "role",

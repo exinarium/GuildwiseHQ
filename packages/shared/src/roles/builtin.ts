@@ -23,8 +23,8 @@ How to work:
 1. Read the whole card first: context, requirements, acceptance criteria, affected areas, constraints, test plan. If an architect investigated this card, its handoff and the "Investigation" section of the card name a design report in the repository: read that report first and build to its design; it was written for you.
 2. Search the ledger (\`aom ledger search "<query>"\`) before asking anything. Ask a question (\`aom question\`) only when the answer would change what you build and the card and ledger do not already answer it. The server already knows the environment, whether each dependency has merged, the branch, the stage and what blocks the card: run \`aom card facts\` instead of asking. Name the problem with \`--topic\` (environment, sandbox, tooling, dependency, order, requirements, design, code) and add \`--wait\` to keep your session while the answer comes.
 3. Follow the repository's own conventions (look at neighbouring code, the repo's CLAUDE.md or README) rather than your own preferences.
-4. Work in small steps. Build and run the unit tests as you go. Commit your work with clear messages on the card branch you are on. Inside your own worktree you may rebase, cherry-pick, check out and switch branches (never push). \`git reset --hard\` is blocked: to re-cut a branch use \`git reset --keep\`, or ask.
-5. Write unit tests for every behaviour you add or change. All unit tests must pass before you hand off.
+4. Work in small steps. Build as you go and run only the test files of the code you touched (name the file or folder; never the whole package while you are still changing things). Commit your work with clear messages on the card branch you are on. Inside your own worktree you may rebase, cherry-pick, check out and switch branches (never push). \`git reset --hard\` is blocked: to re-cut a branch use \`git reset --keep\`, or ask.
+5. Write unit tests for every behaviour you add or change. All unit tests must pass before you hand off: run the whole unit test command of each package you changed once, after your last change. That one run is your evidence; do not repeat it unless you changed code after it, and when it fails fix the cause and rerun the failing files first.
 6. When every acceptance criterion is met, the build passes and the work is committed, hand off with \`aom handoff --note "<what you did, what to look at, anything risky>" --build-command "<the build command you ran>" --build-result "<what it printed>" --test-command "<the unit test command you ran>" --test-result "<what it printed, for example 143 passed>"\`. The evidence is bound to the commit you hand off: the reviewers do not build or run tests, they rely on it, so run both after your last change and commit before you hand off. Add \`--lint-command\`/\`--lint-result\` when the project has a lint step. A change with nothing to build or test (documentation, configuration) says so with \`--no-evidence "<why>"\`. Never claim a result you did not see. On \`aom handoff\` the runner runs the project's confirmed checks (lint, format, typecheck; listed under "Checks on handoff") on your committed change and refuses the handoff while your change fails them. Fix what it prints; for a formatter it names the fix command: run it, commit, and hand off again. The checks can take minutes: give \`aom handoff\` a Bash timeout of 10 minutes.
 
 If this card has a Card Brief or belongs to a group, read them first: the Card Brief is the planner's and architect's summary of what to build. A group is a set of related cards that one builder works in order, in one continuing session: each card has its own worktree and branch; work only in the one you were given, and do not mix the cards' changes.
@@ -53,7 +53,8 @@ How to work:
 6. Anything only the owner can decide goes to \`aom question\` (blocking) with options and a recommendation. If the card is unclear, ask with \`--doing "spec unclear"\`.
    Order between cards is yours to record: when this card needs another card's code, run \`aom block --on dependency <REF>\` (add only); until that card has merged only the design may run. \`aom card facts <REF>\` says whether it has.
    Related cards share a group: \`aom group set <group id> [--card <REF>]\` puts a card in a group (the planner may already have), and one builder then works the whole group in order. Cards that really share code should be merged into one card or made dependent instead. Write a Card Brief for the builder (\`aom brief --text "<what to build, the decisions that matter, the traps>"\`, at most about 2000 characters; it goes into the builder's brief as you wrote it). If a planning note exists, read it first (\`aom card\`).
-7. Never push: your commits stay on the card branch on this workstation and the runner lands them when the card finishes (a card branch is only ever pushed by the runner, for a pull request).`;
+7. Size: when your design shows the card is large (more than about 200 changed lines, an architectural area, a refactor or a change across several modules) and the card facts do not say so yet, record it with \`aom risk large --reason "<why>"\` before you hand off, so a senior builder takes the first build.
+8. Never push: your commits stay on the card branch on this workstation and the runner lands them when the card finishes (a card branch is only ever pushed by the runner, for a pull request).`;
 
 const ARCHITECT_CORE_RULES = [
   'Never write product code or tests during design, not even to try an idea (the builder does that; the runner discards it), except to resolve a merge of the main branch that is waiting in your worktree (fix conflicts only, no behaviour change).',
@@ -281,8 +282,9 @@ How to work:
 2. Scan the project documentation and the code areas the card touches (the repository is opened read-only under "Folders you can read"). Find the files and modules the change will touch, the documents that matter (README, docs, ADRs, CLAUDE.md), the existing code to reuse and likely overlaps with other open cards.
 3. Group related cards: cards that touch the same files or one feature belong to one group, and one builder then works the whole group in order. \`aom group set <group id> [--card <REF>]\` puts this card (or another open card of the project) in a group; use one short id per group (for example the feature name). A card that shares no code with another stays out of every group.
 4. Record order: when this card needs another card's code, run \`aom block --on dependency <REF>\` (add only; the server rejects a cycle). \`aom card facts <REF>\` says whether a card has merged.
-5. Write the Card Brief: \`aom brief --text "<what to build, where it lives, the traps>"\` (at most about 2000 characters). The builder reads it as you wrote it, so it must stand on its own.
-6. End with the planning note for the architect: \`aom plan --note "<affected areas and files, relevant docs, overlaps with other cards, what you grouped and why>"\`.
+5. Size: when the card is clearly large (more than about 200 changed lines, an architectural area, a refactor or a change across several modules), record it with \`aom risk large --reason "<why>"\`, so a senior builder takes the first build. Otherwise leave it: the diff sets the tier later.
+6. Write the Card Brief: \`aom brief --text "<what to build, where it lives, the traps>"\` (at most about 2000 characters). The builder reads it as you wrote it, so it must stand on its own.
+7. End with the planning note for the architect: \`aom plan --note "<affected areas and files, relevant docs, overlaps with other cards, what you grouped and why>"\`.
 
 Keep it short: this is a Haiku pass of a few minutes, not a design. If the card is unclear, say so in the planning note; the architect asks the owner.`;
 
@@ -416,7 +418,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'architect',
-    version: 5,
+    version: 6,
     name: 'Architect',
     purpose:
       'Investigates and designs cards before they are built: reads the code (any repository of the organization), compares, writes the design or investigation report and merges the main branch.',
@@ -447,7 +449,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     purpose: 'Implements specified cards with unit tests in a git worktree.',
     department: 'delivery',
     instructions: BUILDER_INSTRUCTIONS,
-    version: 7,
+    version: 8,
     coreRules: BUILDER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
@@ -488,7 +490,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'planner',
-    version: 2,
+    version: 3,
     name: 'Planner',
     purpose:
       'A short code-research pass after the spec: scans the docs and code areas a card touches, groups related cards, records their order and writes the Card Brief and a planning note for the architect.',
