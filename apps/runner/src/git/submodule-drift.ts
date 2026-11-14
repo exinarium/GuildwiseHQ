@@ -1,7 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { git } from './git.ts';
-import { trustedSubmoduleGitDir } from './harden.ts';
 
 /** A submodule checked out at another commit than the one the card branch pins (its index entry). */
 export interface SubmoduleDrift {
@@ -59,15 +58,6 @@ export async function modulesRoot(worktree: string): Promise<string | null> {
  * content, not a submodule this runner manages: null.
  */
 export function managedGitDir(abs: string, modules: string): string | null {
-  const dir = moduleGitDir(abs, modules);
-  // ... and the runner trusts only a repository that was there, with an inert configuration, when the shift
-  // started (harden.ts `trustSubmodulesAtShiftStart`): the sandbox kept its config read-only since. One the agent
-  // made or re-pointed during the shift could carry a filter or a diff driver, which git would run here.
-  return dir && trustedSubmoduleGitDir(dir) ? dir : null;
-}
-
-/** The shape half of `managedGitDir`: a `.git` file whose gitdir resolves under `modules/`. Says nothing about trust. */
-export function moduleGitDir(abs: string, modules: string): string | null {
   const dotGit = join(abs, '.git');
   try {
     if (!lstatSync(dotGit).isFile()) return null;
@@ -110,21 +100,16 @@ export function headShaFromFiles(gitDir: string): string | null {
 }
 
 /**
- * Before the guard of an outcome report (BLOCKERS.md section 3): every initialised submodule whose checked-out commit
- * differs from the pin in the index, with nothing uncommitted inside, is reset to the pin (`git submodule update
- * --checkout --no-fetch`). Otherwise the leftovers commit (`git add -A`) would commit the drift as a pin change, or the
- * reviewers would see a pin change nobody made. Agent sandboxes cannot run `git submodule update` themselves, so
- * refusing a drift would only loop the card.
+ * Before the guard of an outcome report (BLOCKERS.md section 3): a checked-out submodule whose commit differs from the
+ * pin in the index is reported to the agent with the one command that puts it back. The agent can run that in its
+ * sandbox; the runner cannot safely do it, because git inside a submodule reads that submodule's own configuration,
+ * which the agent can write (a `clean` filter or a diff driver there would run on the workstation). So the commit is
+ * read from the repository's files and no git is run inside any submodule. The name and the result shape are kept
+ * from the version that reset the drift itself: `reset` is always empty now.
  *
- * This runs on the workstation, outside the sandbox, on content the agent can write (the index, `<path>/.git`), so it
- * never contacts a remote: no fetch, transports disabled (`protocol.allow=never`), no credentials. A pin the
- * submodule's clone does not have is refused with advice to ask (fetching it belongs to worktree preparation). No git
- * command runs inside a submodule whose `.git` does not lead under the superproject's `modules/` folder: refused.
- *
- * Refused (nothing reset for that submodule) when the submodule has uncommitted changes of its own (they would be lost
- * or committed by accident), the pin is not in its clone, or it is not a submodule this runner manages. A pin change
- * committed or staged on the card branch is the index entry itself, so it is never drift. A submodule that is not
- * initialised (no `.git`) is left alone.
+ * A pin change committed or staged on the card branch is the index entry itself, so it is never drift. A submodule
+ * that is not initialised (no `.git`) is left alone. The leftovers commit never stages a gitlink (git.ts), so a
+ * drift that is not put back is not committed as a pin change.
  */
 export async function resetSubmoduleDrift(worktree: string): Promise<SubmoduleDriftResult> {
   const result: SubmoduleDriftResult = { reset: [] };
@@ -133,68 +118,22 @@ export async function resetSubmoduleDrift(worktree: string): Promise<SubmoduleDr
   const modules = links.length ? await modulesRoot(worktree) : null;
   for (const { path, pin } of links) {
     const abs = join(worktree, path);
-    // not initialised (no .git of its own): nothing is checked out, and git would answer for the superproject
+    // not initialised (no .git of its own): nothing is checked out
     if (!existsSync(join(abs, '.git'))) continue;
-    const gitDir = modules ? moduleGitDir(abs, modules) : null;
+    const gitDir = modules ? managedGitDir(abs, modules) : null;
     if (!gitDir) {
       problems.push(
-        `the submodule ${path} is not a checkout the runner manages (its .git does not lead to the repository's modules folder), so the runner will not touch it: remove what you put at ${path}, or ask with \`aom question --topic environment\``,
+        `the submodule ${path} is not a checkout the runner manages (its .git does not lead to the repository's modules folder): remove what you put at ${path}, or ask with \`aom question --topic environment\``,
       );
       continue;
     }
-    if (!trustedSubmoduleGitDir(gitDir)) {
-      // Set up during this shift (or its configuration is not the plain one git writes): the runner runs no git inside
-      // it. Its commit is read from the files; the leftovers commit never stages it (`git add` excludes it). On its pin
-      // or unreadable: nothing to do. Off its pin: the agent can check the pin out itself.
-      const at = headShaFromFiles(gitDir);
-      if (at && at !== pin)
-        problems.push(
-          `the submodule ${path} is at ${short(at)} instead of its pinned ${short(pin)}. It was set up during this shift, so the runner does not reset it yet: check the pinned commit out yourself (\`git -C ${path} checkout ${pin}\`) and report again, commit a pin change if the card really needs one, or ask with \`aom question --topic environment\``,
-        );
-      continue;
-    }
-    const headR = await git(abs, ['rev-parse', 'HEAD']);
-    const head = headR.stdout.trim();
-    if (headR.exitCode !== 0 || !head || head === pin) continue;
-    const status = await git(abs, ['status', '--porcelain', '--untracked-files=all']);
-    if (status.exitCode !== 0 || status.stdout.trim()) {
-      const files = status.stdout
-        .split('\n')
-        .map((l) => l.slice(3).trim())
-        .filter(Boolean);
-      problems.push(
-        `the submodule ${path} is at ${short(head)} instead of its pinned ${short(pin)} and has uncommitted changes inside (${files.slice(0, 5).join(', ') || 'git status failed'}): you do not change a submodule; undo those changes, or commit a pin change if the card really needs one`,
-      );
-      continue;
-    }
-    const cannot = (why: string) =>
-      problems.push(
-        `the submodule ${path} is at ${short(head)} instead of its pinned ${short(pin)} and the runner could not reset it (${why}). You cannot fix this from your sandbox: ask with \`aom question --topic environment\` and name the submodule and the pinned commit`,
-      );
-    // only what the submodule's clone already has: nothing is fetched here
-    if (
-      (await git(abs, ['-c', 'protocol.allow=never', 'cat-file', '-e', `${pin}^{commit}`])).exitCode !== 0
-    ) {
-      cannot("the pinned commit is not in the submodule's clone");
-      continue;
-    }
-    // --checkout: never the `update = rebase|merge|none` of .gitmodules, which would rewrite or skip the submodule
-    const r = await git(worktree, [
-      '-c',
-      'protocol.allow=never',
-      'submodule',
-      'update',
-      '--checkout',
-      '--no-fetch',
-      '--',
-      path,
-    ]);
-    const now = (await git(abs, ['rev-parse', 'HEAD'])).stdout.trim();
-    if (r.exitCode !== 0 || now !== pin) {
-      cannot((r.stderr || r.stdout).trim().slice(0, 300) || `it is at ${short(now)}`);
-      continue;
-    }
-    result.reset.push({ path, from: head, pin });
+    // read from the files: no git runs inside the submodule. On its pin, or unreadable: nothing to say (the leftovers
+    // commit never stages a gitlink, so a drift is not committed either way).
+    const at = headShaFromFiles(gitDir);
+    if (!at || at === pin) continue;
+    problems.push(
+      `the submodule ${path} is at ${short(at)} instead of its pinned ${short(pin)}. The runner does not run git inside a submodule, so put it back yourself: \`git -C ${path} checkout ${pin}\` (from your worktree), then report again. If that commit is not in the submodule's clone, ask with \`aom question --topic environment\` and name the submodule and the pinned commit. If the card really needs another commit of ${path}, commit the pin change (\`git add ${path}\` and commit) instead`,
+    );
   }
   if (problems.length) result.refused = problems.join('; ');
   return result;

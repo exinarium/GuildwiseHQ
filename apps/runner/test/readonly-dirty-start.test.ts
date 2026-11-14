@@ -2,7 +2,6 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { trustSubmodulesAtShiftStart } from '../src/git/harden.ts';
 import {
   discardOutOfScope,
   type GuardInput,
@@ -37,7 +36,6 @@ async function driftedWorktree() {
   // a file someone left behind before the shift as well
   writeFileSync(join(d.clone, 'notes.txt'), 'left behind\n');
   const wt = d.clone;
-  trustSubmodulesAtShiftStart(wt); // what the supervisor does before the snapshot
   const startSha = sh(wt, 'git', ['rev-parse', 'HEAD']);
   const branchesAtStart = await snapshotBranches(wt);
   const dirtyAtStart = await snapshotDirty(wt);
@@ -59,7 +57,7 @@ describe('read-only roles are judged on their own shift only (BLOCKERS.md sectio
   it('a submodule off its pin at shift start gives a reviewer guard of []; without the snapshot it was refused', async () => {
     const t = await driftedWorktree();
     expect(Object.keys(t.dirtyAtStart).sort()).toEqual(['core', 'notes.txt']);
-    expect(t.dirtyAtStart.core).toMatch(/^sub:[0-9a-f]{40}:[0-9a-f]{40}$/);
+    expect(t.dirtyAtStart.core).toMatch(/^sub:[0-9a-f]{40}$/);
     expect(await runGuard(t.input())).toEqual([]);
     expect(await runGuard(t.input({ roleKey: 'pre_reviewer' }))).toEqual([]);
     // the old behaviour, for comparison
@@ -95,16 +93,25 @@ describe('read-only roles are judged on their own shift only (BLOCKERS.md sectio
     expect(v[0]?.detail).not.toContain('core');
   });
 
-  it('an edit to an already-dirty file, or inside the drifted submodule, is still refused', async () => {
+  it('an edit to an already-dirty file, or a submodule moved to another commit during the shift, is still refused', async () => {
     const t = await driftedWorktree();
     writeFileSync(join(t.wt, 'notes.txt'), 'changed during the shift\n');
     expect((await runGuard(t.input()))[0]?.detail).toContain('notes.txt');
 
+    // the submodule was off its pin at the start; moving it again is the role's own doing
     const u = await driftedWorktree();
-    writeFileSync(join(u.wt, 'core', 'hack.txt'), 'x\n');
+    sh(join(u.wt, 'core'), 'git', ['commit', '-q', '--allow-empty', '-m', 'moved during the shift']);
     const v = await runGuard(u.input({ roleKey: 'ba' }));
     expect(v.map((x) => x.rule)).toEqual(['readonly_role_modified_code']);
     expect(v[0]?.detail).toContain('core');
+  });
+
+  it('uncommitted content inside a submodule is not looked at: the runner runs no git inside it', async () => {
+    // Known limit of the 1.7.0 hardening (docs/RUNNER.md): a file a read-only role leaves inside a submodule's checkout
+    // does not reach the card branch (the superproject only records the submodule's commit) and is not seen here.
+    const u = await driftedWorktree();
+    writeFileSync(join(u.wt, 'core', 'hack.txt'), 'x\n');
+    expect(await runGuard(u.input({ roleKey: 'ba' }))).toEqual([]);
   });
 
   it('a role that commits is judged on every path: leftovers from before the shift are flagged and discarded', async () => {

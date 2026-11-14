@@ -17,14 +17,30 @@ export const GIT_HARDEN_ARGS: readonly string[] = [
   'core.hooksPath=/dev/null',
   '-c',
   'protocol.ext.allow=never',
-  // A superproject's status, diff, commit, stash, checkout and rebase otherwise start `git status` INSIDE every
-  // submodule to see whether it is dirty, and that child reads the submodule's own configuration: a `filter.*.clean`
-  // there is a program run on the workstation. A nested repository is agent-made content (`git init x && git add x`),
-  // so its configuration cannot be protected. With `dirty` the superproject only compares the submodule's commit with
-  // the pin (read in-process): a moved pin still shows, uncommitted content inside a submodule does not.
-  // `git add` ignores this setting on purpose: see `excludeUntrustedGitlinks`.
+  // A superproject's status, diff, stash and checkout otherwise start `git status` INSIDE every submodule to see
+  // whether it is dirty, and that child reads the nested repository's own configuration: a `filter.*.clean` there is a
+  // program run on the workstation. A nested repository is agent-made content (`git init x && git add x`), and a
+  // submodule's repository under `modules/` is agent-writable too, so neither configuration can be trusted. With
+  // `dirty` the superproject only compares the submodule's commit with the pin (read in-process): a moved pin still
+  // shows, uncommitted content inside a submodule does not. This is only the DEFAULT: an agent-written `.gitmodules`
+  // (`submodule.<name>.ignore = none`) overrides it, and `git add` ignores it. `git()` therefore also passes
+  // `--ignore-submodules=dirty` to status and diff, makes checkout quiet and excludes gitlinks from add (git.ts,
+  // `withSubmoduleGuards`), and the runner never runs git inside a submodule of a worktree (submodule-drift.ts).
   '-c',
   'diff.ignoreSubmodules=dirty',
+  // The other ways a superproject command goes into its submodules, each of which would run git (and so the nested
+  // repository's configuration: a filter, `remote.<n>.uploadpack`, `core.sshCommand`) inside one: recursing checkout,
+  // merge, rebase, reset and pull; fetching or pushing submodules; a submodule diff or summary in diff, show and status.
+  '-c',
+  'submodule.recurse=false',
+  '-c',
+  'fetch.recurseSubmodules=false',
+  '-c',
+  'push.recurseSubmodules=no',
+  '-c',
+  'diff.submodule=short',
+  '-c',
+  'status.submoduleSummary=false',
 ];
 
 /** Environment of every git the runner starts: no system-wide configuration, no prompts. */
@@ -132,8 +148,9 @@ export function protectedGitPaths(cwd: string): string[] {
         return false;
       }
     });
-  // The submodules' own repositories (`modules/<name>`): the runner runs git inside the ones it trusts, and git then
-  // reads their `config` (a filter or a diff driver there is a program). Read-only for the agent like the rest.
+  // The submodules' own repositories (`modules/<name>`): the runner never runs git inside them, but the owner or a
+  // DevOps engineer may, and git then reads their `config` (a filter or a diff driver there is a program). Read-only
+  // for the agent like the rest; a repository made later cannot be covered (only what exists can be bound).
   const submodules = existing(
     submoduleGitDirs(cwd).flatMap((d) => ['config', 'config.worktree', 'hooks'].map((f) => join(d, f))),
   );
@@ -208,118 +225,13 @@ export function submoduleGitDirs(cwd: string): string[] {
   return out;
 }
 
-/** What a submodule's `config` may hold and still start no program: section -> keys (lower case). */
-const INERT_CONFIG: Record<string, ReadonlySet<string>> = {
-  core: new Set([
-    'repositoryformatversion',
-    'filemode',
-    'bare',
-    'logallrefupdates',
-    'worktree',
-    'ignorecase',
-    'precomposeunicode',
-    'symlinks',
-  ]),
-  remote: new Set(['url', 'fetch']),
-  branch: new Set(['remote', 'merge', 'rebase']),
-  submodule: new Set(['url', 'active']),
-  user: new Set(['name', 'email']),
-};
-
 /**
- * True when a repository configuration file holds only settings that cannot start a program: the handful git itself
- * writes when it clones a submodule (allowlist above). Anything else - a filter, a diff or merge driver, an alias, an
- * include, a credential helper, `core.sshCommand`, `submodule.<n>.update` - makes it not inert. Parsed here, never by
- * running git on it. A missing or oversized file is not inert.
+ * Exclude pathspecs that keep `git add` away from every gitlink. `git add -A` starts `git status` inside each gitlink
+ * of the index that has a repository behind it, whatever `diff.ignoreSubmodules` or `--ignore-submodules` says, and
+ * that child honours the nested repository's own configuration (a `clean` filter is a program on the workstation).
+ * With the path excluded git skips it before it would start the child. So the runner never stages a submodule's pin:
+ * an agent that changes a pin commits it itself, inside its sandbox.
  */
-export function inertGitConfig(file: string): boolean {
-  let text: string;
-  try {
-    const st = lstatSync(file);
-    if (!st.isFile() || st.size > 65536) return false;
-    text = readFileSync(file, 'utf8');
-  } catch {
-    return false;
-  }
-  let section: string | null = null;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-    if (line.endsWith('\\')) return false; // a continued line: not something git writes for a submodule
-    const head = /^\[\s*([A-Za-z0-9-]+)(?:\s+"(?:[^"\\]|\\.)*")?\s*\]$/.exec(line);
-    if (head) {
-      section = (head[1] as string).toLowerCase();
-      if (!INERT_CONFIG[section]) return false;
-      continue;
-    }
-    if (line.startsWith('[')) return false; // `[section.sub]`, a key on the header line, anything unusual
-    const kv = /^([A-Za-z][A-Za-z0-9-]*)\s*(?:=.*)?$/.exec(line);
-    if (!section || !kv) return false;
-    if (!INERT_CONFIG[section]?.has((kv[1] as string).toLowerCase())) return false;
-  }
-  return true;
-}
-
-/**
- * Submodule repositories the runner may run git inside, per worktree (real paths). Filled when a shift starts, before
- * the agent runs: every repository under the worktree's `modules/` whose configuration is inert. From then on the
- * sandbox keeps that configuration read-only (`protectedGitPaths`), so it stays inert for the whole shift. A repository
- * that appears later is the agent's own making and is never trusted; after a runner restart nothing is trusted until
- * the next shift starts (the callers then behave as for an unmanaged folder).
- */
-const TRUSTED_SUBMODULES = new Map<string, Set<string>>();
-
-/** Records the trusted submodule repositories of `cwd` (see `TRUSTED_SUBMODULES`); returns them. */
-export function trustSubmodulesAtShiftStart(cwd: string): string[] {
-  const trusted = submoduleGitDirs(cwd).filter((dir) => {
-    if (!inertGitConfig(join(dir, 'config'))) return false;
-    try {
-      lstatSync(join(dir, 'config.worktree'));
-      return inertGitConfig(join(dir, 'config.worktree'));
-    } catch {
-      return true; // no config.worktree
-    }
-  });
-  TRUSTED_SUBMODULES.set(real(cwd), new Set(trusted.map(real)));
-  return trusted;
-}
-
-/** True when `gitDir` is a submodule repository some shift start recorded as trusted (real path compare). */
-export function trustedSubmoduleGitDir(gitDir: string): boolean {
-  const r = real(gitDir);
-  for (const set of TRUSTED_SUBMODULES.values()) if (set.has(r)) return true;
-  return false;
-}
-
-/** For tests. */
-export function forgetTrustedSubmodules(): void {
-  TRUSTED_SUBMODULES.clear();
-}
-
-/** The gitdir a folder's `.git` FILE names, as a real path; null for a `.git` directory, a link or nothing. */
-function gitFileTarget(dir: string): string | null {
-  try {
-    const dotGit = join(dir, '.git');
-    if (!lstatSync(dotGit).isFile()) return null;
-    const m = /^gitdir:\s*(.+)$/m.exec(readSmall(dotGit) ?? '');
-    return m?.[1] ? realpathSync(resolve(dir, m[1].trim())) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Pathspecs that keep `git add` away from submodules it must not look into. `git add -A` starts `git status` inside
- * every gitlink of the index that has a repository behind it, whatever `diff.ignoreSubmodules` says, and that child
- * honours the submodule's own configuration (a `clean` filter is a program on the workstation). A gitlink whose
- * repository is not a trusted one (`trustedSubmoduleGitDir`) is excluded: git skips it before it would start the
- * child. `gitlinkPaths` are the index's mode-160000 paths, relative to the top of `cwd`'s repository.
- */
-export function untrustedGitlinkExcludes(top: string, gitlinkPaths: readonly string[]): string[] {
-  return gitlinkPaths
-    .filter((p) => {
-      const target = gitFileTarget(join(top, p));
-      return !(target && trustedSubmoduleGitDir(target));
-    })
-    .map((p) => `:(exclude,top,literal)${p}`);
+export function gitlinkExcludes(gitlinkPaths: readonly string[]): string[] {
+  return gitlinkPaths.map((p) => `:(exclude,top,literal)${p}`);
 }

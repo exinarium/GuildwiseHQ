@@ -21,7 +21,7 @@ import {
 import { currentBranch, git } from '../git/git.ts';
 import { commitsWithInternalRef, describeCommits } from '../git/internal-ref.ts';
 import { baseTarget } from '../git/rebase.ts';
-import { managedGitDir, modulesRoot } from '../git/submodule-drift.ts';
+import { headShaFromFiles, managedGitDir, modulesRoot } from '../git/submodule-drift.ts';
 
 export interface BranchSnapshot {
   [branch: string]: string;
@@ -135,8 +135,8 @@ export type DirtySnapshot = Record<string, string>;
 export const DIRTY_SNAPSHOT_MAX = 500;
 
 /**
- * What a dirty path looks like now: `gone` (missing), `link:<target>`, `sub:<HEAD>:<sha1 of status and diff>` for a
- * checked-out submodule (`empty` when it is not initialised), or the file's blob id. Null when it cannot be read: such a
+ * What a dirty path looks like now: `gone` (missing), `link:<target>`, `sub:<commit>` for a checked-out submodule
+ * (`empty` when it is not initialised), or the file's blob id. Null when it cannot be read: such a
  * path never counts as untouched.
  */
 async function dirtyFingerprint(
@@ -161,16 +161,12 @@ async function dirtyFingerprint(
   if (st.isDirectory()) {
     // without its own .git, git would answer for the superproject
     if (!existsSync(join(abs, '.git'))) return 'empty';
-    // git runs inside only for a submodule this runner manages (its gitdir under the modules folder); anything else is
-    // agent-owned configuration: no fingerprint, so the path is never "untouched" and is judged as before
-    if (!modules || !managedGitDir(abs, modules)) return null;
-    const head = await git(abs, ['rev-parse', 'HEAD']);
-    if (head.exitCode !== 0) return null;
-    const status = await git(abs, ['status', '--porcelain', '--untracked-files=all']);
-    const diff = await git(abs, ['diff', '--no-ext-diff', '--no-textconv', 'HEAD']);
-    if (status.exitCode !== 0 || diff.exitCode !== 0) return null;
-    const sum = createHash('sha1').update(status.stdout).update('\0').update(diff.stdout).digest('hex');
-    return `sub:${head.stdout.trim()}:${sum}`;
+    // A submodule this runner manages (its gitdir under the modules folder) is fingerprinted by the commit it is at,
+    // read from its files: no git runs inside it (its configuration is agent-writable). Anything else is agent-owned:
+    // no fingerprint, so the path is never "untouched" and is judged as before.
+    const gitDir = modules ? managedGitDir(abs, modules) : null;
+    const at = gitDir ? headShaFromFiles(gitDir) : null;
+    return at ? `sub:${at}` : null;
   }
   const h = await git(worktree, ['hash-object', '--', path]);
   return h.exitCode === 0 && h.stdout.trim() ? `file:${h.stdout.trim()}` : null;

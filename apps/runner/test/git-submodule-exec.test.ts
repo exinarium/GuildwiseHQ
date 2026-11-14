@@ -4,15 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git/git.ts';
-import {
-  forgetTrustedSubmodules,
-  inertGitConfig,
-  protectedGitPaths,
-  submoduleGitDirs,
-  trustedSubmoduleGitDir,
-  trustSubmodulesAtShiftStart,
-} from '../src/git/harden.ts';
-import { managedGitDir, modulesRoot } from '../src/git/submodule-drift.ts';
+import { protectedGitPaths, submoduleGitDirs } from '../src/git/harden.ts';
 
 /**
  * A nested repository inside a card worktree is agent-made content, and its `config` can name programs (a `clean`
@@ -68,7 +60,6 @@ beforeEach(() => {
   writeFileSync(join(superRepo, 'f.txt'), 'hi\n');
   sh(superRepo, 'add', 'f.txt');
   sh(superRepo, 'commit', '-qm', 'init');
-  forgetTrustedSubmodules();
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -135,7 +126,7 @@ describe("the runner's git never runs a nested repository's programs", () => {
     }
   });
 
-  it('a moved pin still shows in status, and add -A leaves the untrusted gitlink alone', async () => {
+  it('a moved pin still shows in status, and add -A leaves the gitlink alone', async () => {
     const evil = nestedRepo();
     dirty(evil);
     sh(evil, '-c', 'filter.pwn.clean=cat', 'commit', '-qam', 'more');
@@ -163,14 +154,102 @@ describe("the runner's git never runs a nested repository's programs", () => {
   });
 });
 
-describe('submodule repositories the runner trusts', () => {
+describe('an agent-written .gitmodules cannot switch the looking-inside back on (submodule.<name>.ignore = none)', () => {
+  it('status, diff, checkout and add start nothing', async () => {
+    const evil = nestedRepo();
+    writeFileSync(
+      join(superRepo, '.gitmodules'),
+      '[submodule "evil"]\n\tpath = evil\n\turl = ./evil\n\tignore = none\n',
+    );
+    sh(superRepo, 'add', '.gitmodules');
+    sh(superRepo, 'commit', '-qm', 'hostile .gitmodules');
+    // control: the config default alone is overridden by .gitmodules
+    dirty(evil);
+    sh(superRepo, '-c', 'diff.ignoreSubmodules=dirty', 'status', '--porcelain');
+    expect(ran()).toBe(true);
+    const commands: string[][] = [
+      ['status', '--porcelain'],
+      ['status', '--porcelain=v2', '-z', '--untracked-files=all'],
+      ['-c', 'protocol.allow=never', 'status'],
+      ['diff', 'HEAD'],
+      ['diff', '--name-status', 'HEAD'],
+      ['add', '-A'],
+      ['add', '-u'],
+      ['add', '--all', '--', '.'],
+      ['commit', '--no-verify', '--allow-empty', '-m', 'wip'],
+      ['checkout', '-B', 'other'],
+      ['checkout', '-f', 'main'],
+      ['checkout', 'HEAD', '--', 'f.txt'],
+      ['merge', 'other'],
+      ['rebase', 'other'],
+      ['reset', '--hard'],
+      ['clean', '-fd'],
+    ];
+    const env = {
+      GIT_AUTHOR_NAME: 'a',
+      GIT_AUTHOR_EMAIL: 'a@b',
+      GIT_COMMITTER_NAME: 'a',
+      GIT_COMMITTER_EMAIL: 'a@b',
+    };
+    for (const c of commands) {
+      dirty(evil);
+      writeFileSync(join(superRepo, 'f.txt'), `change ${tick}\n`);
+      await git(superRepo, c, { env });
+      expect(ran(), `git ${c.join(' ')}`).toBe(false);
+    }
+  });
+});
+
+describe('fetch does not go into a nested repository (its remote settings name programs too)', () => {
+  it('a fetch that brings a moved pin starts nothing, even when .gitmodules asks for recursion', async () => {
+    const evil = nestedRepo();
+    // the nested repository has a remote whose "upload-pack" is a program of the agent's choosing
+    sh(evil, 'remote', 'add', 'origin', join(dir, 'nowhere'));
+    sh(evil, 'config', 'remote.origin.uploadpack', `sh -c 'touch ${marker}'`);
+    writeFileSync(
+      join(superRepo, '.gitmodules'),
+      '[submodule "evil"]\n\tpath = evil\n\turl = ./evil\n\tfetchRecurseSubmodules = true\n\tignore = none\n',
+    );
+    sh(superRepo, 'add', '.gitmodules');
+    sh(superRepo, 'commit', '-qm', 'hostile .gitmodules');
+    // an origin for the superproject that is one commit ahead, with the gitlink moved
+    const origin = join(dir, 'origin.git');
+    sh(dir, 'clone', '-q', '--bare', superRepo, origin);
+    sh(superRepo, 'remote', 'add', 'origin', origin);
+    const other = join(dir, 'other');
+    sh(dir, 'clone', '-q', origin, other);
+    sh(other, 'update-index', '--cacheinfo', `160000,${'a'.repeat(40)},evil`);
+    sh(other, 'commit', '-qm', 'move the pin');
+    sh(other, 'push', '-q', 'origin', 'HEAD:main');
+    // control: plain git recurses and runs the program
+    try {
+      sh(superRepo, 'fetch', '-q', 'origin');
+    } catch {
+      // the nested fetch fails after it ran the "upload-pack" program: that it ran is the point
+    }
+    expect(ran()).toBe(true);
+    // again one commit ahead, now through the runner's git
+    sh(other, 'update-index', '--cacheinfo', `160000,${'b'.repeat(40)},evil`);
+    sh(other, 'commit', '-qm', 'move the pin again');
+    sh(other, 'push', '-q', 'origin', 'HEAD:main');
+    const r = await git(superRepo, ['fetch', 'origin']);
+    expect(r.exitCode).toBe(0);
+    expect(ran()).toBe(false);
+    sh(other, 'update-index', '--cacheinfo', `160000,${'c'.repeat(40)},evil`);
+    sh(other, 'commit', '-qm', 'and again');
+    sh(other, 'push', '-q', 'origin', 'HEAD:main');
+    await git(superRepo, ['pull', '--ff-only', 'origin', 'main']);
+    expect(ran()).toBe(false);
+  });
+});
+
+describe('git add never stages a gitlink, and the submodule repositories are protected', () => {
   /** A real submodule: its repository lives under `<git dir>/modules/core`. */
   function realSubmodule(): { path: string; gitDir: string } {
     const origin = join(dir, 'origin');
     mkdirSync(origin);
     sh(origin, 'init', '-q', '-b', 'main');
     writeFileSync(join(origin, 'data.bin'), 'xxxx\n');
-    writeFileSync(join(origin, '.gitattributes'), '*.bin filter=pwn diff=pwn\n');
     sh(origin, 'add', '.');
     sh(origin, 'commit', '-qm', 'o');
     sh(superRepo, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', origin, 'core');
@@ -178,85 +257,33 @@ describe('submodule repositories the runner trusts', () => {
     return { path: join(superRepo, 'core'), gitDir: join(superRepo, '.git', 'modules', 'core') };
   }
 
-  it('finds them, protects their config and hooks, and trusts an inert one', async () => {
+  it('lists the submodule repositories and protects their config and hooks', () => {
     const sub = realSubmodule();
     expect(submoduleGitDirs(superRepo)).toEqual([sub.gitDir]);
     expect(protectedGitPaths(superRepo)).toEqual(expect.arrayContaining([join(sub.gitDir, 'config')]));
-    expect(trustedSubmoduleGitDir(sub.gitDir)).toBe(false); // nothing is trusted before a shift start
-    const modules = (await modulesRoot(superRepo)) as string;
-    expect(managedGitDir(sub.path, modules)).toBeNull();
-    expect(trustSubmodulesAtShiftStart(superRepo)).toEqual([sub.gitDir]);
-    expect(managedGitDir(sub.path, modules)).not.toBeNull();
   });
 
-  it('never trusts one whose configuration names a program, at the shift start or planted later', async () => {
+  it("the runner's add leaves a moved pin unstaged (the agent commits a pin change itself), other files are staged", async () => {
     const sub = realSubmodule();
-    plant(sub.path); // an earlier shift left a filter in modules/core/config
-    expect(trustSubmodulesAtShiftStart(superRepo)).toEqual([]);
-    const modules = (await modulesRoot(superRepo)) as string;
-    expect(managedGitDir(sub.path, modules)).toBeNull();
-    // add -A stays out of it too
-    dirty(sub.path);
-    await git(superRepo, ['add', '-A']);
-    expect(ran()).toBe(false);
-  });
-
-  it('a repository made under modules/ after the shift start is not trusted', async () => {
-    const sub = realSubmodule();
-    trustSubmodulesAtShiftStart(superRepo);
-    const forged = join(superRepo, '.git', 'modules', 'forged');
-    execFileSync('cp', ['-r', sub.gitDir, forged]);
-    expect(submoduleGitDirs(superRepo).sort()).toEqual([sub.gitDir, forged].sort());
-    expect(trustedSubmoduleGitDir(forged)).toBe(false);
-    expect(trustedSubmoduleGitDir(sub.gitDir)).toBe(true);
-  });
-
-  it('git add still stages a pin change of a trusted submodule', async () => {
-    const sub = realSubmodule();
-    trustSubmodulesAtShiftStart(superRepo);
     writeFileSync(join(sub.path, 'new.txt'), 'n\n');
     sh(sub.path, 'add', 'new.txt');
     sh(sub.path, 'commit', '-qm', 'pin moves');
+    writeFileSync(join(superRepo, 'f.txt'), 'changed\n');
     await git(superRepo, ['add', '-A']);
-    expect((await git(superRepo, ['diff', '--cached', '--name-only'])).stdout.trim()).toBe('core');
+    expect((await git(superRepo, ['diff', '--cached', '--name-only'])).stdout.trim()).toBe('f.txt');
+    expect((await git(superRepo, ['status', '--porcelain'])).stdout).toContain(' M core');
+    // the agent's own commit of the pin (plain git, as in its sandbox) is kept by later runner commands
+    sh(superRepo, 'add', 'core');
+    sh(superRepo, 'commit', '-qm', 'bump core');
+    await git(superRepo, ['add', '-A']);
+    expect(sh(superRepo, 'rev-parse', 'HEAD:core').trim()).toBe(sh(sub.path, 'rev-parse', 'HEAD').trim());
   });
-});
 
-describe('inertGitConfig', () => {
-  const write = (text: string): string => {
-    const f = join(dir, `cfg-${++tick}`);
-    writeFileSync(f, text);
-    return f;
-  };
-  it('accepts what git writes for a submodule clone', () => {
-    expect(
-      inertGitConfig(
-        write(
-          '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n\tworktree = ../../../core\n[remote "origin"]\n\turl = /x/y\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n[submodule "inner"]\n\tactive = true\n\turl = /x/z\n',
-        ),
-      ),
-    ).toBe(true);
-  });
-  it.each([
-    ['a filter', '[filter "pwn"]\n\tclean = sh -c x\n'],
-    ['a diff driver', '[diff "pwn"]\n\tcommand = x\n'],
-    ['a merge driver', '[merge "pwn"]\n\tdriver = x\n'],
-    ['an include', '[include]\n\tpath = /tmp/evil\n'],
-    ['a conditional include', '[includeIf "gitdir:/"]\n\tpath = /tmp/evil\n'],
-    ['an alias', '[alias]\n\tstatus = !x\n'],
-    ['core.fsmonitor', '[core]\n\tfsmonitor = x\n'],
-    ['core.sshCommand', '[core]\n\tsshCommand = x\n'],
-    ['core.hooksPath', '[core]\n\thooksPath = /tmp\n'],
-    ['a credential helper', '[credential]\n\thelper = x\n'],
-    ['submodule update command', '[submodule "a"]\n\tupdate = !x\n'],
-    ['remote uploadpack', '[remote "origin"]\n\tuploadpack = x\n'],
-    ['a dotted section', '[filter.pwn]\n\tclean = x\n'],
-    ['a key on the header line', '[core] fsmonitor = x\n'],
-    ['a continued line', '[core]\n\tbare = false \\\n[filter "p"]\n'],
-  ])('rejects %s', (_name, text) => {
-    expect(inertGitConfig(write(`[core]\n\tbare = false\n${text}`))).toBe(false);
-  });
-  it('rejects a missing file', () => {
-    expect(inertGitConfig(join(dir, 'nope'))).toBe(false);
+  it('the add is refused, not run unguarded, when the index cannot be read', async () => {
+    realSubmodule();
+    writeFileSync(join(superRepo, '.git', 'index'), 'not an index');
+    const r = await git(superRepo, ['add', '-A']);
+    expect(r.exitCode).toBe(128);
+    expect(r.stderr).toContain('refusing to run git');
   });
 });

@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import { execa } from 'execa';
 import { clearLockStub } from './config-lock.ts';
-import { GIT_HARDEN_ENV, gitPointerProblem, hardenedGitArgs, untrustedGitlinkExcludes } from './harden.ts';
+import { GIT_HARDEN_ENV, gitlinkExcludes, gitPointerProblem, hardenedGitArgs } from './harden.ts';
 
 export interface GitResult {
   stdout: string;
@@ -47,37 +47,65 @@ async function clearConfigLockStub(cwd: string): Promise<boolean> {
   return clearLockStub(isAbsolute(out) ? out : resolve(cwd, out)).length > 0;
 }
 
+/** Index of the subcommand in `args`: after any leading `-c <setting>` / `-C <dir>` pairs. */
+function subcommandIndex(args: readonly string[]): number {
+  let i = 0;
+  while (i < args.length && (args[i] === '-c' || args[i] === '-C')) i += 2;
+  return i;
+}
+
 /**
- * `git add ...` with an exclude pathspec for every gitlink of the index whose repository the runner does not trust.
- * Reads the index (`ls-files -s`, which starts nothing) with the same environment, so a private index file is honoured.
- * Unchanged when the index has no gitlink.
+ * Keeps a superproject command from starting git inside a submodule or a nested repository (harden.ts,
+ * `GIT_HARDEN_ARGS`): the option forms that an agent-written `.gitmodules` cannot override.
+ * - `status`, `diff`: `--ignore-submodules=dirty` (the command-line option beats `submodule.<name>.ignore`).
+ * - `checkout`, `switch`: quiet, so they do not report local changes (that report looks into submodules).
+ * - `fetch`, `pull`: `--no-recurse-submodules` (beats `submodule.<name>.fetchRecurseSubmodules`).
+ * - `add`: an exclude pathspec for every gitlink of the index (read with `ls-files -s`, which starts nothing, in the
+ *   same environment so a private index file is honoured). When the index cannot be read the add is not run.
+ * Returns the arguments to run, or a refusal.
  */
-async function excludeUntrustedGitlinks(
+async function withSubmoduleGuards(
   cwd: string,
   args: string[],
   env: Record<string, string> | undefined,
-): Promise<string[]> {
-  const run = (a: string[]) =>
-    execa('git', hardenedGitArgs(a), {
-      cwd,
-      reject: false,
-      stdin: 'ignore',
-      env: { ...GIT_HARDEN_ENV, ...env },
-      extendEnv: true,
-    });
-  const ls = await run(['ls-files', '-s', '-z', '--full-name', ':/']);
-  if (ls.exitCode !== 0) return args;
-  const links: string[] = [];
+): Promise<{ args: string[] } | { refused: string }> {
+  const at = subcommandIndex(args);
+  const sub = args[at];
+  const head = args.slice(0, at + 1);
+  const rest = args.slice(at + 1);
+  if (sub === 'status' || sub === 'diff') {
+    if (rest.some((a) => a.startsWith('--ignore-submodules'))) return { args };
+    return { args: [...head, '--ignore-submodules=dirty', ...rest] };
+  }
+  if (sub === 'checkout' || sub === 'switch') {
+    const options = rest.includes('--') ? rest.slice(0, rest.indexOf('--')) : rest;
+    if (options.includes('-q') || options.includes('--quiet')) return { args };
+    return { args: [...head, '-q', ...rest] };
+  }
+  if (sub === 'fetch' || sub === 'pull') {
+    // `submodule.<name>.fetchRecurseSubmodules` in an agent-written .gitmodules beats the config default; the option wins
+    if (rest.some((a) => a.startsWith('--recurse-submodules') || a === '--no-recurse-submodules'))
+      return { args };
+    return { args: [...head, '--no-recurse-submodules', ...rest] };
+  }
+  if (sub !== 'add') return { args };
+  const ls = await execa('git', hardenedGitArgs(['ls-files', '-s', '-z', '--full-name', ':/']), {
+    cwd,
+    reject: false,
+    stdin: 'ignore',
+    env: { ...GIT_HARDEN_ENV, ...env },
+    extendEnv: true,
+    maxBuffer: 1024 * 1024 * 1024,
+  });
+  if (ls.exitCode !== 0) return { refused: 'the index could not be read to keep git add out of submodules' };
+  const links = new Set<string>();
   for (const entry of String(ls.stdout ?? '').split('\0')) {
     const tab = entry.indexOf('\t');
-    if (tab > 0 && entry.startsWith('160000 ')) links.push(entry.slice(tab + 1));
+    if (tab > 0 && entry.startsWith('160000 ')) links.add(entry.slice(tab + 1));
   }
-  if (links.length === 0) return args;
-  const top = String((await run(['rev-parse', '--show-toplevel'])).stdout ?? '').trim();
-  if (!top) return args;
-  const excludes = untrustedGitlinkExcludes(top, [...new Set(links)]);
-  if (excludes.length === 0) return args;
-  return args.includes('--') ? [...args, ...excludes] : [...args, '--', ...excludes];
+  if (links.size === 0) return { args };
+  const excludes = gitlinkExcludes([...links]);
+  return { args: rest.includes('--') ? [...args, ...excludes] : [...args, '--', ...excludes] };
 }
 
 /** Pauses (ms) between the retries of a command that hit a lock error; tests shorten them. */
@@ -91,8 +119,11 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
   // a worktree whose .git file points somewhere it should not is not a place to run git (docs/RUNNER.md, "the repository's configuration")
   const pointer = gitPointerProblem(cwd);
   if (pointer) return { stdout: '', stderr: `refusing to run git: ${pointer}`, exitCode: 128 };
-  // every `git add` the runner starts stays out of submodules it does not trust (harden.ts, `untrustedGitlinkExcludes`)
-  if (args[0] === 'add') args = await excludeUntrustedGitlinks(cwd, args, opts.env);
+  // no superproject command the runner starts looks inside a submodule or a nested repository
+  const guarded = await withSubmoduleGuards(cwd, args, opts.env);
+  if ('refused' in guarded)
+    return { stdout: '', stderr: `refusing to run git: ${guarded.refused}`, exitCode: 128 };
+  args = guarded.args;
   for (let attempt = 0; ; attempt++) {
     const r = await execa('git', hardenedGitArgs(args), {
       cwd,

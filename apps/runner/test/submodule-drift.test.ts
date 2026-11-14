@@ -1,9 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { forgetTrustedSubmodules, trustSubmodulesAtShiftStart } from '../src/git/harden.ts';
-import { headShaFromFiles, resetSubmoduleDrift, submoduleResetNote } from '../src/git/submodule-drift.ts';
+import { headShaFromFiles, resetSubmoduleDrift } from '../src/git/submodule-drift.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -16,8 +14,6 @@ function twoRepos() {
   sh(d.clone, 'git', ['commit', '-m', 'add core']);
   sh(d.clone, 'git', ['push', 'origin', 'main']);
   const pin = sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD']);
-  // the submodule was there, with the configuration git wrote, when the shift started: the runner may run git inside it
-  trustSubmodulesAtShiftStart(d.clone);
   return { x, d, pin };
 }
 
@@ -39,33 +35,39 @@ function drift(d: TestRepo, sha: string) {
   sh(core, 'git', ['checkout', '-q', sha]);
 }
 
-describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
-  it('resets a clean drift to the pin; nothing is left for the leftovers commit to put on the gitlink', async () => {
+describe('resetSubmoduleDrift (BLOCKERS.md section 3): the drift is reported, no git runs inside a submodule', () => {
+  it('on its pin: nothing to do, nothing refused', async () => {
+    const { d } = twoRepos();
+    expect(await resetSubmoduleDrift(d.clone)).toEqual({ reset: [] });
+  });
+
+  it('off its pin: refused with the checkout the agent can do itself; the submodule is left as it is', async () => {
     const { x, d, pin } = twoRepos();
     const newer = advanceX(x, 'feature.txt');
     drift(d, newer);
-    expect(sh(d.clone, 'git', ['status', '--porcelain'])).toContain('core');
+    expect(headShaFromFiles(join(d.clone, '.git', 'modules', 'core'))).toBe(newer);
     const r = await resetSubmoduleDrift(d.clone);
-    expect(r.refused).toBeUndefined();
-    expect(r.reset).toEqual([{ path: 'core', from: newer, pin }]);
-    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
-    // what `git add -A` would stage: nothing
-    sh(d.clone, 'git', ['add', '-A']);
-    expect(sh(d.clone, 'git', ['diff', '--cached', '--name-only'])).toBe('');
-    expect(submoduleResetNote(r.reset)).toContain(`core (${newer.slice(0, 10)} -> ${pin.slice(0, 10)})`);
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain(`git -C core checkout ${pin}`);
+    expect(r.refused).toContain('aom question --topic environment');
+    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
+    // the agent does what it was told: accepted
+    sh(join(d.clone, 'core'), 'git', ['checkout', '-q', pin]);
+    expect(await resetSubmoduleDrift(d.clone)).toEqual({ reset: [] });
   });
 
-  it('refuses a drifted submodule with uncommitted changes inside and leaves it as it is', async () => {
+  it("never runs a program from the submodule's configuration (a clean filter there leaves no marker)", async () => {
     const { x, d } = twoRepos();
     const newer = advanceX(x, 'feature.txt');
     drift(d, newer);
-    writeFileSync(join(d.clone, 'core', 'wip.txt'), 'work in progress\n');
+    const core = join(d.clone, 'core');
+    const marker = join(tmp(), 'MARK');
+    writeFileSync(join(core, '.gitattributes'), '* filter=pwn\n');
+    sh(core, 'git', ['config', 'filter.pwn.clean', `sh -c 'touch ${marker}; cat'`]);
+    writeFileSync(join(core, 'feature.txt'), 'changed\n');
     const r = await resetSubmoduleDrift(d.clone);
-    expect(r.reset).toEqual([]);
-    expect(r.refused).toContain('the submodule core is at');
-    expect(r.refused).toContain('uncommitted changes inside (wip.txt)');
-    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
-    expect(existsSync(join(d.clone, 'core', 'wip.txt'))).toBe(true);
+    expect(r.refused).toContain('instead of its pinned');
+    expect(existsSync(marker)).toBe(false);
   });
 
   it('leaves a pin change committed on the branch alone', async () => {
@@ -79,27 +81,9 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
   });
 
-  it('never fetches: a pin the submodule clone lacks is refused, even with a file:// origin that has it (B3)', async () => {
-    const { x, d, pin } = twoRepos();
-    const newer = advanceX(x, 'feature.txt');
-    const core = join(d.clone, 'core');
-    sh(core, 'git', ['remote', 'set-url', 'origin', `file://${x.origin}`]);
-    // the branch pins X's newer commit; the submodule clone has never seen it
-    sh(d.clone, 'git', ['update-index', '--cacheinfo', `160000,${newer},core`]);
-    sh(d.clone, 'git', ['commit', '-m', 'pin core']);
-    const r = await resetSubmoduleDrift(d.clone);
-    expect(r.reset).toEqual([]);
-    expect(r.refused).toContain("the pinned commit is not in the submodule's clone");
-    expect(r.refused).toContain('aom question --topic environment');
-    // nothing was fetched into the submodule's clone, and it was not moved
-    expect(spawnSync('git', ['cat-file', '-e', `${newer}^{commit}`], { cwd: core }).status).not.toBe(0);
-    expect(sh(core, 'git', ['rev-parse', 'HEAD'])).toBe(pin);
-  });
-
-  it('a redirected core/.git is not operated on: refused, the repository it points at is untouched (B3)', async () => {
+  it('a redirected core/.git is refused, and the repository it points at is untouched', async () => {
     const { x, d } = twoRepos();
     const newer = advanceX(x, 'feature.txt');
-    // a repository the agent owns, with a hook-free config of its own, checked out at the newer commit
     const owned = join(tmp(), 'owned');
     sh(x.root, 'git', ['clone', '-q', x.origin, owned]);
     sh(owned, 'git', ['checkout', '-q', newer]);
@@ -108,10 +92,9 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     expect(r.reset).toEqual([]);
     expect(r.refused).toContain('the submodule core is not a checkout the runner manages');
     expect(sh(owned, 'git', ['rev-parse', 'HEAD'])).toBe(newer);
-    expect(sh(owned, 'git', ['status', '--porcelain'])).toBe('');
   });
 
-  it('a gitlink the agent made over a fresh git init is not operated on: refused (B3)', async () => {
+  it('a gitlink the agent made over a fresh git init is refused', async () => {
     const d = makeRepo();
     const evil = join(d.clone, 'evil');
     mkdirSync(evil);
@@ -119,67 +102,23 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     writeFileSync(join(evil, 'a.txt'), 'a\n');
     sh(evil, 'git', ['add', '-A']);
     sh(evil, 'git', ['commit', '-q', '-m', 'a']);
-    const head = sh(evil, 'git', ['rev-parse', 'HEAD']);
     sh(d.clone, 'git', ['update-index', '--add', '--cacheinfo', `160000,${'e'.repeat(40)},evil`]);
     const r = await resetSubmoduleDrift(d.clone);
     expect(r.reset).toEqual([]);
     expect(r.refused).toContain('the submodule evil is not a checkout the runner manages');
-    expect(sh(evil, 'git', ['rev-parse', 'HEAD'])).toBe(head);
   });
 
-  it('resets even when .gitmodules says update = none or rebase (it always checks the pin out)', async () => {
-    for (const mode of ['none', 'rebase']) {
-      const { x, d, pin } = twoRepos();
-      sh(d.clone, 'git', ['config', '--file', '.gitmodules', 'submodule.core.update', mode]);
-      sh(d.clone, 'git', ['config', 'submodule.core.update', mode]);
-      sh(d.clone, 'git', ['commit', '-am', `update = ${mode}`]);
-      const newer = advanceX(x, 'feature.txt');
-      drift(d, newer);
-      const r = await resetSubmoduleDrift(d.clone);
-      expect(r.refused).toBeUndefined();
-      expect(r.reset).toEqual([{ path: 'core', from: newer, pin }]);
-      expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
-      // nothing was rebased onto the pin: X's newer commit is untouched
-      expect(sh(join(d.clone, 'core'), 'git', ['cat-file', '-t', newer])).toBe('commit');
-    }
-  });
-
-  it('a repository without submodules, or with one not initialised, has nothing to reset', async () => {
-    expect(await resetSubmoduleDrift(makeRepo().clone)).toEqual({ reset: [] });
+  it('a repository without submodules, or with one not initialised, has nothing to report', async () => {
+    const plain = makeRepo();
+    expect(await resetSubmoduleDrift(plain.clone)).toEqual({ reset: [] });
     const { d } = twoRepos();
     const fresh = join(tmp(), 'fresh');
     sh(d.root, 'git', ['clone', d.origin, fresh]);
     expect(await resetSubmoduleDrift(fresh)).toEqual({ reset: [] });
   });
-});
-
-describe('a submodule set up during the shift (not trusted: no git is run inside it)', () => {
-  /** As `twoRepos`, but the shift started before the submodule existed. */
-  function lateSubmodule() {
-    const r = twoRepos();
-    forgetTrustedSubmodules();
-    trustSubmodulesAtShiftStart(tmp()); // some other folder: nothing of this repository is trusted
-    return r;
-  }
-
-  it('on its pin: nothing to do, nothing refused', async () => {
-    const { d } = lateSubmodule();
-    expect(await resetSubmoduleDrift(d.clone)).toEqual({ reset: [] });
-  });
-
-  it('off its pin: refused with the checkout the agent can do itself, read from the files', async () => {
-    const { x, d, pin } = lateSubmodule();
-    const newer = advanceX(x, 'later.txt');
-    drift(d, newer);
-    expect(headShaFromFiles(join(d.clone, '.git', 'modules', 'core'))).toBe(newer);
-    const r = await resetSubmoduleDrift(d.clone);
-    expect(r.reset).toEqual([]);
-    expect(r.refused).toContain(`git -C core checkout ${pin}`);
-    expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer); // untouched
-  });
 
   it('reads a HEAD that names a branch, loose or packed', () => {
-    const { d, pin } = lateSubmodule();
+    const { d, pin } = twoRepos();
     const core = join(d.clone, 'core');
     sh(core, 'git', ['checkout', '-q', '-B', 'work', pin]);
     const gitDir = join(d.clone, '.git', 'modules', 'core');
