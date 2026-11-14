@@ -105,8 +105,8 @@ export async function raiseQuestion(
     const r = recommendIndex(report.recommend, report.options);
     if ('error' in r) return { accepted: false, error: r.error };
     recommend = r.index;
-    if (r.oneBased)
-      recommendNote = `\n--recommend ${report.recommend} was read as option ${r.index} ("${report.options[r.index]}"): options count from 0.`;
+    // always echoed, so an agent that counts from 1 sees which option it actually recommended
+    recommendNote = `\n--recommend ${report.recommend} was read as option ${r.index} ("${report.options[r.index]}"): options count from 0.`;
   }
   const repeated = await repeatGuard(ctx, tx, card, agent, report);
   if (repeated) return repeated;

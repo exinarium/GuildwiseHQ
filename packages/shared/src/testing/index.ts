@@ -239,19 +239,24 @@ const E2E_NOT_TEST_EXT = /\.(?:md|mdx|txt)$/i;
 const E2E_MANIFEST =
   /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i;
 const E2E_DATA_DIR =
-  /(?:^|\/)(?:fixtures|__fixtures__|snapshots|__snapshots__|testdata|mocks|data|[^/]+-snapshots)\//i;
+  /(?:^|\/)(?:fixtures|__fixtures__|snapshots|__snapshots__|testdata|test-data|mocks|data|expected|golden|[^/]+-snapshots)\//i;
+/** JSON files that configure a test runner (they select or skip specs): test content wherever they are. */
+const E2E_RUNNER_CONFIG = /(?:^|\/)(?:cypress\.json|\.mocharc\.json|jest\.config\.json|\.detoxrc\.json)$/i;
 
 /**
  * Is a path inside the E2E globs real test content (a spec or its support code: helpers, scripts, config, fixtures,
  * snapshots)? Docs (`*.md|mdx|txt`), `package.json` and lock files, and JSON configuration outside fixture or snapshot
  * folders (the help-video `screens.json`, `tsconfig.json`) are not: a builder may change them (BLOCKERS.md section 2).
- * Conservative: anything else counts as test content. The path is repository-relative, forward slashes.
+ * Anything in a fixture, data or snapshot folder (a `.txt` text snapshot included) and a JSON test-runner config
+ * (`cypress.json`, `.mocharc.json`, ...) is test content. Conservative: anything else counts as test content. The path is repository-relative, forward slashes.
  */
 export function isE2eTestContent(path: string): boolean {
   const p = path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+  // fixtures and snapshots (a Playwright text snapshot is a .txt) and runner configs are always test content
+  if (E2E_DATA_DIR.test(p) || E2E_RUNNER_CONFIG.test(p)) return true;
   if (E2E_NOT_TEST_EXT.test(p)) return false;
   if (E2E_MANIFEST.test(p)) return false;
-  if (/\.json$/i.test(p) && !E2E_DATA_DIR.test(p)) return false;
+  if (/\.json$/i.test(p)) return false;
   return true;
 }
 

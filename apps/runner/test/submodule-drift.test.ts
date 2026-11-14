@@ -87,6 +87,33 @@ describe('resetSubmoduleDrift (BLOCKERS.md section 3)', () => {
     expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(newer);
   });
 
+  it('resets even when .gitmodules says update = none or rebase (it always checks the pin out)', async () => {
+    for (const mode of ['none', 'rebase']) {
+      const { x, d, pin } = twoRepos();
+      sh(d.clone, 'git', ['config', '--file', '.gitmodules', 'submodule.core.update', mode]);
+      sh(d.clone, 'git', ['config', 'submodule.core.update', mode]);
+      sh(d.clone, 'git', ['commit', '-am', `update = ${mode}`]);
+      const newer = advanceX(x, 'feature.txt');
+      drift(d, newer);
+      const r = await resetSubmoduleDrift(d.clone);
+      expect(r.refused).toBeUndefined();
+      expect(r.reset).toEqual([{ path: 'core', from: newer, pin }]);
+      expect(sh(join(d.clone, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
+      // nothing was rebased onto the pin: X's newer commit is untouched
+      expect(sh(join(d.clone, 'core'), 'git', ['cat-file', '-t', newer])).toBe('commit');
+    }
+  });
+
+  it('a pin that cannot be fetched is refused with what the builder can do about it', async () => {
+    const { d } = twoRepos();
+    sh(d.clone, 'git', ['update-index', '--cacheinfo', `160000,${'e'.repeat(40)},core`]);
+    sh(d.clone, 'git', ['commit', '-m', 'pin core to a commit nobody has']);
+    const r = await resetSubmoduleDrift(d.clone, { fetchTimeoutMs: 30_000 });
+    expect(r.reset).toEqual([]);
+    expect(r.refused).toContain('the runner could not reset it');
+    expect(r.refused).toContain('aom question --topic environment');
+  });
+
   it('a repository without submodules, or with one not initialised, has nothing to reset', async () => {
     expect(await resetSubmoduleDrift(makeRepo().clone)).toEqual({ reset: [] });
     const { d } = twoRepos();

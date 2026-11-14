@@ -242,6 +242,19 @@ describe('--recommend numbering (BLOCKERS.md smaller friction)', () => {
     r.close();
   });
 
+  it('an in-range --recommend is echoed too, so an off-by-one is visible to the agent', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    await w.hire('Rex', 'builder', 'junior');
+    await w.card({ title: 'Echo' });
+    const start = await h.dispatchTo(r, 'Rex');
+    await h.startShift(r, start);
+    const res = await ask(r, start.shiftId, { recommend: 1, blocking: false });
+    expect(res.accepted).toBe(true);
+    expect(res.message).toContain('--recommend 1 was read as option 1 ("spaces"): options count from 0.');
+    r.close();
+  });
+
   it('two options with --recommend 5 is refused with 0-based numbering and the valid values', async () => {
     await freshState();
     const r = await w.connectRunner();

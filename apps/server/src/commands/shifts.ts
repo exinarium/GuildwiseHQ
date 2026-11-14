@@ -614,6 +614,9 @@ export async function applyShiftReport(
         }
         const review = inv.review;
         const confirming = pending && review?.decision === 'confirm';
+        // A revised design keeps the tests-only flag of the design it revises (`aom design revise` cannot repeat it).
+        const testsOnly =
+          !!inv.testsOnly || (review?.decision === 'revise' && card.investigation?.testsOnly === true);
         if (review) {
           const revised = [...new Set(review.revised)];
           if (revised.some((n) => n > total))
@@ -672,7 +675,7 @@ export async function applyShiftReport(
                   ...(inv.body ? { body: inv.body } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
-                  ...(inv.testsOnly ? { testsOnly: true } : {}),
+                  ...(testsOnly ? { testsOnly: true } : {}),
                 },
               },
               actor,
@@ -682,7 +685,7 @@ export async function applyShiftReport(
               card,
               { kind: 'agent', agentId: agent.id },
               'comment',
-              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${inv.testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}`,
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}`,
             ),
           );
         }
@@ -691,7 +694,7 @@ export async function applyShiftReport(
           ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
-            : inv.testsOnly
+            : testsOnly
               ? 'Recorded. The card is tests-only: the tester works the build stage with your design. Finish now.'
               : 'Recorded. The card goes to the builder with your design. Finish now.';
       }

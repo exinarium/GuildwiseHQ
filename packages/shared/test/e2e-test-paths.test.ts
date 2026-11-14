@@ -29,6 +29,14 @@ describe('isE2eTestContent (BLOCKERS.md section 2)', () => {
     'e2e/data/seed.json',
     'e2e/playwright.config.ts',
     'e2e/scripts/seed.sh',
+    'e2e/login.spec.ts-snapshots/greeting-chromium-linux.txt',
+    'e2e/fixtures/expected.txt',
+    'e2e/__snapshots__/notes.md',
+    'e2e/test-data/users.json',
+    'e2e/golden/page.json',
+    'e2e/cypress.json',
+    'e2e/.mocharc.json',
+    'e2e/jest.config.json',
   ])('%s is test content', (p) => {
     expect(isE2eTestContent(p)).toBe(true);
   });

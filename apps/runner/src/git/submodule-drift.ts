@@ -73,7 +73,17 @@ export async function resetSubmoduleDrift(
       continue;
     }
     const update = () =>
-      git(worktree, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--no-fetch', '--', path]);
+      // --checkout: never the `update = rebase|merge|none` of .gitmodules, which would rewrite or skip the submodule
+      git(worktree, [
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'update',
+        '--checkout',
+        '--no-fetch',
+        '--',
+        path,
+      ]);
     let r = await update();
     if (r.exitCode !== 0) {
       // the pin is not in the submodule's clone: fetch it once, with the runner's credentials
@@ -99,7 +109,7 @@ export async function resetSubmoduleDrift(
     const now = (await git(abs, ['rev-parse', 'HEAD'])).stdout.trim();
     if (r.exitCode !== 0 || now !== pin) {
       problems.push(
-        `the submodule ${path} is at ${short(now || head)} instead of its pinned ${short(pin)} and the runner could not reset it: ${(r.stderr || r.stdout).trim().slice(0, 300) || 'the pinned commit is not available'}`,
+        `the submodule ${path} is at ${short(now || head)} instead of its pinned ${short(pin)} and the runner could not reset it (${(r.stderr || r.stdout).trim().slice(0, 300) || 'the pinned commit is not available'}). You cannot fix this from your sandbox: ask with \`aom question --topic environment\` and name the submodule and the pinned commit`,
       );
       continue;
     }
