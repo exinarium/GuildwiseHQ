@@ -871,7 +871,7 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
     return;
   }
   console.log(
-    `Connected to ${result.site}${result.account ? ` as ${result.account}` : ''}. Saved on this machine only (mode 0600).`,
+    `Connected to ${result.site}${result.account ? ` as ${result.account}` : ''}. Saved on this machine only, sealed with the runner key.`,
   );
   done();
 }
