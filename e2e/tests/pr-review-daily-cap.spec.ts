@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { apiAs, inviteAndAccept } from '../support/api.ts';
+import { apiAs } from '../support/api.ts';
 import { q } from '../support/db.ts';
 import { ADMIN, GUEST, paths } from '../support/env.ts';
 
@@ -95,7 +95,6 @@ test('cap setting: default 20, the owner sets 1..100, 0 and 101 are refused, a m
   expect(ok.status(), await ok.text()).toBe(200);
   const body = await (await admin.get(`/api/projects/${projectId}/pull-requests/queue`)).json();
   expect(body.cap).toBe(2);
-  await inviteAndAccept(admin, GUEST);
   const guest = await apiAs(GUEST.email, GUEST.password);
   const denied = await guest.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 50 } });
   expect([403, 404]).toContain(denied.status());
