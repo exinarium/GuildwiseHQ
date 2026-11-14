@@ -109,7 +109,7 @@ export function Journeys() {
             <EmptyState
               icon={Route}
               title="No journeys yet"
-              description="Start from the rentals template or build your own."
+              description="Start from a template or build your own."
             />
           ) : (
             <ul className="grid gap-3 sm:grid-cols-2" data-testid="journey-list">
