@@ -352,6 +352,24 @@ Some logins belong to the whole computer (the `gh` login, `~/.claude`, MCP sign-
 
 > **In the app:** watch the videos "Workstations" (Help, "Workstations and the installer", `/help/workstations-and-installer#add-a-workstation`) and "Integrations" (Help, "Integrations", `/help/integrations#connect`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
 
+### 3.4b Add a GitHub App for your organization
+
+A GitHub App gives your agents their own bot identity (`<app>[bot]`) instead of your personal GitHub user. Only the organization **Owner** can add, test, rename or remove one; everyone else sees the app and its state but no buttons.
+
+1. **Create the app** on GitHub: your organization's **Settings > Developer settings > GitHub Apps > New GitHub App**. No webhook is needed: untick **Active** under Webhook.
+2. **Permissions** (repository): **Contents** read and write, **Pull requests** read and write, **Issues** read and write, **Metadata** read. Add **Workflows** write only if your agents must edit files in `.github/workflows`. Grant nothing else.
+3. **Install it** on your organization and choose **Only select repositories**: the repositories of your projects.
+4. **Generate a private key** on the app's page. GitHub downloads a `.pem` file.
+5. In Guildwise open **Settings > Automated apps > Add app**. Enter a label, the App ID (or client ID) and, if you know it, the installation ID (leave it empty to pick from the installations). Choose the `.pem` file, then pick the workstations that may act as the app. Anyone who controls one of those workstations can act as the app: pick only workstations you trust with that.
+6. **Save.** The key is encrypted in your browser separately for each chosen workstation; Guildwise relays it and never stores or sees it. Each workstation checks it with GitHub (signs an app token, reads the installation, mints a short-lived token and looks up the bot user) and stores it, encrypted, only when GitHub accepts it. The page then shows the bot login and the commit identity, for example `guild-bot[bot] <99001+guild-bot[bot]@users.noreply.github.com>`. A wrong key, a wrong App ID or an app that is not installed shows a clear sentence, and nothing is saved.
+7. **Delete the downloaded `.pem` file** once the app is added.
+
+Tokens are minted on the workstation when needed, refreshed before they expire and kept in memory only, so nobody signs in again while the key is valid. If a token cannot be minted (key revoked, app uninstalled, installation suspended, clock wrong, permission missing), the app's state turns to *Error* with the reason on the Settings page and on the workstation's Integrations page.
+
+One integration is one installation: an app installed on two GitHub organizations is added twice. **Remove** deletes the key on every workstation, including workstations that are offline (they delete it when they next connect).
+
+On a workstation without a browser, connect it from a terminal instead: `guildwise-runner apps connect github --app-id <id> --installation <id> --key-file <path>` (or `--key-stdin`; without either it asks for the key without showing it). `guildwise-runner apps list`, `apps test <instance>` and `apps remove <instance>` do the rest.
+
 ### 3.5 Hire your first agents (2 minutes)
 
 You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended. New projects use the lean team workflow (4.26), which also uses a planner, an architect and a pre-reviewer: hire those too for the intended cost, until then the architect plans and the reviewer does the pre-review.
