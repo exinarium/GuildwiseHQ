@@ -608,7 +608,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ]),
       sharedCacheDir: input.sandbox.cacheRoot ?? join(root, 'cache'),
       ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() } : {}),
+      ...(process.platform === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
       ...(readOnlyScan ? { readOnlyScan: true } : {}),

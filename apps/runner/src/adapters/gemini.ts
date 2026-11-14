@@ -927,7 +927,9 @@ export class GeminiAdapter implements RuntimeAdapter {
       mayCommit,
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       ...(nuget ? { nugetFallbackDir: nuget } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() } : {}),
+      ...(process.platform === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
     };
   }
 

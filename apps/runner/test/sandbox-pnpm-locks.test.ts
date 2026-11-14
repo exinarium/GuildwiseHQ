@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -172,7 +180,10 @@ describe('Claude Code: allowWrite carries exactly the three lock folders under /
       const fs = buildShiftSettings(role(key).permissions, ctx, POLICY_PATHS, key).sandbox?.filesystem;
       expect(underTmp(fs?.allowWrite ?? []), key).toEqual([DOTNET_SHM_DIR, ...LOCKS]);
       expect(fs?.allowWrite ?? [], key).not.toContain('/tmp');
-      expect((fs?.allowWrite ?? []).some((p) => p.includes('*')), key).toBe(false);
+      expect(
+        (fs?.allowWrite ?? []).some((p) => p.includes('*')),
+        key,
+      ).toBe(false);
       expect(fs?.denyWrite ?? [], key).not.toEqual(expect.arrayContaining(LOCKS));
     }
   });
@@ -191,7 +202,14 @@ describe('Claude Code: allowWrite carries exactly the three lock folders under /
     const a = new ClaudeCodeAdapter(ClaudeRuntimeConfigSchema.parse({ bin: 'no-such-claude-binary' }));
     const root = tmp();
     // a Sandbox built by hand, as PR review does: no ensureSandbox
-    const sandbox = { agentId: 'x', root, home: join(root, 'home'), configDir: join(root, 'c'), scratch: root, tmp: root };
+    const sandbox = {
+      agentId: 'x',
+      root,
+      home: join(root, 'home'),
+      configDir: join(root, 'c'),
+      scratch: root,
+      tmp: root,
+    };
     // policy() is private
     const ctx = (a as any).policy({ env: {}, sandbox }, root);
     if (process.platform === 'linux') expect(ctx.pnpmLockDirs).toEqual(usablePnpmLockDirs());
@@ -203,7 +221,11 @@ describe('Codex: the profile grants exactly the three lock folders under /tmp', 
   const base = {
     cwd: '/work/wt',
     readOnlyCwd: false,
-    sandbox: { home: '/runner/agents/a/home', scratch: '/runner/agents/a/scratch', tmp: '/runner/agents/a/tmp' },
+    sandbox: {
+      home: '/runner/agents/a/home',
+      scratch: '/runner/agents/a/scratch',
+      tmp: '/runner/agents/a/tmp',
+    },
     gitDirs: [],
     mayCommit: false,
     readDirs: [],
@@ -270,7 +292,9 @@ const bwrapWorks =
   bwrap !== undefined &&
   spawnSync(bwrap, ['--ro-bind', '/', '/', '--dev', '/dev', 'true'], { encoding: 'utf8' }).status === 0;
 const pnpm = which('pnpm');
-const pnpmMajor = pnpm ? Number((spawnSync(pnpm, ['--version'], { encoding: 'utf8' }).stdout ?? '').split('.')[0]) : 0;
+const pnpmMajor = pnpm
+  ? Number((spawnSync(pnpm, ['--version'], { encoding: 'utf8' }).stdout ?? '').split('.')[0])
+  : 0;
 
 /** Read-only `/` with only the Claude policy's allowWrite paths (and the work folder) writable, like the shift sandbox. */
 describe.skipIf(!bwrapWorks)('pnpm lock folders in a real bubblewrap sandbox (skipped without bwrap)', () => {
@@ -342,7 +366,9 @@ describe.skipIf(!bwrapWorks)('pnpm lock folders in a real bubblewrap sandbox (sk
     'without the lock folders pnpm 12 install fails on the lock (the bug)',
     async () => {
       const r = await run(`${workspace} && pnpm install --frozen-lockfile 2>&1`, { withLocks: false });
-      expect(`${r.stdout}${r.stderr}`).toMatch(/store operation lock|ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK/i);
+      expect(`${r.stdout}${r.stderr}`).toMatch(
+        /store operation lock|ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK/i,
+      );
     },
     120_000,
   );
