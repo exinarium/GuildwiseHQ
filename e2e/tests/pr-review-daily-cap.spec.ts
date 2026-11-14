@@ -19,16 +19,7 @@ async function seedPr(changeId: string, openedAt: string, changedLines: number |
     `INSERT INTO pr_reviews (id, project_id, project_repo_id, change_id, url, title, author, head_branch, base_branch,
                              opened_at, recorded_at, review_state, changed_lines)
      VALUES ($1,$2,$3,$4,$5,$6,'dev','feat','main',$7,$7,'not_reviewed',$8)`,
-    [
-      id,
-      projectId,
-      repoId,
-      changeId,
-      `https://example.test/pr/${changeId}`,
-      `PR number ${changeId}`,
-      openedAt,
-      changedLines,
-    ],
+    [id, projectId, repoId, changeId, `https://example.test/pr/${changeId}`, `PR number ${changeId}`, openedAt, changedLines],
   );
   return id;
 }
@@ -43,9 +34,9 @@ test.beforeAll(async () => {
   });
   expect(add.status(), await add.text()).toBe(201);
   repoId = (await add.json()).repos[0].id;
-  expect(
-    (await admin.patch(`/api/projects/${projectId}/repos/${repoId}`, { data: { prOnly: true } })).status(),
-  ).toBe(200);
+  expect((await admin.patch(`/api/projects/${projectId}/repos/${repoId}`, { data: { prOnly: true } })).status()).toBe(
+    200,
+  );
   // 11 and 12 opened on the same day (12 is smaller), 13 on the same day with unknown size, 14 a day later
   seeded['11'] = await seedPr('11', '2026-01-10T09:00:00Z', 50);
   seeded['12'] = await seedPr('12', '2026-01-10T10:00:00Z', 10);
@@ -85,12 +76,8 @@ test('AC4: the project view shows n/20 and the queue in run order; Review now is
 
 test('cap setting: default 20, the owner sets 1..100, 0 and 101 are refused, a member is refused', async () => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);
-  expect((await admin.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 0 } })).status()).toBe(
-    400,
-  );
-  expect((await admin.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 101 } })).status()).toBe(
-    400,
-  );
+  expect((await admin.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 0 } })).status()).toBe(400);
+  expect((await admin.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 101 } })).status()).toBe(400);
   const ok = await admin.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 2 } });
   expect(ok.status(), await ok.text()).toBe(200);
   const body = await (await admin.get(`/api/projects/${projectId}/pull-requests/queue`)).json();
@@ -99,14 +86,10 @@ test('cap setting: default 20, the owner sets 1..100, 0 and 101 are refused, a m
   const guest = await apiAs(GUEST.email, GUEST.password);
   const denied = await guest.put(`/api/projects/${projectId}/pr-review-cap`, { data: { cap: 50 } });
   expect([403, 404]).toContain(denied.status());
-  expect((await admin.get(`/api/projects/${projectId}/pull-requests/queue`).then((r) => r.json())).cap).toBe(
-    2,
-  );
+  expect((await admin.get(`/api/projects/${projectId}/pull-requests/queue`).then((r) => r.json())).cap).toBe(2);
 });
 
-test('cap panel in the project settings: saves a valid cap and shows it after a reload', async ({
-  browser,
-}) => {
+test('cap panel in the project settings: saves a valid cap and shows it after a reload', async ({ browser }) => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);
   const page = await (await browser.newContext({ storageState: await admin.storageState() })).newPage();
   await page.goto(`/projects/${projectId}/settings`);
