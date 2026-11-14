@@ -35,6 +35,7 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   PR_LIST_CAPABILITY,
+  PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
@@ -1607,6 +1608,7 @@ export class Runner {
         RELEASE_FACTS_CAPABILITY,
         PR_LIST_CAPABILITY,
         PR_REVIEW_CAPABILITY,
+        PR_NOTICE_CAPABILITY,
         REPLAY_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
@@ -2343,6 +2345,10 @@ export class Runner {
       } else if (command === 'pr_review.post') {
         const p = CommandPayloadSchemas['pr_review.post'].parse(payload);
         done(true, await this.prReviews.post(p));
+      } else if (command === 'pr_review.notice') {
+        // A body-only comment review that tells the author to split the pull request (reviewer token, never gh).
+        const p = CommandPayloadSchemas['pr_review.notice'].parse(payload);
+        done(true, await this.prReviews.notice(p));
       } else if (command === 'release.ship') {
         // "No clone here" and every git refusal are answers (ok:true, result.ok:false): the server puts them on the desk.
         const p = CommandPayloadSchemas['release.ship'].parse(payload);

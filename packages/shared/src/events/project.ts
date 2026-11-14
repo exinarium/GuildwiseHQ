@@ -16,6 +16,7 @@ import {
   PrReviewStateSchema,
   PrReviewTriggerSchema,
 } from '../review/pr-review.ts';
+import { SPLIT_REASONS } from '../review/size-check.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -270,6 +271,96 @@ export const projectEvents = [
       by: z.enum(['runner', 'server']),
       at: IsoDate,
     }),
+  ),
+  /** The size check found a pull request (or the chain it is stacked in) over the size budget: sent back to its author. */
+  defineEvent(
+    'PrReviewNeedsSplit',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      /** One id per size check decision: the members of a chain share it. */
+      checkId: Id,
+      reason: z.enum(SPLIT_REASONS),
+      unit: SizeUnitSchema,
+      budget: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+      members: z.array(z.object({ changeId: z.string(), size: z.number().int().nonnegative() })).max(200),
+      runId: Id.optional(),
+      /** The author notice that follows (one per member and decision). */
+      noticeId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** A pull request that needed splitting is within the budget again (or the budget was removed): reviewable again. */
+  defineEvent(
+    'PrReviewSplitCleared',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      checkId: Id,
+      verdict: z.enum(['within', 'inactive']),
+      total: z.number().int().nonnegative().optional(),
+      budget: z.number().int().nonnegative().optional(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticeQueued',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      workstationId: Id,
+      attempt: z.number().int().positive(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticePosted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      reviewUrl: z.string().max(500),
+      alreadyPosted: z.boolean(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticeFailed',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      code: z.string().max(40),
+      error: z.string().max(400),
+      retryable: z.boolean(),
+      at: IsoDate,
+    }),
+  ),
+  /** A re-run timed out again while the pull request is within the budget: it stays not reviewed and the owner decides. */
+  defineEvent(
+    'PrReviewTimedOutTwice',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      runId: Id,
+      verdict: z.enum(['within', 'inactive', 'unknown']),
+      total: z.number().int().nonnegative().optional(),
+      budget: z.number().int().nonnegative().optional(),
+      unit: SizeUnitSchema.optional(),
+      deskItemId: Id,
+      timerId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** The "timed out twice" mark of a pull request ended (the owner acted, or the pull request closed or needs a split). */
+  defineEvent(
+    'PrReviewAttentionCleared',
+    z.object({ projectId: Id, prReviewId: Id, reason: z.enum(['owner_acted', 'closed']), at: IsoDate }),
   ),
   /** The run (or its posting) failed. The pull request stays not reviewed and the error is kept for the owner. */
   defineEvent(

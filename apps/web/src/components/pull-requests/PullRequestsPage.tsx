@@ -24,6 +24,7 @@ import { HeldBackFindings } from './HeldBackFindings.tsx';
 import { PostedFindings } from './PostedFindings.tsx';
 import { PrReviewTriggerButton } from './PrReviewTriggerButton.tsx';
 import { ReviewerPrecisionPanel } from './ReviewerPrecisionPanel.tsx';
+import { SizeCheckInfo } from './SizeCheckInfo.tsx';
 
 /** "3 min 12 s", "45 s". */
 export function fmtRunTime(ms: number): string {
@@ -127,10 +128,10 @@ function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
           {pr.title}
         </a>
         <Badge
-          tone={pr.state === 'reviewed' ? 'green' : 'neutral'}
+          tone={pr.state === 'reviewed' ? 'green' : pr.state === 'needs_split' ? 'amber' : 'neutral'}
           data-testid={`pr-review-state-${pr.changeId}`}
         >
-          {pr.state === 'reviewed' ? 'Reviewed' : 'Not reviewed'}
+          {pr.state === 'reviewed' ? 'Reviewed' : pr.state === 'needs_split' ? 'Needs split' : 'Not reviewed'}
         </Badge>
         {attention && <Badge tone="amber">Needs attention</Badge>}
       </div>
@@ -139,7 +140,8 @@ function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
         {pr.author ? ` · ${pr.author}` : ''} · opened {when(pr.openedAt)}
       </p>
       <div className="text-xs text-muted">
-        <Detail pr={pr} />
+        {pr.state !== 'needs_split' && <Detail pr={pr} />}
+        <SizeCheckInfo pr={pr} />
         {pr.lastRun?.trigger === 'manual' && (
           <p data-testid={`pr-review-by-hand-${pr.changeId}`}>Started by hand</p>
         )}

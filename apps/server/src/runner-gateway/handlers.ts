@@ -65,6 +65,7 @@ import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyPrListResult } from '../commands/pr-only.ts';
 import { applyMergedPrList } from '../commands/pr-replays.ts';
 import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
+import { applySplitNoticeResult } from '../commands/pr-size-check.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -628,6 +629,10 @@ export class RunnerHandlers {
     } else if (cmd?.type === 'pr_review.post') {
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrReviewPostResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.notice') {
+      // Terminal: the author was told, or why not (the server retries a few times by itself).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applySplitNoticeResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'release.ship') {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

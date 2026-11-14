@@ -24,6 +24,9 @@ interface GhPr {
   createdAt: string;
   additions?: number;
   deletions?: number;
+  changedFiles?: number;
+  isCrossRepository?: boolean;
+  headRefOid?: string;
 }
 
 interface GhMergedPr extends GhPr {
@@ -166,7 +169,7 @@ export class GitHubForge implements Forge {
       '--state',
       'open',
       '--json',
-      'number,url,title,author,headRefName,baseRefName,createdAt,additions,deletions',
+      'number,url,title,author,headRefName,baseRefName,createdAt,additions,deletions,changedFiles,isCrossRepository,headRefOid',
       '--limit',
       String(limit + 1),
     ]);
@@ -184,6 +187,13 @@ export class GitHubForge implements Forge {
       createdAt: p.createdAt,
       ...(Number.isInteger(p.additions) && Number.isInteger(p.deletions)
         ? { changedLines: (p.additions as number) + (p.deletions as number) }
+        : {}),
+      ...(Number.isInteger(p.changedFiles) && (p.changedFiles as number) >= 0
+        ? { changedFiles: p.changedFiles as number }
+        : {}),
+      ...(typeof p.isCrossRepository === 'boolean' ? { crossRepo: p.isCrossRepository } : {}),
+      ...(typeof p.headRefOid === 'string' && /^[0-9a-f]{40}$/.test(p.headRefOid)
+        ? { headSha: p.headRefOid }
         : {}),
     }));
     return { changes, complete: list.length <= limit };

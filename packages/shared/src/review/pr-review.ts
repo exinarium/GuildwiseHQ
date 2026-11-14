@@ -10,8 +10,11 @@ import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
  * cards. A pull request seen on such a repository is recorded with a review state.
  */
 
-/** Review states of a recorded pull request. `not_reviewed` until a reviewer run completes. */
-export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed'] as const;
+/**
+ * Review states of a recorded pull request. `not_reviewed` until a reviewer run completes; `needs_split`: over the size
+ * budget, sent back to its author, and not reviewed until it is within the budget again.
+ */
+export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed', 'needs_split'] as const;
 export const PrReviewStateSchema = z.enum(PR_REVIEW_STATES);
 export type PrReviewState = z.infer<typeof PrReviewStateSchema>;
 
@@ -37,6 +40,14 @@ export const OpenChangeSchema = z.object({
   createdAt: z.iso.datetime({ offset: true }),
   /** Added + removed lines as the forge reports them; null/absent when it does not say. */
   changedLines: z.number().int().nonnegative().nullable().optional(),
+  /** Files changed as the forge reports them; absent from an older runner (the size is then unknown). */
+  changedFiles: z.number().int().nonnegative().nullable().optional(),
+  /** Opened from a fork: no pull request can be stacked on its head branch. */
+  crossRepo: z.boolean().optional(),
+  headSha: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
 });
 export type OpenChange = z.infer<typeof OpenChangeSchema>;
 
@@ -238,6 +249,29 @@ export const PrReviewManualActionSchema = z
   .nullable();
 export type PrReviewManualAction = z.infer<typeof PrReviewManualActionSchema>;
 
+/** `pr_review.notice`: a body-only comment review that tells the author to split the pull request. Never a token. */
+export const PrReviewNoticePayloadSchema = z
+  .object({
+    noticeId: z.uuid(),
+    projectRepoId: z.uuid(),
+    remoteUrlNormalized: z.string().max(500),
+    prNumber: z.number().int().positive(),
+    headSha: Sha40.optional(),
+    body: z.string().max(5000),
+  })
+  .strict();
+export type PrReviewNoticePayload = z.infer<typeof PrReviewNoticePayloadSchema>;
+
+export const PrReviewNoticeResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), reviewUrl: z.string().max(500), alreadyPosted: z.boolean() }),
+  z.object({
+    ok: z.literal(false),
+    code: z.enum(['no_token', 'unsupported', 'unreachable', 'forbidden', 'not_found', 'error']),
+    error: z.string().max(400),
+  }),
+]);
+export type PrReviewNoticeResult = z.infer<typeof PrReviewNoticeResultSchema>;
+
 /** What the owner sees for one recorded pull request (project view, Pull requests tab). */
 export const PrReviewDtoSchema = z.object({
   id: z.uuid(),
@@ -262,6 +296,42 @@ export const PrReviewDtoSchema = z.object({
   queueSlot: PrReviewQueueSlotSchema.nullable().optional(),
   /** What the viewer may start by hand now; null unless the viewer is a spend owner. */
   manualAction: PrReviewManualActionSchema.optional(),
+  /** The live size check result; null when the size check does not apply to this pull request. */
+  size: z
+    .object({
+      state: z.enum(['inactive', 'unknown', 'within', 'over']),
+      total: z.number().optional(),
+      budget: z.number().optional(),
+      unit: z.enum(['changed_lines', 'changed_files']).optional(),
+      members: z.array(z.object({ changeId: z.string(), size: z.number() })).optional(),
+      complete: z.boolean().optional(),
+      reason: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  /** Why and when the pull request was sent back to its author, and whether the author was told. */
+  split: z
+    .object({
+      reason: z.string(),
+      total: z.number().nullable(),
+      budget: z.number().nullable(),
+      unit: z.enum(['changed_lines', 'changed_files']).nullable(),
+      members: z.array(z.object({ changeId: z.string(), size: z.number() })),
+      at: z.string().nullable(),
+      notice: z
+        .object({
+          state: z.enum(['pending', 'queued', 'posted', 'failed']),
+          postedAt: z.string().nullable(),
+          url: z.string().nullable(),
+          error: z.string().nullable(),
+        })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** `timed_out_twice`: a re-run timed out again within the budget; the owner decides. */
+  attention: z.literal('timed_out_twice').nullable().optional(),
+  reminder: z.object({ dueAt: z.string(), remindedAt: z.string().nullable() }).nullable().optional(),
   lastRun: z
     .object({
       state: PrReviewRunStateSchema,
