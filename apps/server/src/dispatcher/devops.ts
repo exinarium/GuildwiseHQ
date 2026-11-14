@@ -23,18 +23,23 @@ export interface DevopsDispatch {
 export const AGE_INTO_WAITED_MS = 30 * 60_000;
 
 /**
- * A request somebody waits for (`r` is the `devops_requests` row; `nowParam` the SQL parameter holding the clock):
- * - a card is parked on it;
- * - the agent that asked still holds a card shift on that card that started before the request (the request
- *   `questionStatus` polls for);
- * - it is the server's test-environment request of a card held at Test deploy (`run_environments`, purpose `test`);
- * - or it is at least `AGE_INTO_WAITED_MS` old (ageing: it is then ordered by age with the others).
+ * A request an agent or a card is actually waiting on right now (`r` is the `devops_requests` row): a card is parked on
+ * it, or the agent that asked still holds a card shift on that card that started before the request (the request
+ * `questionStatus` polls for). Only these may take the express slot.
  */
-export function waitedSql(nowParam: string): string {
-  return `(EXISTS (SELECT 1 FROM cards wc WHERE wc.parked_request_id = r.id AND wc.status = 'waiting')
+export const HELD_SQL = `(EXISTS (SELECT 1 FROM cards wc WHERE wc.parked_request_id = r.id AND wc.status = 'waiting')
   OR (r.requested_by_kind = 'agent' AND r.card_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM shifts ws WHERE ws.card_id = r.card_id AND ws.agent_id::text = r.requested_by_id
-           AND ws.kind = 'card' AND ws.status <> 'ended' AND ws.started_at <= r.created_at))
+           AND ws.kind = 'card' AND ws.status <> 'ended' AND ws.started_at <= r.created_at)))`;
+
+/**
+ * The waited-on tier of the queue order (`nowParam` the SQL parameter holding the clock): `HELD_SQL`, plus the server's
+ * test-environment request of a card held at Test deploy (`run_environments`, purpose `test`), plus any request at least
+ * `AGE_INTO_WAITED_MS` old (ageing: it is then ordered by age with the others). These two get the priority, not the
+ * express slot.
+ */
+export function waitedSql(nowParam: string): string {
+  return `(${HELD_SQL}
   OR EXISTS (SELECT 1 FROM run_environments re WHERE re.devops_request_id = r.id AND re.purpose = 'test')
   OR r.created_at <= ${nowParam}::timestamptz - make_interval(secs => ${AGE_INTO_WAITED_MS / 1000}))`;
 }
@@ -51,7 +56,8 @@ export interface OpenDevopsShift {
 /**
  * The capacity rule (docs/ARCHITECTURE.md section 16.2): at most two open DevOps shifts per engineer. The first slot
  * takes the head of the queue; the second (express) slot opens only while the one running shift is at least
- * `EXPRESS_AFTER_MS` old, and only for a waited-on request of another card. Null: the request waits.
+ * `EXPRESS_AFTER_MS` old, and only for a request of another card that an agent or a parked card is waiting on
+ * (`HELD_SQL`; `req.waited` carries that, not the wider waited-on tier). Null: the request waits.
  */
 export function devopsLane(
   open: readonly OpenDevopsShift[],
@@ -93,7 +99,7 @@ export async function devopsPass(
   const onlineSince = new Date(ctx.clock.now().getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
     ctx.pool,
-    `SELECT r.id, r.org_id, r.workstation_id, r.devops_agent_id, r.card_id, a.runtime, w.runtimes, ${waitedSql('$2')} AS waited
+    `SELECT r.id, r.org_id, r.workstation_id, r.devops_agent_id, r.card_id, a.runtime, w.runtimes, ${waitedSql('$2')} AS waited, ${HELD_SQL} AS held
        FROM devops_requests r
        JOIN agents a ON a.id = r.devops_agent_id AND a.status = 'active'
        JOIN workstations w ON w.id = r.workstation_id AND w.status = 'active' AND w.connected AND w.last_seen_at > $1
@@ -118,7 +124,7 @@ export async function devopsPass(
       open = await openDevopsShifts(ctx.pool, r.devops_agent_id);
       openOf.set(r.devops_agent_id, open);
     }
-    const req = { cardId: (r.card_id as string | null) ?? null, waited: r.waited === true };
+    const req = { cardId: (r.card_id as string | null) ?? null, waited: r.held === true };
     if (!devopsLane(open, req, ctx.clock.now())) continue;
     // DevOps always runs on the workstation's main account (docs/design/claude-accounts.md D2).
     if (!mainUsable(r.runtimes, r.runtime, ctx.clock.now())) continue;
@@ -129,13 +135,10 @@ export async function devopsPass(
       const row = await one(tx, `SELECT status FROM devops_requests WHERE id=$1 FOR UPDATE`, [r.id]);
       if (row?.status !== 'queued') return false;
       // Re-checked inside the transaction: another pass may have started a shift since the queue was read.
-      const w = await one(tx, `SELECT ${waitedSql('$2')} AS waited FROM devops_requests r WHERE r.id=$1`, [
-        r.id,
-        ctx.clock.now(),
-      ]);
+      const w = await one(tx, `SELECT ${HELD_SQL} AS held FROM devops_requests r WHERE r.id=$1`, [r.id]);
       const lane = devopsLane(
         await openDevopsShifts(tx, r.devops_agent_id),
-        { cardId: req.cardId, waited: w?.waited === true },
+        { cardId: req.cardId, waited: w?.held === true },
         ctx.clock.now(),
       );
       if (!lane) return false;

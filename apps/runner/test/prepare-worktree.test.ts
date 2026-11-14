@@ -62,7 +62,7 @@ describe('preparing a new card worktree', () => {
       launch,
       platform: 'linux',
       stacks: noStacks,
-      baseBranch: 'main',
+      trustedBranches: ['main'],
     });
     expect(prep.ok).toBe(true);
     expect(prep.steps.map((s) => [s.name, s.status])).toEqual([['submodules', 'done']]);
@@ -95,18 +95,56 @@ describe('preparing a new card worktree', () => {
       launch,
       platform: 'linux',
       stacks: noStacks,
-      baseBranch: 'main', // main declares no submodule
+      trustedBranches: ['main'], // main declares no submodule
     });
     expect(prep.ok).toBe(true);
     expect(prep.steps.map((s) => [s.name, s.status])).toEqual([['submodules not filled', 'skipped']]);
-    expect(prep.steps[0]!.detail).toMatch(/loot: the base branch does not declare it/);
-    expect(prep.steps[0]!.detail).toMatch(/other: the base branch does not declare it/);
+    expect(prep.steps[0]!.detail).toMatch(/^loot, other: the project's working branch has no \.gitmodules/);
     expect(seen).toEqual([]); // not even looked up
     expect(existsSync(join(path, 'loot', 'README.md'))).toBe(false);
     expect(existsSync(join(path, 'other', 'README.md'))).toBe(false);
     const modules = sh(path, 'git', ['rev-parse', '--git-path', 'modules']);
     expect(existsSync(modules)).toBe(false);
     expect(prepNote(prep)).toMatch(/Not prepared:\n- submodules not filled: loot/);
+  });
+
+  it('a second .gitmodules entry at a trusted path is not followed: nothing is cloned, the clone config gains no url', async () => {
+    const x = makeRepo();
+    const secret = makeRepo(); // a repository the workstation does not know as a clone and the sandbox hides
+    const d = makeRepo();
+    sh(d.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
+    sh(d.clone, 'git', ['commit', '-m', 'add core']);
+    sh(d.clone, 'git', ['push', 'origin', 'main']);
+    // The card branch keeps the trusted entry and adds another one with the same path and an unknown url.
+    sh(d.clone, 'git', ['checkout', '-b', spec.branchName]);
+    sh(d.clone, 'git', ['config', '-f', '.gitmodules', 'submodule.evil.path', 'core']);
+    sh(d.clone, 'git', ['config', '-f', '.gitmodules', 'submodule.evil.url', secret.clone]);
+    sh(d.clone, 'git', ['commit', '-am', 'second entry']);
+    sh(d.clone, 'git', ['checkout', 'main']);
+    const configBefore = sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.']);
+    const path = await newWorktree(d);
+    const prep = await prepareWorktree({
+      worktree: path,
+      repoPath: d.clone,
+      findRepo: async (n) => (n === x.remoteNormalized ? { localPath: x.clone } : undefined),
+      launch,
+      platform: 'linux',
+      stacks: noStacks,
+      trustedBranches: ['main'],
+    });
+    expect(sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.'])).toBe(configBefore);
+    expect(sh(d.clone, 'git', ['config', '--get-regexp', '^submodule\\.']).includes(secret.clone)).toBe(
+      false,
+    );
+    const modules = sh(path, 'git', ['rev-parse', '--git-path', 'modules']);
+    expect(existsSync(join(modules, 'evil'))).toBe(false);
+    expect(existsSync(join(path, 'core', 'README.md'))).toBe(false);
+    expect(prep.ok).toBe(true);
+    expect(prep.steps).toEqual([
+      expect.objectContaining({ name: 'submodules not filled', status: 'skipped' }),
+    ]);
+    expect(prep.steps[0]!.detail).toMatch(/\.gitmodules differs from the project's working branch/);
+    expect(prep.steps[0]!.detail).toMatch(/core/);
   });
 
   it('a submodule the base branch declares but this workstation has no clone of is skipped, not fetched', async () => {
@@ -123,7 +161,7 @@ describe('preparing a new card worktree', () => {
       launch,
       platform: 'linux',
       stacks: noStacks,
-      baseBranch: 'main',
+      trustedBranches: ['main'],
     });
     expect(prep.ok).toBe(true);
     expect(prep.steps).toEqual([
@@ -148,7 +186,7 @@ describe('preparing a new card worktree', () => {
       launch,
       platform: 'linux' as const,
       stacks: noStacks,
-      baseBranch: 'main',
+      trustedBranches: ['main'],
     };
     let calls = 0;
     const late = await prepareWorktree({

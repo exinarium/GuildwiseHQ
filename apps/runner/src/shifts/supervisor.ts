@@ -2035,7 +2035,12 @@ export class ShiftSupervisor {
       s.worktreePrep = await prep({
         worktree: wt.path,
         repoPath: repo.localPath,
-        baseBranch: wt.baseBranch,
+        // The trust anchor for submodules: the project's working branch, then the main branch (never the card's base,
+        // which is a card branch for a suite card).
+        trustedBranches: [
+          s.msg.kind === 'card' ? s.msg.brief.project.workingBranch : '',
+          s.msg.worktree?.mainBranch ?? '',
+        ].filter(Boolean),
         ...(projectPath ? { projectPath } : {}),
         findRepo: (n) => this.deps.findRepo(n),
         ...(runs

@@ -634,4 +634,63 @@ describe('DevOps queue: waited-on first, plus an express slot', () => {
       await q(`UPDATE devops_requests SET status='failed' WHERE id=$1`, [id]);
     await q(`UPDATE cards SET status='queued', parked_request_id=NULL WHERE id=$1`, [card.id]);
   });
+  it('the express slot is only for requests an agent or a parked card waits on: aged and Test deploy requests wait for slot 1', async () => {
+    await q(
+      `UPDATE devops_requests SET status='failed' WHERE status IN ('queued','running','needs_approval')`,
+    );
+    await q(`UPDATE shifts SET status='ended' WHERE kind='devops' AND status <> 'ended'`);
+    const now = () => w.t.clock.now();
+    // A long request runs (6 minutes: the express window is open).
+    const a = await request('a long migration');
+    const sA = await nextDevopsShift(r.received.length);
+    await accept(sA);
+    await q('UPDATE shifts SET started_at=$2 WHERE id=$1', [
+      sA.shiftId,
+      new Date(now().getTime() - 6 * 60_000),
+    ]);
+    // An aged request of card P, and the Test deploy environment request of card Q: both in the waited-on tier.
+    const p = await w.card({ title: 'Aged card' });
+    const qc = await w.card({ title: 'Held at Test deploy' });
+    const aged = (await request('nobody waits, but it is old')).request.id as string;
+    await q('UPDATE devops_requests SET card_id=$2, created_at=$3 WHERE id=$1', [
+      aged,
+      p.id,
+      new Date(now().getTime() - 31 * 60_000),
+    ]);
+    const envReq = (await request('make the app run for the integration tests')).request.id as string;
+    await q('UPDATE devops_requests SET card_id=$2 WHERE id=$1', [envReq, qc.id]);
+    const row = (await q('SELECT org_id FROM devops_requests WHERE id=$1', [envReq]))[0]!;
+    await q(
+      `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, state, devops_request_id,
+          branch_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'test',$5,'requested',$6,'k2',$7,$7)`,
+      [randomUUID(), row.org_id, w.projectId, w.workstationId, qc.id, envReq, now()],
+    );
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, aged, { now: now() })).toEqual({
+      state: 'queued',
+      position: 1,
+      of: 2,
+    });
+    const mark = r.received.length;
+    await dispatcher().run();
+    await r.barrier();
+    expect(
+      r.received.slice(mark).filter((f) => f.type === 'shift.start' && f.kind === 'devops'),
+    ).toHaveLength(0);
+    expect(await statusOf(aged)).toBe('queued');
+    // Never dispatched (the later test-environment pass of the same run may fail it: its environment row is a stub).
+    expect((await q('SELECT shift_id FROM devops_requests WHERE id=$1', [envReq]))[0]!.shift_id).toBeNull();
+    // A card parked on the aged request: now an agent's card waits on it, and the express slot takes it.
+    await q(`UPDATE cards SET status='waiting', parked_request_id=$2 WHERE id=$1`, [p.id, aged]);
+    const sX = await nextDevopsShift(mark);
+    expect(sX.devops?.requestId).toBe(aged);
+    for (const s of [sA, sX]) {
+      if (s === sX) await accept(sX);
+      await report(s.shiftId, done('finished'));
+      r.ended(s.shiftId, 'reported');
+    }
+    await q(`UPDATE devops_requests SET status='failed' WHERE id=$1`, [envReq]);
+    await q(`UPDATE cards SET status='queued', parked_request_id=NULL WHERE id=$1`, [p.id]);
+    expect(a.request.id).toBeTruthy();
+  });
 });

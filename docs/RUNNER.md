@@ -1639,9 +1639,10 @@ the server recorded for the card. They are removed after finalize (`worktree.rem
 
 When a card shift's `git worktree add` creates the card worktree (not when it reuses one, and never for a resumed shift),
 the runner prepares it after it accepted the shift and before the agent starts: each git submodule is checked out at the
-commit the branch pins, but only a submodule the base branch's `.gitmodules` declares the same way and only from the
-workstation's own clone of its repository (no url from the branch's own `.gitmodules` is ever fetched; the others are
-listed as not filled), then the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
+commit the branch pins, but only when the worktree's `.gitmodules` is the same blob as on the project's working branch
+(else the main branch; never the card's base, which is a card branch for a suite card), and only from the workstation's
+own clone of each repository (no url from the branch's own `.gitmodules` is ever fetched; what is not filled is listed),
+then the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
 `uv sync`, `go mod download`, ...; the same steps the Development environment check runs) run in the project folder, in
 the run-step sandbox the handoff checks use (shared package caches, credentials masked) with `CI=true` (poetry and pipenv keep their virtualenv in the project; `bundle install` and `cargo fetch`, whose output
 would stay in the sandbox's private home, are not run). Without a run-step sandbox on the workstation the installs are

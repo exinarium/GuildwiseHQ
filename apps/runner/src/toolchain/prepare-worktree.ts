@@ -34,10 +34,11 @@ export interface PrepareWorktreeInput {
   /** The local clone the worktree belongs to (submodules are cloned from the workstation's clones). */
   repoPath: string;
   /**
-   * The card's base branch: its `.gitmodules` (on origin, else locally) is the trusted list of submodules. A submodule
-   * the card branch declares differently, or adds, is not filled. Absent: no submodule is filled.
+   * The project's trusted branches, first that exists wins: its working branch, then the repository's main branch (never
+   * a card's base, which for a suite card is a card branch). Submodules are filled only when the card worktree's
+   * `.gitmodules` is the very same blob as on that branch. Absent: no submodule is filled.
    */
-  baseBranch?: string;
+  trustedBranches?: string[];
   /** The project's sub directory in the repository (absent: the root): dependencies are installed there. */
   projectPath?: string;
   findRepo: (remoteUrlNormalized: string) => Promise<{ localPath: string } | undefined>;
@@ -95,8 +96,9 @@ async function changedPaths(dir: string): Promise<Array<{ path: string; untracke
  * Prepares a card worktree the runner just added, so the agent can build and test without asking DevOps: each submodule
  * at its pinned commit (from the workstation's clones, `fillDeploySubmodules`), then the project's dependency installs
  * (`pnpm install`, `dotnet restore`, ...) in the run-step sandbox with `CI=true` (the worktree may hold agent-written
- * scripts, so nothing it holds runs unsandboxed). Submodules are filled on the host by git, but only those the base
- * branch declares, only from the workstation's own clone of the submodule's repository, and the file protocol is allowed
+ * scripts, so nothing it holds runs unsandboxed). Submodules are filled on the host by git, but only when the worktree's
+ * `.gitmodules` is the same blob as on the project's working branch (else none is), only from the workstation's own clone
+ * of the submodule's repository, and the file protocol is allowed
  * only for that clone's path: no url from the branch's `.gitmodules` is ever fetched. Never throws: a failure is a step
  * with its detail. The whole run, submodules included, has one budget
  * and stops on `signal`. Afterwards no tracked file is left changed and no new unignored file is left behind (a rewritten
@@ -123,25 +125,44 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
       const t = now();
       const skipped: string[] = [];
       const filled: string[] = [];
-      try {
-        const problem = await fillDeploySubmodules(i.worktree, i.repoPath, i.findRepo, {
-          localOnly: true,
-          allowed: await trustedSubmodules(i.repoPath, i.baseBranch),
-          deadline: started + budget,
-          ...(i.signal ? { signal: i.signal } : {}),
-          now,
-          skipped,
-          filled,
+      const trusted = await trustedGitmodules(i.repoPath, i.trustedBranches ?? []);
+      const mine = (
+        await git(i.worktree, ['rev-parse', '--verify', '--quiet', 'HEAD:.gitmodules'])
+      ).stdout.trim();
+      if (!trusted || !mine || mine !== trusted.blob) {
+        // A changed `.gitmodules` (an added entry can take over a trusted path): nothing is filled.
+        const why = trusted
+          ? ".gitmodules differs from the project's working branch, so no submodule was filled"
+          : "the project's working branch has no .gitmodules (or is not in this clone), so no submodule was filled";
+        const originUrl = (await git(i.repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+        const paths = [...new Set((await readSubmodules(i.worktree, originUrl)).map((x) => x.path))];
+        add({
+          name: 'submodules not filled',
+          status: 'skipped',
+          detail: `${paths.join(', ') || 'all submodules'}: ${why}`,
+          ms: 0,
         });
-        if (problem || filled.length)
-          add({
-            name: 'submodules',
-            status: problem ? 'failed' : 'done',
-            ...(problem ? { detail: problem } : {}),
-            ms: now() - t,
+      } else {
+        try {
+          const problem = await fillDeploySubmodules(i.worktree, i.repoPath, i.findRepo, {
+            localOnly: true,
+            allowed: trusted.submodules,
+            deadline: started + budget,
+            ...(i.signal ? { signal: i.signal } : {}),
+            now,
+            skipped,
+            filled,
           });
-      } catch (err) {
-        add({ name: 'submodules', status: 'failed', detail: errText(err), ms: now() - t });
+          if (problem || filled.length)
+            add({
+              name: 'submodules',
+              status: problem ? 'failed' : 'done',
+              ...(problem ? { detail: problem } : {}),
+              ms: now() - t,
+            });
+        } catch (err) {
+          add({ name: 'submodules', status: 'failed', detail: errText(err), ms: now() - t });
+        }
       }
       if (skipped.length)
         add({ name: 'submodules not filled', status: 'skipped', detail: skipped.join('; '), ms: 0 });
@@ -267,17 +288,27 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   }
 }
 
-/** The submodules the base branch declares (on origin, else locally): the only ones the preparation fills. */
-async function trustedSubmodules(
+/** The `.gitmodules` of the first trusted branch that exists (on origin, else locally): its blob and its submodules. */
+async function trustedGitmodules(
   repoPath: string,
-  baseBranch: string | undefined,
-): Promise<Array<{ name: string; path: string; normalized: string }>> {
-  if (!baseBranch) return [];
-  const ref = (await revParse(repoPath, `refs/remotes/origin/${baseBranch}`))
-    ? `refs/remotes/origin/${baseBranch}`
-    : `refs/heads/${baseBranch}`;
-  const originUrl = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
-  return readSubmodules(repoPath, originUrl, [`--blob=${ref}:.gitmodules`]);
+  branches: string[],
+): Promise<{ blob: string; submodules: Array<{ name: string; path: string; normalized: string }> } | null> {
+  for (const b of branches) {
+    if (!b) continue;
+    const ref = (await revParse(repoPath, `refs/remotes/origin/${b}`))
+      ? `refs/remotes/origin/${b}`
+      : (await revParse(repoPath, `refs/heads/${b}`))
+        ? `refs/heads/${b}`
+        : null;
+    if (!ref) continue;
+    const blob = (
+      await git(repoPath, ['rev-parse', '--verify', '--quiet', `${ref}:.gitmodules`])
+    ).stdout.trim();
+    if (!blob) return null;
+    const originUrl = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+    return { blob, submodules: await readSubmodules(repoPath, originUrl, [`--blob=${ref}:.gitmodules`]) };
+  }
+  return null;
 }
 
 async function hasGitmodules(dir: string): Promise<boolean> {

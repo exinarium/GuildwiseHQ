@@ -408,6 +408,25 @@ describe('supervisor', () => {
     expect(h!.server.invalid).toEqual([]);
   });
 
+  it("the submodule trust anchor is the project's working branch, not the card's base (a suite card's branch)", async () => {
+    const seen: Array<string[] | undefined> = [];
+    await start(
+      async () => {},
+      {},
+      {
+        prepareWorktree: async (p) => {
+          seen.push(p.trustedBranches);
+          return { ok: true, steps: [] };
+        },
+      },
+    );
+    const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-8' }) as any;
+    msg.worktree.baseBranch = 'aom/toy-7-suite';
+    h!.server.send('shift.start', msg);
+    await h!.server.waitFor('shift.started', (m) => m.shiftId === msg.shiftId);
+    expect(seen).toEqual([['main']]);
+  });
+
   it('the prepareWorktrees switch off: a new worktree is not prepared', async () => {
     let called = false;
     await start(
