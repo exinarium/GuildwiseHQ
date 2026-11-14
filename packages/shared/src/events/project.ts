@@ -7,6 +7,8 @@ import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
+import { FindingDispositionSchema } from '../review/findings.ts';
+import { FindingMarkSchema } from '../review/marks.ts';
 import {
   PR_REVIEW_FAILURE_CODES,
   PrReviewerSchema,
@@ -239,7 +241,18 @@ export const projectEvents = [
       baseSha: z.string(),
       durationMs: z.number().int().nonnegative(),
       summary: z.string().max(2000),
-      findings: z.array(PrReviewFindingSchema.extend({ findingId: Id })).max(50),
+      /** Optional: events from before the findings cap replay as all posted, line count unknown. */
+      changedLines: z.number().int().nonnegative().nullable().optional(),
+      findingsCap: z.number().int().min(1).max(5).optional(),
+      findings: z
+        .array(
+          PrReviewFindingSchema.extend({
+            findingId: Id,
+            rank: z.number().int().positive().optional(),
+            disposition: FindingDispositionSchema.optional(),
+          }),
+        )
+        .max(50),
       at: IsoDate,
     }),
   ),
@@ -281,6 +294,20 @@ export const projectEvents = [
       reviewer: PrReviewerSchema,
       reviewUrl: z.string().max(500),
       postedFindingIds: z.array(Id).max(50),
+      at: IsoDate,
+    }),
+  ),
+  /** The project owner marked a posted finding useful or noise. No reviewer in the payload (blind marking). */
+  defineEvent(
+    'PrReviewFindingMarked',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      findingId: Id,
+      mark: FindingMarkSchema,
+      previousMark: FindingMarkSchema.nullable(),
+      markedBy: Id,
       at: IsoDate,
     }),
   ),

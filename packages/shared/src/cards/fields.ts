@@ -44,6 +44,8 @@ export const DERIVED_BOOLEAN_FIELDS: Record<string, FieldMeta> = {
   qaAgent: { label: 'An agent can write the QA steps', kind: 'boolean' },
   /** lean team: the owner approves the card after the review (decided when the last review approval comes in). */
   ownerApproval: { label: 'The owner approves after the review', kind: 'boolean' },
+  /** code v7: the owner approves the design before Build (decided at the design hand-off). */
+  designGate: { label: 'The owner approves the design before Build', kind: 'boolean' },
   /** lean team: a merge conflict at Finalize was resolved and the resolution goes to a merge review (server-driven; never true for an agent's outcome). */
   mergeReview: { label: 'Merge conflict resolution under review', kind: 'boolean' },
 };

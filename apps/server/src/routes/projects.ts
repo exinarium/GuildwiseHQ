@@ -7,6 +7,7 @@ import {
   DeleteProjectRequestSchema,
   FullSuiteRequestSchema,
   IdParamsSchema,
+  MarkFindingRequestSchema,
   PatchProjectRequestSchema,
   PatchRepoRequestSchema,
   PauseProjectRequestSchema,
@@ -16,6 +17,7 @@ import {
   SetArchitectSettingsRequestSchema,
   SetClaudeAccountRequestSchema,
   SetConcurrencyCapRequestSchema,
+  SetDesignGateRequestSchema,
   SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
   SetManualQaRequestSchema,
@@ -35,17 +37,24 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
-import { loadVisibleProject } from '../authz/scope.ts';
+import { loadVisibleProject, projectRole } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
+import { setProjectDesignGate } from '../commands/design-gate.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { setRepoPrOnly } from '../commands/pr-only.ts';
 import { prReviewQueue, setPrReviewDailyCap } from '../commands/pr-review-cap.ts';
-import { listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
+import {
+  findingMarksForReplay,
+  listPostedFindings,
+  markFinding,
+  reviewerPrecisionForProject,
+} from '../commands/pr-review-marks.ts';
+import { heldBackFindings, listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -75,7 +84,8 @@ import {
 import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
-import { gone } from '../errors.ts';
+import { one } from '../db/sql.ts';
+import { gone, notFound } from '../errors.ts';
 import { getProjectClaudeAccounts } from '../queries/claude-accounts.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { getProjectProviderAccounts } from '../queries/provider-accounts.ts';
@@ -156,6 +166,64 @@ export function projectRoutes(ctx: Ctx) {
           req.body.cap,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** The findings the cap held back on a pull request's latest review, on request (not posted to the pull request). */
+    app.get('/api/pr-reviews/:id/held-back', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const pr = await one(ctx.pool, 'SELECT project_id FROM pr_reviews WHERE id=$1', [req.params.id]);
+      if (!pr) throw notFound('pull request not found');
+      await loadVisibleProject(ctx.pool, s.user.id, pr.project_id as string);
+      const out = await heldBackFindings(ctx.pool, req.params.id);
+      if (!out) throw notFound('pull request not found');
+      return out;
+    });
+
+    /** The posted findings of a pull request. The reviewer is left out of a finding until it is marked. */
+    app.get('/api/pr-reviews/:id/findings', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const pr = await one(ctx.pool, 'SELECT project_id FROM pr_reviews WHERE id=$1', [req.params.id]);
+      if (!pr) throw notFound('pull request not found');
+      await loadVisibleProject(ctx.pool, s.user.id, pr.project_id as string);
+      const role = await projectRole(ctx.pool, s.user.id, pr.project_id as string);
+      return { findings: await listPostedFindings(ctx.pool, req.params.id, { canMark: role === 'owner' }) };
+    });
+
+    /** The owner marks a posted finding useful or noise (changeable). */
+    app.put(
+      '/api/pr-review-findings/:id/mark',
+      { schema: { params: IdParamsSchema, body: MarkFindingRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return markFinding(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    /** Useful findings out of posted findings per reviewer. */
+    app.get('/api/projects/:id/reviewer-precision', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return { reviewers: await reviewerPrecisionForProject(ctx.pool, req.params.id) };
+    });
+
+    /** Marked findings with reviewer, PR and mark: the input to the 20-PR replay. */
+    app.get(
+      '/api/projects/:id/pr-review-marks',
+      {
+        schema: {
+          params: IdParamsSchema,
+          querystring: z.object({
+            since: z.iso.datetime({ offset: true }).optional(),
+            reviewer: z.string().max(40).optional(),
+          }),
+        },
+      },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+        const q = req.query as { since?: string; reviewer?: string };
+        return { marks: await findingMarksForReplay(ctx.pool, req.params.id, q) };
       },
     );
 
@@ -263,6 +331,23 @@ export function projectRoutes(ctx: Ctx) {
     );
 
     /** lean team: when the owner approves a card after the review; the mapping of changed paths to E2E specs. */
+    /** code v7: every design stops for the owner's approval before Build (default off). */
+    app.put(
+      '/api/projects/:id/design-gate',
+      { schema: { params: IdParamsSchema, body: SetDesignGateRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setProjectDesignGate(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.on,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
     app.put(
       '/api/projects/:id/owner-approval',
       { schema: { params: IdParamsSchema, body: SetOwnerApprovalRequestSchema } },

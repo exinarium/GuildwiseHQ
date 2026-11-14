@@ -43,7 +43,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     title: 'Pull requests',
     article: 'board-and-cards',
     intro:
-      "The open pull requests of this project's PR-only repositories and what the reviewer did with each. A run that finishes posts its findings together as one review; a run that times out or fails posts nothing and leaves the pull request Not reviewed. At most the project's daily cap of pull requests (20 by default) is reviewed automatically each day; the rest wait in the Queue, oldest first, and Review now starts one by hand past the cap. Nothing here needs typing.",
+      "The open pull requests of this project's PR-only repositories and what the reviewer did with each. A run that finishes posts its findings together as one review, at most one finding per 100 changed lines (1 to 5, most important first); the rest are held back, not posted, and Show held-back findings opens them; a run that times out or fails posts nothing and leaves the pull request Not reviewed. The owner marks each posted finding Useful or Noise with one tap (Show posted findings); the reviewer is shown only after the mark. Reviewer precision, at the top, is useful ÷ posted. At most the project's daily cap of pull requests (20 by default) is reviewed automatically each day; the rest wait in the Queue, oldest first, and Review now starts one by hand past the cap. Nothing here needs typing.",
     controls: [
       {
         name: 'Reviewed / Not reviewed',

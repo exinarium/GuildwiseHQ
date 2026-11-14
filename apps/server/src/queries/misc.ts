@@ -132,6 +132,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       ? { providerAccounts: p.provider_accounts as NonNullable<ProjectDto['providerAccounts']> }
       : {}),
     ownerApprovalPolicy: p.owner_approval_policy ?? 'large_or_high_risk',
+    designGate: p.design_gate === true,
     e2eAreas: p.e2e_areas ?? null,
     decisionsProjectOnly: p.decisions_project_only ?? false,
     testWithoutEnvironment: p.test_without_environment ?? false,

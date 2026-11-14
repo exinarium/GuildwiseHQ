@@ -15,6 +15,7 @@ import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
+import { designGateProjectors } from './design-gate.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { discoveryProjectors } from './discovery.ts';
@@ -128,6 +129,7 @@ const domains: Array<Record<string, Projector>> = [
   ceoTopicProjectors,
   questionFlowProjectors,
   codeV6Projectors,
+  designGateProjectors,
   sessionProjectors,
   discoveryProjectors,
   boardProjectors,
@@ -195,6 +197,7 @@ export const PROJECTION_TABLES = [
   'pr_reviews',
   'pr_review_runs',
   'pr_review_findings',
+  'pr_review_finding_marks',
   'project_members',
   'project_workflows',
   'workflow_versions',

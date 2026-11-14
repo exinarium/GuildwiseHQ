@@ -8,6 +8,7 @@ import {
   capDiff,
   checkEvidenceProblem,
   DEFAULT_OWNER_APPROVAL_POLICY,
+  DESIGN_GATE_STAGE,
   DESK_SUBKIND,
   type DesignSizing,
   type DiffStats,
@@ -43,6 +44,7 @@ import {
   type TestEvidence,
   UNLIMITED_SHIFTS,
   WorkflowResolveError,
+  workflowHasDesignGate,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { applyCeoReport } from '../ceo/report.ts';
@@ -60,6 +62,7 @@ import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { decideDesignGate, designGateMessage } from './design-gate.ts';
 import {
   checkedProposal,
   designModeOf,
@@ -331,6 +334,8 @@ export async function applyShiftReport(
   const after: AppendInput[] = [];
   /** Events that belong to the outcome and follow it (desk items, thread notes). */
   const followUps: AppendInput[] = [];
+  /** Events projected before the outcome (the design gate decision the reactor reads when the card enters the gate). */
+  const beforeMain: AppendInput[] = [];
   let acceptMessage: string | undefined;
   /** Refs of the unlanded dependencies when this design is held for the assumption review. */
   let holdDesign: string[] | undefined;
@@ -692,6 +697,7 @@ export async function applyShiftReport(
                   summary: inv.summary,
                   ...(inv.commit ? { commit: inv.commit } : {}),
                   ...(inv.body ? { body: inv.body } : {}),
+                  ...(inv.reportText ? { reportText: inv.reportText } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
                 },
@@ -715,11 +721,52 @@ export async function applyShiftReport(
         if (designSize)
           followUps.push(mk({ type: 'DesignSized', payload: { cardId, sizing: designSize.sizing } }));
         if (early && inv.assumptions?.length) holdDesign = unlanded.map((d) => d.ref);
+        // code v7: the design gate is decided at every design hand-off (high-risk paths > card switch > project).
+        // Needs-split comes first: an over-budget design stops for the split question and does not enter the gate now,
+        // but the decision is still recorded so "build it as designed" later goes through the gate when it applies.
+        let gated = false;
+        const splitStop = designSize?.split === 'split' && !!designSize.proposal;
+        if (
+          !holdDesign &&
+          !card.investigation_only &&
+          outcome.id === 'handoff' &&
+          workflowHasDesignGate(wf.definition)
+        ) {
+          const gate = await decideDesignGate(tx, card, inv.summary ?? card.investigation?.summary);
+          if (!splitStop) {
+            resolved = resolveOutcome(
+              wf.definition,
+              { ...workflowCard, designGate: gate.required },
+              card.stage,
+              outcome.id,
+            );
+            if (resolved.toStage === DESIGN_GATE_STAGE) {
+              // The owner's approval at the gate does not check Build's fields: check them now.
+              const build = getStage(wf.definition, 'build');
+              const missing = build ? requiredMissing(cardView(card), build) : [];
+              if (missing.length)
+                return {
+                  accepted: false,
+                  error: `${card.ref} cannot move to ${build?.label ?? 'build'}: required fields are missing (${missing.join(', ')}); ask the manager or update the card`,
+                };
+              gated = true;
+            }
+          }
+          beforeMain.push(
+            mk({
+              type: 'DesignGateDecided',
+              payload: { cardId, required: gate.required, reason: gate.reason, highRiskPaths: gate.paths },
+            }),
+          );
+          followUps.push(designGateMessage(card, gate));
+        }
         acceptMessage = holdDesign
           ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
-            : 'Recorded. The card goes to the builder with your design. Finish now.';
+            : gated
+              ? "Recorded. The card waits at the design gate for the owner's approval. Finish now."
+              : 'Recorded. The card goes to the builder with your design. Finish now.';
         // Over budget (not held, the owner has not kept it as one card): the design is not handed on. The first time the
         // architect's needs-split question is raised; a card that already went to the BA once goes to the owner.
         if (!holdDesign && designSize?.split === 'split' && designSize.proposal) {
@@ -852,6 +899,7 @@ export async function applyShiftReport(
           data: handoffData,
         },
       }),
+      ...beforeMain,
       ...(mains ?? (main ? [main] : [])),
       ...followUps,
       mk({

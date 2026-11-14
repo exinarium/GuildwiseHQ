@@ -14,6 +14,7 @@ import { chatEvents } from './chat.ts';
 import { codeV6Events } from './code-v6.ts';
 import { costEvents } from './cost.ts';
 import { deliveryEvents } from './delivery.ts';
+import { designGateEvents } from './design-gate.ts';
 import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
 import { discoveryEvents } from './discovery.ts';
@@ -114,6 +115,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...questionFlowEvents,
   ...platformEvents,
   ...codeV6Events,
+  ...designGateEvents,
   ...sessionEvents,
   ...discoveryEvents,
   ...boardEvents,
@@ -149,6 +151,7 @@ export * from './chat.ts';
 export * from './code-v6.ts';
 export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';
+export * from './design-gate.ts';
 export * from './desk.ts';
 export * from './devops.ts';
 export * from './discovery.ts';

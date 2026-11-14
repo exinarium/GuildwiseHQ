@@ -5,6 +5,10 @@ import { E2eAreaMapSchema, OwnerApprovalPolicySchema } from '../cards/lean-v6.ts
 export const SetOwnerApprovalRequestSchema = z.object({ policy: OwnerApprovalPolicySchema });
 export type SetOwnerApprovalRequest = z.infer<typeof SetOwnerApprovalRequestSchema>;
 
+/** `PUT /api/projects/:id/design-gate` and `PUT /api/cards/:id/design-gate`: switch the design gate on or off. */
+export const SetDesignGateRequestSchema = z.object({ on: z.boolean() });
+export type SetDesignGateRequest = z.infer<typeof SetDesignGateRequestSchema>;
+
 /** `PUT /api/projects/:id/e2e-areas`: the mapping of changed paths to E2E specs; `null` returns to the default derived from the E2E folders. */
 export const SetE2eAreasRequestSchema = z.object({ mapping: E2eAreaMapSchema.nullable() });
 export type SetE2eAreasRequest = z.infer<typeof SetE2eAreasRequestSchema>;

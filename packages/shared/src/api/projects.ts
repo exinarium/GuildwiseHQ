@@ -259,6 +259,8 @@ export const ProjectDtoSchema = z.object({
   regressionLoop: z.boolean().optional(),
   /** lean team: when the owner approves a card after the review (large and high-risk cards by default). */
   ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
+  /** lean team (code v7): every design stops for the owner's approval before Build (default false; high risk always stops). */
+  designGate: z.boolean().optional(),
   /** lean team: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
   e2eAreas: E2eAreaMapSchema.nullable().optional(),
   /** Answers and orders of this project stay at project scope (the platform project): no org-wide promotion (default off). */

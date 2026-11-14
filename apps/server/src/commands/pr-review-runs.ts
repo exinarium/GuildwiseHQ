@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
+  applyFindingsCap,
+  type FindingDisposition,
   GitRefSchema,
+  type HeldBackFindingsResponse,
   type OrgRole,
   PR_REVIEW_CAPABILITY,
   PR_REVIEW_TIMEOUT_MS,
@@ -270,11 +273,15 @@ export async function triggerPrReview(
 
 // ---- the findings the review posts -----------------------------------------------------------------------------
 
-type StoredFinding = PrReviewFinding & { findingId: string };
+type StoredFinding = PrReviewFinding & {
+  findingId: string;
+  rank?: number;
+  disposition?: FindingDisposition;
+};
 
-/** GWP-198 replaces this: which of the run's findings are posted. Today: all of them. */
-export function selectFindingsToPost<T>(findings: T[]): T[] {
-  return findings;
+/** The findings that go to the pull request: everything the cap did not hold back (no disposition counts as posted). */
+export function selectFindingsToPost<T extends { disposition?: FindingDisposition }>(findings: T[]): T[] {
+  return findings.filter((f) => f.disposition !== 'held_back');
 }
 
 /**
@@ -393,9 +400,15 @@ export async function applyPrReviewRunResult(
       });
       return;
     }
-    const findings: StoredFinding[] = r.findings.map((f) => ({ ...f, findingId: randomUUID() }));
+    // the cap is decided here, from the runner's line count; held-back findings are stored and never sent to the poster
+    const { cap, ordered } = applyFindingsCap(r.findings, r.changedLines);
+    if (r.changedLines === undefined)
+      ctx.log.info({ runId: p.runId }, 'no changed-line count from the runner; findings cap 5');
+    const findings: StoredFinding[] = ordered.map((f) => ({ ...f, findingId: randomUUID() }));
     await emit('PrReviewRunCompleted', {
       ...base,
+      changedLines: r.changedLines ?? null,
+      findingsCap: cap,
       headSha: r.headSha,
       baseSha: r.baseSha,
       durationMs: r.durationMs,
@@ -560,6 +573,17 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
 
 // ---- what the owner sees ---------------------------------------------------------------------------------------
 
+/** Blind marking: the reviewer is withheld while the pull request has posted findings the owner has not marked. */
+function blindReviewer(l: Record<string, unknown>) {
+  const unmarkedCount = Number(l.unmarked_count ?? 0);
+  const reviewersHidden = unmarkedCount > 0;
+  return {
+    reviewer: reviewersHidden ? null : ((l.reviewed_by as 'first' | null) ?? null),
+    reviewersHidden,
+    unmarkedCount,
+  };
+}
+
 /** The recorded pull requests of a project's live repositories with their latest run, open ones first. */
 export async function listPrReviews(
   db: Queryable,
@@ -574,7 +598,12 @@ export async function listPrReviews(
             pr.reviewed_at, pr.reviewed_by, pr.closed_at, r.remote_url_normalized, r.name,
             run.state AS run_state, run.started_at, run.finished_at, run.duration_ms, run.timeout_ms, run.error,
             run.error_code, run.review_url, run.trigger,
-            (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count
+            (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count,
+            (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id) AS findings_count,
+            run.held_back_count, run.findings_cap, run.changed_lines,
+            (SELECT count(*)::int FROM pr_review_findings f
+               LEFT JOIN pr_review_finding_marks m ON m.finding_id = f.id
+              WHERE f.pr_review_id = pr.id AND f.posted AND m.finding_id IS NULL) AS unmarked_count
        FROM pr_reviews pr
        JOIN project_repos r ON r.id = pr.project_repo_id AND r.removed_at IS NULL
        LEFT JOIN pr_review_runs run ON run.id = (
@@ -587,6 +616,7 @@ export async function listPrReviews(
   const tokens = await reviewerTokenStates(db, [...new Set(list.map((l) => l.project_repo_id as string))]);
   const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
   return list.map((l) => ({
+    ...blindReviewer(l),
     id: l.id as string,
     repoId: l.project_repo_id as string,
     repoName: l.name as string,
@@ -597,7 +627,6 @@ export async function listPrReviews(
     openedAt: iso(l.opened_at) as string,
     state: l.review_state as 'not_reviewed' | 'reviewed',
     reviewedAt: iso(l.reviewed_at),
-    reviewer: (l.reviewed_by as 'first' | null) ?? null,
     reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
     queuePosition: queued.get(l.id as string)?.position ?? null,
     queueSlot: queued.get(l.id as string)?.slot ?? null,
@@ -613,7 +642,48 @@ export async function listPrReviews(
           postedCount: Number(l.posted_count ?? 0),
           reviewUrl: (l.review_url as string | null) ?? null,
           trigger: (l.trigger as 'auto' | 'manual' | null) ?? 'auto',
+          findingsCount: Number(l.findings_count ?? 0),
+          heldBackCount: Number(l.held_back_count ?? 0),
+          findingsCap:
+            l.findings_cap === null || l.findings_cap === undefined ? null : Number(l.findings_cap),
+          changedLines:
+            l.changed_lines === null || l.changed_lines === undefined ? null : Number(l.changed_lines),
         }
       : null,
   }));
+}
+
+/**
+ * The findings the cap held back for a pull request's latest run (the run the Pull requests tab shows), most important
+ * first. No reviewer name. `undefined`: no such pull request.
+ */
+export async function heldBackFindings(
+  db: Queryable,
+  prReviewId: string,
+): Promise<HeldBackFindingsResponse | undefined> {
+  if (!(await one(db, 'SELECT id FROM pr_reviews WHERE id=$1', [prReviewId]))) return undefined;
+  const run = await one(
+    db,
+    'SELECT id FROM pr_review_runs WHERE pr_review_id=$1 ORDER BY started_at DESC LIMIT 1',
+    [prReviewId],
+  );
+  if (!run) return { runId: null, findings: [] };
+  const list = await rows(
+    db,
+    `SELECT id, rank, severity, path, line, title, body FROM pr_review_findings
+      WHERE run_id=$1 AND disposition='held_back' ORDER BY rank NULLS LAST, idx`,
+    [run.id],
+  );
+  return {
+    runId: run.id as string,
+    findings: list.map((f) => ({
+      id: f.id as string,
+      rank: f.rank === null ? null : Number(f.rank),
+      severity: f.severity as 'high' | 'medium' | 'low',
+      path: f.path as string,
+      line: f.line === null ? null : Number(f.line),
+      title: f.title as string,
+      body: f.body as string,
+    })),
+  };
 }

@@ -244,6 +244,18 @@ export function useSetOwnerApproval(id: string) {
   });
 }
 
+/** code v7: stop every card after the design for the owner's approval (default off). */
+export function useSetDesignGate(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => put(`/projects/${id}/design-gate`, { on }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 /** lean team: the manual full E2E suite run on the working branch (the automatic run after every merge is off). */
 export function useRunFullSuite(id: string) {
   const qc = useQueryClient();

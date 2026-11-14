@@ -150,6 +150,8 @@ export const PrReviewRunResultSchema = z.discriminatedUnion('outcome', [
     durationMs: z.number().int().nonnegative(),
     summary: z.string().max(2000),
     findings: z.array(PrReviewFindingSchema).max(50),
+    /** Added + removed lines of the change; absent when the runner could not count them (the cap is then 5). */
+    changedLines: z.number().int().nonnegative().optional(),
     usage: Usage.optional(),
   }),
   z.object({
@@ -204,7 +206,11 @@ export const PrReviewDtoSchema = z.object({
   openedAt: z.string(),
   state: PrReviewStateSchema,
   reviewedAt: z.string().nullable(),
+  /** Null while `reviewersHidden` (blind marking). */
   reviewer: PrReviewerSchema.nullable(),
+  /** True while the pull request has posted findings the owner has not marked: the reviewer is not shown. */
+  reviewersHidden: z.boolean().optional(),
+  unmarkedCount: z.number().optional(),
   /** `missing`: the repository's workstation holds no comment-only token, so no run starts. */
   reviewerToken: z.enum(['present', 'missing']).nullable(),
   /** Place in the run queue and why it waits; null when the pull request is not waiting in the queue. */
@@ -222,6 +228,11 @@ export const PrReviewDtoSchema = z.object({
       postedCount: z.number(),
       reviewUrl: z.string().nullable(),
       trigger: PrReviewTriggerSchema.optional(),
+      /** Findings the run produced, how many were held back by the cap, the cap, and the lines it came from. */
+      findingsCount: z.number().optional(),
+      heldBackCount: z.number().optional(),
+      findingsCap: z.number().nullable().optional(),
+      changedLines: z.number().nullable().optional(),
     })
     .nullable(),
 });

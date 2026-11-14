@@ -102,6 +102,8 @@ export async function createWorld(
     manualQa?: boolean;
     /** Keep built-in `code` v6 (the lean team flow) active: `code` projects then start new cards on it (see createTestApp). */
     lean?: boolean;
+    /** With `lean`: also register `code` v7 (the design gate), so new `code` cards start on it. */
+    designGate?: boolean;
     /**
      * The project's integration test setting (backlog #59, #71). Since code v5 the tester's `test` stage always runs; with
      * the setting off it is the plain tester stage (no environment). The suites that drive a card through Test with the
@@ -121,6 +123,7 @@ export async function createWorld(
     env: opts.env,
     listen: opts.listen ?? true,
     lean: opts.lean,
+    designGate: opts.designGate,
     ...(opts.extensions ? { extensions: opts.extensions } : {}),
     ...(opts.logStream ? { logStream: opts.logStream } : {}),
   });

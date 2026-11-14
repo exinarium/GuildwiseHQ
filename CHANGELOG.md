@@ -8,6 +8,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 - PR-only review for project repositories. The owner can switch a project repository to PR-only in the project settings, and its open pull requests are then recorded as not reviewed. Waiting pull request list requests are now replaced or expire, and a connected workstation is preferred.
 - Owner reminder for pending items. When an item has been waiting on the owner for 2 working days, the owner gets one reminder. The state of the item is not changed, so nothing moves on without the owner.
+- Design gate. New cards on the lean team workflow (code version 7) can stop after Investigate & design until the project owner approves the design. The gate is off by default; switch it on per project in Project settings, or for one card once its design report exists. The owner reads the existing design report on the desk item and approves it (the card moves to Build) or returns it with a note. Designs that touch high-risk paths stop at the gate even with the gate off. Cards already in flight keep their workflow.
 
 ### Fixed
 

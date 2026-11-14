@@ -339,6 +339,19 @@ export const CardDetailResponseSchema = z.object({
   qa: CardQaSchema.nullable().optional(),
   /** An approval step: the approver, the decision and where the card goes next (absent: the card has no approval step). */
   approval: CardApprovalSchema.nullable().optional(),
+  /**
+   * code v7: the card's design gate switch (absent: the card's workflow has no design gate). `refusal` is why it cannot be
+   * switched on now (no design report yet, Build has started), null when it can.
+   */
+  designGate: z
+    .object({
+      on: z.boolean(),
+      required: z.boolean(),
+      reasonText: z.string().nullable(),
+      canChange: z.boolean(),
+      refusal: z.object({ code: z.string(), message: z.string() }).nullable(),
+    })
+    .optional(),
   /** Sub-workflows: children this card started and the parent that started it (absent: neither). */
   subworkflows: SubworkflowsPanelSchema.optional(),
   /** M6: the published research note of a research card. */

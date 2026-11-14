@@ -1,4 +1,9 @@
-import type { PrReviewDto, PrReviewQueueDto, PrReviewQueueItem } from '@aom/shared';
+import {
+  PR_REVIEWER_LABEL,
+  type PrReviewDto,
+  type PrReviewQueueDto,
+  type PrReviewQueueItem,
+} from '@aom/shared';
 import { GitPullRequest } from 'lucide-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
@@ -15,8 +20,9 @@ import {
   ListSkeleton,
   PageHeader,
 } from '../ui.tsx';
-
-const REVIEWER_LABEL: Record<string, string> = { first: 'Sonnet reviewer' };
+import { HeldBackFindings } from './HeldBackFindings.tsx';
+import { PostedFindings } from './PostedFindings.tsx';
+import { ReviewerPrecisionPanel } from './ReviewerPrecisionPanel.tsx';
 
 /** "3 min 12 s", "45 s". */
 export function fmtRunTime(ms: number): string {
@@ -32,9 +38,18 @@ function Detail({ pr }: { pr: PrReviewDto }) {
   if (pr.state === 'reviewed' && pr.reviewedAt) {
     return (
       <p data-testid={`pr-review-detail-${pr.changeId}`}>
-        Reviewed {when(pr.reviewedAt)} by {REVIEWER_LABEL[pr.reviewer ?? ''] ?? 'the reviewer'}
+        Reviewed {when(pr.reviewedAt)}
+        {pr.reviewersHidden
+          ? ' · reviewer shown once every posted finding is marked'
+          : ` by ${PR_REVIEWER_LABEL[(pr.reviewer ?? '') as 'first'] ?? 'the reviewer'}`}
         {run?.durationMs != null && ` · run took ${fmtRunTime(run.durationMs)}`}
-        {run && ` · ${run.postedCount} comment${run.postedCount === 1 ? '' : 's'}`}
+        {run && (run.heldBackCount ?? 0) > 0
+          ? ` · Posted ${(run.findingsCount ?? 0) - (run.heldBackCount ?? 0)} of ${run.findingsCount} findings: ${
+              run.changedLines == null
+                ? 'the limit is 5'
+                : `${run.changedLines} changed lines allow ${run.findingsCap}`
+            } (1 per 100 lines, at most 5)`
+          : run && ` · ${run.postedCount} comment${run.postedCount === 1 ? '' : 's'}`}
         {run?.reviewUrl && (
           <>
             {' · '}
@@ -94,7 +109,7 @@ function Detail({ pr }: { pr: PrReviewDto }) {
   return <p data-testid={`pr-review-detail-${pr.changeId}`}>Waiting for a review</p>;
 }
 
-function Row({ pr }: { pr: PrReviewDto }) {
+function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
   const attention = pr.lastRun?.state === 'timed_out' || pr.lastRun?.state === 'failed';
   return (
     <li
@@ -125,6 +140,21 @@ function Row({ pr }: { pr: PrReviewDto }) {
       <div className="text-xs text-muted">
         <Detail pr={pr} />
       </div>
+      {((pr.lastRun?.postedCount ?? 0) > 0 || (pr.unmarkedCount ?? 0) > 0) && (
+        <div className="text-xs">
+          <PostedFindings
+            prReviewId={pr.id}
+            projectId={projectId}
+            count={Math.max(pr.lastRun?.postedCount ?? 0, pr.unmarkedCount ?? 0)}
+            unmarked={pr.unmarkedCount ?? 0}
+          />
+        </div>
+      )}
+      {(pr.lastRun?.heldBackCount ?? 0) > 0 && (
+        <div className="text-xs">
+          <HeldBackFindings prReviewId={pr.id} count={pr.lastRun?.heldBackCount ?? 0} />
+        </div>
+      )}
     </li>
   );
 }
@@ -260,6 +290,7 @@ export function PullRequests() {
         sub="Pull requests of PR-only repositories and their review."
       />
       <ProjectTabs projectKey={project.key} projectId={project.id} active="pull-requests" />
+      <ReviewerPrecisionPanel projectId={project.id} />
       {queue.data?.items && <CapStrip q={queue.data} />}
       {queue.data?.items && (
         <Queue q={queue.data} projectId={project.id} isOwner={project.myRole === 'owner'} />
@@ -277,7 +308,7 @@ export function PullRequests() {
       ) : (
         <ul className="space-y-3" aria-label="Pull requests">
           {items.map((pr) => (
-            <Row key={pr.id} pr={pr} />
+            <Row key={pr.id} pr={pr} projectId={project.id} />
           ))}
         </ul>
       )}
