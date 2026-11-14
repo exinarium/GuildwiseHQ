@@ -4,7 +4,7 @@ import type { Queryable, Row } from '../db/sql.ts';
 
 /**
  * Fix stop-loss of platform bug cards (owner decision: small 2 rework rounds / 2 reviews / 10 shifts, medium 3/2/15,
- * large 4/2/25; then architect arbitration, then the owner on the platform organisation's desk).
+ * large 4/3/25 since 1.7.0; then architect arbitration, then the owner on the platform organisation's desk).
  *
  * The mechanism is S1a's (`commands/stop-loss.ts`): at the cap the card is parked with a blocking `stop_loss` question to
  * the card's architect, and an unresolved one escalates to the desk, which for the platform project is the platform

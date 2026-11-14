@@ -24,6 +24,8 @@ export interface GitOptions {
   env?: Record<string, string>;
   /** Kill git after this long (network probes such as `ls-remote`). */
   timeoutMs?: number;
+  /** Kill git when this aborts (a shift that is stopped while the runner prepares its worktree). */
+  signal?: AbortSignal;
 }
 
 /** git lost a race for a lock file (two operations in one clone at once); it did nothing and can simply be run again. */
@@ -66,6 +68,7 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
       env: { ...GIT_HARDEN_ENV, ...opts.env },
       extendEnv: true,
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+      ...(opts.signal ? { cancelSignal: opts.signal } : {}),
     });
     const res = { stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), exitCode: r.exitCode ?? 1 };
     const delay = lockRetry.delaysMs[attempt];

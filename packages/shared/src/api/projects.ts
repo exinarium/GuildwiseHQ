@@ -309,7 +309,7 @@ export type ProjectDto = z.infer<typeof ProjectDtoSchema>;
 export const PauseProjectRequestSchema = z.object({ reason: z.string().trim().max(500).optional() });
 export type PauseProjectRequest = z.infer<typeof PauseProjectRequestSchema>;
 
-/** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/2/25). */
+/** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/3/25). */
 export const SetStopLossRequestSchema = z.object({ settings: StopLossSettingsSchema.nullable() });
 export type SetStopLossRequest = z.infer<typeof SetStopLossRequestSchema>;
 

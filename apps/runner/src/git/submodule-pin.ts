@@ -35,14 +35,16 @@ const isMovedRejection = (why: string): boolean =>
   );
 
 /**
- * The submodules a `.gitmodules` file declares: name, path and url. A relative url (`../core.git`) is resolved against
+ * The submodules a `.gitmodules` file declares: name, path and url (from the checkout's file, or a blob of a ref). A relative url (`../core.git`) is resolved against
  * the url of D's own origin, the way git does.
  */
 export async function readSubmodules(
   worktree: string,
   originUrl: string,
+  /** Where git reads the file: the checkout's `.gitmodules` (default), or `['--blob', '<ref>:.gitmodules']`. */
+  source: string[] = ['--file', '.gitmodules'],
 ): Promise<Array<{ name: string; path: string; normalized: string }>> {
-  const r = await git(worktree, ['config', '--file', '.gitmodules', '--list', '-z']);
+  const r = await git(worktree, ['config', ...source, '--list', '-z']);
   if (r.exitCode !== 0) return [];
   const byName = new Map<string, { path?: string; url?: string }>();
   for (const entry of r.stdout.split('\0')) {

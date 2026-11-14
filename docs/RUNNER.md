@@ -1639,11 +1639,14 @@ the server recorded for the card. They are removed after finalize (`worktree.rem
 
 When a card shift's `git worktree add` creates the card worktree (not when it reuses one, and never for a resumed shift),
 the runner prepares it after it accepted the shift and before the agent starts: each git submodule is checked out at the
-commit the branch pins (cloned from the workstation's own clone of that repository when there is one, as deploy checkouts
-do), then the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
+commit the branch pins, but only a submodule the base branch's `.gitmodules` declares the same way and only from the
+workstation's own clone of its repository (no url from the branch's own `.gitmodules` is ever fetched; the others are
+listed as not filled), then the project's dependency installs from the toolchain table (`pnpm install`, `npm install`, `dotnet restore`,
 `uv sync`, `go mod download`, ...; the same steps the Development environment check runs) run in the project folder, in
-the run-step sandbox the handoff checks use (shared package caches, credentials masked) with `CI=true`. The whole
-preparation has a 5-minute budget and stops with the shift. Afterwards `git status` is as before: a tracked file an
+the run-step sandbox the handoff checks use (shared package caches, credentials masked) with `CI=true` (poetry and pipenv keep their virtualenv in the project; `bundle install` and `cargo fetch`, whose output
+would stay in the sandbox's private home, are not run). Without a run-step sandbox on the workstation the installs are
+skipped, not failed. It does not depend on the "Install packages and tools" DevOps access, which governs installing tools on
+the workstation itself. The whole preparation, submodules included, has a 5-minute budget and stops with the shift. Afterwards `git status` is as before: a tracked file an
 install rewrote (a lockfile) is restored, a new file outside `.gitignore` is removed, and both are reported. Nothing is
 retried: a failed or cut-off preparation is a line in the shift's progress, a note on the card, `shift.started.worktreePrep`,
 and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The

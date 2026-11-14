@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { devopsLane, devopsQueuePosition } from '../src/dispatcher/devops.ts';
 import { uniqueEmail } from './helpers/app.ts';
@@ -538,13 +539,19 @@ describe('DevOps queue: waited-on first, plus an express slot', () => {
     const c = await r.waitFor('rpc.response', (f) => f.rpcId === rpcId);
     expect(c.ok).toBe(true);
     const idC = (c.result as any).requestId as string;
-    expect(await devopsQueuePosition(w.t.app.ctx.pool, idC)).toEqual({ state: 'queued', position: 1, of: 2 });
-    expect(await devopsQueuePosition(w.t.app.ctx.pool, b.request.id)).toEqual({
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, idC, { now: w.t.clock.now() })).toEqual({
+      state: 'queued',
+      position: 1,
+      of: 2,
+    });
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, b.request.id, { now: w.t.clock.now() })).toEqual({
       state: 'queued',
       position: 2,
       of: 2,
     });
-    expect(await devopsQueuePosition(w.t.app.ctx.pool, a.request.id)).toEqual({ state: 'running' });
+    expect(await devopsQueuePosition(w.t.app.ctx.pool, a.request.id, { now: w.t.clock.now() })).toEqual({
+      state: 'running',
+    });
 
     // A has run for a minute: capacity one still holds.
     const mark1 = r.received.length;
@@ -575,5 +582,56 @@ describe('DevOps queue: waited-on first, plus an express slot', () => {
       r.ended(s.shiftId, 'reported');
     }
     r.ended(start.shiftId, 'stopped');
+  });
+  it('a request nobody waits for joins the waited-on tier after 30 minutes; a Test deploy environment request is waited on', async () => {
+    await q(
+      `UPDATE devops_requests SET status='failed' WHERE status IN ('queued','running','needs_approval')`,
+    );
+    await q(`UPDATE shifts SET status='ended' WHERE kind='devops' AND status <> 'ended'`);
+    const now = () => w.t.clock.now();
+    const pos = async (id: string) => devopsQueuePosition(w.t.app.ctx.pool, id, { now: now() });
+    const old = (await request('nobody waits for this')).request.id as string;
+    const parked = (await request('a card is parked on this')).request.id as string;
+    const card = await w.card({ title: 'Parked on DevOps' });
+    await q(`UPDATE cards SET status='waiting', parked_request_id=$2 WHERE id=$1`, [card.id, parked]);
+    expect(await pos(parked)).toEqual({ state: 'queued', position: 1, of: 2 });
+    expect(await pos(old)).toEqual({ state: 'queued', position: 2, of: 2 });
+    // 29 minutes old: still behind; 31 minutes old: in the waited-on tier, and the older of the two
+    await q('UPDATE devops_requests SET created_at=$2 WHERE id=$1', [
+      old,
+      new Date(now().getTime() - 29 * 60_000),
+    ]);
+    expect(await pos(old)).toEqual({ state: 'queued', position: 2, of: 2 });
+    await q('UPDATE devops_requests SET created_at=$2 WHERE id=$1', [
+      old,
+      new Date(now().getTime() - 31 * 60_000),
+    ]);
+    expect(await pos(old)).toEqual({ state: 'queued', position: 1, of: 2 });
+    expect(await pos(parked)).toEqual({ state: 'queued', position: 2, of: 2 });
+    // the dispatcher uses the same order: the aged request starts first
+    const s1 = await nextDevopsShift(r.received.length);
+    expect(s1.devops?.requestId).toBe(old);
+    await accept(s1);
+    await report(s1.shiftId, done('done'));
+    r.ended(s1.shiftId, 'reported');
+    await until(
+      async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [s1.shiftId, 'ended']))[0],
+    );
+
+    // The server's environment request for a card held at Test deploy counts as waited on from the start.
+    const plain = (await request('another one nobody waits for')).request.id as string;
+    const envReq = (await request('make the app run for the integration tests')).request.id as string;
+    const row = (await q('SELECT org_id FROM devops_requests WHERE id=$1', [envReq]))[0]!;
+    await q(
+      `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, state, devops_request_id,
+          branch_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'test',$5,'requested',$6,'k',$7,$7)`,
+      [randomUUID(), row.org_id, w.projectId, w.workstationId, card.id, envReq, now()],
+    );
+    expect(await pos(envReq)).toEqual({ state: 'queued', position: 2, of: 3 });
+    expect(await pos(plain)).toEqual({ state: 'queued', position: 3, of: 3 });
+    for (const id of [parked, plain, envReq])
+      await q(`UPDATE devops_requests SET status='failed' WHERE id=$1`, [id]);
+    await q(`UPDATE cards SET status='queued', parked_request_id=NULL WHERE id=$1`, [card.id]);
   });
 });

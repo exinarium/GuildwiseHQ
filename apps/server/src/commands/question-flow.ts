@@ -330,7 +330,7 @@ export async function devopsTopicQuestion(
         card,
         { kind: 'system' },
         'system',
-        `${agent.name} asked about ${topic}. The DevOps engineer is already working a request for this card; ${card.ref} is parked until it completes.${await devopsQueueSentence(tx, open.id, { asWaited: true })}`,
+        `${agent.name} asked about ${topic}. The DevOps engineer is already working a request for this card; ${card.ref} is parked until it completes.${await devopsQueueSentence(tx, open.id, { asWaited: true, now: ctx.clock.now() })}`,
         { requestId: open.id, problem },
       ),
     ];
@@ -364,7 +364,9 @@ export async function devopsTopicQuestion(
       | string
       | null
       | undefined);
-  const queue = parkedReq ? await devopsQueueSentence(tx, parkedReq, { asWaited: true }) : '';
+  const queue = parkedReq
+    ? await devopsQueueSentence(tx, parkedReq, { asWaited: true, now: ctx.clock.now() })
+    : '';
   return {
     accepted: true,
     message: `Recorded. The DevOps engineer was asked about ${topic} and ${card.ref} is parked until the request completes.${queue} Finish now; do not make further changes.`,
@@ -603,7 +605,7 @@ export async function convertWaitingQuestion(
       message:
         'Recorded. The DevOps engineer has not finished yet; the card is not parked. Carry on without those tests, do not record them as passed, and say in your handoff note that they were not run.',
     };
-  const queue = await devopsQueueSentence(tx, req.id, { asWaited: true });
+  const queue = await devopsQueueSentence(tx, req.id, { asWaited: true, now: ctx.clock.now() });
   await ctx.store.append(
     await releaseClaimEvents(
       tx,

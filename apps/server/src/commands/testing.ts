@@ -519,7 +519,7 @@ export async function environmentNotReadyEvents(
       card,
       { kind: 'system' },
       'system',
-      `${PROBLEM_TEXT[problem]}${detail}. The DevOps engineer was asked to fix it; ${card.ref} is parked until the request completes.${await devopsQueueSentence(tx, requestId, { asWaited: true })}`,
+      `${PROBLEM_TEXT[problem]}${detail}. The DevOps engineer was asked to fix it; ${card.ref} is parked until the request completes.${await devopsQueueSentence(tx, requestId, { asWaited: true, now: ctx.clock.now() })}`,
       { requestId, problem },
     ),
   ];

@@ -2027,6 +2027,7 @@ export class ShiftSupervisor {
     if (!repo) return;
     s.prepAbort = new AbortController();
     this.addProgress(s, 'status', 'preparing the new worktree (submodules, dependencies)');
+    this.flushProgress(s); // the owner sees it now, not after the session started
     const runs = this.deps.runs;
     const shiftKey = s.msg.shiftId.slice(0, 8);
     const prep = this.deps.prepareWorktree ?? prepareWorktree;
@@ -2034,6 +2035,7 @@ export class ShiftSupervisor {
       s.worktreePrep = await prep({
         worktree: wt.path,
         repoPath: repo.localPath,
+        baseBranch: wt.baseBranch,
         ...(projectPath ? { projectPath } : {}),
         findRepo: (n) => this.deps.findRepo(n),
         ...(runs
@@ -2068,6 +2070,7 @@ export class ShiftSupervisor {
         `worktree prepared in ${secs}s (${r.steps.map((x) => x.name).join(', ')})`,
       );
     }
+    this.flushProgress(s);
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {

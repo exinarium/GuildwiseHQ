@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { normalizeProjectPath } from '@aom/shared';
 import { type CheckLaunch, capture } from '../checks/run.ts';
 import { fillDeploySubmodules } from '../delivery/submodules.ts';
-import { git } from '../git/git.ts';
+import { git, revParse } from '../git/git.ts';
+import { readSubmodules } from '../git/submodule-pin.ts';
 import { detectStacks, viewOf } from './detect.ts';
 import { depCommand } from './ensure.ts';
 import { STACKS } from './stacks.ts';
@@ -32,6 +33,11 @@ export interface PrepareWorktreeInput {
   worktree: string;
   /** The local clone the worktree belongs to (submodules are cloned from the workstation's clones). */
   repoPath: string;
+  /**
+   * The card's base branch: its `.gitmodules` (on origin, else locally) is the trusted list of submodules. A submodule
+   * the card branch declares differently, or adds, is not filled. Absent: no submodule is filled.
+   */
+  baseBranch?: string;
   /** The project's sub directory in the repository (absent: the root): dependencies are installed there. */
   projectPath?: string;
   findRepo: (remoteUrlNormalized: string) => Promise<{ localPath: string } | undefined>;
@@ -53,6 +59,16 @@ function defaultStacks(dir: string, platform: Platform): Array<{ id: string; ste
     steps: STACKS.find((s) => s.id === d.id)?.deps?.(d, platform) ?? [],
   }));
 }
+
+/**
+ * Dependency steps whose output does not land in the worktree or a shared cache: inside the run-step sandbox they write to
+ * its private home, which is removed after the step (bundler's user gem dir, cargo's unshared `CARGO_HOME`). They are
+ * reported as not run instead of "done".
+ */
+const OUTPUT_OUTSIDE_WORKTREE = new Set(['bundle', 'cargo']);
+
+/** Keeps the virtualenvs of poetry and pipenv in the project (`.venv`) instead of the sandbox's private home. */
+const IN_PROJECT_ENV = { CI: 'true', POETRY_VIRTUALENVS_IN_PROJECT: 'true', PIPENV_VENV_IN_PROJECT: '1' };
 
 const tail = (text: string, n = 400): string => {
   const t = text.trim();
@@ -79,9 +95,16 @@ async function changedPaths(dir: string): Promise<Array<{ path: string; untracke
  * Prepares a card worktree the runner just added, so the agent can build and test without asking DevOps: each submodule
  * at its pinned commit (from the workstation's clones, `fillDeploySubmodules`), then the project's dependency installs
  * (`pnpm install`, `dotnet restore`, ...) in the run-step sandbox with `CI=true` (the worktree may hold agent-written
- * scripts, so nothing runs unsandboxed). Never throws: a failure is a step with its detail. The whole run has one budget
+ * scripts, so nothing it holds runs unsandboxed). Submodules are filled on the host by git, but only those the base
+ * branch declares, only from the workstation's own clone of the submodule's repository, and the file protocol is allowed
+ * only for that clone's path: no url from the branch's `.gitmodules` is ever fetched. Never throws: a failure is a step
+ * with its detail. The whole run, submodules included, has one budget
  * and stops on `signal`. Afterwards no tracked file is left changed and no new unignored file is left behind (a rewritten
  * lockfile is restored, and said so), so the guard and the autocommit see nothing.
+ *
+ * It does not depend on the workstation's "Install packages and tools" DevOps setting: that setting governs installing
+ * tools on the workstation itself (the toolchain step, unsandboxed). This only fills the project's own dependencies,
+ * inside the sandbox, in the card's worktree and the shared package caches; its own switch is `prepareWorktrees`.
  */
 export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResult> {
   const now = i.now ?? Date.now;
@@ -95,20 +118,33 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   try {
     const before = new Set((await changedPaths(i.worktree)).map((c) => c.path));
 
-    // 1. Submodules at the commits the checkout pins.
+    // 1. Submodules at the commits the checkout pins: only the trusted ones, only from local clones (see above).
     if (await hasGitmodules(i.worktree)) {
       const t = now();
+      const skipped: string[] = [];
+      const filled: string[] = [];
       try {
-        const problem = await fillDeploySubmodules(i.worktree, i.repoPath, i.findRepo);
-        add({
-          name: 'submodules',
-          status: problem ? 'failed' : 'done',
-          ...(problem ? { detail: problem } : {}),
-          ms: now() - t,
+        const problem = await fillDeploySubmodules(i.worktree, i.repoPath, i.findRepo, {
+          localOnly: true,
+          allowed: await trustedSubmodules(i.repoPath, i.baseBranch),
+          deadline: started + budget,
+          ...(i.signal ? { signal: i.signal } : {}),
+          now,
+          skipped,
+          filled,
         });
+        if (problem || filled.length)
+          add({
+            name: 'submodules',
+            status: problem ? 'failed' : 'done',
+            ...(problem ? { detail: problem } : {}),
+            ms: now() - t,
+          });
       } catch (err) {
         add({ name: 'submodules', status: 'failed', detail: errText(err), ms: now() - t });
       }
+      if (skipped.length)
+        add({ name: 'submodules not filled', status: 'skipped', detail: skipped.join('; '), ms: 0 });
     }
 
     // 2. The project's dependencies, in its folder, sandboxed.
@@ -148,6 +184,15 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
           add({ name: step.name, status: 'skipped', detail: 'no sandboxed launcher on this runner', ms: 0 });
           break;
         }
+        if (OUTPUT_OUTSIDE_WORKTREE.has(step.cmd)) {
+          add({
+            name: step.name,
+            status: 'skipped',
+            detail: 'not run: its output would not be kept in the worktree',
+            ms: 0,
+          });
+          break;
+        }
         const remaining = left();
         if (remaining <= 0) {
           add({
@@ -161,18 +206,19 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
         let l: CheckLaunch;
         try {
           l = await i.launch(argv, `prep-${step.name}`);
-        } catch (err) {
+        } catch {
+          // No run-step sandbox here (no bubblewrap, macOS, Windows): like no launcher, not a failure of the card.
           add({
             name: step.name,
-            status: 'failed',
-            detail: `could not start: ${errText(err)}`,
+            status: 'skipped',
+            detail: 'no run-step sandbox on this workstation, so it was not run',
             ms: now() - t,
           });
           break;
         }
         try {
           const c = await capture(
-            { ...l, env: { ...l.env, CI: 'true' } },
+            { ...l, env: { ...l.env, ...IN_PROJECT_ENV } },
             dir,
             remaining,
             i.signal,
@@ -219,6 +265,19 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   function finish(): PrepResult {
     return { ok: !steps.some((s) => s.status === 'failed'), steps };
   }
+}
+
+/** The submodules the base branch declares (on origin, else locally): the only ones the preparation fills. */
+async function trustedSubmodules(
+  repoPath: string,
+  baseBranch: string | undefined,
+): Promise<Array<{ name: string; path: string; normalized: string }>> {
+  if (!baseBranch) return [];
+  const ref = (await revParse(repoPath, `refs/remotes/origin/${baseBranch}`))
+    ? `refs/remotes/origin/${baseBranch}`
+    : `refs/heads/${baseBranch}`;
+  const originUrl = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+  return readSubmodules(repoPath, originUrl, [`--blob=${ref}:.gitmodules`]);
 }
 
 async function hasGitmodules(dir: string): Promise<boolean> {

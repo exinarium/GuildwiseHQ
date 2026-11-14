@@ -79,7 +79,7 @@ export async function cardFactsRpc(
     : undefined;
   // Why a parked card waits: its request's place in the DevOps queue, or "running now".
   const parkedQueue = parked
-    ? devopsQueueText(await devopsQueuePosition(ctx.pool, card.parked_request_id))
+    ? devopsQueueText(await devopsQueuePosition(ctx.pool, card.parked_request_id, { now: ctx.clock.now() }))
     : '';
   const usage = await cardUsage(ctx.pool, card.id);
   const budget = await stopLossBudget(ctx.pool, card);

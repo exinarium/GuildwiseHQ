@@ -75,7 +75,7 @@ const FOOTER =
 async function loadPlaywright(browsersPath: string): Promise<PwModule> {
   // playwright-core reads the variable when it loads; keep it out of the runner-wide environment
   // so child processes (other Playwright runs, toolchain commands) are not redirected.
-  const had = Object.prototype.hasOwnProperty.call(process.env, 'PLAYWRIGHT_BROWSERS_PATH');
+  const had = Object.hasOwn(process.env, 'PLAYWRIGHT_BROWSERS_PATH');
   const old = process.env.PLAYWRIGHT_BROWSERS_PATH;
   process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
   try {

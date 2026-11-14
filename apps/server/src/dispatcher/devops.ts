@@ -19,14 +19,25 @@ export interface DevopsDispatch {
   agentId: string;
 }
 
+/** A request nobody waits for joins the waited-on tier once it is this old, so it cannot starve behind parked cards. */
+export const AGE_INTO_WAITED_MS = 30 * 60_000;
+
 /**
- * A request somebody waits for (`r` is the `devops_requests` row): a card is parked on it, or the agent that asked still
- * holds a card shift on that card that started before the request (the request `questionStatus` polls for).
+ * A request somebody waits for (`r` is the `devops_requests` row; `nowParam` the SQL parameter holding the clock):
+ * - a card is parked on it;
+ * - the agent that asked still holds a card shift on that card that started before the request (the request
+ *   `questionStatus` polls for);
+ * - it is the server's test-environment request of a card held at Test deploy (`run_environments`, purpose `test`);
+ * - or it is at least `AGE_INTO_WAITED_MS` old (ageing: it is then ordered by age with the others).
  */
-export const WAITED_SQL = `(EXISTS (SELECT 1 FROM cards wc WHERE wc.parked_request_id = r.id AND wc.status = 'waiting')
+export function waitedSql(nowParam: string): string {
+  return `(EXISTS (SELECT 1 FROM cards wc WHERE wc.parked_request_id = r.id AND wc.status = 'waiting')
   OR (r.requested_by_kind = 'agent' AND r.card_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM shifts ws WHERE ws.card_id = r.card_id AND ws.agent_id::text = r.requested_by_id
-           AND ws.kind = 'card' AND ws.status <> 'ended' AND ws.started_at <= r.created_at)))`;
+           AND ws.kind = 'card' AND ws.status <> 'ended' AND ws.started_at <= r.created_at))
+  OR EXISTS (SELECT 1 FROM run_environments re WHERE re.devops_request_id = r.id AND re.purpose = 'test')
+  OR r.created_at <= ${nowParam}::timestamptz - make_interval(secs => ${AGE_INTO_WAITED_MS / 1000}))`;
+}
 
 /** The second (express) slot opens only while the engineer's single running shift is at least this old. */
 export const EXPRESS_AFTER_MS = 5 * 60_000;
@@ -82,7 +93,7 @@ export async function devopsPass(
   const onlineSince = new Date(ctx.clock.now().getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
     ctx.pool,
-    `SELECT r.id, r.org_id, r.workstation_id, r.devops_agent_id, r.card_id, a.runtime, w.runtimes, ${WAITED_SQL} AS waited
+    `SELECT r.id, r.org_id, r.workstation_id, r.devops_agent_id, r.card_id, a.runtime, w.runtimes, ${waitedSql('$2')} AS waited
        FROM devops_requests r
        JOIN agents a ON a.id = r.devops_agent_id AND a.status = 'active'
        JOIN workstations w ON w.id = r.workstation_id AND w.status = 'active' AND w.connected AND w.last_seen_at > $1
@@ -95,7 +106,7 @@ export async function devopsPass(
                            AND rp.id = COALESCE((SELECT rc.project_id FROM cards rc WHERE rc.id = r.card_id),
                                                 (r.context->>'projectId')::uuid))
       ORDER BY waited DESC, r.created_at, r.id`,
-    [onlineSince],
+    [onlineSince, ctx.clock.now()],
   );
   const started: DevopsDispatch[] = [];
   // Each engineer's open DevOps shifts, loaded once and extended with what this pass starts.
@@ -118,7 +129,10 @@ export async function devopsPass(
       const row = await one(tx, `SELECT status FROM devops_requests WHERE id=$1 FOR UPDATE`, [r.id]);
       if (row?.status !== 'queued') return false;
       // Re-checked inside the transaction: another pass may have started a shift since the queue was read.
-      const w = await one(tx, `SELECT ${WAITED_SQL} AS waited FROM devops_requests r WHERE r.id=$1`, [r.id]);
+      const w = await one(tx, `SELECT ${waitedSql('$2')} AS waited FROM devops_requests r WHERE r.id=$1`, [
+        r.id,
+        ctx.clock.now(),
+      ]);
       const lane = devopsLane(
         await openDevopsShifts(tx, r.devops_agent_id),
         { cardId: req.cardId, waited: w?.waited === true },
@@ -179,7 +193,8 @@ export type DevopsQueuePosition =
 export async function devopsQueuePosition(
   db: Queryable,
   requestId: string,
-  opts: { asWaited?: boolean } = {},
+  /** `now`: the server clock (`ctx.clock.now()`), for the ageing rule. */
+  opts: { asWaited?: boolean; now?: Date } = {},
 ): Promise<DevopsQueuePosition> {
   const req = await one(db, 'SELECT status, devops_agent_id FROM devops_requests WHERE id=$1', [requestId]);
   if (!req) return null;
@@ -189,13 +204,13 @@ export async function devopsQueuePosition(
   const pos = await one<{ position: number; of: number }>(
     db,
     `WITH q AS (
-       SELECT r.id, r.created_at, ((r.id = $1 AND $3::boolean) OR ${WAITED_SQL}) AS waited
+       SELECT r.id, r.created_at, ((r.id = $1 AND $3::boolean) OR ${waitedSql('$4')}) AS waited
          FROM devops_requests r WHERE r.status = 'queued' AND r.devops_agent_id = $2)
      SELECT position, total AS of FROM (
        SELECT id, row_number() OVER (ORDER BY waited DESC, created_at, id)::int AS position, count(*) OVER ()::int AS total
          FROM q) ranked
       WHERE id = $1`,
-    [requestId, req.devops_agent_id, opts.asWaited === true],
+    [requestId, req.devops_agent_id, opts.asWaited === true, opts.now ?? new Date()],
   );
   return pos ? { state: 'queued', position: Number(pos.position), of: Number(pos.of) } : null;
 }
@@ -212,7 +227,7 @@ export function devopsQueueText(pos: DevopsQueuePosition): string {
 export async function devopsQueueSentence(
   db: Queryable,
   requestId: string,
-  opts: { asWaited?: boolean } = {},
+  opts: { asWaited?: boolean; now?: Date } = {},
 ): Promise<string> {
   const text = devopsQueueText(await devopsQueuePosition(db, requestId, opts));
   return text ? ` The DevOps request is ${text}.` : '';
