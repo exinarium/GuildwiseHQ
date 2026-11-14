@@ -4,6 +4,8 @@ import { useProjects } from './api/queries/projects.ts';
 import { DevOnly } from './components/DevOnly.tsx';
 import { RequireAuth } from './components/Layout.tsx';
 import { PlatformShell } from './components/platform/PlatformShell.tsx';
+import { PrReplayDetailPage } from './components/pull-requests/PrReplayDetailPage.tsx';
+import { PrReplayPage } from './components/pull-requests/PrReplayPage.tsx';
 import { PullRequests } from './components/pull-requests/PullRequestsPage.tsx';
 import { RouteError } from './components/RouteError.tsx';
 import { PageSkeleton } from './components/ui.tsx';
@@ -123,6 +125,8 @@ export const routes = [
       { path: '/p/:projectKey/archive', element: <Archive /> },
       { path: '/p/:projectKey/backlog', element: <Backlog /> },
       { path: '/p/:projectKey/pull-requests', element: <PullRequests /> },
+      { path: '/p/:projectKey/pull-requests/replay', element: <PrReplayPage /> },
+      { path: '/p/:projectKey/pull-requests/replay/:replayId', element: <PrReplayDetailPage /> },
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },

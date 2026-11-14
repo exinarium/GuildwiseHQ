@@ -906,6 +906,23 @@ export type RepoListPrsPayload = z.infer<typeof RepoListPrsPayloadSchema>;
 export const PR_LIST_CAPABILITY = 'pr-list:1';
 
 /**
+ * `repo.list_merged_prs`: read-only. The most recently merged pull requests of a repository (20-PR replay). The answer
+ * is a `RepoListMergedPrsResult`.
+ */
+export const RepoListMergedPrsPayloadSchema = z.object({
+  requestId: z.uuid(),
+  replayId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+  limit: z.number().int().positive().max(100),
+});
+export type RepoListMergedPrsPayload = z.infer<typeof RepoListMergedPrsPayloadSchema>;
+
+/** Announced by a runner that understands `repo.list_merged_prs` and offline replay runs. */
+export const REPLAY_CAPABILITY = 'pr-replay:1';
+
+/**
  * `release.ship`: the release commit on the working branch (CHANGELOG.md moved to the version, component versions
  * bumped), pushed without force. Idempotent: a branch that already has the version section answers `alreadyDone`.
  */
@@ -1282,6 +1299,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'repo.list_prs',
+  'repo.list_merged_prs',
   'pr_review.run',
   'pr_review.post',
   'release.ship',
@@ -1399,6 +1417,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'repo.list_prs': RepoListPrsPayloadSchema,
+  'repo.list_merged_prs': RepoListMergedPrsPayloadSchema,
   'pr_review.run': PrReviewRunPayloadSchema,
   'pr_review.post': PrReviewPostPayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,

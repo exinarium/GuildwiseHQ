@@ -127,6 +127,13 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     reviewSettings: reviewSettingsOf(p),
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     regressionLoop: p.regression_loop ?? false,
+    reviewTargets: {
+      precisionTarget: p.review_precision_target == null ? null : Number(p.review_precision_target),
+      effortTargetHoursPerWeek:
+        p.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
+      replayId: p.review_targets_replay_id ?? null,
+      setAt: iso(p.review_targets_set_at),
+    },
     claudeAccount: { key: p.claude_account_key ?? null, fallbackToMain: p.claude_account_fallback ?? false },
     ...(p.provider_accounts && typeof p.provider_accounts === 'object'
       ? { providerAccounts: p.provider_accounts as NonNullable<ProjectDto['providerAccounts']> }

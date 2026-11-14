@@ -114,6 +114,7 @@ import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
+import { prReplayRoutes } from './routes/pr-replays.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
@@ -472,6 +473,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(installerRoutes(ctx));
   await app.register(cloudRoutes(ctx));
   await app.register(projectRoutes(ctx));
+  await app.register(prReplayRoutes(ctx));
   await app.register(projectWorkflowRoutes(ctx));
   await app.register(cardRoutes(ctx));
   await app.register(qaRoutes(ctx));

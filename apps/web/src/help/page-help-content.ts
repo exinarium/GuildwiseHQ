@@ -55,6 +55,34 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+  '/p/:projectKey/pull-requests/replay': {
+    title: '20-PR replay',
+    article: 'board-and-cards',
+    intro:
+      'Measures both reviewers (Sonnet and Opus) offline on the 20 most recently merged pull requests of a PR-only repository. Nothing is posted to any pull request. The owner starts it, marks every finding Useful or Noise, and then sees precision per reviewer and the recorded review effort.',
+    controls: [
+      {
+        name: 'Start replay',
+        text: 'Starts 40 offline reviews on your workstation. This can take several hours. Only one replay runs at a time.',
+      },
+    ],
+  },
+  '/p/:projectKey/pull-requests/replay/:replayId': {
+    title: 'Replay',
+    article: 'board-and-cards',
+    intro:
+      'Progress, one-at-a-time blind marking, and the result of one replay. You do not see which reviewer wrote a finding until every finding is marked. When the replay is finished, type the targets for reviewer precision and baseline review effort and select Save.',
+    controls: [
+      {
+        name: 'Useful / Noise',
+        text: 'Marks the finding on screen. The time you take is recorded as review effort, at most 10 minutes per finding.',
+      },
+      {
+        name: 'Save',
+        text: 'Saves the targets you typed on the project. They are not computed from the result.',
+      },
+    ],
+  },
   '/p/:projectKey/board': {
     title: 'Board',
     intro:

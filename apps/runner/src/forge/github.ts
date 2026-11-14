@@ -1,4 +1,4 @@
-import type { GitConnection, OpenChange, RepoRef } from '@aom/shared';
+import type { GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
 import { errText, ForgeUnavailableError, isHttps } from './http.ts';
 import type {
   BranchRules,
@@ -22,6 +22,14 @@ interface GhPr {
   headRefName: string;
   baseRefName: string;
   createdAt: string;
+  additions?: number;
+  deletions?: number;
+}
+
+interface GhMergedPr extends GhPr {
+  headRefOid?: string;
+  mergeCommit?: { oid?: string } | null;
+  mergedAt?: string;
   additions?: number;
   deletions?: number;
 }
@@ -179,6 +187,42 @@ export class GitHubForge implements Forge {
         : {}),
     }));
     return { changes, complete: list.length <= limit };
+  }
+
+  /** The merged pull requests (`gh pr list --state merged`), newest first; those without a merge commit are dropped. */
+  async listMergedChanges(repo: RemoteRepo, limit: number): Promise<MergedChange[]> {
+    const r = await this.gh([
+      'pr',
+      'list',
+      '--repo',
+      repo.fullName,
+      '--state',
+      'merged',
+      '--json',
+      'number,url,title,author,headRefName,baseRefName,headRefOid,mergeCommit,mergedAt,additions,deletions',
+      '--limit',
+      String(limit),
+    ]);
+    if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
+    if (r.exitCode !== 0)
+      throw new Error(`gh pr list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
+    const list = JSON.parse(r.stdout || '[]') as GhMergedPr[];
+    return list
+      .filter((p) => p.mergeCommit?.oid && p.headRefOid && p.mergedAt)
+      .map((p) => ({
+        id: String(p.number),
+        url: p.url,
+        title: (p.title ?? '').slice(0, 300),
+        author: p.author?.login ? p.author.login.slice(0, 100) : null,
+        head: p.headRefName,
+        base: p.baseRefName,
+        headSha: p.headRefOid as string,
+        mergeCommitSha: p.mergeCommit?.oid as string,
+        mergedAt: p.mergedAt as string,
+        additions: p.additions ?? 0,
+        deletions: p.deletions ?? 0,
+      }))
+      .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt));
   }
 
   /** The open pull request from `head` into `base`, if any (a reopened card's branch already has one). */

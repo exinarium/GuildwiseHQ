@@ -60,6 +60,7 @@ export * from './review/findings.ts';
 export * from './review/index.ts';
 export * from './review/marks.ts';
 export * from './review/pr-review.ts';
+export * from './review/replay.ts';
 export * from './review/reviewer-run.ts';
 export * from './roles/index.ts';
 export * from './runs/index.ts';

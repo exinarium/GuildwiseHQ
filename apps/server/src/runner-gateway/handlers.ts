@@ -63,6 +63,7 @@ import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyPrListResult } from '../commands/pr-only.ts';
+import { applyMergedPrList } from '../commands/pr-replays.ts';
 import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
@@ -616,6 +617,10 @@ export class RunnerHandlers {
       // Terminal: the open pull requests of a PR-only repository (or why not) are recorded; the next poll asks again.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrListResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.list_merged_prs') {
+      // Terminal: the merged pull requests the replay takes its 20 from (or why not).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyMergedPrList(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'pr_review.run') {
       // Terminal: a timeout or a failure is recorded as it is (never redelivered: a second run would be a second review).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

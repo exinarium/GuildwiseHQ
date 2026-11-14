@@ -6,7 +6,7 @@ import {
 } from '@aom/shared';
 import { GitPullRequest } from 'lucide-react';
 import { useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { usePrReviewQueue, usePullRequests, useTriggerPrReview } from '../../api/queries/pr-reviews.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { ProjectTabs } from '../ProjectTabs.tsx';
@@ -290,6 +290,15 @@ export function PullRequests() {
         sub="Pull requests of PR-only repositories and their review."
       />
       <ProjectTabs projectKey={project.key} projectId={project.id} active="pull-requests" />
+      <p className="mb-2">
+        <Link
+          to={`/p/${project.key}/pull-requests/replay`}
+          className="inline-flex min-h-11 items-center text-brand-text underline"
+          data-testid="replay-link"
+        >
+          20-PR replay
+        </Link>
+      </p>
       <ReviewerPrecisionPanel projectId={project.id} />
       {queue.data?.items && <CapStrip q={queue.data} />}
       {queue.data?.items && (

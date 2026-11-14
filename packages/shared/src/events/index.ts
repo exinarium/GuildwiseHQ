@@ -40,6 +40,7 @@ import { packEvents } from './pack.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
 import { playbookEvents } from './playbook.ts';
+import { prReplayEvents } from './pr-replay.ts';
 import { projectEvents } from './project.ts';
 import { projectWorkflowEvents, workflowFoldEvents } from './project-workflows.ts';
 import { providerKeyEvents } from './provider-keys.ts';
@@ -70,6 +71,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...orgEvents,
   ...workstationEvents,
   ...projectEvents,
+  ...prReplayEvents,
   ...projectWorkflowEvents,
   ...workflowFoldEvents,
   ...cardEvents,
@@ -174,6 +176,7 @@ export * from './outbound.ts';
 export * from './owner-pending.ts';
 export * from './phase.ts';
 export * from './playbook.ts';
+export * from './pr-replay.ts';
 export * from './project.ts';
 export * from './project-workflows.ts';
 export * from './qa.ts';

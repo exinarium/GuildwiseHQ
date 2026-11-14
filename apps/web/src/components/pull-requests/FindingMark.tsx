@@ -12,14 +12,34 @@ const MARKS: Array<{ mark: Mark; label: string }> = [
  * The owner's one-tap mark on a posted finding. Two big buttons, no text field (so no soft keyboard), nothing that needs
  * hover. The reviewer is shown only after the mark, from the server's answer (no optimistic update).
  */
-export function FindingMark({ finding, projectId }: { finding: PostedFindingDto; projectId?: string }) {
-  const save = useMarkFinding(projectId);
+export function FindingMark({
+  finding,
+  projectId,
+  onMark,
+  pending,
+  error,
+  hint,
+}: {
+  finding: PostedFindingDto;
+  projectId?: string;
+  /** The 20-PR replay marks through its own mutation. Absent: the live `useMarkFinding(projectId)`. */
+  onMark?: (mark: Mark, done: () => void) => void;
+  pending?: boolean;
+  error?: unknown;
+  /** Replaces "Reviewer shown after you mark". */
+  hint?: string;
+}) {
+  const live = useMarkFinding(projectId);
   const [changing, setChanging] = useState(false);
   const marked = finding.mark !== null;
+  const isPending = onMark ? !!pending : live.isPending;
+  const err = onMark ? error : live.error;
   const choose = (mark: Mark) =>
-    save.mutate({ id: finding.id, mark }, { onSuccess: () => setChanging(false) });
+    onMark
+      ? onMark(mark, () => setChanging(false))
+      : live.mutate({ id: finding.id, mark }, { onSuccess: () => setChanging(false) });
   const buttons = (
-    <fieldset className="grid grid-cols-2 gap-2" disabled={save.isPending}>
+    <fieldset className="grid grid-cols-2 gap-2" disabled={isPending}>
       <legend className="sr-only">Mark finding: {finding.title}</legend>
       {MARKS.map((m) => (
         <button
@@ -64,12 +84,12 @@ export function FindingMark({ finding, projectId }: { finding: PostedFindingDto;
       ) : finding.canMark ? (
         <>
           {buttons}
-          {!marked && <p className="text-muted">Reviewer shown after you mark</p>}
+          {!marked && <p className="text-muted">{hint ?? 'Reviewer shown after you mark'}</p>}
         </>
       ) : (
         <p className="text-muted">Not marked yet</p>
       )}
-      {save.isError && <ErrorBox error={save.error} />}
+      {err != null && <ErrorBox error={err} />}
     </div>
   );
 }

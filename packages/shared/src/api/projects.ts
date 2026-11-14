@@ -35,6 +35,7 @@ import {
   repoNameError,
 } from '../repo/index.ts';
 import { PrReviewProblemSchema } from '../review/pr-review.ts';
+import { ReviewTargetsDtoSchema } from '../review/replay.ts';
 import { ReviewerTokenStateSchema } from '../review/reviewer-run.ts';
 import {
   BranchPrefixSchema,
@@ -257,6 +258,8 @@ export const ProjectDtoSchema = z.object({
   fullSuiteAfterFinalize: z.boolean().optional(),
   /** A failed regression run is redeployed by DevOps and run again once its bugs are merged (default false). */
   regressionLoop: z.boolean().optional(),
+  /** The owner's targets for reviewer precision and baseline review effort (set after the 20-PR replay). */
+  reviewTargets: ReviewTargetsDtoSchema.optional(),
   /** lean team: when the owner approves a card after the review (large and high-risk cards by default). */
   ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
   /** lean team (code v7): every design stops for the owner's approval before Build (default false; high risk always stops). */
