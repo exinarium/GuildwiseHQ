@@ -281,7 +281,10 @@ describe('the facilitator verbs', () => {
     const [before] = await q('SELECT display_name FROM users WHERE id=$1', [w.owner.id]);
     await q('UPDATE users SET display_name=$1 WHERE id=$2', [name, w.owner.id]);
     try {
-      const res = await raw('POST', '/api/discovery', { title: 'Owner name', idea: 'Invoices for freelancers' });
+      const res = await raw('POST', '/api/discovery', {
+        title: 'Owner name',
+        idea: 'Invoices for freelancers',
+      });
       expect(res.status).toBe(201);
       const threadId = (res.body as any).state.threadId as string;
       expect((await get(threadId)).threadId).toBe(threadId);

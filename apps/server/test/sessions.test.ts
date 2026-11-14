@@ -195,7 +195,7 @@ describe('creating a session', () => {
       threadId = s.threadId;
       expect(s.participants.find((x: any) => x.kind === 'user').displayName).toBe(clipped);
     } finally {
-      await q('UPDATE users SET display_name=$1 WHERE id=$2', [before.display_name, w.owner.id]);
+      await q('UPDATE users SET display_name=$1 WHERE id=$2', [before?.display_name, w.owner.id]);
     }
     // a second member with a long name, then one with a short name
     const guest = await w.t.userSession(uniqueEmail('longname'));
