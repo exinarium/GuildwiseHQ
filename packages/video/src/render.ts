@@ -1,4 +1,5 @@
 import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import {
   buildDescription,
@@ -11,7 +12,17 @@ import {
 import { joinWavs, writeSilentWav } from './audio.ts';
 import { renderPngs } from './browser.ts';
 import { ass, chunkCaption, srt } from './captions.ts';
-import { findFfmpeg, MP4_MUX_ARGS, probeDuration, RENDER_ENCODERS, runFfmpeg, vtt } from './ffmpeg.ts';
+import {
+  DEFAULT_ENCODE_THREADS,
+  findFfmpeg,
+  MP4_MUX_ARGS,
+  probeDuration,
+  RENDER_ENCODERS,
+  resolveEncodeThreads,
+  runFfmpeg,
+  vtt,
+  x264ThreadArgs,
+} from './ffmpeg.ts';
 import { browserJobsFor, type SceneJob, thumbnailJob } from './jobs.ts';
 import { clipBox, type Orientation, type SceneImages, SIZES } from './scenes.ts';
 import {
@@ -50,6 +61,13 @@ export interface RenderOptions {
   silentFallback?: boolean;
   crf?: number;
   fps?: number;
+  /**
+   * libx264 threads of every encode: default DEFAULT_ENCODE_THREADS, never more than the host's cores. Bounds the
+   * encoder's memory whatever the core count.
+   */
+  encodeThreads?: number;
+  /** Names the render in the log, e.g. `post <id> render <id>`. */
+  renderLabel?: string;
   log?: (line: string) => void;
 }
 
@@ -83,6 +101,9 @@ const WORDS_PER_SECOND = 2.4;
 /**
  * The arguments of the final encode: the scene segments cross-faded (`filter`), the narration, H.264 high + AAC 48 kHz
  * stereo, written as an MP4 with the index first and no edit lists (`MP4_MUX_ARGS`; Meta's Reels spec forbids edit lists).
+ * The encoder runs `threads` threads (default DEFAULT_ENCODE_THREADS). Every scene segment is its own input with its own
+ * H.264 decoder, so each decoder gets one thread: left to pick from the core count, their frame threads were most of the
+ * encode's peak memory (scenes x cores).
  */
 export function encodeArgs(o: {
   segments: readonly string[];
@@ -92,9 +113,10 @@ export function encodeArgs(o: {
   fps: number;
   seconds: number;
   out: string;
+  threads?: number;
 }): string[] {
   return [
-    ...o.segments.flatMap((f) => ['-i', f]),
+    ...o.segments.flatMap((f) => ['-threads', '1', '-i', f]),
     '-i',
     o.audio,
     '-filter_complex',
@@ -115,6 +137,7 @@ export function encodeArgs(o: {
     'yuv420p',
     '-r',
     String(o.fps),
+    ...x264ThreadArgs(o.threads ?? DEFAULT_ENCODE_THREADS),
     '-c:a',
     'aac',
     '-b:a',
@@ -126,6 +149,32 @@ export function encodeArgs(o: {
     '-t',
     o.seconds.toFixed(3),
     ...MP4_MUX_ARGS,
+    o.out,
+  ];
+}
+
+/** The arguments of one scene segment's encode (video only, H.264 veryfast CRF 12), after its inputs and filter. */
+export function segmentEncodeArgs(o: {
+  fps: number;
+  frames: number;
+  out: string;
+  threads: number;
+}): string[] {
+  return [
+    '-an',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '12',
+    '-pix_fmt',
+    'yuv420p',
+    '-r',
+    String(o.fps),
+    ...x264ThreadArgs(o.threads),
+    '-frames:v',
+    String(o.frames),
     o.out,
   ];
 }
@@ -153,6 +202,11 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
   mkdirSync(out, { recursive: true });
   mkdirSync(work, { recursive: true });
   const ff = findFfmpeg(RENDER_ENCODERS);
+  const threads = resolveEncodeThreads(opts.encodeThreads);
+  log(
+    `encode threads: ${threads} (asked ${opts.encodeThreads ?? 'default'}, default ${DEFAULT_ENCODE_THREADS}, ` +
+      `${availableParallelism()} cores)${opts.renderLabel ? `, ${opts.renderLabel}` : ''}`,
+  );
 
   // 1. speech
   const cues = script.cues.map((c) => ({ id: c.id, text: c.text, speech: c.speech ?? speakable(c.text) }));
@@ -208,22 +262,7 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     const seg = join(work, `seg-${String(i).padStart(3, '0')}.mp4`);
     const dur = lens[i] as number;
     const frames = Math.round(dur * fps);
-    const enc = [
-      '-an',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '12',
-      '-pix_fmt',
-      'yuv420p',
-      '-r',
-      String(fps),
-      '-frames:v',
-      String(frames),
-      seg,
-    ];
+    const enc = segmentEncodeArgs({ fps, frames, out: seg, threads });
     if (job.clip) {
       const b = clipBox(orient);
       const fit = fitClip(dur, job.clip.to - job.clip.from);
@@ -304,6 +343,7 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     fps,
     seconds: tl.total,
     out: final,
+    threads,
   });
   runFfmpeg(args, { bin: ff, cwd: work });
   const durationSeconds = probeDuration(final, ff);

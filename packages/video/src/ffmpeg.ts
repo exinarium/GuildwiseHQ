@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { VIDEO_HOME } from './voice.ts';
 
@@ -96,39 +97,64 @@ export function mux(
  */
 export const MP4_MUX_ARGS = ['-movflags', '+faststart', '-use_editlist', '0'] as const;
 
+/**
+ * libx264 threads when none (or an invalid number) is asked for: a fixed small number, so the encoder's memory does not
+ * follow the host's core count.
+ */
+export const DEFAULT_ENCODE_THREADS = 4;
+
+/** The encoder threads to use: `requested` if it is a whole number >= 1, else the default; never more than the cores. */
+export function resolveEncodeThreads(requested?: number, cores: number = availableParallelism()): number {
+  const n =
+    typeof requested === 'number' && Number.isInteger(requested) && requested >= 1
+      ? requested
+      : DEFAULT_ENCODE_THREADS;
+  return Math.max(1, Math.min(n, Math.floor(cores) || 1));
+}
+
+/** The libx264 thread arguments (output options: place them after the inputs). */
+export const x264ThreadArgs = (n: number): string[] => [
+  '-threads',
+  String(n),
+  '-x264-params',
+  `threads=${n}`,
+];
+
+/** The arguments of `toMp4`: H.264 high 4.0 + AAC, fast start, no edit lists, a bounded number of encoder threads. */
+export function toMp4Args(src: string, dest: string, crf = '23', threads?: number): string[] {
+  return [
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    src,
+    '-c:v',
+    'libx264',
+    '-profile:v',
+    'high',
+    '-level',
+    '4.0',
+    '-pix_fmt',
+    'yuv420p',
+    '-preset',
+    'slow',
+    '-crf',
+    crf,
+    ...x264ThreadArgs(resolveEncodeThreads(threads)),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    '-ac',
+    '2',
+    ...MP4_MUX_ARGS,
+    dest,
+  ];
+}
+
 /** An MP4 copy (H.264 + AAC, fast start, no edit lists) of the finished WebM: plays on iPhone, Android and in-app browsers. */
-export function toMp4(src: string, dest: string, crf = '23'): void {
-  execFileSync(
-    findFfmpeg(),
-    [
-      '-loglevel',
-      'error',
-      '-y',
-      '-i',
-      src,
-      '-c:v',
-      'libx264',
-      '-profile:v',
-      'high',
-      '-level',
-      '4.0',
-      '-pix_fmt',
-      'yuv420p',
-      '-preset',
-      'slow',
-      '-crf',
-      crf,
-      '-c:a',
-      'aac',
-      '-b:a',
-      '128k',
-      '-ac',
-      '2',
-      ...MP4_MUX_ARGS,
-      dest,
-    ],
-    { stdio: 'inherit' },
-  );
+export function toMp4(src: string, dest: string, crf = '23', threads?: number): void {
+  execFileSync(findFfmpeg(), toMp4Args(src, dest, crf, threads), { stdio: 'inherit' });
 }
 
 /** Runs ffmpeg (quiet); a failure carries the tail of its output. */
