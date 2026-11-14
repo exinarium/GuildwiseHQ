@@ -33,7 +33,7 @@ import type { Who } from '../auth/org-context.ts';
 import { loadVisibleProject, visibleProjectIds } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { escapeLike, exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, HttpError, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
@@ -172,43 +172,88 @@ export async function createDocument(
   req: CreateDocumentRequest,
 ): Promise<DocumentWithContentDto> {
   assertManager(who);
-  return withAppendTx(ctx.pool, async (tx) => {
-    if (req.projectId) {
-      const p = await loadVisibleProject(tx, who.userId, req.projectId);
-      if (p.org_id !== who.orgId) throw notFound('project not found');
-    }
-    await assertThreads(tx, who, req.sourceThreadIds);
-    const docId = randomUUID();
-    const tags = tagsOf(req.tags);
-    const slug = await uniqueSlug(tx, who.orgId, req.projectId ?? null, req.title);
-    const scope = req.projectId ? projectScope(who.orgId, req.projectId) : orgScope(who.orgId);
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.document(docId),
-          event: {
-            type: 'DocumentCreated',
-            payload: {
-              docId,
-              orgId: who.orgId,
-              ...(req.projectId ? { projectId: req.projectId } : {}),
-              kind: req.kind,
-              title: req.title,
-              slug,
-              createdBy: who.userId,
-              sourceThreadIds: req.sourceThreadIds,
-              ...(tags.length ? { tags } : {}),
-            },
+  return withAppendTx(ctx.pool, (tx) => createDocumentIn(ctx, tx, who, req));
+}
+
+/** The create body, for a caller that already runs in an append transaction and has checked the role. */
+export async function createDocumentIn(
+  ctx: Ctx,
+  tx: Tx,
+  who: Who,
+  req: CreateDocumentRequest,
+): Promise<DocumentWithContentDto> {
+  if (req.projectId) {
+    const p = await loadVisibleProject(tx, who.userId, req.projectId);
+    if (p.org_id !== who.orgId) throw notFound('project not found');
+  }
+  await assertThreads(tx, who, req.sourceThreadIds);
+  const docId = randomUUID();
+  const tags = tagsOf(req.tags);
+  const slug = await uniqueSlug(tx, who.orgId, req.projectId ?? null, req.title);
+  const scope = req.projectId ? projectScope(who.orgId, req.projectId) : orgScope(who.orgId);
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.document(docId),
+        event: {
+          type: 'DocumentCreated',
+          payload: {
+            docId,
+            orgId: who.orgId,
+            ...(req.projectId ? { projectId: req.projectId } : {}),
+            kind: req.kind,
+            title: req.title,
+            slug,
+            createdBy: who.userId,
+            sourceThreadIds: req.sourceThreadIds,
+            ...(tags.length ? { tags } : {}),
           },
-          actor: userActor(who.userId),
-          scope,
         },
-        versionEvent(docId, 1, req.content, { kind: 'user', id: who.userId }, scope, userActor(who.userId)),
-      ],
-      { tx },
+        actor: userActor(who.userId),
+        scope,
+      },
+      versionEvent(docId, 1, req.content, { kind: 'user', id: who.userId }, scope, userActor(who.userId)),
+    ],
+    { tx },
+  );
+  return dtoWithContent(tx, (await one(tx, 'SELECT * FROM documents WHERE id=$1', [docId])) as Row);
+}
+
+/** Archives a draft document, inside the caller's append transaction. Any other status is refused. */
+export async function archiveDocumentIn(
+  ctx: Ctx,
+  tx: Tx,
+  who: Who,
+  docId: string,
+  note: string,
+): Promise<void> {
+  const d = await loadDocument(tx, who, docId, true);
+  if (d.status !== 'draft')
+    throw conflict(
+      'invalid_transition',
+      `a ${String(d.status).replace('_', ' ')} document cannot be archived here`,
     );
-    return dtoWithContent(tx, (await one(tx, 'SELECT * FROM documents WHERE id=$1', [docId])) as Row);
-  });
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.document(docId),
+        event: {
+          type: 'DocumentStatusChanged',
+          payload: {
+            docId,
+            from: 'draft',
+            to: 'archived',
+            version: d.current_version,
+            by: who.userId,
+            note: note.slice(0, 500),
+          },
+        },
+        actor: userActor(who.userId),
+        scope: scopeOf(d as never),
+      },
+    ],
+    { tx },
+  );
 }
 
 export function versionEvent(

@@ -34,6 +34,7 @@ export * from './hr/index.ts';
 export * from './hygiene/index.ts';
 export * from './hygiene/secrets.ts';
 export * from './ids.ts';
+export * from './industry/index.ts';
 export * from './intake/index.ts';
 export * from './integrations/index.ts';
 export * from './interests/index.ts';

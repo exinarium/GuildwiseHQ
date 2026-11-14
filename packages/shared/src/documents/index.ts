@@ -4,7 +4,15 @@ import { z } from 'zod';
  * Documents (docs/design/discovery-boardroom-registry.md): briefs, PRDs, minutes and session logs held on the server
  * while they are drafted, published to the organization or project vault as markdown once approved.
  */
-export const DOCUMENT_KINDS = ['brief', 'prd', 'minutes', 'session_log', 'file'] as const;
+export const DOCUMENT_KINDS = [
+  'brief',
+  'prd',
+  'minutes',
+  'session_log',
+  'file',
+  'template',
+  'sample',
+] as const;
 export const DocumentKindSchema = z.enum(DOCUMENT_KINDS);
 export type DocumentKind = z.infer<typeof DocumentKindSchema>;
 

@@ -95,6 +95,7 @@ import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
 import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
+import { industryBundleRoutes } from './routes/industry-bundles.ts';
 import { installerRoutes } from './routes/installer.ts';
 import { intakeBatchRoutes } from './routes/intake-batches.ts';
 import { intakeRoutes } from './routes/intakes.ts';
@@ -485,6 +486,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(shiftRoutes(ctx));
   await app.register(deskRoutes(ctx));
   await app.register(ledgerRoutes(ctx));
+  await app.register(industryBundleRoutes(ctx));
   await app.register(chatRoutes(ctx));
   await app.register(ceoRoutes(ctx));
   await app.register(threadRoutes(ctx));

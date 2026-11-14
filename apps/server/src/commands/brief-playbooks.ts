@@ -41,7 +41,7 @@ function managerOrg(org: OrgCtx | null): OrgCtx {
 }
 
 /** The installed schedule of each playbook in the organization (by `action.playbook.key`). */
-async function installedMap(db: Tx | Ctx['pool'], orgId: string): Promise<Map<string, string>> {
+export async function installedMap(db: Tx | Ctx['pool'], orgId: string): Promise<Map<string, string>> {
   const r = await rows(
     db,
     `SELECT id, action->'playbook'->>'key' AS key FROM schedules
@@ -54,7 +54,8 @@ async function installedMap(db: Tx | Ctx['pool'], orgId: string): Promise<Map<st
 export async function listBriefPlaybooks(ctx: Ctx, org: OrgCtx | null): Promise<BriefPlaybookDto[]> {
   const o = managerOrg(org);
   const installed = await installedMap(ctx.pool, o.orgId);
-  return BRIEF_PLAYBOOK_KEYS.map((k) => {
+  // Industry playbooks show only once a bundle has installed them.
+  return BRIEF_PLAYBOOK_KEYS.filter((k) => !BRIEF_PLAYBOOKS[k].industry || installed.has(k)).map((k) => {
     const p = BRIEF_PLAYBOOKS[k];
     return {
       key: p.key,
@@ -66,6 +67,7 @@ export async function listBriefPlaybooks(ctx: Ctx, org: OrgCtx | null): Promise<
       defaultOwnerRole: p.defaultOwnerRole,
       maxWords: p.maxWords,
       scheduleId: installed.get(k) ?? null,
+      industry: p.industry ?? null,
     };
   });
 }
@@ -153,6 +155,40 @@ async function ensureBriefWorkflow(
   return key;
 }
 
+export interface InstallPlaybookOptions {
+  projectId?: string;
+  timezone?: string;
+  time?: string;
+  weekday?: number;
+  ownerRole?: InstallBriefPlaybookRequest['ownerRole'];
+  maxWords?: number;
+  destinations?: InstallBriefPlaybookRequest['destinations'];
+  /** Whether the schedule runs at once. */
+  enabled: boolean;
+}
+
+/** The project the playbook cards are made in: the requested one, or the only active one. */
+export async function resolvePlaybookProject(
+  tx: Tx,
+  orgId: string,
+  projectId?: string,
+): Promise<{ id: string; created_by: string }> {
+  const projects = await rows(
+    tx,
+    `SELECT id, created_by FROM projects WHERE org_id=$1 AND kind='project' AND status='active' ORDER BY created_at`,
+    [orgId],
+  );
+  let project = projectId ? projects.find((p) => p.id === projectId) : undefined;
+  if (projectId && !project)
+    throw badRequest('project_not_found', 'that project is not in this organization');
+  if (!project) {
+    if (projects.length > 1) throw badRequest('project_required', 'choose the project the cards are made in');
+    project = projects[0];
+  }
+  if (!project) throw badRequest('project_required', 'the organization has no project to make the cards in');
+  return project as { id: string; created_by: string };
+}
+
 export async function installBriefPlaybook(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -162,54 +198,53 @@ export async function installBriefPlaybook(
 ): Promise<{ scheduleId: string; webhookSecret?: string }> {
   const o = managerOrg(org);
   const playbook = playbookOf(key);
-  return withAppendTx(ctx.pool, async (tx) => {
-    const installed = (await installedMap(tx, o.orgId)).get(playbook.key);
-    if (installed)
-      throw conflict('playbook_installed', `${playbook.name} is already installed`, {
-        scheduleId: installed,
-      });
-    const projects = await rows(
-      tx,
-      `SELECT id, created_by FROM projects WHERE org_id=$1 AND kind='project' AND status='active' ORDER BY created_at`,
-      [o.orgId],
-    );
-    let project = req.projectId ? projects.find((p) => p.id === req.projectId) : undefined;
-    if (req.projectId && !project)
-      throw badRequest('project_not_found', 'that project is not in this organization');
-    if (!project) {
-      if (projects.length > 1)
-        throw badRequest('project_required', 'choose the project the cards are made in');
-      project = projects[0];
-    }
-    if (!project)
-      throw badRequest('project_required', 'the organization has no project to make the cards in');
-    const role = req.ownerRole ?? playbook.defaultOwnerRole;
-    const workflowKey = await ensureBriefWorkflow(ctx, tx, o.orgId, project as never, role);
-    const timezone = req.timezone ?? (await reportingOf(tx, o.orgId)).timezone ?? 'UTC';
-    const create: CreateScheduleRequest = {
-      name: playbook.name,
-      enabled: true,
-      trigger: {
-        kind: 'cron',
-        cron: briefPlaybookCron(playbook, req.time ?? playbook.defaultTime, req.weekday),
-        timezone,
-      },
-      action: {
-        kind: 'create_card',
-        projectId: project.id,
-        template: { ...briefPlaybookTemplate(playbook, role, req.maxWords), workflowKey },
-        deliverOutput: { destinations: req.destinations },
-        playbook: { key: playbook.key, version: playbook.version },
-      },
-    } as CreateScheduleRequest;
-    const r = await createScheduleIn(ctx, tx, user, o, {
-      name: create.name,
-      enabled: true,
-      trigger: create.trigger as never,
-      action: create.action as never,
+  return withAppendTx(ctx.pool, (tx) =>
+    installBriefPlaybookIn(ctx, tx, user, o, playbook.key, { ...req, enabled: true }),
+  );
+}
+
+/** The install body, for a caller that already runs in an append transaction and has checked access. */
+export async function installBriefPlaybookIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  o: OrgCtx,
+  key: string,
+  req: InstallPlaybookOptions,
+): Promise<{ scheduleId: string; webhookSecret?: string }> {
+  const playbook = playbookOf(key);
+  const installed = (await installedMap(tx, o.orgId)).get(playbook.key);
+  if (installed)
+    throw conflict('playbook_installed', `${playbook.name} is already installed`, {
+      scheduleId: installed,
     });
-    return { scheduleId: r.id, ...(r.webhookSecret ? { webhookSecret: r.webhookSecret } : {}) };
+  const project = await resolvePlaybookProject(tx, o.orgId, req.projectId);
+  const role = req.ownerRole ?? playbook.defaultOwnerRole;
+  const workflowKey = await ensureBriefWorkflow(ctx, tx, o.orgId, project, role);
+  const timezone = req.timezone ?? (await reportingOf(tx, o.orgId)).timezone ?? 'UTC';
+  const create: CreateScheduleRequest = {
+    name: playbook.name,
+    enabled: req.enabled,
+    trigger: {
+      kind: 'cron',
+      cron: briefPlaybookCron(playbook, req.time ?? playbook.defaultTime, req.weekday),
+      timezone,
+    },
+    action: {
+      kind: 'create_card',
+      projectId: project.id,
+      template: { ...briefPlaybookTemplate(playbook, role, req.maxWords), workflowKey },
+      ...(req.destinations?.length ? { deliverOutput: { destinations: req.destinations } } : {}),
+      playbook: { key: playbook.key, version: playbook.version },
+    },
+  } as CreateScheduleRequest;
+  const r = await createScheduleIn(ctx, tx, user, o, {
+    name: create.name,
+    enabled: req.enabled,
+    trigger: create.trigger as never,
+    action: create.action as never,
   });
+  return { scheduleId: r.id, ...(r.webhookSecret ? { webhookSecret: r.webhookSecret } : {}) };
 }
 
 export async function patchBriefPlaybook(

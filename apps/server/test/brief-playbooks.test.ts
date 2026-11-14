@@ -79,3 +79,12 @@ describe('a software-default organization', () => {
     expect(await q('SELECT 1 FROM schedules WHERE id=$1', [scheduleId])).toEqual([]);
   });
 });
+
+// GWP-233: the industry playbooks show only once an industry bundle has installed them.
+describe('the playbook list of an organization without an industry bundle', () => {
+  it('holds exactly the two general playbooks', async () => {
+    const r = await ok<any>(owner('GET', '/api/brief-playbooks'));
+    const list = (r.playbooks ?? r) as Array<{ key: string }>;
+    expect(list.map((p) => p.key).sort()).toEqual(['morning_plan', 'weekly_owner_brief']);
+  });
+});

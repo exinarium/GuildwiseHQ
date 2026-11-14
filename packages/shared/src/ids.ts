@@ -33,6 +33,7 @@ export const streamId = {
   ledger: (id: string) => `ledger-${id}`,
   /** One stream per organization and rule pack (business mode). */
   rulePack: (orgId: string, packId: string) => `rule-pack-${orgId}-${packId}`,
+  industryBundle: (orgId: string, bundleId: string) => `industry-bundle-${orgId}-${bundleId}`,
   intake: (id: string) => `intake-${id}`,
   outbound: (id: string) => `outbound-${id}`,
   mailInbox: (id: string) => `mailinbox-${id}`,

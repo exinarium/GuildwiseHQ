@@ -48,6 +48,8 @@ const KIND_LABEL: Record<DocumentKind, string> = {
   minutes: 'Minutes',
   session_log: 'Session log',
   file: 'Uploaded file',
+  template: 'Template',
+  sample: 'Sample data',
 };
 const STATUS_TONE = {
   draft: 'neutral',
