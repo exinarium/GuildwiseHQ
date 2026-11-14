@@ -158,8 +158,8 @@ describe('needs-split record and runner gate', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('needs a runner newer than 0.1.73, which shipped without the needs-split prompt', () => {
-    expect(runnerAtLeast('0.1.73', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(false);
-    expect(runnerAtLeast('0.1.74', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(true);
+  it('needs a runner newer than 0.1.74 (1.7.0), which shipped without the needs-split prompt', () => {
+    expect(runnerAtLeast('0.1.74', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(false);
+    expect(runnerAtLeast('0.1.75', MIN_RUNNER_FOR_NEEDS_SPLIT)).toBe(true);
   });
 });
