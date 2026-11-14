@@ -627,6 +627,15 @@ A second, deeper reviewer (Opus) can review each pull request together with the 
 - **Marks and precision:** a finding that both reviewers found counts for both reviewers' precision, once each. Reviewers are shown only after you have marked every posted finding.
 - **By hand:** a review you start by hand uses both reviewers while the switch is on.
 
+#### Size check and needs split
+
+- **What it checks:** the size of each recorded pull request against the project's **size budget**, in the project's **size unit** (changed lines or changed files). It is inactive until both are set in Project settings, and the pull request shows **Size check inactive: no size budget set** until then.
+- **Stacked pull requests are one:** a pull request whose base branch is the branch of another open pull request is stacked on it. A stack is measured together: each pull request counts only its own changes and the sizes are added up. Pull requests that cards open are not part of a stack.
+- **Over the budget means Needs split:** the pull request, and every pull request in its stack, shows **Needs split**. It is not reviewed, and a comment review on each pull request asks the author to split it (the page shows **Author notified**, or why not). The author is told on the pull request itself, so it reaches them whether or not they use GuildWise. No decision is needed from you and nothing is added to your Desk. Equal to the budget is within it.
+- **Back within the budget:** when the pull request (or the stack) is within the budget again, for example after the author splits it, it goes back to **Not reviewed** and is reviewed as usual.
+- **A timeout alone never sends a pull request back:** when a review times out, the size check decides. Over the budget: **Needs split**. Within the budget, after the first timeout: it stays **Not reviewed** and nothing else happens.
+- **Timed out twice:** when your **Re-run review** times out again and the pull request is within the budget (or the size check is inactive), it stays **Not reviewed**, you get a **timed out twice** item on your Desk, and the pull request says **Timed out twice**. You decide: re-run the review, or leave it. If you do nothing for 2 working days you get one reminder; nothing changes by itself. Re-running, or closing the Desk item, ends the wait. If it is over the budget when the second timeout happens, it goes to **Needs split** straight away.
+
 #### 20-PR replay and ending the rollout
 
 Before the second, deeper reviewer (Opus) reviews live pull requests, you measure both reviewers offline. On the **Pull requests** tab choose **20-PR replay**, pick a PR-only repository and select **Start replay**. The 20 most recently merged pull requests are taken (pull requests from cards are left out; the repository needs at least 20), and your workstation reviews each one with Sonnet and with Opus: 40 reviews, each with the usual 10-minute limit, one after the other, after any live reviews. **Nothing is posted** to the pull requests and no reviewer token is needed.

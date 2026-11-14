@@ -7,14 +7,14 @@ import {
   PR_TIMED_OUT_TWICE_SUBKIND,
   PrReviewNoticePayloadSchema,
   PrReviewNoticeResultSchema,
+  type PrSizeVerdict,
   prChain,
+  prSizeVerdict,
+  type SizeUnit,
   SPLIT_NOTICE_MAX_ATTEMPTS,
   SPLIT_NOTICE_RETRY_MS,
-  type SizeUnit,
-  type PrSizeVerdict,
   type SplitReason,
   sizeUnitWord,
-  prSizeVerdict,
   splitNoticeBody,
   streamId,
   timeoutFollowUp,
@@ -22,8 +22,8 @@ import {
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { afterCommit, type Tx, withAppendTx } from '../db/tx.ts';
-import { pickReviewerWorkstation, reviewerGate } from '../review/reviewer-gate.ts';
 import { reviewSettingsOf } from '../queries/misc.ts';
+import { pickReviewerWorkstation, reviewerGate } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { registerOwnerPending, resolveOwnerPending } from './owner-pending.ts';
@@ -75,10 +75,11 @@ export async function writeOpenChangeSnapshot(
     );
   }
   if (complete)
-    await exec(tx, 'DELETE FROM pr_open_changes WHERE project_repo_id=$1 AND NOT (change_id = ANY($2::text[]))', [
-      repoId,
-      changes.map((c) => c.id),
-    ]);
+    await exec(
+      tx,
+      'DELETE FROM pr_open_changes WHERE project_repo_id=$1 AND NOT (change_id = ANY($2::text[]))',
+      [repoId, changes.map((c) => c.id)],
+    );
   await exec(tx, 'UPDATE pr_review_polls SET complete=$2 WHERE project_repo_id=$1', [repoId, complete]);
 }
 
@@ -89,7 +90,11 @@ export interface SizeContext {
 }
 
 /** The project's size settings, the stored open list as chain candidates (card branches excluded) and whether it is complete. */
-export async function loadSizeContext(db: Queryable, projectId: string, repoId: string): Promise<SizeContext> {
+export async function loadSizeContext(
+  db: Queryable,
+  projectId: string,
+  repoId: string,
+): Promise<SizeContext> {
   const project = await one(db, 'SELECT * FROM projects WHERE id=$1', [projectId]);
   const cardBranches = new Set(
     (
@@ -242,7 +247,8 @@ export async function evaluateRepoSizes(
 // ---- timeouts -----------------------------------------------------------------------------------------------------
 
 const verdictText = (v: PrSizeVerdict): string => {
-  if (v.state === 'within') return `within the size budget: ${v.total} of ${v.budget} ${sizeUnitWord(v.unit)}`;
+  if (v.state === 'within')
+    return `within the size budget: ${v.total} of ${v.budget} ${sizeUnitWord(v.unit)}`;
   if (v.state === 'inactive') return 'the size check is inactive: no size budget is set';
   return 'the size could not be measured';
 };
@@ -283,7 +289,16 @@ export async function onPrReviewTimedOut(ctx: Ctx, tx: Tx, run: Row): Promise<{ 
     for (const m of await lockRecordedPrs(tx, repoId)) {
       if (!members.has(m.changeId) || m.state !== 'not_reviewed') continue;
       if (m.id !== prReviewId && (await reviewInFlight(tx, m.id))) continue;
-      await sendBack(ctx, tx, { projectId, orgId, repoId }, m, v, checkId, reason, m.id === prReviewId ? (run.id as string) : undefined);
+      await sendBack(
+        ctx,
+        tx,
+        { projectId, orgId, repoId },
+        m,
+        v,
+        checkId,
+        reason,
+        m.id === prReviewId ? (run.id as string) : undefined,
+      );
     }
   } else if (follow === 'owner_pending') {
     await tellOwnerTimedOutTwice(ctx, tx, { pr, run, v });
@@ -292,7 +307,11 @@ export async function onPrReviewTimedOut(ctx: Ctx, tx: Tx, run: Row): Promise<{ 
   return { repoId };
 }
 
-async function tellOwnerTimedOutTwice(ctx: Ctx, tx: Tx, i: { pr: Row; run: Row; v: PrSizeVerdict }): Promise<void> {
+async function tellOwnerTimedOutTwice(
+  ctx: Ctx,
+  tx: Tx,
+  i: { pr: Row; run: Row; v: PrSizeVerdict },
+): Promise<void> {
   const { pr, v } = i;
   const projectId = pr.project_id as string;
   const orgId = pr.org_id as string;
@@ -452,10 +471,12 @@ export async function deliverSplitNotices(ctx: Ctx): Promise<number> {
   );
   let sent = 0;
   for (const d of due) {
-    const target = await withAppendTx(ctx.pool, (tx) => queueNotice(ctx, tx, d.id as string, now)).catch((err) => {
-      ctx.log.error({ err, noticeId: d.id }, 'queueing a split notice failed');
-      return undefined;
-    });
+    const target = await withAppendTx(ctx.pool, (tx) => queueNotice(ctx, tx, d.id as string, now)).catch(
+      (err) => {
+        ctx.log.error({ err, noticeId: d.id }, 'queueing a split notice failed');
+        return undefined;
+      },
+    );
     if (target) {
       sent++;
       void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
@@ -495,7 +516,8 @@ async function queueNotice(ctx: Ctx, tx: Tx, noticeId: string, now: Date): Promi
     );
   // a pull request that left needs-split (or closed) before the author was told needs no notice
   if (pr.closed_at || pr.review_state !== 'needs_split') {
-    if (n.state !== 'failed' || n.retryable) await fail('dropped', 'the pull request no longer needs splitting', false);
+    if (n.state !== 'failed' || n.retryable)
+      await fail('dropped', 'the pull request no longer needs splitting', false);
     return undefined;
   }
   if (n.state === 'queued' && Number(n.attempts) >= SPLIT_NOTICE_MAX_ATTEMPTS) {
@@ -536,7 +558,9 @@ async function queueNotice(ctx: Ctx, tx: Tx, noticeId: string, now: Date): Promi
     projectRepoId: pr.project_repo_id,
     remoteUrlNormalized: pr.remote_url_normalized,
     prNumber,
-    ...(typeof snap?.head_sha === 'string' && /^[0-9a-f]{40}$/.test(snap.head_sha) ? { headSha: snap.head_sha } : {}),
+    ...(typeof snap?.head_sha === 'string' && /^[0-9a-f]{40}$/.test(snap.head_sha)
+      ? { headSha: snap.head_sha }
+      : {}),
     body,
   });
   await ctx.store.append(
@@ -552,7 +576,13 @@ async function queueNotice(ctx: Ctx, tx: Tx, noticeId: string, now: Date): Promi
     ],
     { tx },
   );
-  await enqueueRunnerCommand(tx, pick.id, 'pr_review.notice', payload, new Date(now.getTime() + SPLIT_NOTICE_RETRY_MS));
+  await enqueueRunnerCommand(
+    tx,
+    pick.id,
+    'pr_review.notice',
+    payload,
+    new Date(now.getTime() + SPLIT_NOTICE_RETRY_MS),
+  );
   return pick.id;
 }
 
