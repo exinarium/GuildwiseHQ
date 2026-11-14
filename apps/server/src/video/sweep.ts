@@ -5,6 +5,8 @@ import {
   type BlueskyFacet,
   composeCaption,
   defaultVideoCaption,
+  HASHTAG_POOLS,
+  type HashtagPools,
   SCHEDULE_DEFAULTS,
   TikTokOptionsSchema,
   VIDEO_CAPTION_LIMITS,
@@ -15,6 +17,7 @@ import {
   type VideoScript,
 } from '@aom/shared';
 import { decryptSecret } from '../auth/secrets.ts';
+import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import { alertOnce, SHARE_BACKOFF_MS, superAdminEmails } from '../commands/social.ts';
 import { freshTiktokToken } from '../commands/tiktok.ts';
@@ -728,6 +731,7 @@ const DEST_BACKOFF_MS = [1, 5, 30, 120].map((m) => m * 60_000);
 export function destinationCaption(
   post: Row,
   network: ShortDestination,
+  pools: HashtagPools = HASHTAG_POOLS,
 ): { text: string; facets: BlueskyFacet[] } {
   const meta = post.meta as VideoPostMeta;
   // the owner's edit, else the drafter's caption, else a default; an empty text falls through to the next
@@ -735,7 +739,7 @@ export function destinationCaption(
   const c =
     filled((post.captions as VideoCaptions | null)?.[network]) ??
     filled((post.submit_captions as VideoCaptions | null)?.[network]) ??
-    defaultVideoCaption(network, meta);
+    defaultVideoCaption(network, meta, pools);
   // no link on any Short: X and TikTok forbid or charge for it, and a Short has no page of its own. A link the owner typed
   // into an X or TikTok caption is taken out.
   const text =
@@ -824,7 +828,7 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
     }
     const settings = await videoSettings(ctx);
     const meta = post.meta as VideoPostMeta;
-    const cap = destinationCaption(post, network);
+    const cap = destinationCaption(post, network, await hashtagPools(ctx));
     let credentials = await decryptSecret(ctx, ch.access_token);
     let tiktok: DestinationPayload['tiktok'];
     if (network === 'tiktok') {
@@ -899,10 +903,17 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
     }
     const attempts = (share.attempts as number) + 1;
     const wait = DEST_BACKOFF_MS[Math.min(attempts - 1, DEST_BACKOFF_MS.length - 1)] as number;
-    if (kind === 'final' || now.getTime() + wait > deadline) {
+    // a retry the destination bounds itself (Instagram's processing failures) stops after its number of attempts
+    const limit = err instanceof DestinationError ? err.maxAttempts : undefined;
+    const exhausted = kind === 'retry' && limit !== undefined && attempts >= limit;
+    if (kind === 'final' || exhausted || now.getTime() + wait > deadline) {
       await setShare(`detail=$4::jsonb`, [JSON.stringify({ ...detail, dest: state })]);
       return void (await fail(
-        kind === 'final' ? message : `gave up 6 hours after the slot: ${message}`,
+        kind === 'final'
+          ? message
+          : exhausted
+            ? `gave up after ${attempts} attempts: ${message}`
+            : `gave up 6 hours after the slot: ${message}`,
         true,
       ));
     }

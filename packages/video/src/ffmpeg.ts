@@ -90,7 +90,13 @@ export function mux(
   execFileSync(ff, args, { stdio: 'ignore' });
 }
 
-/** An MP4 copy (H.264 + AAC, fast start) of the finished WebM: plays on iPhone, Android and in-app browsers. */
+/**
+ * How every MP4 is written: the index (moov) first for streaming, and no edit lists (`elst`), which Meta's Reels spec
+ * forbids and which ffmpeg's MP4 muxer writes by default.
+ */
+export const MP4_MUX_ARGS = ['-movflags', '+faststart', '-use_editlist', '0'] as const;
+
+/** An MP4 copy (H.264 + AAC, fast start, no edit lists) of the finished WebM: plays on iPhone, Android and in-app browsers. */
 export function toMp4(src: string, dest: string, crf = '23'): void {
   execFileSync(
     findFfmpeg(),
@@ -118,8 +124,7 @@ export function toMp4(src: string, dest: string, crf = '23'): void {
       '128k',
       '-ac',
       '2',
-      '-movflags',
-      '+faststart',
+      ...MP4_MUX_ARGS,
       dest,
     ],
     { stdio: 'inherit' },

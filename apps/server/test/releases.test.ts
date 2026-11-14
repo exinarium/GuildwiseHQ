@@ -1,7 +1,18 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SocialCaptionsSchema, SocialPostContentSchema } from '@aom/shared';
+import {
+  composeCaption,
+  graphemeCount,
+  HASHTAG_POOLS,
+  NO_HASHTAG_POOLS,
+  SOCIAL_LIMITS,
+  SOCIAL_NETWORKS,
+  SocialCaptionsSchema,
+  SocialPostContentSchema,
+  X_LINK_SAMPLE,
+  xTweetText,
+} from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildReleases,
@@ -275,6 +286,36 @@ describe('draftFromRelease', () => {
         .filter((l) => l.startsWith('- '))
         .every((l) => l.endsWith('…') || l.length > 10),
     ).toBe(true);
+  });
+  it('hashtags: the release tags first, then a standing and a popular tag, within each maximum and the X/Bluesky limit', () => {
+    const [r] = buildReleases(CHANGELOG, []);
+    if (!r) throw new Error('no release');
+    const c = draftFromRelease(r);
+    const h = c.captions.hashtags ?? {};
+    for (const n of SOCIAL_NETWORKS) {
+      const tags = h[n] ?? [];
+      expect(tags.length).toBeLessThanOrEqual(SOCIAL_LIMITS[n].tags[1]);
+      expect(tags.some((t) => HASHTAG_POOLS.standing.includes(t))).toBe(true);
+      expect(tags.some((t) => HASHTAG_POOLS.popular.includes(t))).toBe(true);
+    }
+    expect(h.x?.[0]).toBe('GuildwiseHQ');
+    expect(h.linkedin?.slice(0, 3)).toEqual(['AIAgents', 'Automation', 'GuildwiseHQ']);
+    expect(SocialCaptionsSchema.safeParse(c.captions).success).toBe(true);
+    expect(graphemeCount(xTweetText(c.captions.xText ?? '', X_LINK_SAMPLE, h.x))).toBeLessThanOrEqual(280);
+    const bs = composeCaption('bluesky', c.captions.blueskyText ?? '', h.bluesky).text;
+    expect(bs.endsWith(h.bluesky?.map((t) => `#${t}`).join(' ') ?? '')).toBe(true); // no tag dropped
+    // the same release gives the same tags; with no pools only the release's own
+    expect(draftFromRelease(r).captions.hashtags).toEqual(h);
+    expect(draftFromRelease(r, NO_HASHTAG_POOLS).captions.hashtags).toEqual({
+      facebook: ['GuildwiseHQ'],
+      linkedin: ['AIAgents', 'Automation', 'GuildwiseHQ'],
+      x: ['GuildwiseHQ'],
+      bluesky: ['GuildwiseHQ'],
+    });
+    expect(draftFromRelease(r, { standing: ['Libre'], popular: [] }).captions.hashtags?.x).toEqual([
+      'GuildwiseHQ',
+      'Libre',
+    ]);
   });
   it('is still valid for a release with nothing listed', () => {
     const c = draftFromRelease({

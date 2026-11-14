@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HashtagPoolsSchema } from '../blog/hashtags.ts';
 import {
   defaultSchedule,
   PatchVideoScheduleSchema,
@@ -284,6 +285,8 @@ export const VideoStatusSchema = z.object({
   /** Uploads whose video YouTube kept private. */
   lockedPrivate: z.number().int(),
   auditFormUrl: z.string(),
+  /** The hashtag pools in force, so the schedule step shows the default captions as they will be posted. */
+  hashtagPools: HashtagPoolsSchema.optional(),
 });
 export type VideoStatus = z.infer<typeof VideoStatusSchema>;
 

@@ -21,6 +21,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireSuperAdmin } from '../auth/guards.ts';
+import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { draftFromRelease, getRelease } from '../blog/releases.ts';
 import { listTopics, moveTopicUp, queueBlogTopic, rejectTopic } from '../blog/topics.ts';
 import {
@@ -301,7 +302,11 @@ export function blogPlatformRoutes(ctx: Ctx) {
         if (!release) throw badRequest('unknown_release', `there is no release ${req.body.ref}`);
         const { post, created } = await submitSocialPost(
           ctx,
-          { kind: req.body.kind, ref: req.body.ref, content: draftFromRelease(release) },
+          {
+            kind: req.body.kind,
+            ref: req.body.ref,
+            content: draftFromRelease(release, await hashtagPools(ctx)),
+          },
           { userId: s.user.id },
           'draft',
         );

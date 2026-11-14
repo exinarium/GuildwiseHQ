@@ -11,6 +11,7 @@ import {
   SOCIAL_CHANNEL_NETWORKS,
   SOCIAL_NETWORKS,
 } from '../blog/constants.ts';
+import { HashtagPoolInputSchema, HashtagPoolsSchema } from '../blog/hashtags.ts';
 import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
 import {
   ReleaseSchema,
@@ -303,6 +304,8 @@ export const BlogWriterSchema = z.object({
   /** Draft a social post for each new core release (always held for the super admin's approval). Default on. */
   releasePosts: z.boolean().default(true),
   topics: z.array(z.string()),
+  /** The standing and popular hashtags added to every post's own (an empty list: that kind is off). */
+  hashtagPools: HashtagPoolsSchema.optional(),
   model: z.string(),
   models: z.array(z.string()),
   /** Prices in use per selectable model; null when unknown (the writer refuses to run on it). */
@@ -332,6 +335,10 @@ export const PatchBlogWriterRequestSchema = z.object({
   queuedPerDay: z.number().int().min(0).max(10).optional(),
   releasePosts: z.boolean().optional(),
   topics: z.array(z.string().trim().min(3).max(BLOG_WRITER.topicChars)).max(BLOG_WRITER.topicsMax).optional(),
+  /** Replaces one or both hashtag pools; an empty list turns that kind of tag off. */
+  hashtagPools: z
+    .object({ standing: HashtagPoolInputSchema.optional(), popular: HashtagPoolInputSchema.optional() })
+    .optional(),
   model: z.string().trim().min(1).max(100).optional(),
   capUsd: z.number().min(0).max(BLOG_WRITER.maxCapUsd).optional(),
   searchUsd: z.number().min(0).max(1).optional(),

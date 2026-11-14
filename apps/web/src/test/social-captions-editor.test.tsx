@@ -29,20 +29,28 @@ describe('SocialCaptionsEditor', () => {
     const user = userEvent.setup();
     render(<Harness initial={{ xText: 'Hello' }} />);
     const x = screen.getByTestId('caption-x');
-    expect(within(x).getByTestId('tags-count-x').textContent).toBe('0 of 1-2 hashtags');
+    expect(within(x).getByTestId('tags-count-x').textContent).toBe('0 of 1-3 hashtags');
     expect(
       within(screen.getByTestId('caption-linkedin')).getByTestId('tags-count-linkedin').textContent,
-    ).toBe('0 of 3-5 hashtags');
+    ).toBe('0 of 3-8 hashtags');
     const input = within(x).getByLabelText('Add a hashtag for X');
     await user.type(input, '#Agents{Enter}');
     await user.type(within(x).getByLabelText('Add a hashtag for X'), 'AI{Enter}');
-    expect(within(x).getByTestId('tags-count-x').textContent).toBe('2 of 1-2 hashtags');
+    expect(within(x).getByTestId('tags-count-x').textContent).toBe('2 of 1-3 hashtags');
+    await user.type(within(x).getByLabelText('Add a hashtag for X'), 'Ops{Enter}');
+    expect(within(x).getByTestId('tags-count-x').textContent).toBe('3 of 1-3 hashtags');
     expect(within(x).queryByLabelText('Add a hashtag for X')).toBeNull(); // at the maximum
-    expect(JSON.parse(screen.getByTestId('value').textContent ?? '{}').hashtags.x).toEqual(['Agents', 'AI']);
+    expect(JSON.parse(screen.getByTestId('value').textContent ?? '{}').hashtags.x).toEqual([
+      'Agents',
+      'AI',
+      'Ops',
+    ]);
     // the exact preview carries the tags and the 23-character sample link
-    expect(within(x).getByTestId('preview-x').textContent).toBe('Hello #Agents #AI https://example.com/abc');
+    expect(within(x).getByTestId('preview-x').textContent).toBe(
+      'Hello #Agents #AI #Ops https://example.com/abc',
+    );
     await user.click(within(x).getByLabelText('Remove #Agents'));
-    expect(within(x).getByTestId('tags-count-x').textContent).toBe('1 of 1-2 hashtags');
+    expect(within(x).getByTestId('tags-count-x').textContent).toBe('2 of 1-3 hashtags');
   });
 
   it('refuses a hashtag that is not one word, and a duplicate', async () => {
@@ -50,11 +58,11 @@ describe('SocialCaptionsEditor', () => {
     render(<Harness />);
     const fb = screen.getByTestId('caption-facebook');
     await user.type(within(fb).getByLabelText('Add a hashtag for Facebook'), '1bad{Enter}');
-    expect(within(fb).getByTestId('tags-count-facebook').textContent).toBe('0 of 0-3 hashtags');
+    expect(within(fb).getByTestId('tags-count-facebook').textContent).toBe('0 of 0-5 hashtags');
     await user.clear(within(fb).getByLabelText('Add a hashtag for Facebook'));
     await user.type(within(fb).getByLabelText('Add a hashtag for Facebook'), 'AI{Enter}');
     await user.type(within(fb).getByLabelText('Add a hashtag for Facebook'), 'ai{Enter}');
-    expect(within(fb).getByTestId('tags-count-facebook').textContent).toBe('1 of 0-3 hashtags');
+    expect(within(fb).getByTestId('tags-count-facebook').textContent).toBe('1 of 0-5 hashtags');
   });
 
   it('shows Bluesky without a link and LinkedIn escaped', async () => {

@@ -11,7 +11,7 @@ import {
 import { joinWavs, writeSilentWav } from './audio.ts';
 import { renderPngs } from './browser.ts';
 import { ass, chunkCaption, srt } from './captions.ts';
-import { findFfmpeg, probeDuration, RENDER_ENCODERS, runFfmpeg, vtt } from './ffmpeg.ts';
+import { findFfmpeg, MP4_MUX_ARGS, probeDuration, RENDER_ENCODERS, runFfmpeg, vtt } from './ffmpeg.ts';
 import { browserJobsFor, type SceneJob, thumbnailJob } from './jobs.ts';
 import { clipBox, type Orientation, type SceneImages, SIZES } from './scenes.ts';
 import {
@@ -79,6 +79,56 @@ export interface RenderResult {
 }
 
 const WORDS_PER_SECOND = 2.4;
+
+/**
+ * The arguments of the final encode: the scene segments cross-faded (`filter`), the narration, H.264 high + AAC 48 kHz
+ * stereo, written as an MP4 with the index first and no edit lists (`MP4_MUX_ARGS`; Meta's Reels spec forbids edit lists).
+ */
+export function encodeArgs(o: {
+  segments: readonly string[];
+  audio: string;
+  filter: string;
+  crf: number;
+  fps: number;
+  seconds: number;
+  out: string;
+}): string[] {
+  return [
+    ...o.segments.flatMap((f) => ['-i', f]),
+    '-i',
+    o.audio,
+    '-filter_complex',
+    o.filter,
+    '-map',
+    '[vout]',
+    '-map',
+    `${o.segments.length}:a`,
+    '-c:v',
+    'libx264',
+    '-profile:v',
+    'high',
+    '-preset',
+    'medium',
+    '-crf',
+    String(o.crf),
+    '-pix_fmt',
+    'yuv420p',
+    '-r',
+    String(o.fps),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '160k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-t',
+    o.seconds.toFixed(3),
+    ...MP4_MUX_ARGS,
+    o.out,
+  ];
+}
 
 /**
  * Renders a script to a finished MP4 plus captions, thumbnail (long videos), description and render log:
@@ -246,42 +296,15 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     last = label;
   });
   parts.push(`${last}${short ? 'ass=burn.ass,' : ''}format=yuv420p[vout]`);
-  const args = [
-    ...segFiles.flatMap((f) => ['-i', f]),
-    '-i',
+  const args = encodeArgs({
+    segments: segFiles,
     audio,
-    '-filter_complex',
-    parts.join(';'),
-    '-map',
-    '[vout]',
-    '-map',
-    `${segFiles.length}:a`,
-    '-c:v',
-    'libx264',
-    '-profile:v',
-    'high',
-    '-preset',
-    'medium',
-    '-crf',
-    String(opts.crf ?? 20),
-    '-pix_fmt',
-    'yuv420p',
-    '-r',
-    String(fps),
-    '-c:a',
-    'aac',
-    '-b:a',
-    '160k',
-    '-ar',
-    '48000',
-    '-ac',
-    '2',
-    '-t',
-    tl.total.toFixed(3),
-    '-movflags',
-    '+faststart',
-    final,
-  ];
+    filter: parts.join(';'),
+    crf: opts.crf ?? 20,
+    fps,
+    seconds: tl.total,
+    out: final,
+  });
   runFfmpeg(args, { bin: ff, cwd: work });
   const durationSeconds = probeDuration(final, ff);
   const bytes = statSync(final).size;

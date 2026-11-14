@@ -3,9 +3,12 @@ import { isAbsolute, join, resolve, sep } from 'node:path';
 import {
   type BlogContent,
   buildDescription,
+  buildHashtags,
   DEFAULT_VIDEO_SETTINGS,
   type EditVideoPostRequest,
   fitCaption,
+  graphemeCount,
+  type HashtagPools,
   isLibraryRef,
   isScheduleSlot,
   nextFreeSlot,
@@ -17,9 +20,11 @@ import {
   ScheduleVideoPostRequestSchema,
   SOCIAL_LIMITS,
   type SocialCaptions,
+  type SocialNetwork,
   type SubmitVideoPostRequest,
   slotsFrom,
   VIDEO_LIBRARY_PREFIX,
+  VIDEO_LIMITS,
   VIDEO_POST_LIMITS,
   VIDEO_TOPIC_LIMITS,
   type VideoCapacity,
@@ -50,6 +55,7 @@ import {
   videoScriptIssues,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { loadReleases } from '../blog/releases.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Row, rows } from '../db/sql.ts';
@@ -541,6 +547,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
       videoStorageUsed(ctx),
       offScheduleCount(ctx),
     ]);
+  const pools = await hashtagPools(ctx);
   return {
     settings,
     channel: {
@@ -563,6 +570,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
     pending: pending?.n ?? 0,
     lockedPrivate: locked?.n ?? 0,
     auditFormUrl: YOUTUBE_AUDIT_FORM_URL,
+    hashtagPools: { standing: [...pools.standing], popular: [...pools.popular] },
   };
 }
 
@@ -1426,7 +1434,7 @@ export async function resolveLockedUpload(ctx: Ctx, by: string, postId: string):
 
 // ---- library import (existing help videos; their MP4 is the artifact, metadata only)
 
-function libraryMeta(title: string, chapters: string[]): VideoPostMeta {
+function libraryMeta(title: string, chapters: string[], pools: HashtagPools): VideoPostMeta {
   const t = fitCaption(`${title} | Guildwise HQ`, 100).replace(/[<>]/g, '');
   const topics = chapters.slice(0, 5).join(', ');
   return {
@@ -1436,7 +1444,13 @@ function libraryMeta(title: string, chapters: string[]): VideoPostMeta {
       600,
     ).replace(/[<>]/g, ''),
     tags: ['Guildwise HQ', 'AI agents', 'tutorial', 'automation'],
-    hashtags: ['#GuildwiseHQ', '#AIAgents', '#Tutorial'],
+    // the tutorial's own tags, then the standing and popular pool tags, within YouTube's 3 to 5
+    hashtags: buildHashtags({
+      topical: ['GuildwiseHQ', 'AIAgents', 'Tutorial'],
+      pools,
+      max: VIDEO_LIMITS.youtube.hashtags[1],
+      seed: t,
+    }).map((h) => `#${h}`),
   };
 }
 
@@ -1511,6 +1525,7 @@ export async function importLibrary(
   }
   const created: VideoPost[] = [];
   const skipped: string[] = [];
+  const pools = await hashtagPools(ctx);
   for (const e of wanted) {
     const ref = `${VIDEO_LIBRARY_PREFIX}${e.slug}`;
     const made = await withLock(ctx, `video-post:tutorial:${ref}:long`, async () => {
@@ -1537,6 +1552,7 @@ export async function importLibrary(
               meta: libraryMeta(
                 e.title,
                 e.chapters.map((c) => c.title),
+                pools,
               ),
               origin: by,
               status: 'in_review',
@@ -1818,19 +1834,32 @@ export function libraryDescription(
 
 // ---- tutorial cross-post (social_posts kind 'video'), approved separately from the video
 
-function crossPostCaptions(meta: VideoPostMeta): SocialCaptions {
-  const tags = meta.hashtags.map((h) => h.replace(/^#/, ''));
+function crossPostCaptions(meta: VideoPostMeta, pools: HashtagPools): SocialCaptions {
   const lead = `New video: ${meta.title}`;
-  return {
+  const texts = {
     facebookText: fitCaption(`${lead}. ${meta.description}`, SOCIAL_LIMITS.facebook.text),
     linkedinText: fitCaption(`${lead}\n\n${meta.description}`, SOCIAL_LIMITS.linkedin.text),
     xText: fitCaption(lead, 200),
     blueskyText: fitCaption(lead, 240),
+  };
+  // the video's hashtags first, then the standing and popular pool tags, within each network's maximum and room
+  const tags = (network: SocialNetwork): string[] => {
+    const limits = SOCIAL_LIMITS[network];
+    return buildHashtags({
+      topical: meta.hashtags,
+      pools,
+      max: limits.tags[1],
+      seed: meta.title,
+      room: 'total' in limits ? limits.total - graphemeCount(texts[`${network}Text`]) : undefined,
+    });
+  };
+  return {
+    ...texts,
     hashtags: {
-      facebook: tags.slice(0, SOCIAL_LIMITS.facebook.tags[1]),
-      linkedin: tags.slice(0, SOCIAL_LIMITS.linkedin.tags[1]),
-      x: tags.slice(0, SOCIAL_LIMITS.x.tags[1]),
-      bluesky: tags.slice(0, SOCIAL_LIMITS.bluesky.tags[1]),
+      facebook: tags('facebook'),
+      linkedin: tags('linkedin'),
+      x: tags('x'),
+      bluesky: tags('bluesky'),
     },
   };
 }
@@ -1851,6 +1880,7 @@ export async function createVideoCrossPost(ctx: Ctx, postId: string, by: Origin)
     [postId],
   );
   if (!share?.url) throw conflict('not_on_youtube', 'the video is not on YouTube yet');
+  const pools = await hashtagPools(ctx);
   await withLock(ctx, `social-post:video:${postId}`, async () => {
     if (await one(ctx.pool, `SELECT 1 AS x FROM social_posts WHERE kind='video' AND ref=$1`, [postId]))
       return;
@@ -1879,7 +1909,7 @@ export async function createVideoCrossPost(ctx: Ctx, postId: string, by: Origin)
               ),
               summary,
               coverKey: 'how-to',
-              captions: crossPostCaptions(meta),
+              captions: crossPostCaptions(meta, pools),
             },
             origin: by,
             status: 'draft',
