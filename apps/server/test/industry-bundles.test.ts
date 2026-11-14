@@ -1,7 +1,7 @@
 import { INDUSTRY_BUNDLES, type IndustryBundle, rulePackById } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { addMember } from './helpers/members.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 // GWP-233: one install or uninstall for an industry's rule pack, playbooks, knowledge templates, sample data and
@@ -103,7 +103,11 @@ describe.each(['accounting', 'law'])('the %s bundle', (id) => {
     }
     const templates = await bundleDocs('industry-template');
     expect(templates.filter((d) => d.tags.includes(id))).toHaveLength(b.knowledgeTemplates.length);
-    expect(templates.every((d) => d.kind === 'template' && d.status === 'draft')).toBe(true);
+    expect(
+      templates
+        .filter((d) => d.tags.includes(id))
+        .every((d) => d.kind === 'template' && d.status === 'draft'),
+    ).toBe(true);
     const samples = await bundleDocs('sample');
     expect(samples.filter((d) => d.tags.includes(id))).toHaveLength(b.sampleData.length);
     expect(samples.every((d) => d.kind === 'sample' && d.title.startsWith('Sample:'))).toBe(true);
@@ -141,11 +145,15 @@ describe.each(['accounting', 'law'])('the %s bundle', (id) => {
     await install(id);
     const [rule] = await packRows(pack.id).then((r) => r.filter((x) => !x.retired_at));
     await call('PATCH', `/api/ledger/${rule?.id}`, { body: 'Our own wording of this rule.' });
-    const [tpl] = (await bundleDocs('industry-template')).filter((d) => d.tags.includes(id));
-    await call('POST', `/api/documents/${tpl?.id}/versions`, {
-      content: 'Filled in by the firm',
-      baseVersion: 1,
-    });
+    const [tpl] = (await bundleDocs('industry-template')).filter(
+      (d) => d.tags.includes(id) && d.status === 'draft' && d.current_version === 1,
+    );
+    await call(
+      'POST',
+      `/api/documents/${tpl?.id}/versions`,
+      { content: 'Filled in by the firm', baseVersion: 1 },
+      201,
+    );
     const r = await remove(id);
     const kept = r.kept.map((k: any) => `${k.kind}:${k.id}:${k.reason}`);
     expect(kept).toContain(`document:${tpl?.id}:edited`);
@@ -216,16 +224,24 @@ describe('the bundle commands', () => {
   it('previews a near-duplicate of the organization own rule without writing', async () => {
     const rule = rulePackById('law')?.rules[0];
     if (!rule) throw new Error('no rule');
-    await call('POST', '/api/ledger', { scope: 'standing_order', title: rule.title, body: rule.body });
+    const made = await raw('POST', '/api/ledger', {
+      scope: 'standing_order',
+      title: rule.title,
+      body: rule.body,
+    });
+    // 409 duplicate_order: an earlier case already left an equivalent live rule in the organization
+    expect([200, 201, 409], JSON.stringify(made.body)).toContain(made.status);
     const events = await eventCount();
     const pv = await call('GET', '/api/industry-bundles/law');
     const first = pv.rulePack.rules.find((r: any) => r.id === rule.id);
-    expect(['covered', 'may_conflict']).toContain(first.status);
+    // 'edited': an earlier case left the organization's edited copy of this rule live
+    expect(['covered', 'may_conflict', 'edited']).toContain(first.status);
     expect(await eventCount()).toBe(events);
   });
 
   it('lets a member list and preview, but not install or remove', async () => {
-    const m = await addMember(w, 'member');
+    const m = await w.t.userSession(uniqueEmail('member'));
+    await w.t.addOrgMember(orgId(), m.id, 'member');
     const asMember = (method: string, url: string) =>
       w.t.req(method, url, { cookie: m.cookie, headers: { 'x-aom-org': w.owner.id }, body: {} });
     expect((await asMember('GET', '/api/industry-bundles')).status).toBe(200);
