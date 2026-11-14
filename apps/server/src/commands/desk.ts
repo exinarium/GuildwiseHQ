@@ -10,6 +10,7 @@ import {
   isOrgManager,
   isPhaseDeskSubkind,
   PLATFORM_APPROVAL_SUBKINDS,
+  PR_TIMED_OUT_TWICE_SUBKIND,
   type ResolveDeskItemRequest,
   type ShipReleaseApproval,
   streamId,
@@ -53,6 +54,7 @@ import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { editLedgerEntry } from './ledger.ts';
 import { findNearDuplicate } from './ledger-checks.ts';
 import { needsSplitAnswered } from './needs-split.ts';
+import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { relayAuthoredBundles } from './pack-authoring.ts';
 import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignmentIn } from './pack-holders.ts';
@@ -519,6 +521,11 @@ async function closeItem(
       item.subkind === BATCH_QUESTION_SUBKIND && resolution === 'dismissed'
         ? await batchDismissedEvents(tx, item)
         : [];
+    // The owner decided about a "timed out twice" pull request (re-run it elsewhere, or leave it): the reminder stops.
+    if (item.subkind === PR_TIMED_OUT_TWICE_SUBKIND && !retryClosedAlert && !partial) {
+      const prReviewId = (item.data as { prReviewId?: string } | null)?.prReviewId;
+      if (prReviewId) await resolveTimedOutTwice(ctx, tx, prReviewId, 'owner_acted', user.id, { skipAlertClose: true });
+    }
     if (!retryClosedAlert && !partial)
       await ctx.store.append(
         [

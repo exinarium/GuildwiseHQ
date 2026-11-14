@@ -30,6 +30,8 @@ import { mayStart } from '../review/may-start.ts';
 import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
+import { loadSizeContext, onPrReviewTimedOut, resolveTimedOutTwice, verdictOf } from './pr-size-check.ts';
+import { ownerPendingOf } from './owner-pending.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
 import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
 import { RUN_GRACE_MS, type StartResult, startPrReviewRound } from './pr-review-rounds.ts';
@@ -131,6 +133,8 @@ export async function triggerPrReview(
     });
     if (r.started) {
       target = r.target;
+      // the owner acted on a "timed out twice" item by re-running: it stops waiting for them
+      await resolveTimedOutTwice(ctx, tx, prReviewId, 'owner_acted', user.id);
       return;
     }
     if (r.reason === 'gone') throw notFound('pull request not found');
@@ -530,6 +534,8 @@ export async function applyPrReviewRunResult(
     if (r.outcome === 'timeout') {
       await emit('PrReviewRunTimedOut', { ...base, durationMs: r.durationMs, phase: r.phase, by: 'runner' });
       await end('timed_out', 'timeout', 'partner_timeout');
+      // the size check decides what a timeout leads to (never a replay run: it branched off above)
+      await onPrReviewTimedOut(ctx, tx, { ...run, state: 'timed_out' });
       return;
     }
     if (r.outcome === 'failed') {
@@ -727,6 +733,7 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
         });
         if (t) deliver.add(t);
       }
+      await onPrReviewTimedOut(ctx, tx, { ...run, state: 'timed_out' });
       return true;
     });
     if (done) n++;
@@ -843,6 +850,8 @@ export async function listPrReviews(
     db,
     `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.url, pr.title, pr.author, pr.opened_at, pr.review_state,
             pr.reviewed_at, pr.reviewed_by, pr.reviewed_by_all, pr.closed_at, r.pr_only, r.remote_url_normalized, r.name,
+            pr.attention, pr.split_reason, pr.split_at, pr.split_total, pr.split_budget, pr.split_unit, pr.split_members,
+            nt.state AS notice_state, nt.posted_at AS notice_posted_at, nt.review_url AS notice_url, nt.error AS notice_error,
             rd.id AS round_id, rd.state AS round_state, rd.started_at, rd.finished_at, rd.end_code, rd.review_url,
             rd.trigger, rd.rerun_of_round_id, prev.started_at AS rerun_of_started_at, rd.held_back_count, rd.findings_cap, rd.changed_lines, rd.merged_count, rd.reviewers,
             (SELECT max(x.duration_ms) FROM pr_review_runs x WHERE x.round_id = rd.id) AS duration_ms,
@@ -861,6 +870,8 @@ export async function listPrReviews(
        LEFT JOIN pr_review_rounds rd ON rd.id = (
               SELECT x.id FROM pr_review_rounds x WHERE x.pr_review_id = pr.id ORDER BY x.started_at DESC LIMIT 1)
        LEFT JOIN pr_review_rounds prev ON prev.id = rd.rerun_of_round_id
+       LEFT JOIN pr_split_notices nt ON nt.id = (
+              SELECT y.id FROM pr_split_notices y WHERE y.pr_review_id = pr.id ORDER BY y.created_at DESC LIMIT 1)
       WHERE pr.project_id=$1
       ORDER BY (pr.closed_at IS NULL) DESC, pr.opened_at DESC, pr.change_id DESC
       LIMIT 200`,
@@ -877,6 +888,31 @@ export async function listPrReviews(
     : [];
   const tokens = await reviewerTokenStates(db, [...new Set(list.map((l) => l.project_repo_id as string))]);
   const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+  // the live size check result: one read of the stored open list per repository
+  const sizes = new Map<string, Awaited<ReturnType<typeof loadSizeContext>>>();
+  for (const repoId of new Set(list.filter((l) => !l.closed_at).map((l) => l.project_repo_id as string)))
+    sizes.set(repoId, await loadSizeContext(db, projectId, repoId));
+  const reminders = new Map<string, { dueAt: string; remindedAt: string | null }>();
+  for (const l of list)
+    if (l.attention === 'timed_out_twice') {
+      const t = await ownerPendingOf(db, 'second_timeout', l.id as string);
+      if (t?.status === 'open') reminders.set(l.id as string, { dueAt: t.dueAt, remindedAt: t.remindedAt });
+    }
+  const sizeOf = (l: Record<string, unknown>): PrReviewDto['size'] => {
+    const ctx2 = sizes.get(l.project_repo_id as string);
+    if (!ctx2 || l.closed_at || l.review_state === 'reviewed') return null;
+    const v = verdictOf(ctx2, l.change_id as string);
+    if (v.state === 'inactive') return { state: 'inactive', reason: v.reason };
+    if (v.state === 'unknown') return { state: 'unknown', reason: v.reason };
+    return {
+      state: v.state,
+      total: v.total,
+      budget: v.budget,
+      unit: v.unit,
+      members: v.members,
+      complete: v.complete,
+    };
+  };
   return list.map((l) => {
     const blind = blindReviewer(l);
     // nothing was posted by a round that timed out or failed: nothing is blind, the owner sees which run failed
@@ -900,8 +936,30 @@ export async function listPrReviews(
       title: l.title as string,
       author: (l.author as string | null) ?? null,
       openedAt: iso(l.opened_at) as string,
-      state: l.review_state as 'not_reviewed' | 'reviewed',
+      state: l.review_state as PrReviewState,
       reviewedAt: iso(l.reviewed_at),
+      size: sizeOf(l),
+      split:
+        l.review_state === 'needs_split'
+          ? {
+              reason: (l.split_reason as string | null) ?? 'over_budget',
+              total: l.split_total === null ? null : Number(l.split_total),
+              budget: l.split_budget === null ? null : Number(l.split_budget),
+              unit: (l.split_unit as 'changed_lines' | 'changed_files' | null) ?? null,
+              members: (l.split_members as Array<{ changeId: string; size: number }> | null) ?? [],
+              at: iso(l.split_at),
+              notice: l.notice_state
+                ? {
+                    state: l.notice_state as 'pending' | 'queued' | 'posted' | 'failed',
+                    postedAt: iso(l.notice_posted_at),
+                    url: (l.notice_url as string | null) ?? null,
+                    error: (l.notice_error as string | null) ?? null,
+                  }
+                : null,
+            }
+          : null,
+      attention: l.attention === 'timed_out_twice' ? ('timed_out_twice' as const) : null,
+      reminder: reminders.get(l.id as string) ?? null,
       reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
       queuePosition: queued.get(l.id as string)?.position ?? null,
       queueSlot: queued.get(l.id as string)?.slot ?? null,
