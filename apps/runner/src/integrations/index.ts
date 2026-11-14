@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import {
+  type AppCommandResult,
   CommandPayloadSchemas,
   checkIntegrationRequest,
   INTEGRATIONS_REGISTRY_VERSION,
@@ -17,7 +18,6 @@ import {
   MAX_INTEGRATION_STATUSES,
   type RunnerCommandName,
   type SealedPlaintext,
-  type AppCommandResult,
 } from '@aom/shared';
 import { AppCommands } from '../apps/commands.ts';
 import { type Logger, nullLogger } from '../log.ts';

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
+  APP_ERROR_TEXT,
   ClaudeAccountKeySchema,
   CONNECTABLE_FORGES,
   type ConnectableForge,
@@ -12,7 +13,6 @@ import {
   INTEGRATION_STATE_LABELS,
   RunnerPairRequestSchema,
   RunnerPairResponseSchema,
-  APP_ERROR_TEXT,
 } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
@@ -27,6 +27,14 @@ import {
 } from './adapters/claude-account-provision.ts';
 import { displayDir, expandHome } from './adapters/claude-accounts.ts';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
+import {
+  type AppsConnectOptions,
+  appProviderOf,
+  appsConnect,
+  appsList,
+  readAppKey,
+  readHiddenPem,
+} from './apps/cli.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -38,17 +46,9 @@ import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
+import { AutomatedAppIntegration } from './integrations/automated-app.ts';
 import { ClaudeCredentialStore, claudeAccountFile, claudeFile } from './integrations/claude-store.ts';
 import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
-import { AutomatedAppIntegration } from './integrations/automated-app.ts';
-import {
-  type AppsConnectOptions,
-  appProviderOf,
-  appsConnect,
-  appsList,
-  readAppKey,
-  readHiddenPem,
-} from './apps/cli.ts';
 import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';

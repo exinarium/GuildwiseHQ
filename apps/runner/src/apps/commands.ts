@@ -1,8 +1,8 @@
 import {
   type AppCommandResult,
   type AppConnectPayload,
-  type IntegrationKindId,
   CommandPayloadSchemas,
+  type IntegrationKindId,
   type RunnerCommandName,
   type SealedEnvelope,
 } from '@aom/shared';

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type AddOrgAppRequest,
   APP_ERROR_TEXT,
   APP_INTEGRATIONS_CAPABILITY,
-  type AddOrgAppRequest,
   type AppCommandResult,
   AppCommandResultSchema,
   type AppIdentity,

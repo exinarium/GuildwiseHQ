@@ -48,6 +48,7 @@ import {
 } from '../commands/integrations.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
+import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyResealResult } from '../commands/org-provider-keys.ts';
@@ -99,7 +100,6 @@ import {
   applyStorageReport,
   sendStorageSync,
 } from '../commands/storage-connections.ts';
-import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
 import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';

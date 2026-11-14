@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  APP_PROVIDER_IDS,
   CLAUDE_ACCOUNTS_CAPABILITY,
   checkIntegrationRequest,
   ENVELOPE_COMMANDS,
@@ -23,7 +24,6 @@ import {
   type RunnerCommandName,
   streamId,
   type WorkstationIntegrationsResponse,
-  APP_PROVIDER_IDS,
 } from '@aom/shared';
 import { z } from 'zod';
 import type { AuthSession } from '../auth/sessions.ts';

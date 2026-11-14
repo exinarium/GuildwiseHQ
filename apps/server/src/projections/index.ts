@@ -1,6 +1,7 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentUxProjectors } from './agent-ux.ts';
 import { agentProjectors } from './agents.ts';
+import { appIntegrationProjectors } from './app-integrations.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
 import { boardProjectors } from './board.ts';
@@ -61,7 +62,6 @@ import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { socialPostProjectors } from './social-posts.ts';
 import { storageProjectors } from './storage.ts';
-import { appIntegrationProjectors } from './app-integrations.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';

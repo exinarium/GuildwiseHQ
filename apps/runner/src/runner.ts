@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir, hostname, platform } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import {
+  APP_INTEGRATIONS_CAPABILITY,
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_DIAGNOSTICS_CAPABILITY,
@@ -73,7 +74,6 @@ import {
   type ShiftLimitSetting,
   type ShiftLimitSource,
   STORAGE_CAPABILITY,
-  APP_INTEGRATIONS_CAPABILITY,
   STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
   UNLIMITED_SHIFTS,
@@ -97,6 +97,8 @@ import {
 } from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { AppTokenBroker } from './apps/broker.ts';
+import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
@@ -190,8 +192,6 @@ import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/su
 import { writeShims } from './shims.ts';
 import { chromiumPdfRenderer, type PdfRenderer } from './storage/pdf.ts';
 import { StorageService } from './storage/service.ts';
-import { AppTokenBroker } from './apps/broker.ts';
-import { AppKeyStore } from './apps/store.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';

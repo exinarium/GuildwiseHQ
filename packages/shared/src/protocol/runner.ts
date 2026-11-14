@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
+import {
+  AppAdoptPayloadSchema,
+  AppConnectPayloadSchema,
+  AppRemovePayloadSchema,
+  AppSyncPayloadSchema,
+  AppTestPayloadSchema,
+} from '../apps/index.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
 import {
@@ -141,13 +148,6 @@ import {
   RunStopPayloadSchema,
 } from '../runs/types.ts';
 import { VaultFolderSchema } from '../safe.ts';
-import {
-  AppAdoptPayloadSchema,
-  AppConnectPayloadSchema,
-  AppRemovePayloadSchema,
-  AppSyncPayloadSchema,
-  AppTestPayloadSchema,
-} from '../apps/index.ts';
 import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import {
   DIRECT_UNAVAILABLE_REASONS,
