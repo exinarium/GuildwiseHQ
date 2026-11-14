@@ -141,6 +141,8 @@ You can override it:
 
 The override shows as a badge on the card and the reason is recorded. Once overridden, the diff no longer changes it.
 
+The planner and the architect can also mark a card **large** before its first build (`aom risk large --reason "..."`), when their reading of the code shows it is a big change, so that a senior builder takes the first build. They only ever raise it; the BA or you lower it with **Change**.
+
 ## The project backlog {#backlog}
 
 Each project has a **Backlog** page in the sidebar (and a Board/Backlog tab pair at the top of the board). It holds wanted work that is not in development: nothing on it is worked by an agent until an Owner or Admin sends it to the BA. Every member of the project can read the backlog; only Owners and Admins add, edit, drop and send items.

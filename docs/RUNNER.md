@@ -876,7 +876,7 @@ aom card [--json]                                      print the card and brief
 aom ledger search "<query>" [--scope all|feature|decision|standing_order]
                                                        search answers, decisions and standing orders
 aom comment --note "<text>"                            post a note without ending
-aom question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic <topic>] [--wait [10m]] [--non-blocking] [--force]
+aom question --text "<q>" [--option "<a>"]... [--recommend <n, from 0>] [--doing "<x>"] [--topic <topic>] [--wait [10m]] [--non-blocking] [--force]
 aom card facts [<REF>]                                 what the server knows: environment, dependencies merged, branch, stage, blockers
 aom block --on dependency <REF> [--card <REF>]         architect, planner, BA: this card waits for another card
 aom devops "<request>"                                 ask the DevOps engineer
@@ -891,7 +891,7 @@ Agents must run `aom ledger search` before raising a question: every answer (fro
 - Repeat guard: the second similar question on the same card and stage with no handoff in between does not reach anybody. The card is parked with a back-off and exactly one desk item says so. Five question shifts about one card within two hours put it in loop back-off, whatever the wording. A question shift the runner refused (no agent ran) does not count, and neither does a routing hop (peer, BA, CEO, desk): one question counts once. Only questions an agent asked count; the stop-loss arbitration the system asks the architect does not (the stop-loss is its own guard).
 - `aom card facts` answers what the agent would otherwise ask: the environment status, whether each dependency has merged, the branch, the stage and the blockers. `aom card facts <REF>` does the same for another card of the project.
 - `aom block --on dependency <REF>` records that this card waits for another card (add only, any open card, no cycles, same project). Until the dependency has merged only the design stage may run; build, review and test wait.
-- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 3 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
+- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 3 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts, and an agent extends one card at most three times (the next stop-loss goes to the owner's desk, and the item shows how often the budget was extended).
 
 **DevOps engineer of a "Run request" (run a branch), only for the environment of its own request:**
 ```sh
@@ -949,7 +949,8 @@ aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host 
 #   name: owner/repo (github) | group[/subgroup]/project (gitlab) | organization/project/repo (azure-devops) | workspace/repo (bitbucket-cloud)
 aom git status [<provider>] | aom git connect <provider> [--host <h>]   # DevOps only: check or start this workstation's git host login
 aom git fetch | merge-main | verify-merge   # architect only (investigate stages): the runner fetches origin, merges the latest main, checks a conflict resolution (`aom git push` is refused: agents never push)
-aom design --report <path> --summary "<text>"           # architect: hand the designed card to build (outcome handoff)
+aom design --report <path> --summary "<text>" [--tests-only]   # architect: hand the designed card to build (outcome handoff); --tests-only: the Build stage goes to the tester
+aom risk large --reason "<why>"                       # planner, architect: mark the card large (BA also small)
 aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
 aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
 aom finalize                                      # investigation-only card with the report in the vault: no git step (derived by the server)

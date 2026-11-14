@@ -18,6 +18,10 @@ On a card, **Investigate & design before build** overrides the project: off for 
 
 Tick **Investigation only** for an answer, not a change (a comparison, "how should we ...", a spike). Nothing is built: the architect writes the report, the BA records the result in the ledger and in the project's `PROJECT.md`, and the card is done. It needs only a title, context, requirements and a repository. The card page shows the report with a link to the file when the git host is known.
 
+## Tests-only cards {#tests-only}
+
+When a card only needs tests, the architect hands it to build with `aom design --tests-only`. The Build stage is then worked by the **tester**, not a builder (builders may not edit E2E specs), and the tester needs no test environment for it. The project needs an active tester: without one the card waits and says to hire a tester. A tests-only card cannot also be investigation-only.
+
 ## Where the report goes {#report-location}
 
 By default a markdown file in the repository, `docs/investigations/<ref>-<title>.md`, merged with the card. In the **Architect** settings you can change the folder or choose the **knowledge vault** instead (nothing is committed; the card finishes without a merge). A card can name its own **Report path**, or `vault:<path>`. The runner refuses a report that contains a secret.

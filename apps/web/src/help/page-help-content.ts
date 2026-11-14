@@ -719,7 +719,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/metrics': {
     title: 'Metrics',
     intro:
-      'What the team delivered, where it waited on you and where quality slipped: throughput, time blocked, bounce rate, escaped bugs, duration and queue depth.',
+      'What the team delivered, where it waited on you and where quality slipped: throughput, time blocked, bounce rate, escaped bugs, duration, queue depth, and time, cost and rework by role.',
     controls: [
       {
         name: 'Project filter',
@@ -752,6 +752,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Queue depth per column',
         text: 'How many cards sit in each board column right now. A long queue means agents are at capacity.',
+      },
+      {
+        name: 'Time and cost by role',
+        text: 'Per role, seniority and model: shifts, cards, shift time, median shift, cost and cost per card.',
+      },
+      {
+        name: 'Builder rework by seniority, model and card size',
+        text: 'How many cards builders submitted and how many came back from review, by seniority, model and card size. Read the rate with the card count.',
       },
     ],
     article: 'agents#hr-board',
