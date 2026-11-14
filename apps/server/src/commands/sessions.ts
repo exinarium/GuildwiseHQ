@@ -24,7 +24,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { sessionCost } from '../sessions/cost.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
-import { orgScope, userActor } from './common.ts';
+import { clipEventName, orgScope, userActor } from './common.ts';
 import { followProjectPacks } from './pack-follow.ts';
 
 /** `ad-hoc-<slug>`: a persona cast on the fly from a one-line brief (the brief is its stance; it is not in the registry). */
@@ -186,7 +186,8 @@ async function checkParticipant(
       [orgId, p.refId],
     );
     if (!u) throw badRequest('unknown_participant', 'that user is not a member of the organization');
-    return { displayName: p.displayName ?? u.display_name };
+    // The event's displayName is max 100; a user's display name can be longer (users.display_name is unbounded).
+    return { displayName: p.displayName ?? (clipEventName(u.display_name) || u.display_name) };
   }
   if (p.kind === 'agent') {
     const a = await one(db, `SELECT name FROM agents WHERE id=$1 AND org_id=$2 AND status <> 'retired'`, [

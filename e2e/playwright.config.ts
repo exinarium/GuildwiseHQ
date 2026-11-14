@@ -55,6 +55,7 @@ const config = defineConfig({
     { name: 'pr-review-daily-cap', testMatch: 'pr-review-daily-cap.spec.ts', dependencies: ['auth'] },
     { name: 'review-settings', testMatch: 'review-settings.spec.ts', dependencies: ['auth'] },
     { name: 'discovery', testMatch: 'discovery.spec.ts', dependencies: ['auth'] },
+    { name: 'discovery-long-name', testMatch: 'discovery-long-name.spec.ts', dependencies: ['auth'] },
     // Boardroom (phase C): its own user and runner; needs only the shared stack.
     { name: 'boardroom', testMatch: 'boardroom.spec.ts', dependencies: ['auth'] },
     { name: 'hr', testMatch: 'hr.spec.ts', dependencies: ['intake'] },
