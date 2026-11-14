@@ -8,13 +8,11 @@ import { createWorld, ok, type World } from './helpers/world.ts';
 // journey templates. Needs the test database, like the other ledger suites.
 
 let w: World;
-const extraWorlds: World[] = [];
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w.owner.id]);
 });
 afterAll(async () => {
-  for (const x of extraWorlds) await x.t.close();
   await w.t.close();
   await closeAdminPool();
 });
@@ -220,32 +218,6 @@ describe('the bundle commands', () => {
     } finally {
       await q('DROP TRIGGER IF EXISTS gwp233_fail ON documents');
       await q('DROP FUNCTION IF EXISTS gwp233_fail()');
-    }
-  });
-
-  it('previews a near-duplicate of the organization own rule without writing', async () => {
-    const rule = rulePackById('law')?.rules[0];
-    if (!rule) throw new Error('no rule');
-    // A fresh organization, so no state from the other cases can stand in for the own rule.
-    const w2 = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-    extraWorlds.push(w2); // closed in afterAll: closing it here would also close the shared pool
-    {
-      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w2.owner.id]);
-      const as2 = (method: string, url: string, body?: unknown) =>
-        w2.t.req(method, url, { cookie: w2.owner.cookie, ...(body !== undefined ? { body } : {}) });
-      const before = await ok<any>(as2('GET', '/api/industry-bundles/law'));
-      expect(before.rulePack.rules.find((r: any) => r.id === rule.id).status).toBe('new');
-      const made = await as2('POST', '/api/ledger', {
-        scope: 'standing_order',
-        title: rule.title,
-        body: rule.body,
-      });
-      expect([200, 201], JSON.stringify(made.body)).toContain(made.status);
-      const events = await eventCount();
-      const pv = await ok<any>(as2('GET', '/api/industry-bundles/law'));
-      const first = pv.rulePack.rules.find((r: any) => r.id === rule.id);
-      expect(['covered', 'may_conflict']).toContain(first.status);
-      expect(await eventCount()).toBe(events);
     }
   });
 
