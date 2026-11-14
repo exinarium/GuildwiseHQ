@@ -722,31 +722,35 @@ export async function applyShiftReport(
           followUps.push(mk({ type: 'DesignSized', payload: { cardId, sizing: designSize.sizing } }));
         if (early && inv.assumptions?.length) holdDesign = unlanded.map((d) => d.ref);
         // code v7: the design gate is decided at every design hand-off (high-risk paths > card switch > project).
+        // Needs-split comes first: an over-budget design stops for the split question and does not enter the gate now,
+        // but the decision is still recorded so "build it as designed" later goes through the gate when it applies.
         let gated = false;
+        const splitStop = designSize?.split === 'split' && !!designSize.proposal;
         if (
           !holdDesign &&
           !card.investigation_only &&
           outcome.id === 'handoff' &&
-          !(designSize?.split === 'split' && designSize.proposal) && // needs-split stops the hand-off ahead of the gate
           workflowHasDesignGate(wf.definition)
         ) {
           const gate = await decideDesignGate(tx, card, inv.summary ?? card.investigation?.summary);
-          resolved = resolveOutcome(
-            wf.definition,
-            { ...workflowCard, designGate: gate.required },
-            card.stage,
-            outcome.id,
-          );
-          if (resolved.toStage === DESIGN_GATE_STAGE) {
-            // The owner's approval at the gate does not check Build's fields: check them now.
-            const build = getStage(wf.definition, 'build');
-            const missing = build ? requiredMissing(cardView(card), build) : [];
-            if (missing.length)
-              return {
-                accepted: false,
-                error: `${card.ref} cannot move to ${build?.label ?? 'build'}: required fields are missing (${missing.join(', ')}); ask the manager or update the card`,
-              };
-            gated = true;
+          if (!splitStop) {
+            resolved = resolveOutcome(
+              wf.definition,
+              { ...workflowCard, designGate: gate.required },
+              card.stage,
+              outcome.id,
+            );
+            if (resolved.toStage === DESIGN_GATE_STAGE) {
+              // The owner's approval at the gate does not check Build's fields: check them now.
+              const build = getStage(wf.definition, 'build');
+              const missing = build ? requiredMissing(cardView(card), build) : [];
+              if (missing.length)
+                return {
+                  accepted: false,
+                  error: `${card.ref} cannot move to ${build?.label ?? 'build'}: required fields are missing (${missing.join(', ')}); ask the manager or update the card`,
+                };
+              gated = true;
+            }
           }
           beforeMain.push(
             mk({

@@ -5,10 +5,10 @@ import {
   codeWorkflowV7,
   DESIGN_GATE_STAGE,
   designGateDecision,
+  designGatePathsInText,
   designHighRiskPredicate,
   designRiskPaths,
   getBuiltinWorkflow,
-  designGatePathsInText,
   resolveOutcome,
   validateWorkflow,
   workflowHasDesignGate,
@@ -68,7 +68,10 @@ describe('designGatePathsInText', () => {
         'Touches apps/server/src/db/pool.ts, packages/shared/src/orgs/ and docs/USER-GUIDE.md. See https://x.io/a/b',
       ),
     ).toEqual(['apps/server/src/db/pool.ts', 'packages/shared/src/orgs/', 'docs/USER-GUIDE.md']);
-    expect(designGatePathsInText('apps/server/src/db/** and ./apps/web')).toEqual(['apps/server/src/db/', 'apps/web']);
+    expect(designGatePathsInText('apps/server/src/db/** and ./apps/web')).toEqual([
+      'apps/server/src/db/',
+      'apps/web',
+    ]);
     expect(designGatePathsInText('no paths here, 1/2')).toEqual([]);
     expect(designGatePathsInText(null)).toEqual([]);
   });
