@@ -16,6 +16,7 @@ import {
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { devopsQueueSentence } from '../dispatcher/devops.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
@@ -518,7 +519,7 @@ export async function environmentNotReadyEvents(
       card,
       { kind: 'system' },
       'system',
-      `${PROBLEM_TEXT[problem]}${detail}. The DevOps engineer was asked to fix it; ${card.ref} is parked until the request completes.`,
+      `${PROBLEM_TEXT[problem]}${detail}. The DevOps engineer was asked to fix it; ${card.ref} is parked until the request completes.${await devopsQueueSentence(tx, requestId, { asWaited: true })}`,
       { requestId, problem },
     ),
   ];

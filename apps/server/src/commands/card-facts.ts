@@ -3,6 +3,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
+import { devopsQueuePosition, devopsQueueText } from '../dispatcher/devops.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
 import { dependencyCycle } from './intake.ts';
 import { cardSize, cardUsage, stopLossBudget } from './stop-loss.ts';
@@ -76,6 +77,10 @@ export async function cardFactsRpc(
   const parked = card.parked_request_id
     ? await one(ctx.pool, 'SELECT status, summary FROM devops_requests WHERE id=$1', [card.parked_request_id])
     : undefined;
+  // Why a parked card waits: its request's place in the DevOps queue, or "running now".
+  const parkedQueue = parked
+    ? devopsQueueText(await devopsQueuePosition(ctx.pool, card.parked_request_id))
+    : '';
   const usage = await cardUsage(ctx.pool, card.id);
   const budget = await stopLossBudget(ctx.pool, card);
   const unlanded = deps.filter((d) => !d.landed).map((d) => d.ref);
@@ -106,7 +111,15 @@ export async function cardFactsRpc(
               ...(test.healthy_at ? { healthySince: test.healthy_at } : {}),
             }
           : null,
-        ...(parked ? { devopsRequest: { status: parked.status, summary: parked.summary } } : {}),
+        ...(parked
+          ? {
+              devopsRequest: {
+                status: parked.status,
+                summary: parked.summary,
+                ...(parkedQueue ? { queue: parkedQueue } : {}),
+              },
+            }
+          : {}),
       },
       dependencies: deps.map((d) => ({
         ref: d.ref,

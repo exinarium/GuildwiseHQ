@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { CardTestingSchema } from '@aom/shared';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { detectLoops } from '../src/ceo/detectors.ts';
+import { cardFactsRpc } from '../src/commands/card-facts.ts';
 import { testGapResultPass } from '../src/dispatcher/bottleneck.ts';
 import { cardTesting } from '../src/queries/testing.ts';
 import { appoint } from './helpers/ceo.ts';
@@ -474,6 +475,41 @@ describe('topic routing', () => {
     expect(reqs[0]!.summary).toMatch(/environment/);
     // Sam, the senior peer, was not asked.
     expect((await itemsOf(card.id)).filter((i) => i.kind === 'question')).toHaveLength(0);
+  });
+
+  it('the park messages and card facts say where the request stands in the DevOps queue', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Waits in line' });
+    const start = await claimCard(card.id);
+    await p.startShift(r, start);
+    // A request nobody waits for is queued first: the parked card's request still goes ahead of it.
+    await ok(
+      w.t.req('POST', '/api/devops/requests', {
+        cookie: w.owner.cookie,
+        body: { workstationId: w.workstationId, summary: 'Tidy the scratch folder' },
+      }),
+      201,
+    );
+    const res = await ask(start.shiftId, { text: 'The staging app is not running', topic: 'environment' });
+    r.ended(start.shiftId, 'reported');
+    expect(res.message).toMatch(/number 1 of 2 in the DevOps queue/);
+    const c = await cardRow(card.id);
+    expect(c.status).toBe('waiting');
+    const notes = await q(
+      `SELECT body FROM thread_messages WHERE thread_id=$1 AND body LIKE '%DevOps queue%'`,
+      [card.id],
+    );
+    expect(notes.map((n) => String(n.body)).join('\n')).toMatch(/number 1 of 2 in the DevOps queue/);
+    const shift = (await q('SELECT * FROM shifts WHERE id=$1', [start.shiftId]))[0]!;
+    const queued = await cardFactsRpc(w.t.app.ctx, shift, {});
+    expect((queued[1] as any).environment.devopsRequest.queue).toBe('number 1 of 2 in the DevOps queue');
+    await p.dispatcher().run();
+    expect(
+      (await q('SELECT status FROM devops_requests WHERE id=$1', [c.parked_request_id]))[0]!.status,
+    ).toBe('running');
+    const running = await cardFactsRpc(w.t.app.ctx, shift, {});
+    expect((running[1] as any).environment.devopsRequest.queue).toMatch(/^running now/);
   });
 
   it('a second environment question attaches to the open request', async () => {
