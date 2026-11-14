@@ -13,6 +13,7 @@ import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { pollPrOnlyRepos } from '../commands/pr-only.ts';
+import { dispatchReplayRuns } from '../commands/pr-replays.ts';
 import { dispatchPrReviews, sweepStalePrReviewRuns } from '../commands/pr-review-runs.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
@@ -161,6 +162,9 @@ export class Scheduler {
       // The first reviewer: runs start on reviewable pull requests (a token is held); lost runs and posts are given up.
       await dispatchPrReviews(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'PR review dispatch failed'),
+      );
+      await dispatchReplayRuns(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'replay dispatch failed'),
       );
       await sweepStalePrReviewRuns(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'PR review sweep failed'),

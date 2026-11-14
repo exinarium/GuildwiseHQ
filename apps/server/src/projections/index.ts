@@ -41,6 +41,7 @@ import { phaseProjectors } from './phases.ts';
 import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { playbookProjectors } from './playbooks.ts';
+import { prReplayProjectors } from './pr-replays.ts';
 import { prReviewRunProjectors } from './pr-review-runs.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
@@ -85,6 +86,7 @@ const domains: Array<Record<string, Projector>> = [
   workstationProjectors,
   projectProjectors,
   prReviewRunProjectors,
+  prReplayProjectors,
   projectWorkflowProjectors,
   agentProjectors,
   cardProjectors,
@@ -198,6 +200,9 @@ export const PROJECTION_TABLES = [
   'pr_review_runs',
   'pr_review_findings',
   'pr_review_finding_marks',
+  'pr_replays',
+  'pr_replay_prs',
+  'pr_replay_finding_views',
   'project_members',
   'project_workflows',
   'workflow_versions',

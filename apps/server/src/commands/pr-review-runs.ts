@@ -31,6 +31,7 @@ import {
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
 import { prReviewQueue, requireSpendOwner } from './pr-review-cap.ts';
+import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
 
 /**
  * The first reviewer on PR-only pull requests. The server decides WHEN a run starts and is the only party that starts a
@@ -334,6 +335,20 @@ export function buildReviewPost(
 // ---- results ---------------------------------------------------------------------------------------------------
 
 /**
+ * The only place a `pr_review.post` is enqueued. A replay run is offline and is never posted: this refuses it.
+ */
+export async function enqueueReviewPost(
+  tx: Queryable,
+  run: { replay_id?: unknown },
+  workstationId: string,
+  post: PrReviewPostPayload,
+  expiresAt: Date,
+): Promise<void> {
+  if (run.replay_id) throw new Error('replay runs are never posted');
+  await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', post, expiresAt);
+}
+
+/**
  * `command.result` of `pr_review.run`. A result for a run that is no longer `running` (a duplicate after a requeue, or an
  * answer after the server gave the run up) is ignored. `completed` stores the findings and sends the post to the same
  * workstation (it holds the token). A timeout or a failure records one event and does nothing else.
@@ -355,6 +370,11 @@ export async function applyPrReviewRunResult(
     const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [p.runId]);
     if (!run || run.state !== 'running') {
       ctx.log.info({ runId: p.runId }, 'ignored a pull request review result for a run that is not running');
+      return;
+    }
+    // a replay run is offline: its result goes to the replay and never reaches the post below
+    if (run.replay_id) {
+      await applyReplayRunResult(ctx, tx, run, ok, parsed.success ? parsed.data : undefined, error);
       return;
     }
     const orgId = await orgOf(tx, p.projectId);
@@ -427,7 +447,7 @@ export async function applyPrReviewRunResult(
       findings,
     );
     postTo = run.workstation_id as string;
-    await enqueueRunnerCommand(tx, postTo, 'pr_review.post', post, new Date(now.getTime() + POST_WAIT_MS));
+    await enqueueReviewPost(tx, run, postTo, post, new Date(now.getTime() + POST_WAIT_MS));
   });
   if (postTo) void Promise.resolve(ctx.services.gateway.deliverPending(postTo)).catch(() => undefined);
 }
@@ -455,6 +475,10 @@ export async function applyPrReviewPostResult(
   await withAppendTx(ctx.pool, async (tx) => {
     const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [runId]);
     if (!run || run.state === 'posted') return;
+    if (run.replay_id) {
+      ctx.log.warn({ runId }, 'ignored a post result for a replay run');
+      return;
+    }
     const projectId = run.project_id as string;
     const orgId = await orgOf(tx, projectId);
     if (!orgId) return;
@@ -508,7 +532,7 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
     ctx.pool,
     `SELECT id, state FROM pr_review_runs
       WHERE (state='running' AND started_at + (timeout_ms + $1) * interval '1 millisecond' < $3)
-         OR (state='completed' AND finished_at + $2 * interval '1 millisecond' < $3)`,
+         OR (state='completed' AND replay_id IS NULL AND finished_at + $2 * interval '1 millisecond' < $3)`,
     [RUN_GRACE_MS, POST_WAIT_MS, now],
   );
   let n = 0;
@@ -516,6 +540,16 @@ export async function sweepStalePrReviewRuns(ctx: Ctx): Promise<number> {
     const done = await withAppendTx(ctx.pool, async (tx) => {
       const run = await one(tx, 'SELECT * FROM pr_review_runs WHERE id=$1 FOR UPDATE', [s.id]);
       if (!run || run.state !== s.state) return false;
+      if (run.replay_id) {
+        await timeOutReplayRun(ctx, tx, run);
+        await exec(
+          tx,
+          `UPDATE runner_commands SET status='failed', last_error='superseded'
+            WHERE type='pr_review.run' AND status IN ('pending','sent') AND payload->>'runId' = $1`,
+          [run.id],
+        );
+        return true;
+      }
       const projectId = run.project_id as string;
       const orgId = await orgOf(tx, projectId);
       if (!orgId) return false;
