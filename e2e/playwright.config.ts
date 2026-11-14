@@ -51,6 +51,7 @@ const config = defineConfig({
     { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
     // Discovery Studio (phase B): its own user, runner and project; needs only the shared stack.
     { name: 'pr-only', testMatch: 'pr-only.spec.ts', dependencies: ['auth'] },
+    { name: 'second-reviewer', testMatch: 'second-reviewer.spec.ts', dependencies: ['auth'] },
     { name: 'pr-review-daily-cap', testMatch: 'pr-review-daily-cap.spec.ts', dependencies: ['auth'] },
     { name: 'review-settings', testMatch: 'review-settings.spec.ts', dependencies: ['auth'] },
     { name: 'discovery', testMatch: 'discovery.spec.ts', dependencies: ['auth'] },
