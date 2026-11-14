@@ -1,11 +1,25 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { type ReviewerRunSpec, ReviewerRunSpecSchema } from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agentEnv } from '../src/adapters/claude-policy.ts';
 import { runnerPaths } from '../src/paths.ts';
-import { ReviewHeadMovedError } from '../src/review/review-checkout.ts';
+import { renderReviewerPrompt } from '../src/review/instructions.ts';
+import {
+  ReviewCheckoutError,
+  ReviewHeadMovedError,
+  SymlinkNeutralisationError,
+} from '../src/review/review-checkout.ts';
 import {
   disposeReviewerRun,
   prepareReviewerRun,
@@ -260,5 +274,99 @@ describe('the run payload carries no credential', () => {
   it('ReviewerRunSpec refuses a token key', () => {
     expect(ReviewerRunSpecSchema.safeParse(fx.spec(RUN_A)).success).toBe(true);
     expect(ReviewerRunSpecSchema.safeParse({ ...fx.spec(RUN_A), token: FAKE_TOKEN }).success).toBe(false);
+  });
+});
+
+describe('GWP-222: symlinks in the pull request never lead outside the checkout', () => {
+  const MARKER = 'OUTSIDE-MARKER-7f3a';
+  const RUN_C = '019e3f6a-7b1c-7a2d-8c3e-0123456789c5';
+
+  /** Pushes a second pull request (8) whose head adds symlinks to a marker file outside the checkout. */
+  function linkPr(): { headSha: string; secret: string } {
+    const secret = join(fx.base, 'outside', 'secret.txt');
+    mkdirSync(join(fx.base, 'outside', 'dir'), { recursive: true });
+    writeFileSync(secret, MARKER);
+    writeFileSync(join(fx.base, 'outside', 'dir', 'f.txt'), MARKER);
+    const w = join(fx.base, 'seed2');
+    git(fx.base, 'clone', '-q', fx.bare, w);
+    git(w, 'checkout', '-q', '-b', 'links', fx.headSha);
+    mkdirSync(join(w, 'deep'));
+    mkdirSync(join(w, 'chain'));
+    mkdirSync(join(w, 'docs', 'v2'), { recursive: true });
+    writeFileSync(join(w, 'docs', 'v2', 'index.md'), 'in tree\n');
+    symlinkSync(secret, join(w, 'abs-link'));
+    symlinkSync(secret, join(w, '.bashrc'));
+    symlinkSync(`${'../'.repeat(40)}${secret.slice(1)}`, join(w, 'deep', 'rel-link'));
+    symlinkSync('b', join(w, 'chain', 'a'));
+    symlinkSync(secret, join(w, 'chain', 'b'));
+    symlinkSync(join(fx.base, 'outside', 'dir'), join(w, 'outside-dir'));
+    symlinkSync(join(fx.base, 'outside', 'missing.txt'), join(w, 'gone-outside'));
+    symlinkSync('v2', join(w, 'docs', 'latest'));
+    symlinkSync('a.txt', join(w, 'link-to-a'));
+    symlinkSync('does-not-exist.txt', join(w, 'gone-inside'));
+    git(w, 'add', '-A');
+    git(w, 'commit', '-q', '-m', 'links');
+    git(w, 'push', '-q', 'origin', 'HEAD:refs/pull/8/head');
+    return { headSha: git(w, 'rev-parse', 'HEAD'), secret };
+  }
+
+  it('replaces every out-of-tree link with a read-only note and keeps in-tree links', async () => {
+    const { headSha } = linkPr();
+    const run = await start(RUN_C, { prNumber: 8, headSha });
+    const co = run.checkout;
+    const replaced = [
+      'abs-link',
+      '.bashrc',
+      'deep/rel-link',
+      'chain/a',
+      'chain/b',
+      'outside-dir',
+      'gone-outside',
+    ];
+    expect(run.neutralisedLinks.map((l) => l.path)).toEqual([...replaced].sort());
+    for (const p of replaced) {
+      expect(lstatSync(join(co, p)).isFile()).toBe(true);
+      const text = readFileSync(join(co, p), 'utf8');
+      expect(text).toContain('removed by the review checkout');
+      expect(text).not.toContain(MARKER);
+      expect(lstatSync(join(co, p)).mode & 0o222).toBe(0);
+    }
+    expect(() => readdirSync(join(co, 'outside-dir'))).toThrow(/ENOTDIR/);
+    expect(lstatSync(join(co, 'docs', 'latest')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(co, 'docs', 'latest', 'index.md'), 'utf8')).toBe('in tree\n');
+    expect(readFileSync(join(co, 'link-to-a'), 'utf8')).toBe('changed by the pull request\n');
+    expect(readlinkSync(join(co, 'gone-inside'))).toBe('does-not-exist.txt');
+    const prompt = renderReviewerPrompt({
+      diffPath: '/x/pr.diff',
+      title: 't',
+      changedFiles: 1,
+      neutralisedLinks: run.neutralisedLinks,
+    });
+    expect(prompt).toContain('"abs-link"');
+    expect(prompt).not.toContain(MARKER);
+    expect(JSON.stringify(run)).not.toContain(MARKER);
+  });
+
+  it.skipIf(root)('the neutralised checkout stays read-only', async () => {
+    const { headSha } = linkPr();
+    const run = await start(RUN_C, { prNumber: 8, headSha });
+    expect(() => writeFileSync(join(run.checkout, 'abs-link'), 'x')).toThrow(/EACCES|EPERM|EROFS/);
+    expect(() => writeFileSync(join(run.checkout, 'new.txt'), 'x')).toThrow(/EACCES|EPERM|EROFS/);
+  });
+
+  it('a checkout without links has an empty list', async () => {
+    const run = await start(RUN_A);
+    expect(run.neutralisedLinks).toEqual([]);
+  });
+
+  it('fails closed when the guard throws: a checkout error, nothing left behind', async () => {
+    fx.deps.neutraliseLinks = () => {
+      throw new Error('EACCES at "x"');
+    };
+    const err = await prepareReviewerRun(fx.deps, fx.spec(RUN_A)).catch((e) => e);
+    expect(err).toBeInstanceOf(SymlinkNeutralisationError);
+    expect(err).toBeInstanceOf(ReviewCheckoutError);
+    expect(String(err.message)).toContain('symlink neutralisation');
+    expect(existsSync(join(fx.deps.paths.reviews, RUN_A))).toBe(false);
   });
 });

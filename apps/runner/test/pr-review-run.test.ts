@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatStartInput, RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { PrReviewCommands } from '../src/review/pr-review-commands.ts';
-import { ReviewHeadMovedError } from '../src/review/review-checkout.ts';
+import { ReviewHeadMovedError, SymlinkNeutralisationError } from '../src/review/review-checkout.ts';
 import type { ReviewerRun } from '../src/review/reviewer-sandbox.ts';
 import { MemoryReviewerTokenStore } from '../src/review/reviewer-tokens.ts';
 import { anchoredLines, parseReviewerOutput, runPrReview } from '../src/review/run.ts';
@@ -355,6 +355,46 @@ describe('AC4: any other failure returns no findings and says why', () => {
       throw new Error('gh failed');
     });
     expect(await run()).toMatchObject({ code: 'no_checkout' });
+  });
+  it('a symlink neutralisation failure is a failed run naming it, and no reviewer starts', async () => {
+    fx.setPrepare(async () => {
+      throw new SymlinkNeutralisationError('EACCES at "x"');
+    });
+    const out = await run();
+    expect(out).toMatchObject({ outcome: 'failed', code: 'no_checkout' });
+    expect((out as { error: string }).error).toContain('symlink neutralisation');
+    expect(fx.starts).toHaveLength(0);
+  });
+  it('tells the reviewer which links were neutralised and logs them, never target content', async () => {
+    const base = fx.deps.prepare;
+    fx.setPrepare(async (spec, ctx) => {
+      const r = (await base(spec, ctx)) as ReviewerRun;
+      return {
+        ...r,
+        neutralisedLinks: [
+          { path: 'docs/notes.txt', linkText: '/home/someone/.bashrc' },
+          { path: 'weird\nname', linkText: 'b' },
+        ],
+      };
+    });
+    const lines: string[] = [];
+    fx.deps.log = (l: string) => lines.push(l);
+    await run();
+    const msg = (fx.starts[0] as ChatStartInput).message;
+    expect(msg).toContain(
+      '<untrusted>\n"docs/notes.txt" -> "/home/someone/.bashrc"\n"weird\\nname" -> "b"\n</untrusted>',
+    );
+    const line = lines.find((l) => l.includes('neutralised'));
+    expect(line).toContain('neutralised 2 symlinks');
+    expect(line).toContain('"docs/notes.txt"');
+    expect(line).not.toContain('\n');
+  });
+  it('a run without neutralised links has no note in the prompt and no log line', async () => {
+    const lines: string[] = [];
+    fx.deps.log = (l: string) => lines.push(l);
+    await run();
+    expect((fx.starts[0] as ChatStartInput).message).not.toContain('symlinks');
+    expect(lines.some((l) => l.includes('neutralised'))).toBe(false);
   });
   it('a bad session start is an error result, never a throw, and the run is still disposed', async () => {
     (fx.deps.adapter as { startChat: unknown }).startChat = async () => {
