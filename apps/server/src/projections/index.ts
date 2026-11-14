@@ -61,6 +61,7 @@ import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { socialPostProjectors } from './social-posts.ts';
 import { storageProjectors } from './storage.ts';
+import { appIntegrationProjectors } from './app-integrations.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';
@@ -143,6 +144,7 @@ const domains: Array<Record<string, Projector>> = [
   agentUxProjectors,
   relayProjectors,
   storageProjectors,
+  appIntegrationProjectors,
   formProjectors,
   publicFormProjectors,
 ];
@@ -292,6 +294,8 @@ export const PROJECTION_TABLES = [
   'backlog_items',
   'relay_integrations',
   'storage_connections',
+  'org_app_integrations',
+  'org_app_integration_workstations',
   'forms',
   'form_versions',
   'form_publications',

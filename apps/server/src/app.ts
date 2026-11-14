@@ -2,7 +2,12 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { RUNNER_SUBPROTOCOL, STORAGE_DELETE_CAPABILITY, type StorageKind } from '@aom/shared';
+import {
+  containsPlaintextKey,
+  RUNNER_SUBPROTOCOL,
+  STORAGE_DELETE_CAPABILITY,
+  type StorageKind,
+} from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -106,6 +111,7 @@ import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
+import { orgAppRoutes } from './routes/org-apps.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { packRoutes } from './routes/packs.ts';
@@ -289,6 +295,9 @@ export const LOG_REDACT = {
   paths: [
     'req.body.envelope',
     '*.envelope',
+    // Automated apps: one sealed envelope per workstation share (`*.envelope` covers one level only).
+    'req.body.shares[*].envelope',
+    '*.shares[*].envelope',
     'body.envelope',
     'payload.envelope',
     'err.body.envelope',
@@ -408,6 +417,16 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     if (rawBodyPaths.has(req.url.split('?')[0] ?? ''))
       (req as unknown as { rawBody?: string }).rawBody = body as string;
     if (body === '' || body === undefined) return done(null, undefined);
+    // A broken client that posts an app's private key in the clear: refused before it is parsed, logged or echoed.
+    if (req.url.startsWith('/api/org/apps') && containsPlaintextKey(body as string))
+      return done(
+        new HttpError(
+          400,
+          'plaintext_key_refused',
+          'the private key must be encrypted in the browser, never sent',
+        ),
+        undefined,
+      );
     try {
       done(null, JSON.parse(body as string));
     } catch {
@@ -494,6 +513,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(devopsRoutes(ctx));
   await app.register(providerRoutes(ctx));
   await app.register(orgProviderRoutes(ctx));
+  await app.register(orgAppRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
   await app.register(releaseDocsPrepRoutes(ctx));

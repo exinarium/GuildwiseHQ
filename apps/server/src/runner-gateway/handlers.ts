@@ -99,6 +99,7 @@ import {
   applyStorageReport,
   sendStorageSync,
 } from '../commands/storage-connections.ts';
+import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
 import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
@@ -845,6 +846,21 @@ export class RunnerHandlers {
         msg.result,
         String(cmd.payload.keyId ?? ''),
       );
+    } else if (cmd?.type === 'app.connect' || cmd?.type === 'app.test') {
+      // The sealed key is forgotten whatever the answer was; only facts (identity, typed error) are kept.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+        msg.commandId,
+      ]);
+      await applyAppCommandResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.type,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
     } else if (cmd?.type === 'provider.key.set' || cmd?.type === 'provider.key.clear') {
       // The sealed key is forgotten whatever the answer was; only the fact is kept for the page.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -1149,6 +1165,7 @@ export class RunnerHandlers {
     await sendStorageSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'storage sync not queued'),
     );
+    await sendAppSync(ctx, conn.workstationId).catch((err) => ctx.log.warn({ err }, 'app sync not queued'));
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
   }

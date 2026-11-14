@@ -22,6 +22,7 @@ import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
 import { pruneStorage } from '../commands/storage-connections.ts';
+import { pruneAppRequests } from '../commands/org-apps.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
@@ -228,6 +229,7 @@ export class Scheduler {
       this.ctx.log.error({ err }, 'offline form links failed'),
     );
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
+    await pruneAppRequests(this.ctx).catch((err) => this.ctx.log.error({ err }, 'app request prune failed'));
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),
     );
