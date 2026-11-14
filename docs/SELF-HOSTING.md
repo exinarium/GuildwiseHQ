@@ -252,7 +252,7 @@ The bundled Caddy configuration (`deploy/Caddyfile`) does two things for the pub
 **Log redaction.** Caddy logs handler errors (a `502` while the app restarts, a `413`, a client abort) with the request address and headers, even without an access log. Every Caddy log line goes through one global filter that:
 
 - deletes the headers `X-Form-Link`, `X-Upload-Token`, `X-File-Name`, `X-Guildwise-Signature`, `X-Hub-Signature-256`, `X-Signature`, `X-Goog-Channel-Token`, `Idempotency-Key`, `X-Guildwise-Delivery`, `Cookie`, `Authorization`, `Proxy-Authorization` and the response `Set-Cookie`;
-- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
+- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the hook secret in `/api/hooks/<id>/<secret>` (the id stays visible), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
 
 If a relay kind of yours sends a secret in another header, add a `request>headers>Name delete` line to the filter.
 

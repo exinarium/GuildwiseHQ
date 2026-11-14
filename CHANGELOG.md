@@ -19,6 +19,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 ### Fixed
 
 - Parking or answering a discovery question no longer fails with a server error. Long display names are now shortened to the allowed length, so people with long names can park and answer questions as normal.
+- The secret of a journey hook called as `POST /api/hooks/<id>/<secret>` no longer appears in the app request log or in the bundled Caddy logs; it is replaced with `[redacted]` and the hook id stays visible. Self-hosters who copied an older `deploy/Caddyfile` should copy the new global log filter from it.
 
 ## [1.7.0] - 2026-11-14
 
