@@ -451,3 +451,38 @@ test('a step with no matching handoff makes the instance stuck and leaves a noti
   await page.goto(`/journeys/instances/${id}`);
   await expect(page.getByRole('alert').filter({ hasText: 'This journey is stuck' })).toBeVisible();
 });
+
+test('the template gallery lists the accounting and law templates with industry badges, and rentals has none', async () => {
+  await page.goto('/journeys');
+  await page.getByRole('button', { name: 'New journey' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New journey' });
+  const items = dialog.getByTestId('journey-templates').getByRole('listitem');
+  await expect(items).toHaveCount(3);
+  await expect(items.filter({ hasText: 'Rentals: lead to monthly rent' })).toContainText(
+    '10 steps · for a client',
+  );
+  await expect(items.filter({ hasText: 'Rentals: lead to monthly rent' })).not.toContainText(
+    /Accounting|Law/,
+  );
+  await expect(items.filter({ hasText: '11 steps · for a client' })).toContainText('Accounting');
+  await expect(items.filter({ hasText: '10 steps · for a matter' })).toContainText('Law');
+});
+
+for (const [label, hasText, count] of [
+  ['accounting', '11 steps · for a client', 11],
+  ['law', '10 steps · for a matter', 10],
+] as const) {
+  test(`a journey can be created from the ${label} template and opens with all its steps`, async () => {
+    await page.goto('/journeys');
+    await page.getByRole('button', { name: 'New journey' }).click();
+    const dialog = page.getByRole('dialog', { name: 'New journey' });
+    await dialog
+      .getByTestId('journey-templates')
+      .getByRole('listitem')
+      .filter({ hasText })
+      .getByRole('button', { name: 'Use this template' })
+      .click();
+    await expect(page).toHaveURL(/\/journeys\/[0-9a-f-]{36}$/);
+    await expect(page.getByTestId('journey-steps').locator(':scope > li')).toHaveCount(count);
+  });
+}

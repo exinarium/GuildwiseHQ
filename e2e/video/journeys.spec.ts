@@ -145,7 +145,14 @@ test('record the journeys video', async ({ browser }) => {
     const dialog = page.getByRole('dialog', { name: 'New journey' });
     await expect(dialog.getByText('Rentals: lead to monthly rent')).toBeVisible();
     await pause(1500);
-    await click(page, dialog.getByRole('button', { name: 'Use this template' }));
+    await click(
+      page,
+      dialog
+        .getByTestId('journey-templates')
+        .getByRole('listitem')
+        .filter({ hasText: 'Rentals: lead to monthly rent' })
+        .getByRole('button', { name: 'Use this template' }),
+    );
     await expect(page).toHaveURL(/\/journeys\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId('journey-steps')).toBeVisible();
   });
