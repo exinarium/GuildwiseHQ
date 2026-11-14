@@ -22,6 +22,7 @@ import { type Logger, nullLogger } from '../log.ts';
 import { EnvelopeError, type RunnerKeys } from '../secrets/keys.ts';
 import { redact, registerSecret, unregisterSecret } from '../secrets/redact.ts';
 import { type AuditEntry, AuditLog } from './audit-log.ts';
+import { AutomatedAppIntegration } from './automated-app.ts';
 import { ClaudeCodeIntegration } from './claude-code.ts';
 import { AzureDevOpsIntegration, BitbucketIntegration, GitLabIntegration } from './forge-tokens.ts';
 import { GitHubIntegration } from './github.ts';
@@ -66,6 +67,7 @@ export function buildIntegrationAdapters(
     new McpIntegration(env),
     new WhatsappIntegration(env),
     new GoogleSheetsIntegration(env),
+    new AutomatedAppIntegration('github-app', env),
   ];
   return new Map(list.map((a) => [a.kind, a]));
 }
