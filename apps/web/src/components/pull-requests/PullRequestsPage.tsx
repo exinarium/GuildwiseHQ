@@ -33,6 +33,9 @@ export function fmtRunTime(ms: number): string {
 
 const when = (iso: string): string => new Date(iso).toLocaleString();
 
+const labelOf = (who: string | null | undefined): string =>
+  who ? (PR_REVIEWER_LABEL[who as 'first'] ?? 'the reviewer') : 'the reviewer';
+
 /** What happened to the review of one pull request, in words. Never colour alone: every state has its own text. */
 function Detail({ pr }: { pr: PrReviewDto }) {
   const run = pr.lastRun;
@@ -42,7 +45,10 @@ function Detail({ pr }: { pr: PrReviewDto }) {
         Reviewed {when(pr.reviewedAt)}
         {pr.reviewersHidden
           ? ' · reviewer shown once every posted finding is marked'
-          : ` by ${PR_REVIEWER_LABEL[(pr.reviewer ?? '') as 'first'] ?? 'the reviewer'}`}
+          : ` by ${pr.reviewers && pr.reviewers.length > 1 ? pr.reviewers.map(labelOf).join(' and ') : labelOf(pr.reviewer)}`}
+        {(run?.runCount ?? 1) > 1 && ` · ${run?.runCount} review runs`}
+        {(run?.mergedCount ?? 0) > 0 &&
+          ` · ${run?.mergedCount} combined duplicate${run?.mergedCount === 1 ? '' : 's'}`}
         {run?.durationMs != null && ` · run took ${fmtRunTime(run.durationMs)}`}
         {run && (run.heldBackCount ?? 0) > 0
           ? ` · Posted ${(run.findingsCount ?? 0) - (run.heldBackCount ?? 0)} of ${run.findingsCount} findings: ${
@@ -71,15 +77,21 @@ function Detail({ pr }: { pr: PrReviewDto }) {
     return (
       <p data-testid={`pr-review-detail-${pr.changeId}`}>
         {run.state === 'running'
-          ? `Review running, started ${when(run.startedAt)} (stops after ${Math.round(run.timeoutMs / 60_000)} min)`
+          ? (run.runCount ?? 1) > 1
+            ? `Review running: ${(run.runs ?? []).filter((r) => r.state !== 'running').length} of ${run.runCount} runs finished, started ${when(run.startedAt)} (each stops after ${Math.round(run.timeoutMs / 60_000)} min)`
+            : `Review running, started ${when(run.startedAt)} (stops after ${Math.round(run.timeoutMs / 60_000)} min)`
           : 'Review finished, posting the comments'}
       </p>
     );
   if (run?.state === 'timed_out')
     return (
       <Callout tone="warning" data-testid={`pr-review-timeout-${pr.changeId}`} role="status">
-        Not reviewed: the review run timed out after {Math.round(run.timeoutMs / 60_000)} minutes. No comments
-        were posted.
+        {(run.runCount ?? 1) > 1
+          ? `Not reviewed: the ${labelOf(run.runs?.find((r) => r.state === 'timed_out')?.reviewer)} review run timed out after ${Math.round(run.timeoutMs / 60_000)} minutes. No comments were posted by either reviewer.`
+          : `Not reviewed: the review run timed out after ${Math.round(run.timeoutMs / 60_000)} minutes. No comments were posted.`}
+        {(run.runs ?? []).some((r) => r.state === 'cancelled') && (
+          <span className="block">One run was stopped because the other did not finish.</span>
+        )}
       </Callout>
     );
   if (run?.state === 'failed')
@@ -90,7 +102,7 @@ function Detail({ pr }: { pr: PrReviewDto }) {
           {run.code && ['forbidden', 'not_found', 'stale_head', 'unreachable'].includes(run.code)
             ? 'could not be posted'
             : 'run failed'}
-          . No comments were posted.
+          . {(run.runCount ?? 1) > 1 ? 'No comments were posted by either reviewer.' : 'No comments were posted.'}
         </p>
         {run.error && <p className="break-words">{run.error}</p>}
       </Callout>

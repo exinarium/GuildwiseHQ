@@ -1382,6 +1382,11 @@ The first reviewer runs as two server commands (announced as `pr-review:1`):
   (`<!-- review-run:<runId> -->`), then posts one `COMMENT` review with the comment-only token. A command sent again for a live run
   id awaits the same run.
 
+- `pr_review.cancel` stops a live `pr_review.run` (the other run of a two-reviewer round timed out or failed): the run answers
+  `failed` with code `cancelled` and its folders are removed. A cancel that arrives before its run is remembered for 15 minutes,
+  and the run then answers `cancelled` without a checkout or a model session. A runner that can do this announces
+  `pr-review-pair:1`; the server starts a two-reviewer round only on such a workstation.
+
 The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by the normalized remote url), separate from the
 git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
 `workstation_repos.reviewer_token`), never the token.

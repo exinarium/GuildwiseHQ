@@ -25,6 +25,7 @@ import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { PrReviewCapPanel } from '../components/PrReviewCapPanel.tsx';
+import { SecondReviewerPanel } from '../components/SecondReviewerPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { ReleaseDocsPrepPanel } from '../components/ReleaseDocsPrepPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
@@ -554,6 +555,16 @@ export function ProjectSettings() {
       {project && activeRepos.some((r) => r.prOnly) && (
         <div id="pr-review-cap" className="scroll-mt-20">
           <PrReviewCapPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
+        </div>
+      )}
+      {project && activeRepos.some((r) => r.prOnly) && (
+        <div id="second-reviewer" className="scroll-mt-20">
+          <SecondReviewerPanel
+            projectId={id}
+            projectKey={project.key}
+            project={project}
+            canChange={project.myRole === 'owner'}
+          />
         </div>
       )}
       <div id="members" className="scroll-mt-20">
