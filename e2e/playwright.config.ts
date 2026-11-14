@@ -119,6 +119,7 @@ const config = defineConfig({
     { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['installer'] },
     // Journeys (designer, instances, handoffs, the shared record): its own user, organization and project.
     { name: 'journeys', testMatch: 'journeys.spec.ts', dependencies: ['auth'] },
+    { name: 'hook-secret-log', testMatch: 'hook-secret-log.spec.ts', dependencies: ['auth'] },
     // Journey waits, gates and webhooks: its own user, project and mock runner; moves the server's test clock by minutes and hours.
     { name: 'journey-waits', testMatch: 'journey-waits.spec.ts', dependencies: ['auth'] },
     // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the
