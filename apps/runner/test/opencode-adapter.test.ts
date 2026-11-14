@@ -23,7 +23,7 @@ import type { RuntimeEvent } from '../src/adapters/types.ts';
 import { OpencodeRuntimeConfigSchema, RunnerConfigSchema } from '../src/config.ts';
 import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
-import { ensureSandbox } from '../src/sandbox/sandbox.ts';
+import { DOTNET_SHM_DIR, ensureSandbox, pnpmLockDirs, usablePnpmLockDirs } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 import { sealOrg, sealWs } from './seal-helpers.ts';
@@ -489,6 +489,23 @@ describe('the opencode adapter (fake binary)', () => {
     // a second shift grants fewer skills: the folder holds exactly those
     await w.start({ skills: ['b'] });
     expect(readdirSync(join(opencodeHomeOf(w.sb), 'config', 'opencode', 'skills'))).toEqual(['b']);
+  });
+
+  it('the box input carries /tmp/.dotnet and the usable pnpm lock folders on Linux, nothing else under /tmp', async () => {
+    const w = await world([{ id: 'openai', key: 'sk-oai-REAL' }]);
+    await w.start();
+    const sb = (w.launches[0] as HarnessLaunch).sandbox;
+    if (process.platform === 'linux') {
+      expect(sb.dotnetShmDir).toBe(DOTNET_SHM_DIR);
+      expect(sb.pnpmLockDirs).toEqual(usablePnpmLockDirs());
+      // only the runner's own lock folders, never /tmp itself
+      expect(sb.pnpmLockDirs?.every((d) => pnpmLockDirs(process.getuid?.() as number).includes(d))).toBe(
+        true,
+      );
+    } else {
+      expect(sb.pnpmLockDirs).toBeUndefined();
+    }
+    expect(sb.writable).not.toContain('/tmp');
   });
 
   it('adds the repository’s AGENTS.md by path when there is one', async () => {

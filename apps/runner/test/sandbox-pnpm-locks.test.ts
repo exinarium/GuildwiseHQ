@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,7 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import { CodexAdapter, codexFilesystem } from '../src/adapters/codex.ts';
@@ -24,6 +25,7 @@ import { runnerPaths } from '../src/paths.ts';
 import { type HarnessSandboxInput, harnessBwrapArgs } from '../src/sandbox/harness-sandbox.ts';
 import {
   DOTNET_SHM_DIR,
+  ensureDotnetShm,
   ensurePnpmLockDirs,
   ensureSandbox,
   PNPM_LOCK_DIR_NAMES,
@@ -142,6 +144,24 @@ describe.skipIf(!posix)('ensurePnpmLockDirs / usablePnpmLockDirs (a temp root st
     expect(logs).toHaveLength(3);
     for (const l of logs) expect(l).toContain(`owned by uid ${uid}, not ${other}`);
     expect(usablePnpmLockDirs({ root, uid: other })).toEqual([]);
+  });
+
+  it('a foreign folder that cannot even be opened (EACCES) is refused and still names its owner', async () => {
+    const root = tmp();
+    const other = uid + 1;
+    const dirs = pnpmLockDirs(other, root);
+    // mode 0000: as a normal user open() fails with EACCES, as another user's 0700 folder would
+    for (const d of dirs) mkdirSync(d, { mode: 0o000 });
+    const logs: string[] = [];
+    try {
+      const got = await ensurePnpmLockDirs({ root, uid: other, log: (m) => logs.push(m) });
+      expect(got).toEqual([]);
+      expect(logs).toHaveLength(3);
+      for (const l of logs) expect(l).toContain(`owned by uid ${uid}, not ${other}`);
+      for (const d of dirs) expect(mode(d)).toBe(0o000);
+    } finally {
+      for (const d of dirs) chmodSync(d, 0o700);
+    }
   });
 
   it('logs a bad folder once, not on every call', async () => {
@@ -306,37 +326,74 @@ describe('Codex: the profile grants exactly the three lock folders under /tmp', 
   });
 });
 
-describe('harness box: the three lock folders are bound writable, /tmp stays a private tmpfs', () => {
-  const input: HarnessSandboxInput = {
-    cwd: '/work/wt',
-    readOnlyCwd: false,
-    home: '/runner/agents/a/home',
-    scratch: '/runner/agents/a/scratch',
-    tmp: '/runner/agents/a/tmp',
-    writable: [],
-    readonly: [],
-    readDirs: [],
-    gitDirs: [],
-    mayCommit: false,
-    proxySocket: '/runner/proxy.sock',
-    bridgePort: 3128,
-    hiddenFromShell: [],
-  };
-  const binds = (args: string[]) =>
-    args.flatMap((a, i) => (a === '--bind' || a === '--bind-try' ? [`${args[i + 1]}=>${args[i + 2]}`] : []));
+// The harness box is a bubblewrap box (Linux only), and harnessBwrapArgs drops every path that is missing on the
+// host. So the folders are real: the lock folders are made under a temp root for this test's own uid, and
+// /tmp/.dotnet is made by ensureDotnetShm here rather than relying on another test having run first.
+describe.skipIf(process.platform !== 'linux' || !posix)(
+  'harness box: the three lock folders are bound writable, /tmp stays a private tmpfs',
+  () => {
+    let root = '';
+    let locks: string[] = [];
+    beforeAll(async () => {
+      await ensureDotnetShm();
+      root = tmp();
+      locks = await ensurePnpmLockDirs({ root, uid, log: () => {} });
+    });
+    const input: HarnessSandboxInput = {
+      cwd: '/work/wt',
+      readOnlyCwd: false,
+      home: '/runner/agents/a/home',
+      scratch: '/runner/agents/a/scratch',
+      tmp: '/runner/agents/a/tmp',
+      writable: [],
+      readonly: [],
+      readDirs: [],
+      gitDirs: [],
+      mayCommit: false,
+      proxySocket: '/runner/proxy.sock',
+      bridgePort: 3128,
+      hiddenFromShell: [],
+    };
+    const binds = (args: string[]) =>
+      args.flatMap((a, i) =>
+        a === '--bind' || a === '--bind-try' ? [`${args[i + 1]}=>${args[i + 2]}`] : [],
+      );
+    const roBinds = (args: string[]) =>
+      args.flatMap((a, i) => (a === '--ro-bind' || a === '--ro-bind-try' ? [`${args[i + 1]}`] : []));
+    // the temp root may itself sit under /tmp (os.tmpdir()), so both count as "under /tmp" here
+    const underTmpOrRoot = (b: string) => b.startsWith('/tmp') || b.startsWith(root);
 
-  it('one writable bind per folder, at its own path; nothing else under /tmp', () => {
-    const args = harnessBwrapArgs({ ...input, dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: LOCKS });
-    const tmpBinds = binds(args).filter((b) => b.startsWith('/tmp'));
-    expect(tmpBinds.sort()).toEqual([DOTNET_SHM_DIR, ...LOCKS].map((p) => `${p}=>${p}`).sort());
-    expect(args[args.indexOf('/tmp') - 1]).toBe('--tmpfs');
-  });
+    it('the fixtures are real: /tmp/.dotnet and the three lock folders exist on the host', () => {
+      expect(existsSync(DOTNET_SHM_DIR)).toBe(true);
+      expect(locks).toEqual(pnpmLockDirs(uid, root));
+    });
 
-  it('without the field only /tmp/.dotnet is bound', () => {
-    const args = harnessBwrapArgs({ ...input, dotnetShmDir: DOTNET_SHM_DIR });
-    expect(binds(args).filter((b) => b.startsWith('/tmp'))).toEqual([`${DOTNET_SHM_DIR}=>${DOTNET_SHM_DIR}`]);
-  });
-});
+    it('one writable bind per folder, at its own path; nothing else under /tmp', () => {
+      const args = harnessBwrapArgs({ ...input, dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: locks });
+      const tmpBinds = binds(args).filter(underTmpOrRoot);
+      expect(tmpBinds.sort()).toEqual([DOTNET_SHM_DIR, ...locks].map((p) => `${p}=>${p}`).sort());
+      expect(roBinds(args).filter(underTmpOrRoot)).toEqual([]);
+      expect(args[args.indexOf('/tmp') - 1]).toBe('--tmpfs');
+      expect(binds(args)).not.toContain('/tmp=>/tmp');
+    });
+
+    it('without the field only /tmp/.dotnet is bound', () => {
+      const args = harnessBwrapArgs({ ...input, dotnetShmDir: DOTNET_SHM_DIR });
+      expect(binds(args).filter(underTmpOrRoot)).toEqual([`${DOTNET_SHM_DIR}=>${DOTNET_SHM_DIR}`]);
+    });
+
+    it('a missing lock folder is not bound (the box cannot mount it), the others still are', () => {
+      const missing = join(tmp(), 'pnpm-dir-locks-gone');
+      const args = harnessBwrapArgs({
+        ...input,
+        dotnetShmDir: DOTNET_SHM_DIR,
+        pnpmLockDirs: [missing, ...locks],
+      });
+      expect(binds(args).some((b) => b.startsWith(missing))).toBe(false);
+      for (const p of locks) expect(binds(args)).toContain(`${p}=>${p}`);
+    });
+  },
+);
 
 // ---------------------------------------------------------------------------------- real sandbox (bubblewrap)
 

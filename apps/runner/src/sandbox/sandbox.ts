@@ -205,13 +205,19 @@ export async function ensurePnpmLockDirs(
     } catch (e) {
       const c = errCode(e);
       // with O_DIRECTORY Linux reports a symlink as ENOTDIR, not ELOOP: lstat (never follows) tells the two apart
-      const link = await lstat(dir).then(
-        (s) => s.isSymbolicLink(),
-        () => false,
-      );
+      const st = await lstat(dir).catch(() => undefined);
+      const link = st?.isSymbolicLink() ?? false;
+      // a 0700 folder of another user cannot even be opened (EACCES): name its owner, which is the real reason
+      const foreign = st?.isDirectory() && st.uid !== uid ? st.uid : undefined;
       warn(
         dir,
-        link || c === 'ELOOP' ? 'is a symlink' : c === 'ENOTDIR' ? 'is not a directory' : `unusable (${c})`,
+        link || c === 'ELOOP'
+          ? 'is a symlink'
+          : c === 'ENOTDIR'
+            ? 'is not a directory'
+            : foreign !== undefined
+              ? `owned by uid ${foreign}, not ${uid}`
+              : `unusable (${c})`,
       );
     } finally {
       await fh?.close().catch(() => undefined);
