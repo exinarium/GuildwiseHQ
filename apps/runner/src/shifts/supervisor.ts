@@ -173,6 +173,7 @@ import {
   withReachability,
 } from '../sandbox/test-services.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
+import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import { e2eAreasSection } from '../testing/e2e-areas.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
@@ -410,6 +411,8 @@ interface ActiveShift {
   delegateWork?: DelegateWork;
   startedAt: Date;
   token?: string;
+  /** The token's env file; `revoke()` ends both (see session/shift-credential.ts). */
+  credential?: IssuedShiftCredential;
   session?: RuntimeSession;
   worktree?: WorktreeResult;
   /** A design before the dependencies landed: a detached read-only checkout of the working branch, removed at the end. */
@@ -719,7 +722,8 @@ export class ShiftSupervisor {
       if (shift.readOnlyCheckout)
         await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
       if (shift.prepTask) await removePrepTaskWorktree(shift.prepTask);
-      if (shift.token) this.deps.ipc.revoke(shift.token);
+      if (shift.credential) shift.credential.revoke();
+      else if (shift.token) this.deps.ipc.revoke(shift.token);
       this.delegates.endCaller(msg.shiftId, 'the shift ended');
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
@@ -1559,13 +1563,16 @@ export class ShiftSupervisor {
     // the agent's name and seniority close the file: everything before is shared by every agent of the role and project
     texts.instructions = identityLast(texts.instructions);
     await adapter.writeInstructions(sandbox, texts.instructions);
-    s.token = this.deps.ipc.registerShift(this.handlerFor(s));
+    s.credential?.revoke();
+    const cred = issueShiftCredential(
+      { ipc: this.deps.ipc, runnerRoot: paths.root, log: this.log },
+      { sessionId: msg.shiftId, handler: this.handlerFor(s) },
+    );
+    s.token = cred.token;
+    s.credential = cred;
     s.env = {
       ...sandboxEnv(sandbox, undefined, tc?.env, identity),
-      AOM_IPC_URL: this.deps.ipc.url,
-      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-      AOM_SHIFT_TOKEN: s.token,
-      AOM_SHIFT_ID: msg.shiftId,
+      ...cred.env,
       ...(s.worktree?.path ? { AOM_WORKDIR: s.worktree.path } : {}),
       // A suite or regression card of a phase follow-up tests the deployed app: Playwright configs read this.
       ...(msg.agent.roleKey === 'tester' && typeof msg.brief.card.fields.targetUrl === 'string'

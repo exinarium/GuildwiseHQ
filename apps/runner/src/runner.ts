@@ -182,6 +182,7 @@ import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
+import { sweepSessionEnvFiles } from './session/shift-credential.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
@@ -1264,6 +1265,8 @@ export class Runner {
         if (n) this.log.info(`temp sweep: removed ${n} temp dir(s) of agents that no longer exist`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    // session env files of a crashed runner: no token of an earlier process is live (the IPC registry is in memory)
+    this.sweepSessionEnv('start');
     this.startScratchSweeps();
     this.supervisor.resumePersisted();
     await this.runs
@@ -1341,7 +1344,18 @@ export class Runner {
     await this.pdfRepairRun?.done;
     await this.pdf.close();
     await this.ipc.stop();
+    // every token is dead once the IPC server stopped; a shift whose cleanup outlived the grace leaves its file behind
+    this.sweepSessionEnv('stop');
     this.writeStatus(false);
+  }
+
+  private sweepSessionEnv(when: 'start' | 'stop'): void {
+    try {
+      const n = sweepSessionEnvFiles(this.paths.root);
+      if (n) this.log.info(`session env sweep (${when}): removed ${n} leftover session env dir(s)`);
+    } catch (err) {
+      this.log.warn(`session env sweep failed: ${(err as NodeJS.ErrnoException).code ?? 'error'}`);
+    }
   }
 
   /** The PDF browser of a new runner version is fetched in the background; until then copies report 'unavailable'. */
