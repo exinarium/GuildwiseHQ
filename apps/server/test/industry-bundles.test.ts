@@ -8,11 +8,13 @@ import { createWorld, ok, type World } from './helpers/world.ts';
 // journey templates. Needs the test database, like the other ledger suites.
 
 let w: World;
+const extraWorlds: World[] = [];
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w.owner.id]);
 });
 afterAll(async () => {
+  for (const x of extraWorlds) await x.t.close();
   await w.t.close();
   await closeAdminPool();
 });
@@ -224,19 +226,27 @@ describe('the bundle commands', () => {
   it('previews a near-duplicate of the organization own rule without writing', async () => {
     const rule = rulePackById('law')?.rules[0];
     if (!rule) throw new Error('no rule');
-    const made = await raw('POST', '/api/ledger', {
-      scope: 'standing_order',
-      title: rule.title,
-      body: rule.body,
-    });
-    // 409 duplicate_order: an earlier case already left an equivalent live rule in the organization
-    expect([200, 201, 409], JSON.stringify(made.body)).toContain(made.status);
-    const events = await eventCount();
-    const pv = await call('GET', '/api/industry-bundles/law');
-    const first = pv.rulePack.rules.find((r: any) => r.id === rule.id);
-    // 'edited': an earlier case left the organization's edited copy of this rule live
-    expect(['covered', 'may_conflict', 'edited']).toContain(first.status);
-    expect(await eventCount()).toBe(events);
+    // A fresh organization, so no state from the other cases can stand in for the own rule.
+    const w2 = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
+    extraWorlds.push(w2); // closed in afterAll: closing it here would also close the shared pool
+    {
+      await q(`UPDATE organizations SET mode='business' WHERE id=$1`, [w2.owner.id]);
+      const as2 = (method: string, url: string, body?: unknown) =>
+        w2.t.req(method, url, { cookie: w2.owner.cookie, ...(body !== undefined ? { body } : {}) });
+      const before = await ok<any>(as2('GET', '/api/industry-bundles/law'));
+      expect(before.rulePack.rules.find((r: any) => r.id === rule.id).status).toBe('new');
+      const made = await as2('POST', '/api/ledger', {
+        scope: 'standing_order',
+        title: rule.title,
+        body: rule.body,
+      });
+      expect([200, 201], JSON.stringify(made.body)).toContain(made.status);
+      const events = await eventCount();
+      const pv = await ok<any>(as2('GET', '/api/industry-bundles/law'));
+      const first = pv.rulePack.rules.find((r: any) => r.id === rule.id);
+      expect(['covered', 'may_conflict']).toContain(first.status);
+      expect(await eventCount()).toBe(events);
+    }
   });
 
   it('lets a member list and preview, but not install or remove', async () => {
