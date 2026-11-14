@@ -6,8 +6,16 @@ import { createSandboxPlaceholders } from '../adapters/sandbox-placeholders.ts';
 import { git, gitOk, revParse } from '../git/git.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import type { GitAuth } from '../git/worktrees.ts';
+import { type NeutralisedLink, neutraliseOutsideSymlinks } from './symlink-guard.ts';
 
 export class ReviewCheckoutError extends Error {}
+
+/** Out-of-tree symlinks could not be checked or replaced: the checkout is refused, no reviewer starts. */
+export class SymlinkNeutralisationError extends ReviewCheckoutError {
+  constructor(detail: string) {
+    super(`symlink neutralisation failed: ${detail}`);
+  }
+}
 
 /** The pull request moved since the run was queued: the head the host has now is not the one the run names. */
 export class ReviewHeadMovedError extends ReviewCheckoutError {
@@ -53,6 +61,8 @@ export interface ReviewCheckout {
   /** The standalone repository: no remote, detached at the pull request head, read-only on disk. */
   path: string;
   headSha: string;
+  /** Symlinks that led outside the checkout and were replaced by a placeholder file (empty: none). */
+  neutralisedLinks: NeutralisedLink[];
 }
 
 /**
@@ -66,6 +76,8 @@ export async function createReviewCheckout(input: {
   runDir: string;
   spec: ReviewerRunSpec;
   auth?: GitAuth;
+  /** Test seam: replaces the symlink guard. */
+  neutraliseLinks?: (root: string) => NeutralisedLink[];
 }): Promise<ReviewCheckout> {
   const { repoPath, runDir, spec } = input;
   if (!isSafeGitRef(spec.baseRef)) throw new ReviewCheckoutError(`refusing unsafe base ref ${spec.baseRef}`);
@@ -116,10 +128,17 @@ export async function createReviewCheckout(input: {
       }
     });
     await gitOk(checkout, ['checkout', '-q', '--detach', spec.headSha]);
+    // before anything else touches the tree: no runner write and no sandbox mount may go through a PR symlink
+    let neutralisedLinks: NeutralisedLink[];
+    try {
+      neutralisedLinks = (input.neutraliseLinks ?? neutraliseOutsideSymlinks)(checkout);
+    } catch (err) {
+      throw new SymlinkNeutralisationError((err instanceof Error ? err.message : String(err)).slice(0, 200));
+    }
     // placeholders first (the sandbox mounts over these names), then the write bit goes
     createSandboxPlaceholders(checkout);
     setTreeWritable(checkout, false);
-    return { path: checkout, headSha: spec.headSha };
+    return { path: checkout, headSha: spec.headSha, neutralisedLinks };
   } catch (err) {
     await removeRunDir(runDir);
     throw err;

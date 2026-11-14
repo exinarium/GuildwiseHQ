@@ -15,6 +15,7 @@ import type { RunnerPaths } from '../paths.ts';
 import { agentTmpRoot, type Sandbox } from '../sandbox/sandbox.ts';
 import { createReviewCheckout, removeRunDir } from './review-checkout.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
+import type { NeutralisedLink } from './symlink-guard.ts';
 
 export type ReviewerRefusal =
   | 'reviewer_token_missing'
@@ -30,6 +31,8 @@ export interface ReviewerRun {
   checkout: string;
   /** This run's own home, scratch and tmp; `configDir` is the agent's account config (the shell cannot read it). */
   sandbox: Sandbox;
+  /** Symlinks of the PR that led outside the checkout and were replaced by placeholder files. */
+  neutralisedLinks: NeutralisedLink[];
 }
 
 export interface ReviewerSandboxDeps {
@@ -44,6 +47,8 @@ export interface ReviewerSandboxDeps {
   agentId: string;
   /** Credentials the owner's clone uses to fetch from the host (never given to the reviewer). */
   auth?: GitAuth;
+  /** Test seam: replaces the symlink guard of the checkout. Production never sets it. */
+  neutraliseLinks?: (root: string) => NeutralisedLink[];
 }
 
 /** Runs prepared and not yet disposed: the startup sweep never touches them. */
@@ -79,6 +84,7 @@ export async function prepareReviewerRun(
       runDir,
       spec,
       ...(deps.auth ? { auth: deps.auth } : {}),
+      ...(deps.neutraliseLinks ? { neutraliseLinks: deps.neutraliseLinks } : {}),
     });
     const sandbox: Sandbox = {
       agentId: deps.agentId,
@@ -91,7 +97,7 @@ export async function prepareReviewerRun(
     await mkdir(sandbox.home, { recursive: true, mode: 0o700 });
     await mkdir(sandbox.scratch, { recursive: true, mode: 0o700 });
     await mkdir(tmp, { recursive: true, mode: 0o700 });
-    return { spec, runDir, checkout: co.path, sandbox };
+    return { spec, runDir, checkout: co.path, sandbox, neutralisedLinks: co.neutralisedLinks };
   } catch (err) {
     await removeRunDir(runDir);
     await removeRunDir(tmp);

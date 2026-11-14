@@ -17,7 +17,7 @@ import { git } from '../git/git.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { cleanAgentTmp, sandboxEnv, sandboxFor, wipeAgent } from '../sandbox/sandbox.ts';
 import { REVIEW_JSON_MARKER, renderReviewerInstructions, renderReviewerPrompt } from './instructions.ts';
-import { ReviewCheckoutError, ReviewHeadMovedError } from './review-checkout.ts';
+import { ReviewCheckoutError, ReviewHeadMovedError, SymlinkNeutralisationError } from './review-checkout.ts';
 import { type ReviewerRefusal, type ReviewerRun, reviewerPermissions } from './reviewer-sandbox.ts';
 
 export interface PrReviewRunDeps {
@@ -186,6 +186,8 @@ export async function runPrReview(
     } catch (err) {
       if (err instanceof ReviewHeadMovedError)
         return fail(elapsed(), 'head_moved', 'the pull request changed while the review was starting', true);
+      if (err instanceof SymlinkNeutralisationError)
+        return fail(elapsed(), 'no_checkout', `the checkout was refused: ${msg(err)}`, true);
       if (err instanceof ReviewCheckoutError)
         return fail(elapsed(), 'no_checkout', `the checkout failed: ${msg(err)}`, true);
       return fail(elapsed(), 'no_checkout', `the checkout failed: ${msg(err)}`, true);
@@ -195,6 +197,16 @@ export async function runPrReview(
       return fail(elapsed(), r.code, r.error, r.retryable);
     }
     run = prepared;
+    // `?? []`: test fixtures build runs without the field
+    const links = run.neutralisedLinks ?? [];
+    if (links.length > 0) {
+      // paths are PR-authored: JSON-quoted, so a newline in a name cannot forge a log line
+      const shown = links.slice(0, 200).map((l) => JSON.stringify(l.path.slice(0, 300)));
+      if (links.length > 200) shown.push(`and ${links.length - 200} more`);
+      deps.log?.(
+        `pr review ${payload.runId}: neutralised ${links.length} symlink${links.length === 1 ? '' : 's'} leading outside the checkout: ${shown.join(', ')}`,
+      );
+    }
     if (timedOut) return fail(elapsed(), 'error', 'stopped', false);
 
     // 3. the change, written by the runner (the checkout is read-only; the agent reads the file)
@@ -233,7 +245,12 @@ export async function runPrReview(
     const logFile = join(deps.paths.shiftLogs, `pr-review-${payload.runId}.jsonl`);
     session = await deps.adapter.startChat({
       chatId: payload.runId,
-      message: renderReviewerPrompt({ diffPath, title: payload.title, changedFiles: anchors.size }),
+      message: renderReviewerPrompt({
+        diffPath,
+        title: payload.title,
+        changedFiles: anchors.size,
+        neutralisedLinks: links,
+      }),
       cwd: run.checkout,
       sandbox: run.sandbox,
       // the sandbox's own variables only: no IPC url, no shift token, no git host token
