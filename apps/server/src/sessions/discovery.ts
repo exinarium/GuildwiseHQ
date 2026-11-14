@@ -40,7 +40,7 @@ import {
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import { effectiveRegistry, resolvePersona } from '../capabilities/registry.ts';
-import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { clipEventName, orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import { openItemForSubject, raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import { scopeOfDoc, versionEvent } from '../commands/documents.ts';
 import { startIntakeIn } from '../commands/intake.ts';
@@ -93,8 +93,6 @@ const assertDiscovery = (t: Row): void => {
   if (t.kind !== 'discovery') throw notFound('session not found');
 };
 
-// Longest event author name (Author in packages/shared/src/events/discovery.ts); display names can be longer.
-const AUTHOR_NAME_MAX = 100;
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 interface PendingEntry {
@@ -1121,7 +1119,7 @@ export class DiscoveryService {
 
   private async userName(db: Queryable, userId: string): Promise<string> {
     const u = await one(db, 'SELECT display_name FROM users WHERE id=$1', [userId]);
-    return clip((u?.display_name ?? '').trim(), AUTHOR_NAME_MAX) || 'Owner';
+    return clipEventName(u?.display_name ?? '') || 'Owner';
   }
 
   async answer(

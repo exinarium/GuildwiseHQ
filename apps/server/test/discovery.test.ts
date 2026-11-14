@@ -272,6 +272,36 @@ describe('the facilitator verbs', () => {
     }
   });
 
+  it.each([
+    ['longer than an event name allows (120)', 'N'.repeat(120), `${'N'.repeat(99)}…`],
+    ['one over the limit (101)', 'M'.repeat(101), `${'M'.repeat(99)}…`],
+    ['exactly at the limit (100)', 'L'.repeat(100), 'L'.repeat(100)],
+    ['short', 'Ada Lovelace', 'Ada Lovelace'],
+  ])('creates a session for an owner whose display name is %s', async (_label, name, stored) => {
+    const [before] = await q('SELECT display_name FROM users WHERE id=$1', [w.owner.id]);
+    await q('UPDATE users SET display_name=$1 WHERE id=$2', [name, w.owner.id]);
+    try {
+      const res = await raw('POST', '/api/discovery', { title: 'Owner name', idea: 'Invoices for freelancers' });
+      expect(res.status).toBe(201);
+      const threadId = (res.body as any).state.threadId as string;
+      expect((await get(threadId)).threadId).toBe(threadId);
+      const [ev] = await q(
+        `SELECT payload FROM events WHERE type='ThreadParticipantAdded'
+          AND payload->>'threadId'=$1 AND payload->>'kind'='user' AND payload->>'refId'=$2`,
+        [threadId, w.owner.id],
+      );
+      expect(ev.payload.displayName).toBe(stored);
+      const [p] = await q(
+        `SELECT display_name FROM thread_participants WHERE thread_id=$1 AND kind='user' AND ref_id=$2`,
+        [threadId, w.owner.id],
+      );
+      expect(p.display_name).toBe(stored);
+      await finish(await nextStart());
+    } finally {
+      await q('UPDATE users SET display_name=$1 WHERE id=$2', [before.display_name, w.owner.id]);
+    }
+  });
+
   it('keeps an answer that arrives while the facilitator is still working and sends it right after', async () => {
     const s = await create({ title: 'Pending' });
     const start = await nextStart();
