@@ -135,6 +135,14 @@ export async function prReviewQueue(
   };
 }
 
+/** The one rule: the project Owner, or an organization Owner/Admin of the project's organization. */
+export function isSpendOwner(
+  org: { id: string; role: OrgRole | null },
+  project: { my_role?: unknown; org_id?: unknown },
+): boolean {
+  return project.my_role === 'owner' || (isOrgManager({ orgRole: org.role }) && org.id === project.org_id);
+}
+
 /** The project Owner or an organization Owner/Admin: the people who decide spend. */
 export async function requireSpendOwner(
   db: Queryable,
@@ -143,8 +151,7 @@ export async function requireSpendOwner(
   projectId: string,
 ) {
   const p = await loadVisibleProject(db, user.id, projectId);
-  const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
-  if (p.my_role !== 'owner' && !orgAdmin)
+  if (!isSpendOwner(org, p))
     throw forbidden('only the project Owner or an organization Owner or Admin can do this');
   return p;
 }

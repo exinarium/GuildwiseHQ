@@ -223,6 +223,21 @@ export type PrReviewPostResult = z.infer<typeof PrReviewPostResultSchema>;
 /** The hidden line a posted review ends with, so a resent post command finds the review it already made. */
 export const prReviewMarker = (runId: string): string => `<!-- review-run:${runId} -->`;
 
+/** Body of POST /api/projects/:id/pull-requests/:prReviewId/review. An empty body reviews the PR as it is now. */
+export const PrReviewTriggerRequestSchema = z
+  .object({
+    /** The timed-out run this re-run replaces, as the page showed it. The server checks it is still the latest run. */
+    previousRunId: z.uuid().optional(),
+  })
+  .strict();
+export type PrReviewTriggerRequest = z.infer<typeof PrReviewTriggerRequestSchema>;
+
+/** What the viewer may start by hand on a PR; null = nothing (not a spend owner, reviewed, closed, run active). */
+export const PrReviewManualActionSchema = z
+  .object({ kind: z.enum(['review_now', 'rerun']), previousRunId: z.uuid().nullable() })
+  .nullable();
+export type PrReviewManualAction = z.infer<typeof PrReviewManualActionSchema>;
+
 /** What the owner sees for one recorded pull request (project view, Pull requests tab). */
 export const PrReviewDtoSchema = z.object({
   id: z.uuid(),
@@ -245,6 +260,8 @@ export const PrReviewDtoSchema = z.object({
   /** Place in the run queue and why it waits; null when the pull request is not waiting in the queue. */
   queuePosition: z.number().int().positive().nullable().optional(),
   queueSlot: PrReviewQueueSlotSchema.nullable().optional(),
+  /** What the viewer may start by hand now; null unless the viewer is a spend owner. */
+  manualAction: PrReviewManualActionSchema.optional(),
   lastRun: z
     .object({
       state: PrReviewRunStateSchema,
@@ -257,6 +274,8 @@ export const PrReviewDtoSchema = z.object({
       postedCount: z.number(),
       reviewUrl: z.string().nullable(),
       trigger: PrReviewTriggerSchema.optional(),
+      /** The timed-out run this run is a re-run of. */
+      rerunOf: z.object({ runId: z.uuid(), startedAt: z.string() }).nullable().optional(),
       /** Findings the run produced, how many were held back by the cap, the cap, and the lines it came from. */
       findingsCount: z.number().optional(),
       heldBackCount: z.number().optional(),

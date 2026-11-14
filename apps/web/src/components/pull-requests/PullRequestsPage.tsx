@@ -22,6 +22,7 @@ import {
 } from '../ui.tsx';
 import { HeldBackFindings } from './HeldBackFindings.tsx';
 import { PostedFindings } from './PostedFindings.tsx';
+import { PrReviewTriggerButton } from './PrReviewTriggerButton.tsx';
 import { ReviewerPrecisionPanel } from './ReviewerPrecisionPanel.tsx';
 
 /** "3 min 12 s", "45 s". */
@@ -139,7 +140,16 @@ function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
       </p>
       <div className="text-xs text-muted">
         <Detail pr={pr} />
+        {pr.lastRun?.trigger === 'manual' && (
+          <p data-testid={`pr-review-by-hand-${pr.changeId}`}>Started by hand</p>
+        )}
+        {pr.lastRun?.rerunOf && (
+          <p data-testid={`pr-review-rerun-of-${pr.changeId}`}>
+            Re-run of the run that timed out at {when(pr.lastRun.rerunOf.startedAt)}
+          </p>
+        )}
       </div>
+      <PrReviewTriggerButton pr={pr} projectId={projectId} />
       {((pr.lastRun?.postedCount ?? 0) > 0 || (pr.unmarkedCount ?? 0) > 0) && (
         <div className="text-xs">
           <PostedFindings
@@ -254,7 +264,8 @@ function Queue({ q, projectId, isOwner }: { q: PrReviewQueueDto; projectId: stri
         confirmLabel="Review now"
         pending={trigger.isPending}
         onConfirm={() => {
-          if (confirm) trigger.mutate(confirm.prReviewId, { onSettled: () => setConfirm(null) });
+          if (confirm)
+            trigger.mutate({ prReviewId: confirm.prReviewId }, { onSettled: () => setConfirm(null) });
         }}
       />
     </section>

@@ -9,10 +9,14 @@ import {
   PR_REVIEW_TIMEOUT_MS,
   type PrReviewDto,
   type PrReviewFinding,
+  type PrReviewManualAction,
   type PrReviewPostPayload,
   PrReviewPostResultSchema,
   PrReviewRunPayloadSchema,
   PrReviewRunResultSchema,
+  type PrReviewRunState,
+  type PrReviewState,
+  type PrReviewTriggerRequest,
   prReviewMarker,
   REVIEWER_MODEL,
   streamId,
@@ -21,6 +25,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
+import { manualReviewAction } from '../review/manual-action.ts';
 import { mayStart } from '../review/may-start.ts';
 import {
   MAX_RUNNING_PER_WORKSTATION,
@@ -110,7 +115,7 @@ export type StartResult =
   | { started: true; target: string; runId: string }
   | {
       started: false;
-      reason: 'gone' | 'not_eligible' | 'running' | 'closed' | 'not_ready' | 'concurrency';
+      reason: 'gone' | 'not_eligible' | 'running' | 'closed' | 'not_ready' | 'concurrency' | 'stale';
       detail?: string;
     };
 
@@ -129,6 +134,8 @@ export async function startPrReviewRun(
     trigger: 'auto' | 'manual';
     requestedBy: string | null;
     enforceConcurrency: boolean;
+    /** Manual only: the timed-out run the page showed. A different latest run means the page is out of date. */
+    expectedPreviousRunId?: string;
   },
 ): Promise<StartResult> {
   const model = REVIEWER_MODEL.first;
@@ -145,15 +152,25 @@ export async function startPrReviewRun(
   if (!row) return { started: false, reason: 'gone' };
   if (row.closed_at) return { started: false, reason: 'closed' };
   if (row.review_state !== 'not_reviewed' || !row.pr_only) return { started: false, reason: 'not_eligible' };
+  let rerunOfRunId: string | null = null;
   if (input.trigger === 'auto') {
     if (!(await mayStart(tx, input.prReviewId))) return { started: false, reason: 'not_eligible' };
   } else {
-    const live = await one(
+    const last = await one(
       tx,
-      `SELECT 1 AS x FROM pr_review_runs WHERE pr_review_id=$1 AND state IN ('running','completed')`,
+      `SELECT id, state FROM pr_review_runs WHERE pr_review_id=$1 AND reviewer='first' ORDER BY started_at DESC LIMIT 1`,
       [input.prReviewId],
     );
-    if (live) return { started: false, reason: 'running' };
+    const action = manualReviewAction({
+      reviewState: 'not_reviewed',
+      closed: false,
+      prOnly: true,
+      lastRun: last ? { id: last.id as string, state: last.state as PrReviewRunState } : null,
+    });
+    if ('refused' in action) return { started: false, reason: action.refused };
+    if (input.expectedPreviousRunId && input.expectedPreviousRunId !== action.previousRunId)
+      return { started: false, reason: 'stale' };
+    rerunOfRunId = action.previousRunId;
   }
   const repoId = row.project_repo_id as string;
   const prNumber = Number(row.change_id);
@@ -211,6 +228,7 @@ export async function startPrReviewRun(
             timeoutMs: PR_REVIEW_TIMEOUT_MS,
             trigger: input.trigger,
             requestedBy: input.requestedBy,
+            rerunOfRunId,
             at: now.toISOString(),
           },
         },
@@ -240,6 +258,7 @@ export async function triggerPrReview(
   org: { id: string; role: OrgRole | null },
   projectId: string,
   prReviewId: string,
+  req: PrReviewTriggerRequest = {},
 ): Promise<PrReviewDto> {
   let target: string | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
@@ -251,6 +270,7 @@ export async function triggerPrReview(
       trigger: 'manual',
       requestedBy: user.id,
       enforceConcurrency: false,
+      expectedPreviousRunId: req.previousRunId,
     });
     if (r.started) {
       target = r.target;
@@ -258,6 +278,11 @@ export async function triggerPrReview(
     }
     if (r.reason === 'gone') throw notFound('pull request not found');
     if (r.reason === 'closed') throw conflict('pr_closed', 'this pull request is closed');
+    if (r.reason === 'stale')
+      throw conflict(
+        'stale_action',
+        'This pull request changed since the page loaded. Refresh and try again.',
+      );
     if (r.reason === 'running') throw conflict('review_running', 'a review of this pull request is running');
     if (r.reason === 'not_ready')
       throw conflict('reviewer_not_ready', 'no reviewer workstation is ready for this repository', {
@@ -266,7 +291,7 @@ export async function triggerPrReview(
     throw conflict('not_reviewable', 'this pull request cannot be reviewed now');
   });
   if (target) void Promise.resolve(ctx.services.gateway.deliverPending(target)).catch(() => undefined);
-  const list = await listPrReviews(ctx.pool, projectId, ctx);
+  const list = await listPrReviews(ctx.pool, projectId, ctx, { canTrigger: true });
   const dto = list.find((p) => p.id === prReviewId);
   if (!dto) throw notFound('pull request not found');
   return dto;
@@ -619,10 +644,21 @@ function blindReviewer(l: Record<string, unknown>) {
 }
 
 /** The recorded pull requests of a project's live repositories with their latest run, open ones first. */
+function manualActionOf(l: Record<string, unknown>): PrReviewManualAction {
+  const a = manualReviewAction({
+    reviewState: l.review_state as PrReviewState,
+    closed: Boolean(l.closed_at),
+    prOnly: Boolean(l.pr_only),
+    lastRun: l.run_id ? { id: l.run_id as string, state: l.run_state as PrReviewRunState } : null,
+  });
+  return 'refused' in a ? null : a;
+}
+
 export async function listPrReviews(
   db: Queryable,
   projectId: string,
   ctx?: Pick<Ctx, 'clock'>,
+  viewer?: { canTrigger: boolean },
 ): Promise<PrReviewDto[]> {
   const queue = ctx ? await prReviewQueue(db, ctx, projectId) : undefined;
   const queued = new Map((queue?.items ?? []).map((q) => [q.prReviewId, q]));
@@ -631,7 +667,8 @@ export async function listPrReviews(
     `SELECT pr.id, pr.project_repo_id, pr.change_id, pr.url, pr.title, pr.author, pr.opened_at, pr.review_state,
             pr.reviewed_at, pr.reviewed_by, pr.closed_at, r.remote_url_normalized, r.name,
             run.state AS run_state, run.started_at, run.finished_at, run.duration_ms, run.timeout_ms, run.error,
-            run.error_code, run.review_url, run.trigger,
+            run.error_code, run.review_url, run.trigger, run.id AS run_id, run.reviewer AS run_reviewer, r.pr_only,
+            run.rerun_of_run_id, prev.started_at AS rerun_of_started_at,
             (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id AND f.posted) AS posted_count,
             (SELECT count(*)::int FROM pr_review_findings f WHERE f.run_id = run.id) AS findings_count,
             run.held_back_count, run.findings_cap, run.changed_lines,
@@ -642,6 +679,7 @@ export async function listPrReviews(
        JOIN project_repos r ON r.id = pr.project_repo_id AND r.removed_at IS NULL
        LEFT JOIN pr_review_runs run ON run.id = (
               SELECT x.id FROM pr_review_runs x WHERE x.pr_review_id = pr.id ORDER BY x.started_at DESC LIMIT 1)
+       LEFT JOIN pr_review_runs prev ON prev.id = run.rerun_of_run_id
       WHERE pr.project_id=$1
       ORDER BY (pr.closed_at IS NULL) DESC, pr.opened_at DESC, pr.change_id DESC
       LIMIT 200`,
@@ -664,6 +702,7 @@ export async function listPrReviews(
     reviewerToken: tokens.get(l.project_repo_id as string) ?? null,
     queuePosition: queued.get(l.id as string)?.position ?? null,
     queueSlot: queued.get(l.id as string)?.slot ?? null,
+    manualAction: viewer?.canTrigger ? manualActionOf(l) : null,
     lastRun: l.run_state
       ? {
           state: l.run_state as 'running' | 'completed' | 'posted' | 'timed_out' | 'failed',
@@ -676,6 +715,9 @@ export async function listPrReviews(
           postedCount: Number(l.posted_count ?? 0),
           reviewUrl: (l.review_url as string | null) ?? null,
           trigger: (l.trigger as 'auto' | 'manual' | null) ?? 'auto',
+          rerunOf: l.rerun_of_run_id
+            ? { runId: l.rerun_of_run_id as string, startedAt: iso(l.rerun_of_started_at) ?? '' }
+            : null,
           findingsCount: Number(l.findings_count ?? 0),
           heldBackCount: Number(l.held_back_count ?? 0),
           findingsCap:

@@ -40,7 +40,11 @@ export function usePrReviewQueue(projectId: string | undefined) {
 export function useTriggerPrReview(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (prReviewId: string) => post(`/projects/${projectId}/pull-requests/${prReviewId}/review`, {}),
+    mutationFn: ({ prReviewId, previousRunId }: { prReviewId: string; previousRunId?: string }) =>
+      post(
+        `/projects/${projectId}/pull-requests/${prReviewId}/review`,
+        previousRunId ? { previousRunId } : {},
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pull-requests', projectId] });
       qc.invalidateQueries({ queryKey: ['pr-review-queue', projectId] });

@@ -8,8 +8,8 @@ export const prReviewRunProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'PrReviewRunStarted'>).payload;
     await exec(
       tx,
-      `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state, timeout_ms, started_at, trigger, requested_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,$10,$11)
+      `INSERT INTO pr_review_runs (id, pr_review_id, project_id, reviewer, runtime, model, workstation_id, state, timeout_ms, started_at, trigger, requested_by, rerun_of_run_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,$10,$11,$12)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.runId,
@@ -23,6 +23,7 @@ export const prReviewRunProjectors: Record<string, Projector> = {
         p.at,
         p.trigger ?? 'auto',
         p.requestedBy ?? null,
+        p.rerunOfRunId ?? null,
       ],
     );
     await exec(tx, 'UPDATE pr_reviews SET last_run_id=$2 WHERE id=$1', [p.prReviewId, p.runId]);
