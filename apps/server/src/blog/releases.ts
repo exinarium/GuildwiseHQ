@@ -2,13 +2,17 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  buildHashtags,
   fitCaption,
   graphemeCount,
+  HASHTAG_POOLS,
+  type HashtagPools,
   type Release,
   type ReleaseSections,
   type ReleaseWhatsNew,
   SOCIAL_LIMITS,
   SOCIAL_POST_LIMITS,
+  type SocialNetwork,
   type SocialPostContent,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
@@ -371,11 +375,22 @@ function linkedinText(version: string, top: string[]): string {
   return `${head}${kept.length ? `\n\nWhat is new:\n${kept.join('\n')}` : ''}${tail}`;
 }
 
+/** The release's own hashtags per network, before the pool tags are added. */
+const RELEASE_TOPICAL: Record<SocialNetwork, string[]> = {
+  facebook: ['GuildwiseHQ'],
+  linkedin: ['AIAgents', 'Automation', 'GuildwiseHQ'],
+  x: ['GuildwiseHQ'],
+  bluesky: ['GuildwiseHQ'],
+};
+
 /**
  * Captions prefilled from the manifest for a super admin who writes the post by hand (and a valid starting point for any
- * drafter): factual, no hype, no link (the link is added per network). The hashtags are a suggestion.
+ * drafter): factual, no hype, no link (the link is added per network). The hashtags are a suggestion: the release's own
+ * tags, then the standing and popular pool tags (`buildHashtags`, seeded by the version), within each network's maximum
+ * and, on X and Bluesky, the room the text leaves. `pools` defaults to the built-in pools; pass the settings
+ * (`hashtagPools(ctx)`), or `NO_HASHTAG_POOLS` for the release's own tags only.
  */
-export function draftFromRelease(r: Release): SocialPostContent {
+export function draftFromRelease(r: Release, pools: HashtagPools = HASHTAG_POOLS): SocialPostContent {
   const items = [...r.sections.added, ...r.sections.changed].filter((i) => plain(i).length > 10);
   const top = items.slice(0, 3).map((i) => headline(i, 110));
   const lead = top[0] ?? 'See what changed in this release';
@@ -384,6 +399,22 @@ export function draftFromRelease(r: Release): SocialPostContent {
     `Guildwise HQ ${r.version} is out. ${top.length ? `${top.join('. ')}.` : 'See what changed in this release.'}`,
     SOCIAL_POST_LIMITS.summaryMax,
   );
+  const texts = {
+    facebookText: fitCaption(`Guildwise HQ ${r.version} is out. ${top.slice(0, 2).join('. ')}.`, 500),
+    linkedinText: linkedinText(r.version, top),
+    xText: fitCaption(`Guildwise HQ ${r.version} is out. ${lead}.`, 200),
+    blueskyText: fitCaption(`Guildwise HQ ${r.version} is out. ${lead}.`, 240),
+  };
+  const tags = (network: SocialNetwork): string[] => {
+    const limits = SOCIAL_LIMITS[network];
+    return buildHashtags({
+      topical: RELEASE_TOPICAL[network],
+      pools,
+      max: limits.tags[1],
+      seed: r.version,
+      room: 'total' in limits ? limits.total - graphemeCount(texts[`${network}Text`]) : undefined,
+    });
+  };
   return {
     version: r.version,
     releasedOn: r.date,
@@ -391,15 +422,12 @@ export function draftFromRelease(r: Release): SocialPostContent {
     summary,
     coverKey: 'release',
     captions: {
-      facebookText: fitCaption(`Guildwise HQ ${r.version} is out. ${top.slice(0, 2).join('. ')}.`, 500),
-      linkedinText: linkedinText(r.version, top),
-      xText: fitCaption(`Guildwise HQ ${r.version} is out. ${lead}.`, 200),
-      blueskyText: fitCaption(`Guildwise HQ ${r.version} is out. ${lead}.`, 240),
+      ...texts,
       hashtags: {
-        facebook: ['GuildwiseHQ'],
-        linkedin: ['AIAgents', 'Automation', 'GuildwiseHQ'],
-        x: ['GuildwiseHQ'],
-        bluesky: ['GuildwiseHQ'],
+        facebook: tags('facebook'),
+        linkedin: tags('linkedin'),
+        x: tags('x'),
+        bluesky: tags('bluesky'),
       },
     },
   };

@@ -113,6 +113,7 @@ import {
   type PrepTaskWorktree,
   removePrepTaskWorktree,
 } from '../git/release-prep-task.ts';
+import { resetSubmoduleDrift, submoduleResetNote } from '../git/submodule-drift.ts';
 import {
   abortMerge,
   mergeInProgress,
@@ -176,6 +177,7 @@ import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../tes
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
+import { type PrepResult, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
 import {
   agentPath,
   describeToolchains,
@@ -183,6 +185,7 @@ import {
   toolchainNote,
   toolchainRpc,
 } from '../toolchain/registry.ts';
+import type { Platform } from '../toolchain/types.ts';
 import type { TranscriptDeps, TranscriptResult } from '../transcript/fetch.ts';
 import {
   defaultTranscriptDeps,
@@ -204,6 +207,8 @@ import {
 } from './autocommit.ts';
 import {
   type BranchSnapshot,
+  builderE2eMatcher,
+  type DirtySnapshot,
   discardOutOfScope,
   discardTestArtifacts,
   fetchedRemoteTip,
@@ -211,6 +216,7 @@ import {
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
+  snapshotDirty,
   uncommittedOutOfScope,
   workRefGuardInput,
 } from './guard.ts';
@@ -348,6 +354,8 @@ export interface SupervisorDeps {
   toolchains?: ToolchainRegistry;
   /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
   runs?: RunManager;
+  /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
+  prepareWorktree?: typeof prepareWorktree;
   /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
   onTestServices?: () => void;
   /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
@@ -443,6 +451,8 @@ interface ActiveShift {
   mainShas: string[];
   /** Shas of the card's base and working branch (local and origin/): merges of them are exempt in the guard. */
   baseTips: string[];
+  /** Fingerprints of the paths already dirty at the shift start: unchanged ones are not this shift's doing (guard). */
+  dirtyAtStart?: DirtySnapshot;
   /** Refusals of the leftovers commit already noted on the card this shift (reason and tree): one note each. */
   autoCommitRefusals: Set<string>;
   /** When the shift's start sha was taken (ms since epoch). */
@@ -451,6 +461,10 @@ interface ActiveShift {
   checksRunning?: boolean;
   /** Aborted when the shift ends: kills the running checks. */
   checkAbort?: AbortController;
+  /** Aborted when the shift is stopped: ends the preparation of a new worktree. */
+  prepAbort?: AbortController;
+  /** What preparing the new card worktree did (reported with `shift.started`, told to the agent). */
+  worktreePrep?: PrepResult;
   /** Check results by head, check and command: a second handoff at the same head does not run them again. */
   checkCache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
@@ -483,6 +497,7 @@ interface PersistedShift {
   startedSent: boolean;
   mainShas?: string[];
   baseTips?: string[];
+  dirtyAtStart?: DirtySnapshot;
 }
 
 /**
@@ -633,7 +648,7 @@ export class ShiftSupervisor {
 
   async handleStart(
     msg: ShiftStartMsg,
-    resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[] },
+    resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[]; dirtyAtStart?: DirtySnapshot },
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     // The CEO's management shift has a slot of its own (one at a time, outside the owner's limit like a chat): a
@@ -679,6 +694,7 @@ export class ShiftSupervisor {
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
       baseTips: resume?.baseTips ? [...resume.baseTips] : [],
+      ...(resume?.dirtyAtStart ? { dirtyAtStart: { ...resume.dirtyAtStart } } : {}),
       autoCommitRefusals: new Set<string>(),
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
@@ -741,6 +757,7 @@ export class ShiftSupervisor {
           startedSent: rec.startedSent,
           ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
           ...(rec.baseTips ? { baseTips: rec.baseTips } : {}),
+          ...(rec.dirtyAtStart ? { dirtyAtStart: rec.dirtyAtStart } : {}),
         });
       } catch (err) {
         this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
@@ -778,6 +795,7 @@ export class ShiftSupervisor {
         startedSent: !!s.startedSent,
         ...(s.mainShas.length ? { mainShas: s.mainShas } : {}),
         ...(s.baseTips.length ? { baseTips: s.baseTips } : {}),
+        ...(s.dirtyAtStart ? { dirtyAtStart: s.dirtyAtStart } : {}),
       };
       writeFileSync(`${file}.tmp`, JSON.stringify(rec), { mode: 0o600 });
       renameSync(`${file}.tmp`, file);
@@ -825,6 +843,7 @@ export class ShiftSupervisor {
       if (done) return;
     }
     if (!afterAccepted) s.stopReason ??= reason;
+    s.prepAbort?.abort();
     if (reason === 'claim_lost') {
       s.reportState = 'accepted'; // no further reports for a shift the server no longer holds
       this.deps.outbox.discard((e) => e.type === 'shift.report' && e.frame.shiftId === shiftId);
@@ -1267,6 +1286,9 @@ export class ShiftSupervisor {
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
       s.startedAtMs = Date.now();
       await this.recordBaseTips(s);
+      // What was already dirty before the agent started. A resumed shift keeps the snapshot of its first start; one
+      // persisted without a snapshot (an older runner) gets none, since by now the worktree holds the agent's own edits.
+      if (!s.resumed) s.dirtyAtStart ??= await snapshotDirty(cwd);
       s.branchesAtStart = await snapshotBranches(cwd);
       const seen = await originBranchNames(repo.localPath);
       if (seen.length) s.originBranches = seen;
@@ -1313,6 +1335,18 @@ export class ShiftSupervisor {
 
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
+
+    // A card worktree this shift just added is prepared before the agent starts (after the accept: the server releases a
+    // shift that is not accepted within 30 s): submodules, then the project's dependencies in the run-step sandbox.
+    if (
+      msg.kind === 'card' &&
+      s.worktree?.added &&
+      !s.resumed &&
+      !msg.agent.isDevops &&
+      this.deps.config.prepareWorktrees !== false &&
+      msg.worktree
+    )
+      await this.prepareNewWorktree(s, msg.brief.project.projectPath);
 
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
@@ -1366,6 +1400,8 @@ export class ShiftSupervisor {
       }) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
     if (playbookNote(msg.playbookGrants)) texts.instructions += `\n${playbookNote(msg.playbookGrants)}\n`;
+    const prepText = prepNote(s.worktreePrep);
+    if (prepText) texts.instructions += `\n${prepText}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
       this.deps.capabilities?.grantedSkills(
@@ -1664,6 +1700,18 @@ export class ShiftSupervisor {
         ...(s.worktree?.createdBranch ? { branchCreated: s.worktree.createdBranch } : {}),
         ...(s.originBranches ? { originBranches: s.originBranches } : {}),
         ...(s.syncMain ? { syncMain: s.syncMain } : {}),
+        ...(s.worktreePrep
+          ? {
+              worktreePrep: {
+                ok: s.worktreePrep.ok,
+                steps: s.worktreePrep.steps.slice(0, 20).map((x) => ({
+                  ...x,
+                  ...(x.detail ? { detail: x.detail.slice(0, 1000) } : {}),
+                  ms: Math.max(0, Math.round(x.ms)),
+                })),
+              },
+            }
+          : {}),
       });
     if (s.worktree?.createdBranch && !s.startedSent) {
       const b = s.worktree.createdBranch;
@@ -1980,6 +2028,55 @@ export class ShiftSupervisor {
     if (!u || u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens <= 0) return;
     s.usageSentAt = now;
     this.deps.transport.send('run.usage', { kind: 'shift', id: s.msg.shiftId, usage: u });
+  }
+
+  /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
+  private async prepareNewWorktree(s: ActiveShift, projectPath: string | undefined): Promise<void> {
+    const wt = s.worktree;
+    if (!wt) return;
+    s.prepAbort = new AbortController();
+    this.addProgress(s, 'status', 'preparing the new worktree (submodules, dependencies)');
+    this.flushProgress(s); // the owner sees it now, not after the session started
+    const runs = this.deps.runs;
+    const shiftKey = s.msg.shiftId.slice(0, 8);
+    const prep = this.deps.prepareWorktree ?? prepareWorktree;
+    try {
+      s.worktreePrep = await prep({
+        worktree: wt.path,
+        ...(projectPath ? { projectPath } : {}),
+        ...(runs
+          ? {
+              launch: (argv: string[], key: string) =>
+                runs.checkLaunch({ key: `${shiftKey}-${key}`, worktree: wt.path, argv }),
+            }
+          : {}),
+        platform: process.platform as Platform,
+        signal: s.prepAbort.signal,
+      });
+    } catch (err) {
+      s.worktreePrep = {
+        ok: false,
+        steps: [{ name: 'prepare', status: 'failed', detail: String(err).slice(0, 400), ms: 0 }],
+      };
+    } finally {
+      s.prepAbort = undefined;
+    }
+    const r = s.worktreePrep;
+    if (r.steps.length === 0) return;
+    const secs = Math.round(r.steps.reduce((a, x) => a + x.ms, 0) / 1000);
+    const failed = r.steps.filter((x) => x.status === 'failed');
+    if (failed.length) {
+      const what = failed.map((x) => `${x.name}: ${x.detail ?? 'failed'}`).join('; ');
+      this.addProgress(s, 'status', `the worktree was not fully prepared (${what})`);
+      this.log.warn(`worktree preparation of ${s.msg.shiftId} failed: ${what}`);
+    } else {
+      this.addProgress(
+        s,
+        'status',
+        `worktree prepared in ${secs}s (${r.steps.map((x) => x.name).join(', ')})`,
+      );
+    }
+    this.flushProgress(s);
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
@@ -2400,6 +2497,7 @@ export class ShiftSupervisor {
       ...(s.mainShas.length ? { mainMergeShas: s.mainShas } : {}),
       ...(s.baseTips.length ? { baseTipShas: s.baseTips } : {}),
       ...(s.startedAtMs ? { startedAtMs: s.startedAtMs } : {}),
+      ...(s.dirtyAtStart && Object.keys(s.dirtyAtStart).length ? { dirtyAtStart: s.dirtyAtStart } : {}),
     };
   }
 
@@ -2575,6 +2673,7 @@ export class ShiftSupervisor {
           ...(data.assumptions ? { assumptions: data.assumptions } : {}),
           ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
           ...(data.review ? { review: data.review } : {}),
+          ...(data.testsOnly ? { testsOnly: true } : {}),
         },
       };
     }
@@ -2641,6 +2740,7 @@ export class ShiftSupervisor {
         ...(data.assumptions ? { assumptions: data.assumptions } : {}),
         ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
         ...(data.review ? { review: data.review } : {}),
+        ...(data.testsOnly ? { testsOnly: true } : {}),
       },
     };
   }
@@ -2912,6 +3012,20 @@ export class ShiftSupervisor {
 
       if (s.worktree && s.startSha) {
         await this.recordBaseTips(s, true);
+        // A submodule left off its pin (agent sandboxes cannot run `git submodule update`) goes back to the pin before
+        // the guard and the leftovers commit: a role that commits is judged on every changed path, so the drift would
+        // refuse a tester it cannot fix, and `git add -A` would commit it as a pin change. Not during a merge.
+        if (msg.agent.permissions.mayCommit && !(await mergeInProgress(s.worktree.path))) {
+          // (never a fetch: this runs on the host, on content the agent can write)
+          const drift = await resetSubmoduleDrift(s.worktree.path);
+          if (drift.reset.length) {
+            const note = submoduleResetNote(drift.reset);
+            this.log.info(`${msg.brief.card.ref}: ${note}`);
+            await this.submit(s, { kind: 'comment', note });
+            checkNote = note;
+          }
+          if (drift.refused) return rejected(drift.refused);
+        }
         const violations = await runGuard(this.guardInput(s, s.worktree.path, s.startSha));
         if (violations.length > 0) {
           for (const v of violations) {
@@ -2970,10 +3084,16 @@ export class ShiftSupervisor {
               let r: Awaited<ReturnType<typeof runHandoffChecks>>;
               try {
                 const runs = this.deps.runs;
+                // A builder is not held to E2E test content it may not change (a tester's specs on the card branch);
+                // the tester working a tests-only build is. The attached changedPaths stay complete.
+                const isE2e = builderE2eMatcher(msg.brief.project.e2eGlobs);
                 r = await runHandoffChecks({
                   suites: cb.suites,
                   worktree: wt,
-                  changedPaths: cd.changedPaths,
+                  changedPaths:
+                    msg.agent.roleKey === 'builder'
+                      ? cd.changedPaths.filter((p) => !isE2e(p))
+                      : cd.changedPaths,
                   headSha: cd.headSha,
                   logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'checks'),
                   signal: s.checkAbort.signal,
@@ -3002,7 +3122,7 @@ export class ShiftSupervisor {
                 );
               if (r.blocking.length) return rejected(r.refusal);
               attach = { ...attach, checks: r.evidence };
-              checkNote = r.summary;
+              checkNote = checkNote ? `${checkNote} ${r.summary}` : r.summary;
             }
           }
         }

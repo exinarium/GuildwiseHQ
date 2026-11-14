@@ -111,11 +111,12 @@ describe('SocialCaptionsSchema', () => {
   it('rejects bad tags, too many tags and duplicates', () => {
     expect(SocialCaptionsSchema.safeParse({ hashtags: { x: ['has space'] } }).success).toBe(false);
     expect(SocialCaptionsSchema.safeParse({ hashtags: { x: ['1abc'] } }).success).toBe(false);
-    expect(SocialCaptionsSchema.safeParse({ hashtags: { x: ['a1', 'b2', 'c3'] } }).success).toBe(false);
+    expect(SocialCaptionsSchema.safeParse({ hashtags: { x: ['a1', 'b2', 'c3', 'd4'] } }).success).toBe(false);
     expect(SocialCaptionsSchema.safeParse({ hashtags: { facebook: ['aa', 'AA'] } }).success).toBe(false);
     expect(
-      SocialCaptionsSchema.safeParse({ hashtags: { linkedin: ['a1', 'b2', 'c3', 'd4', 'e5', 'f6'] } })
-        .success,
+      SocialCaptionsSchema.safeParse({
+        hashtags: { linkedin: ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7', 'h8', 'i9'] },
+      }).success,
     ).toBe(false);
   });
   it('accepts non-Latin tags', () => {

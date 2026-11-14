@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BUILTIN_ROLES } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractFallbackReport } from '../src/shifts/supervisor.ts';
 import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
-import { cleanupTmp, sh, waitUntil } from './helpers.ts';
+import { cleanupTmp, makeRepo, sh, tmp, waitUntil } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 
 cleanupTmp();
@@ -14,6 +15,7 @@ afterEach(async () => {
   h = undefined;
 });
 
+type Post = { status: number; json: Record<string, unknown> };
 const outcome = (outcomeId: string, note = 'n', data: Record<string, unknown> = {}) => ({
   report: { kind: 'outcome', outcomeId, note, data },
 });
@@ -26,6 +28,25 @@ async function start(
   const adapter = new ScriptedAdapter(script);
   h = await startHarness(serverOpts, { adapters: new Map([['mock', adapter]]), ...runnerOpts });
   return { adapter, h };
+}
+
+/** A card repository that holds X as a submodule at `core`, and a newer commit of X than the pin. */
+function submoduleRepo() {
+  // the card repository holds X as a submodule at `core`
+  const x = makeRepo();
+  const repo = makeRepo();
+  sh(repo.clone, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', x.origin, 'core']);
+  sh(repo.clone, 'git', ['commit', '-m', 'add core']);
+  sh(repo.clone, 'git', ['push', 'origin', 'main']);
+  const pin = sh(join(repo.clone, 'core'), 'git', ['rev-parse', 'HEAD']);
+  const other = join(tmp(), 'x-other');
+  sh(x.root, 'git', ['clone', x.origin, other]);
+  writeFileSync(join(other, 'feature.txt'), 'feature\n');
+  sh(other, 'git', ['add', '-A']);
+  sh(other, 'git', ['commit', '-m', 'feature']);
+  sh(other, 'git', ['push', 'origin', 'main']);
+  const newer = sh(other, 'git', ['rev-parse', 'HEAD']);
+  return { repo, pin, newer };
 }
 
 describe('supervisor', () => {
@@ -243,6 +264,99 @@ describe('supervisor', () => {
     expect(h!.server.of('shift.report').filter((r) => r.shiftId === shiftId)).toHaveLength(0);
   });
 
+  it('a reviewer whose worktree was already dirty when the shift started has its verdict accepted (BLOCKERS.md section 3)', async () => {
+    const seen: { r?: Post; cwd?: string } = {};
+    await start(async (i, ctl) => {
+      if (i.agent.roleKey === 'builder') return;
+      seen.r = await ctl.post(
+        '/v1/report',
+        outcome('approve', 'ok', { score: 4, risk: 'low', riskAnalysis: 'contained' }),
+      );
+    });
+    await h!.runShift({ stage: 'build' });
+    // left behind between the shifts (a submodule off its pin looks the same to the guard: a dirty path)
+    const wt = worktreeOf(h!);
+    writeFileSync(join(wt, 'README.md'), '# toy, edited outside any shift\n');
+    writeFileSync(join(wt, 'left-behind.txt'), 'x\n');
+    const { shiftId, ended } = await h!.runShift({ stage: 'review' });
+    expect(seen.r?.status).toBe(200);
+    expect(ended.outcome).toBe('reported');
+    expect(ended.guardViolations ?? []).toEqual([]);
+    expect(h!.server.of('shift.report').filter((r) => r.shiftId === shiftId)).toHaveLength(1);
+  });
+
+  it('a submodule set up during the shift and left off its pin: the builder is told to check the pin out, the runner runs no git inside it, the drift is never committed (BLOCKERS.md section 3)', async () => {
+    const { repo, pin, newer } = submoduleRepo();
+    const seen: { first?: Post; r?: Post; cwd?: string } = {};
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      // the submodule appears during the shift (DevOps set it up) and ends up on another commit than the pin
+      sh(i.cwd, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--', 'core']);
+      sh(join(i.cwd, 'core'), 'git', ['fetch', 'origin']);
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', newer]);
+      writeFileSync(join(i.cwd, 'feature.ts'), 'export const x = 1;\n');
+      seen.first = await ctl.post('/v1/report', outcome('handoff', 'built'));
+      // what the refusal tells the agent to do, from its own sandbox
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', pin]);
+      seen.r = await ctl.post('/v1/report', outcome('handoff', 'built'));
+      seen.cwd = i.cwd;
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) }, repo);
+    const { ended } = await h.runShift({ stage: 'build' });
+    expect(seen.first?.status).not.toBe(200);
+    expect(JSON.stringify(seen.first?.json)).toContain(`git -C core checkout ${pin}`);
+    expect(seen.r?.status).toBe(200);
+    expect(ended.outcome).toBe('reported');
+    // the card branch pins the same commit as before; the builder's own file was committed
+    expect(sh(seen.cwd as string, 'git', ['rev-parse', 'HEAD:core'])).toBe(pin);
+    expect(sh(seen.cwd as string, 'git', ['diff', '--name-only', 'origin/main', 'HEAD'])).toBe('feature.ts');
+  }, 60_000);
+
+  it('a tester whose late-set-up submodule went off its pin gets the same instruction, not a guard violation for core', async () => {
+    const { repo, pin, newer } = submoduleRepo();
+    const seen: { first?: Post; r?: Post; cwd?: string } = {};
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      sh(i.cwd, 'git', ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--', 'core']);
+      sh(join(i.cwd, 'core'), 'git', ['fetch', 'origin']);
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', newer]);
+      mkdirSync(join(i.cwd, 'e2e'), { recursive: true });
+      writeFileSync(join(i.cwd, 'e2e', 'login.spec.ts'), 'test\n');
+      seen.first = await ctl.post('/v1/report', outcome('handoff', 'spec fixed'));
+      sh(join(i.cwd, 'core'), 'git', ['checkout', '-q', pin]);
+      seen.r = await ctl.post(
+        '/v1/report',
+        outcome('handoff', 'spec fixed', {
+          buildEvidence: {
+            commands: [{ kind: 'test', command: 'playwright', status: 'passed', result: '1 passed' }],
+          },
+        }),
+      );
+      seen.cwd = i.cwd;
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) }, repo);
+    const tester = BUILTIN_ROLES.find((r) => r.key === 'tester')!;
+    const base = makeShiftStart({ stage: 'build', remoteNormalized: repo.remoteNormalized }) as {
+      agent: Record<string, unknown>;
+    };
+    // the tester works the build stage of a tests-only card
+    const msg = makeShiftStart({
+      stage: 'build',
+      remoteNormalized: repo.remoteNormalized,
+      outcomes: [{ id: 'handoff', label: 'Hand off for review', kind: 'success', data: 'buildHandoff' }],
+      startExtra: { agent: { ...base.agent, roleKey: 'tester', permissions: tester.permissions } },
+    });
+    h.server.send('shift.start', msg);
+    const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    expect(JSON.stringify(seen.first?.json)).toContain(`git -C core checkout ${pin}`);
+    expect(JSON.stringify(seen.first?.json)).not.toContain('tester_edited_non_e2e');
+    expect(seen.r?.json.error).toBeUndefined();
+    expect(seen.r?.status).toBe(200);
+    expect(ended.guardViolations ?? []).toEqual([]);
+    expect(sh(join(seen.cwd as string, 'core'), 'git', ['rev-parse', 'HEAD'])).toBe(pin);
+    expect(sh(seen.cwd as string, 'git', ['diff', '--name-only', 'origin/main', 'HEAD'])).toBe(
+      'e2e/login.spec.ts',
+    );
+  }, 60_000);
+
   it("after a guard rejection a tester's out-of-scope leftovers are discarded, not auto-committed", async () => {
     const seen: any = {};
     let wt = '';
@@ -366,6 +480,63 @@ describe('supervisor', () => {
       'runtime_unavailable',
     );
     expect(h!.server.invalid).toEqual([]);
+  });
+
+  it('prepares a card worktree it just added; a failed preparation still starts the shift and the agent is told', async () => {
+    let instructions = '';
+    const calls: string[] = [];
+    await start(
+      async (i) => {
+        instructions = i.instructionsMarkdown;
+      },
+      {},
+      {
+        prepareWorktree: async (p) => {
+          calls.push(p.worktree);
+          return {
+            ok: false,
+            steps: [
+              { name: 'pnpm install', status: 'failed', detail: 'exit 1: registry unreachable', ms: 1200 },
+            ],
+          };
+        },
+      },
+    );
+    const { shiftId, ended } = await h!.runShift({ stage: 'build' });
+    expect(calls).toEqual([worktreeOf(h!)]);
+    expect(ended.outcome).toBe('no_report');
+    const started = h!.server.of('shift.started').find((m) => m.shiftId === shiftId);
+    expect(started?.worktreePrep).toEqual({
+      ok: false,
+      steps: [{ name: 'pnpm install', status: 'failed', detail: 'exit 1: registry unreachable', ms: 1200 }],
+    });
+    expect(instructions).toMatch(/Not prepared:\n- pnpm install: exit 1: registry unreachable/);
+    const progress = h!.server.of('shift.progress').flatMap((m) => m.items.map((x: any) => x.text));
+    expect(progress.some((t: string) => /not fully prepared/.test(t))).toBe(true);
+    // the next shift reuses the worktree: nothing is prepared again
+    const second = await h!.runShift({ stage: 'review', mode: 'reuse' });
+    expect(calls).toHaveLength(1);
+    expect(
+      h!.server.of('shift.started').find((m) => m.shiftId === second.shiftId)?.worktreePrep,
+    ).toBeUndefined();
+    expect(h!.server.invalid).toEqual([]);
+  });
+
+  it('the prepareWorktrees switch off: a new worktree is not prepared', async () => {
+    let called = false;
+    await start(
+      async () => {},
+      {},
+      {
+        prepareWorktree: async () => {
+          called = true;
+          return { ok: true, steps: [] };
+        },
+      },
+    );
+    (h!.runner as any).opts.config.prepareWorktrees = false;
+    await h!.runShift({ stage: 'build' });
+    expect(called).toBe(false);
   });
 
   it('creates a base branch the clone lacks from the default branch and says so on shift.started', async () => {

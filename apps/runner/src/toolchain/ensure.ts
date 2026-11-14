@@ -20,7 +20,7 @@ import {
 import type { ExecResult, Executor } from './exec.ts';
 import { type DetectedManager, detectManagers, managerCommands, noManagerAdvice } from './managers.ts';
 import { dotnetInstallInto, STACKS, TOOLS } from './stacks.ts';
-import type { Check, Detection, Manager, Params, Platform, Step, ToolSpec } from './types.ts';
+import type { Check, DepStep, Detection, Manager, Params, Platform, Step, ToolSpec } from './types.ts';
 
 /** `have >= want`, comparing dotted numbers segment by segment (`8` is satisfied by `8.0.100` and `9.0`). */
 export function versionAtLeast(have: string, want: string): boolean {
@@ -224,6 +224,12 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   return { state, stacks: stackList, tools: reports, summary, logTail };
 }
 
+/** The program a dependency step runs: a repository script (`./mvnw`, a Windows `.cmd` path) resolved in `dir`, else the command. */
+export function depCommand(step: DepStep, dir: string): string {
+  const cmd = step.cmd.startsWith('./') || step.cmd.includes('\\') ? join(dir, step.cmd) : step.cmd;
+  return isAbsolute(cmd) ? cmd : step.cmd;
+}
+
 /**
  * D6: runs each detected stack's dependency steps in the repository folder (`pnpm install`, `dotnet restore`, pip into
  * `.venv`, `go mod download`, `cargo fetch`, ...). A step waits for its tools; nothing runs unless the manager allowed
@@ -257,10 +263,8 @@ async function installDependencies(
           });
           break;
         }
-        const cmd =
-          step.cmd.startsWith('./') || step.cmd.includes('\\') ? join(run.localPath, step.cmd) : step.cmd;
         log(`$ (${run.name}) ${step.cmd} ${step.args.join(' ')}`);
-        const r = await deps.exec.run(isAbsolute(cmd) ? cmd : step.cmd, step.args, {
+        const r = await deps.exec.run(depCommand(step, run.localPath), step.args, {
           cwd: run.localPath,
           timeoutMs: 30 * 60_000,
           ...dotnetRunEnv(step.cmd, deps),

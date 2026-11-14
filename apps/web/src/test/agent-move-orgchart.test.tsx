@@ -176,7 +176,7 @@ describe('canMoveAgent', () => {
 describe('Move to workstation on the org chart', () => {
   it.each(['owner', 'admin'] as const)('%s sees it for an agent in a running shift', async (role) => {
     show(role, role === 'owner' ? OWNER : U(2));
-    await openAgent(/^Sam,/);
+    await openAgent(/^Sam /);
     expect(screen.getByRole('button', { name: 'Move Sam to another workstation' })).toHaveTextContent(
       'Move to workstation',
     );
@@ -185,37 +185,37 @@ describe('Move to workstation on the org chart', () => {
 
   it('the hiring manager (a Member) sees it for their agent, a plain Member does not', async () => {
     show('member', OWNER);
-    await openAgent(/^Sam,/);
+    await openAgent(/^Sam /);
     expect(moveButton('Sam')).toBeInTheDocument();
   });
 
   it('a Member who did not hire the agent does not see it', async () => {
     show('member', OTHER_MEMBER);
-    await openAgent(/^Sam,/);
+    await openAgent(/^Sam /);
     expect(moveButton('Sam')).toBeNull();
   });
 
   it('the hiring manager of Tess sees it for Tess only', async () => {
     show('member', OTHER_MEMBER);
-    await openAgent(/^Tess,/);
+    await openAgent(/^Tess /);
     expect(moveButton('Tess')).toBeInTheDocument();
   });
 
   it('a DevOps engineer on an unpaired workstation shows it to the Owner, not to a Member', async () => {
     show('owner');
-    await openAgent(/^Dev, senior DevOps/);
+    await openAgent(/^Dev DevOps/);
     expect(moveButton('Dev')).toBeInTheDocument();
   });
 
   it('a DevOps engineer is not offered to a Member', async () => {
     show('member', OWNER);
-    await openAgent(/^Dev, senior DevOps/);
+    await openAgent(/^Dev DevOps/);
     expect(moveButton('Dev')).toBeNull();
   });
 
   it('opens the move dialog, offers only the targets, keeps runtime and model when nothing changes', async () => {
     const calls = show('owner');
-    const { user } = await openAgent(/^Sam,/);
+    const { user } = await openAgent(/^Sam /);
     await user.click(moveButton('Sam')!);
     const form = await screen.findByRole('form', { name: 'Move agent' });
     expect(await screen.findByTestId('move-now-on')).toHaveTextContent('Now on: Old laptop');
@@ -232,7 +232,7 @@ describe('Move to workstation on the org chart', () => {
 
   it('says so when the target lacks the agent runtime', async () => {
     show('owner');
-    const { user } = await openAgent(/^Sam,/);
+    const { user } = await openAgent(/^Sam /);
     await user.click(moveButton('Sam')!);
     await screen.findByRole('form', { name: 'Move agent' });
     expect(screen.queryByTestId('move-runtime-changes')).toBeNull();
@@ -244,7 +244,7 @@ describe('Move to workstation on the org chart', () => {
 
   it('warns before the user confirms when a DevOps engineer moves to a workstation that has one', async () => {
     const calls = show('owner');
-    const { user } = await openAgent(/^Dev, senior DevOps/);
+    const { user } = await openAgent(/^Dev DevOps/);
     await user.click(moveButton('Dev')!);
     await screen.findByRole('form', { name: 'Move agent' });
     expect(await screen.findByTestId('move-devops-warning')).toHaveTextContent(
@@ -263,7 +263,7 @@ describe('Move to workstation on the org chart', () => {
       { ...rt('claude-code'), sandbox: 'unsandboxed', sandboxReason: 'no bwrap' } as never,
     ];
     try {
-      const { user } = await openAgent(/^Sam,/);
+      const { user } = await openAgent(/^Sam /);
       await user.click(moveButton('Sam')!);
       await screen.findByRole('form', { name: 'Move agent' });
       await user.selectOptions(screen.getByLabelText('Workstation'), WS_NEW2);
@@ -279,7 +279,7 @@ describe('Move to workstation on the org chart', () => {
       OWNER,
       json({ error: { code: 'agent_busy', message: 'Sam is in a running shift: wait until it ends' } }, 409),
     );
-    const { user } = await openAgent(/^Sam,/);
+    const { user } = await openAgent(/^Sam /);
     await user.click(moveButton('Sam')!);
     await screen.findByRole('form', { name: 'Move agent' });
     await user.click(screen.getByRole('button', { name: 'Move' }));

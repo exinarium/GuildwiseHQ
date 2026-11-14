@@ -85,6 +85,7 @@ export const extraHandlers = [
       bounceRate: [],
       bugsEscaped: { total: 0, byDay: [] },
       duration: { cards: 0, avgMsPerCard: null, medianMsPerCard: null, perAgent: [] },
+      team: { byRole: [], builderRework: [] },
       queueDepth: [],
     }),
   ),

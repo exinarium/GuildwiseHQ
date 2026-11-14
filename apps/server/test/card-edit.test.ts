@@ -260,7 +260,7 @@ describe('risk tier override', () => {
   });
 });
 
-describe('the BA overrides the risk tier from its shift (aom risk)', () => {
+describe('the risk tier is set from a shift (aom risk)', () => {
   const rpc = async (shiftId: string, params: Record<string, unknown>) => {
     const rpcId = randomUUID();
     const from = r.received.length;
@@ -303,7 +303,7 @@ describe('the BA overrides the risk tier from its shift (aom risk)', () => {
     expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'awaiting_approval' });
   });
 
-  it('only the BA, and only on a card it holds', async () => {
+  it('not a builder, and only on a card the shift holds', async () => {
     await freshState();
     r.close();
     r = await w.connectRunner();
@@ -318,5 +318,26 @@ describe('the BA overrides the risk tier from its shift (aom risk)', () => {
     expect((await cardRow(card.id)).risk_tier_overridden).toBe(false);
     expect((await rpc(randomUUID(), { tier: 'large', reason: 'x' })).ok).toBe(false);
     await until(async () => true);
+  });
+
+  it('the architect marks a card large before its first build, and never lowers it', async () => {
+    await freshState();
+    r.close();
+    r = await w.connectRunner();
+    p = pipeline(w, r);
+    await hireTeam(w);
+    await w.hire('Aria', 'architect', 'senior');
+    const card = await w.card({ title: 'Architect sizes it', designNeeded: true });
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'investigate', risk_tier: null });
+    const start = await p.next('Aria');
+    await p.startShift(r, start);
+    const small = await rpc(start.shiftId, { tier: 'small', reason: 'Looks tiny' });
+    expect(small.ok).toBe(false);
+    expect(small.error).toMatch(/only mark a card large/);
+    expect((await cardRow(card.id)).risk_tier).toBeNull();
+    const set = await rpc(start.shiftId, { tier: 'large', reason: 'Rewrites the dispatcher' });
+    expect(set).toMatchObject({ ok: true });
+    // the tier is known before any build: the dispatcher's `risk_tier = ANY(agent tiers)` clause now routes the first build
+    expect(await cardRow(card.id)).toMatchObject({ risk_tier: 'large', risk_tier_overridden: true });
   });
 });

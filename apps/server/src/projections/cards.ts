@@ -395,6 +395,8 @@ export const cardProjectors: Record<string, Projector> = {
         assumptions: p.assumptions ?? prev?.investigation?.assumptions ?? [],
         // the size estimate of the design is recorded right after (DesignSized); keep the earlier one until then
         ...(prev?.investigation?.sizing ? { sizing: prev.investigation.sizing } : {}),
+        // a tests-only card's build stage is worked by the tester (dispatcher stageRoleSql); a new report without it clears it
+        ...(p.testsOnly ? { testsOnly: true } : {}),
         at: e.createdAt,
       }),
       e.createdAt,

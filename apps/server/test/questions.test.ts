@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { renderInstructions, renderShiftPrompt, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { recommendIndex } from '../src/commands/questions.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { seed } from './helpers/seed.ts';
@@ -210,6 +211,61 @@ describe('raising a question', () => {
     });
     expect(res.accepted).toBe(true);
     expect(res.matches ?? []).toEqual([]);
+    r.close();
+  });
+});
+
+describe('--recommend numbering (BLOCKERS.md smaller friction)', () => {
+  it('recommendIndex: 0-based values pass; the option count is read as 1-based; anything else lists the valid values', () => {
+    expect(recommendIndex(0, ['a', 'b'])).toEqual({ index: 0, oneBased: false });
+    expect(recommendIndex(1, ['a', 'b'])).toEqual({ index: 1, oneBased: false });
+    expect(recommendIndex(2, ['a', 'b'])).toEqual({ index: 1, oneBased: true });
+    expect(recommendIndex(1, ['only'])).toEqual({ index: 0, oneBased: true });
+    const bad = recommendIndex(5, ['a', 'b']);
+    expect('error' in bad && bad.error).toContain('options count from 0: 0 = a, 1 = b');
+    const none = recommendIndex(0, []);
+    expect('error' in none && none.error).toContain('needs an --option');
+  });
+
+  it('one option with --recommend 1 is accepted as option 0, and the agent is told how it was read', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    await w.hire('Rex', 'builder', 'junior');
+    await w.card({ title: 'One option' });
+    const start = await h.dispatchTo(r, 'Rex');
+    await h.startShift(r, start);
+    const res = await ask(r, start.shiftId, { options: ['spaces'], recommend: 1, blocking: false });
+    expect(res.accepted).toBe(true);
+    expect(res.message).toContain('--recommend 1 was read as option 0 ("spaces"): options count from 0.');
+    const item = (await desk()).items[0];
+    expect(item).toMatchObject({ options: [{ id: 'o1', label: 'spaces' }], recommendation: 'o1' });
+    r.close();
+  });
+
+  it('an in-range --recommend is echoed too, so an off-by-one is visible to the agent', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    await w.hire('Rex', 'builder', 'junior');
+    await w.card({ title: 'Echo' });
+    const start = await h.dispatchTo(r, 'Rex');
+    await h.startShift(r, start);
+    const res = await ask(r, start.shiftId, { recommend: 1, blocking: false });
+    expect(res.accepted).toBe(true);
+    expect(res.message).toContain('--recommend 1 was read as option 1 ("spaces"): options count from 0.');
+    r.close();
+  });
+
+  it('two options with --recommend 5 is refused with 0-based numbering and the valid values', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    await w.hire('Rex', 'builder', 'junior');
+    await w.card({ title: 'Two options' });
+    const start = await h.dispatchTo(r, 'Rex');
+    await h.startShift(r, start);
+    const res = await ask(r, start.shiftId, { recommend: 5, blocking: false });
+    expect(res.accepted).toBe(false);
+    expect(res.error).toContain('options count from 0: 0 = tabs, 1 = spaces');
+    expect((await desk()).items).toHaveLength(0);
     r.close();
   });
 });

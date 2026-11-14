@@ -271,7 +271,8 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
           scope: projectScope(card.org_id, card.project_id),
         },
         // lean team: the first builder of a group keeps the rest of the group (each build claim of a group card renews it).
-        ...(card.group_id && stage?.claimRole === 'builder'
+        // A tester working a tests-only card's build stage (`aom design --tests-only`) never becomes the group builder.
+        ...(card.group_id && stage?.claimRole === 'builder' && a.role_key === 'builder'
           ? [
               {
                 streamId: streamId.project(card.project_id),

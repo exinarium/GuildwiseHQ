@@ -11,7 +11,8 @@ const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 /**
  * Manager dashboard metrics (docs/SPEC.md "Manager dashboard") for the projects the user belongs to (or one project),
  * over `[from, to)`: throughput per day, time blocked on the manager, bounce rate per builder, bugs escaped, duration
- * per card and per agent, and the queue depth per board column right now. Computed from the projections of the events
+ * per card and per agent, the team tuning tables (time and cost by role, seniority and model; builder rework by
+ * seniority, model and card size) and the queue depth per board column right now. Computed from the projections of the events
  * (cards, card_transitions, test_runs, shifts, agent_card_stats), so a rebuild gives the same numbers.
  */
 export async function metrics(
@@ -125,6 +126,35 @@ export async function metrics(
     [projectIds, from, to],
   );
 
+  // Team tuning: shift time and cost by role, seniority and the model the shift ran on (delegated calls of a shift
+  // are part of its cost).
+  const byRole = await rows(
+    ctx.pool,
+    `SELECT a.role_key, a.seniority, s.model, count(*)::int AS shifts, count(DISTINCT s.card_id)::int AS cards,
+            COALESCE(sum(s.duration_ms), 0)::bigint AS total,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY s.duration_ms)::float AS median,
+            COALESCE(sum((SELECT sum(sc.cost_usd_micros) FROM shift_costs sc
+                           WHERE sc.shift_id = s.id OR sc.parent_id = s.id)), 0)::bigint AS cost
+       FROM shifts s JOIN agents a ON a.id = s.agent_id JOIN cards c ON c.id = s.card_id
+      WHERE c.project_id = ANY($1::uuid[]) AND s.status='ended' AND s.ended_at >= $2 AND s.ended_at < $3
+      GROUP BY a.role_key, a.seniority, s.model
+      ORDER BY COALESCE(sum(s.duration_ms), 0) DESC, a.role_key, a.seniority, s.model`,
+    [projectIds, from, to],
+  );
+  // Rework per builder seniority, model and card size: cards submitted in the range that came back from review.
+  const builderRework = await rows(
+    ctx.pool,
+    `SELECT a.seniority, a.model, COALESCE(s.risk_tier, 'unknown') AS risk_tier, count(*)::int AS cards,
+            count(*) FILTER (WHERE s.rework_rounds + s.spec_unclear_rounds > 0)::int AS reworked,
+            COALESCE(sum(s.rework_rounds + s.spec_unclear_rounds), 0)::int AS rounds
+       FROM agent_card_stats s JOIN agents a ON a.id = s.agent_id
+      WHERE s.project_id = ANY($1::uuid[]) AND s.role_key = 'builder' AND s.submitted
+        AND s.last_at >= $2 AND s.last_at < $3
+      GROUP BY a.seniority, a.model, COALESCE(s.risk_tier, 'unknown')
+      ORDER BY a.seniority, a.model, 3`,
+    [projectIds, from, to],
+  );
+
   // Queue depth per board column, now.
   const open = await rows(
     ctx.pool,
@@ -191,6 +221,31 @@ export async function metrics(
         shifts: p.shifts,
         totalMs: Number(p.total),
         avgMsPerShift: p.shifts ? Math.round(Number(p.total) / p.shifts) : null,
+      })),
+    },
+    team: {
+      byRole: byRole.map((b) => {
+        const costUsd = round(Number(b.cost) / 1_000_000);
+        return {
+          roleKey: b.role_key,
+          seniority: b.seniority ?? null,
+          model: b.model ?? 'unknown',
+          shifts: b.shifts,
+          cards: b.cards,
+          totalMs: Number(b.total),
+          medianMsPerShift: b.median == null ? null : Math.round(b.median),
+          costUsd,
+          costUsdPerCard: b.cards > 0 ? round(costUsd / b.cards) : null,
+        };
+      }),
+      builderRework: builderRework.map((b) => ({
+        seniority: b.seniority ?? null,
+        model: b.model ?? 'unknown',
+        riskTier: b.risk_tier,
+        cards: b.cards,
+        reworkedCards: b.reworked,
+        reworkRounds: b.rounds,
+        rate: b.cards > 0 ? round(b.reworked / b.cards) : null,
       })),
     },
     queueDepth,

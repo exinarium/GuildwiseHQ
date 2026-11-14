@@ -105,6 +105,26 @@ describe('stop-loss baseline', () => {
     expect((await stopItems(card.id)).filter((i) => i.status === 'open')).toHaveLength(1);
   });
 
+  it('an agent extends the budget three times; the next stop-loss goes to the owner and names the count', async () => {
+    const { bea, card } = await setup();
+    await w.hire('Arch', 'architect', 'senior');
+    const now = w.t.clock.now();
+    // three resolved arbitrations: the small budget of 10 shifts became 25
+    for (let i = 0; i < 3; i++)
+      await q(
+        `INSERT INTO desk_items (id, org_id, card_id, kind, subkind, status, title, created_at, updated_at)
+         VALUES ($1,$2,$3,'question','stop_loss','answered','go on',$4,$4)`,
+        [randomUUID(), w.owner.id, card.id, new Date(now.getTime() - 3_600_000)],
+      );
+    await seedShifts(bea.id, card.id, 25, new Date(now.getTime() - 60_000), 'reported');
+    expect((await stopLossBudget(w.t.app.ctx.pool, await cardRow(card.id))).shifts).toBe(25);
+    await w.t.app.ctx.services.dispatcher.run();
+    const open = (await stopItems(card.id)).filter((i) => i.status === 'open');
+    expect(open).toHaveLength(1);
+    expect(open[0]?.routed_to).toBe('manager');
+    expect(open[0]?.title).toContain('the budget was extended 3 times already');
+  });
+
   it('says so when the shifts mostly crashed, with the last error, and does not ask about the reviewer', async () => {
     const { bea, card } = await setup();
     const now = w.t.clock.now();

@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { IntegrationSuiteSchema, type ShiftBrief } from '@aom/shared';
+import { BUILTIN_ROLES, IntegrationSuiteSchema, type ShiftBrief } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, sh } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
@@ -104,6 +105,58 @@ describe('checks at aom handoff', () => {
     const checks = h?.server.of('shift.report')[0]?.checks;
     expect(checks?.[0]).toMatchObject({ status: 'preexisting', elsewhereCount: 1 });
   }, 60_000);
+
+  it('a failing E2E test file on the card branch does not refuse a builder; it still refuses the tester of a tests-only build', async () => {
+    // the check fails on BAD-FORMAT in src or in the E2E specs, naming the file
+    const fmt = fmtCheck({
+      cmd: ['sh', '-c', 'for d in src e2e; do [ -d $d ] && grep -rn BAD-FORMAT $d && exit 1; done; exit 0'],
+    });
+    const checks = { suites: [fmt], detect: false };
+    const posts: Record<string, Post> = {};
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      const post = () =>
+        ctl.post('/v1/report', {
+          report: { kind: 'outcome', outcomeId: 'handoff', note: 'done', data: EVIDENCE },
+        });
+      if (i.agent.roleKey === 'tester') {
+        execFileSync('mkdir', ['-p', join(i.cwd, 'e2e')]);
+        writeFileSync(join(i.cwd, 'e2e', 'login.spec.ts'), 'BAD-FORMAT\n');
+        sh(i.cwd, 'git', ['add', '-A']);
+        execFileSync('git', ['commit', '-q', '-m', 'spec'], { cwd: i.cwd });
+        posts.tester = await post();
+        return;
+      }
+      commit(i.cwd, 'a.txt', 'ok\n', 'product change');
+      posts.builder = await post();
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
+    const tester = BUILTIN_ROLES.find((r) => r.key === 'tester')!;
+    const base = makeShiftStart({ stage: 'build', remoteNormalized: h.repo.remoteNormalized }) as {
+      agent: Record<string, unknown>;
+    };
+    // the tester works the build stage of a tests-only card
+    h.server.send(
+      'shift.start',
+      makeShiftStart({
+        stage: 'build',
+        remoteNormalized: h.repo.remoteNormalized,
+        outcomes: OUTCOMES,
+        briefExtra: { checks },
+        startExtra: { agent: { ...base.agent, roleKey: 'tester', permissions: tester.permissions } },
+      }),
+    );
+    await h.server.waitFor('shift.ended', undefined, 60_000);
+    expect(posts.tester?.json.accepted).toBe(false);
+    expect(posts.tester?.json.error).toContain('e2e/login.spec.ts');
+    // then the card is back with a builder: the tester's failing spec is not the builder's to fix
+    await h.runShift({ stage: 'build', mode: 'reuse', outcomes: OUTCOMES, briefExtra: { checks } });
+    expect(posts.builder?.json.accepted).toBe(true);
+    const reports = h.server.of('shift.report');
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.checks?.[0]).toMatchObject({ name: 'fmt', status: 'preexisting' });
+    // the server still gets the whole card diff
+    expect(reports[0]?.changedPaths).toEqual(expect.arrayContaining(['e2e/login.spec.ts', 'src/a.txt']));
+  }, 90_000);
 
   it('without brief.checks the report has no checks (an older server)', async () => {
     await run(undefined, async (wt, post) => {

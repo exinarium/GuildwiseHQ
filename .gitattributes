@@ -1,0 +1,2 @@
+# Two cards that each add a changelog entry merge without a conflict (both lines are kept).
+/CHANGELOG.md merge=union

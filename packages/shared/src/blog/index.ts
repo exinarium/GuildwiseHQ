@@ -1,5 +1,6 @@
 export * from './article.ts';
 export * from './constants.ts';
+export * from './hashtags.ts';
 export * from './markdown.ts';
 export * from './public-terms.ts';
 export * from './schema.ts';

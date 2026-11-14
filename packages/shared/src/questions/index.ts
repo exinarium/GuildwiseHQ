@@ -62,11 +62,11 @@ export const StopLossSettingsSchema = z.object({
 });
 export type StopLossSettings = z.infer<typeof StopLossSettingsSchema>;
 
-/** Owner decision 17 Oct: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25. */
+/** Owner decision 17 Oct: small 2 / 2 / 10, medium 3 / 2 / 15; large 4 / 3 / 25 since 1.7.0 (a large card has 4 build passes, so 2 review rounds parked it early). */
 export const DEFAULT_STOP_LOSS: StopLossSettings = {
   small: { buildPasses: 2, reviewRounds: 2, shifts: 10 },
   medium: { buildPasses: 3, reviewRounds: 2, shifts: 15 },
-  large: { buildPasses: 4, reviewRounds: 2, shifts: 25 },
+  large: { buildPasses: 4, reviewRounds: 3, shifts: 25 },
 };
 
 /** What one answered arbitration adds to a card's budget (the architect said "go on"). */

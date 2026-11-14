@@ -674,3 +674,85 @@ describe('the Card Brief reaches the builder', () => {
     expect(build.brief.cardBrief).toBe('Use the existing queue; do not add a table.');
   });
 });
+
+describe('a tests-only card (aom design --tests-only, BLOCKERS.md section 2)', () => {
+  const testsOnly = (ref: string) => {
+    const d = designed(ref);
+    return { ...d, data: { ...d.data, testsOnly: true } };
+  };
+  const agentRow = async (name: string) =>
+    (await q(`SELECT * FROM agents WHERE name=$1 AND status='active'`, [name]))[0]!;
+  const offered = async (name: string) => {
+    const a = await agentRow(name);
+    const caps =
+      (
+        await q(`SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1`, [
+          a.workstation_id,
+        ])
+      )[0]?.capabilities ?? [];
+    return (await candidateCards(w.t.app.ctx.pool, agentView(a, caps), new Date())).map((c) => c.id);
+  };
+
+  it('is never offered to a builder: the tester works Build, and pre-review and review still apply', async () => {
+    await team();
+    const card = await w.card({ title: 'Fix the login spec' });
+    await q(`UPDATE cards SET group_id='g-e2e' WHERE id=$1`, [card.id]);
+    // the tester is paused while the design lands, so the candidate lists can be read before anyone claims the card
+    await q(`UPDATE agents SET paused_at=now() WHERE name='Tess'`);
+    await p.run('Pia', planned());
+    const design = await p.run('Arc', testsOnly(card.ref));
+    expect(design.res.message).toMatch(/tests-only: the tester works the build stage/);
+    let row = await cardRow(card.id);
+    expect(row.stage).toBe('build');
+    expect(row.investigation.testsOnly).toBe(true);
+    expect(await offered('Bea')).not.toContain(card.id);
+    expect(await offered('Tess')).toContain(card.id);
+    await q(`UPDATE agents SET paused_at=NULL WHERE name='Tess'`);
+
+    const tess = await agentRow('Tess');
+    const first = await p.runAt('Tess', handoffEv(), leanAttach(SHA1, ['e2e/login.spec.ts']), SHA1);
+    expect(first.start.brief.card.id).toBe(card.id);
+    expect(first.start.brief.shift.stage).toBe('build');
+    expect(first.res.accepted).toBe(true);
+    row = await cardRow(card.id);
+    expect(row.stage).toBe('pre_review');
+    // a tester never becomes the group builder
+    expect(await q(`SELECT 1 FROM card_groups WHERE group_id='g-e2e'`)).toHaveLength(0);
+    expect((await eventsOfType('GroupBuilderAssigned')).filter((e) => e.groupId === 'g-e2e')).toHaveLength(0);
+
+    // changes come back to the tester, not to a builder
+    await p.runAt('Pre', verdict('changes'), {}, SHA1);
+    expect((await cardRow(card.id)).stage).toBe('build');
+    expect(await offered('Bea')).not.toContain(card.id);
+    const second = await p.runAt('Tess', handoffEv(), leanAttach(SHA2, ['e2e/login.spec.ts']), SHA2);
+    expect(second.start.brief.card.id).toBe(card.id);
+    expect((await cardRow(card.id)).stage).toBe('pre_review');
+    await p.runAt('Pre', verdict('approve'), {}, SHA2);
+    expect((await cardRow(card.id)).stage).toBe('review');
+    const review = await p.runAt('Rex', verdict('approve'), {}, SHA2);
+    // the reviewer reviews the tester's change
+    expect(review.start.brief.buildEvidence).toMatchObject({ sha: SHA2 });
+    expect((await cardRow(card.id)).stage).not.toBe('review');
+
+    const builds = await q(`SELECT DISTINCT agent_id FROM shifts WHERE card_id=$1 AND stage='build'`, [
+      card.id,
+    ]);
+    expect(builds.map((s) => s.agent_id)).toEqual([tess.id]);
+  });
+
+  it('is refused when no tester may work the project; a later report without the flag clears it', async () => {
+    await team();
+    const card = await w.card({ title: 'No tester' });
+    await q(`UPDATE agents SET status='retired' WHERE name='Tess'`);
+    await p.run('Pia', planned());
+    const refused = await p.run('Arc', testsOnly(card.ref));
+    expect(refused.res.accepted).toBe(false);
+    expect(refused.res.error).toMatch(/no active tester may work this project/);
+    expect((await cardRow(card.id)).stage).toBe('investigate');
+    const plain = await p.run('Arc', designed(card.ref));
+    expect(plain.res.accepted).toBe(true);
+    const row = await cardRow(card.id);
+    expect(row.stage).toBe('build');
+    expect(row.investigation.testsOnly).toBeUndefined();
+  });
+});

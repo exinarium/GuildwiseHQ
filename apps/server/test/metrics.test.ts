@@ -133,6 +133,38 @@ describe('dashboard metrics', () => {
     ]);
   });
 
+  it('team tuning: time and cost by role, seniority and model, and builder rework by card size', async () => {
+    const m = await get();
+    const role = (key: string) => m.team.byRole.filter((x: any) => x.roleKey === key);
+    // the same shifts as "duration per agent", grouped by role, seniority and the model the shift ran on
+    expect(role('builder')).toEqual([
+      {
+        roleKey: 'builder',
+        seniority: expect.any(String),
+        model: expect.any(String),
+        shifts: 5,
+        cards: 4,
+        totalMs: 5000,
+        medianMsPerShift: 1000,
+        costUsd: expect.any(Number),
+        costUsdPerCard: expect.any(Number),
+      },
+    ]);
+    expect(role('reviewer').reduce((s: number, x: any) => s + x.shifts, 0)).toBe(4);
+    expect(role('tester').reduce((s: number, x: any) => s + x.shifts, 0)).toBe(4);
+    const shifts = m.team.byRole.reduce((s: number, x: any) => s + x.shifts, 0);
+    expect(shifts).toBe(m.duration.perAgent.reduce((s: number, a: any) => s + a.shifts, 0));
+    // Bea submitted A (came back once), B and the bug card: 3 cards, 1 came back, 1 rework round
+    const rework = m.team.builderRework;
+    expect(rework.reduce((s: number, x: any) => s + x.cards, 0)).toBe(3);
+    expect(rework.reduce((s: number, x: any) => s + x.reworkedCards, 0)).toBe(1);
+    expect(rework.reduce((s: number, x: any) => s + x.reworkRounds, 0)).toBe(1);
+    for (const x of rework) {
+      expect(['small', 'large', 'unknown']).toContain(x.riskTier);
+      expect(x.rate).toBeCloseTo(x.reworkedCards / x.cards, 3);
+    }
+  });
+
   it('queue depth per board column right now', async () => {
     const m = await get();
     // C and the answered E wait in To do, B waits at Finalize; A and its suite are done.

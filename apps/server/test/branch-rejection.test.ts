@@ -227,6 +227,40 @@ describe('a working branch the runner created', () => {
     r.ended(start.shiftId, 'stopped');
   });
 
+  it('a worktree the runner could not fully prepare gets a note on the card; a prepared one gets none', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Prepared worktree' });
+    const start = await p.next('Bea');
+    r.accepted(start.shiftId);
+    r.send('shift.started', {
+      shiftId: start.shiftId,
+      worktreePrep: { ok: true, steps: [{ name: 'pnpm install', status: 'done', ms: 4000 }] },
+    });
+    r.send('shift.started', {
+      shiftId: start.shiftId,
+      worktreePrep: {
+        ok: false,
+        steps: [
+          { name: 'submodules', status: 'done', ms: 100 },
+          { name: 'pnpm install', status: 'failed', detail: 'exit 1: registry unreachable', ms: 2000 },
+        ],
+      },
+    });
+    await new Promise((res) => setTimeout(res, 300));
+    const notes = (
+      await q(`SELECT payload FROM events WHERE type='ThreadMessagePosted' AND stream_id=$1`, [
+        `thread-${card.id}`,
+      ])
+    )
+      .map((e) => String(e.payload.body))
+      .filter((b) => b.includes('prepare the new worktree'));
+    expect(notes).toEqual([
+      `The runner could not fully prepare the new worktree of ${card.ref}: pnpm install (exit 1: registry unreachable). The agent was told; it asks DevOps for what is missing if it needs it.`,
+    ]);
+    r.ended(start.shiftId, 'stopped');
+  });
+
   it('adds the created branch to the repository branch list, notes the unset main branch, and takes the origin list', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');

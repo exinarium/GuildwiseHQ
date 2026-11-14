@@ -14,6 +14,9 @@ import {
 import { duration, pct } from '../lib/hr.ts';
 
 const RANGES = [7, 14, 30, 90] as const;
+const TH = 'bg-sunken text-left text-xs font-semibold text-muted [&_th]:px-2 [&_th]:py-2';
+const TR = 'border-b border-line [&_td]:px-2 [&_td]:py-2.5 [&_th]:px-2 [&_th]:py-2.5';
+const usd = (n: number | null) => (n == null ? '' : `$${n.toFixed(2)}`);
 
 /** The manager dashboard's numbers: throughput, time blocked on the manager, bounce rate, bugs, durations, queues. */
 export function Metrics() {
@@ -145,6 +148,117 @@ export function Metrics() {
                 data={d.duration.perAgent.map((a) => ({ label: a.name, value: a.totalMs }))}
                 format={duration}
               />
+            )}
+          </Panel>
+
+          <Panel className="md:col-span-2">
+            <h2 className="mb-1 text-lg font-semibold text-fg">Time and cost by role</h2>
+            <p className="mb-3 text-sm text-muted">
+              Shifts that ended in this range, by role, seniority and the model they ran on. Use it to see
+              which role costs most and what a model change would touch.
+            </p>
+            {d.team.byRole.length === 0 ? (
+              <p className="text-sm text-muted">No shift ended in this range.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-fg" data-testid="metric-team-roles">
+                  <thead className={TH}>
+                    <tr>
+                      <th scope="col">Role</th>
+                      <th scope="col">Seniority</th>
+                      <th scope="col">Model</th>
+                      <th scope="col" className="text-right">
+                        Shifts
+                      </th>
+                      <th scope="col" className="text-right">
+                        Cards
+                      </th>
+                      <th scope="col" className="text-right">
+                        Shift time
+                      </th>
+                      <th scope="col" className="text-right">
+                        Median shift
+                      </th>
+                      <th scope="col" className="text-right">
+                        Cost
+                      </th>
+                      <th scope="col" className="text-right">
+                        Cost per card
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.team.byRole.map((r) => (
+                      <tr key={`${r.roleKey}|${r.seniority}|${r.model}`} className={TR}>
+                        <th scope="row" className="text-left font-medium">
+                          {r.roleKey}
+                        </th>
+                        <td>{r.seniority ?? ''}</td>
+                        <td>{r.model}</td>
+                        <td className="text-right tabular-nums">{r.shifts}</td>
+                        <td className="text-right tabular-nums">{r.cards}</td>
+                        <td className="text-right tabular-nums">{duration(r.totalMs)}</td>
+                        <td className="text-right tabular-nums">{duration(r.medianMsPerShift)}</td>
+                        <td className="text-right tabular-nums">{usd(r.costUsd)}</td>
+                        <td className="text-right tabular-nums">{usd(r.costUsdPerCard)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+
+          <Panel className="md:col-span-2">
+            <h2 className="mb-1 text-lg font-semibold text-fg">
+              Builder rework by seniority, model and card size
+            </h2>
+            <p className="mb-3 text-sm text-muted">
+              Cards a builder submitted in this range and how many came back from review. Read the rate
+              together with the number of cards: a handful of cards proves little. The model is the builder's
+              current one.
+            </p>
+            {d.team.builderRework.length === 0 ? (
+              <p className="text-sm text-muted">No builder submitted a card in this range.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-fg" data-testid="metric-team-rework">
+                  <thead className={TH}>
+                    <tr>
+                      <th scope="col">Seniority</th>
+                      <th scope="col">Model</th>
+                      <th scope="col">Card size</th>
+                      <th scope="col" className="text-right">
+                        Cards
+                      </th>
+                      <th scope="col" className="text-right">
+                        Came back
+                      </th>
+                      <th scope="col" className="text-right">
+                        Rework rounds
+                      </th>
+                      <th scope="col" className="text-right">
+                        Rate
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.team.builderRework.map((r) => (
+                      <tr key={`${r.seniority}|${r.model}|${r.riskTier}`} className={TR}>
+                        <th scope="row" className="text-left font-medium">
+                          {r.seniority ?? ''}
+                        </th>
+                        <td>{r.model}</td>
+                        <td>{r.riskTier === 'unknown' ? 'not assessed' : r.riskTier}</td>
+                        <td className="text-right tabular-nums">{r.cards}</td>
+                        <td className="text-right tabular-nums">{r.reworkedCards}</td>
+                        <td className="text-right tabular-nums">{r.reworkRounds}</td>
+                        <td className="text-right tabular-nums">{pct(r.rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 

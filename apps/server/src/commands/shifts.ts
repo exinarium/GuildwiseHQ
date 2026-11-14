@@ -617,6 +617,27 @@ export async function applyShiftReport(
             accepted: false,
             error: `${card.ref} is designed before ${unlanded.map((d) => d.ref).join(', ')} landed: record the assumptions you made about them (\`--assumption "<assumption> | <dependency ref> | <what changes if wrong>"\`, repeatable) or say there are none with \`--no-assumptions "<why>"\``,
           };
+        // A tests-only card (`aom design --tests-only`): its build stage is worked by the tester (BLOCKERS.md section 2).
+        if (inv.testsOnly) {
+          if (card.investigation_only)
+            return {
+              accepted: false,
+              error:
+                '--tests-only is for a card that will be built: an investigation-only card has no build stage',
+            };
+          const tester = await one(
+            tx,
+            `SELECT 1 FROM agents fa WHERE fa.org_id = $1 AND fa.status = 'active' AND fa.role_key = 'tester'
+                AND (fa.allowed_project_ids IS NULL OR $2 = ANY (fa.allowed_project_ids)) LIMIT 1`,
+            [card.org_id, card.project_id],
+          );
+          if (!tester)
+            return {
+              accepted: false,
+              error:
+                '--tests-only hands the build to the tester, but no active tester may work this project: hand off without --tests-only (a builder builds it) or ask the manager to hire a tester',
+            };
+        }
         const review = inv.review;
         const confirming = pending && review?.decision === 'confirm';
         // The size estimate and the risk class of a design (not of an investigation-only card), and the verdict.
@@ -641,6 +662,9 @@ export async function applyShiftReport(
           designSize = { sizing: step.sizing, split, ...(proposal ? { proposal } : {}) };
         }
         const sizeLine = designSize ? `\n\n${sizingLine(designSize.sizing)}` : '';
+        // A revised design keeps the tests-only flag of the design it revises (`aom design revise` cannot repeat it).
+        const testsOnly =
+          !!inv.testsOnly || (review?.decision === 'revise' && card.investigation?.testsOnly === true);
         if (review) {
           const revised = [...new Set(review.revised)];
           if (revised.some((n) => n > total))
@@ -700,6 +724,7 @@ export async function applyShiftReport(
                   ...(inv.reportText ? { reportText: inv.reportText } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
+                  ...(testsOnly ? { testsOnly: true } : {}),
                 },
               },
               actor,
@@ -709,7 +734,7 @@ export async function applyShiftReport(
               card,
               { kind: 'agent', agentId: agent.id },
               'comment',
-              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${sizeLine}`,
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}${sizeLine}`,
             ),
           );
         } else if (designSize) {
@@ -765,8 +790,12 @@ export async function applyShiftReport(
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
             : gated
-              ? "Recorded. The card waits at the design gate for the owner's approval. Finish now."
-              : 'Recorded. The card goes to the builder with your design. Finish now.';
+              ? testsOnly
+                ? "Recorded. The card waits at the design gate for the owner's approval; after it the tester works the build stage (tests-only). Finish now."
+                : "Recorded. The card waits at the design gate for the owner's approval. Finish now."
+              : testsOnly
+                ? 'Recorded. The card is tests-only: the tester works the build stage with your design. Finish now.'
+                : 'Recorded. The card goes to the builder with your design. Finish now.';
         // Over budget (not held, the owner has not kept it as one card): the design is not handed on. The first time the
         // architect's needs-split question is raised; a card that already went to the BA once goes to the owner.
         if (!holdDesign && designSize?.split === 'split' && designSize.proposal) {
@@ -1043,6 +1072,21 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
           ]
         : []),
       ...(card && msg.syncMain ? await mainSyncEvents(tx, ws, card, msg.syncMain) : []),
+      // The runner could not fully prepare the new card worktree (submodules, dependencies): a note on the card.
+      ...(card && msg.worktreePrep && !msg.worktreePrep.ok
+        ? [
+            cardMessage(
+              card,
+              { kind: 'system' },
+              'system',
+              `The runner could not fully prepare the new worktree of ${card.ref}: ${msg.worktreePrep.steps
+                .filter((x) => x.status === 'failed')
+                .map((x) => `${x.name}${x.detail ? ` (${x.detail.slice(0, 300)})` : ''}`)
+                .join('; ')}. The agent was told; it asks DevOps for what is missing if it needs it.`,
+              { worktreePrep: msg.worktreePrep },
+            ),
+          ]
+        : []),
       ...(card && created
         ? [
             cardMessage(

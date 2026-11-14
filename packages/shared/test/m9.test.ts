@@ -132,6 +132,7 @@ describe('M9 contract', () => {
         bounceRate: [],
         bugsEscaped: { total: 0, byDay: [] },
         duration: { cards: 0, avgMsPerCard: null, medianMsPerCard: null, perAgent: [] },
+        team: { byRole: [], builderRework: [] },
         queueDepth: [],
       }).success,
     ).toBe(true);

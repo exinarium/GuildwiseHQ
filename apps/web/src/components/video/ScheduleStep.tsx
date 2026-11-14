@@ -59,9 +59,10 @@ export function ScheduleStep({
 
   const [captions, setCaptions] = useState<Partial<Record<VideoDestination, Caption>>>({});
   const [tab, setTab] = useState<string>('');
-  // the owner's edit, else the drafter's caption stored with the post, else a default from the metadata
+  // the owner's edit, else the drafter's caption stored with the post, else a default from the metadata and the hashtag
+  // pools in force (the same the worker uses)
   const captionOf = (d: VideoDestination): Caption =>
-    captions[d] ?? post.captions?.[d] ?? defaultCaption(d, post.meta);
+    captions[d] ?? post.captions?.[d] ?? defaultCaption(d, post.meta, status?.hashtagPools);
   // biome-ignore lint/correctness/useExhaustiveDependencies: new defaults when the stored revision changes
   useEffect(() => setCaptions({}), [post.revision, post.updatedAt]);
   const activeTab = extras.includes(tab as VideoDestination) ? (tab as VideoDestination) : extras[0];

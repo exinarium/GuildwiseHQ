@@ -238,7 +238,7 @@ describe('the CEO on the chart', () => {
   it('marks a paused CEO', async () => {
     show(withCeo);
     const chart = await screen.findByTestId('org-chart');
-    const tile = within(chart).getByRole('button', { name: /^Cora,/ });
+    const tile = within(chart).getByRole('button', { name: /^Cora / });
     expect(tile).toHaveAttribute('data-paused', 'true');
     expect(tile).toHaveTextContent('Paused');
   });
@@ -280,21 +280,21 @@ describe('the org chart page', () => {
     expect(within(chart).getByTestId('org-manager')).toHaveTextContent('Pieter');
     expect(within(chart).getByTestId('org-manager')).toHaveTextContent('1 admin');
     const sam = within(chart).getByRole('button', {
-      name: /^Sam, senior Builder\. Working on TOY-4\. Escalates to the BA \(Bea\)/,
+      name: /^Sam Builder · senior Working on TOY-4\b.*Escalates to the BA \(Bea\)\. Open details$/,
     });
     expect(sam).toBeInTheDocument();
     expect(
       within(chart).getByRole('button', {
-        name: /^Jo, junior Builder\. Blocked on TOY-7\. Escalates to Sam \(senior builder\)/,
+        name: /^Jo Builder Blocked on TOY-7\b.* junior\. Escalates to Sam \(senior builder\)\. Open details$/,
       }),
     ).toBeInTheDocument();
-    expect(within(chart).getByRole('button', { name: /^Rae, .*Offline/ })).toBeInTheDocument();
+    expect(within(chart).getByRole('button', { name: /^Rae .*Offline/ })).toBeInTheDocument();
     expect(within(chart).getAllByTestId('org-department')).toHaveLength(2);
     // DevOps is not in the tree; it is in the workstation panel
     expect(within(chart).queryByText('Dev')).toBeNull();
     const panel = screen.getByTestId('org-devops');
     expect(within(panel).getAllByTestId('org-workstation')).toHaveLength(2);
-    expect(within(panel).getByRole('button', { name: /^Dev, senior DevOps/ })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: /^Dev DevOps/ })).toBeInTheDocument();
     expect(within(panel).getByText(/No DevOps engineer here yet/)).toBeInTheDocument();
     expect(screen.getByTestId('org-summary')).toHaveTextContent('5 agents in 2 departments');
   });
@@ -305,8 +305,8 @@ describe('the org chart page', () => {
     await screen.findByTestId('org-chart');
     await user.selectOptions(screen.getByTestId('org-project-filter'), PROJ_B);
     const chart = screen.getByTestId('org-chart');
-    expect(within(chart).getByRole('button', { name: /^Rae,/ })).toBeInTheDocument();
-    expect(within(chart).queryByRole('button', { name: /^Jo,/ })).toBeNull();
+    expect(within(chart).getByRole('button', { name: /^Rae / })).toBeInTheDocument();
+    expect(within(chart).queryByRole('button', { name: /^Jo / })).toBeNull();
     expect(screen.getByTestId('org-summary')).toHaveTextContent('allowed on WEB');
   });
 
@@ -334,7 +334,7 @@ describe('the org chart page', () => {
       },
     ];
     show(withWork);
-    await user.click(await screen.findByRole('button', { name: /^Jo, junior Builder/ }));
+    await user.click(await screen.findByRole('button', { name: /^Jo Builder/ }));
     const card = await screen.findByTestId('org-agent-card');
     expect(within(card).getByTestId('org-agent-allowed')).toHaveTextContent('TOY');
     expect(card).toHaveTextContent('Reports to');

@@ -68,12 +68,13 @@ export type SocialChannelNetwork = (typeof SOCIAL_CHANNEL_NETWORKS)[number];
  * LinkedIn); `total` is everything the caption may hold except the link: for X the 280 characters minus the space and
  * the 23 a link counts (the hashtags share it), for Bluesky the 300 graphemes (the link is the card, not text).
  * `tags` is [min, max] hashtags: the max is enforced by the schema, the min is what the writer and the editor aim for.
+ * The maxima leave room for the standing and popular pool tags `buildHashtags` adds to the topical ones.
  */
 export const SOCIAL_LIMITS = {
-  facebook: { text: 500, tags: [0, 3] },
-  linkedin: { text: 700, tags: [3, 5] },
-  x: { total: 256, tags: [1, 2] },
-  bluesky: { total: 300, tags: [1, 2] },
+  facebook: { text: 500, tags: [0, 5] },
+  linkedin: { text: 700, tags: [3, 8] },
+  x: { total: 256, tags: [1, 3] },
+  bluesky: { total: 300, tags: [1, 3] },
 } as const satisfies Record<
   SocialNetwork,
   { text?: number; total?: number; tags: readonly [number, number] }

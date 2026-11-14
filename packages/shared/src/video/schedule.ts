@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { SOCIAL_LIMITS } from '../blog/constants.ts';
+import { buildHashtags, HASHTAG_POOLS, type HashtagPools } from '../blog/hashtags.ts';
+import { graphemeCount } from '../blog/social-text.ts';
 import { isValidTimeZone } from '../reporter/index.ts';
 
 /**
@@ -254,13 +256,14 @@ export const backlogLimit = (fs: FormatSchedule): number => SCHEDULE_DEFAULTS.ba
 // ---- captions per destination
 
 /**
- * Caption limits per destination: the social networks' limits plus Instagram and TikTok (2,200 characters, 3-5 hashtags)
- * and YouTube (a 100-character title; the description is built from the script).
+ * Caption limits per destination: the social networks' limits plus Instagram (2,200 characters, 3-5 hashtags: Instagram
+ * allows at most 5 per post), TikTok (2,200 characters, 3-8 hashtags) and YouTube (a 100-character title; the description
+ * is built from the script).
  */
 export const VIDEO_CAPTION_LIMITS = {
   ...SOCIAL_LIMITS,
   instagram: { total: 2200, tags: [3, 5] },
-  tiktok: { total: 2200, tags: [3, 5] },
+  tiktok: { total: 2200, tags: [3, 8] },
   youtube: { title: 100, tags: [0, 15] },
 } as const satisfies Record<
   VideoDestination,
@@ -276,17 +279,29 @@ export type VideoCaptions = z.infer<typeof VideoCaptionsSchema>;
 
 /**
  * The caption a destination starts from when nobody wrote one: the title (X and Bluesky) or the title and description, and
- * the hashtags (no `#`, at most the destination's maximum). Never a link.
+ * the hashtags (no `#`): the video's own hashtags first, then the standing and popular pool tags (`buildHashtags`, seeded
+ * by the title), at most the destination's maximum, and on X and Bluesky only as many as fit next to the title. Never a
+ * link.
  */
 export function defaultVideoCaption(
   dest: VideoDestination,
   meta: { title: string; description: string; hashtags: readonly string[] },
+  pools: HashtagPools = HASHTAG_POOLS,
 ): { text: string; tags: string[] } {
-  const tags = meta.hashtags.map((h) => h.replace(/^#/, '')).filter(Boolean);
-  const max = VIDEO_CAPTION_LIMITS[dest].tags[1];
+  const limits = VIDEO_CAPTION_LIMITS[dest] as { total?: number; tags: readonly [number, number] };
   const text =
     dest === 'x' || dest === 'bluesky' ? meta.title : `${meta.title}\n\n${meta.description}`.trim();
-  return { text, tags: tags.slice(0, max) };
+  const tags = buildHashtags({
+    topical: meta.hashtags,
+    pools,
+    max: limits.tags[1],
+    seed: meta.title,
+    room:
+      (dest === 'x' || dest === 'bluesky') && limits.total !== undefined
+        ? limits.total - graphemeCount(text.trim().replace(/\s+/g, ' '))
+        : undefined,
+  });
+  return { text, tags };
 }
 
 // ---- per-destination options (TikTok's Direct Post UX rules)

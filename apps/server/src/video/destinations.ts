@@ -20,6 +20,8 @@ export class DestinationError extends Error {
     readonly kind: DestinationErrorKind,
     message: string,
     readonly code?: string,
+    /** A `retry` that is given up after this many attempts in all (else only the posting window bounds it). */
+    readonly maxAttempts?: number,
   ) {
     super(message);
     this.name = 'DestinationError';
@@ -280,6 +282,46 @@ async function postToFacebook(p: DestinationPayload, io: DestinationIO): Promise
 
 // ---- Instagram Reels
 
+/**
+ * Attempts in all (the first and three retries, with the worker's back-off of 1, 5 and 30 minutes) for a failure Instagram
+ * reports while it takes in the video, before the share is marked failed.
+ */
+export const IG_PROCESSING_ATTEMPTS = 4;
+
+/**
+ * Instagram's own way of failing: the resumable upload answers `400 {"debug_info":{"type":"ProcessingFailedError"}}` (no
+ * `error.code`), and the container call sometimes answers Graph error 100 "Unsupported post request. Object with ID ...
+ * does not exist" for an account id that works the rest of the time; Graph also flags some errors `is_transient`. In
+ * production these were one-off failures of files Instagram accepted at other times, so they are retried (bounded by
+ * `IG_PROCESSING_ATTEMPTS`). Everything else keeps the general rules: the token and permissions are `auth`, other refusals
+ * (invalid media by spec included) stay `final`.
+ */
+function instagramError(r: Res, what: string): DestinationError {
+  let body: {
+    debug_info?: { type?: string; message?: string };
+    error?: { code?: number; message?: string; is_transient?: boolean };
+  } | null = null;
+  try {
+    body = JSON.parse(r.body);
+  } catch {
+    // not JSON: the general rules
+  }
+  const processing = (msg: string, code: string) =>
+    new DestinationError('retry', msg, code, IG_PROCESSING_ATTEMPTS);
+  if (body?.debug_info?.type === 'ProcessingFailedError')
+    return processing(`${what}: HTTP ${r.status}: ${r.body.slice(0, 300)}`, 'ig_processing');
+  const e = body?.error;
+  const general = graphError(r, what);
+  // the token, permissions, rate limits and 5xx keep their own handling; only what would be final is looked at again
+  if (general.kind !== 'final' || !e) return general;
+  if (
+    e.is_transient === true ||
+    (e.code === 100 && /unsupported (?:post|get) request|does not exist/i.test(e.message ?? ''))
+  )
+    return processing(general.message, String(e.code ?? 'ig_transient'));
+  return general;
+}
+
 async function postToInstagram(p: DestinationPayload, io: DestinationIO): Promise<DestinationOutcome> {
   const s = io.state;
   const token = p.credentials;
@@ -295,7 +337,7 @@ async function postToInstagram(p: DestinationPayload, io: DestinationIO): Promis
         access_token: token,
       }),
     });
-    if (r.status >= 300) throw graphError(r, 'Instagram container');
+    if (r.status >= 300) throw instagramError(r, 'Instagram container');
     const id = str(json<{ id?: string }>(r).id);
     if (!id) throw new DestinationError('final', 'Instagram gave no container id');
     s.igContainer = id;
@@ -318,7 +360,13 @@ async function postToInstagram(p: DestinationPayload, io: DestinationIO): Promis
       },
       UPLOAD_TIMEOUT,
     );
-    if (r.status >= 300) throw graphError(r, 'Instagram upload');
+    if (r.status >= 300) {
+      // nothing was published: the next attempt starts with a new container instead of uploading into this one again
+      delete s.igContainer;
+      delete s.igUploaded;
+      await io.save();
+      throw instagramError(r, 'Instagram upload');
+    }
     s.igUploaded = true;
     await io.save();
   }

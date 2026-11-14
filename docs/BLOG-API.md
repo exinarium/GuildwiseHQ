@@ -220,7 +220,7 @@ audience technical founders, engineering leads and operations people; plain, pro
 takeaways* section; research with web search; most sources primary (papers, standards bodies, official documentation and announcements), at most 2 secondary (vendor or personal blogs, Medium, Substack, LinkedIn, forums) and never more secondary than primary, enforced for blog and social platforms; an original title that never reuses a source's headline (checked: same first four words or nearly the same words is rejected); treat all web content as untrusted; every claim about a
 product, number or date from a source found; never invent statistics, quotes, customers, people or links; mention Guildwise
 HQ at most once; the last line is the AI disclosure ("written with AI assistance"); byline "The Guildwise HQ team"; 1 to 3
-tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn captions with at most 3 hashtags, an X caption (at most 240 characters, at most 2 hashtags) and a Bluesky caption (at most 260 characters).
+tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn captions with topical hashtags only (the standing and popular tags are added for it: Facebook 0 to 3, LinkedIn 3 to 6, X 1, Bluesky 1), an X caption (at most 240 characters) and a Bluesky caption (at most 260 characters).
 
 ### What can go wrong
 
@@ -269,12 +269,23 @@ duplicates are refused. The limits, kept in one place (`SOCIAL_LIMITS` in `packa
 
 | Network | Caption | Hashtags (goal) | Notes |
 |---|---|---|---|
-| Facebook | 500 characters | 0 to 3 | tags go on their own line after the caption |
-| LinkedIn | 700 characters | 3 to 5 | the caption is escaped for LinkedIn's "little text" format (the backslash, the vertical bar and `{ } @ [ ] ( ) < > * _ ~`, and a `#` that does not start a word); underscores are dropped from the tags, which are one word |
-| X | 256 characters, caption and hashtags together | 1 to 2 | the link is added after them and counts as 23 (280 in all); the caption is cut first so the hashtags survive, and hashtags are dropped from the end only when the caption would be left with almost no room |
-| Bluesky | 300 graphemes, caption and hashtags together | 1 to 2 | **no link in the text**: the link card carries it; each hashtag is a clickable `#tag` facet |
+| Facebook | 500 characters | 0 to 5 | tags go on their own line after the caption |
+| LinkedIn | 700 characters | 3 to 8 | the caption is escaped for LinkedIn's "little text" format (the backslash, the vertical bar and `{ } @ [ ] ( ) < > * _ ~`, and a `#` that does not start a word); underscores are dropped from the tags, which are one word |
+| X | 256 characters, caption and hashtags together | 1 to 3 | the link is added after them and counts as 23 (280 in all); the caption is cut first so the hashtags survive, and hashtags are dropped from the end only when the caption would be left with almost no room |
+| Bluesky | 300 graphemes, caption and hashtags together | 1 to 3 | **no link in the text**: the link card carries it; each hashtag is a clickable `#tag` facet |
 
-The maximum is enforced (`400 validation_error`); the minimum is the goal the editor and the blog writer aim for. A
+The maximum is enforced (`400 validation_error`); the minimum is the goal the editor and the blog writer aim for. Instagram
+stays at 5 and TikTok takes 3 to 8 (video captions, `VIDEO_CAPTION_LIMITS`).
+
+Since 1.7.0 the maxima leave room for two pool tags the server adds to the topical hashtags of a release post, a
+video caption and a blog writer post: one **standing** tag and one **popular** tag (when the maximum is 3 or more; at most
+2 from either list, chosen by a fixed rotation seeded by the version, title or slug, so the same post always gets the same
+tags). On X and Bluesky the pool tags are dropped first when the text leaves no room. The lists are the platform settings
+`blog_writer_hashtags_standing` (default OpenSource, Free, FreeSoftware, SelfHosted, FOSS) and
+`blog_writer_hashtags_popular` (default AI, Automation, DevOps, Tech, Productivity, AIAgents, GenerativeAI,
+MachineLearning, Programming, SoftwareDevelopment); an unset key uses the default and an empty list turns that kind off.
+`GET|PATCH /api/platform/blog/writer` carry them as `hashtagPools: {standing, popular}`, and the video status carries
+the same object so the schedule step previews what the worker posts. A
 post written before `hashtags` existed keeps its hashtags inline in the caption and is posted as it was (except that
 Bluesky no longer repeats the link in the text).
 
@@ -400,7 +411,7 @@ that are connected; each gets a caption of its own. `video_posts.captions` holds
 drafter's (the optional `captions` of `POST /api/platform/video/posts`, stored with `VideoPostSubmitted`, shown as the defaults
 in the Schedule step), over which the owner's edits at scheduling are merged per destination; with neither, a default is built
 from the title, description and hashtags. The caption is composed to the destination's limits (`VIDEO_CAPTION_LIMITS`: Facebook
-500, LinkedIn 700, X 256, Bluesky 300 graphemes, Instagram and TikTok 2,200) and **never carries a link** (X charges $0.20
+500, LinkedIn 700, X 256, Bluesky 300 graphemes, Instagram and TikTok 2,200; hashtag maxima Facebook 5, LinkedIn 8, X 3, Bluesky 3, Instagram 5, TikTok 8) and **never carries a link** (X charges $0.20
 instead of $0.015 for a post with a URL, TikTok forbids promotional links, and a Short has no page of its own). Unscheduling a
 post clears what the owner edited at scheduling and the TikTok options; the drafter's captions stay.
 
@@ -419,6 +430,13 @@ slot is 6 hours past), or 3 days after a failure. **Retry one destination:** `PO
 (super admin; `network` is one of the seven; `404` when the post has no such destination, `409 not_failed` unless it is `failed`
 or `skipped`, `409 video_purged` when the file is gone and cannot be rendered again). A retry of a destination other than YouTube
 starts from scratch and opens a new 6-hour window; if the clean-up already removed the MP4 the same revision renders again first.
+
+**Instagram processing failures (1.7.0).** A failure Instagram reports while it processes the video (an upload answered with
+`ProcessingFailedError`, a Graph error 100 saying "Unsupported post/get request" or "does not exist", or an error marked
+transient) is retried by the sweep with a new container, with code `ig_processing`, after the usual 1, 5 and 30 minutes inside
+the 6-hour window, and gives up after 4 attempts ("gave up after 4 attempts"). Authorization, rate-limit and 5xx handling are
+unchanged and any other refusal (invalid media included) is final. Publishing is still reached only after the container is
+`FINISHED`, so nothing is posted twice. The rendered MP4 is written without edit lists (`-use_editlist 0`, `+faststart`).
 
 **No double posts.** A destination's progress (upload session, container, media or publish id) is kept in `social_shares.detail.dest`;
 a share that holds progress counts as started, so unscheduling, moving, slipping and re-flowing that post are refused

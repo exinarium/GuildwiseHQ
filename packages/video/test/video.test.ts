@@ -6,12 +6,15 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTimeline,
   chunkCaption,
+  encodeArgs,
   findFfmpeg,
   fitClip,
   joinWavs,
+  MP4_MUX_ARGS,
   probeDuration,
   RENDER_ENCODERS,
   renderVideo,
+  runFfmpeg,
   sceneHtml,
   srt,
   streamDurations,
@@ -140,6 +143,64 @@ describe.skipIf(!canRender)(
     }, 180_000);
   },
 );
+
+describe('MP4 without edit lists (Reels spec)', () => {
+  const args = encodeArgs({
+    segments: ['s0.mp4', 's1.mp4'],
+    audio: 'voice.wav',
+    filter: '[0:v][1:v]xfade[vout]',
+    crf: 20,
+    fps: 30,
+    seconds: 12.5,
+    out: 'short.mp4',
+  });
+  it('the final encode asks for fast start and no edit lists', () => {
+    const at = args.indexOf('-use_editlist');
+    expect(at).toBeGreaterThan(0);
+    expect(args[at + 1]).toBe('0');
+    expect(args[args.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(args.at(-1)).toBe('short.mp4');
+    expect(args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac']));
+    expect(MP4_MUX_ARGS).toEqual(['-movflags', '+faststart', '-use_editlist', '0']);
+  });
+  it.skipIf(!ffmpegAvailable())('ffmpeg writes no elst atom with these arguments', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aomv-elst-'));
+    const ff = findFfmpeg(RENDER_ENCODERS);
+    runFfmpeg(
+      [
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=320x240:rate=30:duration=1',
+        '-c:v',
+        'libx264',
+        join(dir, 's0.mp4'),
+      ],
+      {
+        bin: ff,
+      },
+    );
+    writeSilentWav(join(dir, 'voice.wav'), 1);
+    const out = join(dir, 'short.mp4');
+    runFfmpeg(
+      encodeArgs({
+        segments: [join(dir, 's0.mp4')],
+        audio: join(dir, 'voice.wav'),
+        filter: '[0:v]format=yuv420p[vout]',
+        crf: 30,
+        fps: 30,
+        seconds: 1,
+        out,
+      }),
+      { bin: ff },
+    );
+    const bytes = readFileSync(out);
+    expect(bytes.includes(Buffer.from('moov'))).toBe(true);
+    expect(bytes.includes(Buffer.from('elst'))).toBe(false);
+    // fast start: the index comes before the media data
+    expect(bytes.indexOf(Buffer.from('moov'))).toBeLessThan(bytes.indexOf(Buffer.from('mdat')));
+  });
+});
 
 describe('code card language label', () => {
   const card = (lang: string) => sceneHtml({ type: 'code', lang, code: 'a = 1' }, 'landscape');

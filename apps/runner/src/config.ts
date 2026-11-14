@@ -295,6 +295,11 @@ export const RunnerConfigSchema = z.object({
   scratch: ScratchConfigSchema.default(ScratchConfigSchema.parse({})),
   /** Malware scan of public form uploads (see `UploadScanConfigSchema`). */
   uploadScan: UploadScanConfigSchema.default(UploadScanConfigSchema.parse({})),
+  /**
+   * Prepare a card worktree the runner creates (submodules at their pinned commits, the project's dependencies installed
+   * in the run-step sandbox) before the agent starts. A kill switch: false leaves new worktrees as git checks them out.
+   */
+  prepareWorktrees: z.boolean().default(true),
 });
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;
 

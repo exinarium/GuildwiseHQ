@@ -4,7 +4,7 @@ import { uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PrCreator } from '../src/git/gh.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
-import { defaultEnvChecker } from '../src/testing/environment.ts';
+import { defaultEnvChecker, needsTestEnvironment } from '../src/testing/environment.ts';
 import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp, sh, tmp, waitUntil } from './helpers.ts';
@@ -89,6 +89,24 @@ describe('tester environment check (spec: deployed app, Docker required)', () =>
     const ended = await h!.server.waitFor('shift.ended', (m) => m.shiftId === second.shiftId, 20_000);
     expect(ended.outcome).toBe('reported');
     expect(adapter.inputs.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('needsTestEnvironment', () => {
+  it('a tester on Test needs the environment; a tester on a tests-only Build (a build handoff outcome) does not', () => {
+    type Msg = Parameters<typeof needsTestEnvironment>[0];
+    const test = makeShiftStart({ stage: 'test', remoteNormalized: 'x' }) as unknown as Msg;
+    expect(test.agent.roleKey).toBe('tester');
+    expect(needsTestEnvironment(test)).toBe(true);
+    const build = makeShiftStart({
+      stage: 'test',
+      remoteNormalized: 'x',
+      outcomes: [{ id: 'handoff', label: 'Hand off for review', kind: 'success', data: 'buildHandoff' }],
+    }) as unknown as Msg;
+    build.brief.shift.stage = 'build';
+    expect(needsTestEnvironment(build)).toBe(false);
+    const builder = makeShiftStart({ stage: 'build', remoteNormalized: 'x' }) as unknown as Msg;
+    expect(needsTestEnvironment(builder)).toBe(false);
   });
 });
 

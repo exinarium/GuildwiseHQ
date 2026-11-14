@@ -142,6 +142,11 @@ export const InvestigationDataSchema = z.object({
   review: DesignReviewDataSchema.optional(),
   /** The architect's size estimate (`aom design --size --path [--risk] [--seam]`); the server gives the verdict. */
   size: DesignSizeDataSchema.optional(),
+  /**
+   * `aom design --tests-only`: the change is only in end-to-end test files, so the build stage is worked by the tester
+   * instead of a builder (BLOCKERS.md section 2). Old runners drop it; the card then goes to a builder as before.
+   */
+  testsOnly: z.boolean().optional(),
 });
 export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
 
@@ -258,7 +263,7 @@ export const RpcMethodSchema = z.enum([
   'source.read',
   /** M8, the BA's finalize shift: draft the update for the card's ticket (the manager approves it on the desk). */
   'outbound.draft',
-  /** The BA's finalize shift: override the card's risk tier (small or large) with a reason. */
+  /** Override the card's risk tier with a reason: the BA (small or large), the planner and the architect (large only). */
   'card.risk',
   /** M10, the BA's design chat: draft roles and workflows for the owner's organization (they approve on the desk). */
   'org.catalogue',

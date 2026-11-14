@@ -312,6 +312,35 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     expect(row.investigation.body).toBeUndefined();
   });
 
+  it('revise keeps the tests-only flag of the held design (aom design revise cannot repeat it)', async () => {
+    await team();
+    await w.hire('Tess', 'tester', 'junior');
+    const { base, dep } = await pair();
+    const start = await p.next('Aria');
+    await startReadOnly(start);
+    const held = await p.report(
+      r,
+      start.shiftId,
+      design({ body: '# design', assumptions: ASSUMPTIONS, testsOnly: true }),
+    );
+    expect(held).toMatchObject({ accepted: true });
+    await finish(start.shiftId);
+    expect((await cardRow(dep.id)).investigation.testsOnly).toBe(true);
+    await landEvent(base.id);
+    const rev = await p.next('Aria');
+    await p.startShift(r, rev);
+    const res = await p.report(
+      r,
+      rev.shiftId,
+      review('revise', [2], { commit: 'def5678', summary: 'Now async.' }),
+    );
+    expect(res).toMatchObject({ accepted: true });
+    expect(res.message).toMatch(/tests-only/);
+    await finish(rev.shiftId);
+    await until(async () => (await cardRow(dep.id)).stage === 'build', 3000, 'card moved to build');
+    expect((await cardRow(dep.id)).investigation).toMatchObject({ summary: 'Now async.', testsOnly: true });
+  });
+
   it('a design that assumes nothing skips the review: the card goes to build and build waits for the dependency', async () => {
     await team();
     const { base, dep } = await pair();

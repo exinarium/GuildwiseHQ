@@ -83,6 +83,28 @@ export async function cardUsage(db: Queryable, cardId: string): Promise<CardUsag
   };
 }
 
+/**
+ * How often this card's budget was extended since its baseline: every resolved arbitration grants one extension.
+ * An answer and a dismissal both resolve the arbitration and grant the extension: a dismissed item must not be
+ * raised again a minute later by the same usage (production: GWP-19, GWP-3).
+ */
+export async function stopLossExtensions(db: Queryable, cardId: string): Promise<number> {
+  const ext = await one<{ n: number }>(
+    db,
+    `SELECT count(*)::int AS n FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status IN ('answered','dismissed')
+        AND keep_blocked_until IS NULL AND created_at >= ${SINCE}`,
+    [cardId, DESK_SUBKIND.stopLoss],
+  );
+  return Number(ext?.n ?? 0);
+}
+
+/**
+ * An agent (the architect, without a CEO) extends one card's budget this many times; the next stop-loss goes to the
+ * owner's desk. Without it the cap was soft: each "go on" added a build pass, a review round and five shifts, with no
+ * end (production: GWP-98, 16 review rounds that asked for changes).
+ */
+export const AGENT_STOP_LOSS_EXTENSIONS = 3;
+
 /** The budget of this card: the project's setting (else the defaults) plus what answered arbitrations added. */
 export async function stopLossBudget(db: Queryable, card: Row): Promise<StopLossBudget> {
   const p = await one(db, 'SELECT stop_loss FROM projects WHERE id=$1', [card.project_id]);
@@ -91,15 +113,7 @@ export async function stopLossBudget(db: Queryable, card: Row): Promise<StopLoss
   const bug = await one(db, 'SELECT fix_size FROM platform_bugs WHERE card_id=$1', [card.id]);
   const size: CardSize = (bug?.fix_size as CardSize | undefined) ?? cardSize(card);
   const base = (parsed.success ? parsed.data : DEFAULT_STOP_LOSS)[size];
-  const ext = await one<{ n: number }>(
-    db,
-    // An answer and a dismissal both resolve the arbitration and grant the extension: a dismissed item must not be
-    // raised again a minute later by the same usage (production: GWP-19, GWP-3).
-    `SELECT count(*)::int AS n FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status IN ('answered','dismissed')
-        AND keep_blocked_until IS NULL AND created_at >= ${SINCE}`,
-    [card.id, DESK_SUBKIND.stopLoss],
-  );
-  const n = Number(ext?.n ?? 0);
+  const n = await stopLossExtensions(db, card.id);
   return {
     buildPasses: base.buildPasses + n * STOP_LOSS_EXTENSION.buildPasses,
     reviewRounds: base.reviewRounds + n * STOP_LOSS_EXTENSION.reviewRounds,
@@ -181,6 +195,12 @@ export async function stopLossRoute(
       note: "Asked: the manager's desk (no CEO is active).",
     };
   if (!ceo) {
+    const extended = await stopLossExtensions(tx, card.id);
+    if (extended >= AGENT_STOP_LOSS_EXTENSIONS)
+      return {
+        route: { routedTo: 'manager', level: 'desk' },
+        note: `This card's budget was extended ${extended} times already: the owner decides now.`,
+      };
     const route = await architectRoute(ctx, tx, card);
     return {
       route,
@@ -240,7 +260,8 @@ export async function stopLossEvents(
   const { route, ceoHold, note } = await stopLossRoute(ctx, tx, card);
   const deskItemId = randomUUID();
   const size = cardSize(card);
-  const counts = `${size} card: ${usage.buildPasses}/${budget.buildPasses} build passes, ${usage.reviewRounds}/${budget.reviewRounds} review rounds, ${usage.shifts}/${budget.shifts} shifts`;
+  const extended = await stopLossExtensions(tx, card.id);
+  const counts = `${size} card: ${usage.buildPasses}/${budget.buildPasses} build passes, ${usage.reviewRounds}/${budget.reviewRounds} review rounds, ${usage.shifts}/${budget.shifts} shifts${extended > 0 ? `; the budget was extended ${extended} ${extended === 1 ? 'time' : 'times'} already` : ''}`;
   const failed = usage.failedShifts ?? 0;
   let text: string;
   if (usage.shifts > 0 && failed * 2 > usage.shifts) {

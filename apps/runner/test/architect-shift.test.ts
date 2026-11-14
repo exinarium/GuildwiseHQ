@@ -184,6 +184,62 @@ describe('architect shift: the investigation outcome', () => {
     expect(sh(h!.repo.clone, 'git', ['log', '--all', '--format=%s', '--', 'docs'])).toBe('');
   });
 
+  it('aom design --tests-only reaches the server on the repo-report path (BLOCKERS.md section 2)', async () => {
+    let status = 0;
+    await start(async (i, ctl) => {
+      write(i.cwd, REPORT, '# TOY-1\n\nOnly the login spec changes.\n');
+      commit(i.cwd);
+      status = (await ctl.post('/v1/report', handoff(data({ testsOnly: true })))).status;
+    });
+    const { shiftId } = await h!.runShift({
+      stage: 'investigate',
+      briefExtra: { investigation: investigation() },
+    });
+    expect(status).toBe(200);
+    const rep = h!.server.of('shift.report').find((r) => r.shiftId === shiftId);
+    expect(rep?.report).toMatchObject({ data: { reportPath: REPORT, location: 'repo', testsOnly: true } });
+  });
+
+  it('aom design --tests-only reaches the server on the vault-report path', async () => {
+    let status = 0;
+    await start(async (i, ctl) => {
+      writeFileSync(join(i.sandbox.tmp, 'TOY-1-add-greeting.md'), '# vault report\n');
+      status = (
+        await ctl.post(
+          '/v1/report',
+          handoff(data({ reportPath: join(i.sandbox.tmp, 'TOY-1-add-greeting.md'), testsOnly: true })),
+        )
+      ).status;
+    });
+    const vault = makeVault({ 'projects/toy/PROJECT.md': '# Toy\n' });
+    h!.server.send('command', {
+      commandId: 'cfg',
+      command: 'vault.configure',
+      payload: {
+        vaults: [
+          { vaultId: 'vault-1', kind: 'org', name: 'Org', remoteUrl: vault.origin, syncIntervalSec: 3600 },
+        ],
+        identity: IDENTITY,
+        workstationName: 'Desk',
+      },
+    });
+    expect((await h!.server.waitFor('command.result', (m) => m.commandId === 'cfg')).ok).toBe(true);
+    const { shiftId } = await h!.runShift({
+      stage: 'investigate',
+      briefExtra: {
+        investigation: investigation({
+          location: 'vault',
+          reportPath: 'docs/investigations/TOY-1-add-greeting.md',
+          folder: undefined,
+        }),
+      },
+      startExtra: { vault: { vaultId: 'vault-1', kind: 'org', folder: 'projects/toy' } },
+    });
+    expect(status).toBe(200);
+    const rep = h!.server.of('shift.report').find((r) => r.shiftId === shiftId);
+    expect(rep?.report).toMatchObject({ data: { location: 'vault', testsOnly: true } });
+  });
+
   it('a vault report with no vault configured is refused with a clear reason', async () => {
     const seen: any = {};
     await start(async (i, ctl) => {

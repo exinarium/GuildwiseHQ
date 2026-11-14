@@ -48,6 +48,8 @@ export interface WorktreeResult {
   branchRecreated?: boolean;
   /** Set when the worktree was left on a `conflict/<ref>-aN` branch (a DevOps conflict attempt) and was switched back. */
   recoveredFrom?: string;
+  /** True when this call ran `git worktree add` (a fresh checkout the runner may prepare); absent when it was reused. */
+  added?: boolean;
 }
 
 export interface EnsureWorktreeInput {
@@ -209,7 +211,7 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
   if (await branchExists(repoPath, branch)) {
     const r = await git(repoPath, ['worktree', 'add', '--', path, branch]);
     if (r.exitCode !== 0) fail(`git worktree add ${branch} failed: ${r.stderr.trim()}`);
-    return result(false);
+    return { ...(await result(false)), added: true };
   }
 
   // The card branch is gone locally (worktree removed, clone pruned, hygiene removed a finished card's branch) but may
@@ -220,7 +222,7 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     await git(repoPath, [...a.args, 'fetch', '--', 'origin', branch], { env: a.env });
     if (await revParse(repoPath, `refs/remotes/origin/${branch}`)) {
       await addWorktreeOnBranch(repoPath, branch, path, `origin/${branch}`, fail);
-      return result(false);
+      return { ...(await result(false)), added: true };
     }
   }
 
@@ -252,6 +254,7 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
   const madeHere = await addWorktreeOnBranch(repoPath, branch, path, startPoint, fail);
   return {
     ...(await result(madeHere)),
+    added: true,
     ...(createdBranch ? { createdBranch } : {}),
     ...(recreated && madeHere ? { branchRecreated: true } : {}),
   };
