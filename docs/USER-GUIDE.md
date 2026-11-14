@@ -1522,7 +1522,7 @@ A **form** is a set of questions your clients answer without a Guildwise login. 
 - **Unpublish** closes it: the address then says "This form is not available", like an address that never existed.
 - **Create a new link** replaces the address for good: the old address and every printed QR code stop working.
 - **Publish changes** moves the address to the newest saved version.
-- **Submissions** lists what arrived: **In progress**, **Received**, **Failed, client can retry** or **Timed out**. It shows status and times only, never the answers; those are in your storage.
+- **Submissions** lists what arrived: **In progress**, **Received**, **Failed, client can retry** or **Timed out**. It shows status and times only, never the answers; those are in your storage. If a submission times out while it is being saved, the client is asked to send the form again and the list shows it as **Timed out**; its copies of the answers and its files are removed like those of any timed-out submission.
 
 **Personal links.** Under **Personal links** you create a link for one client or record: type a reference (a client number, not a name) and choose 7 to 90 days. The link works once: the first completed submission uses it up. **Revoke** ends it earlier. It carries no personal data and an expired, revoked or used link is refused with a clear message. Send the link yourself.
 

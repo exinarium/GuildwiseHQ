@@ -27,6 +27,14 @@ describe('describePublicError', () => {
     expect(d('storage_failed', false)).toMatchObject({ retry: false, closed: true });
   });
 
+  it('an expired submission asks to send again and offers Try again', () => {
+    expect(d('submission_expired', false, 410)).toEqual({
+      text: 'This submission timed out before it was saved. Please send the form again. Your answers and files are still here.',
+      retry: true,
+      closed: false,
+    });
+  });
+
   it('never repeats anything the server sent beyond its code', () => {
     expect(d('something_new_and_odd', false, 500).text).toBe(
       'Something went wrong. Your answers are still here. Try again.',

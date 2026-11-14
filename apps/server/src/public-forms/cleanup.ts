@@ -15,14 +15,35 @@ const RETRY_MAX_MS = 6 * 3_600_000;
 export const CLEANUP_NOT_TRIED_BOUND_MS = 30 * 86_400_000;
 const MIN_SWEEP_GAP_MS = 60_000;
 
-/** A write that started before `expires_at` can still end up to two write timeouts later: wait for it. */
-export function cleanupGraceMs(ctx: Ctx): number {
-  return 2 * ctx.config.storage.writeTimeoutMs + 60_000;
+/** A complete keeps `updated_at` fresh after each document; a storing row older than this has no write running. */
+export function storingGraceMs(ctx: Ctx): number {
+  return 2 * ctx.config.storage.writeTimeoutMs;
 }
 
+/** A write that started before `expires_at` can still end up to two write timeouts later: wait for it. */
+export function cleanupGraceMs(ctx: Ctx): number {
+  return storingGraceMs(ctx) + 60_000;
+}
+
+/** error_code of a row the sweep expired while its complete was writing; the respondent was told to send again. */
+export const EXPIRED_DURING_COMPLETE = 'expired_during_complete';
+
+/** The desk's label of each answers document; the cleanup rows use the same ones so the desk can match them. */
+export const ANSWERS_LABELS = {
+  json: 'Answers (JSON)',
+  html: 'Answers (readable)',
+  pdf: 'Answers (PDF)',
+} as const;
+
+/** Cleanup row `seq` of each answers document: negative, so it never meets a part index. */
+const ANSWERS_SEQ = { json: -1, html: -2, pdf: -3 } as const;
+
+type FileRef = { connectionId: string; path: string; providerId?: string };
+
 /**
- * Queues the files of expired submissions that have no answers document. Only `expired`, never completed, no answers
- * reference at all, and past the grace window; one transaction, safe to run on several instances.
+ * Queues the files of expired submissions that have no answers document, and of those marked as expired during their
+ * complete (the respondent was told to send again: their answers documents go too). Only `expired`, never completed,
+ * and past the grace window; one transaction, safe to run on several instances.
  */
 export async function queueFormUploadCleanup(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
@@ -31,36 +52,31 @@ export async function queueFormUploadCleanup(ctx: Ctx): Promise<void> {
     const subs = await rows<{
       id: string;
       org_id: string;
-      parts: Array<{
-        field?: string;
-        reference?: { connectionId: string; path: string; providerId?: string };
-      }>;
+      parts: Array<{ field?: string; reference?: FileRef }>;
+      answers_refs: Partial<Record<keyof typeof ANSWERS_LABELS, FileRef>> | null;
     }>(
       tx,
-      `SELECT id, org_id, parts FROM form_submissions
-        WHERE status='expired' AND cleanup_queued_at IS NULL
-          AND completed_at IS NULL AND answers_refs = '{}'::jsonb
+      `SELECT id, org_id, parts, answers_refs FROM form_submissions
+        WHERE status='expired' AND cleanup_queued_at IS NULL AND completed_at IS NULL
+          AND (answers_refs = '{}'::jsonb OR error_code = $2)
           AND expires_at < $1
         ORDER BY expires_at LIMIT 200 FOR UPDATE SKIP LOCKED`,
-      [cutoff],
+      [cutoff, EXPIRED_DURING_COMPLETE],
     );
     for (const s of subs) {
-      for (const [seq, p] of s.parts.entries()) {
-        if (!p.reference) continue;
+      const files: Array<{ seq: number; label: string; ref: FileRef }> = [];
+      for (const [seq, p] of s.parts.entries())
+        if (p.reference) files.push({ seq, label: p.field ?? '', ref: p.reference });
+      for (const kind of ['json', 'html', 'pdf'] as const) {
+        const ref = s.answers_refs?.[kind];
+        if (ref) files.push({ seq: ANSWERS_SEQ[kind], label: ANSWERS_LABELS[kind], ref });
+      }
+      for (const f of files) {
         await tx.query(
           `INSERT INTO form_submission_cleanup
              (submission_id, seq, org_id, connection_id, label, path, provider_id, state, queued_at, next_attempt_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$8) ON CONFLICT DO NOTHING`,
-          [
-            s.id,
-            seq,
-            s.org_id,
-            p.reference.connectionId,
-            p.field ?? '',
-            p.reference.path,
-            p.reference.providerId ?? null,
-            now,
-          ],
+          [s.id, f.seq, s.org_id, f.ref.connectionId, f.label, f.ref.path, f.ref.providerId ?? null, now],
         );
       }
       await tx.query('UPDATE form_submissions SET cleanup_queued_at=$2 WHERE id=$1', [s.id, now]);
@@ -92,10 +108,11 @@ export async function sweepFormUploadCleanup(ctx: Ctx): Promise<number> {
         SELECT c2.submission_id, c2.seq FROM form_submission_cleanup c2
           JOIN form_submissions s ON s.id = c2.submission_id
          WHERE c2.state = 'pending' AND c2.next_attempt_at <= $1
-           AND s.status = 'expired' AND s.completed_at IS NULL AND s.answers_refs = '{}'::jsonb
+           AND s.status = 'expired' AND s.completed_at IS NULL
+           AND (s.answers_refs = '{}'::jsonb OR s.error_code = $3)
          ORDER BY c2.next_attempt_at LIMIT ${BATCH} FOR UPDATE OF c2 SKIP LOCKED)
       RETURNING c.submission_id, c.seq, c.org_id, c.connection_id, c.path, c.provider_id, c.attempts, c.queued_at`,
-    [now, new Date(now.getTime() + CLEANUP_LEASE_MS)],
+    [now, new Date(now.getTime() + CLEANUP_LEASE_MS), EXPIRED_DURING_COMPLETE],
   );
   let next = 0;
   const worker = async () => {
