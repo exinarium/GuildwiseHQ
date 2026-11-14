@@ -1,6 +1,7 @@
 export * from './accounts/provider-accounts.ts';
 export * from './agent-ux/index.ts';
 export * from './api/index.ts';
+export * from './apps/index.ts';
 export * from './attachments/index.ts';
 export * from './authz/index.ts';
 export * from './avatars/index.ts';
@@ -36,7 +37,6 @@ export * from './hygiene/secrets.ts';
 export * from './ids.ts';
 export * from './intake/index.ts';
 export * from './integrations/index.ts';
-export * from './apps/index.ts';
 export * from './interests/index.ts';
 export * from './investigation/index.ts';
 export * from './journeys/index.ts';

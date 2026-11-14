@@ -69,7 +69,10 @@ export class AppKeyStore {
   }
 
   list(): Array<{ instance: string } & StoredAppInfo> {
-    return Object.entries(this.read().apps).map(([instance, { privateKey: _k, ...rest }]) => ({ instance, ...rest }));
+    return Object.entries(this.read().apps).map(([instance, { privateKey: _k, ...rest }]) => ({
+      instance,
+      ...rest,
+    }));
   }
 
   instances(): string[] {
@@ -80,7 +83,8 @@ export class AppKeyStore {
     const cur = this.read();
     const old = cur.apps[instance];
     this.write({ apps: { ...cur.apps, [instance]: app } });
-    if (old && old.privateKey !== app.privateKey) for (const s of pemSecrets(old.privateKey)) unregisterSecret(s);
+    if (old && old.privateKey !== app.privateKey)
+      for (const s of pemSecrets(old.privateKey)) unregisterSecret(s);
   }
 
   addRef(instance: string, ref: { orgId: string; integrationId: string }): void {

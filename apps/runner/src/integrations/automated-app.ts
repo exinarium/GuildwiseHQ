@@ -75,7 +75,9 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
     try {
       broker = this.broker();
     } catch (err) {
-      return baseStatus(this.kind, instance, 'workstation', now, 'unavailable', { detail: errOf(err).message });
+      return baseStatus(this.kind, instance, 'workstation', now, 'unavailable', {
+        detail: errOf(err).message,
+      });
     }
     const app = broker.store.get(instance);
     if (!app || app.provider !== this.kind)
@@ -112,16 +114,26 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
         ...common,
         ...(id.missingPermissions.length ? { missingScopes: id.missingPermissions } : {}),
       });
-    return baseStatus(this.kind, instance, 'workstation', now, UNREACHABLE.has(error.code) ? 'unreachable' : 'refused', {
-      ...common,
-      errorCode: error.code,
-      detail: redact(error.message || APP_ERROR_TEXT[error.code]).slice(0, 400),
-    });
+    return baseStatus(
+      this.kind,
+      instance,
+      'workstation',
+      now,
+      UNREACHABLE.has(error.code) ? 'unreachable' : 'refused',
+      {
+        ...common,
+        errorCode: error.code,
+        detail: redact(error.message || APP_ERROR_TEXT[error.code]).slice(0, 400),
+      },
+    );
   }
 
   async test(instance: string): Promise<IntegrationStatus> {
     const r = await this.verifyStored(instance);
-    this.checked.set(instance, { at: this.env.now().getTime(), ...(r.ok ? {} : { error: new AppTokenError(r.code ?? 'unexpected', r.message ?? '') }) });
+    this.checked.set(instance, {
+      at: this.env.now().getTime(),
+      ...(r.ok ? {} : { error: new AppTokenError(r.code ?? 'unexpected', r.message ?? '') }),
+    });
     return this.status(instance);
   }
 
@@ -130,10 +142,18 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
     const broker = this.broker();
     const app = broker.store.get(instance);
     if (!app)
-      return { ok: false, instance, code: 'installation_not_found', message: 'This app is not connected on this workstation.' };
+      return {
+        ok: false,
+        instance,
+        code: 'installation_not_found',
+        message: 'This app is not connected on this workstation.',
+      };
     try {
       const identity = await this.factory()
-        .create({ ...app, identity: app.identity }, { fetch: this.env.fetch, now: () => this.env.now().getTime() })
+        .create(
+          { ...app, identity: app.identity },
+          { fetch: this.env.fetch, now: () => this.env.now().getTime() },
+        )
         .verify();
       if (JSON.stringify(identity) !== JSON.stringify(app.identity)) {
         broker.store.put(instance, { ...app, identity });
@@ -169,9 +189,18 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
       if (!installationId) {
         const list = await factory.installations(input, deps);
         if (list.length === 0)
-          return { ok: false, code: 'installation_not_found', message: 'The app is not installed on any account yet.' };
+          return {
+            ok: false,
+            code: 'installation_not_found',
+            message: 'The app is not installed on any account yet.',
+          };
         if (list.length > 1)
-          return { ok: false, code: 'choose_installation', message: APP_ERROR_TEXT.choose_installation, installations: list };
+          return {
+            ok: false,
+            code: 'choose_installation',
+            message: APP_ERROR_TEXT.choose_installation,
+            installations: list,
+          };
         installationId = (list[0] as { id: string }).id;
       }
       const identity = await factory.create({ ...input, installationId }, deps).verify();
@@ -183,7 +212,10 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
       if (cur && cur.provider !== this.kind)
         return { ok: false, instance, code: 'app_mismatch', message: APP_ERROR_TEXT.app_mismatch };
       const refs = [...(cur?.refs ?? [])];
-      if (opts.ref && !refs.some((r) => r.orgId === opts.ref?.orgId && r.integrationId === opts.ref?.integrationId))
+      if (
+        opts.ref &&
+        !refs.some((r) => r.orgId === opts.ref?.orgId && r.integrationId === opts.ref?.integrationId)
+      )
         refs.push(opts.ref);
       broker.store.put(instance, {
         provider: this.kind,
@@ -212,8 +244,11 @@ export class AutomatedAppIntegration implements IntegrationAdapter {
   }
 
   async connect(instance: string, method: string, fields: Record<string, string>): Promise<Outcome> {
-    if (method !== 'app_key') return { error: 'This method cannot be connected from here.', code: 'unsupported' };
-    const [appRef = '', inst] = (fields.appRef ? `${fields.appRef}:${fields.installationId ?? ''}` : instance).split(':');
+    if (method !== 'app_key')
+      return { error: 'This method cannot be connected from here.', code: 'unsupported' };
+    const [appRef = '', inst] = (
+      fields.appRef ? `${fields.appRef}:${fields.installationId ?? ''}` : instance
+    ).split(':');
     const r = await this.connectApp({
       host: fields.host || 'github.com',
       appRef,

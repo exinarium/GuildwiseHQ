@@ -47,9 +47,9 @@ describe('automated apps', () => {
       'contents',
       'issues',
     ]);
-    expect(missingAppPermissions({ contents: 'admin', pull_requests: 'write', issues: 'write', metadata: 'read' })).toEqual(
-      [],
-    );
+    expect(
+      missingAppPermissions({ contents: 'admin', pull_requests: 'write', issues: 'write', metadata: 'read' }),
+    ).toEqual([]);
   });
 
   it('has a sentence for every error code', () => {

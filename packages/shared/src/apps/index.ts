@@ -97,7 +97,8 @@ export type AppErrorCode = z.infer<typeof AppErrorCodeSchema>;
 
 /** One sentence per code. Never a value. */
 export const APP_ERROR_TEXT: Record<AppErrorCode, string> = {
-  key_invalid: 'The private key could not be read: use the .pem file the app settings page generated (RSA, 2048 bits or more).',
+  key_invalid:
+    'The private key could not be read: use the .pem file the app settings page generated (RSA, 2048 bits or more).',
   jwt_rejected: 'GitHub refused the app key or App ID: check both, or generate a new private key.',
   clock_skew: "This workstation's clock is off: fix the system time and try again.",
   app_not_found: 'No app was found for this App ID.',

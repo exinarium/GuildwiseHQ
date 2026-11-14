@@ -83,22 +83,45 @@ export function classifyGitHubError(a: Answer, phase: Phase): AppTokenError {
       retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : 60_000,
     });
   }
-  if (a.status >= 500) return new AppTokenError('unreachable', `GitHub answered ${a.status}.`, { status: a.status });
+  if (a.status >= 500)
+    return new AppTokenError('unreachable', `GitHub answered ${a.status}.`, { status: a.status });
   if (a.status === 401) {
-    if (phase === 'user') return new AppTokenError('token_rejected', `GitHub refused the access token.${suffix}`, { status: 401 });
-    return new AppTokenError('jwt_rejected', `GitHub refused the app key or App ID.${suffix}`, { status: 401 });
+    if (phase === 'user')
+      return new AppTokenError('token_rejected', `GitHub refused the access token.${suffix}`, {
+        status: 401,
+      });
+    return new AppTokenError('jwt_rejected', `GitHub refused the app key or App ID.${suffix}`, {
+      status: 401,
+    });
   }
   if (a.status === 404) {
-    if (phase === 'app') return new AppTokenError('app_not_found', `No app was found for this App ID.${suffix}`, { status: 404 });
+    if (phase === 'app')
+      return new AppTokenError('app_not_found', `No app was found for this App ID.${suffix}`, {
+        status: 404,
+      });
     if (phase === 'installation' || phase === 'mint')
-      return new AppTokenError('installation_not_found', `The app is not installed there any more.${suffix}`, { status: 404 });
+      return new AppTokenError(
+        'installation_not_found',
+        `The app is not installed there any more.${suffix}`,
+        { status: 404 },
+      );
   }
   if (a.status === 403 && /suspend/i.test(msg))
-    return new AppTokenError('installation_suspended', `The installation is suspended.${suffix}`, { status: 403 });
+    return new AppTokenError('installation_suspended', `The installation is suspended.${suffix}`, {
+      status: 403,
+    });
   if ((a.status === 403 || a.status === 422) && phase === 'mint') {
     if (/repositor/i.test(msg))
-      return new AppTokenError('repository_not_accessible', `The installation cannot reach a repository asked for.${suffix}`, { status: a.status });
-    return new AppTokenError('permission_missing', `The installation does not grant a permission asked for.${suffix}`, { status: a.status });
+      return new AppTokenError(
+        'repository_not_accessible',
+        `The installation cannot reach a repository asked for.${suffix}`,
+        { status: a.status },
+      );
+    return new AppTokenError(
+      'permission_missing',
+      `The installation does not grant a permission asked for.${suffix}`,
+      { status: a.status },
+    );
   }
   return new AppTokenError('unexpected', `GitHub answered ${a.status}.${suffix}`, { status: a.status });
 }
@@ -168,7 +191,11 @@ class GitHubAppProvider implements AutomatedAppProvider {
   }
 
   /** A JWT call, with one re-sign after a clock skew refusal (using GitHub's Date header). */
-  private async jwtCall(path: string, phase: Phase, init: { method?: string; body?: unknown } = {}): Promise<Answer> {
+  private async jwtCall(
+    path: string,
+    phase: Phase,
+    init: { method?: string; body?: unknown } = {},
+  ): Promise<Answer> {
     let a = await this.call(path, { jwt: true }, init);
     if (a.status === 401 && isSkewMessage(messageOf(a))) {
       const date = Date.parse(a.headers.get('date') ?? '');
@@ -287,7 +314,8 @@ class GitHubAppProvider implements AutomatedAppProvider {
       json = null;
     }
     if (res.status >= 300) {
-      const body = json && typeof json === 'object' && !Array.isArray(json) ? (json as Record<string, unknown>) : {};
+      const body =
+        json && typeof json === 'object' && !Array.isArray(json) ? (json as Record<string, unknown>) : {};
       throw classifyGitHubError({ status: res.status, body, headers: res.headers }, 'installations');
     }
     if (!Array.isArray(json)) throw new AppTokenError('unexpected', 'GitHub did not list the installations.');

@@ -53,7 +53,8 @@ function fakeGitHub(
     const auth = String((init.headers as Record<string, string>).Authorization ?? '');
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, path: u.pathname, auth, body });
-    if (u.pathname === '/app') return opts.app?.(new Request(url)) ?? json(200, { id: 4242, slug: 'guild-bot', name: 'Guild Bot' });
+    if (u.pathname === '/app')
+      return opts.app?.(new Request(url)) ?? json(200, { id: 4242, slug: 'guild-bot', name: 'Guild Bot' });
     if (u.pathname === '/app/installations')
       return json(
         200,
@@ -78,7 +79,10 @@ function fakeGitHub(
       mints++;
       const r = opts.mint?.(mints);
       if (r) return r;
-      return json(201, { token: `ghs_testtoken${String(mints).padStart(20, '0')}`, expires_at: new Date(clock() + 60 * MIN).toISOString() });
+      return json(201, {
+        token: `ghs_testtoken${String(mints).padStart(20, '0')}`,
+        expires_at: new Date(clock() + 60 * MIN).toISOString(),
+      });
     }
     if (u.pathname === '/users/guild-bot%5Bbot%5D' || u.pathname === '/users/guild-bot[bot]')
       return json(200, { login: 'guild-bot[bot]', id: 99001 });
@@ -130,8 +134,12 @@ describe('GitHub App JWT', () => {
   it('reads PKCS#1 and PKCS#8 keys and refuses non-RSA or short keys without quoting them', () => {
     expect(parseAppPrivateKey(PEM_PKCS1).asymmetricKeyType).toBe('rsa');
     expect(parseAppPrivateKey(PEM_PKCS8).asymmetricKeyType).toBe('rsa');
-    const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-    const short = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+    const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+      .privateKey.export({ type: 'pkcs8', format: 'pem' })
+      .toString();
+    const short = generateKeyPairSync('rsa', { modulusLength: 1024 })
+      .privateKey.export({ type: 'pkcs1', format: 'pem' })
+      .toString();
     for (const bad of [ec, short, 'not a key']) {
       try {
         parseAppPrivateKey(bad);
@@ -156,7 +164,11 @@ describe('GitHub error classification', () => {
     [a(404), 'installation', 'installation_not_found'],
     [a(403, 'This installation has been suspended'), 'mint', 'installation_suspended'],
     [a(422, 'The permissions requested are not granted to this installation.'), 'mint', 'permission_missing'],
-    [a(422, 'There is at least one repository that does not exist or is not accessible'), 'mint', 'repository_not_accessible'],
+    [
+      a(422, 'There is at least one repository that does not exist or is not accessible'),
+      'mint',
+      'repository_not_accessible',
+    ],
     [a(403, 'rate limit', { 'x-ratelimit-remaining': '0', 'retry-after': '30' }), 'mint', 'rate_limited'],
     [a(502), 'mint', 'unreachable'],
     [a(401, 'Bad credentials'), 'user', 'token_rejected'],
@@ -176,7 +188,12 @@ describe('AutomatedAppIntegration connect', () => {
     const gh = fakeGitHub();
     const e = env(gh.fetch);
     const app = new AutomatedAppIntegration('github-app', e);
-    const r = await app.connectApp({ host: 'github.com', appRef: '4242', installationId: '777', privateKey: PEM_PKCS1 });
+    const r = await app.connectApp({
+      host: 'github.com',
+      appRef: '4242',
+      installationId: '777',
+      privateKey: PEM_PKCS1,
+    });
     expect(r.ok).toBe(true);
     expect(r.instance).toBe('4242:777');
     expect(r.identity).toMatchObject({
@@ -190,12 +207,19 @@ describe('AutomatedAppIntegration connect', () => {
     const mint = gh.calls.find((c) => c.method === 'POST');
     expect(mint?.body).toEqual({ permissions: { metadata: 'read' } });
     expect(await app.instances()).toEqual(['4242:777']);
-    const files = walk(e.dir).map((f) => readFileSync(f, 'utf8')).join('\n');
+    const files = walk(e.dir)
+      .map((f) => readFileSync(f, 'utf8'))
+      .join('\n');
     expect(files).not.toContain('BEGIN');
     for (const line of pemSecrets(PEM_PKCS1).slice(3)) expect(files).not.toContain(line);
     expect(files).not.toContain('ghs_');
     const st = await app.status('4242:777');
-    expect(st).toMatchObject({ state: 'connected', account: 'guild-bot[bot]', method: 'app_key', missingScopes: ['issues'] });
+    expect(st).toMatchObject({
+      state: 'connected',
+      account: 'guild-bot[bot]',
+      method: 'app_key',
+      missingScopes: ['issues'],
+    });
   });
 
   it('uses the GHES noreply host and API base', async () => {
@@ -216,13 +240,26 @@ describe('AutomatedAppIntegration connect', () => {
   });
 
   it.each([
-    ['a wrong key', { app: () => json(401, { message: 'A JSON web token could not be decoded' }) }, 'jwt_rejected'],
+    [
+      'a wrong key',
+      { app: () => json(401, { message: 'A JSON web token could not be decoded' }) },
+      'jwt_rejected',
+    ],
     ['a wrong App ID', { app: () => json(404, { message: 'Not Found' }) }, 'app_not_found'],
-    ['an uninstalled app', { installation: () => json(404, { message: 'Not Found' }) }, 'installation_not_found'],
+    [
+      'an uninstalled app',
+      { installation: () => json(404, { message: 'Not Found' }) },
+      'installation_not_found',
+    ],
   ] as const)('%s stores nothing and returns a typed, non-secret error', async (_n, o, code) => {
     const e = env(fakeGitHub(o).fetch);
     const app = new AutomatedAppIntegration('github-app', e);
-    const r = await app.connectApp({ host: 'github.com', appRef: '4242', installationId: '777', privateKey: PEM_PKCS1 });
+    const r = await app.connectApp({
+      host: 'github.com',
+      appRef: '4242',
+      installationId: '777',
+      privateKey: PEM_PKCS1,
+    });
     expect(r).toMatchObject({ ok: false, code });
     expect(JSON.stringify(r)).not.toContain('PRIVATE');
     expect(await app.instances()).toEqual([]);
@@ -232,7 +269,12 @@ describe('AutomatedAppIntegration connect', () => {
   });
 
   it('asks to choose when the app has several installations, and uses the only one otherwise', async () => {
-    const many = fakeGitHub({ installations: [{ id: 777, login: 'acme' }, { id: 778, login: 'other' }] });
+    const many = fakeGitHub({
+      installations: [
+        { id: 777, login: 'acme' },
+        { id: 778, login: 'other' },
+      ],
+    });
     const r = await new AutomatedAppIntegration('github-app', env(many.fetch)).connectApp({
       host: 'github.com',
       appRef: '4242',
@@ -259,7 +301,12 @@ describe('AutomatedAppIntegration connect', () => {
   it('remove deletes the sealed key and the file, and unregisters the key', async () => {
     const e = env(fakeGitHub().fetch);
     const app = new AutomatedAppIntegration('github-app', e);
-    await app.connectApp({ host: 'github.com', appRef: '4242', installationId: '777', privateKey: PEM_PKCS1 });
+    await app.connectApp({
+      host: 'github.com',
+      appRef: '4242',
+      installationId: '777',
+      privateKey: PEM_PKCS1,
+    });
     expect(redact(PEM_PKCS1)).toBe('***');
     await app.remove('4242:777');
     expect(await app.instances()).toEqual([]);
@@ -287,7 +334,12 @@ async function connected(clock: { t: number }, o: Parameters<typeof fakeGitHub>[
   const gh = fakeGitHub({ clock: () => clock.t, ...o });
   const e = env(gh.fetch, () => clock.t);
   const app = new AutomatedAppIntegration('github-app', e);
-  const r = await app.connectApp({ host: 'github.com', appRef: '4242', installationId: '777', privateKey: PEM_PKCS1 });
+  const r = await app.connectApp({
+    host: 'github.com',
+    appRef: '4242',
+    installationId: '777',
+    privateKey: PEM_PKCS1,
+  });
   expect(r.ok).toBe(true);
   const broker = new AppTokenBroker({
     store: new AppKeyStore(e.paths.secrets, sealKey),
@@ -324,9 +376,9 @@ describe('AppTokenBroker', () => {
   });
 
   it('keys the cache by scope, with sorted repositories and permissions', async () => {
-    expect(scopeKey('i', { repositories: ['b', 'a'], permissions: { issues: 'write', contents: 'read' } })).toBe(
-      scopeKey('i', { repositories: ['a', 'b'], permissions: { contents: 'read', issues: 'write' } }),
-    );
+    expect(
+      scopeKey('i', { repositories: ['b', 'a'], permissions: { issues: 'write', contents: 'read' } }),
+    ).toBe(scopeKey('i', { repositories: ['a', 'b'], permissions: { contents: 'read', issues: 'write' } }));
     const { broker, mintsSince, gh } = await connected({ t: T0 });
     await broker.getAccessToken('4242:777', { repositories: ['web'] });
     await broker.getAccessToken('4242:777', { repositories: ['api'] });
@@ -372,8 +424,12 @@ describe('AppTokenBroker', () => {
     await broker.getAccessToken('4242:777');
     expect(mintsSince()).toBe(2);
     fail = json(429, { message: 'slow down' }, { 'retry-after': '120' });
-    await expect(broker.getAccessToken('4242:777', { repositories: ['x'] })).rejects.toMatchObject({ code: 'rate_limited' });
-    await expect(broker.getAccessToken('4242:777', { repositories: ['x'] })).rejects.toMatchObject({ code: 'rate_limited' });
+    await expect(broker.getAccessToken('4242:777', { repositories: ['x'] })).rejects.toMatchObject({
+      code: 'rate_limited',
+    });
+    await expect(broker.getAccessToken('4242:777', { repositories: ['x'] })).rejects.toMatchObject({
+      code: 'rate_limited',
+    });
     expect(mintsSince()).toBe(3);
     fail = undefined;
     clock.t += 121_000;
@@ -399,7 +455,14 @@ describe('AppTokenBroker', () => {
     const serverDate = new Date(T0 + 30 * MIN).toUTCString();
     let n = 0;
     const skewOnce = fakeGitHub({
-      app: () => (++n === 1 ? json(401, { message: "'Expiration time' claim ('exp') is too far in the future" }, { date: serverDate }) : undefined),
+      app: () =>
+        ++n === 1
+          ? json(
+              401,
+              { message: "'Expiration time' claim ('exp') is too far in the future" },
+              { date: serverDate },
+            )
+          : undefined,
     });
     const ok = await new AutomatedAppIntegration('github-app', env(skewOnce.fetch)).connectApp({
       host: 'github.com',
@@ -459,7 +522,9 @@ describe('AppKeyStore and redaction', () => {
     s.addRef('4242:777', { orgId: 'o1', integrationId: 'i1' });
     s.addRef('4242:777', { orgId: 'o2', integrationId: 'i2' });
     expect(s.list()[0]).not.toHaveProperty('privateKey');
-    expect(s.dropRef('4242:777', { orgId: 'o1', integrationId: 'i1' })?.refs).toEqual([{ orgId: 'o2', integrationId: 'i2' }]);
+    expect(s.dropRef('4242:777', { orgId: 'o1', integrationId: 'i1' })?.refs).toEqual([
+      { orgId: 'o2', integrationId: 'i2' },
+    ]);
     expect(readFileSync(join(dir, 'app-integrations.json'), 'utf8')).not.toContain('BEGIN');
   });
 
@@ -473,10 +538,22 @@ describe('AppKeyStore and redaction', () => {
     const logFile = join(e.dir, 'logs', 'runner.log');
     createLogger(logFile, true).error(leak);
     const audit = join(e.dir, 'logs', 'integrations.jsonl');
-    new AuditLog(audit).write({ kind: 'github-app', instance: '4242:777', op: 'test', via: 'cli', result: 'failed', detail: leak });
+    new AuditLog(audit).write({
+      kind: 'github-app',
+      instance: '4242:777',
+      op: 'test',
+      via: 'cli',
+      result: 'failed',
+      detail: leak,
+    });
     const summary = summarizeToolInput('Bash', { command: `echo ${t.token} ${oneLine}` });
 
-    for (const text of [readFileSync(logFile, 'utf8'), readFileSync(audit, 'utf8'), summary, redactSecrets(leak)]) {
+    for (const text of [
+      readFileSync(logFile, 'utf8'),
+      readFileSync(audit, 'utf8'),
+      summary,
+      redactSecrets(leak),
+    ]) {
       expect(text).not.toContain(t.token);
       expect(text).not.toContain(oneLine);
       expect(text).not.toContain('PRIVATE KEY-----\n');
@@ -485,7 +562,9 @@ describe('AppKeyStore and redaction', () => {
   });
 
   it('the stream-parser redaction masks an unregistered PEM block by its shape', () => {
-    const other = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const other = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      .privateKey.export({ type: 'pkcs8', format: 'pem' })
+      .toString();
     expect(redactSecrets(`cat <<EOF\n${other}EOF`)).not.toContain('PRIVATE KEY');
   });
 });

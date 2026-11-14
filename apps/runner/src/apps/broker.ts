@@ -61,7 +61,8 @@ export class AppTokenBroker {
     const have = this.providers.get(instance);
     if (have) return have;
     const app = this.deps.store.get(instance);
-    if (!app) throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
+    if (!app)
+      throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
     const factory = (this.deps.providers ?? APP_PROVIDERS)[app.provider];
     const p = factory.create(
       {
@@ -92,7 +93,10 @@ export class AppTokenBroker {
 
   private fail(instance: string, err: AppTokenError): void {
     const cur = this.healthOf.get(instance) ?? {};
-    this.setHealth(instance, { ...cur, error: { code: err.code, message: err.message, at: this.deps.now() } });
+    this.setHealth(instance, {
+      ...cur,
+      error: { code: err.code, message: err.message, at: this.deps.now() },
+    });
   }
 
   private retire(token: string): void {
@@ -130,7 +134,9 @@ export class AppTokenBroker {
       return t;
     } catch (err) {
       const e =
-        err instanceof AppTokenError ? err : new AppTokenError('unexpected', 'The app token could not be minted.');
+        err instanceof AppTokenError
+          ? err
+          : new AppTokenError('unexpected', 'The app token could not be minted.');
       if (e.code === 'rate_limited')
         this.holdUntil.set(key, { until: this.deps.now() + (e.opts.retryAfterMs ?? 60_000), error: e });
       this.fail(instance, e);
@@ -168,9 +174,13 @@ export class AppTokenBroker {
       if (!refused) return out as T;
       if (this.cache.get(key)?.token === t.token) this.drop(key);
     }
-    const err = new AppTokenError('token_rejected', 'GitHub refused the access token of this app twice in a row.', {
-      status: 401,
-    });
+    const err = new AppTokenError(
+      'token_rejected',
+      'GitHub refused the access token of this app twice in a row.',
+      {
+        status: 401,
+      },
+    );
     this.fail(instance, err);
     throw err;
   }
@@ -190,6 +200,7 @@ export class AppTokenBroker {
     this.providers.delete(instance);
     this.healthOf.delete(instance);
     for (const key of [...this.cache.keys()]) if (key.startsWith(`${instance}|`)) this.drop(key);
-    for (const key of [...this.holdUntil.keys()]) if (key.startsWith(`${instance}|`)) this.holdUntil.delete(key);
+    for (const key of [...this.holdUntil.keys()])
+      if (key.startsWith(`${instance}|`)) this.holdUntil.delete(key);
   }
 }
