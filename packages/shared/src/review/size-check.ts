@@ -127,7 +127,13 @@ export function timeoutFollowUp(secondTimeout: boolean, v: PrSizeVerdict): Timeo
   return secondTimeout ? 'owner_pending' : 'none';
 }
 
-export const SPLIT_REASONS = ['over_budget', 'timeout_over_budget', 'second_timeout_over_budget'] as const;
+export const SPLIT_REASONS = [
+  'over_budget',
+  'timeout_over_budget',
+  'second_timeout_over_budget',
+  'size_exception_rejected',
+  'size_exception_lapsed',
+] as const;
 export type SplitReason = (typeof SPLIT_REASONS)[number];
 export const SPLIT_NOTICE_STATES = ['pending', 'queued', 'posted', 'failed'] as const;
 export type SplitNoticeState = (typeof SPLIT_NOTICE_STATES)[number];
@@ -154,6 +160,7 @@ export function splitNoticeBody(i: {
   members: SizeMember[];
   self: string;
   noticeId: string;
+  reason?: string | null;
 }): string {
   const word = sizeUnitWord(i.unit);
   const others = i.members.filter((m) => m.changeId !== i.self);
@@ -164,6 +171,9 @@ export function splitNoticeBody(i: {
   return [
     `This pull request is over the project's size budget of ${i.budget} ${word}.${chain}`,
     '',
+    ...(i.reason === 'size_exception_rejected' || i.reason === 'size_exception_lapsed'
+      ? ['A size exception was asked for and not approved.', '']
+      : []),
     'Please split it into smaller pull requests. It will be reviewed once the change is within the budget.',
     '',
     splitNoticeMarker(i.noticeId),

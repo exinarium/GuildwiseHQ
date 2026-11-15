@@ -12,6 +12,7 @@ import { sweepJourneys } from '../commands/journey-runtime.ts';
 import { pruneAppRequests } from '../commands/org-apps.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { ownerPendingSweep } from '../commands/owner-pending.ts';
+import { sizeExceptionSweep } from '../commands/size-exception.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { pollPrOnlyRepos } from '../commands/pr-only.ts';
 import { dispatchReplayRuns } from '../commands/pr-replays.ts';
@@ -197,6 +198,10 @@ export class Scheduler {
       // Owner-pending items: the owner is reminded once after 2 working days without acting (the item's state is kept).
       await ownerPendingSweep(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'owner-pending reminders failed'),
+      );
+      // Size exception requests: no owner answer within 2 working days sends the pull request back to its author. No reminder.
+      await sizeExceptionSweep(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'size exception sweep failed'),
       );
       return fired;
     });

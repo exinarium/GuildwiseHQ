@@ -226,6 +226,47 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       );
   }
 
+  if (want('desk')) {
+    // Pull requests sent back for their size: those without a request (and not refused at the current size) are the ones
+    // a size exception can be asked for; the ones waiting for the owner are not chased.
+    const over = await rows(
+      ctx.pool,
+      `SELECT pr.id, pr.change_id, pr.author, pr.url, pr.split_total, pr.split_budget, pr.split_unit, r.name AS repo_name
+         FROM pr_reviews pr JOIN projects p ON p.id = pr.project_id JOIN project_repos r ON r.id = pr.project_repo_id
+        WHERE p.org_id=$1 AND pr.closed_at IS NULL AND pr.review_state='needs_split'
+          AND NOT EXISTS (SELECT 1 FROM pr_size_exceptions e
+                           WHERE e.state IN ('rejected','lapsed') AND e.size >= COALESCE(pr.split_total, 0)
+                             AND (e.pr_review_id = pr.id OR pr.id = ANY(e.chain_pr_review_ids)))
+        ORDER BY pr.split_at DESC NULLS LAST LIMIT 20`,
+      [orgId],
+    );
+    out.push(
+      renderCeoData(
+        'Over-budget PRs (needs split; a size exception can be asked for with size-exception)',
+        over
+          .map(
+            (r) =>
+              `pr=${r.id} #${r.change_id} ${clip(r.repo_name, 60)} author=${clip(r.author ?? '-', 40)} ${r.split_total ?? '?'} of ${r.split_budget ?? '?'} ${r.split_unit === 'changed_files' ? 'changed files' : 'changed lines'}`,
+          )
+          .join('\n') || 'none',
+      ),
+    );
+    const waiting = await rows(
+      ctx.pool,
+      `SELECT e.id, e.pr_review_id, e.due_at, pr.change_id FROM pr_size_exceptions e
+         LEFT JOIN pr_reviews pr ON pr.id = e.pr_review_id
+        WHERE e.org_id=$1 AND e.state='pending' ORDER BY e.due_at LIMIT 20`,
+      [orgId],
+    );
+    out.push(
+      `## Size exceptions waiting for the owner\n${
+        waiting
+          .map((w) => `pr=${w.pr_review_id} #${w.change_id} answer due ${new Date(w.due_at).toISOString()}`)
+          .join('\n') || 'none'
+      }\nthe owner decides; do not remind them.`,
+    );
+  }
+
   if (want('signals')) {
     const ss = await rows(
       ctx.pool,

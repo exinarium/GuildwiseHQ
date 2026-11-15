@@ -9,6 +9,7 @@ import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { evaluateRepoSizes, resolveTimedOutTwice, writeOpenChangeSnapshot } from './pr-size-check.ts';
+import { withdrawSizeExceptionOnClose } from './size-exception.ts';
 
 /**
  * PR-only review. The owner marks a project repository PR-only: its open pull requests are recorded for review (state
@@ -308,7 +309,10 @@ export async function applyPrListResult(
     await writeOpenChangeSnapshot(tx, repoId, r.changes, r.complete, now);
     for (const e of events)
       if (e.event.type === 'PrReviewClosed')
+      {
         await resolveTimedOutTwice(ctx, tx, e.event.payload.prReviewId, 'closed');
+        await withdrawSizeExceptionOnClose(ctx, tx, e.event.payload.prReviewId);
+      }
     await evaluateRepoSizes(ctx, tx, projectId, repo.org_id as string, repoId);
   });
 }

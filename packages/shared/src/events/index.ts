@@ -60,6 +60,7 @@ import { sessionEvents } from './session.ts';
 import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
+import { sizeExceptionEvents } from './size-exception.ts';
 import { storageEvents } from './storage.ts';
 import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
@@ -137,6 +138,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...journeyEvents,
   ...journeyWaitEvents,
   ...ownerPendingEvents,
+  ...sizeExceptionEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -180,6 +182,7 @@ export * from './mail.ts';
 export * from './org.ts';
 export * from './outbound.ts';
 export * from './owner-pending.ts';
+export * from './size-exception.ts';
 export * from './phase.ts';
 export * from './playbook.ts';
 export * from './pr-replay.ts';

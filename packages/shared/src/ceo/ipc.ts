@@ -34,6 +34,8 @@ export const CEO_ACTIONS = [
   'move-workstation',
   /** `aom ceo act move-agents-off`: move every movable agent off an offline or removed workstation (the owner's bulk move). */
   'move-agents-off',
+  /** `aom ceo act size-exception`: ask the owner, with a reason, to let an over-budget pull request stay as one. */
+  'size-exception',
   'hire',
   'bench',
   'retire',

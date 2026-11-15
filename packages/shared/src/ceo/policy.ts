@@ -29,6 +29,7 @@ export const ACTION_CLASSES = [
   'card.create_via_ba',
   'card.specify',
   'backlog.manage',
+  'pr.request_size_exception',
   'shift.stop',
   'agent.pause',
   'agent.resume',
@@ -83,6 +84,7 @@ export const CLASS_LABEL: Record<ActionClass, string> = {
   'card.create_via_ba': 'Ask the BA to draft cards',
   'card.specify': 'Specify a draft card (the BA completes what is missing)',
   'backlog.manage': 'Keep the project backlog: add, edit, flag, drop',
+  'pr.request_size_exception': 'Ask the owner for a PR size exception',
   'shift.stop': 'Stop a shift or its running command',
   'agent.pause': 'Pause an agent',
   'agent.resume': 'Resume an agent',
@@ -208,6 +210,7 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'card.create_via_ba': decide,
     'card.specify': decide,
     'backlog.manage': decide,
+    'pr.request_size_exception': decide,
     'shift.stop': decide,
     'agent.pause': decide,
     'agent.resume': decide,
@@ -501,3 +504,4 @@ export const MoveAgentsOffParamsSchema = z
   })
   .strict();
 export type MoveAgentsOffParams = z.infer<typeof MoveAgentsOffParamsSchema>;
+

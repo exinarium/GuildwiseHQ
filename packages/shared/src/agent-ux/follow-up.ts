@@ -47,8 +47,17 @@ export function clampFollowUpDays(n: number): number {
 
 /** Desk kinds the chase covers: things somebody has to decide, answer or rate. Alerts and reports are not chased. */
 export const FOLLOW_UP_KINDS = ['question', 'approval', 'escalation', 'rating'] as const;
-/** Subkinds that are reports even when their kind is a question: never chased. */
-export const FOLLOW_UP_SKIP_SUBKINDS = ['floor_report', 'ba_report', 'ceo_notice', 'ceo_decision'] as const;
+/**
+ * Subkinds that are reports even when their kind is a question: never chased. A size exception is an approval that lapses
+ * after 2 working days instead of being reminded about, so the chase must never nudge the owner for it.
+ */
+export const FOLLOW_UP_SKIP_SUBKINDS = [
+  'floor_report',
+  'ba_report',
+  'ceo_notice',
+  'ceo_decision',
+  'size_exception',
+] as const;
 
 export function followUpNudgeText(i: { title: string; ageDays: number; cardRef?: string | null }): {
   title: string;

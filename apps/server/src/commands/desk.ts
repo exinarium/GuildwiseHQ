@@ -3,6 +3,7 @@ import {
   type AnswerDeskItemRequest,
   BATCH_QUESTION_SUBKIND,
   CEO_PERMISSION_SUBKIND,
+  SIZE_EXCEPTION_SUBKIND,
   type DeskActor,
   type DeskResolution,
   GATE_DESK_SUBKIND,
@@ -48,6 +49,7 @@ import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
+import { resolveSizeExceptionIn } from './size-exception.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
@@ -398,6 +400,9 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === SIZE_EXCEPTION_SUBKIND) {
+      // A size exception: approved keeps the over-budget pull request as one, rejected sends it back to its author.
+      await resolveSizeExceptionIn(ctx, tx, user, item, resolution, note);
     } else if (item.kind === 'approval' && PLATFORM_APPROVAL_SUBKINDS.has(item.subkind)) {
       // Platform team (Lean Team v3): deploy and downtime approvals and stop-loss decisions on the platform organisation's
       // desk, a grant request on the client organisation's desk.

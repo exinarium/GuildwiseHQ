@@ -12,6 +12,7 @@ import {
   PatchRepoRequestSchema,
   PauseProjectRequestSchema,
   ProjectsQuerySchema,
+  SizeExceptionsQuerySchema,
   PrReviewTriggerRequestSchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
@@ -59,6 +60,7 @@ import {
 } from '../commands/pr-review-marks.ts';
 import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import { heldBackFindings, listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
+import { listSizeExceptions } from '../commands/size-exception.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -139,6 +141,21 @@ export function projectRoutes(ctx: Ctx) {
         }),
       };
     });
+
+    /** The size exception requests of the project (reason and outcome), newest first; the same visibility as the list. */
+    app.get(
+      '/api/projects/:id/size-exceptions',
+      { schema: { params: IdParamsSchema, querystring: SizeExceptionsQuerySchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+        return {
+          sizeExceptions: await listSizeExceptions(ctx.pool, req.params.id, {
+            ...(req.query.state ? { state: req.query.state } : {}),
+          }),
+        };
+      },
+    );
 
     /** Today's used count and the queue of waiting pull requests in run order. */
     app.get('/api/projects/:id/pull-requests/queue', { schema: { params: IdParamsSchema } }, async (req) => {

@@ -46,6 +46,7 @@ import { playbookProjectors } from './playbooks.ts';
 import { prReplayProjectors } from './pr-replays.ts';
 import { prReviewRunProjectors } from './pr-review-runs.ts';
 import { prSizeCheckProjectors } from './pr-size-check.ts';
+import { sizeExceptionProjectors } from './size-exception.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
@@ -90,6 +91,7 @@ const domains: Array<Record<string, Projector>> = [
   projectProjectors,
   prReviewRunProjectors,
   prSizeCheckProjectors,
+  sizeExceptionProjectors,
   prReplayProjectors,
   projectWorkflowProjectors,
   agentProjectors,
