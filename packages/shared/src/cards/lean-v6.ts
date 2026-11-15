@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { CHECKS_MAX } from '../runs/integration.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
 /**
@@ -29,35 +28,96 @@ export type BuildEvidenceInput = z.infer<typeof BuildEvidenceInputSchema>;
 
 // ---------------------------------------------------------------------------------------------- checks
 
-/** The total time the runner spends on the checks of one handoff. */
+/** The total time the runner spends on the checks (lint, format, typecheck) of one handoff. */
 export const CHECKS_BUDGET_MS = 6 * 60_000;
+/** The total time the runner spends on the unit test runs of one builder handoff (their own budget). */
+export const UNIT_BUDGET_MS = 10 * 60_000;
+/** The most check results one handoff carries: the checks and the unit test runs. */
+export const CHECK_EVIDENCE_MAX = 20;
+/**
+ * The judging policy a runner applies (`shift.report.checksPolicy`). 2: every check result except `passed`, `deferred` and
+ * `regression_only` refuses the handoff, for findings in any file of the repository. Absent: an older runner, whose results
+ * only refuse on `failed` (the server keeps its warning for the rest for one release).
+ */
+export const CHECKS_POLICY = 2;
+
+/** The roles whose success handoffs run the handoff checks (whole repository): they hand off changed files. */
+export const HANDOFF_CHECK_ROLES = ['builder', 'tester', 'writer'] as const;
+export const isHandoffCheckRole = (roleKey: string): boolean =>
+  (HANDOFF_CHECK_ROLES as readonly string[]).includes(roleKey);
+
+export const CHECK_STATUSES = [
+  'passed',
+  'failed',
+  'preexisting',
+  'error',
+  'timeout',
+  'deferred',
+  'regression_only',
+] as const;
+export type CheckStatus = (typeof CHECK_STATUSES)[number];
+
+/** The statuses that let a handoff through under policy 2: green, owed by another role, or run only at regression. */
+export const checkStatusPasses = (s: CheckStatus): boolean =>
+  s === 'passed' || s === 'deferred' || s === 'regression_only';
 
 /**
- * The result of one repository check (a `check` suite) the runner ran at `aom handoff`. `failed`: it found problems in
- * files the card changed (the handoff is refused). `preexisting`: problems only in files the card did not change
- * (information). `error` / `timeout`: it could not be judged (a warning, never a silent pass).
+ * The result of one repository check (a `check` suite: lint, format, typecheck) or one unit test run (a `unit` suite, kind
+ * `unit`) the runner ran at a handoff, over the whole repository at the card's head.
+ * - `failed`: it found problems, in any file (`introduced`: in files this card changed, `elsewhere`: in other files; both
+ *   block).
+ * - `error` / `timeout`: it produced no verdict (missing tool, could not start, budget used up, incomplete output): blocks.
+ * - `deferred`: its only findings are in files the handing-off role may not edit; owed by `owedBy` (stored, shown to the
+ *   reviewers, does not block this role).
+ * - `regression_only`: a unit suite with no handoff command: not run at handoff, runs at regression (does not block).
+ * - `preexisting`: written by runners before policy 2 only (old data).
  */
 export const CheckEvidenceSchema = z.object({
   name: z.string().max(60),
   command: z.string().max(500),
   cwd: z.string().max(300).default('.'),
-  status: z.enum(['passed', 'failed', 'preexisting', 'error', 'timeout']),
+  status: z.enum(CHECK_STATUSES),
+  /** A repository check (lint, format, typecheck) or a unit test run. Absent: a check (older runners). */
+  kind: z.enum(['check', 'unit']).default('check'),
   exitCode: z.number().int().nullable().default(null),
   durationMs: z.number().int().min(0).default(0),
   /** One line: counts, or why it could not run. */
   summary: z.string().max(500).default(''),
   /** Problems in files this card changed (at most 20 lines). */
   introduced: z.array(z.string().max(300)).max(20).default([]),
+  /** How many problems are in files this card changed (absent: older runners, `introduced` is complete). */
+  introducedCount: z.number().int().min(0).optional(),
   /** Problems in files this card did not change (at most 20 lines; the count is complete). */
   elsewhere: z.array(z.string().max(300)).max(20).default([]),
   elsewhereCount: z.number().int().min(0).default(0),
-  /** The formatter or import sorter command the builder may run to repair it. */
+  /** Problems in files the handing-off role may not edit, owed by `owedBy` (at most 20 lines). */
+  owed: z.array(z.string().max(300)).max(20).optional(),
+  owedCount: z.number().int().min(0).optional(),
+  /** The role that owes `owed` (`tester` for a builder's E2E findings, `builder` for code a tester or writer may not edit). */
+  owedBy: z.string().max(40).optional(),
+  /** `error` / `timeout`: the last lines of its output (at most 20). */
+  tail: z.array(z.string().max(300)).max(20).optional(),
+  /** The formatter or import sorter command the agent may run to repair it. */
   fix: z.string().max(500).optional(),
 });
 export type CheckEvidence = z.infer<typeof CheckEvidenceSchema>;
 
-/** Why these check results cannot back a handoff (the first failed check), or null. Only `failed` refuses. */
-export function checkEvidenceProblem(c: readonly CheckEvidence[] | undefined | null): string | null {
+/**
+ * Why these check results cannot back a handoff (the first refusing check), or null. Policy 2 (this release's runners):
+ * everything except `passed`, `deferred` and `regression_only` refuses. Absent policy (older runners): only `failed`.
+ */
+export function checkEvidenceProblem(
+  c: readonly CheckEvidence[] | undefined | null,
+  policy?: number,
+): string | null {
+  if (policy !== undefined && policy >= CHECKS_POLICY) {
+    const f = c?.find((x) => !checkStatusPasses(x.status));
+    if (!f) return null;
+    if (f.status === 'error' || f.status === 'timeout')
+      return `the check "${f.name}" (\`${f.command}\`) did not produce a verdict (${f.status === 'timeout' ? 'timed out' : 'could not run'}${f.summary ? `: ${f.summary}` : ''}). Fix the cause and hand off again, or ask with \`aom question --topic environment\` when the environment is broken.`;
+    const fix = f.fix ? ` Fix: \`${f.fix}\`, commit, then hand off again.` : '';
+    return `the check "${f.name}" (\`${f.command}\`) fails${f.summary ? `: ${f.summary}` : ''}.${fix}`;
+  }
   const f = c?.find((x) => x.status === 'failed');
   if (!f) return null;
   const fix = f.fix ? ` Fix: \`${f.fix}\`, commit, then hand off again.` : '';
@@ -75,9 +135,25 @@ export function checkStatusLabel(status: CheckEvidence['status']): string {
       return 'passed (failures only in files the card did not change)';
     case 'timeout':
       return 'timed out';
+    case 'deferred':
+      return 'owed by another role (does not block this handoff)';
+    case 'regression_only':
+      return 'not run at handoff: runs at regression';
     default:
       return 'could not run';
   }
+}
+
+/**
+ * The agent's own lint and unit test lines (`--lint-*`, `--test-*`) as shown to people: its note, not the evidence. The
+ * runner's handoff checks (lint, format, typecheck, unit tests) are what was measured.
+ */
+export function agentEvidenceRows<T extends { kind: string; result: string }>(commands: readonly T[]): T[] {
+  return commands.map((c) =>
+    c.kind === 'lint' || c.kind === 'test'
+      ? { ...c, result: `the agent's note (not measured by the runner)${c.result ? `: ${c.result}` : ''}` }
+      : c,
+  );
 }
 
 /** The checks as rows next to the build and test commands (owner approval, card view). */
@@ -86,7 +162,7 @@ export function checkEvidenceRows(
 ): Array<{ kind: 'check'; command: string; status: string; result: string }> {
   return (c ?? []).map((x) => ({
     kind: 'check' as const,
-    command: x.command,
+    command: x.kind === 'unit' ? `unit tests: ${x.command}` : x.command,
     status: checkStatusLabel(x.status),
     result: x.summary,
   }));
@@ -100,7 +176,7 @@ export const StoredBuildEvidenceSchema = BuildEvidenceInputSchema.extend({
   /** A clean rebase before review moved the head: the evidence followed it (from the earlier SHA). */
   rebasedFrom: z.string().optional(),
   /** What the runner's checks (lint, format, typecheck) found on this commit at the handoff. Absent: an older runner. */
-  checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
+  checks: z.array(CheckEvidenceSchema).max(CHECK_EVIDENCE_MAX).optional(),
 });
 export type StoredBuildEvidence = z.infer<typeof StoredBuildEvidenceSchema>;
 

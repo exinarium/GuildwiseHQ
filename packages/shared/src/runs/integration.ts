@@ -11,7 +11,7 @@ export const INTEGRATION_MODES = ['off', 'local', 'remote'] as const;
 export const IntegrationModeSchema = z.enum(INTEGRATION_MODES);
 export type IntegrationMode = z.infer<typeof IntegrationModeSchema>;
 
-export const INTEGRATION_SUITE_KINDS = ['integration', 'e2e', 'check'] as const;
+export const INTEGRATION_SUITE_KINDS = ['integration', 'e2e', 'check', 'unit'] as const;
 export const IntegrationSuiteKindSchema = z.enum(INTEGRATION_SUITE_KINDS);
 export type IntegrationSuiteKind = z.infer<typeof IntegrationSuiteKindSchema>;
 
@@ -42,6 +42,15 @@ export const IntegrationSuiteSchema = z.object({
    * before the handoff and commit the result; the runner names it in its refusal but never runs it.
    */
   fix: Cmd.optional(),
+  /**
+   * A unit suite only (kind `unit`): the command that runs the tests of given files at a builder's handoff (the test files
+   * the card changed and the tests related to its changed sources). Must contain the token `{files}`, which the runner
+   * replaces with those paths relative to `cwd`. Absent: the suite is not run at handoff, it runs at regression (`cmd`,
+   * the whole suite).
+   */
+  handoffCmd: Cmd.optional(),
+  /** A unit suite's handoff run may take this long (minutes; absent: `UNIT_HANDOFF_TIMEOUT_MIN`). */
+  handoffTimeoutMin: z.number().int().min(1).max(10).optional(),
   /** False: proposed by a tester (`aom env suites propose`), waiting for the owner to confirm it. */
   confirmed: z.boolean().default(true),
 });
@@ -63,6 +72,8 @@ export const IntegrationTestsSchema = z.object({
   flakyRetry: z.number().int().min(0).max(3).default(DEFAULT_FLAKY_RETRY),
   /** Repositories whose checks were already proposed from the repository, so the runner does not look again. */
   checkDetection: z.array(z.uuid()).max(100).default([]),
+  /** Repositories whose unit suites were already proposed from the repository (the checks' marker predates them). */
+  unitDetection: z.array(z.uuid()).max(100).default([]),
 });
 export type IntegrationTests = z.infer<typeof IntegrationTestsSchema>;
 
@@ -78,19 +89,37 @@ export const CHECKS_MAX = 10;
 /** The longest a single check may run (minutes). */
 export const CHECK_TIMEOUT_MAX_MIN = 10;
 
-/** The suites the tester works with: everything except the builder's checks. */
+/** The most unit suites one handoff or one suite card runs. */
+export const UNIT_SUITES_MAX = 10;
+/** The token a unit suite's handoff command carries: the runner puts the files to test in its place. */
+export const FILES_TOKEN = '{files}';
+/** A unit suite's handoff run without its own `handoffTimeoutMin` may take this long (minutes). */
+export const UNIT_HANDOFF_TIMEOUT_MIN = 5;
+
+/**
+ * The suites the tester works with: everything except the builder's checks and the unit suites (the runner runs those:
+ * at a builder's handoff, and on a suite card).
+ */
 export const testerSuites = <T extends Pick<IntegrationSuite, 'kind'>>(s: {
   suites: T[];
-}): Array<T & { kind: Exclude<T['kind'], 'check'> }> =>
-  s.suites.filter((x): x is T & { kind: Exclude<T['kind'], 'check'> } => x.kind !== 'check');
+}): Array<T & { kind: Exclude<T['kind'], 'check' | 'unit'> }> =>
+  s.suites.filter(
+    (x): x is T & { kind: Exclude<T['kind'], 'check' | 'unit'> } => x.kind !== 'check' && x.kind !== 'unit',
+  );
 
 /** The confirmed checks of one repository; only these run (and block) at a builder handoff. */
 export const checkSuites = (s: Pick<IntegrationTests, 'suites'>, repoId: string): IntegrationSuite[] =>
   s.suites.filter((x) => x.kind === 'check' && x.confirmed && x.repoId === repoId).slice(0, CHECKS_MAX);
 
-/** The suites a tester must report on: confirmed ones (checks belong to the builder's handoff, not the tester). */
+/** The confirmed unit suites of one repository (all repositories when `repoId` is null). */
+export const unitSuites = (s: Pick<IntegrationTests, 'suites'>, repoId: string | null): IntegrationSuite[] =>
+  s.suites
+    .filter((x) => x.kind === 'unit' && x.confirmed && (repoId === null || x.repoId === repoId))
+    .slice(0, UNIT_SUITES_MAX);
+
+/** The suites a tester must report on: confirmed ones (checks and unit suites are the runner's, not the tester's). */
 export const requiredSuites = (s: Pick<IntegrationTests, 'suites'>): IntegrationSuite[] =>
-  s.suites.filter((x) => x.confirmed && x.kind !== 'check');
+  s.suites.filter((x) => x.confirmed && x.kind !== 'check' && x.kind !== 'unit');
 
 /** Problems the schema cannot see (empty list: fine). `repoIds` are the project's repositories. */
 export function validateIntegrationTests(s: IntegrationTests, repoIds: readonly string[]): string[] {
@@ -109,6 +138,10 @@ export function validateIntegrationTests(s: IntegrationTests, repoIds: readonly 
     if (x.kind === 'check' && x.timeoutMin > CHECK_TIMEOUT_MAX_MIN)
       problems.push(`check "${x.name}": a check runs at most ${CHECK_TIMEOUT_MAX_MIN} minutes`);
     if (x.kind !== 'check' && x.fix) problems.push(`suite "${x.name}": only a check has a fix command`);
+    if (x.kind !== 'unit' && x.handoffCmd)
+      problems.push(`suite "${x.name}": only a unit suite has a handoff command`);
+    if (x.handoffCmd && !x.handoffCmd.some((a) => a.includes(FILES_TOKEN)))
+      problems.push(`unit suite "${x.name}": the handoff command must contain ${FILES_TOKEN}`);
   }
   if (s.mode === 'remote' && !s.deployTargetId)
     problems.push('remote mode needs a deploy target (Project settings > Deploy targets)');
@@ -148,6 +181,9 @@ export const TestSuiteReportSchema = z.object({
   attachmentName: z.string().max(200).optional(),
   attachmentId: z.uuid().optional(),
   note: z.string().max(2000).optional(),
+  /** A unit suite on a suite card: the runner ran it (`measured`), never the agent. */
+  kind: z.literal('unit').optional(),
+  measured: z.boolean().optional(),
 });
 export type TestSuiteReport = z.infer<typeof TestSuiteReportSchema>;
 

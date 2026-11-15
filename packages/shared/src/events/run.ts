@@ -38,7 +38,7 @@ export const runEvents = [
       shiftId: Id,
       testerAgentId: Id,
       suite: z.string().min(1).max(60),
-      kind: z.enum(['integration', 'e2e']).nullable(),
+      kind: z.enum(['integration', 'e2e', 'unit']).nullable(),
       envMode: z.enum(['local', 'remote']).nullable(),
       envId: Id.nullable(),
       deployTargetId: Id.nullable(),
