@@ -9,6 +9,7 @@ import {
   withAppPushRefusal,
 } from '../src/devops/devops-git.ts';
 import { classifyCommand, type GuardConfig } from '../src/devops/guard.ts';
+import { commandCarriesPlan } from '../src/forge/app-actor.ts';
 import { type HygieneNetAuth, hygieneRepo } from '../src/devops/hygiene.ts';
 import { migrateSavedWorkBranches } from '../src/devops/saved-work.ts';
 import { git } from '../src/git/git.ts';
@@ -400,5 +401,23 @@ describe('DevOps guard app_repo rule (AC4/AC6)', () => {
     const none = cfg({ appRepos: undefined });
     for (const cmd of ['git push origin main', 'git fetch origin', 'git commit -m x', 'gh pr create --fill'])
       expect(judge(cmd, none).rule).not.toBe('app_repo');
+  });
+});
+
+describe('every runner command that writes to a repository or its forge carries the plan (AC7)', () => {
+  it.each([
+    'finalize.execute',
+    'repo.create',
+    'branch.check_merged',
+    'repo.open_pr',
+    'repo.commit_status',
+    'pr_review.post',
+    'pr_review.notice',
+    'release.ship',
+    'release.docs_prep',
+    'release.publish',
+    'repo.bump_submodule',
+  ])('%s has a postAs field', (command) => {
+    expect(commandCarriesPlan(command)).toBe(true);
   });
 });
