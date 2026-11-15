@@ -14,7 +14,7 @@
   ],
   "captions": "/videos/ledger.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 73.8,
+  "duration": 72.8,
   "chapters": [
     {
       "t": 9.4,
@@ -25,11 +25,11 @@
       "title": "Add a standing order"
     },
     {
-      "t": 43.9,
+      "t": 42.9,
       "title": "Edit and history"
     },
     {
-      "t": 55.2,
+      "t": 54.2,
       "title": "Retire an entry"
     }
   ]

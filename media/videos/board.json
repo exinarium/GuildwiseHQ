@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/board.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 93.2,
+  "duration": 92.1,
   "chapters": [
     {
-      "t": 8.5,
+      "t": 8.3,
       "title": "Read the board"
     },
     {
-      "t": 24,
+      "t": 23.8,
       "title": "Filter what needs you"
     },
     {
-      "t": 39.3,
+      "t": 38.8,
       "title": "Open a card"
     },
     {
-      "t": 63.9,
+      "t": 63.5,
       "title": "New card, pause and archive"
     }
   ]
