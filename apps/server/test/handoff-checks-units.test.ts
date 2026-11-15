@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { checksBrief } from '../src/runner-gateway/brief.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { rpcOf } from './helpers/lean.ts';
@@ -158,11 +159,18 @@ describe('a refused handoff', () => {
   });
 });
 
+const setPolicy2 = async (on: boolean) => {
+  await q(`UPDATE workstation_capabilities SET capabilities = array_remove(capabilities, 'checks:2')`);
+  if (on)
+    await q(`UPDATE workstation_capabilities SET capabilities = capabilities || ARRAY['checks:2']::text[]`);
+};
+
 describe('unit suites of a suite card', () => {
   it('in the brief; the tester may not report one; no pass while unreported or failing; a failing file files a bug once', async () => {
     await freshState();
     await hireTeam(w);
     await putSettings([unitShared]);
+    await setPolicy2(true);
     await regression();
     const start = await p.next('Tess');
     expect(start.brief.regressionUnits?.map((s: any) => s.name)).toEqual(['unit shared']);
@@ -209,10 +217,29 @@ describe('unit suites of a suite card', () => {
     expect(await bugs()).toHaveLength(1);
   });
 
+  it("a runner without checks:2 keeps today's behaviour: no regression units, the pass goes through with a note (S1)", async () => {
+    await freshState();
+    await hireTeam(w);
+    await putSettings([unitShared]);
+    await setPolicy2(false);
+    await regression();
+    const start = await p.next('Tess');
+    expect(start.brief.regressionUnits).toBeUndefined();
+    await p.startShift(r, start);
+    expect((await p.report(r, start.shiftId, testPass())).accepted).toBe(true);
+    r.ended(start.shiftId, 'reported');
+    const card = (await q(`SELECT id FROM cards WHERE origin='regression' ORDER BY number DESC LIMIT 1`))[0]!;
+    expect((await cardRow(card.id)).status).toBe('done');
+    const notes = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='system'`, [card.id]);
+    expect(notes.map((n: any) => n.body).join('\n')).toContain('did not run');
+    await setPolicy2(true);
+  });
+
   it('a measured pass lets the suite card pass', async () => {
     await freshState();
     await hireTeam(w);
     await putSettings([unitShared]);
+    await setPolicy2(true);
     await regression();
     const start = await p.next('Tess');
     await p.startShift(r, start);
@@ -226,5 +253,31 @@ describe('unit suites of a suite card', () => {
     r.ended(start.shiftId, 'reported');
     const card = (await q(`SELECT id FROM cards WHERE origin='regression' ORDER BY number DESC LIMIT 1`))[0]!;
     expect((await cardRow(card.id)).status).toBe('done');
+  });
+});
+
+describe('who gets the checks brief', () => {
+  const project = () => ({
+    integration_tests: {
+      mode: 'off',
+      suites: [
+        { name: 'lint', repoId: w.repoId, kind: 'check', cmd: ['pnpm', 'lint'], confirmed: true },
+        { ...unitShared, repoId: w.repoId },
+      ],
+    },
+  });
+  const card = () => ({ repo_id: w.repoId, card_type: 'feature', origin: null });
+  it('builder, tester, writer and any role at a build stage that keeps evidence (S2); not DevOps, not without a worktree', () => {
+    const at = (role: string, stage: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      checksBrief(card() as never, project() as never, stage, { role_key: role, ...extra } as never, true);
+    expect(at('writer', { worktree: 'reuse' }).checks?.suites.map((x) => x.name)).toEqual(['lint']);
+    expect(at('writer', { worktree: 'reuse' }).checks?.units).toBeUndefined();
+    expect(
+      at('app_developer', { worktree: 'create', requireBuildEvidence: true }).checks?.suites,
+    ).toHaveLength(1);
+    expect(at('app_developer', { worktree: 'create' })).toEqual({});
+    expect(at('builder', { worktree: 'none' })).toEqual({});
+    expect(at('builder', { worktree: 'create' }, { is_devops: true })).toEqual({});
+    expect(at('builder', { worktree: 'create' }).checks?.units?.map((x) => x.name)).toEqual(['unit shared']);
   });
 });

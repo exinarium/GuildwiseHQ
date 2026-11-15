@@ -44,8 +44,8 @@ export const IntegrationSuiteSchema = z.object({
   fix: Cmd.optional(),
   /**
    * A unit suite only (kind `unit`): the command that runs the tests of given files at a builder's handoff (the test files
-   * the card changed and the tests related to its changed sources). Must contain the token `{files}`, which the runner
-   * replaces with those paths relative to `cwd`. Absent: the suite is not run at handoff, it runs at regression (`cmd`,
+   * the card changed and the tests related to its changed sources). Must contain the token `{files}` as an argument of its
+   * own, which the runner replaces with those paths relative to `cwd`, one argument each. Absent: the suite is not run at handoff, it runs at regression (`cmd`,
    * the whole suite).
    */
   handoffCmd: Cmd.optional(),
@@ -140,8 +140,12 @@ export function validateIntegrationTests(s: IntegrationTests, repoIds: readonly 
     if (x.kind !== 'check' && x.fix) problems.push(`suite "${x.name}": only a check has a fix command`);
     if (x.kind !== 'unit' && x.handoffCmd)
       problems.push(`suite "${x.name}": only a unit suite has a handoff command`);
-    if (x.handoffCmd && !x.handoffCmd.some((a) => a.includes(FILES_TOKEN)))
+    if (x.handoffCmd && !x.handoffCmd.includes(FILES_TOKEN))
       problems.push(`unit suite "${x.name}": the handoff command must contain ${FILES_TOKEN}`);
+    if (x.handoffCmd?.some((a) => a !== FILES_TOKEN && a.includes(FILES_TOKEN)))
+      problems.push(
+        `unit suite "${x.name}": ${FILES_TOKEN} must be an argument of its own in the handoff command`,
+      );
   }
   if (s.mode === 'remote' && !s.deployTargetId)
     problems.push('remote mode needs a deploy target (Project settings > Deploy targets)');

@@ -17,8 +17,9 @@ import { failingTestFiles, handoffUnitRuns } from './units.ts';
 export const CHECK_OUTPUT_CAP = 2 * 1024 * 1024;
 const REFUSAL_MAX = 8000;
 const KILL_GRACE_MS = 2000;
+// (a bare ENOENT in a tool's output is a missing file, not a missing tool: only `spawn <cmd> ENOENT` counts)
 const MISSING_TOOL =
-  /command not found|: not found|ERR_PNPM_NO_SCRIPT|Missing script|is not recognized as an internal or external command|ENOENT/i;
+  /command not found|: not found|ERR_PNPM_NO_SCRIPT|Missing script:|is not recognized as an internal or external command|spawn \S+ ENOENT/i;
 
 export interface CheckLaunch {
   cmd: string;
@@ -61,6 +62,8 @@ export interface RunChecksInput {
   now?: () => number;
   budgetMs?: number;
   unitBudgetMs?: number;
+  /** The most the checks and the unit runs together may take (absent: their own budgets only). */
+  totalBudgetMs?: number;
   /** Results by head and check, so a second `aom handoff` at the same head does not run them again (never `error`/`timeout`). */
   cache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** Absent: every file counts as the role's own (nothing is deferred). */
@@ -531,8 +534,32 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
             if (owedBy) ev.owedBy = owedBy;
           }
           if (i.scope?.defer && own.length === 0 && owed.length > 0) {
-            ev.status = 'deferred';
-            ev.summary = `${plural(owed.length, 'problem')} only in files the ${owedBy ?? 'tester'} owns: owed by the ${owedBy ?? 'tester'}, does not block this handoff`;
+            // Deferred only when every finding was seen and matched to a file: an incomplete output or a diagnostic that
+            // names no file of the repository may hide the role's own problems, so the check then blocks.
+            const why = attributed.incomplete
+              ? `the output is incomplete (${attributed.incomplete})`
+              : attributed.unattributed > 0
+                ? `${plural(attributed.unattributed, 'diagnostic line')} name no file of the repository the runner could match`
+                : '';
+            if (why) {
+              const all = attributed.findings;
+              const inC = all.filter((f) => f.changed).map((f) => f.line);
+              const inO = all.filter((f) => !f.changed).map((f) => f.line);
+              ev.introduced = inC.slice(0, LIST_MAX);
+              ev.introducedCount = inC.length;
+              ev.elsewhere = inO.slice(0, LIST_MAX);
+              ev.elsewhereCount = inO.length;
+              delete ev.owed;
+              delete ev.owedCount;
+              delete ev.owedBy;
+              ev.summary = `${verdict.summary}; not deferred to the ${owedBy ?? 'tester'}: ${why}`.slice(
+                0,
+                500,
+              );
+            } else {
+              ev.status = 'deferred';
+              ev.summary = `${plural(owed.length, 'problem')} only in files the ${owedBy ?? 'tester'} owns: owed by the ${owedBy ?? 'tester'}, does not block this handoff`;
+            }
           }
         }
       }
@@ -542,8 +569,11 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
     }
   };
 
-  await runGroup(checkJobs, i.budgetMs ?? CHECKS_BUDGET_MS);
-  await runGroup(unitJobs, i.unitBudgetMs ?? UNIT_BUDGET_MS);
+  // `totalBudgetMs` caps both groups together (the whole handoff must fit inside the agent's command wait).
+  const t0 = now();
+  const total = i.totalBudgetMs ?? Number.POSITIVE_INFINITY;
+  await runGroup(checkJobs, Math.min(i.budgetMs ?? CHECKS_BUDGET_MS, total));
+  await runGroup(unitJobs, Math.min(i.unitBudgetMs ?? UNIT_BUDGET_MS, total - (now() - t0)));
 
   const blockingIdx = evidence.flatMap((e, ix) => (checkStatusPasses(e.status) ? [] : [ix]));
   const blocking = blockingIdx.map((ix) => evidence[ix] as CheckEvidence);

@@ -315,6 +315,52 @@ describe('judging with the role scope', () => {
     expect(r.refusal).toContain('Owed by the tester (does not block you, 1):');
   });
 
+  it('an incomplete output with only E2E findings visible is never deferred: it blocks (B1)', async () => {
+    const cut = 'echo "e2e/login.spec.ts:2:1 lint/x"; echo "Diagnostics not shown: 40."; exit 1';
+    const r = await runHandoffChecks({
+      ...base(worktree()),
+      suites: [check('lint', cut)],
+      scope: scopeOf('builder', true),
+    });
+    expect(r.evidence[0]?.status).toBe('failed');
+    expect(r.evidence[0]?.summary).toContain('not deferred to the tester: the output is incomplete');
+    expect(r.evidence[0]?.owed).toBeUndefined();
+    expect(r.blocking).toHaveLength(1);
+    expect(r.refusal).toContain('In other files (1):\n  e2e/login.spec.ts:2:1 lint/x');
+  });
+
+  it('a diagnostic that names no file of the repository is never deferred: it blocks (S4)', async () => {
+    const odd = 'echo "e2e/login.spec.ts:2:1 lint/x"; echo "src/my file.ts:3:1 lint/y"; exit 1';
+    const r = await runHandoffChecks({
+      ...base(worktree()),
+      suites: [check('lint', odd)],
+      scope: scopeOf('builder', true),
+    });
+    expect(r.evidence[0]?.status).toBe('failed');
+    expect(r.evidence[0]?.summary).toContain('1 diagnostic line name no file of the repository');
+    expect(r.blocking).toHaveLength(1);
+  });
+
+  it('route folders with brackets and parentheses are attributed to their file', async () => {
+    const wt = worktree(['src/routes/[id].tsx', 'src/(group)/page.tsx', 'e2e/login.spec.ts']);
+    const r = await runHandoffChecks({
+      ...base(wt),
+      changedPaths: ['src/routes/[id].tsx'],
+      suites: [
+        check(
+          'lint',
+          'echo "src/routes/[id].tsx:1:1 x"; echo "src/(group)/page.tsx(2,3): error TS1"; exit 1',
+        ),
+      ],
+      scope: scopeOf('builder', true),
+    });
+    expect(r.evidence[0]).toMatchObject({
+      status: 'failed',
+      introduced: ['src/routes/[id].tsx:1:1 x'],
+      elsewhereCount: 1,
+    });
+  });
+
   it('a tester or writer is refused for a finding it may not edit, told who can fix it and how to report it', async () => {
     const r = await runHandoffChecks({
       ...base(worktree()),
@@ -372,6 +418,22 @@ describe('unit tests at a builder handoff', () => {
     expect(handoffUnitRuns([shared], ['README.md'], () => true)).toEqual([]);
   });
 
+  it('{files} must be an argument of its own (else the whole suite runs); a file named like an option is given as ./-name', () => {
+    const embedded = unit('e', { cmd: ['pnpm', 'test'], handoffCmd: ['sh', '-c', 'vitest related {files}'] });
+    expect(handoffUnitRuns([embedded], ['a.ts'], () => true)[0]).toMatchObject({
+      whole: true,
+      argv: ['pnpm', 'test'],
+    });
+    const own = unit('o', { handoffCmd: ['npx', 'vitest', 'related', '{files}'] });
+    expect(handoffUnitRuns([own], ['-x.ts', 'b c.ts'], () => true)[0]?.argv).toEqual([
+      'npx',
+      'vitest',
+      'related',
+      './-x.ts',
+      'b c.ts',
+    ]);
+  });
+
   it(`more than ${UNIT_FILES_MAX} files run the whole suite`, () => {
     const u = unit('w', { cmd: ['pnpm', 'test'], handoffCmd: ['x', '{files}'] });
     const many = Array.from({ length: UNIT_FILES_MAX + 1 }, (_, i) => `f${i}.ts`);
@@ -424,6 +486,19 @@ describe('unit tests at a builder handoff', () => {
     expect(later.evidence[0]).toMatchObject({ kind: 'unit', status: 'regression_only' });
     expect(later.blocking).toEqual([]);
     expect(later.summary).toContain('not run at handoff (runs at regression)');
+  }, 20_000);
+
+  it('the checks and the unit runs together stay inside the total budget', async () => {
+    const t0 = Date.now();
+    const r = await runHandoffChecks({
+      ...base(worktree()),
+      totalBudgetMs: 2500,
+      suites: [check('lint', 'sleep 1')],
+      units: [unitRun('sleep 20')],
+    });
+    expect(Date.now() - t0).toBeLessThan(8000);
+    expect(r.evidence.map((e) => e.status)).toEqual(['passed', 'timeout']);
+    expect(r.evidence[1]?.summary).toContain('budget for these runs ran out');
   }, 20_000);
 
   it('a handoff that changed no file of a unit suite runs nothing for it', async () => {

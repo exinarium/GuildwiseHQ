@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   agentEvidenceRows,
+  BUILTIN_ROLES,
   CHECKS_POLICY,
   CheckEvidenceSchema,
   checkEvidenceProblem,
@@ -261,5 +262,38 @@ describe('handoff checks policy 2 and unit suites', () => {
       kind: 'unit',
       measured: true,
     });
+  });
+});
+
+describe('role instructions for the handoff checks (criterion 7)', () => {
+  const text = (key: string) => {
+    const r = BUILTIN_ROLES.find((x) => x.key === key);
+    return `${r?.instructions ?? ''}\n${(r?.coreRules ?? []).join('\n')}`;
+  };
+  it('builder, tester and writer: findings in any file block, also in files they did not change; never claim an unseen check clean', () => {
+    for (const key of ['builder', 'tester', 'writer']) {
+      const t = text(key);
+      expect(t, key).toContain('over the whole repository');
+      expect(t, key).toContain('also in files you did not change');
+      expect(t, key).toContain(
+        'Never report a check as clean that you did not see run over the whole repository',
+      );
+      expect(t, key).toContain('aom question --topic environment');
+    }
+    expect(text('builder')).toContain('a branch that was already red when you started');
+    expect(text('builder')).toContain('Findings only in end-to-end test content are owed by the tester');
+    expect(text('builder')).toContain('your `--lint-*` and `--test-*` text is only your note');
+    expect(text('tester')).toContain('You never run unit tests');
+    expect(text('tester')).toContain('do not run or report unit tests');
+    expect(text('writer')).toContain('aom question --topic code');
+  });
+
+  it('a handoff command needs {files} as an argument of its own', () => {
+    const s = IntegrationTestsSchema.parse({
+      suites: [suite({ name: 'unit e', kind: 'unit', handoffCmd: ['sh', '-c', 'vitest related {files}'] })],
+    });
+    expect(validateIntegrationTests(s, [U])).toContain(
+      'unit suite "unit e": {files} must be an argument of its own in the handoff command',
+    );
   });
 });

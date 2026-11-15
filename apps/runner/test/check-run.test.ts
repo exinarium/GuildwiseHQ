@@ -138,6 +138,16 @@ describe('runHandoffChecks', () => {
     expect(r.blocking).toHaveLength(3);
   });
 
+  it('a bare ENOENT in the output is not a missing tool (PREREVIEW 6): an error that names no file', async () => {
+    const r = await run({
+      suites: [suite('lint', 'echo "Error: ENOENT: no such file or directory, open \'x.json\'"; exit 1')],
+    });
+    expect(r.evidence[0]?.status).toBe('error');
+    expect(r.evidence[0]?.summary).toContain('without naming a file');
+    const spawned = await run({ suites: [suite('lint', 'echo "Error: spawn biome ENOENT"; exit 1')] });
+    expect(spawned.evidence[0]?.summary).toContain('missing tool');
+  });
+
   it('output cut by the tool with no findings is incomplete (error); with findings in any file it fails; both block', async () => {
     const cutOnly = 'echo "Diagnostics not shown: 120."; exit 1';
     expect((await run({ suites: [suite('lint', cutOnly)] })).evidence[0]?.status).toBe('error');

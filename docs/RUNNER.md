@@ -1771,11 +1771,18 @@ is prepared once, before the first handoff checks of a shift.
 ### Handoff checks
 
 Every **success handoff of a builder, a tester and a writer** on a card with a worktree (`aom handoff`, `aom test pass`,
-`aom outcome done`) runs the project's confirmed checks (kind `check`: lint, format, typecheck), and at a builder's
+`aom outcome done`), and any role's build handoff at a stage that keeps build evidence (a custom role), runs the project's confirmed checks (kind `check`: lint, format, typecheck), and at a builder's
 handoff the unit tests of the files the card changed. The server sends them in `brief.checks` (`suites`, and `units` for a
 builder only); the runner runs them, never the agent, on the committed head (a tester's or writer's leftovers are committed
 first, as a builder's are), one after the other in the order format, lint, typecheck under a 6-minute budget, then the
 unit runs under their own 10-minute budget.
+
+- **Time bound.** The runner's whole work for one handoff has one deadline, `HANDOFF_WORK_BUDGET_MS` (8 minutes): the
+  dependency refresh (at most `HANDOFF_PREP_BUDGET_MS`, 1 minute, retried at the next handoff when it did not finish),
+  then the checks (at most 6 minutes) and the unit runs (what is left, at most 10 minutes), each check and unit run also
+  within its own limit; a run cut by the deadline is a `timeout`, which refuses. The server's verdict wait adds at most
+  2 minutes, so `aom handoff` returns within 10 minutes, inside a card shift's default command wait (11 minutes; the agent
+  is told to allow 15). A shift with confirmed checks but no card worktree or start commit is refused, never let through.
 
 - **Where they run.** `RunManager.checkLaunch`: the run-step sandbox profile (credential folders, the runner's data dir and
   the buses masked, no .NET user secrets), with `network: 'none'` (bubblewrap `--unshare-net`, only loopback; where the host
@@ -1798,11 +1805,13 @@ unit runs under their own 10-minute budget.
   no confirmed check of a kind is unaffected. Error and timeout results are never cached; other results are cached per head.
 - **Files the role may not edit.** Each finding's paths are classified with the guard's own scope (`guard.ts` `mayEdit`).
   A builder's findings only in E2E test content are `deferred`, owed by the tester: stored, shown to the reviewers, not
-  blocking (the tester's own handoff then runs the same checks and blocks on them). A tester or writer is refused for a
+  blocking. Only when every finding was seen and matched to a file: an incomplete output (cut by the tool, a recursive run
+  without `--no-bail`, the 2 MiB capture) or a diagnostic line that names no file of the repository keeps the check
+  `failed`, so findings nobody saw never pass (the tester's own handoff then runs the same checks and blocks on them). A tester or writer is refused for a
   finding in code it may not edit, with "only a builder can fix ..." and how to hand it on (`aom test fail` for a tester,
   `aom question --topic code` for a writer). The 1.7.0 filter that hid E2E findings from a builder is gone.
-- **Unit tests at a builder's handoff.** A confirmed `unit` suite with a `handoffCmd` (it must contain `{files}`) gets the
-  card's changed paths that exist at the head and lie in the suite's folder (the deepest folder wins), relative to it; more
+- **Unit tests at a builder's handoff.** A confirmed `unit` suite with a `handoffCmd` (it must contain `{files}` as an
+  argument of its own; one argument per file, a name starting with `-` given as `./-name`) gets the card's changed paths that exist at the head and lie in the suite's folder (the deepest folder wins), relative to it; more
   than 200 runs the whole suite. A failing test file, a timeout or an error refuses. A suite without `handoffCmd` is
   `regression_only` ("not run at handoff: runs at regression") and does not block. Testers never get unit suites.
 - **Stored and shown.** An accepted handoff carries `checks` and `checksPolicy: 2` in `shift.report`. A refusal goes to the
@@ -1812,12 +1821,19 @@ unit runs under their own 10-minute budget.
   checks do not pass (defence in depth); an older runner's results keep the old behaviour (only `failed` refuses, the rest is
   a card warning) for one release. The agent's `--lint-*` and `--test-*` text is shown as its note; the checks are the
   evidence.
+- **Release order: the server first.** An older server does not know the statuses `deferred` and `regression_only` or
+  more than 10 results and drops such a `shift.report` silently (a log line on the server only): the runner answers the
+  agent "Queued" after its 2-minute wait, the outbox keeps redelivering, and the card stays in Build with no handoff.
+  Deploy the server before (or with) the runners. A newer server serves older runners: it keeps their warning, gives them
+  the new statuses as `preexisting` and at most 10 results, and leaves suite cards as they were (below).
 - **Suite cards.** On a regression or full-suite card the tester's brief carries `regressionUnits` (every confirmed unit
   suite of the repository). The runner runs each whole in the background (`checkLaunch` with `network: 'host'`: reviewed
   code, a suite may reach a local database) and reports it with `test.suite` (`kind: 'unit'`, `measured: true`); the tester
   may not report one. `aom test pass` is refused while a unit suite runs, failed or is unreported (runner and server); `aom
   test fail` gets a `Bug: Unit tests fail in <file> (<suite>)` / `Test: unit:<suite>:<file>` section per failing test file,
-  so the server files one bug card per file and records a rerun's same failure as seen again.
+  so the server files one bug card per file and records a rerun's same failure as seen again. A runner without `checks:2`
+  gets no `regressionUnits` and its suite-card pass is not gated on unit results (one release); the card gets a note that
+  the unit suites did not run.
 - **Detection.** `detect` proposes checks, `detectUnits` (builder) proposes one unit suite per package with a `test:unit`
   or `test` script, from the base branch, with a `vitest related` or `jest --findRelatedTests` handoff command where the
   runner knows one. Proposals wait unconfirmed (Project settings > Run and test).

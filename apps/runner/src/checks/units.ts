@@ -63,10 +63,17 @@ export function handoffUnitRuns(
       out.push({ suite: u, argv: [...u.cmd], files: [], whole: true });
       continue;
     }
+    // `{files}` is a whole argument (validated with the settings): each file becomes one argument; a name that starts
+    // with `-` is given as `./-name` so the test runner cannot read it as an option. An argument that only contains
+    // the token (settings saved before the validation) is not run at handoff: the whole suite runs instead.
+    const handoff = u.handoffCmd as string[];
+    if (handoff.some((a) => a !== FILES_TOKEN && a.includes(FILES_TOKEN))) {
+      out.push({ suite: u, argv: [...u.cmd], files: [], whole: true });
+      continue;
+    }
     const argv: string[] = [];
-    for (const a of u.handoffCmd as string[]) {
-      if (a === FILES_TOKEN) argv.push(...files);
-      else if (a.includes(FILES_TOKEN)) argv.push(a.replace(FILES_TOKEN, files.join(' ')));
+    for (const a of handoff) {
+      if (a === FILES_TOKEN) argv.push(...files.map((f) => (f.startsWith('-') ? `./${f}` : f)));
       else argv.push(a);
     }
     out.push({ suite: u, argv, files, whole: false });

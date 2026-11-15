@@ -79,7 +79,7 @@ import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
-import { handoffRefusalEvents } from './handoff-checks.ts';
+import { handoffRefusalEvents, runnerHasChecksPolicy } from './handoff-checks.ts';
 import { workingBranchQuestionEvents } from './hygiene.ts';
 import { loopBreakerPlan, rejectionBackoffEvents } from './loop-breaker.ts';
 import { qaStepsEvents } from './qa.ts';
@@ -560,7 +560,19 @@ export async function applyShiftReport(
         )
           return { accepted: false, error: TARGET_LINE_REQUIRED };
         // The unit suites the runner runs on a suite card: no pass while one failed, is still running or is unreported.
-        if (outcome.event === 'TestPassed') {
+        // A runner without `checks:2` cannot run them: its pass goes through as today, with a note on the card.
+        if (outcome.event === 'TestPassed' && !(await runnerHasChecksPolicy(tx, ws.id))) {
+          const skipped = await openUnitSuitesOf(tx, card, shift);
+          if (skipped.length > 0)
+            followUps.push(
+              cardMessage(
+                card,
+                { kind: 'system' },
+                'system',
+                `The unit ${skipped.length === 1 ? 'suite' : 'suites'} ${skipped.join(', ')} did not run on ${card.ref}: the workstation's runner is older than the release that runs them. Update the runner.`,
+              ),
+            );
+        } else if (outcome.event === 'TestPassed') {
           const openUnits = await openUnitSuitesOf(tx, card, shift);
           if (openUnits.length > 0)
             return {

@@ -38,15 +38,23 @@ export interface Attribution {
   elsewhere: string[];
   introducedCount: number;
   elsewhereCount: number;
-  /** Why this output cannot be judged completely (hint included); the check is then a warning, not a block. */
+  /** Why this output cannot be judged completely (hint included). */
   incomplete?: string;
+  /**
+   * Output lines that look like a diagnostic location (`file.ts:12:3`, `file.ts(12,3)`) but name no file of the repository
+   * the runner could match (a path with spaces, an unresolved prefix): such a finding cannot be given to another role.
+   */
+  unattributed: number;
 }
 
 const LIST_MAX = 20;
 const LINE_MAX = 300;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
-const TOKEN = /(?:[A-Za-z]:)?[\w@.+\-/\\]+\.[A-Za-z0-9]{1,8}(?=[:(\s]|$)/g;
+// path characters include `[ ] ( )` for route folders such as `[id].tsx` and `(group)/`
+const TOKEN = /(?:[A-Za-z]:)?[\w@.+\-/\\[\]()]+\.[A-Za-z0-9]{1,8}(?=[:(\s]|$)/g;
+/** A diagnostic location: `<name>.<ext>:<line>[:<col>]` or `<name>.<ext>(<line>,<col>)`. */
+const LOCATION = /\S\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?\b|\(\d+,\d+\))/;
 const PNPM_PREFIX = /^(\S+) [\w:-]+: /;
 
 export const stripAnsi = (s: string): string => s.replace(ANSI, '');
@@ -60,6 +68,7 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
   const introduced = new Set<string>();
   const elsewhere = new Set<string>();
   const findings = new Map<string, Finding>();
+  let unattributed = 0;
   const wt = o.worktree ? `${o.worktree.replace(/\\/g, '/').replace(/\/+$/, '')}/` : null;
   for (const raw of stripAnsi(output).split(/\r?\n/)) {
     const line = raw.trim();
@@ -93,6 +102,7 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
     const shown = line.slice(0, LINE_MAX);
     if (hitIntroduced) introduced.add(shown);
     else if (hitElsewhere) elsewhere.add(shown);
+    if (!hitIntroduced && !hitElsewhere && LOCATION.test(line)) unattributed++;
     if ((hitIntroduced || hitElsewhere) && !findings.has(shown))
       findings.set(shown, { line: shown, paths: [...paths], changed: hitIntroduced });
   }
@@ -109,6 +119,7 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
     elsewhere: [...elsewhere].slice(0, LIST_MAX),
     introducedCount: introduced.size,
     elsewhereCount: elsewhere.size,
+    unattributed,
     ...(reasons.length ? { incomplete: reasons.join('; ') } : {}),
   };
 }

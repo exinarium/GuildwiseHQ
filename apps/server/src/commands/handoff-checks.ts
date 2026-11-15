@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { type CheckEvidence, DESK_SUBKIND, streamId } from '@aom/shared';
-import { one, type Row } from '../db/sql.ts';
+import { CHECKS_POLICY_CAPABILITY, type CheckEvidence, DESK_SUBKIND, streamId } from '@aom/shared';
+import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
@@ -76,4 +76,22 @@ export async function handoffRefusalEvents(
     });
   }
   return out;
+}
+
+/**
+ * Does the workstation's runner judge the handoff checks by policy 2 and run a suite card's unit suites
+ * (`CHECKS_POLICY_CAPABILITY`)? An older runner keeps today's behaviour for one release: no `regressionUnits` in its brief
+ * and no unit-result gate on its suite cards.
+ */
+export async function runnerHasChecksPolicy(
+  db: Queryable,
+  workstationId: string | null | undefined,
+): Promise<boolean> {
+  if (!workstationId) return false;
+  const caps = await one<{ capabilities: string[] }>(
+    db,
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId],
+  );
+  return !!caps?.capabilities?.includes(CHECKS_POLICY_CAPABILITY);
 }

@@ -32,6 +32,14 @@ export type BuildEvidenceInput = z.infer<typeof BuildEvidenceInputSchema>;
 export const CHECKS_BUDGET_MS = 6 * 60_000;
 /** The total time the runner spends on the unit test runs of one builder handoff (their own budget). */
 export const UNIT_BUDGET_MS = 10 * 60_000;
+/**
+ * The most a handoff's runner work may take altogether: the dependency refresh, the checks and the unit runs. With the
+ * server's verdict wait (at most 2 minutes) the handoff ends within 10 minutes, a minute inside a card shift's default
+ * command wait (11 minutes; the agent is told to allow 15).
+ */
+export const HANDOFF_WORK_BUDGET_MS = 8 * 60_000;
+/** The dependency refresh before a handoff's checks (a worktree that was never prepared) may take this long. */
+export const HANDOFF_PREP_BUDGET_MS = 60_000;
 /** The most check results one handoff carries: the checks and the unit test runs. */
 export const CHECK_EVIDENCE_MAX = 20;
 /**

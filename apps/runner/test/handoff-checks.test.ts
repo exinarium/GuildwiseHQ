@@ -352,7 +352,7 @@ describe('checks at aom handoff', () => {
     }, 120_000);
 
     it('a builder handoff runs the unit tests of the changed files; a worktree never prepared is prepared once before the checks', async () => {
-      const prepCalls: string[] = [];
+      const prepCalls: Array<number | undefined> = [];
       const units = [
         IntegrationSuiteSchema.parse({
           name: 'unit src',
@@ -373,7 +373,7 @@ describe('checks at aom handoff', () => {
         {},
         {
           prepareWorktree: async (i) => {
-            prepCalls.push(i.worktree);
+            prepCalls.push(i.budgetMs);
             return { ok: true, steps: [] };
           },
         },
@@ -384,8 +384,33 @@ describe('checks at aom handoff', () => {
       expect(ev?.[0]?.command).toContain('src/a.txt');
       // the new worktree's own preparation, then once more before the checks (no dependency step was done)
       expect(prepCalls.length).toBe(2);
+      // the refresh at the handoff is bounded (the whole handoff must end inside the agent's command wait)
+      expect(prepCalls[1]).toBe(60_000);
     }, 60_000);
   });
+
+  it('a custom role at a build stage keeps its checks (S2)', async () => {
+    const builder = BUILTIN_ROLES.find((r) => r.key === 'builder')!;
+    let res: Post | undefined;
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      commit(i.cwd, 'a.txt', 'BAD-FORMAT\n', 'bad');
+      res = await ctl.post('/v1/report', {
+        report: { kind: 'outcome', outcomeId: 'handoff', note: 'done', data: EVIDENCE },
+      });
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
+    const base = makeShiftStart({ stage: 'build', remoteNormalized: h.repo.remoteNormalized }) as {
+      agent: Record<string, unknown>;
+    };
+    await h.runShift({
+      stage: 'build',
+      outcomes: OUTCOMES,
+      briefExtra: { checks: { suites: [fmtCheck()], detect: false } },
+      startExtra: { agent: { ...base.agent, roleKey: 'app_developer', permissions: builder.permissions } },
+    });
+    expect(res?.json.accepted).toBe(false);
+    expect(res?.json.error).toContain('the check "fmt"');
+  }, 60_000);
 
   describe('a suite card', () => {
     it('the runner runs the unit suites; the tester may not report one; no pass while one failed; the fail note gets a bug section per failing file', async () => {

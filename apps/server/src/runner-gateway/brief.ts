@@ -45,6 +45,7 @@ import { effectiveCompletionAction } from '../commands/completion.ts';
 import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { graphScopeFor } from '../commands/graph.ts';
+import { runnerHasChecksPolicy } from '../commands/handoff-checks.ts';
 import { integrationTestsOf } from '../commands/integration-tests.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
@@ -412,7 +413,13 @@ export async function buildBrief(
       ? { builderTestsNonBlocking: true }
       : {}),
     ...(await leanBrief(ctx, card, project, stage.id, agent)),
-    ...checksBrief(card, project, stage, agent),
+    ...checksBrief(
+      card,
+      project,
+      stage,
+      agent,
+      await runnerHasChecksPolicy(ctx.pool, shift.workstation_id ?? agent.workstation_id),
+    ),
     ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
       ? { testWithoutEnvironment: true }
       : {}),
@@ -471,15 +478,17 @@ async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?:
  * A suite card's tester gets `regressionUnits`: every confirmed unit suite of the repository, which the runner runs whole.
  * An older runner ignores all of it.
  */
-function checksBrief(
+export function checksBrief(
   card: Row,
   project: Row,
-  stage: { worktree?: string; claimRole?: string | null },
+  stage: { worktree?: string; requireBuildEvidence?: boolean },
   agent: Row,
+  policy2: boolean,
 ): Partial<ShiftBrief> {
   if (!card.repo_id || agent.is_devops) return {};
   if (!stage.worktree || stage.worktree === 'none') return {};
-  if (!isHandoffCheckRole(agent.role_key)) return {};
+  // the three roles that hand off changed files, and any role (a custom one) at a build stage that keeps build evidence
+  if (!isHandoffCheckRole(agent.role_key) && !stage.requireBuildEvidence) return {};
   const s = integrationTestsOf(project);
   const repo = card.repo_id as string;
   const detect =
@@ -490,7 +499,8 @@ function checksBrief(
     builder &&
     !s.unitDetection.includes(repo) &&
     !s.suites.some((x) => x.kind === 'unit' && x.repoId === repo);
-  const suiteCard = agent.role_key === 'tester' && isSuiteCard(card.card_type, card.origin);
+  // An older runner (no `checks:2`) cannot run the unit suites of a suite card: it keeps today's behaviour for one release.
+  const suiteCard = policy2 && agent.role_key === 'tester' && isSuiteCard(card.card_type, card.origin);
   const regression = suiteCard ? unitSuites(s, repo) : [];
   return {
     checks: {

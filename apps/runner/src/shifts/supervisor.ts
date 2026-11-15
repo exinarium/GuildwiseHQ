@@ -22,6 +22,8 @@ import {
   checkStatusPasses,
   DELEGATE_RPC,
   type GuardViolation,
+  HANDOFF_PREP_BUDGET_MS,
+  HANDOFF_WORK_BUDGET_MS,
   hasTranscript,
   type InvestigationData,
   type IpcReportRequest,
@@ -2241,6 +2243,7 @@ export class ShiftSupervisor {
     s: ActiveShift,
     projectPath: string | undefined,
     why?: string,
+    budgetMs?: number,
   ): Promise<void> {
     const wt = s.worktree;
     if (!wt) return;
@@ -2269,6 +2272,7 @@ export class ShiftSupervisor {
         platform: process.platform as Platform,
         signal: s.prepAbort.signal,
         trustLockfile: this.deps.config.prepTrustLockfile !== false,
+        ...(budgetMs !== undefined ? { budgetMs } : {}),
         ...(s.submodulesStep ? { submodules: s.submodulesStep } : {}),
       });
     } catch (err) {
@@ -3298,10 +3302,17 @@ export class ShiftSupervisor {
   ): Promise<{ refused: string } | { attach: Record<string, unknown>; summary: string }> {
     const { msg } = s;
     const wt = s.worktree;
-    if (!wt || !s.startSha) return { attach, summary: '' };
-    if (cb.detect || cb.detectUnits) void this.proposeChecks(s, cb);
+    if (wt && (cb.detect || cb.detectUnits)) void this.proposeChecks(s, cb);
     const units = msg.agent.roleKey === 'builder' ? (cb.units ?? []) : [];
     if (cb.suites.length === 0 && units.length === 0) return { attach, summary: '' };
+    if (!wt || !s.startSha)
+      return {
+        refused:
+          'the project has confirmed handoff checks, but this shift has no card worktree or start commit on this workstation, so they cannot run and nothing was handed on. Ask with `aom question --topic environment`, quoting this.',
+      };
+    // The whole handoff (dependency refresh, checks, unit runs) has one deadline, so that with the server's verdict wait
+    // it ends inside the agent's command wait (docs/RUNNER.md "Handoff checks", time bound).
+    const startedAt = Date.now();
     if (data === 'buildHandoff') {
       // do not run minutes of checks for a refusal the server would give anyway
       const problem = buildEvidenceProblem(
@@ -3330,7 +3341,7 @@ export class ShiftSupervisor {
     let r: Awaited<ReturnType<typeof runHandoffChecks>>;
     try {
       // A worktree whose dependencies were never prepared (an in-flight card, a reused worktree): prepared once, offline.
-      await this.refreshDependencies(s);
+      await this.refreshDependencies(s, Math.min(HANDOFF_PREP_BUDGET_MS, HANDOFF_WORK_BUDGET_MS));
       const runs = this.deps.runs;
       const gi = this.guardInput(s, wt.path, s.startSha);
       const role = msg.agent.roleKey;
@@ -3344,6 +3355,7 @@ export class ShiftSupervisor {
         signal: s.checkAbort.signal,
         cache: s.checkCache,
         ...(this.deps.checksBudgetMs ? { budgetMs: this.deps.checksBudgetMs } : {}),
+        totalBudgetMs: Math.max(0, HANDOFF_WORK_BUDGET_MS - (Date.now() - startedAt)),
         scope: {
           mayEdit: (p) => mayEdit(gi, p),
           ownerOf: (p) => ownerOf(msg.brief.project.e2eGlobs, p),
@@ -3460,15 +3472,19 @@ export class ShiftSupervisor {
   }
 
   /** Prepares a worktree whose dependencies were never prepared, once per shift, before the checks (offline, no network). */
-  private async refreshDependencies(s: ActiveShift): Promise<void> {
+  private async refreshDependencies(s: ActiveShift, budgetMs: number): Promise<void> {
     if (s.depsRefreshed || !s.worktree || s.msg.agent.isDevops) return;
     if (this.deps.config.prepareWorktrees === false) return;
-    s.depsRefreshed = true;
     const prepared = s.worktreePrep?.steps.some(
       (x) => x.status === 'done' && x.name !== 'submodules' && x.name !== 'restore changed files',
     );
-    if (prepared) return;
-    await this.prepareNewWorktree(s, s.msg.brief.project.projectPath, 'before the handoff checks');
+    if (prepared) {
+      s.depsRefreshed = true;
+      return;
+    }
+    await this.prepareNewWorktree(s, s.msg.brief.project.projectPath, 'before the handoff checks', budgetMs);
+    // a refresh cut off or failed is tried again at the next handoff (each try is bounded by `budgetMs`)
+    if (s.worktreePrep?.ok) s.depsRefreshed = true;
   }
 
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
@@ -3634,21 +3650,22 @@ export class ShiftSupervisor {
             attach = { ...attach, headSha: cd.headSha, changedPaths: cd.changedPaths, diff: cd.diff };
           }
         }
-        // The handoff checks (lint, format, typecheck over the whole repository, and a builder's unit test runs) run on this
-        // commit, by the runner, for every success handoff of a builder, tester or writer: anything but a pass refuses it
-        // here, and the refusal is posted on the card.
-        const cb = msg.brief.checks;
-        if (
-          outcome.kind === 'success' &&
-          cb &&
-          isHandoffCheckRole(msg.agent.roleKey) &&
-          !msg.agent.isDevops
-        ) {
-          const checked = await this.handoffChecks(s, outcome.data, toSend, attach, cb);
-          if ('refused' in checked) return rejected(checked.refused);
-          attach = checked.attach;
-          if (checked.summary) checkNote = checkNote ? `${checkNote} ${checked.summary}` : checked.summary;
-        }
+      }
+      // The handoff checks (lint, format, typecheck over the whole repository, and a builder's unit test runs) run on this
+      // commit, by the runner, for every success handoff of a builder, tester or writer, and for any role's build handoff
+      // (a custom role at a build stage): anything but a pass refuses it here, and the refusal is posted on the card.
+      // Outside the worktree block on purpose: a shift without a worktree or start commit is refused, never let through.
+      const cb = msg.brief.checks;
+      if (
+        outcome.kind === 'success' &&
+        cb &&
+        (isHandoffCheckRole(msg.agent.roleKey) || outcome.data === 'buildHandoff') &&
+        !msg.agent.isDevops
+      ) {
+        const checked = await this.handoffChecks(s, outcome.data, toSend, attach, cb);
+        if ('refused' in checked) return rejected(checked.refused);
+        attach = checked.attach;
+        if (checked.summary) checkNote = checkNote ? `${checkNote} ${checked.summary}` : checked.summary;
       }
     }
 
