@@ -7,6 +7,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 ### Added
 
 - Release prep regenerates the assistant's knowledge. A new step, Regenerate assistant knowledge, runs after Update Help articles (ticked by default when that step is ticked) and rebuilds the assistant's knowledge pack from the Help articles on the workstation, so a release whose Help changed ships matching assistant answers. Repositories without the pack skip it; a workstation whose runner is too old skips it too instead of failing the run. Runner announces `release-docs-prep-assistant-pack:1`.
+
 ### Changed
 
 - Handoff checks run, block and cover the whole repository. Lint, format and typecheck now run at every success handoff of a builder, a tester and a writer, over the whole repository: a problem in any file refuses the handoff, also in files the card did not change, and a check that cannot run (an error or a timeout) refuses it too, with its last output lines and what to do. Problems only in end-to-end test files are owed by the tester and do not block a builder; a tester or writer is told who can fix code it may not edit. The refusal is posted on the card, and a check that cannot run twice in a row raises a desk alert. The agent's own lint and test text is shown as its note; what the runner measured is the evidence. Deploy the server before the runners (an older server drops a newer runner's handoff report silently), then update the workstations; older runners keep the old behaviour for one release.
@@ -15,8 +16,6 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 ### Fixed
 
 - The handoff checks and the worktree preparation no longer hang on the network. Package managers are kept offline in the check sandbox (pnpm, npm, yarn, corepack, uv and pip settings, `dotnet format --no-restore`, and no network namespace), so a check that needs a missing tool fails at once with its name instead of timing out after 5 minutes, and the worktree preparation installs from the shared package store (trusting the committed lockfile; runner setting `prepTrustLockfile`) or says plainly which package is missing.
-### Fixed
-
 - The Windows installer no longer asks for a restart at "Turning on WSL2" every time it runs. It now checks whether WSL2 works instead of whether one optional Windows feature is on, asks for a restart only when one is really pending and at most twice, and otherwise stops with a message that names what is still off. The restart for Ubuntu is also asked for only once.
 
 ## [1.8.0] - 2026-11-15
