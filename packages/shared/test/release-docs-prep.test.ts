@@ -5,10 +5,12 @@ import {
   canTransitionStep,
   enabledReleaseDocsPrepSteps,
   isReleaseDocsPrepStep,
+  missingReleaseDocsPrepRequirement,
   nextReleaseDocsPrepAction,
   type ReleaseDocsPrepGateInput,
   type RunSnapshot,
   releaseDocsPrepGate,
+  releaseDocsPrepStep,
   releaseDocsPrepSteps,
 } from '../src/index.ts';
 
@@ -28,12 +30,14 @@ describe('release docs prep step registry', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'commit',
     ]);
     expect(enabledReleaseDocsPrepSteps({ steps: { analyse: false } }).map((s) => s.id)).toEqual([
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'commit',
     ]);
   });
@@ -42,8 +46,25 @@ describe('release docs prep step registry', () => {
       'analyse',
       'changelog',
       'help',
+      'assistant-pack',
       'commit',
     ]);
+  });
+  it("'Regenerate assistant knowledge' follows 'Update Help articles' until the checklist names it", () => {
+    const ids = (steps: Record<string, boolean>) => enabledReleaseDocsPrepSteps({ steps }).map((s) => s.id);
+    expect(ids({ help: false })).not.toContain('assistant-pack');
+    expect(ids({ help: true })).toContain('assistant-pack');
+    expect(ids({ help: true, 'assistant-pack': false })).not.toContain('assistant-pack');
+    expect(ids({ help: false, 'assistant-pack': true })).toContain('assistant-pack');
+    const order = releaseDocsPrepSteps().map((s) => s.id);
+    expect(order.indexOf('assistant-pack')).toBe(order.indexOf('help') + 1);
+    const def = releaseDocsPrepStep('assistant-pack');
+    expect(def).toMatchObject({ requires: ['help'], producesFiles: true });
+    expect(def?.serverPhases).toBeUndefined();
+    expect(def?.writerPhase).toBeUndefined();
+    expect(missingReleaseDocsPrepRequirement([def!])?.message).toBe(
+      'Regenerate assistant knowledge needs Update Help articles. Turn it on in the project settings.',
+    );
   });
   it('ships the user guide playbook the guide writer follows', () => {
     const body = builtinPlaybookText('user-guide') ?? '';

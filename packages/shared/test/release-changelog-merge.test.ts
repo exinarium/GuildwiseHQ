@@ -98,6 +98,7 @@ describe('registry: Write changelog', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'videos',
       'commit',
     ]);
@@ -113,6 +114,7 @@ describe('registry: Write changelog', () => {
       'analyse',
       'guide',
       'help',
+      'assistant-pack',
       'commit',
     ]);
   });

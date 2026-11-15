@@ -1,11 +1,13 @@
 import type { ReleaseDocsPrepPayload, ReleaseDocsPrepSummary } from '@aom/shared';
+import { assistantPackStep } from './release-docs-prep-assistant-pack.ts';
 import { changelogStep } from './release-docs-prep-changelog.ts';
 import { runGuideStep } from './release-docs-prep-guide.ts';
 import { runHelpStep } from './release-docs-prep-help.ts';
 import { videosStep } from './release-docs-prep-videos.ts';
 
 /**
- * Handlers of the content steps of Release prep (docs and videos): changelog, user guide, Help articles, videos. A handler writes files
+ * Handlers of the content steps of Release prep (docs and videos): changelog, user guide, Help articles, assistant
+ * knowledge pack, videos. A handler writes files
  * into the throwaway worktree (cut from the release branch, with the earlier steps' commits) and returns the repo
  * relative paths it wrote. The runner commits them to a local kept ref; nothing leaves the workstation until the
  * 'commit' step pushes.
@@ -66,6 +68,7 @@ export const DOCS_PREP_STEP_HANDLERS: Record<string, DocsPrepStepHandler | DocsP
   changelog: changelogStep,
   guide: runGuideStep,
   help: runHelpStep,
+  'assistant-pack': assistantPackStep,
   videos: videosStep,
 };
 
