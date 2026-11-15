@@ -246,6 +246,7 @@ export const PROJECTION_TABLES = [
   'journey_webhook_calls',
   'journey_hook_triggers',
   'owner_pending_timers',
+  'pr_size_exceptions',
   'card_handoffs',
   'card_transitions',
   'card_activity',
