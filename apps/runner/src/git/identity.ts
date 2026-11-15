@@ -8,7 +8,9 @@ import {
   NO_COMMIT_IDENTITY_CODE,
   NO_COMMIT_IDENTITY_MESSAGE,
   type PostAsAppRef,
+  type PostAsPlan,
   type PostAsRepo,
+  postAsFor,
   type RepoIdentityFact,
 } from '@aom/shared';
 import { git } from './git.ts';
@@ -64,11 +66,30 @@ const NO_PROBE: AppTokenProbe = {
     throw Object.assign(new Error(APP_ERROR_TEXT.runner_too_old), { code: 'runner_too_old' });
   },
 };
-let probe: AppTokenProbe = NO_PROBE;
 
-/** Set once at runner start; unset (tests, old wiring) every app identity fails closed. */
-export function setAppTokenProbe(p: AppTokenProbe | null): void {
-  probe = p ?? NO_PROBE;
+/**
+ * A repository's post-as entry bound to the probe of the runner that received it. Each runner (one per pairing, several
+ * in one process) has its own key store and broker, so the probe travels with the entry instead of living in a global.
+ * An entry without a probe fails closed for an app identity.
+ */
+export type BoundPostAs = PostAsRepo & { readonly probe?: AppTokenProbe };
+
+/** Binds a repository's post-as entry to this runner's probe (`null` stays `null`). */
+export function bindPostAs(
+  postAs: PostAsRepo | null | undefined,
+  probe: AppTokenProbe | null | undefined,
+): BoundPostAs | null {
+  if (!postAs) return null;
+  return probe ? { ...postAs, probe } : postAs;
+}
+
+/** The entry for `remoteUrlNormalized` in a plan, bound to this runner's probe. */
+export function boundPostAsFor(
+  plan: PostAsPlan | null | undefined,
+  remoteUrlNormalized: string | null | undefined,
+  probe: AppTokenProbe | null | undefined,
+): BoundPostAs | null {
+  return bindPostAs(postAsFor(plan, remoteUrlNormalized), probe);
 }
 
 const APP_CODES: ReadonlySet<string> = new Set(APP_ERROR_CODES);
@@ -135,7 +156,7 @@ export async function repoLevelIdentity(cwd: string): Promise<RepoIdentityFact |
 export async function resolveCommitIdentity(
   cwd: string,
   commitAs?: CommitAs | null,
-  postAs?: PostAsRepo | null,
+  postAs?: BoundPostAs | null,
 ): Promise<CommitIdentity | null> {
   if (postAs?.source === 'app') {
     const app = postAs.app;
@@ -145,7 +166,7 @@ export async function resolveCommitIdentity(
         'The app reference is missing.',
       );
     try {
-      await probe.ensure(
+      await (postAs.probe ?? NO_PROBE).ensure(
         { instance: app.instance, integrationId: app.integrationId },
         repoNameOf(postAs.remoteUrlNormalized),
       );
@@ -168,7 +189,7 @@ export async function resolveCommitIdentity(
 export async function requireCommitIdentity(
   cwd: string,
   commitAs?: CommitAs | null,
-  postAs?: PostAsRepo | null,
+  postAs?: BoundPostAs | null,
 ): Promise<CommitIdentity> {
   const id = await resolveCommitIdentity(cwd, commitAs, postAs);
   if (!id) throw new NoCommitIdentityError();

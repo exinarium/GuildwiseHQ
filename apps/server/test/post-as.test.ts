@@ -8,6 +8,7 @@ import {
   loadIdentityPlan,
   POST_AS_RUNNER_TOO_OLD_MESSAGE,
 } from '../src/commands/commit-as.ts';
+import { applyAppAccessCheckResult } from '../src/commands/post-as.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember } from './helpers/members.ts';
@@ -173,6 +174,27 @@ describe('post-as app selection (GWP-212.2)', () => {
     });
     expect((await loadIdentityPlan(db(), w.projectId)).postAs?.repos[0]?.source).toBe('repo');
     await q(`UPDATE project_app_access SET state='covered' WHERE project_id=$1`, [w.projectId]);
+  });
+
+  it('an access check answer only stores the repositories the command asked about', async () => {
+    const other = randomUUID();
+    await applyAppAccessCheckResult(
+      w.t.app.ctx,
+      w.workstationId,
+      { projectId: w.projectId, integrationId: appA, repos: [{ repoId: w.repoId }] },
+      true,
+      {
+        repos: [
+          { repoId: w.repoId, state: 'covered' },
+          { repoId: other, state: 'covered' },
+        ],
+      },
+    );
+    const rows = await q(
+      `SELECT repo_id, state FROM project_app_access WHERE project_id=$1 AND integration_id=$2 ORDER BY repo_id`,
+      [w.projectId, appA],
+    );
+    expect(rows).toEqual([{ repo_id: w.repoId, state: 'covered' }]);
   });
 
   it('a removed integration shows "removed" and resolves to the fallback; the reference stays', async () => {

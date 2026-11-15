@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { CommitAs, PostAsRepo, RebaseErrorInfo } from '@aom/shared';
+import type { CommitAs, RebaseErrorInfo } from '@aom/shared';
 import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
 import { redactSecrets } from '../secrets/redact.ts';
 import { type GitResult, git, hasRemote, revParse } from './git.ts';
-import { committerEnv, requireCommitIdentity } from './identity.ts';
+import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
 
 /**
  * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the resolved
@@ -14,7 +14,7 @@ import { committerEnv, requireCommitIdentity } from './identity.ts';
 export async function rebaseEnv(
   worktree: string,
   commitAs?: CommitAs | null,
-  postAs?: PostAsRepo | null,
+  postAs?: BoundPostAs | null,
 ): Promise<Record<string, string>> {
   return committerEnv(await requireCommitIdentity(worktree, commitAs, postAs));
 }
@@ -135,7 +135,7 @@ export async function rebaseOntoBase(
   worktree: string,
   baseBranch: string,
   commitAs?: CommitAs | null,
-  postAs?: PostAsRepo | null,
+  postAs?: BoundPostAs | null,
 ): Promise<'up_to_date' | 'rebased' | 'merged'> {
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   // Best effort: a failed fetch leaves the last fetched origin/<base>, which is still a valid base.

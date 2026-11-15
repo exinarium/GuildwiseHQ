@@ -32,7 +32,9 @@ export function effectiveRepoText(
   const credential = ` Pushed with the workstation's ${forgeName(row.forge)} login.`;
   if (r.source === 'app' && r.app) {
     const state = selected.find((s) => s.integrationId === r.app?.integrationId)?.state;
-    const text = `Commits and pushes as ${r.app.botName} <${r.app.botEmail}> (${APP_PROVIDER_LABEL[r.app.provider]} ${r.app.label}), with the app's installation token.`;
+    // The bot is the commit author and committer. Pushes, pull requests and comments still use the workstation's forge
+    // login until shifts push with the app's installation token; the text says what happens today.
+    const text = `Commits are made as ${r.app.botName} <${r.app.botEmail}> (${APP_PROVIDER_LABEL[r.app.provider]} ${r.app.label}).${credential} Pull requests and comments also use that login for now.`;
     if (state === 'not_connected' || state === 'error')
       return {
         text,

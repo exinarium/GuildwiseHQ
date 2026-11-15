@@ -12,7 +12,6 @@ import {
   type ReleasePublishResult,
   type ReleasePublishStep,
   repoTagUrl,
-  postAsFor,
 } from '@aom/shared';
 import { errText, ForgeUnavailableError } from '../forge/http.ts';
 import { forgeForUrl } from '../forge/index.ts';
@@ -21,6 +20,8 @@ import { detectSignOff } from './dco.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, hasRemote, revParse } from './git.ts';
 import {
+  type AppTokenProbe,
+  boundPostAsFor,
   commitEnv,
   identityErrorWire,
   NO_IDENTITY_WIRE,
@@ -34,6 +35,8 @@ import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleasePublishInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: ReleasePublishPayload;
   repoPath: string;
   integrationDir: string;
@@ -162,7 +165,7 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
       identity = await requireCommitIdentity(
         repoPath,
         p.commitAs,
-        postAsFor(p.postAs, p.remoteUrlNormalized),
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
       );
     } catch (err) {
       return failed(
@@ -339,7 +342,11 @@ async function landByMerge(
   const R = p.releaseCommitSha;
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
     return {
       result: failed(

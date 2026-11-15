@@ -14,12 +14,13 @@ import {
   releaseChangelog,
   releaseSectionOf,
   replaceComponentVersion,
-  postAsFor,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { isProtectedBranchRejection } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
+  type AppTokenProbe,
+  boundPostAsFor,
   commitEnv,
   identityErrorWire,
   NO_IDENTITY_WIRE,
@@ -32,6 +33,8 @@ import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleaseShipInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: ReleaseShipPayload;
   /** Local clone of the repository. */
   repoPath: string;
@@ -164,7 +167,11 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
   // 4. the commit, in a throwaway worktree
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
     return fail(
       'commit',

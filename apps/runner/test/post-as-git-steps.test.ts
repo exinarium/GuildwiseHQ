@@ -5,7 +5,7 @@ import { type PostAsRepo, type ReleasePrepShift, writableFilesFor } from '@aom/s
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppTokenError } from '../src/apps/types.ts';
 import { architectMergeMain } from '../src/git/architect-git.ts';
-import { AppIdentityError, setAppTokenProbe } from '../src/git/identity.ts';
+import { AppIdentityError, type AppTokenProbe, bindPostAs } from '../src/git/identity.ts';
 import { addPrepTaskWorktree, finishPrepTask, removePrepTaskWorktree } from '../src/git/release-prep-task.ts';
 import { mergeInProgress, mergeMainIntoCard, syncMainIntoWorking } from '../src/git/sync-main.ts';
 import { runnerPaths } from '../src/paths.ts';
@@ -27,21 +27,21 @@ const app = {
   instance: '42:777',
   host: 'github.com',
 };
-const appEntry = (remote: string): PostAsRepo => ({
+const planEntry = (remote: string): PostAsRepo => ({
   repoId: REPO_ID,
   remoteUrlNormalized: remote,
   source: 'app',
   app,
 });
 
-const failingProbe = () =>
-  setAppTokenProbe({
-    ensure: async () => {
-      throw new AppTokenError('installation_suspended', 'raw provider text');
-    },
-  });
+const failing: AppTokenProbe = {
+  ensure: async () => {
+    throw new AppTokenError('installation_suspended', 'raw provider text');
+  },
+};
 
-afterEach(() => setAppTokenProbe(null));
+/** The plan entry bound to the runner's probe (failing unless another is given). */
+const appEntry = (remote: string, probe: AppTokenProbe = failing) => bindPostAs(planEntry(remote), probe);
 
 /** origin with `main` and `work`; main moved ahead of work, so a sync has a merge to make. */
 function setup() {
@@ -74,7 +74,6 @@ function setup() {
 
 describe('merging the latest main into the working branch with a post-as plan', () => {
   it('the app cannot mint: AppIdentityError, nothing merged or pushed', async () => {
-    failingProbe();
     const t = setup();
     const before = sh(t.repo.origin, 'git', ['rev-parse', 'work']);
     const err = await syncMainIntoWorking(
@@ -86,10 +85,12 @@ describe('merging the latest main into the working branch with a post-as plan', 
   });
 
   it('the app can mint: the merge commit is the bot’s', async () => {
-    setAppTokenProbe({ ensure: vi.fn(async () => {}) });
     const t = setup();
     const out = await syncMainIntoWorking(
-      t.input({ commitAs: PROJECT, postAs: appEntry(t.repo.remoteNormalized) }),
+      t.input({
+        commitAs: PROJECT,
+        postAs: appEntry(t.repo.remoteNormalized, { ensure: vi.fn(async () => {}) }),
+      }),
     );
     expect(out.kind).toBe('merged_into_working');
     expect(sh(t.repo.origin, 'git', ['log', '-1', '--format=%an <%ae>|%cn', 'work'])).toBe(
@@ -111,7 +112,6 @@ describe('merging the latest main into the working branch with a post-as plan', 
 
 describe('merging the latest main into the card branch with a post-as plan', () => {
   it('the app cannot mint: AppIdentityError, no merge started, HEAD unchanged', async () => {
-    failingProbe();
     const t = setup();
     const wt = t.card();
     const head = sh(wt, 'git', ['rev-parse', 'HEAD']);
@@ -136,7 +136,6 @@ describe('merging the latest main into the card branch with a post-as plan', () 
   });
 
   it('`aom git merge-main` answers with the app_identity_failed wire error', async () => {
-    failingProbe();
     const t = setup();
     const wt = t.card();
     const head = sh(wt, 'git', ['rev-parse', 'HEAD']);
@@ -182,7 +181,6 @@ describe('a release prep task commit with a post-as plan', () => {
   }
 
   it('the app cannot mint: refused with app_identity_failed, the work ref is not moved', async () => {
-    failingProbe();
     const { repo, rp, wt } = await prepared();
     const r = await finishPrepTask(wt, rp, PROJECT, appEntry(repo.remoteNormalized));
     await removePrepTaskWorktree(wt);
@@ -210,8 +208,8 @@ describe('a test environment rebase with a post-as plan', () => {
     }
   });
 
-  it('the app cannot mint: the start fails with app_identity_failed and the card head is unchanged', async () => {
-    failingProbe();
+  /** A card worktree one commit ahead of a main that moved, inside the runner's worktrees folder. */
+  function cardBehindMain() {
     const repo = makeRepo();
     const paths = runnerPaths(tmp());
     mkdirSync(join(paths.worktrees, 'TOY-aaaaaaaa'), { recursive: true });
@@ -232,10 +230,14 @@ describe('a test environment rebase with a post-as plan', () => {
       'main moves',
     ]);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const before = sh(wt, 'git', ['rev-parse', 'HEAD']);
+    return { repo, paths, wt };
+  }
+
+  function manager(paths: ReturnType<typeof runnerPaths>, clone: string, appProbe: AppTokenProbe | null) {
     const mgr = new RunManager({
       paths,
-      findRepo: async () => ({ localPath: repo.clone }),
+      appProbe,
+      findRepo: async () => ({ localPath: clone }),
       send: () => {},
       log: { info() {}, warn() {}, error() {} },
       maxEnvironments: () => 3,
@@ -244,7 +246,11 @@ describe('a test environment rebase with a post-as plan', () => {
       timing: { waitMs: 8000, healthPollMs: 40, superviseMs: 80, logFlushMs: 60, stopGraceMs: 400 },
     });
     running.push(mgr);
-    const r = await mgr.startEnv({
+    return mgr;
+  }
+
+  const start = (mgr: RunManager, repo: ReturnType<typeof makeRepo>, wt: string) =>
+    mgr.startEnv({
       envId: randomUUID(),
       projectId: randomUUID(),
       projectKey: 'TOY',
@@ -268,11 +274,44 @@ describe('a test environment rebase with a post-as plan', () => {
         baseBranch: 'main',
         cardWorktreePath: wt,
         commitAs: PROJECT,
-        postAs: { repos: [appEntry(repo.remoteNormalized)] },
+        postAs: { repos: [planEntry(repo.remoteNormalized)] },
       },
     });
+
+  it('the app cannot mint: the start fails with app_identity_failed and the card head is unchanged', async () => {
+    const { repo, paths, wt } = cardBehindMain();
+    const before = sh(wt, 'git', ['rev-parse', 'HEAD']);
+    const r = await start(manager(paths, repo.clone, failing), repo, wt);
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/app_identity_failed: The app Acme bot could not be used/);
     expect(sh(wt, 'git', ['rev-parse', 'HEAD'])).toBe(before);
+  });
+
+  it('two run managers (two pairings in one process) each rebase with their own probe', async () => {
+    const ok = vi.fn(async () => {});
+    const refusing = vi.fn(failing.ensure);
+    const a = cardBehindMain();
+    const b = cardBehindMain();
+    // B is built last: with a process-wide probe, A's rebase would be checked against B's (refusing) store.
+    const mgrA = manager(a.paths, a.repo.clone, { ensure: ok });
+    const mgrB = manager(b.paths, b.repo.clone, { ensure: refusing });
+    const beforeB = sh(b.wt, 'git', ['rev-parse', 'HEAD']);
+    const rb = await start(mgrB, b.repo, b.wt);
+    expect(rb.ok).toBe(false);
+    expect(rb.error).toMatch(/app_identity_failed/);
+    expect(sh(b.wt, 'git', ['rev-parse', 'HEAD'])).toBe(beforeB);
+    await start(mgrA, a.repo, a.wt);
+    expect(ok).toHaveBeenCalledTimes(1);
+    expect(refusing).toHaveBeenCalledTimes(1);
+    // A's card branch was rebased onto the new main, committed by the bot.
+    expect(sh(a.wt, 'git', ['log', '-1', '--format=%cn', 'HEAD'])).toBe('acme-bot[bot]');
+    expect(sh(a.wt, 'git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'])).toBe('');
+  });
+
+  it('a run manager without a probe fails closed', async () => {
+    const { repo, paths, wt } = cardBehindMain();
+    const r = await start(manager(paths, repo.clone, null), repo, wt);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/app_identity_failed: The app Acme bot could not be used/);
   });
 });

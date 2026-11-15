@@ -3,11 +3,10 @@ import {
   type CommitAs,
   filesOutsideWritable,
   missingNewVideoFiles,
-  type PostAsRepo,
   type ReleasePrepShift,
 } from '@aom/shared';
 import { git } from './git.ts';
-import { commitEnv, identityErrorWire, requireCommitIdentity } from './identity.ts';
+import { type BoundPostAs, commitEnv, identityErrorWire, requireCommitIdentity } from './identity.ts';
 import { withRepoLock } from './repo-lock.ts';
 
 /**
@@ -72,7 +71,7 @@ export async function finishPrepTask(
   rp: ReleasePrepShift,
   commitAs: CommitAs | null | undefined,
   /** The repository's entry of the post-as plan: with an app, the commit is the app's or none (fail closed). */
-  postAs?: PostAsRepo | null,
+  postAs?: BoundPostAs | null,
 ): Promise<PrepTaskFinish> {
   const files = await changedFiles(wt);
   const outside = filesOutsideWritable(files, rp.writable);

@@ -38,7 +38,6 @@ import {
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
-  postAsFor,
   type ReadableFolder,
   type RebaseErrorInfo,
   type RepoReport,
@@ -108,7 +107,9 @@ import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
 import {
   AppIdentityError,
+  type AppTokenProbe,
   appIdentityWire,
+  boundPostAsFor,
   NO_IDENTITY_WIRE,
   resolveCommitIdentity,
 } from '../git/identity.ts';
@@ -296,6 +297,8 @@ export interface SupervisorDeps {
   log?: Logger;
   /** Finds the local clone for a normalized remote URL. */
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
+  /** This runner's app token probe (its own key store and broker); none: a shift for a selected app fails closed. */
+  appProbe?: AppTokenProbe | null;
   /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
   findLocal?: (localKey: string) => Promise<{ localPath: string } | undefined>;
   /** The runner's HTTP calls to the server (attachment bytes). Absent: attachments are not copied. */
@@ -1153,7 +1156,7 @@ export class ShiftSupervisor {
       identity = await resolveCommitIdentity(
         identityRepo?.localPath ?? paths.root,
         msg.commitAs,
-        postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
+        boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
       );
     } catch (err) {
       if (!(err instanceof AppIdentityError)) throw err;
@@ -1253,7 +1256,7 @@ export class ShiftSupervisor {
           workingBranch: msg.prepare.syncMain.workingBranch,
           ref: msg.brief.card.ref,
           commitAs: msg.commitAs ?? null,
-          postAs: postAsFor(msg.postAs, msg.worktree.remoteUrlNormalized),
+          postAs: boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
           integrationDir: paths.integration,
           ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
         }).catch((err) => {
@@ -1293,7 +1296,7 @@ export class ShiftSupervisor {
               s.worktree.path,
               msg.worktree.baseBranch,
               msg.commitAs ?? null,
-              postAsFor(msg.postAs, msg.worktree.remoteUrlNormalized),
+              boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
             ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
@@ -2652,7 +2655,7 @@ export class ShiftSupervisor {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
       commitAs: msg.commitAs ?? null,
-      postAs: postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
     });
     if ('error' in r) {
@@ -2711,7 +2714,7 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
-      postAs: postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
@@ -3106,7 +3109,7 @@ export class ShiftSupervisor {
             s.prepTask,
             msg.releasePrep,
             msg.commitAs,
-            postAsFor(msg.postAs, msg.releasePrep.remoteUrlNormalized),
+            boundPostAsFor(msg.postAs, msg.releasePrep.remoteUrlNormalized, this.deps.appProbe),
           );
           toSend = done.ok
             ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }

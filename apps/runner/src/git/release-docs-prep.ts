@@ -7,11 +7,12 @@ import {
   type ReleaseDocsPrepPayload,
   type ReleaseDocsPrepResult,
   type ReleaseDocsPrepSummary,
-  postAsFor,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
+  type AppTokenProbe,
+  boundPostAsFor,
   commitEnv,
   identityErrorWire,
   NO_IDENTITY_WIRE,
@@ -32,6 +33,8 @@ import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleaseDocsPrepInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: ReleaseDocsPrepPayload;
   /** Local clone of the repository. */
   repoPath: string;
@@ -321,7 +324,11 @@ async function workStart(
   const { payload: p, repoPath } = input;
   let identity: Identity;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
     return {
       result: failed(
@@ -481,7 +488,11 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
     return passed({ notices: ['no changes'] });
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
     return failed(
       err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),

@@ -4,13 +4,14 @@ import {
   normalizeRemoteUrl,
   type RepoBumpSubmodulePayload,
   type RepoBumpSubmoduleResult,
-  postAsFor,
 } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
   AppIdentityError,
+  type AppTokenProbe,
   appIdentityWire,
+  boundPostAsFor,
   commitEnv,
   NoCommitIdentityError,
   requireCommitIdentity,
@@ -20,6 +21,8 @@ import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface BumpSubmoduleInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: RepoBumpSubmodulePayload;
   /** Local clone of the deploy repository (D). */
   repoPath: string;
@@ -175,7 +178,7 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
       const id = await requireCommitIdentity(
         repoPath,
         p.commitAs,
-        postAsFor(p.postAs, p.remoteUrlNormalized),
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
       );
       const env = commitEnv(id);
       const set = await git(wt, ['update-index', '--add', '--cacheinfo', `160000,${p.commit},${found.path}`]);

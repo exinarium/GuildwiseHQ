@@ -1,8 +1,8 @@
 import { basename, join } from 'node:path';
-import { type CommitAs, isSafeGitRef, type PostAsRepo } from '@aom/shared';
+import { type CommitAs, isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import { type BoundPostAs, commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -28,7 +28,7 @@ export interface SyncMainInput {
   /** The project's "Commit as" setting; absent: the repository's or the workstation's git identity. */
   commitAs?: CommitAs | null;
   /** This repository's entry of the project's post-as plan: with an app it is the app or nothing (fail closed). */
-  postAs?: PostAsRepo | null;
+  postAs?: BoundPostAs | null;
 }
 
 export type SyncMainOutcome =
@@ -145,7 +145,7 @@ export async function mergeMainIntoCard(
     mainBranch?: string;
     ref: string;
     commitAs?: CommitAs | null;
-    postAs?: PostAsRepo | null;
+    postAs?: BoundPostAs | null;
     auth?: GitAuth;
   },
 ): Promise<CardMergeOutcome | { error: string }> {

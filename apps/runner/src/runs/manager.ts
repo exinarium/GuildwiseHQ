@@ -38,7 +38,7 @@ import picomatch from 'picomatch';
 import { z } from 'zod';
 import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
-import { AppIdentityError, appIdentityWire } from '../git/identity.ts';
+import { AppIdentityError, type AppTokenProbe, appIdentityWire, bindPostAs } from '../git/identity.ts';
 import { RebaseConflictError, RebaseError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import { fillSubmodules, redactGitError } from '../git/submodule-fill.ts';
@@ -100,6 +100,8 @@ export const DEFAULT_TIMING: RunTiming = {
 
 export interface RunManagerDeps {
   paths: RunnerPaths;
+  /** This runner's app token probe (its own key store and broker); none: a rebase for a selected app fails closed. */
+  appProbe?: AppTokenProbe | null;
   findRepo(normalized: string): Promise<{ localPath: string } | undefined>;
   send(
     type: 'run.status' | 'run.log' | 'run.plan.saved' | 'run.replay.failed',
@@ -483,7 +485,10 @@ export class RunManager {
         wt,
         rc.baseBranch,
         rc.commitAs ?? null,
-        rc.postAs?.repos.find((r) => r.repoId === rc.repoId) ?? null,
+        bindPostAs(
+          rc.postAs?.repos.find((r) => r.repoId === rc.repoId),
+          this.deps.appProbe,
+        ),
       );
     } catch (err) {
       // A selected app that cannot mint: the rebase is never made under another identity.

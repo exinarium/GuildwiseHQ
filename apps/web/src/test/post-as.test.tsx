@@ -125,8 +125,12 @@ describe('Post as app (project settings)', () => {
     });
     wrap(<CommitAsPanel projectId={PROJECT} canEdit />);
     const list = await screen.findByTestId('post-as-repos');
-    expect(list).toHaveTextContent('web: Commits and pushes as acme-bot[bot]');
-    expect(list).toHaveTextContent("with the app's installation token");
+    expect(list).toHaveTextContent('web: Commits are made as acme-bot[bot]');
+    // Until shifts push with the app's token, the credential stated is the one used today: the workstation's login.
+    expect(list).toHaveTextContent(
+      "web: Commits are made as acme-bot[bot] <50+bot@users.noreply.github.com> (GitHub App Acme bot). Pushed with the workstation's GitHub login. Pull requests and comments also use that login for now.",
+    );
+    expect(list).not.toHaveTextContent('installation token');
     expect(list).toHaveTextContent('api: Commits are made as Pieter <p@example.test>');
     expect(list).toHaveTextContent("Pushed with the workstation's GitHub login");
     expect(list).toHaveTextContent('Acme bot cannot reach this repository; it uses the fallback above.');

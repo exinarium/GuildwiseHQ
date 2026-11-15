@@ -1,16 +1,18 @@
 import { APP_ERROR_TEXT, type PostAsRepo } from '@aom/shared';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { appTokenProbe, checkAppAccess, splitRemote } from '../src/apps/access-check.ts';
 import { AppTokenError } from '../src/apps/types.ts';
 import {
   AppIdentityError,
+  type AppTokenProbe,
   appIdentityWire,
   appReason,
+  bindPostAs,
+  boundPostAsFor,
   identityErrorWire,
   repoNameOf,
   requireCommitIdentity,
   resolveCommitIdentity,
-  setAppTokenProbe,
 } from '../src/git/identity.ts';
 import { rebaseEnv } from '../src/git/rebase.ts';
 import { cleanupTmp, makeRepo, sh } from './helpers.ts';
@@ -32,7 +34,7 @@ const app = {
 };
 const appEntry: PostAsRepo = { repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', source: 'app', app };
 
-afterEach(() => setAppTokenProbe(null));
+const bound = (probe: AppTokenProbe, entry: PostAsRepo = appEntry) => bindPostAs(entry, probe);
 
 function repoWithConfig() {
   const repo = makeRepo();
@@ -44,9 +46,8 @@ function repoWithConfig() {
 describe('resolution order with a post-as plan', () => {
   it('app covering the repository: the bot identity, after a scoped mint for that repository', async () => {
     const ensure = vi.fn(async () => {});
-    setAppTokenProbe({ ensure });
     const repo = repoWithConfig();
-    const id = await resolveCommitIdentity(repo.clone, PROJECT, appEntry);
+    const id = await resolveCommitIdentity(repo.clone, PROJECT, bound({ ensure }));
     expect(id).toEqual({
       name: 'acme-bot[bot]',
       email: '123+acme-bot[bot]@users.noreply.github.com',
@@ -58,7 +59,6 @@ describe('resolution order with a post-as plan', () => {
 
   it('app not covering the repository (server resolved to the fallback): Commit as, the probe is never asked', async () => {
     const ensure = vi.fn(async () => {});
-    setAppTokenProbe({ ensure });
     const repo = repoWithConfig();
     const entry: PostAsRepo = {
       ...appEntry,
@@ -66,7 +66,7 @@ describe('resolution order with a post-as plan', () => {
       app: undefined,
       fallbackReason: 'not_covered',
     };
-    expect(await resolveCommitIdentity(repo.clone, PROJECT, entry)).toEqual({
+    expect(await resolveCommitIdentity(repo.clone, PROJECT, bound({ ensure }, entry))).toEqual({
       ...PROJECT,
       source: 'project',
     });
@@ -76,7 +76,9 @@ describe('resolution order with a post-as plan', () => {
       app: undefined,
       fallbackReason: 'not_covered',
     };
-    expect(await resolveCommitIdentity(repo.clone, null, repoEntry)).toMatchObject({ source: 'repo' });
+    expect(await resolveCommitIdentity(repo.clone, null, bound({ ensure }, repoEntry))).toMatchObject({
+      source: 'repo',
+    });
     expect(ensure).not.toHaveBeenCalled();
   });
 
@@ -100,13 +102,13 @@ describe('fail closed when the selected app cannot be used', () => {
   ] as const)(
     '%s -> AppIdentityError naming the app and the reason, never another identity',
     async (code, text) => {
-      setAppTokenProbe({
+      const entry = bound({
         ensure: async () => {
           throw new AppTokenError(code, 'raw provider message with secret-ish details');
         },
       });
       const repo = repoWithConfig();
-      const err = await resolveCommitIdentity(repo.clone, PROJECT, appEntry).catch((e: unknown) => e);
+      const err = await resolveCommitIdentity(repo.clone, PROJECT, entry).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(AppIdentityError);
       const e = err as AppIdentityError;
       expect(e.message).toContain('Acme bot');
@@ -114,14 +116,14 @@ describe('fail closed when the selected app cannot be used', () => {
       expect(e.message).not.toContain('secret-ish');
       expect(appIdentityWire(e)).toMatch(/^app_identity_failed: The app Acme bot could not be used/);
       expect(identityErrorWire(e)).toBe(appIdentityWire(e));
-      await expect(requireCommitIdentity(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(
+      await expect(requireCommitIdentity(repo.clone, PROJECT, entry)).rejects.toBeInstanceOf(
         AppIdentityError,
       );
-      await expect(rebaseEnv(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(AppIdentityError);
+      await expect(rebaseEnv(repo.clone, PROJECT, entry)).rejects.toBeInstanceOf(AppIdentityError);
     },
   );
 
-  it('no probe wired (old wiring): fails closed', async () => {
+  it('an entry not bound to a runner probe: fails closed', async () => {
     const repo = repoWithConfig();
     await expect(resolveCommitIdentity(repo.clone, PROJECT, appEntry)).rejects.toThrow(/Acme bot.*too old/);
   });
@@ -164,6 +166,56 @@ describe('appTokenProbe (shift-time check against the broker)', () => {
     const mint = vi.fn(async () => ({}));
     await appTokenProbe(broker(stored, mint)).ensure({ instance: '42:777', integrationId: APP_ID }, 'acme/a');
     expect(mint).toHaveBeenCalledWith('42:777', { repositories: ['a'] });
+  });
+});
+
+describe('each runner resolves against its own probe (several pairings in one process)', () => {
+  const stored = { refs: [{ orgId: 'o', integrationId: APP_ID }] };
+  /** A runner's broker: its own key store, which holds the app's key or not. */
+  const runnerBroker = (have: unknown) => {
+    const mint = vi.fn(async () => ({}));
+    const get = vi.fn(() => have);
+    return {
+      broker: { store: { get } as never, getAccessToken: mint, withToken: vi.fn() as never },
+      mint,
+      get,
+    };
+  };
+
+  it('the runner holding the key commits as the bot; the other refuses; neither touches the other’s store', async () => {
+    const a = runnerBroker(stored);
+    const b = runnerBroker(undefined);
+    const probeA = appTokenProbe(a.broker);
+    const probeB = appTokenProbe(b.broker);
+    const plan = { repos: [appEntry] };
+    const repo = repoWithConfig();
+
+    // Runner B is built last; with a shared global it would own every probe. Each entry carries its own runner's.
+    const viaA = boundPostAsFor(plan, 'github.com/acme/a', probeA);
+    const viaB = boundPostAsFor(plan, 'github.com/acme/a', probeB);
+    expect(await resolveCommitIdentity(repo.clone, PROJECT, viaA)).toMatchObject({ source: 'app' });
+    const err = await resolveCommitIdentity(repo.clone, PROJECT, viaB).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppIdentityError);
+    expect((err as Error).message).toContain(APP_ERROR_TEXT.installation_not_found);
+
+    expect(a.get).toHaveBeenCalledTimes(1);
+    expect(b.get).toHaveBeenCalledTimes(1);
+    expect(a.mint).toHaveBeenCalledWith('42:777', { repositories: ['a'] });
+    expect(b.mint).not.toHaveBeenCalled();
+    // A second resolution through A still uses A's store, whatever was bound since.
+    expect(await resolveCommitIdentity(repo.clone, PROJECT, viaA)).toMatchObject({ source: 'app' });
+    expect(a.get).toHaveBeenCalledTimes(2);
+    expect(b.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('binding never mutates the plan entry; no entry stays null', () => {
+    const probe: AppTokenProbe = { ensure: vi.fn(async () => {}) };
+    const out = bindPostAs(appEntry, probe);
+    expect(out?.probe).toBe(probe);
+    expect('probe' in appEntry).toBe(false);
+    expect(bindPostAs(null, probe)).toBeNull();
+    expect(boundPostAsFor({ repos: [appEntry] }, 'github.com/acme/other', probe)).toBeNull();
+    expect(boundPostAsFor(null, 'github.com/acme/a', probe)).toBeNull();
   });
 });
 

@@ -30,9 +30,9 @@ import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, forbidden } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { projectScope, userActor } from './common.ts';
 import { stateOf } from './org-apps.ts';
 import { deliver } from './workstation-setup.ts';
-import { projectScope, userActor } from './common.ts';
 
 /**
  * "Post as" (GWP-212.2): which organization app integration a project's shifts act as. The project stores references
@@ -458,8 +458,10 @@ export async function applyAppAccessCheckResult(
             detail: (error ?? 'The check failed.').slice(0, 400),
           })),
       };
+  // Only the repositories this command asked about: a runner cannot write rows for other repositories or projects.
+  const asked = new Set(repos.map((r) => r.repoId).filter((id): id is string => typeof id === 'string'));
   const now = ctx.clock.now();
-  for (const r of answer.repos)
+  for (const r of answer.repos.filter((x) => asked.has(x.repoId)))
     await exec(
       ctx.pool,
       `INSERT INTO project_app_access (project_id, repo_id, integration_id, state, code, detail, checked_at, workstation_id)

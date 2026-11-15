@@ -1,6 +1,6 @@
-import { isSafeGitRef, type PostAsRepo } from '@aom/shared';
+import { isSafeGitRef } from '@aom/shared';
 import { git, hasRemote } from './git.ts';
-import { identityErrorWire } from './identity.ts';
+import { type BoundPostAs, identityErrorWire } from './identity.ts';
 import { mergeInProgress, mergeMainIntoCard } from './sync-main.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -19,7 +19,7 @@ export interface ArchitectGitContext {
   mainBranch?: string;
   ref: string;
   /** The card repository's entry of the post-as plan: with an app, the merge is the app's or none. */
-  postAs?: PostAsRepo | null;
+  postAs?: BoundPostAs | null;
   auth?: GitAuth;
   /** Remembers the `origin/<main>` SHA merged into the card branch (the post-shift guard exempts what it changed). */
   recordMainSha: (sha: string) => void;

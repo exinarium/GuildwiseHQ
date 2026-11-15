@@ -35,6 +35,7 @@ import {
   PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
+  POST_AS_CAPABILITY,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -44,7 +45,6 @@ import {
   PROVIDER_KEYS_BOUND_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
   type ProviderAccountPromoteResult,
-  POST_AS_CAPABILITY,
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   RELAY_FEATURE,
@@ -100,7 +100,6 @@ import {
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { appTokenProbe, checkAppAccess } from './apps/access-check.ts';
-import { setAppTokenProbe } from './git/identity.ts';
 import { AppTokenBroker } from './apps/broker.ts';
 import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -139,6 +138,7 @@ import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
+import type { AppTokenProbe } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
@@ -734,6 +734,7 @@ export class Runner {
     this.toolchains.onChange = () => this.reportToolchains(false);
     this.runs = new RunManager({
       paths: this.paths,
+      appProbe: this.appProbe,
       findRepo: (n) => this.findRepo(n),
       send: (type, payload) => void this.client.send(type as never, payload as never),
       log: this.log,
@@ -761,6 +762,7 @@ export class Runner {
       paths: this.paths,
       config: opts.config,
       adapters: this.adapters,
+      appProbe: this.appProbe,
       beforeAuthReject: () => this.reportRuntimes(),
       ipc: this.ipc,
       outbox: this.outbox,
@@ -1036,11 +1038,18 @@ export class Runner {
         onChange: () => void this.integrations?.report(true),
       });
       this.appTokens = broker;
-      // A project that posts as an app commits as its bot only after a scoped token could be minted here.
-      setAppTokenProbe(appTokenProbe(broker));
     }
     return this.appTokens;
   }
+
+  /**
+   * This runner's own app token probe, handed to every commit path (shifts, finalize, release, submodule, run rebase).
+   * A project that posts as an app commits as its bot only after a scoped token could be minted from THIS runner's key
+   * store: several pairings run in one process, each with its own keys, so the probe is never shared through a global.
+   */
+  private readonly appProbe: AppTokenProbe = {
+    ensure: (app, repoName) => appTokenProbe(this.appBroker()).ensure(app, repoName),
+  };
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
   private repoHosts(): Partial<Record<'github' | 'gitlab', string[]>> {
@@ -2320,6 +2329,7 @@ export class Runner {
           const completion = await executeCompletion({
             payload: p,
             repoPath: repo.localPath,
+            appProbe: this.appProbe,
             worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
             worktreesDir: this.paths.worktrees,
             integrationDir: this.paths.integration,
@@ -2406,6 +2416,7 @@ export class Runner {
           ? await shipReleaseCommit({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
             })
@@ -2439,6 +2450,7 @@ export class Runner {
           ? await runReleaseDocsPrep({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
@@ -2475,6 +2487,7 @@ export class Runner {
           ? await publishRelease({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               forgeEnv: this.forgeEnv,
               auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
@@ -2503,6 +2516,7 @@ export class Runner {
             ? await bumpSubmodule({
                 payload: p,
                 repoPath: repo.localPath,
+                appProbe: this.appProbe,
                 integrationDir: this.paths.integration,
                 auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
               })
