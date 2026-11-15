@@ -15,6 +15,9 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 ### Fixed
 
 - The handoff checks and the worktree preparation no longer hang on the network. Package managers are kept offline in the check sandbox (pnpm, npm, yarn, corepack, uv and pip settings, `dotnet format --no-restore`, and no network namespace), so a check that needs a missing tool fails at once with its name instead of timing out after 5 minutes, and the worktree preparation installs from the shared package store (trusting the committed lockfile; runner setting `prepTrustLockfile`) or says plainly which package is missing.
+### Fixed
+
+- The Windows installer no longer asks for a restart at "Turning on WSL2" every time it runs. It now checks whether WSL2 works instead of whether one optional Windows feature is on, asks for a restart only when one is really pending and at most twice, and otherwise stops with a message that names what is still off. The restart for Ubuntu is also asked for only once.
 
 ## [1.8.0] - 2026-11-15
 

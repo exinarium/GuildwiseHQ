@@ -17,7 +17,7 @@ The installer has not reported in yet. Check that you ran the command on the com
 
 ## Windows asked me to restart {#windows-restart}
 
-Say yes. Turning on WSL2 (Linux inside Windows) needs one restart. Sign in as usual: the installer opens again by itself, and Windows may ask you to allow it. If it does not come back, run the command again.
+Say yes. Turning on WSL2 (Linux inside Windows) needs one restart. Sign in as usual: the installer opens again by itself, and Windows may ask you to allow it. If it does not come back, run the command again. The installer asks for at most two restarts for this step. If WSL2 is still not ready after that, it stops and names what is still off: turn on virtualization in the BIOS/UEFI of the PC, or run `wsl --install` in PowerShell, then run the command again.
 
 ## Ubuntu asks me for a user name and password (Windows) {#ubuntu-user}
 
