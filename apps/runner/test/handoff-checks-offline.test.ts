@@ -341,6 +341,34 @@ describe('judging with the role scope', () => {
     expect(r.blocking).toHaveLength(1);
   });
 
+  it('a code frame under an E2E finding (a URL with a port) is not an unmatched diagnostic: still deferred (R1)', async () => {
+    const framed = [
+      'echo "e2e/login.spec.ts:12:3 lint/style/noVar"',
+      'echo "  > 12 │ await page.goto(\'http://127.0.0.1:3000/login\'); // see foo.ts:12"',
+      'echo "    │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"',
+      'echo "   13 │ await expect(page).toHaveURL("https://example.com:443/")"',
+      'exit 1',
+    ].join('; ');
+    const r = await runHandoffChecks({
+      ...base(worktree()),
+      suites: [check('lint', framed)],
+      scope: scopeOf('builder', true),
+    });
+    expect(r.evidence[0]).toMatchObject({ status: 'deferred', owedBy: 'tester' });
+    expect(r.blocking).toEqual([]);
+  });
+
+  it('the checks use up the handoff deadline: the units are not run and say so (R2)', async () => {
+    const r = await runHandoffChecks({
+      ...base(worktree()),
+      totalBudgetMs: 1500,
+      suites: [check('lint', 'sleep 1')],
+      units: [unit('shared', { cwd: '.', handoffCmd: ['sh', '-c', 'exit 0 #', '{files}'] })],
+    });
+    expect(r.evidence[1]).toMatchObject({ kind: 'unit', status: 'error' });
+    expect(r.evidence[1]?.summary).toBe('not run: the handoff deadline was reached');
+  }, 20_000);
+
   it('route folders with brackets and parentheses are attributed to their file', async () => {
     const wt = worktree(['src/routes/[id].tsx', 'src/(group)/page.tsx', 'e2e/login.spec.ts']);
     const r = await runHandoffChecks({

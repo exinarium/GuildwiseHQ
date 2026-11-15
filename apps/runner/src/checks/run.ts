@@ -406,7 +406,7 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
       timeoutMin: r.suite.handoffTimeoutMin ?? UNIT_HANDOFF_TIMEOUT_MIN,
     });
 
-  const runGroup = async (jobs: Job[], budget: number): Promise<void> => {
+  const runGroup = async (jobs: Job[], budget: number, deadlineCut = false): Promise<void> => {
     const started = now();
     for (const job of jobs) {
       const { suite } = job;
@@ -443,7 +443,12 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
       }
       const remaining = budget - (now() - started);
       if (remaining <= 1000) {
-        fail('error', `not run: the ${Math.round(budget / 60_000)}-minute budget was used up`);
+        fail(
+          'error',
+          deadlineCut
+            ? 'not run: the handoff deadline was reached'
+            : `not run: the ${Math.round(budget / 60_000)}-minute budget was used up`,
+        );
         continue;
       }
       if (!i.launch) {
@@ -572,8 +577,11 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
   // `totalBudgetMs` caps both groups together (the whole handoff must fit inside the agent's command wait).
   const t0 = now();
   const total = i.totalBudgetMs ?? Number.POSITIVE_INFINITY;
-  await runGroup(checkJobs, Math.min(i.budgetMs ?? CHECKS_BUDGET_MS, total));
-  await runGroup(unitJobs, Math.min(i.unitBudgetMs ?? UNIT_BUDGET_MS, total - (now() - t0)));
+  const checksOwn = i.budgetMs ?? CHECKS_BUDGET_MS;
+  await runGroup(checkJobs, Math.min(checksOwn, total), total < checksOwn);
+  const unitsOwn = i.unitBudgetMs ?? UNIT_BUDGET_MS;
+  const unitsLeft = total - (now() - t0);
+  await runGroup(unitJobs, Math.min(unitsOwn, unitsLeft), unitsLeft < unitsOwn);
 
   const blockingIdx = evidence.flatMap((e, ix) => (checkStatusPasses(e.status) ? [] : [ix]));
   const blocking = blockingIdx.map((ix) => evidence[ix] as CheckEvidence);
