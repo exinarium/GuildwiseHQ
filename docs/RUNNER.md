@@ -1759,6 +1759,69 @@ retried: a failed or cut-off preparation is a line in the shift's progress, a no
 and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The
 config switch `prepareWorktrees` (default `true`) turns it off.
 
+**Offline, from the shared package store (handoff checks release).** The installs run with no network: the run-step
+sandbox gets a network namespace of its own (`--unshare-net`) and the offline package-manager environment of the handoff
+checks (below). pnpm cannot re-verify a lockfile against its supply-chain policies offline (that needs registry metadata),
+so the preparation trusts the committed lockfile (`pnpm_config_trust_lockfile`); the config switch `prepTrustLockfile`
+(default `true`) turns that off, and such an install then fails at once with a plain reason. A package missing from the
+store fails fast with "not in the shared package store: <package>; ... run the install in your shell (it fills the store)";
+nothing waits for the time limit. A worktree whose dependencies were never prepared (a card in flight, a reused worktree)
+is prepared once, before the first handoff checks of a shift.
+
+### Handoff checks
+
+Every **success handoff of a builder, a tester and a writer** on a card with a worktree (`aom handoff`, `aom test pass`,
+`aom outcome done`) runs the project's confirmed checks (kind `check`: lint, format, typecheck), and at a builder's
+handoff the unit tests of the files the card changed. The server sends them in `brief.checks` (`suites`, and `units` for a
+builder only); the runner runs them, never the agent, on the committed head (a tester's or writer's leftovers are committed
+first, as a builder's are), one after the other in the order format, lint, typecheck under a 6-minute budget, then the
+unit runs under their own 10-minute budget.
+
+- **Where they run.** `RunManager.checkLaunch`: the run-step sandbox profile (credential folders, the runner's data dir and
+  the buses masked, no .NET user secrets), with `network: 'none'` (bubblewrap `--unshare-net`, only loopback; where the host
+  forbids unprivileged network namespaces the runner logs a warning once and goes on with the environment only) and the
+  offline package-manager environment (`checks/offline-env.ts`): `pnpm_config_verify_deps_before_run=false`,
+  `pnpm_config_offline=true` and their `npm_config_*` twins (pnpm 11+ reads only `pnpm_config_*`, pnpm 8-10 and npm read
+  `npm_config_*`), `npm_config_yes=false` (`npx` never downloads), Yarn Berry, Corepack (`COREPACK_HOME` at the real home's
+  cache when it exists) and `UV_OFFLINE`/`PIP_NO_INDEX`; `dotnet format` gets `--no-restore`. Nothing is downloaded during
+  a check. Root cause this fixes (1.8.0): pnpm 11+ checks the install state before every `pnpm run` and, finding the
+  worktree's `node_modules` missing or stale, starts an install that first verifies the lockfile against its supply-chain
+  policies (registry metadata) and then fetches tarballs with retries; with no resolver in the sandbox (the `/run/systemd`
+  mask hides `/etc/resolv.conf`'s target on systemd-resolved hosts) every check timed out after 5 minutes. Now such a check
+  fails at once ("biome: not found", `ERR_PNPM_NO_OFFLINE_META`) and is reported as a missing tool.
+- **What blocks.** Whole repository: a finding in **any** file at the card's head refuses the handoff, whoever introduced
+  it; the refusal groups the findings as "In files this card changed" and "In other files", both blocking. A check that
+  produced no verdict refuses too: `timeout`, and `error` (missing tool or script, with the "X: not found" line quoted;
+  could not start; budget used up; output incomplete with no findings; a non-zero exit naming no file). The refusal names
+  the check, its command, the last 20 output lines for an error or timeout, the fix command, the log path, and what to do:
+  fix it, commit and hand off again, or `aom question --topic environment` when the check itself cannot run. A project with
+  no confirmed check of a kind is unaffected. Error and timeout results are never cached; other results are cached per head.
+- **Files the role may not edit.** Each finding's paths are classified with the guard's own scope (`guard.ts` `mayEdit`).
+  A builder's findings only in E2E test content are `deferred`, owed by the tester: stored, shown to the reviewers, not
+  blocking (the tester's own handoff then runs the same checks and blocks on them). A tester or writer is refused for a
+  finding in code it may not edit, with "only a builder can fix ..." and how to hand it on (`aom test fail` for a tester,
+  `aom question --topic code` for a writer). The 1.7.0 filter that hid E2E findings from a builder is gone.
+- **Unit tests at a builder's handoff.** A confirmed `unit` suite with a `handoffCmd` (it must contain `{files}`) gets the
+  card's changed paths that exist at the head and lie in the suite's folder (the deepest folder wins), relative to it; more
+  than 200 runs the whole suite. A failing test file, a timeout or an error refuses. A suite without `handoffCmd` is
+  `regression_only` ("not run at handoff: runs at regression") and does not block. Testers never get unit suites.
+- **Stored and shown.** An accepted handoff carries `checks` and `checksPolicy: 2` in `shift.report`. A refusal goes to the
+  server as a non-terminal comment with `checks`, `headSha` and `checksPolicy` (once per distinct refusal text in a shift):
+  the card thread gets the comment with `data.handoffChecks`, and the same check erroring or timing out a second time in a
+  row on a project raises one non-blocking desk alert (`handoff_check_broken`). The server refuses a policy-2 report whose
+  checks do not pass (defence in depth); an older runner's results keep the old behaviour (only `failed` refuses, the rest is
+  a card warning) for one release. The agent's `--lint-*` and `--test-*` text is shown as its note; the checks are the
+  evidence.
+- **Suite cards.** On a regression or full-suite card the tester's brief carries `regressionUnits` (every confirmed unit
+  suite of the repository). The runner runs each whole in the background (`checkLaunch` with `network: 'host'`: reviewed
+  code, a suite may reach a local database) and reports it with `test.suite` (`kind: 'unit'`, `measured: true`); the tester
+  may not report one. `aom test pass` is refused while a unit suite runs, failed or is unreported (runner and server); `aom
+  test fail` gets a `Bug: Unit tests fail in <file> (<suite>)` / `Test: unit:<suite>:<file>` section per failing test file,
+  so the server files one bug card per file and records a rerun's same failure as seen again.
+- **Detection.** `detect` proposes checks, `detectUnits` (builder) proposes one unit suite per package with a `test:unit`
+  or `test` script, from the base branch, with a `vitest related` or `jest --findRelatedTests` handoff command where the
+  runner knows one. Proposals wait unconfirmed (Project settings > Run and test).
+
 **Submodules are filled before the preparation.** For every card shift with a card worktree (fresh or reopened, never a
 resumed shift, DevOps conflict attempts included) the runner fills the submodules listed in the worktree's `.gitmodules`
 at the commits the index pins, after it accepted the shift and before the agent starts (not inside the worktree creation,

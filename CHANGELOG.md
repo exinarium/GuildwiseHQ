@@ -4,6 +4,15 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- Handoff checks run, block and cover the whole repository. Lint, format and typecheck now run at every success handoff of a builder, a tester and a writer, over the whole repository: a problem in any file refuses the handoff, also in files the card did not change, and a check that cannot run (an error or a timeout) refuses it too, with its last output lines and what to do. Problems only in end-to-end test files are owed by the tester and do not block a builder; a tester or writer is told who can fix code it may not edit. The refusal is posted on the card, and a check that cannot run twice in a row raises a desk alert. The agent's own lint and test text is shown as its note; what the runner measured is the evidence. Update workstations to the next runner; older runners keep the old behaviour for one release.
+- Unit tests as a handoff check. A confirmed unit suite with a handoff command runs the unit tests of the files the card changed at a builder's handoff; a failing test refuses it. Suites without one run at regression. On regression and full-suite cards the runner runs every confirmed unit suite whole and each failing test file becomes one bug card. Testers never run unit tests. Unit suites are proposed from the repository and confirmed under Tests and settings. Migration 3000.
+
+### Fixed
+
+- The handoff checks and the worktree preparation no longer hang on the network. Package managers are kept offline in the check sandbox (pnpm, npm, yarn, corepack, uv and pip settings, `dotnet format --no-restore`, and no network namespace), so a check that needs a missing tool fails at once with its name instead of timing out after 5 minutes, and the worktree preparation installs from the shared package store (trusting the committed lockfile; runner setting `prepTrustLockfile`) or says plainly which package is missing.
+
 ## [1.8.0] - 2026-11-15
 
 Runner 0.1.75.
