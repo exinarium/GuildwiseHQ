@@ -2279,6 +2279,7 @@ export class ShiftSupervisor {
                 ...(s.env?.PATH ? { PATH: s.env.PATH } : {}),
               },
             },
+            ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
           }
         : {}),
     };

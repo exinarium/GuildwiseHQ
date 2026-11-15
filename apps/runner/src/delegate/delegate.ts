@@ -92,6 +92,11 @@ export interface DelegateCaller {
   /** The targets granted to the caller (from the start message); none: no delegation. */
   delegation?: DelegationSpec | undefined;
   work?: DelegateWork | undefined;
+  /**
+   * The commit identity the caller resolved for its worktree (a shift: the project's app bot, "Commit as" or git config).
+   * A child that works in that worktree commits with it; without one, the workstation's identity as before.
+   */
+  identity?: { name: string; email: string } | null | undefined;
   /** The caller is set to ask before pack scripts: its delegates ask through the caller too. */
   packScriptsGated?: boolean | undefined;
 }
@@ -393,7 +398,9 @@ export class DelegateRunner {
         this.deps.paths,
         agentId,
         resolved.name,
-        await resolveCommitIdentity(this.deps.paths.root),
+        works && caller.work && caller.identity
+          ? { name: caller.identity.name, email: caller.identity.email }
+          : await resolveCommitIdentity(this.deps.paths.root),
       );
       tmp = sandbox.tmp;
       releaseTmp = holdAgentTmp(sandbox);

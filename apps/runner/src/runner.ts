@@ -880,6 +880,8 @@ export class Runner {
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
       forge: () => this.forgeEnv,
+      appProbe: this.appProbe,
+      scopeFor: (plan) => this.scopeFor(plan),
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.graph = new GraphService({
