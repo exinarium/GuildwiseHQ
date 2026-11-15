@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
+import {
+  AppAdoptPayloadSchema,
+  AppConnectPayloadSchema,
+  AppRemovePayloadSchema,
+  AppSyncPayloadSchema,
+  AppTestPayloadSchema,
+} from '../apps/index.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
 import {
@@ -1332,6 +1339,11 @@ export const RunnerCommandNameSchema = z.enum([
   'storage.remove',
   'storage.sync',
   'storage.discard',
+  'app.connect',
+  'app.test',
+  'app.adopt',
+  'app.remove',
+  'app.sync',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1451,6 +1463,11 @@ export const CommandPayloadSchemas = {
   'storage.remove': StorageRemovePayloadSchema,
   'storage.sync': StorageSyncPayloadSchema,
   'storage.discard': StorageDiscardPayloadSchema,
+  'app.connect': AppConnectPayloadSchema,
+  'app.test': AppTestPayloadSchema,
+  'app.adopt': AppAdoptPayloadSchema,
+  'app.remove': AppRemovePayloadSchema,
+  'app.sync': AppSyncPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -1557,6 +1574,12 @@ export const RunnerShiftOutcomeSchema = z.enum(['reported', 'no_report', 'stoppe
 
 // ----------------------------------------------------------------- runner -> server
 
+/**
+ * Upper bound of `hello.capabilities`. Runners announce one entry per feature and the list only grows, so the bound sits
+ * well above today's count: a runner whose hello fails this check gets no welcome and never connects.
+ */
+export const MAX_HELLO_CAPABILITIES = 200;
+
 export const HelloSchema = msg('hello', {
   runnerVersion: z.string(),
   protocol: z.literal(PROTOCOL_VERSION),
@@ -1583,7 +1606,7 @@ export const HelloSchema = msg('hello', {
   /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
   sudoKey: SudoKeySchema.optional(),
   /** Features this runner has (additive): `runs:1` = it can run a branch (`run.start`); the web app hides the buttons otherwise. */
-  capabilities: z.array(z.string().max(40)).max(50).optional(),
+  capabilities: z.array(z.string().max(40)).max(MAX_HELLO_CAPABILITIES).optional(),
   /** The runner's cap on run environments held at once (default 2 when absent). */
   maxRunEnvironments: z.number().int().positive().optional(),
   /** The runner supports connecting integrations from the web (docs/design/integrations-page.md). Absent from older runners. */

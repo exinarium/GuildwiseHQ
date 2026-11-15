@@ -1,6 +1,7 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentUxProjectors } from './agent-ux.ts';
 import { agentProjectors } from './agents.ts';
+import { appIntegrationProjectors } from './app-integrations.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
 import { boardProjectors } from './board.ts';
@@ -145,6 +146,7 @@ const domains: Array<Record<string, Projector>> = [
   agentUxProjectors,
   relayProjectors,
   storageProjectors,
+  appIntegrationProjectors,
   formProjectors,
   publicFormProjectors,
 ];
@@ -295,6 +297,8 @@ export const PROJECTION_TABLES = [
   'backlog_items',
   'relay_integrations',
   'storage_connections',
+  'org_app_integrations',
+  'org_app_integration_workstations',
   'forms',
   'form_versions',
   'form_publications',

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir, hostname, platform } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import {
+  APP_INTEGRATIONS_CAPABILITY,
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_DIAGNOSTICS_CAPABILITY,
@@ -96,6 +97,8 @@ import {
 } from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { AppTokenBroker } from './apps/broker.ts';
+import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
@@ -1013,7 +1016,21 @@ export class Runner {
       sessionCwd: join(this.paths.root, 'tmp', 'integrations'),
       touchRecheck: () => touchRecheck(this.paths.secrets),
       sealKey: (name) => this.keys.deriveFileKey(name),
+      apps: this.appBroker(),
     };
+  }
+
+  private appTokens: AppTokenBroker | undefined;
+
+  /** One token broker per runner process: the app keys stay sealed on disk, the tokens in memory only. */
+  private appBroker(): AppTokenBroker {
+    this.appTokens ??= new AppTokenBroker({
+      store: new AppKeyStore(this.paths.secrets, (n) => this.keys.deriveFileKey(n)),
+      fetch: globalThis.fetch,
+      now: Date.now,
+      onChange: () => void this.integrations?.report(true),
+    });
+    return this.appTokens;
   }
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
@@ -1617,6 +1634,7 @@ export class Runner {
             : ['runs:1', 'runs:2', 'runs:3']),
         'ceo:1',
         STORAGE_CAPABILITY,
+        APP_INTEGRATIONS_CAPABILITY,
         STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,
@@ -2568,6 +2586,9 @@ export class Runner {
       ) {
         // Refusals (web turned off, wrong envelope, machine-wide login) are answers: ok:true with a sentence, never a retry.
         done(true, await this.integrations.handle(command, payload));
+      } else if (command.startsWith('app.')) {
+        // Automated apps (Settings > Automated apps): typed refusals are answers, never a retry; never a key or token.
+        done(true, await this.integrations.handleApp(command, payload));
       } else if (command.startsWith('storage.')) {
         // Typed errors are answers (ok:true with `error`), never a retry; no secret is ever in an answer.
         done(true, await this.storage.handle(command, payload));

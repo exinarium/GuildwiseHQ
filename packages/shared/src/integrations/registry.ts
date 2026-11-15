@@ -50,7 +50,7 @@ export interface IntegrationKind {
   instances:
     | 'single'
     | {
-        by: 'host' | 'organization' | 'server' | 'provider-host' | 'account';
+        by: 'host' | 'organization' | 'server' | 'provider-host' | 'account' | 'installation';
         label: string;
         placeholder: string;
         defaultInstance?: string;
@@ -650,6 +650,49 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
       "secrets/google-sheets.json, encrypted (AES-256-GCM) with this runner's key, this workstation only.",
     cli: 'guildwise-runner integrations connect google-sheets {instance}',
     minRunner: WHATSAPP_MIN_RUNNER,
+    minIntegrationsVersion: 1,
+  },
+  {
+    id: 'github-app',
+    label: 'GitHub App',
+    group: 'git',
+    instances: { by: 'installation', label: 'App and installation', placeholder: '123456:7890123' },
+    scope: 'workstation',
+    methods: [
+      {
+        id: 'app_key',
+        label: 'App private key',
+        flow: 'local_only',
+        scopes: [
+          { name: 'contents:write', why: 'push branches and commits', required: true },
+          { name: 'pull_requests:write', why: 'open, update and comment on pull requests', required: true },
+          { name: 'issues:write', why: 'comment on issues', required: true },
+          { name: 'metadata:read', why: 'read the repositories the app is installed on', required: true },
+          { name: 'workflows:write', why: 'only when agents must edit .github/workflows', required: false },
+        ],
+        steps: [
+          {
+            text: 'The organization Owner adds the app under Settings > Automated apps and picks the workstations that hold its key.',
+          },
+          {
+            text: 'On a workstation without a browser, run the command below with the downloaded private key file.',
+          },
+        ],
+        warning: 'Anyone who controls a workstation that holds the key can act as the app.',
+      },
+    ],
+    help: {
+      summary: 'A GitHub App that agents act as: commits, pull requests and comments show the bot user.',
+      docsUrl: 'https://docs.github.com/en/apps/creating-github-apps',
+    },
+    test: {
+      label: 'Check the app with GitHub',
+      what: 'Signs an app JWT, reads the installation and mints a short-lived token.',
+    },
+    storage:
+      "secrets/app-integrations.json, encrypted (AES-256-GCM) with this runner's key, this workstation only. Tokens are kept in memory only.",
+    cli: 'guildwise-runner apps connect github --app-id <id> --installation <id> --key-file <path>',
+    minRunner: '0.1.75',
     minIntegrationsVersion: 1,
   },
 ] as const;
