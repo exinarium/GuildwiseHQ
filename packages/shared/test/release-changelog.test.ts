@@ -139,7 +139,10 @@ describe('releaseChangelog', () => {
     // the file: right after a release the real Unreleased section is empty, between releases it has entries without one.
     const raw = readFileSync(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
     // A release being prepared has a heading without a date; leave it out, the test needs the dated releases.
-    const file = raw.replace(/## \[\d+\.\d+\.\d+\]\n[\s\S]*?(?=## \[)/, '');
+    const file = raw
+      .replace(/## \[\d+\.\d+\.\d+\]\n[\s\S]*?(?=## \[)/, '')
+      // entries waiting under Unreleased (between releases) are not part of the released head this test reads
+      .replace(/## \[Unreleased\]\n[\s\S]*?(?=## \[\d)/, '## [Unreleased]\n\n');
     const real = file.replace(
       /## \[Unreleased\]\n[\s\S]*?## \[\d+\.\d+\.\d+\] - (?:\d{4}-\d{2}-\d{2}|Unreleased)\n/,
       '## [Unreleased]\n',

@@ -1,15 +1,25 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CHECKS_BUDGET_MS, type CheckEvidence, type IntegrationSuite, isSafeRelativeDir } from '@aom/shared';
-import { type Attribution, attribute, stripAnsi } from './attribute.ts';
+import {
+  CHECKS_BUDGET_MS,
+  type CheckEvidence,
+  checkStatusPasses,
+  type IntegrationSuite,
+  isSafeRelativeDir,
+  UNIT_BUDGET_MS,
+  UNIT_HANDOFF_TIMEOUT_MIN,
+} from '@aom/shared';
+import { type Attribution, attribute, type Finding, stripAnsi } from './attribute.ts';
+import { failingTestFiles, handoffUnitRuns } from './units.ts';
 
 /** The most output of one check the runner keeps in memory (the rest is dropped and the result says so). */
 export const CHECK_OUTPUT_CAP = 2 * 1024 * 1024;
 const REFUSAL_MAX = 8000;
 const KILL_GRACE_MS = 2000;
+// (a bare ENOENT in a tool's output is a missing file, not a missing tool: only `spawn <cmd> ENOENT` counts)
 const MISSING_TOOL =
-  /command not found|: not found|ERR_PNPM_NO_SCRIPT|Missing script|is not recognized as an internal or external command|ENOENT/i;
+  /command not found|: not found|ERR_PNPM_NO_SCRIPT|Missing script:|is not recognized as an internal or external command|spawn \S+ ENOENT/i;
 
 export interface CheckLaunch {
   cmd: string;
@@ -20,8 +30,26 @@ export interface CheckLaunch {
   tmp?: string;
 }
 
+/** Which files the handing-off role may edit (the guard's own scope rules), and what to do about the rest. */
+export interface CheckScope {
+  /** May this role edit the repository-relative path? */
+  mayEdit: (path: string) => boolean;
+  /** The role that can fix a finding in a path this role may not edit. */
+  ownerOf: (path: string) => string;
+  /**
+   * True (a builder): a check whose only findings are in files the role may not edit is `deferred` (owed by the owner, does
+   * not block). False (a tester, a writer): it still refuses, and the refusal says who can fix it and how to report it.
+   */
+  defer: boolean;
+  /** Tester or writer: how to hand a finding in a file it may not edit to the role that can fix it. */
+  reportHint?: string;
+}
+
 export interface RunChecksInput {
+  /** The confirmed checks (lint, format, typecheck) of the card's repository. */
   suites: readonly IntegrationSuite[];
+  /** A builder's handoff: the confirmed unit suites (the tests of the changed files run, see `checks/units.ts`). */
+  units?: readonly IntegrationSuite[];
   worktree: string;
   changedPaths: readonly string[];
   headSha: string;
@@ -33,17 +61,22 @@ export interface RunChecksInput {
   spawnImpl?: typeof nodeSpawn;
   now?: () => number;
   budgetMs?: number;
+  unitBudgetMs?: number;
+  /** The most the checks and the unit runs together may take (absent: their own budgets only). */
+  totalBudgetMs?: number;
   /** Results by head and check, so a second `aom handoff` at the same head does not run them again (never `error`/`timeout`). */
   cache?: Map<string, { evidence: CheckEvidence; log: string }>;
+  /** Absent: every file counts as the role's own (nothing is deferred). */
+  scope?: CheckScope;
 }
 
 export interface RunChecksResult {
   evidence: CheckEvidence[];
-  /** The checks that found problems in files the card changed. */
+  /** The checks that refuse the handoff: every status except passed, deferred and regression_only. */
   blocking: CheckEvidence[];
   /** The text that refuses the handoff (empty when nothing blocks). */
   refusal: string;
-  /** One line for the accepted handoff: what ran and what could not. */
+  /** One line for the accepted handoff: what ran. */
   summary: string;
 }
 
@@ -163,190 +196,403 @@ export function capture(
   });
 }
 
-function judge(
-  suite: IntegrationSuite,
-  c: Captured,
-  a: Attribution,
-): Pick<CheckEvidence, 'status' | 'summary'> {
+/** The order the checks run in: format, lint, typecheck (quick checks first, so lint never gets a leftover budget). */
+export function checkOrder(suite: Pick<IntegrationSuite, 'name' | 'cmd'>): number {
+  const t = `${suite.name} ${suite.cmd.join(' ')}`.toLowerCase();
+  if (/typecheck|type-check|check-types|\btsc\b|mypy/.test(t)) return 2;
+  if (/format|\bfmt\b|prettier|\bblack\b|isort|gofmt/.test(t)) return 0;
+  return 1;
+}
+
+const lastLines = (output: string, n = 20): string[] =>
+  stripAnsi(output)
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim())
+    .slice(-n)
+    .map((l) => l.slice(0, 300));
+
+/** The first "X: not found" style line of the output, quoted in a missing-tool verdict. */
+const missingLine = (output: string): string | undefined =>
+  stripAnsi(output)
+    .split(/\r?\n/)
+    .find((l) => MISSING_TOOL.test(l))
+    ?.trim()
+    .slice(0, 200);
+
+type Verdict = Pick<CheckEvidence, 'status' | 'summary'>;
+
+/** What did not produce a verdict, or null when the run ended normally. */
+function noVerdict(timeoutMin: number, c: Captured): Verdict | null {
   if (c.aborted) return { status: 'error', summary: 'stopped: the shift ended while the check was running' };
   if (c.spawnError !== undefined) {
     return /ENOENT/.test(c.spawnError)
       ? { status: 'error', summary: `missing tool: ${c.spawnError}`.slice(0, 500) }
       : { status: 'error', summary: `could not start: ${c.spawnError}`.slice(0, 500) };
   }
-  if (c.timedOut)
-    return { status: 'timeout', summary: `timed out after ${plural(suite.timeoutMin, 'minute')}` };
+  if (c.timedOut) return { status: 'timeout', summary: `timed out after ${plural(timeoutMin, 'minute')}` };
+  return null;
+}
+
+const missingTool = (c: Captured): Verdict => {
+  const line = missingLine(c.output);
+  return {
+    status: 'error',
+    summary: `missing tool or script: the command could not run here${line ? ` ("${line}")` : ` (exit ${c.exitCode ?? '?'})`}`,
+  };
+};
+
+/**
+ * A check's verdict: passed (exit 0), failed (any finding, in any file of the repository), timeout, or error (missing
+ * tool, could not start, stopped, output incomplete with no findings, a non-zero exit naming no file).
+ */
+export function judge(suite: Pick<IntegrationSuite, 'timeoutMin'>, c: Captured, a: Attribution): Verdict {
+  const nv = noVerdict(suite.timeoutMin, c);
+  if (nv) return nv;
   if (c.exitCode === 0) return { status: 'passed', summary: 'passed' };
-  if (c.exitCode === 126 || c.exitCode === 127 || (a.introducedCount === 0 && MISSING_TOOL.test(c.output)))
-    return { status: 'error', summary: 'missing tool or script: the command could not run here' };
-  if (a.introducedCount > 0)
-    return {
-      status: 'failed',
-      summary: `${plural(a.introducedCount, 'problem')} in files this card changed${
-        a.elsewhereCount ? `, ${plural(a.elsewhereCount, 'more')} in other files (not blocking)` : ''
-      }`,
-    };
+  const total = a.introducedCount + a.elsewhereCount;
+  if (c.exitCode === 126 || c.exitCode === 127 || (total === 0 && MISSING_TOOL.test(c.output)))
+    return missingTool(c);
+  if (total > 0) {
+    const parts = [
+      ...(a.introducedCount ? [`${a.introducedCount} in files this card changed`] : []),
+      ...(a.elsewhereCount ? [`${a.elsewhereCount} in other files`] : []),
+    ];
+    return { status: 'failed', summary: `${plural(total, 'problem')}: ${parts.join(', ')}` };
+  }
   if (a.incomplete)
     return { status: 'error', summary: `the output is incomplete, so it cannot be judged: ${a.incomplete}` };
-  if (a.elsewhereCount > 0)
-    return {
-      status: 'preexisting',
-      summary: `${plural(a.elsewhereCount, 'problem')} only in files this card did not change`,
-    };
   return { status: 'error', summary: `failed (exit ${c.exitCode ?? '?'}) without naming a file` };
 }
 
-const cmdText = (s: IntegrationSuite): string => s.cmd.join(' ').slice(0, 500);
+/** A unit run's verdict: passed (exit 0), failed (failing test files named), timeout, or error. */
+export function judgeUnit(timeoutMin: number, c: Captured, failing: readonly string[]): Verdict {
+  const nv = noVerdict(timeoutMin, c);
+  if (nv) return nv;
+  if (c.exitCode === 0) return { status: 'passed', summary: 'passed' };
+  if (c.exitCode === 126 || c.exitCode === 127 || (failing.length === 0 && MISSING_TOOL.test(c.output)))
+    return missingTool(c);
+  if (failing.length > 0)
+    return { status: 'failed', summary: `${plural(failing.length, 'test file')} failing` };
+  if (/\b[1-9]\d* failed\b/i.test(c.output)) return { status: 'failed', summary: 'tests failed' };
+  return { status: 'error', summary: `failed (exit ${c.exitCode ?? '?'}) without naming a failing test` };
+}
 
-function refusalText(blocking: Array<{ ev: CheckEvidence; log: string }>, others: CheckEvidence[]): string {
+const cmdText = (argv: readonly string[]): string => argv.join(' ').slice(0, 500);
+const LIST_MAX = 20;
+
+function refusalText(blocking: Array<{ ev: CheckEvidence; log: string }>, scope?: CheckScope): string {
   const parts: string[] = [];
   for (const { ev, log } of blocking) {
-    const lines = [
-      `the check "${ev.name}" (\`${ev.command}\`) fails: ${ev.summary}:`,
-      ...ev.introduced.map((l) => `  ${l}`),
-      ev.fix
-        ? `Fix: \`${ev.fix}\` may repair this: run it, review the diff, commit, then run \`aom handoff\` again.`
-        : 'Fix the problems above, commit, then run `aom handoff` again.',
-      ...(log ? [`Full output: ${log}`] : []),
-    ];
-    const elsewhere = ev.elsewhereCount;
-    if (elsewhere > 0)
-      lines.push(`Not blocking: ${plural(elsewhere, 'problem')} in files this card did not change.`);
+    const what = ev.kind === 'unit' ? 'the unit tests' : 'the check';
+    const lines: string[] = [];
+    if (ev.status === 'error' || ev.status === 'timeout') {
+      lines.push(
+        `${what} "${ev.name}" (\`${ev.command}\`) did not produce a verdict (${ev.status === 'timeout' ? 'timed out' : 'error'}): ${ev.summary}.`,
+      );
+      if (ev.tail?.length) lines.push('Last lines of its output:', ...ev.tail.map((l) => `  ${l}`));
+    } else {
+      lines.push(`${what} "${ev.name}" (\`${ev.command}\`) fails: ${ev.summary}.`);
+      const inChanged = ev.introducedCount ?? ev.introduced.length;
+      if (inChanged)
+        lines.push(`In files this card changed (${inChanged}):`, ...ev.introduced.map((l) => `  ${l}`));
+      if (ev.elsewhereCount)
+        lines.push(`In other files (${ev.elsewhereCount}):`, ...ev.elsewhere.map((l) => `  ${l}`));
+      if (ev.owed?.length && !scope?.defer) {
+        lines.push(
+          `Only a ${ev.owedBy ?? 'builder'} can fix these files (you may not edit them): ${ev.owed.length} problem(s), listed above.`,
+        );
+        if (scope?.reportHint) lines.push(scope.reportHint);
+      }
+    }
+    if (ev.owed?.length && scope?.defer)
+      lines.push(
+        `Owed by the ${ev.owedBy ?? 'tester'} (does not block you, ${ev.owedCount ?? ev.owed.length}):`,
+        ...ev.owed.map((l) => `  ${l}`),
+      );
+    if (ev.fix)
+      lines.push(`Fix: \`${ev.fix}\` may repair formatting and imports: run it, review the diff, commit.`);
+    if (log) lines.push(`Full output: ${log}`);
     parts.push(lines.join('\n'));
   }
-  const unjudged = others.filter((e) => e.status === 'error' || e.status === 'timeout');
-  if (unjudged.length)
-    parts.push(
-      `Not judged (does not block): ${unjudged.map((e) => `"${e.name}": ${e.summary}`).join('; ')}.`,
-    );
-  parts.push('Nothing was handed to review.');
+  parts.push(
+    [
+      'Every lint, format and typecheck finding blocks, in any file of the repository, also in files you did not change. Fix them, commit, then run `aom handoff` again.',
+      'If a check itself cannot run here (a missing tool, a broken environment), ask with `aom question --topic environment`, quoting this.',
+      'Nothing was handed on.',
+    ].join('\n'),
+  );
   const text = parts.join('\n\n');
   return text.length <= REFUSAL_MAX
     ? text
-    : `${text.slice(0, REFUSAL_MAX - 40)}\n[cut]\nNothing was handed to review.`;
+    : `${text.slice(0, REFUSAL_MAX - 40)}\n[cut]\nNothing was handed on.`;
+}
+
+/** Splits a failed check's findings into the role's own and those it may not edit (owed by another role). */
+function splitFindings(
+  a: Attribution,
+  scope: CheckScope | undefined,
+): { own: Finding[]; owed: Finding[]; owedBy?: string } {
+  if (!scope) return { own: a.findings, owed: [] };
+  const own: Finding[] = [];
+  const owed: Finding[] = [];
+  const owners = new Set<string>();
+  for (const f of a.findings) {
+    const editable = f.paths.length === 0 || f.paths.some((p) => scope.mayEdit(p));
+    if (editable) own.push(f);
+    else {
+      owed.push(f);
+      for (const p of f.paths) owners.add(scope.ownerOf(p));
+    }
+  }
+  return { own, owed, ...(owners.size ? { owedBy: [...owners].join(' or ') } : {}) };
 }
 
 /**
  * Runs the confirmed checks of the card's repository on the committed tree (the worktree, after the autocommit), one after
- * the other under a shared budget. A failure in a changed file blocks; everything that cannot be judged is a recorded
- * warning, never a silent pass.
+ * the other under a shared budget, in the order format, lint, typecheck; then a builder's unit test runs under their own
+ * budget. Whole repository: a finding in any file refuses the handoff (findings are grouped by "this card changed" only to
+ * guide the agent). A check that produced no verdict (error, timeout) refuses too. A builder's findings only in files it
+ * may not edit (E2E test content) are `deferred`, owed by the tester.
  */
 export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResult> {
   const now = i.now ?? Date.now;
   const spawnImpl = i.spawnImpl ?? nodeSpawn;
-  const started = now();
-  const budget = i.budgetMs ?? CHECKS_BUDGET_MS;
   const changed = new Set(i.changedPaths);
   const evidence: CheckEvidence[] = [];
   const logs: string[] = [];
   const sha8 = i.headSha.slice(0, 8);
+  const exists = (rel: string) => existsSync(join(i.worktree, rel));
   try {
     mkdirSync(i.logDir, { recursive: true });
   } catch {
     // the log is a convenience
   }
 
-  for (const suite of i.suites) {
-    const base = {
-      name: suite.name.slice(0, 60),
-      command: cmdText(suite),
-      cwd: suite.cwd,
-      ...(suite.fix ? { fix: suite.fix.join(' ').slice(0, 500) } : {}),
-    };
-    const fail = (status: 'error' | 'timeout', summary: string, durationMs = 0): void => {
+  interface Job {
+    suite: IntegrationSuite;
+    kind: 'check' | 'unit';
+    argv: string[];
+    timeoutMin: number;
+  }
+  const checkJobs: Job[] = [...i.suites]
+    .map((suite, ix) => ({ suite, ix }))
+    .sort((a, b) => checkOrder(a.suite) - checkOrder(b.suite) || a.ix - b.ix)
+    .map(({ suite }) => ({ suite, kind: 'check' as const, argv: suite.cmd, timeoutMin: suite.timeoutMin }));
+  const unitJobs: Job[] = [];
+  for (const u of i.units ?? []) {
+    if (!u.handoffCmd?.length) {
       evidence.push({
-        ...base,
-        status,
+        name: u.name.slice(0, 60),
+        command: cmdText(u.cmd),
+        cwd: u.cwd,
+        kind: 'unit',
+        status: 'regression_only',
         exitCode: null,
-        durationMs,
-        summary,
+        durationMs: 0,
+        summary: 'not run at handoff: runs at regression',
         introduced: [],
         elsewhere: [],
         elsewhereCount: 0,
       });
       logs.push('');
-    };
-    if (!isSafeRelativeDir(suite.cwd)) {
-      fail('error', 'the folder must stay inside the repository');
-      continue;
     }
-    const key = `${i.headSha}\0${suite.name}\0${suite.cmd.join(' ')}\0${suite.cwd}`;
-    const hit = i.cache?.get(key);
-    if (hit) {
-      evidence.push(hit.evidence);
-      logs.push(hit.log);
-      continue;
-    }
-    const remaining = budget - (now() - started);
-    if (remaining <= 1000) {
-      fail('error', `not run: the ${Math.round(budget / 60_000)}-minute budget for checks was used up`);
-      continue;
-    }
-    if (!i.launch) {
-      fail('error', 'this runner cannot run checks');
-      continue;
-    }
-    let l: CheckLaunch;
-    try {
-      l = await i.launch(suite.cmd, sha8);
-    } catch (err) {
-      fail('error', (err instanceof Error ? err.message : String(err)).slice(0, 500));
-      continue;
-    }
-    const t0 = now();
-    const cwd = resolve(i.worktree, suite.cwd);
-    const cap = await capture(l, cwd, Math.min(suite.timeoutMin * 60_000, remaining), i.signal, spawnImpl);
-    const durationMs = Math.max(0, now() - t0);
-    const output = stripAnsi(cap.output);
-    const attributed = attribute(output, {
-      cwd: suite.cwd,
-      changed,
-      exists: (rel) => existsSync(join(i.worktree, rel)),
-      argv: suite.cmd,
-      worktree: i.worktree,
-      capped: cap.capped,
-    });
-    const verdict = judge(suite, cap, attributed);
-    const logPath = join(i.logDir, `${slug(suite.name)}-${sha8}.log`);
-    let log = '';
-    try {
-      writeFileSync(logPath, cap.output);
-      log = logPath;
-    } catch {
-      // not fatal
-    }
-    const ev: CheckEvidence = {
-      ...base,
-      status: verdict.status,
-      exitCode: cap.exitCode,
-      durationMs,
-      summary: verdict.summary.slice(0, 500),
-      introduced: verdict.status === 'failed' ? attributed.introduced : [],
-      elsewhere: attributed.elsewhere,
-      elsewhereCount: attributed.elsewhereCount,
-    };
-    evidence.push(ev);
-    logs.push(log);
-    if (ev.status !== 'error' && ev.status !== 'timeout') i.cache?.set(key, { evidence: ev, log });
   }
+  for (const r of handoffUnitRuns(i.units ?? [], i.changedPaths, exists))
+    unitJobs.push({
+      suite: r.suite,
+      kind: 'unit',
+      argv: r.argv,
+      timeoutMin: r.suite.handoffTimeoutMin ?? UNIT_HANDOFF_TIMEOUT_MIN,
+    });
 
-  const blockingIdx = evidence.flatMap((e, ix) => (e.status === 'failed' ? [ix] : []));
+  const runGroup = async (jobs: Job[], budget: number): Promise<void> => {
+    const started = now();
+    for (const job of jobs) {
+      const { suite } = job;
+      const base = {
+        name: suite.name.slice(0, 60),
+        command: cmdText(job.argv),
+        cwd: suite.cwd,
+        kind: job.kind,
+        ...(suite.fix ? { fix: suite.fix.join(' ').slice(0, 500) } : {}),
+      };
+      const fail = (status: 'error' | 'timeout', summary: string, durationMs = 0): void => {
+        evidence.push({
+          ...base,
+          status,
+          exitCode: null,
+          durationMs,
+          summary,
+          introduced: [],
+          elsewhere: [],
+          elsewhereCount: 0,
+        });
+        logs.push('');
+      };
+      if (!isSafeRelativeDir(suite.cwd)) {
+        fail('error', 'the folder must stay inside the repository');
+        continue;
+      }
+      const key = `${i.headSha}\0${job.kind}\0${suite.name}\0${job.argv.join(' ')}\0${suite.cwd}`;
+      const hit = i.cache?.get(key);
+      if (hit) {
+        evidence.push(hit.evidence);
+        logs.push(hit.log);
+        continue;
+      }
+      const remaining = budget - (now() - started);
+      if (remaining <= 1000) {
+        fail('error', `not run: the ${Math.round(budget / 60_000)}-minute budget was used up`);
+        continue;
+      }
+      if (!i.launch) {
+        fail('error', 'this runner cannot run checks');
+        continue;
+      }
+      let l: CheckLaunch;
+      try {
+        l = await i.launch(job.argv, `${job.kind === 'unit' ? 'u-' : ''}${sha8}`);
+      } catch (err) {
+        fail('error', (err instanceof Error ? err.message : String(err)).slice(0, 500));
+        continue;
+      }
+      const t0 = now();
+      const cwd = resolve(i.worktree, suite.cwd);
+      const cap = await capture(l, cwd, Math.min(job.timeoutMin * 60_000, remaining), i.signal, spawnImpl);
+      const durationMs = Math.max(0, now() - t0);
+      const output = stripAnsi(cap.output);
+      const logPath = join(i.logDir, `${job.kind === 'unit' ? 'unit-' : ''}${slug(suite.name)}-${sha8}.log`);
+      let log = '';
+      try {
+        writeFileSync(logPath, cap.output);
+        log = logPath;
+      } catch {
+        // not fatal
+      }
+      let ev: CheckEvidence;
+      const budgetCut = cap.timedOut && remaining < job.timeoutMin * 60_000;
+      const budgetText = `timed out: the ${budget >= 60_000 ? `${Math.round(budget / 60_000)}-minute` : `${Math.round(budget / 1000)}-second`} budget for these runs ran out`;
+      if (job.kind === 'unit') {
+        const failing = failingTestFiles(output);
+        const v0 = judgeUnit(job.timeoutMin, cap, failing);
+        const verdict = budgetCut ? { ...v0, summary: budgetText } : v0;
+        const prefix = suite.cwd && suite.cwd !== '.' ? `${suite.cwd.replace(/\/+$/, '')}/` : '';
+        const named = failing.map((f) => `FAIL ${prefix}${f}`);
+        ev = {
+          ...base,
+          status: verdict.status,
+          exitCode: cap.exitCode,
+          durationMs,
+          summary: verdict.summary.slice(0, 500),
+          introduced: verdict.status === 'failed' ? named.slice(0, LIST_MAX) : [],
+          ...(verdict.status === 'failed' ? { introducedCount: named.length } : {}),
+          elsewhere: [],
+          elsewhereCount: 0,
+          ...(verdict.status === 'error' ||
+          verdict.status === 'timeout' ||
+          (verdict.status === 'failed' && !named.length)
+            ? { tail: lastLines(cap.output) }
+            : {}),
+        };
+      } else {
+        const attributed = attribute(output, {
+          cwd: suite.cwd,
+          changed,
+          exists,
+          argv: job.argv,
+          worktree: i.worktree,
+          capped: cap.capped,
+        });
+        const v0 = judge(suite, cap, attributed);
+        const verdict = budgetCut ? { ...v0, summary: budgetText } : v0;
+        ev = {
+          ...base,
+          status: verdict.status,
+          exitCode: cap.exitCode,
+          durationMs,
+          summary: verdict.summary.slice(0, 500),
+          introduced: [],
+          elsewhere: [],
+          elsewhereCount: 0,
+          ...(verdict.status === 'error' || verdict.status === 'timeout'
+            ? { tail: lastLines(cap.output) }
+            : {}),
+        };
+        if (verdict.status === 'failed') {
+          const { own, owed, owedBy } = splitFindings(attributed, i.scope);
+          const blockingFindings = i.scope?.defer ? own : attributed.findings;
+          const inChanged = blockingFindings.filter((f) => f.changed).map((f) => f.line);
+          const inOther = blockingFindings.filter((f) => !f.changed).map((f) => f.line);
+          ev.introduced = inChanged.slice(0, LIST_MAX);
+          ev.introducedCount = inChanged.length;
+          ev.elsewhere = inOther.slice(0, LIST_MAX);
+          ev.elsewhereCount = inOther.length;
+          if (owed.length) {
+            ev.owed = owed.map((f) => f.line).slice(0, LIST_MAX);
+            ev.owedCount = owed.length;
+            if (owedBy) ev.owedBy = owedBy;
+          }
+          if (i.scope?.defer && own.length === 0 && owed.length > 0) {
+            // Deferred only when every finding was seen and matched to a file: an incomplete output or a diagnostic that
+            // names no file of the repository may hide the role's own problems, so the check then blocks.
+            const why = attributed.incomplete
+              ? `the output is incomplete (${attributed.incomplete})`
+              : attributed.unattributed > 0
+                ? `${plural(attributed.unattributed, 'diagnostic line')} name no file of the repository the runner could match`
+                : '';
+            if (why) {
+              const all = attributed.findings;
+              const inC = all.filter((f) => f.changed).map((f) => f.line);
+              const inO = all.filter((f) => !f.changed).map((f) => f.line);
+              ev.introduced = inC.slice(0, LIST_MAX);
+              ev.introducedCount = inC.length;
+              ev.elsewhere = inO.slice(0, LIST_MAX);
+              ev.elsewhereCount = inO.length;
+              delete ev.owed;
+              delete ev.owedCount;
+              delete ev.owedBy;
+              ev.summary = `${verdict.summary}; not deferred to the ${owedBy ?? 'tester'}: ${why}`.slice(
+                0,
+                500,
+              );
+            } else {
+              ev.status = 'deferred';
+              ev.summary = `${plural(owed.length, 'problem')} only in files the ${owedBy ?? 'tester'} owns: owed by the ${owedBy ?? 'tester'}, does not block this handoff`;
+            }
+          }
+        }
+      }
+      evidence.push(ev);
+      logs.push(log);
+      if (ev.status !== 'error' && ev.status !== 'timeout') i.cache?.set(key, { evidence: ev, log });
+    }
+  };
+
+  // `totalBudgetMs` caps both groups together (the whole handoff must fit inside the agent's command wait).
+  const t0 = now();
+  const total = i.totalBudgetMs ?? Number.POSITIVE_INFINITY;
+  await runGroup(checkJobs, Math.min(i.budgetMs ?? CHECKS_BUDGET_MS, total));
+  await runGroup(unitJobs, Math.min(i.unitBudgetMs ?? UNIT_BUDGET_MS, total - (now() - t0)));
+
+  const blockingIdx = evidence.flatMap((e, ix) => (checkStatusPasses(e.status) ? [] : [ix]));
   const blocking = blockingIdx.map((ix) => evidence[ix] as CheckEvidence);
   const refusal = blocking.length
     ? refusalText(
         blockingIdx.map((ix) => ({ ev: evidence[ix] as CheckEvidence, log: logs[ix] ?? '' })),
-        evidence.filter((e) => e.status !== 'failed'),
+        i.scope,
       )
     : '';
-  const bits = evidence.map((e) =>
-    e.status === 'passed'
-      ? `${e.name} passed`
-      : e.status === 'preexisting'
-        ? `${e.name} passed (${plural(e.elsewhereCount, 'problem')} only in files this card did not change)`
-        : e.status === 'failed'
-          ? `${e.name} failed`
-          : `${e.name} could not be judged (${e.summary})`,
-  );
+  const bits = evidence.map((e) => {
+    const n = e.kind === 'unit' ? `unit tests "${e.name}"` : e.name;
+    return e.status === 'passed'
+      ? `${n} passed`
+      : e.status === 'deferred'
+        ? `${n}: ${e.summary}`
+        : e.status === 'regression_only'
+          ? `${n} not run at handoff (runs at regression)`
+          : `${n} ${e.status}`;
+  });
   const summary = bits.length ? `Checks: ${bits.join('; ')}.` : '';
   return { evidence, blocking, refusal, summary };
 }

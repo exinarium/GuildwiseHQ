@@ -25,6 +25,7 @@ import {
 import { CapabilityMetaSchema } from '../capabilities/parse.ts';
 import {
   CHANGED_PATHS_MAX,
+  CHECK_EVIDENCE_MAX,
   CheckEvidenceSchema,
   DiffUploadSchema,
   E2eAreaMapSchema,
@@ -138,6 +139,7 @@ import {
   EnvSecretSetPayloadSchema,
   IntegrationSuiteSchema,
   ShiftEnvironmentSchema,
+  UNIT_SUITES_MAX,
 } from '../runs/integration.ts';
 import {
   RunExtendPayloadSchema,
@@ -597,15 +599,24 @@ export const ShiftBriefSchema = z.object({
     )
     .optional(),
   /**
-   * lean team, a build stage: the project's confirmed checks of the card's repository (the runner runs them at `aom handoff`)
-   * and whether it should propose checks from the repository first. Absent: an older server.
+   * The handoff checks of a builder, tester or writer shift on a card with a worktree: the project's confirmed checks of the
+   * card's repository (the runner runs them over the whole repository at the role's success handoff), whether it should
+   * propose checks (`detect`) or unit suites (`detectUnits`) from the repository first, and, for a builder only, the
+   * confirmed unit suites (`units`: the tests of the changed files run at the handoff). Absent: an older server.
    */
   checks: z
     .object({
       suites: z.array(IntegrationSuiteSchema).max(CHECKS_MAX).default([]),
       detect: z.boolean().default(false),
+      units: z.array(IntegrationSuiteSchema).max(UNIT_SUITES_MAX).optional(),
+      detectUnits: z.boolean().optional(),
     })
     .optional(),
+  /**
+   * A suite card's tester shift (full suite, regression): every confirmed unit suite of the repository. The runner runs
+   * each whole, in the background, and reports the results itself (`test.suite` with `measured`). Absent: none.
+   */
+  regressionUnits: z.array(IntegrationSuiteSchema).max(UNIT_SUITES_MAX).optional(),
   /** lean team: the build and unit test evidence of the card's handoff, bound to a commit (reviewers read it instead of building). */
   buildEvidence: z
     .object({
@@ -619,7 +630,7 @@ export const ShiftBriefSchema = z.object({
         }),
       ),
       /** The runner's check results at the handoff (absent: an older runner or a project without checks). */
-      checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
+      checks: z.array(CheckEvidenceSchema).max(CHECK_EVIDENCE_MAX).optional(),
       waived: z.string().optional(),
       at: z.string(),
     })
@@ -990,6 +1001,12 @@ export const RELEASE_SHIP_CAPABILITY = 'release-ship:1';
 
 /** The runner runs the project's confirmed `check` suites (lint, format, typecheck) at `aom handoff` and refuses on failures. */
 export const CHECKS_CAPABILITY = 'checks:1';
+/**
+ * The runner judges the handoff checks by policy 2 (whole repository; error and timeout refuse), runs them for testers and
+ * writers and at a builder's handoff the unit tests, and parses the check statuses `deferred` and `regression_only`. A
+ * runner without it gets those statuses as `preexisting` in a brief (its schema would refuse the shift otherwise).
+ */
+export const CHECKS_POLICY_CAPABILITY = 'checks:2';
 export const ReleaseShipStepSchema = z.enum(['prepare', 'components', 'changelog', 'commit', 'push']);
 export type ReleaseShipStep = z.infer<typeof ReleaseShipStepSchema>;
 export const ReleaseShipPayloadSchema = z.object({
@@ -1988,8 +2005,13 @@ export const ShiftReportMsgSchema = msg('shift.report', {
   headSha: z.string().min(7).max(64).optional(),
   changedPaths: z.array(z.string().max(500)).max(CHANGED_PATHS_MAX).optional(),
   diff: DiffUploadSchema.optional(),
-  /** lean team, a build handoff: what the checks found (additive; an older runner sends none and is never refused for it). */
-  checks: z.array(CheckEvidenceSchema).max(CHECKS_MAX).optional(),
+  /**
+   * What the handoff checks found (a builder, tester or writer success handoff, and the comment a refused handoff sends).
+   * Additive: an older runner sends none and is never refused for it.
+   */
+  checks: z.array(CheckEvidenceSchema).max(CHECK_EVIDENCE_MAX).optional(),
+  /** The judging the runner applied to `checks` (`CHECKS_POLICY`); absent: an older runner (only `failed` refuses). */
+  checksPolicy: z.number().int().min(1).max(100).optional(),
 });
 export const ShiftEndedSchema = msg('shift.ended', {
   shiftId: z.uuid(),

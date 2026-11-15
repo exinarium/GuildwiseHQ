@@ -37,6 +37,7 @@ import {
 import picomatch from 'picomatch';
 import { z } from 'zod';
 import type { SandboxMode } from '../adapters/claude-policy.ts';
+import { offlineArgv, offlineEnv } from '../checks/offline-env.ts';
 import { git } from '../git/git.ts';
 import { AppIdentityError, type AppTokenProbe, appIdentityWire, bindPostAs } from '../git/identity.ts';
 import { RebaseConflictError, RebaseError, rebaseOntoBase } from '../git/rebase.ts';
@@ -207,6 +208,7 @@ export class RunManager {
   private allocator: PortAllocator | null = null;
   private readonly launcher: ServiceLauncher;
   private readonly restarting = new Set<string>();
+  private netnsWarned = false;
 
   constructor(private readonly deps: RunManagerDeps) {
     this.store = new RunStore(join(deps.paths.root, 'runs'));
@@ -1222,27 +1224,49 @@ export class RunManager {
   }
 
   /**
-   * The command line for one of the builder's checks at `aom handoff` (lint, format, typecheck) in the card's worktree: the
-   * run-step sandbox profile (credential folders, the runner's data dir and the buses masked, no .NET user secrets) and the
-   * scrubbed run-step environment. `key` names the private tmp dir (`<agentTmpRoot>/aom-check-<key>`); the caller removes it.
-   * Throws for a Docker command and when the sandbox is required but unavailable.
+   * The command line for one of the handoff checks (lint, format, typecheck, unit tests), the worktree preparation's
+   * installs and a suite card's unit suites, in the card's worktree: the run-step sandbox profile (credential folders, the
+   * runner's data dir and the buses masked, no .NET user secrets) and the scrubbed run-step environment, plus the offline
+   * package-manager environment (`checks/offline-env.ts`) so nothing is downloaded. `network: 'none'` (default) also gives
+   * the sandbox a network namespace of its own; where the host forbids that, it logs a warning once and goes on with the
+   * environment only. `host`: the suite card's unit suites, which may reach a local database. `key` names the private tmp
+   * dir (`<agentTmpRoot>/aom-check-<key>`); the caller removes it. Throws for a Docker command and when the sandbox is
+   * required but unavailable.
    */
-  async checkLaunch(o: { key: string; worktree: string; argv: string[] }): Promise<{
+  async checkLaunch(o: {
+    key: string;
+    worktree: string;
+    argv: string[];
+    network?: 'host' | 'none';
+    extraEnv?: Record<string, string>;
+  }): Promise<{
     cmd: string;
     args: string[];
     env: Record<string, string>;
     sandbox: 'sandboxed' | 'off';
     tmp: string;
+    network: 'host' | 'none';
   }> {
     if (isDockerCommand(o.argv)) throw new Error('checks never run Docker');
-    const kind = await this.sandboxKind(o.argv, false);
+    const argv = offlineArgv(o.argv);
+    const kind = await this.sandboxKind(argv, false);
     const tmp = `${agentTmpRoot()}/aom-check-${slug(o.key).slice(0, 16)}`;
     mkdirSync(join(tmp, 'home'), { recursive: true, mode: 0o700 });
-    let cmd = o.argv[0] as string;
-    let args = o.argv.slice(1);
+    let cmd = argv[0] as string;
+    let args = argv.slice(1);
+    let network: 'host' | 'none' = 'host';
     if (kind === 'sandboxed') {
       const cacheRoot = sharedCacheRoot(this.deps.paths);
       await ensureSharedCaches(cacheRoot);
+      if ((o.network ?? 'none') === 'none') {
+        if (await this.launcher.networkIsolationAvailable()) network = 'none';
+        else if (!this.netnsWarned) {
+          this.netnsWarned = true;
+          this.deps.log.warn(
+            'bubblewrap cannot give the checks a network namespace of their own here (--unshare-net failed): they run with the host network and the offline package-manager environment only',
+          );
+        }
+      }
       const c = sandboxCommand(
         {
           runnerRoot: this.deps.paths.root,
@@ -1252,17 +1276,19 @@ export class RunManager {
           runTmp: tmp,
           gitDirs: gitDirOf(o.worktree),
           userSecrets: false,
+          network,
         },
-        o.argv,
+        argv,
       );
       cmd = c.cmd;
       args = c.args;
     }
     // unsandboxed: still without the runner's credentials (scrubEnv), plus the registered toolchains on PATH
     const env: Record<string, string> = kind === 'sandboxed' ? this.baseEnv(true) : this.scrubbedEnv();
+    Object.assign(env, offlineEnv(this.deps.realHome ?? homedir()), o.extraEnv ?? {});
     env.NO_COLOR = '1';
     env.FORCE_COLOR = '0';
-    return { cmd, args, env, sandbox: kind === 'sandboxed' ? 'sandboxed' : 'off', tmp };
+    return { cmd, args, env, sandbox: kind === 'sandboxed' ? 'sandboxed' : 'off', tmp, network };
   }
 
   /** The command line a step or service is really started with, and the environment it gets. */

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -16,9 +17,13 @@ import {
   type BriefAttachment,
   BuildHandoffDataSchema,
   buildEvidenceProblem,
+  CHECKS_POLICY,
   type CheckEvidence,
+  checkStatusPasses,
   DELEGATE_RPC,
   type GuardViolation,
+  HANDOFF_PREP_BUDGET_MS,
+  HANDOFF_WORK_BUDGET_MS,
   hasTranscript,
   type InvestigationData,
   type IpcReportRequest,
@@ -27,6 +32,7 @@ import {
   type IpcRpcResponse,
   identityLast,
   isDelegateServerRpc,
+  isHandoffCheckRole,
   isPublishRequest,
   isSafeGitRef,
   isTerminalReport,
@@ -82,7 +88,8 @@ import {
   type ProjectIndexResult,
   skillRpc,
 } from '../capabilities/registry.ts';
-import { detectChecksFromRef } from '../checks/detect.ts';
+import { detectChecksFromRef, detectUnitSuitesFromRef } from '../checks/detect.ts';
+import { RegressionUnits } from '../checks/regression-units.ts';
 import { runHandoffChecks } from '../checks/run.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
@@ -224,12 +231,13 @@ import {
 } from './autocommit.ts';
 import {
   type BranchSnapshot,
-  builderE2eMatcher,
   type DirtySnapshot,
   discardOutOfScope,
   discardTestArtifacts,
   fetchedRemoteTip,
   type GuardInput,
+  mayEdit,
+  ownerOf,
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
@@ -386,6 +394,8 @@ export interface SupervisorDeps {
   runs?: RunManager;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
   prepareWorktree?: typeof prepareWorktree;
+  /** Test hook: the time budget of a handoff's checks (default `CHECKS_BUDGET_MS`). */
+  checksBudgetMs?: number;
   /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
   initWorktreeSubmodules?: typeof initWorktreeSubmodules;
   /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
@@ -493,6 +503,12 @@ interface ActiveShift {
   startedAtMs?: number;
   /** A handoff's checks are running (a second `aom handoff` meanwhile is refused). */
   checksRunning?: boolean;
+  /** A suite card's unit suites, run by the runner in the background (tester shifts with `brief.regressionUnits`). */
+  regressionUnits?: RegressionUnits;
+  /** The hash of the last refusal posted on the card this shift (the same refusal is posted once). */
+  lastRefusalHash?: string;
+  /** The dependencies were prepared (or found prepared) before this shift's handoff checks. */
+  depsRefreshed?: boolean;
   /** Aborted when the shift ends: kills the running checks. */
   checkAbort?: AbortController;
   /** Aborted when the shift is stopped: ends the preparation of a new worktree. */
@@ -1465,6 +1481,10 @@ export class ShiftSupervisor {
     else if (s.submodulesStep)
       s.worktreePrep = { ok: s.submodulesStep.status !== 'failed', steps: [s.submodulesStep] };
 
+    // A suite card's tester: the runner runs the repository's unit suites whole in the background and reports them itself.
+    if (msg.kind === 'card' && msg.agent.roleKey === 'tester' && !msg.agent.isDevops)
+      this.startRegressionUnits(s);
+
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
     const shiftVaults = shiftVaultsOf(msg);
@@ -2219,11 +2239,22 @@ export class ShiftSupervisor {
   }
 
   /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
-  private async prepareNewWorktree(s: ActiveShift, projectPath: string | undefined): Promise<void> {
+  private async prepareNewWorktree(
+    s: ActiveShift,
+    projectPath: string | undefined,
+    why?: string,
+    budgetMs?: number,
+  ): Promise<void> {
     const wt = s.worktree;
     if (!wt) return;
     s.prepAbort = new AbortController();
-    this.addProgress(s, 'status', 'preparing the new worktree (submodules, dependencies)');
+    this.addProgress(
+      s,
+      'status',
+      why
+        ? `preparing the worktree's dependencies ${why}`
+        : 'preparing the new worktree (submodules, dependencies)',
+    );
     this.flushProgress(s); // the owner sees it now, not after the session started
     const runs = this.deps.runs;
     const shiftKey = s.msg.shiftId.slice(0, 8);
@@ -2235,11 +2266,13 @@ export class ShiftSupervisor {
         ...(runs
           ? {
               launch: (argv: string[], key: string) =>
-                runs.checkLaunch({ key: `${shiftKey}-${key}`, worktree: wt.path, argv }),
+                runs.checkLaunch({ key: `${shiftKey}-${key}`, worktree: wt.path, argv, network: 'none' }),
             }
           : {}),
         platform: process.platform as Platform,
         signal: s.prepAbort.signal,
+        trustLockfile: this.deps.config.prepTrustLockfile !== false,
+        ...(budgetMs !== undefined ? { budgetMs } : {}),
         ...(s.submodulesStep ? { submodules: s.submodulesStep } : {}),
       });
     } catch (err) {
@@ -2565,6 +2598,15 @@ export class ShiftSupervisor {
   ): Promise<IpcRpcResponse> {
     if (s.msg.kind !== 'card' || s.msg.agent.isDevops)
       return { ok: false, error: '`aom env` and `aom test suite` are for an agent working a card' };
+    if (
+      method === 'test.suite' &&
+      typeof params.name === 'string' &&
+      s.regressionUnits?.isUnitSuite(params.name)
+    )
+      return {
+        ok: false,
+        error: `"${params.name}" is a unit suite: the runner runs it on this card and reports the result itself. Do not run or report unit tests.`,
+      };
     return testerRpc(
       {
         env: s.msg.brief.environment,
@@ -3225,18 +3267,224 @@ export class ShiftSupervisor {
     return { data: { ...data, items: next } };
   }
 
-  /** Proposes `check` suites from what the card's repository declares (once per repository: the server says when). */
-  private async proposeChecks(s: ActiveShift): Promise<void> {
+  /**
+   * Proposes `check` suites (and, when the server asks, `unit` suites) from what the card's repository declares (once per
+   * repository: the server says when).
+   */
+  private async proposeChecks(s: ActiveShift, cb: NonNullable<ShiftBrief['checks']>): Promise<void> {
     try {
       if (!s.worktree) return;
       const base = await baseRef(s.worktree.path, s.worktree.baseBranch);
-      const suites = await detectChecksFromRef(s.worktree.path, base, s.msg.brief.project.projectPath ?? '.');
+      const projectPath = s.msg.brief.project.projectPath ?? '.';
+      const suites = [
+        ...(cb.detect ? await detectChecksFromRef(s.worktree.path, base, projectPath) : []),
+        ...(cb.detectUnits ? await detectUnitSuitesFromRef(s.worktree.path, base) : []),
+      ].slice(0, 10);
       if (suites.length === 0) return;
       const r = await this.deps.rpc(s.msg.shiftId, 'env.suites.propose', { suites });
       if (!r.ok) this.log.warn(`check proposal for shift ${s.msg.shiftId} refused: ${r.error ?? 'unknown'}`);
     } catch (err) {
       this.log.warn(`check proposal for shift ${s.msg.shiftId} failed`, err);
     }
+  }
+
+  /**
+   * The handoff checks of a builder, tester or writer success handoff (docs/RUNNER.md "Handoff checks"): the confirmed
+   * checks over the whole repository at the committed head, and a builder's unit test runs. Anything but passed, deferred
+   * or regression_only refuses the handoff; the refusal is also posted on the card (once per distinct text in a shift).
+   */
+  private async handoffChecks(
+    s: ActiveShift,
+    data: string | undefined,
+    toSend: ShiftReport,
+    attach: Record<string, unknown>,
+    cb: NonNullable<ShiftBrief['checks']>,
+  ): Promise<{ refused: string } | { attach: Record<string, unknown>; summary: string }> {
+    const { msg } = s;
+    const wt = s.worktree;
+    if (wt && (cb.detect || cb.detectUnits)) void this.proposeChecks(s, cb);
+    const units = msg.agent.roleKey === 'builder' ? (cb.units ?? []) : [];
+    if (cb.suites.length === 0 && units.length === 0) return { attach, summary: '' };
+    if (!wt || !s.startSha)
+      return {
+        refused:
+          'the project has confirmed handoff checks, but this shift has no card worktree or start commit on this workstation, so they cannot run and nothing was handed on. Ask with `aom question --topic environment`, quoting this.',
+      };
+    // The whole handoff (dependency refresh, checks, unit runs) has one deadline, so that with the server's verdict wait
+    // it ends inside the agent's command wait (docs/RUNNER.md "Handoff checks", time bound).
+    const startedAt = Date.now();
+    if (data === 'buildHandoff') {
+      // do not run minutes of checks for a refusal the server would give anyway
+      const problem = buildEvidenceProblem(
+        BuildHandoffDataSchema.parse(toSend.kind === 'outcome' ? toSend.data : {}).buildEvidence,
+      );
+      if (problem) return { refused: problem };
+    }
+    if (s.checksRunning)
+      return {
+        refused: 'the checks of an earlier `aom handoff` are still running: wait for that command to finish',
+      };
+    // The checks judge the committed tree: a tester's or writer's leftovers are committed first, as a builder's are.
+    if (data !== 'buildHandoff' && data !== 'diffStats' && msg.agent.permissions.mayCommit) {
+      const ac = await this.leftoversCommit(s, 'report');
+      if (ac.refused) return { refused: refusedReport(ac.refused) };
+    }
+    const headSha =
+      typeof attach.headSha === 'string' ? attach.headSha : await gitOk(wt.path, ['rev-parse', 'HEAD']);
+    const changedPaths = Array.isArray(attach.changedPaths)
+      ? (attach.changedPaths as string[])
+      : (await computeCardDiff(wt.path, wt.baseBranch)).changedPaths;
+    s.checksRunning = true;
+    s.checkAbort ??= new AbortController();
+    s.checkCache ??= new Map();
+    const tmps: string[] = [];
+    let r: Awaited<ReturnType<typeof runHandoffChecks>>;
+    try {
+      // A worktree whose dependencies were never prepared (an in-flight card, a reused worktree): prepared once, offline.
+      await this.refreshDependencies(s, Math.min(HANDOFF_PREP_BUDGET_MS, HANDOFF_WORK_BUDGET_MS));
+      const runs = this.deps.runs;
+      const gi = this.guardInput(s, wt.path, s.startSha);
+      const role = msg.agent.roleKey;
+      r = await runHandoffChecks({
+        suites: cb.suites,
+        units,
+        worktree: wt.path,
+        changedPaths,
+        headSha,
+        logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'checks'),
+        signal: s.checkAbort.signal,
+        cache: s.checkCache,
+        ...(this.deps.checksBudgetMs ? { budgetMs: this.deps.checksBudgetMs } : {}),
+        totalBudgetMs: Math.max(0, HANDOFF_WORK_BUDGET_MS - (Date.now() - startedAt)),
+        scope: {
+          mayEdit: (p) => mayEdit(gi, p),
+          ownerOf: (p) => ownerOf(msg.brief.project.e2eGlobs, p),
+          defer: role === 'builder',
+          ...(role === 'tester'
+            ? {
+                reportHint:
+                  'Report a product code finding with `aom test fail` (it files a bug card for a builder); at the Build stage ask with `aom question --topic code`.',
+              }
+            : role === 'writer'
+              ? { reportHint: 'Ask with `aom question --topic code`, quoting the findings.' }
+              : {}),
+        },
+        ...(runs
+          ? {
+              launch: async (argv: string[], key: string) => {
+                const l = await runs.checkLaunch({
+                  key: `${msg.shiftId.slice(0, 8)}-${key}`,
+                  worktree: wt.path,
+                  argv,
+                  network: 'none',
+                });
+                tmps.push(l.tmp);
+                return l;
+              },
+            }
+          : {}),
+      });
+    } finally {
+      s.checksRunning = false;
+      for (const t of tmps) rmSync(t, { recursive: true, force: true });
+    }
+    if ((await gitOk(wt.path, ['rev-parse', 'HEAD'])) !== headSha)
+      return { refused: 'the branch moved while the checks ran: commit, then run `aom handoff` again' };
+    if (r.blocking.length) {
+      this.postRefusal(s, r.refusal, r.evidence, headSha);
+      return { refused: r.refusal };
+    }
+    return {
+      attach: {
+        ...attach,
+        headSha: attach.headSha ?? headSha,
+        checks: r.evidence,
+        checksPolicy: CHECKS_POLICY,
+      },
+      summary: r.summary,
+    };
+  }
+
+  /**
+   * A refused handoff's checks go to the server as a card comment carrying the results (stored, shown on the card, and
+   * counted for the desk alert). Not sent again for the same refusal text in this shift. Fire and forget.
+   */
+  private postRefusal(s: ActiveShift, refusal: string, checks: CheckEvidence[], headSha: string): void {
+    const hash = createHash('sha256').update(refusal).digest('hex').slice(0, 16);
+    if (s.lastRefusalHash === hash) return;
+    s.lastRefusalHash = hash;
+    const blocking = checks.filter((c) => !checkStatusPasses(c.status));
+    const note = `The handoff checks refused this handoff at ${headSha.slice(0, 10)}: ${blocking
+      .map((c) => `${c.kind === 'unit' ? 'unit tests ' : ''}"${c.name}" ${c.status} (${c.summary})`)
+      .join('; ')}`.slice(0, 4000);
+    this.deps.transport.send('shift.report', {
+      shiftId: s.msg.shiftId,
+      reportId: uuidv7(),
+      report: { kind: 'comment', note },
+      checks,
+      headSha,
+      checksPolicy: CHECKS_POLICY,
+    });
+  }
+
+  /**
+   * Starts a suite card's unit suites (`brief.regressionUnits`) in the background: whole, one after the other, in the
+   * run-step sandbox with the host network (reviewed code on the working branch; a suite may reach a local database) and
+   * the offline package-manager environment. Each result goes to the server as the runner's measurement.
+   */
+  private startRegressionUnits(s: ActiveShift): void {
+    const suites = s.msg.brief.regressionUnits ?? [];
+    const wt = s.worktree;
+    const runs = this.deps.runs;
+    if (!suites.length || !wt || s.regressionUnits) return;
+    s.checkAbort ??= new AbortController();
+    const tmps: string[] = [];
+    const key = s.msg.shiftId.slice(0, 8);
+    s.regressionUnits = new RegressionUnits({
+      suites,
+      worktree: wt.path,
+      logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'checks'),
+      signal: s.checkAbort.signal,
+      launch: async (argv, k) => {
+        if (!runs) throw new Error('this runner cannot run unit suites');
+        const l = await runs.checkLaunch({ key: `${key}-${k}`, worktree: wt.path, argv, network: 'host' });
+        tmps.push(l.tmp);
+        return l;
+      },
+      report: async (r) => {
+        const res = await this.deps.rpc(s.msg.shiftId, 'test.suite', { ...r });
+        if (!res.ok)
+          this.log.warn(`unit suite ${r.name} of ${s.msg.brief.card.ref}: ${res.error ?? 'refused'}`);
+        this.addProgress(s, 'status', `unit suite ${r.name}: ${r.status}`);
+      },
+    });
+    this.addProgress(
+      s,
+      'status',
+      `running the unit suites ${suites.map((x) => x.name).join(', ')} in the background`,
+    );
+    void s.regressionUnits
+      .start()
+      .catch((err) => this.log.warn(`unit suites of ${s.msg.brief.card.ref} failed`, err))
+      .finally(() => {
+        for (const t of tmps) rmSync(t, { recursive: true, force: true });
+      });
+  }
+
+  /** Prepares a worktree whose dependencies were never prepared, once per shift, before the checks (offline, no network). */
+  private async refreshDependencies(s: ActiveShift, budgetMs: number): Promise<void> {
+    if (s.depsRefreshed || !s.worktree || s.msg.agent.isDevops) return;
+    if (this.deps.config.prepareWorktrees === false) return;
+    const prepared = s.worktreePrep?.steps.some(
+      (x) => x.status === 'done' && x.name !== 'submodules' && x.name !== 'restore changed files',
+    );
+    if (prepared) {
+      s.depsRefreshed = true;
+      return;
+    }
+    await this.prepareNewWorktree(s, s.msg.brief.project.projectPath, 'before the handoff checks', budgetMs);
+    // a refresh cut off or failed is tried again at the next handoff (each try is bounded by `budgetMs`)
+    if (s.worktreePrep?.ok) s.depsRefreshed = true;
   }
 
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
@@ -3272,6 +3520,19 @@ export class ShiftSupervisor {
         );
       }
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      // A suite card's unit suites are the runner's measurement: no pass while one runs or failed; a failure report gets a
+      // bug section per failing test file (the server files one bug card each, a rerun's same failure is seen again).
+      if (s.regressionUnits && outcome.data === 'testEvidence') {
+        if (outcome.kind === 'success') {
+          const problem = s.regressionUnits.passProblem();
+          if (problem) return rejected(problem);
+        } else {
+          const sections = s.regressionUnits.failSections();
+          if (sections)
+            toSend = { ...toSend, note: `${report.note.trimEnd()}\n\n${sections}`.slice(0, 20000) };
+        }
+      }
 
       // A release prep task: the runner checks the files against the task and keeps them as a local commit; a refusal
       // reaches the server as the task's failure (the agent cannot work around it by reporting again). A proposal task
@@ -3387,67 +3648,24 @@ export class ShiftSupervisor {
           if (outcome.data === 'buildHandoff') {
             const cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch);
             attach = { ...attach, headSha: cd.headSha, changedPaths: cd.changedPaths, diff: cd.diff };
-            // The repository's confirmed checks (lint, format, typecheck) run on this commit, by the runner: a failure in a
-            // changed file refuses the handoff here, so nothing reaches the server or the reviewers.
-            const cb = msg.brief.checks;
-            if (cb?.detect) void this.proposeChecks(s);
-            if (cb?.suites.length) {
-              const problem = buildEvidenceProblem(BuildHandoffDataSchema.parse(toSend.data).buildEvidence); // do not run minutes of checks for a refusal the server would give anyway
-              if (problem) return rejected(problem);
-              if (s.checksRunning)
-                return rejected(
-                  'the checks of an earlier `aom handoff` are still running: wait for that command to finish',
-                );
-              s.checksRunning = true;
-              s.checkAbort ??= new AbortController();
-              s.checkCache ??= new Map();
-              const wt = s.worktree.path;
-              const tmps: string[] = [];
-              let r: Awaited<ReturnType<typeof runHandoffChecks>>;
-              try {
-                const runs = this.deps.runs;
-                // A builder is not held to E2E test content it may not change (a tester's specs on the card branch);
-                // the tester working a tests-only build is. The attached changedPaths stay complete.
-                const isE2e = builderE2eMatcher(msg.brief.project.e2eGlobs);
-                r = await runHandoffChecks({
-                  suites: cb.suites,
-                  worktree: wt,
-                  changedPaths:
-                    msg.agent.roleKey === 'builder'
-                      ? cd.changedPaths.filter((p) => !isE2e(p))
-                      : cd.changedPaths,
-                  headSha: cd.headSha,
-                  logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'checks'),
-                  signal: s.checkAbort.signal,
-                  cache: s.checkCache,
-                  ...(runs
-                    ? {
-                        launch: async (argv: string[], key: string) => {
-                          const l = await runs.checkLaunch({
-                            key: `${msg.shiftId.slice(0, 8)}-${key}`,
-                            worktree: wt,
-                            argv,
-                          });
-                          tmps.push(l.tmp);
-                          return l;
-                        },
-                      }
-                    : {}),
-                });
-              } finally {
-                s.checksRunning = false;
-                for (const t of tmps) rmSync(t, { recursive: true, force: true });
-              }
-              if ((await gitOk(wt, ['rev-parse', 'HEAD'])) !== cd.headSha)
-                return rejected(
-                  'the branch moved while the checks ran: commit, then run `aom handoff` again',
-                );
-              if (r.blocking.length) return rejected(r.refusal);
-              attach = { ...attach, checks: r.evidence };
-              checkNote = checkNote ? `${checkNote} ${r.summary}` : r.summary;
-            }
           }
         }
+      }
+      // The handoff checks (lint, format, typecheck over the whole repository, and a builder's unit test runs) run on this
+      // commit, by the runner, for every success handoff of a builder, tester or writer, and for any role's build handoff
+      // (a custom role at a build stage): anything but a pass refuses it here, and the refusal is posted on the card.
+      // Outside the worktree block on purpose: a shift without a worktree or start commit is refused, never let through.
+      const cb = msg.brief.checks;
+      if (
+        outcome.kind === 'success' &&
+        cb &&
+        (isHandoffCheckRole(msg.agent.roleKey) || outcome.data === 'buildHandoff') &&
+        !msg.agent.isDevops
+      ) {
+        const checked = await this.handoffChecks(s, outcome.data, toSend, attach, cb);
+        if ('refused' in checked) return rejected(checked.refused);
+        attach = checked.attach;
+        if (checked.summary) checkNote = checkNote ? `${checkNote} ${checked.summary}` : checked.summary;
       }
     }
 

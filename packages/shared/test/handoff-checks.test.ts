@@ -1,18 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agentEvidenceRows,
+  BUILTIN_ROLES,
+  CHECKS_POLICY,
   CheckEvidenceSchema,
   checkEvidenceProblem,
   checkEvidenceRows,
+  checkStatusPasses,
   checkSuites,
   INTEGRATION_TESTS_OFF,
   IntegrationSuiteSchema,
   IntegrationTestsSchema,
+  PROTOCOL_VERSION,
   renderShiftPrompt,
   requiredSuites,
   ShiftBriefSchema,
   ShiftReportMsgSchema,
   StoredBuildEvidenceSchema,
+  TestSuiteReportSchema,
   testerSuites,
+  unitSuites,
   validateIntegrationTests,
 } from '../src/index.ts';
 import { buildBrief, U as UU } from './fixtures.ts';
@@ -133,7 +140,8 @@ describe('check prompts', () => {
     expect(p).toContain('Checks on handoff');
     expect(p).toContain('lint: `pnpm lint` in .');
     expect(p).toContain('(fix: `pnpm format`)');
-    expect(p).toContain('Bash timeout of 10 minutes');
+    expect(p).toContain('Bash timeout of 15 minutes');
+    expect(p).toContain('in any file (also in files you did not change)');
     expect(renderShiftPrompt(b)).not.toContain('Checks on handoff');
   });
 
@@ -159,8 +167,133 @@ describe('check prompts', () => {
       },
     });
     expect(p).toContain('- check fmt: `pnpm fmt` passed');
-    expect(p).toContain('did not change (3, information)');
+    expect(p).toContain('In files this card did not change (3):');
     expect(p).toContain('a.ts:1 x');
     expect(p).toContain('could not run: timed out; treat it as unverified');
+  });
+});
+
+describe('handoff checks policy 2 and unit suites', () => {
+  it('policy 2: everything except passed, deferred and regression_only refuses; older runners only on failed', () => {
+    const timeout = ev({ status: 'timeout', summary: 'timed out after 5 minutes' });
+    expect(checkEvidenceProblem([timeout])).toBeNull();
+    expect(checkEvidenceProblem([timeout], CHECKS_POLICY)).toContain('did not produce a verdict (timed out');
+    expect(checkEvidenceProblem([timeout], CHECKS_POLICY)).toContain('aom question --topic environment');
+    expect(checkEvidenceProblem([ev({ status: 'error' })], CHECKS_POLICY)).toContain('could not run');
+    expect(checkEvidenceProblem([ev({ status: 'failed', elsewhereCount: 3 })], CHECKS_POLICY)).toContain(
+      'fails',
+    );
+    expect(
+      checkEvidenceProblem(
+        [
+          ev({ status: 'passed' }),
+          ev({ status: 'deferred', owedBy: 'tester' }),
+          ev({ status: 'regression_only', kind: 'unit' }),
+        ],
+        CHECKS_POLICY,
+      ),
+    ).toBeNull();
+    expect(checkStatusPasses('preexisting')).toBe(false);
+  });
+
+  it('labels the new statuses and marks unit rows; the agent lint and test lines are its note', () => {
+    expect(checkEvidenceRows([ev({ status: 'deferred' })])[0]?.status).toContain('owed by another role');
+    expect(checkEvidenceRows([ev({ status: 'regression_only', kind: 'unit' })])[0]).toMatchObject({
+      status: 'not run at handoff: runs at regression',
+      command: 'unit tests: pnpm lint',
+    });
+    const rows = agentEvidenceRows([
+      { kind: 'build', command: 'b', status: 'passed', result: 'ok' },
+      { kind: 'lint', command: 'l', status: 'passed', result: '0 errors' },
+    ]);
+    expect(rows[0]?.result).toBe('ok');
+    expect(rows[1]?.result).toBe("the agent's note (not measured by the runner): 0 errors");
+  });
+
+  it("unit suites: never the tester's, a handoff command needs {files} and is for unit suites only", () => {
+    const settings = IntegrationTestsSchema.parse({
+      suites: [
+        suite({ name: 'api', kind: 'integration' }),
+        suite({ name: 'unit a', kind: 'unit', handoffCmd: ['npx', 'vitest', 'related', '{files}'] }),
+        suite({ name: 'unit b', kind: 'unit', confirmed: false }),
+      ],
+    });
+    expect(testerSuites(settings).map((x) => x.name)).toEqual(['api']);
+    expect(requiredSuites(settings).map((x) => x.name)).toEqual(['api']);
+    expect(unitSuites(settings, U).map((x) => x.name)).toEqual(['unit a']);
+    expect(unitSuites(settings, null).map((x) => x.name)).toEqual(['unit a']);
+    expect(settings.unitDetection).toEqual([]);
+    const bad = IntegrationTestsSchema.parse({
+      suites: [
+        suite({ name: 'unit c', kind: 'unit', handoffCmd: ['npx', 'vitest'] }),
+        suite({ name: 'api', kind: 'integration', handoffCmd: ['x', '{files}'] }),
+      ],
+    });
+    const p = validateIntegrationTests(bad, [U]);
+    expect(p).toContain('unit suite "unit c": the handoff command must contain {files}');
+    expect(p).toContain('suite "api": only a unit suite has a handoff command');
+  });
+
+  it('the protocol carries units, regression units, checksPolicy and up to 20 results', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ev({ name: `c${i}`, status: 'passed' }));
+    const msg = ShiftReportMsgSchema.safeParse({
+      type: 'shift.report',
+      v: PROTOCOL_VERSION,
+      id: 'm1',
+      ts: '2026-11-15T10:00:00.000Z',
+      shiftId: U,
+      reportId: UU.b,
+      report: { kind: 'comment', note: 'refused' },
+      checks: many,
+      checksPolicy: CHECKS_POLICY,
+    });
+    expect(msg.success).toBe(true);
+    const brief = ShiftBriefSchema.parse({
+      ...buildBrief(),
+      checks: { suites: [], units: [suite({ name: 'unit a', kind: 'unit' })], detectUnits: true },
+      regressionUnits: [suite({ name: 'unit a', kind: 'unit' })],
+    });
+    expect(brief.checks?.units?.[0]?.name).toBe('unit a');
+    expect(brief.regressionUnits).toHaveLength(1);
+    expect(ev({ status: 'deferred' }).kind).toBe('check');
+    expect(
+      TestSuiteReportSchema.parse({ name: 'u', status: 'passed', kind: 'unit', measured: true }),
+    ).toMatchObject({
+      kind: 'unit',
+      measured: true,
+    });
+  });
+});
+
+describe('role instructions for the handoff checks (criterion 7)', () => {
+  const text = (key: string) => {
+    const r = BUILTIN_ROLES.find((x) => x.key === key);
+    return `${r?.instructions ?? ''}\n${(r?.coreRules ?? []).join('\n')}`;
+  };
+  it('builder, tester and writer: findings in any file block, also in files they did not change; never claim an unseen check clean', () => {
+    for (const key of ['builder', 'tester', 'writer']) {
+      const t = text(key);
+      expect(t, key).toContain('over the whole repository');
+      expect(t, key).toContain('also in files you did not change');
+      expect(t, key).toContain(
+        'Never report a check as clean that you did not see run over the whole repository',
+      );
+      expect(t, key).toContain('aom question --topic environment');
+    }
+    expect(text('builder')).toContain('a branch that was already red when you started');
+    expect(text('builder')).toContain('Findings only in end-to-end test content are owed by the tester');
+    expect(text('builder')).toContain('your `--lint-*` and `--test-*` text is only your note');
+    expect(text('tester')).toContain('You never run unit tests');
+    expect(text('tester')).toContain('do not run or report unit tests');
+    expect(text('writer')).toContain('aom question --topic code');
+  });
+
+  it('a handoff command needs {files} as an argument of its own', () => {
+    const s = IntegrationTestsSchema.parse({
+      suites: [suite({ name: 'unit e', kind: 'unit', handoffCmd: ['sh', '-c', 'vitest related {files}'] })],
+    });
+    expect(validateIntegrationTests(s, [U])).toContain(
+      'unit suite "unit e": {files} must be an argument of its own in the handoff command',
+    );
   });
 });

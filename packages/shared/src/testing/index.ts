@@ -27,6 +27,8 @@ export const DESK_SUBKIND = {
   testEnvironment: 'test_environment',
   /** A suite that failed and passed again (flaky) three times in seven days: a notice per project and suite. */
   flakySuite: 'flaky_suite',
+  /** A handoff check produced no verdict (error or timeout) twice in a row on a project: one alert per project and check. */
+  handoffCheckBroken: 'handoff_check_broken',
   bugReported: 'bug_reported',
   /** A suite or regression run found the target app on another commit than the one it tests: no bug was filed. */
   regressionTargetMismatch: 'regression_target_mismatch',

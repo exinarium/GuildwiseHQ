@@ -34,6 +34,11 @@ export interface SandboxSpec {
   uid?: number;
   /** Mount the .NET user secrets (default true). The builder's checks never get them. */
   userSecrets?: boolean;
+  /**
+   * `host` (default): the host network, as services need. `none`: a network namespace of its own (`--unshare-net`, only
+   * loopback): the handoff checks and the worktree preparation, which must never download anything.
+   */
+  network?: 'host' | 'none';
 }
 
 /** The services' HOME inside the sandbox (inside the private `/tmp`). */
@@ -81,6 +86,7 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
     '/proc',
     '--unshare-pid',
     '--unshare-ipc',
+    ...(spec.network === 'none' ? ['--unshare-net'] : []),
     '--cap-drop',
     'ALL',
   ];
@@ -148,6 +154,7 @@ const run = (cmd: string, args: string[], timeoutMs = 8000): Promise<boolean> =>
 export class ServiceLauncher {
   private bwrap: Promise<boolean> | undefined;
   private scope: Promise<boolean> | undefined;
+  private netns: Promise<boolean> | undefined;
 
   constructor(
     private readonly opts: {
@@ -155,6 +162,7 @@ export class ServiceLauncher {
       pathVar?: string;
       probeBwrap?: () => Promise<boolean>;
       probeScope?: () => Promise<boolean>;
+      probeNetns?: () => Promise<boolean>;
       /** `AOM_RUN_NO_SCOPE=1` turns the systemd scope off. */
       noScope?: boolean;
     } = {},
@@ -179,6 +187,30 @@ export class ServiceLauncher {
       ]);
     })();
     return this.bwrap;
+  }
+
+  /**
+   * Can bubblewrap give a process a network namespace of its own here (`--unshare-net`; some hosts forbid unprivileged
+   * network namespaces)? Probed once. False: a check runs with the host network and the offline environment only.
+   */
+  networkIsolationAvailable(): Promise<boolean> {
+    this.netns ??= (async () => {
+      if (!(await this.sandboxAvailable())) return false;
+      if (this.opts.probeNetns) return this.opts.probeNetns();
+      return run('bwrap', [
+        '--ro-bind',
+        '/',
+        '/',
+        '--dev',
+        '/dev',
+        '--proc',
+        '/proc',
+        '--unshare-pid',
+        '--unshare-net',
+        'true',
+      ]);
+    })();
+    return this.netns;
   }
 
   /** Is the systemd user manager reachable (a trial `systemd-run --user --scope true`)? */

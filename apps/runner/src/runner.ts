@@ -10,6 +10,7 @@ import {
   CHAT_ACCOUNTS_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
   CHECKS_CAPABILITY,
+  CHECKS_POLICY_CAPABILITY,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
   COMMIT_STATUS_CAPABILITY,
@@ -264,6 +265,8 @@ export interface RunnerOptions {
   probeTarget?: (url: string) => Promise<string | null>;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`, submodules and dependencies). */
   prepareWorktree?: SupervisorDeps['prepareWorktree'];
+  /** Test hook: the time budget of a handoff's checks (default `CHECKS_BUDGET_MS`). */
+  checksBudgetMs?: number;
   /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
   initWorktreeSubmodules?: SupervisorDeps['initWorktreeSubmodules'];
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
@@ -826,6 +829,7 @@ export class Runner {
       envChecker: opts.envChecker,
       ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
+      ...(opts.checksBudgetMs ? { checksBudgetMs: opts.checksBudgetMs } : {}),
       ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
@@ -1751,6 +1755,7 @@ export class Runner {
         RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
         CHECKS_CAPABILITY,
+        CHECKS_POLICY_CAPABILITY,
         RELEASE_DOCS_PREP_CAPABILITY,
         RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY,
         RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
