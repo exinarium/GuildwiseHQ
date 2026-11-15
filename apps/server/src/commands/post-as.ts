@@ -20,6 +20,8 @@ import {
   resolvePostAsRepo,
   type SelectedAppState,
   streamId,
+  TRACKER_POST_AS_CAPABILITY,
+  type TrackerApp,
 } from '@aom/shared';
 import { z } from 'zod';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -28,7 +30,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, forbidden } from '../errors.ts';
+import { badRequest, conflict, forbidden } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, userActor } from './common.ts';
 import { stateOf } from './org-apps.ts';
@@ -86,6 +88,66 @@ export async function selectedAppStates(
       ? { ref, identity: identityOf(a), removed: a.status !== 'active' }
       : { ref, identity: null, removed: true };
   });
+}
+
+/**
+ * The project's selected github.com GitHub App for GitHub issue traffic (approved posts, polling, issue reads), or null:
+ * no project, no GitHub App selected, the app was removed, or it lives on another host (issue references are github.com
+ * only). A disconnected or failing app is still returned: the runner then fails closed when it cannot get a token.
+ */
+export async function trackerAppFor(
+  db: Queryable,
+  projectId: string | null | undefined,
+): Promise<TrackerApp | null> {
+  if (!projectId) return null;
+  const p = await one<{ post_as: unknown; org_id: string | null }>(
+    db,
+    'SELECT post_as, org_id FROM projects WHERE id=$1',
+    [projectId],
+  );
+  if (!p) return null;
+  const refs = storedPostAs(p.post_as).filter((r) => APP_PROVIDER_FORGE[r.provider] === 'github');
+  if (!refs.length) return null;
+  // One app per provider (GWP-212.2).
+  const [s] = await selectedAppStates(db, p.org_id, refs.slice(0, 1));
+  if (!s || s.removed || !s.identity) return null;
+  if (s.identity.host.toLowerCase() !== 'github.com') return null;
+  return s.identity;
+}
+
+/** Does this workstation's runner post to and read GitHub issues as the `trackerApp` it is sent? */
+export async function canTrackerPostAs(
+  db: Queryable,
+  workstationId: string | null | undefined,
+): Promise<boolean> {
+  if (!workstationId) return false;
+  const r = await one(
+    db,
+    'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+    [workstationId, TRACKER_POST_AS_CAPABILITY],
+  );
+  return !!r;
+}
+
+/**
+ * `integration.run` fields for a schedule's poll: `trackerApp` for a GitHub poll of a project with a GitHub App
+ * selected. Throws 409 runner_too_old when the workstation's runner would ignore the app (fail closed).
+ */
+export async function trackerAppForPoll(
+  db: Queryable,
+  s: { project_id?: string | null },
+  integration: string,
+  workstationId: string,
+): Promise<{ trackerApp?: TrackerApp }> {
+  if (integration !== 'github') return {};
+  const trackerApp = await trackerAppFor(db, s.project_id);
+  if (!trackerApp) return {};
+  if (!(await canTrackerPostAs(db, workstationId)))
+    throw conflict(
+      'runner_too_old',
+      `Update the runner on this workstation so it can poll GitHub as the GitHub App ${trackerApp.label}.`,
+    );
+  return { trackerApp };
 }
 
 /** Connected = at least one active workstation holding the key reports connected. */

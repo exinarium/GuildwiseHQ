@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ExternalSystem } from '../events/intake.ts';
 import { OutboundKind } from '../events/outbound.ts';
+import { type TrackerApp, TrackerAppSchema } from '../repo/post-as.ts';
 
 /**
  * External systems (docs/SPEC.md "External systems boundary"; docs/ARCHITECTURE.md section 16.5). Company systems such as
@@ -82,19 +83,24 @@ export class NotImplementedError extends Error {
   }
 }
 
+/** Per call context for an adapter. `app`: the GitHub App to act as; adapters of other systems ignore it. */
+export interface AdapterCallContext {
+  app?: TrackerApp;
+}
+
 /**
  * One external system, as seen from the runner of the workstation that holds its credentials.
  * `readSource(ref)` reads a ticket; `postApproved(draft)` posts a manager-approved draft, exactly as approved.
  */
 export interface ExternalAdapter {
   readonly system: ExternalSystem;
-  readSource(ref: ExternalRef): Promise<ExternalSource>;
-  postApproved(draft: ApprovedDraft): Promise<PostResult>;
+  readSource(ref: ExternalRef, ctx?: AdapterCallContext): Promise<ExternalSource>;
+  postApproved(draft: ApprovedDraft, ctx?: AdapterCallContext): Promise<PostResult>;
   /**
    * Optional: has this draft's text already been posted to the ticket? Used on a retry after an ambiguous failure
    * (a timeout, a crash after sending) so the same update is never posted twice.
    */
-  findPosted?(draft: ApprovedDraft): Promise<PostResult | null>;
+  findPosted?(draft: ApprovedDraft, ctx?: AdapterCallContext): Promise<PostResult | null>;
 }
 
 /**
@@ -130,6 +136,8 @@ export const OutboundPostPayloadSchema = z.object({
   /** The final, approved text, posted exactly as it is. */
   body: z.string().min(1),
   agentNames: z.array(z.string()).default([]),
+  /** The project's GitHub App, only for a GitHub issue of a project with a github.com app selected; absent otherwise. */
+  trackerApp: TrackerAppSchema.optional(),
 });
 export type OutboundPostPayload = z.infer<typeof OutboundPostPayloadSchema>;
 

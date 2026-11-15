@@ -7,6 +7,7 @@ import {
   OutboundPostResultSchema,
   type OutboundStatus,
   streamId,
+  TRACKER_POST_AS_CAPABILITY,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
@@ -18,6 +19,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { completeCommand, enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cardInternalRefs, orgAgentNames, screenOutbound } from './leak-check.ts';
+import { canTrackerPostAs, trackerAppFor } from './post-as.ts';
 
 /**
  * The outbox (docs/SPEC.md "External systems boundary"; docs/ARCHITECTURE.md section 16.5). A draft the card's owner
@@ -27,14 +29,29 @@ import { cardInternalRefs, orgAgentNames, screenOutbound } from './leak-check.ts
  * and is queued when one connects.
  */
 
-/** The owner's workstation to post from: a connected one first, else the most recently seen. */
-export async function ownerWorkstation(db: Queryable, ownerId: string): Promise<string | null> {
-  const w = await one(
-    db,
-    `SELECT id FROM workstations WHERE user_id=$1 AND status='active'
-      ORDER BY connected DESC, last_seen_at DESC NULLS LAST, paired_at LIMIT 1`,
-    [ownerId],
-  );
+/**
+ * The owner's workstation to post from: a connected one first, else the most recently seen. With `capability`, only a
+ * workstation whose runner announces it.
+ */
+export async function ownerWorkstation(
+  db: Queryable,
+  ownerId: string,
+  opts: { capability?: string } = {},
+): Promise<string | null> {
+  const w = opts.capability
+    ? await one(
+        db,
+        `SELECT w.id FROM workstations w WHERE w.user_id=$1 AND w.status='active'
+            AND EXISTS (SELECT 1 FROM workstation_capabilities wc WHERE wc.workstation_id = w.id AND $2 = ANY (wc.capabilities))
+          ORDER BY w.connected DESC, w.last_seen_at DESC NULLS LAST, w.paired_at LIMIT 1`,
+        [ownerId, opts.capability],
+      )
+    : await one(
+        db,
+        `SELECT id FROM workstations WHERE user_id=$1 AND status='active'
+          ORDER BY connected DESC, last_seen_at DESC NULLS LAST, paired_at LIMIT 1`,
+        [ownerId],
+      );
   return w?.id ?? null;
 }
 
@@ -49,10 +66,22 @@ const hasOpenCommand = async (db: Queryable, draftId: string): Promise<boolean> 
 export async function queueOutboundPost(tx: Tx, draft: Row, toWorkstation?: string): Promise<string | null> {
   if (draft.status !== 'approved' || !draft.final_body) return null;
   if (await hasOpenCommand(tx, draft.id)) return null;
-  const card = (await one(tx, 'SELECT id, ref, owner_user_id FROM cards WHERE id=$1', [
+  const card = (await one(tx, 'SELECT id, ref, owner_user_id, project_id FROM cards WHERE id=$1', [
     draft.card_id,
   ])) as Row;
-  const ws = toWorkstation ?? (await ownerWorkstation(tx, card.owner_user_id));
+  // A GitHub issue of a project with a GitHub App selected is posted as the app, so only by a runner that understands
+  // `trackerApp`: an older one would post as the owner. Without such a workstation the draft stays approved and is
+  // queued when an updated runner connects (queueApprovedFor).
+  const trackerApp = draft.external_system === 'github' ? await trackerAppFor(tx, card.project_id) : null;
+  let ws: string | null;
+  if (trackerApp) {
+    ws =
+      toWorkstation === undefined
+        ? await ownerWorkstation(tx, card.owner_user_id, { capability: TRACKER_POST_AS_CAPABILITY })
+        : (await canTrackerPostAs(tx, toWorkstation))
+          ? toWorkstation
+          : null;
+  } else ws = toWorkstation ?? (await ownerWorkstation(tx, card.owner_user_id));
   if (!ws) return null;
   const payload: OutboundPostPayload = {
     draftId: draft.id,
@@ -66,6 +95,7 @@ export async function queueOutboundPost(tx: Tx, draft: Row, toWorkstation?: stri
     kind: draft.kind,
     body: draft.final_body,
     agentNames: await orgAgentNames(tx, draft.org_id),
+    ...(trackerApp ? { trackerApp } : {}),
   };
   await enqueueRunnerCommand(tx, ws, 'outbound.post', payload as never);
   return ws;

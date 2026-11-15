@@ -7,6 +7,7 @@ import {
   type PostAsPlan,
   RepoIdentityFactSchema,
   streamId,
+  type TrackerApp,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -16,7 +17,7 @@ import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
-import { loadPostAsPlan, postAsSettings } from './post-as.ts';
+import { loadPostAsPlan, postAsSettings, trackerAppFor } from './post-as.ts';
 
 /**
  * "Commit as" (backlog #65): the name and e-mail every commit of a project carries. The runner resolves the identity
@@ -90,9 +91,16 @@ export async function identityFieldsFor(
 export async function withCommitAs<T extends { brief: { project: { id: string } } }>(
   ctx: Ctx,
   payload: T,
-): Promise<T & { commitAs?: CommitAs; postAs?: PostAsPlan }> {
+): Promise<T & { commitAs?: CommitAs; postAs?: PostAsPlan; trackerApp?: TrackerApp }> {
   const { commitAs, postAs } = await loadIdentityPlan(ctx.pool, payload.brief.project.id);
-  return { ...payload, ...(commitAs ? { commitAs } : {}), ...(postAs ? { postAs } : {}) };
+  // GitHub issue reads in the shift (`aom source read`) as the project's GitHub App.
+  const trackerApp = await trackerAppFor(ctx.pool, payload.brief.project.id);
+  return {
+    ...payload,
+    ...(commitAs ? { commitAs } : {}),
+    ...(postAs ? { postAs } : {}),
+    ...(trackerApp ? { trackerApp } : {}),
+  };
 }
 
 export async function getCommitAs(
