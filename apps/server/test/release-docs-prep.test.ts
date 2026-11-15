@@ -1264,10 +1264,14 @@ describe("the step 'Regenerate assistant knowledge'", () => {
     expect((await setting()).enabled).toBe(false);
     await saved({ analyse: true, changelog: false, guide: false, help: true, videos: false, commit: true });
     expect((await setting()).enabled).toBe(true);
-    // a save names every step, so the tick is the project's own from then on
+    // a save that names it sets it; one that names only the Help articles takes it along
     await enable({ help: true, 'assistant-pack': false });
     expect((await setting()).enabled).toBe(false);
     await enable({ help: true });
+    expect((await setting()).enabled).toBe(true);
+    await enable({ help: false });
+    expect((await setting()).enabled).toBe(false);
+    await owner('PUT', `${base()}/settings`, { enabled: false, steps: {} }); // names neither: keeps the saved tick
     expect((await setting()).enabled).toBe(false);
   });
 

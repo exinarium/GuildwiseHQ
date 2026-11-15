@@ -286,6 +286,7 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
     'Write changelog',
     'Update user guide',
     'Update Help articles',
+    'Regenerate assistant knowledge',
     'Generate videos',
     'Commit results',
   ]);
@@ -309,6 +310,7 @@ test('AC2/AC9: the owner switches release prep on; the checklist lists only the 
       changelog: true,
       guide: true,
       help: true,
+      'assistant-pack': true,
       videos: false,
       commit: true,
     }),
