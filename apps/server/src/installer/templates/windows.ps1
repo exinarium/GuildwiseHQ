@@ -54,7 +54,7 @@ function Stop-Install([string]$What, [string]$Todo = '') {
 
 function Get-State {
   if (Test-Path $StatePath) { try { return Get-Content $StatePath -Raw | ConvertFrom-Json } catch { } }
-  return [pscustomobject]@{ rebootRequested = $false; wslRestarts = 0; ubuntuRestartRequested = $false }
+  return [pscustomobject]@{ rebootRequested = $false; wslRestarts = 0; ubuntuRestartRequested = $false; restartBootTime = '' }
 }
 function Save-State($State) { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding ASCII }
 # An older state file has no field for what was added later: Add-Member -Force sets it either way.
@@ -89,9 +89,22 @@ function Get-Distros {
   return @(($raw | Out-String) -replace "`0", '' -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+# When Windows last started. Saved with every restart request: answering N to the prompt (or never restarting) leaves it
+# unchanged, so the next run can tell "back after a restart" from "run again without one".
+function Get-BootTime {
+  try { return (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToString('o') } catch { return '' }
+}
+function Test-RestartedSince {
+  $then = [string](Get-State).restartBootTime
+  $now = Get-BootTime
+  if (-not $then -or -not $now) { return $true }
+  return ([Math]::Abs(([datetime]$now - [datetime]$then).TotalSeconds) -gt 60)
+}
+
 function Request-Restart([string]$Reason) {
   $state = Get-State
   $state.rebootRequested = $true
+  $state | Add-Member -NotePropertyName restartBootTime -NotePropertyValue (Get-BootTime) -Force
   Save-State $state
   $runOnce = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
   $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$SelfPath`""
@@ -123,14 +136,18 @@ function Get-WslReadiness {
 }
 
 # Turns on every WSL feature that is not on yet. True when something changed, so that a restart is really pending.
+# A failure is kept in $script:WslEnableError for the stop message instead of going to the trap.
+$script:WslEnableError = ''
 function Enable-WslFeatures {
   $changed = $false
-  foreach ($f in $WslFeatureNames) {
-    $before = [string](Get-WindowsOptionalFeature -Online -FeatureName $f -ErrorAction Stop).State
-    if ($before -eq 'Enabled') { continue }
-    Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All -ErrorAction Stop | Out-Null
-    $changed = $true
-  }
+  try {
+    foreach ($f in $WslFeatureNames) {
+      $before = [string](Get-WindowsOptionalFeature -Online -FeatureName $f -ErrorAction Stop).State
+      if ($before -eq 'Enabled') { continue }
+      Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All -ErrorAction Stop | Out-Null
+      $changed = $true
+    }
+  } catch { $script:WslEnableError = "Enabling $f failed: $($_.Exception.Message)" }
   return $changed
 }
 
@@ -183,6 +200,8 @@ catch { if (-not (Test-Path $LinuxScriptPath)) { Stop-Install "Could not downloa
 # ---- 2. WSL2 --------------------------------------------------------------------------------------------------------------
 Start-Step 'Turning on WSL2 (Linux on Windows)'
 $wslRestarts = [int](Get-State).wslRestarts
+# Windows has not restarted since the last request (the answer was N): that request does not count.
+if ($wslRestarts -gt 0 -and -not (Test-RestartedSince)) { $wslRestarts--; Set-StateValue 'wslRestarts' $wslRestarts }
 $wsl = Get-WslReadiness
 if (-not $wsl.Ready) {
   $changed = $false
@@ -210,8 +229,21 @@ if (-not $wsl.Ready) {
       Set-StateValue 'wslRestarts' ($wslRestarts + 1)
       Request-Restart 'to finish turning on WSL2'
     }
-    Set-StateValue 'wslRestarts' 0
-    Stop-Install "WSL2 is still not ready. $($wsl.Summary)." 'Turn on virtualization in the BIOS/UEFI of this PC, or open PowerShell and run: wsl --install   Then run the same command again.'
+    # Both features are on but this wsl.exe has no --status (older Windows 10 without the Store update): if it can
+    # still set version 2 as the default, carry on rather than stop a PC that works.
+    $allOn = @($wsl.States.Values | Where-Object { $_ -ne 'Enabled' }).Count -eq 0
+    if ($allOn) {
+      & wsl.exe --set-default-version 2 2>&1 | Out-Null
+      if ($LASTEXITCODE -eq 0) { $wsl.Ready = $true }
+    }
+    if (-not $wsl.Ready) {
+      Set-StateValue 'wslRestarts' 0
+      $detail = $wsl.Summary
+      if ($script:WslEnableError) { $detail = "$detail; $($script:WslEnableError)" }
+      $todo = 'Turn on virtualization in the BIOS/UEFI of this PC, or open PowerShell and run: wsl --install   Then run the same command again.'
+      if ($wsl.Pending) { $todo = "Restart Windows first (a feature is waiting for it). $todo" }
+      Stop-Install "WSL2 is still not ready. $detail." $todo
+    }
   }
 }
 Set-StateValue 'wslRestarts' 0
@@ -232,7 +264,7 @@ if (-not $Distro) {
     $Distro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
   }
   if (-not $Distro) {
-    if ((Get-State).ubuntuRestartRequested) {
+    if ((Get-State).ubuntuRestartRequested -and (Test-RestartedSince)) {
       Set-StateValue 'ubuntuRestartRequested' $false
       $listed = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ''
       Stop-Install "Ubuntu is still not installed after a restart. wsl.exe -l -q returned: $($listed.Trim())" 'Open PowerShell and run: wsl --install -d Ubuntu   Then run the same command again.'
