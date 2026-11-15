@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { globToRegExp } from '../workflows/high-risk.ts';
 

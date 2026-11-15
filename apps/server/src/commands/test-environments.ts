@@ -31,12 +31,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { workflowView } from './cards.ts';
-import {
-  canPostAs,
-  explicitPostAs,
-  loadIdentityPlan,
-  POST_AS_RUNNER_TOO_OLD_MESSAGE,
-} from './commit-as.ts';
+import { canPostAs, explicitPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { openItemForSubject, raiseOrCoalesce } from './desk-coalesce.ts';
 import { createDevOpsRequestIn } from './devops.ts';

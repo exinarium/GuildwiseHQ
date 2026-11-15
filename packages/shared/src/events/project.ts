@@ -6,8 +6,8 @@ import { ProjectKeySchema } from '../ids.ts';
 import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
-import { PostAsAppRefSchema } from '../repo/post-as.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
+import { PostAsAppRefSchema } from '../repo/post-as.ts';
 import { FindingDispositionSchema } from '../review/findings.ts';
 import { FindingMarkSchema } from '../review/marks.ts';
 import {

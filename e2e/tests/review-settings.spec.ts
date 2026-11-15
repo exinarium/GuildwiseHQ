@@ -11,10 +11,12 @@ let projectId: string;
 const url = () => `/api/projects/${projectId}/review-settings`;
 const events = async () =>
   Number(
-    (await q<{ n: string }>(
-      `SELECT count(*) AS n FROM events WHERE type='ProjectReviewSettingsSet' AND payload->>'projectId'=$1`,
-      [projectId],
-    ))[0]?.n,
+    (
+      await q<{ n: string }>(
+        `SELECT count(*) AS n FROM events WHERE type='ProjectReviewSettingsSet' AND payload->>'projectId'=$1`,
+        [projectId],
+      )
+    )[0]?.n,
   );
 
 test.beforeAll(async () => {
@@ -116,7 +118,9 @@ test('touch: numeric keypad, Add path focuses the new row, 44px targets on a pho
   const add = page.getByTestId('review-settings-add');
   await add.scrollIntoViewIfNeeded();
   expect((await add.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-  expect((await page.getByTestId('review-settings-save').boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect((await page.getByTestId('review-settings-save').boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(
+    44,
+  );
   const before = await page.getByTestId('review-settings-row').count();
   await add.tap();
   await expect(page.getByTestId('review-settings-row')).toHaveCount(before + 1);
@@ -137,7 +141,9 @@ test('AC5: a manager sees a read-only panel and the PUT is refused; the owner ca
   );
   const other = await apiAs(REVMGR.email, REVMGR.password);
   const before = await events();
-  const denied = await other.put(url(), { data: { sizeBudget: 1, sizeUnit: 'changed_files', riskMap: null } });
+  const denied = await other.put(url(), {
+    data: { sizeBudget: 1, sizeUnit: 'changed_files', riskMap: null },
+  });
   expect(denied.status()).toBe(403);
   expect(await events()).toBe(before);
 

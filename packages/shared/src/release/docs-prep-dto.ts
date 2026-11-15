@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { AgentRuntimeSpecSchema } from '../protocol/agent-runtime.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { ReleasePrepChangelogPayloadSchema } from './changelog-entries.ts';
 
 /** The change summary of 'Analyse changes' for one repository (stored per repo, capped to keep events small). */

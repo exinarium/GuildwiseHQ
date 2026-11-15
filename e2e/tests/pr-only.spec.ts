@@ -12,10 +12,12 @@ const repoName = 'toy';
 let repoId: string;
 
 const prOnlyRow = async () =>
-  (await q<{ pr_only: boolean; pr_only_since: string | null }>(
-    'SELECT pr_only, pr_only_since FROM project_repos WHERE id=$1',
-    [repoId],
-  ))[0];
+  (
+    await q<{ pr_only: boolean; pr_only_since: string | null }>(
+      'SELECT pr_only, pr_only_since FROM project_repos WHERE id=$1',
+      [repoId],
+    )
+  )[0];
 
 test.beforeAll(async () => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);

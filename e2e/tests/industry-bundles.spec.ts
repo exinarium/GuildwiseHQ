@@ -78,7 +78,9 @@ for (const [name, pattern] of [
     expect(await countOf('/api/documents')).toBeGreaterThan(before.docs);
 
     // journey templates are in the gallery
-    const tpl = (await (await api.get('/api/journey-templates')).json()).items as { industry: string | null }[];
+    const tpl = (await (await api.get('/api/journey-templates')).json()).items as {
+      industry: string | null;
+    }[];
     expect(tpl.some((t) => t.industry === name)).toBe(true);
 
     const d2 = await openBundles();

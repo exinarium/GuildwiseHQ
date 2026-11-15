@@ -9,9 +9,9 @@ import {
 import { DomainEventSchema } from '../src/index.ts';
 import {
   MIN_RUNNER_FOR_NEEDS_SPLIT,
-  runnerAtLeast,
   renderSpecCardInstructions,
   renderSpecCardPrompt,
+  runnerAtLeast,
   SPEC_CARD_MAX_SPLIT,
   type SpecCardTask,
 } from '../src/intake/spec-card.ts';
