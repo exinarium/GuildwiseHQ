@@ -9,7 +9,7 @@ import type { OpencodeRuntimeConfig } from '../config.ts';
 import type { ProviderConfig, ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { EgressRoute } from '../sandbox/egress-proxy.ts';
-import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { DOTNET_SHM_DIR, usablePnpmLockDirs, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import { agentEnv, toolchainReadPaths } from './claude-policy.ts';
 import { findBinary, gitCommonDirs } from './codex.ts';
@@ -517,7 +517,9 @@ export class OpencodeAdapter implements RuntimeAdapter {
         mayCommit: opts.mayCommit,
         ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
         ...(nuget ? { nugetFallbackDir: nuget } : {}),
-        ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+        ...(process.platform === 'linux'
+          ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+          : {}),
       },
       cmd: { bin: cmd.bin, args: cmd.args, env: cmd.env },
     };

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, constants, existsSync, rmSync } from 'node:fs';
+import { chmodSync, constants, existsSync, lstatSync, rmSync } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { commitEnv } from '../git/identity.ts';
+import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 
 export interface Sandbox {
@@ -55,6 +56,20 @@ export const sharedCacheDir = (cacheRoot: string, kind: CacheKind): string => jo
  * file specified" when the sandbox cannot write here.
  */
 export const DOTNET_SHM_DIR = '/tmp/.dotnet';
+
+/**
+ * pnpm 12's lock folders: fixed paths under /tmp (it ignores TMPDIR), one set per uid. The only /tmp paths besides
+ * DOTNET_SHM_DIR that the sandbox may write; each is checked first (usablePnpmLockDirs).
+ */
+export const PNPM_LOCK_DIR_NAMES = [
+  'pnpm-store-operation-locks',
+  'pnpm-dir-locks',
+  'pnpm-verify-deps-install-locks',
+] as const;
+
+/** `<root>/<name>-<uid>` for each of PNPM_LOCK_DIR_NAMES. */
+export const pnpmLockDirs = (uid: number, root = '/tmp'): string[] =>
+  PNPM_LOCK_DIR_NAMES.map((n) => `${root}/${n}-${uid}`);
 
 /**
  * Env that makes every package manager use the runner's shared caches (never the agent's empty private HOME).
@@ -140,6 +155,96 @@ export async function ensureDotnetShm(): Promise<void> {
   }
 }
 
+/** Reasons already logged per folder: a foreign folder is reported once per process, not on every shift. */
+const pnpmLockWarned = new Set<string>();
+
+const errCode = (e: unknown): string => (e as NodeJS.ErrnoException)?.code ?? String(e);
+
+/**
+ * Creates pnpm 12's lock folders (PNPM_LOCK_DIR_NAMES) for the runner's own uid, mode 0700, so the sandbox can be told
+ * to write there. Never follows a symlink: an existing entry that is a symlink, not a directory or owned by another uid
+ * is left alone, not granted, and the reason is logged. Linux only (a `root` override is for tests); never throws.
+ * Returns the folders that passed.
+ */
+export async function ensurePnpmLockDirs(
+  opts: { root?: string; uid?: number; log?: (msg: string) => void } = {},
+): Promise<string[]> {
+  if (process.platform !== 'linux' && opts.root === undefined) return [];
+  const uid = opts.uid ?? process.getuid?.();
+  if (uid === undefined) return [];
+  const log = opts.log ?? ((m: string) => process.stderr.write(`${m}\n`));
+  const warn = (dir: string, reason: string) => {
+    const key = `${dir}\0${reason}`;
+    if (pnpmLockWarned.has(key)) return;
+    pnpmLockWarned.add(key);
+    log(`pnpm lock folder ${dir} not added to the sandbox write list: ${reason}`);
+  };
+  const ok: string[] = [];
+  for (const dir of pnpmLockDirs(uid, opts.root)) {
+    try {
+      // not recursive: any existing entry, also a symlink, gives EEXIST and is checked below
+      await mkdir(dir, { mode: 0o700 });
+    } catch (e) {
+      if (errCode(e) !== 'EEXIST') {
+        warn(dir, `cannot create (${errCode(e)})`);
+        continue;
+      }
+    }
+    let fh: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      // O_NOFOLLOW + O_DIRECTORY: a symlink (ELOOP) or a non-directory (ENOTDIR) is refused, never followed; the stat
+      // and chmod below act on this exact inode, so nothing can be swapped in between
+      fh = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      const st = await fh.stat();
+      if (st.uid !== uid) {
+        warn(dir, `owned by uid ${st.uid}, not ${uid}`);
+        continue;
+      }
+      if ((st.mode & 0o777) !== 0o700) await fh.chmod(0o700);
+      ok.push(dir);
+    } catch (e) {
+      const c = errCode(e);
+      // with O_DIRECTORY Linux reports a symlink as ENOTDIR, not ELOOP: lstat (never follows) tells the two apart
+      const st = await lstat(dir).catch(() => undefined);
+      const link = st?.isSymbolicLink() ?? false;
+      // a 0700 folder of another user cannot even be opened (EACCES): name its owner, which is the real reason
+      const foreign = st?.isDirectory() && st.uid !== uid ? st.uid : undefined;
+      warn(
+        dir,
+        link || c === 'ELOOP'
+          ? 'is a symlink'
+          : c === 'ENOTDIR'
+            ? 'is not a directory'
+            : foreign !== undefined
+              ? `owned by uid ${foreign}, not ${uid}`
+              : `unusable (${c})`,
+      );
+    } finally {
+      await fh?.close().catch(() => undefined);
+    }
+  }
+  return ok;
+}
+
+/**
+ * pnpm 12's lock folders that may go on a sandbox write list: real directories (lstat, a symlink is never followed)
+ * owned by the runner's uid with mode 0700. Creates and changes nothing, logs nothing (ensurePnpmLockDirs does).
+ * Linux only (a `root` override is for tests).
+ */
+export function usablePnpmLockDirs(opts: { root?: string; uid?: number } = {}): string[] {
+  if (process.platform !== 'linux' && opts.root === undefined) return [];
+  const uid = opts.uid ?? process.getuid?.();
+  if (uid === undefined) return [];
+  return pnpmLockDirs(uid, opts.root).filter((d) => {
+    try {
+      const st = lstatSync(d);
+      return st.isDirectory() && !st.isSymbolicLink() && st.uid === uid && (st.mode & 0o777) === 0o700;
+    } catch {
+      return false; // missing: not granted (the sandbox could not bind it anyway)
+    }
+  });
+}
+
 /**
  * Root of the agents' short tmp dirs on POSIX: `/tmp`, or an absolute `AOM_AGENT_TMP_ROOT`. A runner started inside a
  * tester shift (the E2E suite's mock runner) gets it from the shift's env, because `/tmp` itself is read-only there.
@@ -193,6 +298,8 @@ export async function ensureSandbox(
   identity?: { name: string; email: string } | null,
   /** The Claude account of the shift (absent: main). */
   account?: string,
+  /** Where a pnpm lock folder that cannot be granted is reported (default: stderr). */
+  opts: { log?: Logger } = {},
 ): Promise<Sandbox> {
   const sb = sandboxFor(paths, agentId, account);
   await Promise.all([sb.home, sb.configDir, sb.scratch].map((d) => mkdir(d, { recursive: true })));
@@ -200,6 +307,8 @@ export async function ensureSandbox(
   if (process.platform !== 'win32') await writeTmpOwner(sb.tmp, paths, agentId);
   if (sb.cacheRoot) await ensureSharedCaches(sb.cacheRoot);
   await ensureDotnetShm();
+  const log = opts.log;
+  await ensurePnpmLockDirs(log ? { log: (m) => log.warn(m) } : {});
   const gitconfig = [
     ...(identity ? ['[user]', `\tname = ${identity.name}`, `\temail = ${identity.email}`] : []),
     '[commit]',
