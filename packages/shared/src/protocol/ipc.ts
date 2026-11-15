@@ -302,6 +302,7 @@ export const RpcMethodSchema = z.enum([
   'git.verify_merge',
   /** DevOps repository hygiene, answered by the runner itself: the shifts with a running worktree, and a pull request's state. */
   'hygiene.busy_worktrees',
+  'hygiene.run',
   'hygiene.change_state',
   /** The BA's finalize shift on an investigation-only card: record the result in the ledger and PROJECT.md. */
   'investigation.record',

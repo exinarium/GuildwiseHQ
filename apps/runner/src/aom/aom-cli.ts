@@ -55,9 +55,8 @@ import {
   runSubagentDone,
   runSubagentGuard,
 } from '../delegate/subagent-guard.ts';
-import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
-import { gitHeadBranch, loadGuardConfig, runGuardHook } from '../devops/guard.ts';
-import { runHygiene } from '../devops/hygiene.ts';
+import { gitHeadBranch, gitOriginUrl, loadGuardConfig, runGuardHook } from '../devops/guard.ts';
+import type { HygieneRun } from '../devops/hygiene.ts';
 import { missingTokenMessage, resolveShiftEnv, type ShiftEnvAttempt } from '../session/shift-credential.ts';
 
 export interface AomIo {
@@ -84,6 +83,8 @@ interface Parsed {
 
 const BOOLEAN_FLAGS = new Set([
   'json',
+  'delete',
+  'tags',
   'local',
   'ssh-hosts',
   'non-blocking',
@@ -2027,9 +2028,22 @@ const VERBS: Record<string, Verb> = {
    */
   git: async (ctx, p) => {
     const usage =
-      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push --repo <dir> [--delete] [--tags] <refspec>... | aom git fetch --repo <dir>   (the DevOps engineer: the runner pushes and fetches)\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
     const sub = p.positionals[0];
     const host = one(p, 'host');
+    // The DevOps engineer's push and fetch of a repository: the runner talks to origin (an app repository with the app's
+    // token, which never reaches this process; any other with plain git).
+    const repo = one(p, 'repo');
+    if ((sub === 'push' || sub === 'fetch') && repo) {
+      const r = (await rpc(ctx, `git.${sub}`, {
+        repo: resolvePath(repo),
+        refspecs: p.positionals.slice(1),
+        ...(has(p, 'delete') ? { delete: true } : {}),
+        ...(has(p, 'tags') ? { tags: true } : {}),
+      })) as { message?: string };
+      ctx.io.out(`${r?.message ?? 'Done.'}\n`);
+      return 0;
+    }
     // Agents never push (backlog #61): the runner lands the work, and pushes a branch only for a pull request.
     if (sub === 'push')
       throw new UsageError(
@@ -2097,7 +2111,10 @@ const VERBS: Record<string, Verb> = {
       stdin: ctx.readFile('-'),
       cfg: guardCfg,
       // only a session with frozen branches asks git which branch is checked out
-      ...(guardCfg.frozenBranches?.length ? { deps: { headBranch: gitHeadBranch } } : {}),
+      deps: {
+        ...(guardCfg.frozenBranches?.length ? { headBranch: gitHeadBranch } : {}),
+        ...(guardCfg.appRepos?.length ? { originUrl: gitOriginUrl } : {}),
+      },
       report: async (entries) => {
         try {
           await rpc(ctx, 'devops.audit', { entries });
@@ -2200,29 +2217,9 @@ const VERBS: Record<string, Verb> = {
    */
   hygiene: async (ctx, p) => {
     if (p.positionals[0] !== 'run') throw new UsageError('usage: aom hygiene run [--note "<text>"]');
-    const brief = (await rpc(ctx, 'card.get')) as { devops?: DevopsShift };
-    const spec = brief.devops?.hygiene;
-    if (!spec) throw new UsageError('this request is not a repository hygiene request: nothing to run');
-    // Repositories with a running card shift are left for the next run (hygiene moves refs in the shared .git).
-    let busy: string[] = [];
-    try {
-      busy = ((await rpc(ctx, 'hygiene.busy_worktrees')) as { worktrees?: string[] }).worktrees ?? [];
-    } catch {
-      // older runner: no deferral
-    }
-    // Pull request states come from the runner (it holds the git host logins); without it the branches of cards that
-    // went through a pull request are judged by their commits alone.
-    const changeState: ChangeStateLookup = async (q) => {
-      try {
-        const r = (await rpc(ctx, 'hygiene.change_state', q)) as {
-          state?: 'open' | 'merged' | 'closed' | null;
-        };
-        return r.state ?? null;
-      } catch {
-        return null;
-      }
-    };
-    const run = await runHygiene(spec, busy, { changeState });
+    // Hygiene runs in the runner: it reads the spec from its own copy of the brief, and an app repository reaches
+    // origin with the app's token, which never enters this process.
+    const run = (await rpc(ctx, 'hygiene.run', {})) as HygieneRun;
     const note = textFlag(ctx, p, 'note', false)?.trim();
     const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
     ctx.io.out(`${summary}\n`);

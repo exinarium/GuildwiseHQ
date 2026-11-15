@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
 import { devopsPostAs } from '../commands/commit-as.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { failDevopsRequestEvents } from '../commands/devops-retire.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -11,6 +12,22 @@ import { mainUsable } from './accounts.ts';
 import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
+
+/**
+ * A DevOps request that cannot run as the workstation's apps (runner too old, too many repositories) fails with the
+ * reason on its thread instead of waiting in the queue: nothing runs under another identity, and the owner sees why.
+ */
+async function failRefusedRequest(ctx: Ctx, requestId: string, why: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const row = await one(
+      tx,
+      `SELECT id, org_id, thread_id, approval, status FROM devops_requests WHERE id=$1 FOR UPDATE`,
+      [requestId],
+    );
+    if (row?.status !== 'queued') return;
+    await ctx.store.append(failDevopsRequestEvents([row], why, why), { tx });
+  });
+}
 
 export interface DevopsDispatch {
   requestId: string;
@@ -133,7 +150,10 @@ export async function devopsPass(
     // Every app repository on the workstation is worked as its app; a runner that cannot honour that gets no DevOps
     // shift (the request stays queued until the runner is updated), never one that would act as the owner.
     const postAs = await devopsPostAs(ctx.pool, r.workstation_id);
-    if ('refused' in postAs) continue;
+    if ('refused' in postAs) {
+      await failRefusedRequest(ctx, r.id as string, postAs.refused);
+      continue;
+    }
     const shiftId = randomUUID();
     const ok = await withAppendTx(ctx.pool, async (tx) => {
       const row = await one(tx, `SELECT status FROM devops_requests WHERE id=$1 FOR UPDATE`, [r.id]);

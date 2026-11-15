@@ -333,6 +333,11 @@ describe('aom hygiene run', () => {
       },
       rpc: async (r) => {
         rpcs.push(r);
+        // The runner runs hygiene (supervisor `hygiene.run`) from its own copy of the brief.
+        if (r.method === 'hygiene.run')
+          return hygiene
+            ? { ok: true, result: await runHygiene(hygiene as Parameters<typeof runHygiene>[0]) }
+            : { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
         return { ok: true, result: { devops: { hygiene } } };
       },
     });

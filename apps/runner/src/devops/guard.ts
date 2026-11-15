@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { DevopsAuditEntry } from '@aom/shared';
+import { type DevopsAuditEntry, normalizeRemoteUrl } from '@aom/shared';
 import { redactSecrets } from '../redact.ts';
 
 /**
@@ -40,12 +40,22 @@ export interface GuardConfig {
   shiftKind?: 'devops' | 'release_prep';
   /** Branches this session may not change at all (release prep: the release branch). Empty for devops shifts and chats. */
   frozenBranches?: string[];
+  /**
+   * Repositories of the shift's plan that post as an app (normalized remote, app label, bot e-mail; no secret). Raw
+   * network git, `gh` writes and commits not made as the bot are refused there (`app_repo`). Absent or empty (projects
+   * without an app): no refusal of this kind at all.
+   */
+  appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
+  /** The commit e-mail of the session's environment (the bot's on a card request for an app repository). */
+  identityEmail?: string;
 }
 
 /** Lookups the classifier needs from the machine, injected so `classifyCommand` stays pure. */
 export interface GuardDeps {
   /** The branch checked out in a directory: null when detached or not a repository, 'unknown' when it cannot be told. */
   headBranch?: (dir: string) => string | null | 'unknown';
+  /** The normalized origin URL of the repository a directory is in; null when none or not a repository. */
+  originUrl?: (dir: string) => string | null;
 }
 
 export interface GuardVerdict {
@@ -432,6 +442,101 @@ function offWorkstation(c: Ctx, seg: Segment, what: string): GuardVerdict {
   );
 }
 
+/** git subcommands that talk to a remote, and those that make or move commits (HEAD). */
+const GIT_NETWORK = new Set(['push', 'fetch', 'pull', 'ls-remote', 'clone']);
+const GIT_HEAD_MOVING = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull']);
+const looksLikeUrl = (w: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(w) || /^[^\s/@]+@[^\s:]+:/.test(w);
+
+function appFor(cfg: GuardConfig, normalized: string | null | undefined) {
+  if (!normalized) return undefined;
+  const n = normalized.toLowerCase().replace(/\.git$/, '');
+  return cfg.appRepos?.find((a) => a.remote.toLowerCase().replace(/\.git$/, '') === n);
+}
+
+const appRepoRefusal = (label: string, repo: string, what: string): GuardVerdict =>
+  refuse('app_repo', `${repo} posts as the app '${label}': ${what}`);
+
+/**
+ * `app_repo`: in a repository that posts as an app, the engineer's own git must not reach origin with the user's
+ * credentials, nor make commits under another identity. Network git goes through `aom git push|fetch --repo <dir>`
+ * (the runner uses the app's token); commits are made as the app (a card request runs with the bot identity).
+ */
+function appRepoGit(words: string[], c: Ctx): GuardVerdict | null {
+  if (!c.cfg.appRepos?.length) return null;
+  let i = 1;
+  let dir = c.cwd;
+  while (i < words.length) {
+    const w = words[i] as string;
+    if (w === '-C') {
+      dir = resolve(c.cwd, (words[i + 1] as string) ?? '.');
+      i += 2;
+    } else if (w === '-c' || w === '--git-dir' || w === '--work-tree' || w === '--namespace') i += 2;
+    else if (w.startsWith('-')) i++;
+    else break;
+  }
+  const sub = words[i];
+  if (!sub) return null;
+  const positional = words.slice(i + 1).filter((a) => !a.startsWith('-'));
+  const urlArg = positional.find(looksLikeUrl);
+  const origin = (): string | null => c.deps.originUrl?.(dir) ?? null;
+  if (GIT_NETWORK.has(sub)) {
+    const target = urlArg ? normalizeRemoteUrl(urlArg) : sub === 'clone' ? null : origin();
+    const app = appFor(c.cfg, target);
+    if (app) {
+      if (sub === 'clone') return appRepoRefusal(app.label, app.remote, 'the runner keeps its clone; work in it.');
+      const use =
+        sub === 'push'
+          ? `use \`aom git push --repo ${shellQuote(dir)} <refspec>...\` (add --delete or --tags as needed)`
+          : `use \`aom git fetch --repo ${shellQuote(dir)}\`${sub === 'pull' ? ' and then merge or rebase locally' : ''}`;
+      return appRepoRefusal(app.label, app.remote, `${use}; the runner reaches origin with the app's token.`);
+    }
+  }
+  if (GIT_HEAD_MOVING.has(sub)) {
+    const app = appFor(c.cfg, origin());
+    if (app && (c.cfg.identityEmail ?? '').toLowerCase() !== app.botEmail.toLowerCase())
+      return appRepoRefusal(
+        app.label,
+        app.remote,
+        'commits here must be made as the app; ask for this as a card request (it runs as the app), or use `aom hygiene run`.',
+      );
+  }
+  return null;
+}
+
+const GH_WRITES: Record<string, Set<string>> = {
+  pr: new Set(['create', 'edit', 'comment', 'merge', 'close', 'reopen', 'review', 'ready']),
+  issue: new Set(['create', 'edit', 'comment', 'close', 'reopen', 'delete', 'transfer', 'lock', 'unlock']),
+  release: new Set(['create', 'edit', 'delete', 'upload', 'delete-asset']),
+  label: new Set(['create', 'edit', 'delete', 'clone']),
+};
+
+/** `app_repo` for `gh`: a write aimed at an app repository (`-R/--repo`, else the directory's origin) is refused. */
+function appRepoGh(words: string[], c: Ctx): GuardVerdict | null {
+  if (!c.cfg.appRepos?.length) return null;
+  const [group, action] = words.slice(1).filter((w) => !w.startsWith('-'));
+  let write = !!(group && action && GH_WRITES[group]?.has(action));
+  if (group === 'api') {
+    const m = words.findIndex((w) => w === '-X' || w === '--method');
+    const method = m >= 0 ? (words[m + 1] ?? '').toUpperCase() : '';
+    write =
+      (method !== '' && method !== 'GET') ||
+      words.some((w) => w === '-f' || w === '-F' || w === '--field' || w === '--raw-field' || w === '--input');
+  }
+  if (!write) return null;
+  const r = words.findIndex((w) => w === '-R' || w === '--repo');
+  const named = r >= 0 ? words[r + 1] : words.find((w) => w.startsWith('--repo='))?.slice(7);
+  let target: string | null;
+  if (named) target = named.includes('/') && named.split('/').length === 2 ? `github.com/${named}` : normalizeRemoteUrl(named);
+  else target = c.deps.originUrl?.(c.cwd) ?? null;
+  const app = appFor(c.cfg, target);
+  if (!app) return null;
+  return appRepoRefusal(
+    app.label,
+    app.remote,
+    'pull requests, merges, comments and releases there are made by the runner as the app (the card finishes through it), not with your gh login.',
+  );
+}
+
 function gitPush(words: string[], cfg: GuardConfig): GuardVerdict | null {
   // skip git's global options up to the subcommand
   let i = 1;
@@ -768,6 +873,8 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     return ok('delete_inside');
   }
   if (cmd === 'git') {
+    const app = appRepoGit(words, c);
+    if (app) return app;
     const push = gitPush(words, c.cfg);
     if (push) return push;
     if (c.cfg.frozenBranches?.length) {
@@ -782,6 +889,11 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     if (sub === 'clean' && !c.cfg.deleteRoots.some((r) => inside(dir, resolve(r)) || dir === resolve(r)))
       return refuse('delete_outside', 'git clean outside a worktree or data folder is not allowed.');
     return ok();
+  }
+
+  if (cmd === 'gh') {
+    const app = appRepoGh(words, c);
+    if (app) return app;
   }
 
   // leaving the workstation
@@ -1713,6 +1825,17 @@ export function appendAuditFile(file: string, entry: DevopsAuditEntry): void {
 // ------------------------------------------------------------------------------------------------ hook
 
 /** The branch checked out in `dir` (`git symbolic-ref`): null when detached or not a repository, 'unknown' on any other error. */
+/** The normalized origin URL of the repository `dir` is in (read only); null when there is none. */
+export function gitOriginUrl(dir: string): string | null {
+  try {
+    const r = spawnSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 3000 });
+    const url = r.status === 0 ? r.stdout.trim() : '';
+    return url ? normalizeRemoteUrl(url) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function gitHeadBranch(dir: string): string | null | 'unknown' {
   try {
     const r = spawnSync('git', ['-C', dir, 'symbolic-ref', '-q', '--short', 'HEAD'], {

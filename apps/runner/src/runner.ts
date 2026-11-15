@@ -836,7 +836,14 @@ export class Runner {
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       shiftCredentials: (plan) => {
         const scope = this.scopeFor(plan);
-        return { auth: scope.auth, originRefusal: (url) => appOriginRefusal(scope, url) };
+        return {
+          auth: scope.auth,
+          originRefusal: (url) => appOriginRefusal(scope, url),
+          appFor: (url) => {
+            const a = scope.actorFor(url)?.app;
+            return a ? { label: a.label, botName: a.botName, botEmail: a.botEmail } : null;
+          },
+        };
       },
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),

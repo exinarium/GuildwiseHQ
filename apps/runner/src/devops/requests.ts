@@ -34,7 +34,7 @@ export const devopsOf = (msg: ShiftStartMsg): DevopsShift | undefined =>
  * is its guardrail). Its own requests (`devops`) and, since GWP-189, the release prep tasks (`release_prep`) it writes; no
  * other shift kind, and no other agent, gets a guard. The working branch of the project is protected from force-pushes.
  */
-export function devopsGuardFor(msg: ShiftStartMsg): DevopsGuardInput | undefined {
+export function devopsGuardFor(msg: ShiftStartMsg, identityEmail?: string | null): DevopsGuardInput | undefined {
   if (!guardedShift(msg)) return undefined;
   if (msg.kind === 'release_prep') {
     // the release branch is frozen for the whole shift; nothing is pre-approved
@@ -56,7 +56,22 @@ export function devopsGuardFor(msg: ShiftStartMsg): DevopsGuardInput | undefined
     ),
     approvedCommands: msg.devops?.approval?.commands ?? [],
     ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true as const } : {}),
+    ...appRepoGuard(msg, identityEmail),
   };
+}
+
+/** The app repositories of a DevOps shift's plan for the guard (no secret); nothing when no repository is on an app. */
+function appRepoGuard(
+  msg: ShiftStartMsg,
+  identityEmail: string | null | undefined,
+): Pick<DevopsGuardInput, 'appRepos' | 'identityEmail'> {
+  const appRepos = (msg.postAs?.repos ?? []).flatMap((e) =>
+    e.source === 'app' && e.app
+      ? [{ remote: e.remoteUrlNormalized, label: e.app.label, botEmail: e.app.botEmail }]
+      : [],
+  );
+  if (appRepos.length === 0) return {};
+  return { appRepos, ...(identityEmail ? { identityEmail } : {}) };
 }
 
 /** The one shift-kind decision of the guard: DevOps requests and release prep tasks of a DevOps agent. */

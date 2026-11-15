@@ -9,6 +9,7 @@ import {
   isSafeGitRef,
 } from '@aom/shared';
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
+import { AppIdentityError, committerEnv, inContext } from '../git/identity.ts';
 import { changedFiles } from '../git/sweep.ts';
 import { type ChangeStateLookup, cleanFinishedCards } from './branch-cleanup.ts';
 import { migrateSavedWorkBranches, saveCommitsStash, saveUncommittedWork } from './saved-work.ts';
@@ -42,8 +43,20 @@ export interface HygieneRun {
   summary: string;
 }
 
+/**
+ * How one repository reaches its remote when its project posts as an app: extra `-c` pairs and the environment of the
+ * git process (may hold a token; never logged), plus the app's identity for commits a pull rewrites.
+ */
+export interface HygieneNetAuth {
+  args: string[];
+  env: Record<string, string>;
+  identity?: { name: string; email: string };
+}
+
 class Repo {
   readonly commands: string[] = [];
+  /** Null = plain git with the user's own credentials, exactly as without an app. */
+  net: HygieneNetAuth | null = null;
   constructor(readonly path: string) {}
 
   /** Runs git; `log` records the command for the audit trail. */
@@ -51,6 +64,17 @@ class Repo {
     const full = [...config.flatMap((c) => ['-c', c]), ...args];
     if (log) this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
     return git(this.path, full);
+  }
+
+  /** A command that talks to origin (fetch, pull, push): with the app's auth on an app repository. */
+  async remote(args: string[], log = true, rewrites = false) {
+    if (!this.net) return this.git(args, log);
+    if (log) this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
+    const env = {
+      ...this.net.env,
+      ...(rewrites && this.net.identity ? committerEnv(this.net.identity) : {}),
+    };
+    return git(this.path, [...this.net.args, ...args], { env });
   }
 }
 
@@ -219,6 +243,11 @@ async function busyShiftWorktrees(repo: Repo, busy: string[]): Promise<string[]>
 export interface HygieneDeps {
   /** State of a card's pull request on its git host (answered by the runner, which holds the logins). */
   changeState?: ChangeStateLookup;
+  /**
+   * The app auth of one origin URL: null for a repository not on an app (plain git, exactly as today, never the
+   * runner's own credentials). Throws `AppIdentityError` when the app is selected but cannot be used.
+   */
+  appAuth?: (url: string) => Promise<HygieneNetAuth | null>;
 }
 
 export async function hygieneRepo(
@@ -252,9 +281,23 @@ export async function hygieneRepo(
     return done();
   }
   const remote = await hasRemote(spec.localPath);
+  let reachable = remote;
+  if (remote && deps.appAuth) {
+    const url = (await repo.git(['remote', 'get-url', 'origin'])).stdout.trim();
+    try {
+      repo.net = url ? await deps.appAuth(url) : null;
+    } catch (err) {
+      if (!(err instanceof AppIdentityError)) throw err;
+      // Fail closed: nothing reaches origin under another identity; local steps (stashes) still run.
+      const e = inContext(err, { projectKey: spec.projectKey, operation: 'hygiene' });
+      mark(res, 'app_identity_failed', e.message);
+      reachable = false;
+    }
+  }
+  // Every later remote step needs a fetch of this run, so a failed app leaves origin untouched.
   let fetched = false;
-  if (remote) {
-    const f = await repo.git(['fetch', '--prune', 'origin'], true);
+  if (reachable) {
+    const f = await repo.remote(['fetch', '--prune', 'origin']);
     if (f.exitCode === 0) {
       fetched = true;
       res.actions.push('fetched origin');
@@ -268,6 +311,7 @@ export async function hygieneRepo(
     const mig = await migrateSavedWorkBranches(spec.localPath, {
       remote: remote && fetched,
       log: (c) => repo.commands.push(c),
+      ...(repo.net ? { auth: repo.net } : {}),
     });
     res.actions.push(...mig.actions);
     for (const e of mig.errors) mark(res, AUTH_RE.test(e) ? 'auth_failed' : 'error', e);
@@ -323,14 +367,14 @@ export async function hygieneRepo(
     if (dirty.length > 0) await saveWork(repo, res, remote);
     if (remote && fetched) {
       if (hasRemoteRef) {
-        const pull = await repo.git(['pull', '--ff-only', 'origin', wb], true);
+        const pull = await repo.remote(['pull', '--ff-only', 'origin', wb], true, true);
         if (pull.exitCode === 0) {
           if (!/already up to date/i.test(pull.stdout)) res.actions.push(`pulled ${wb}`);
         } else if (dirty.length > 0) {
           // Unsaved edits stay in the checkout: do not rebase over them, update again once they are committed.
           res.actions.push(`${wb} not updated yet: your own unsaved edits are in the way`);
         } else {
-          const rebase = await repo.git(['pull', '--rebase', 'origin', wb], true);
+          const rebase = await repo.remote(['pull', '--rebase', 'origin', wb], true, true);
           if (rebase.exitCode === 0) res.actions.push(`rebased ${wb} onto origin/${wb}`);
           else {
             await repo.git(['rebase', '--abort']);
@@ -347,7 +391,7 @@ export async function hygieneRepo(
         ? !(await isAncestor(repo, `refs/heads/${wb}`, `refs/remotes/origin/${wb}`))
         : true;
       if (ahead) {
-        const push = await repo.git(['push', 'origin', `${wb}:${wb}`], true);
+        const push = await repo.remote(['push', 'origin', `${wb}:${wb}`]);
         if (push.exitCode === 0) {
           res.pushed = true;
           res.actions.push(`pushed ${wb}`);
@@ -372,7 +416,7 @@ export async function hygieneRepo(
       if (!(await isAncestor(repo, local, origin))) {
         if (await isAncestor(repo, origin, local)) {
           if (remote && fetched) {
-            const push = await repo.git(['push', 'origin', wb], true);
+            const push = await repo.remote(['push', 'origin', wb]);
             if (push.exitCode === 0) {
               res.pushed = true;
               res.actions.push(`pushed ${wb}`);
@@ -389,7 +433,7 @@ export async function hygieneRepo(
         if (moved.exitCode === 0) res.actions.push(`moved ${wb} forward to origin/${wb}`);
       }
     } else if (hasLocal && !hasRemoteRef && remote && fetched) {
-      const push = await repo.git(['push', 'origin', `${wb}:${wb}`], true);
+      const push = await repo.remote(['push', 'origin', `${wb}:${wb}`]);
       if (push.exitCode === 0) {
         res.pushed = true;
         res.actions.push(`pushed ${wb}`);
@@ -421,6 +465,7 @@ export async function hygieneRepo(
       fetched,
       busy: busyWorktrees,
       ...(deps.changeState ? { changeState: deps.changeState } : {}),
+      ...(repo.net ? { auth: repo.net } : {}),
       log: (c) => repo.commands.push(c),
     });
     res.cleaned = swept.cleaned;

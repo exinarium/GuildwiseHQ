@@ -35,7 +35,9 @@ import {
   normalizeUrl,
   type OrgGraphScope,
   outcomeDataSchema,
+  normalizeRemoteUrl,
   type PostAsPlan,
+  postAsFor,
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
@@ -92,7 +94,9 @@ import {
   delegateUsageReporter,
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
+import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
 import { redactCommand } from '../devops/guard.ts';
+import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
 import { cardPayload, devopsGuardFor, guardedShift, shiftTexts } from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
@@ -111,7 +115,9 @@ import {
   type AppTokenProbe,
   appIdentityWire,
   boundPostAsFor,
+  inContext,
   NO_IDENTITY_WIRE,
+  repoNameOf,
   resolveCommitIdentity,
 } from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
@@ -361,6 +367,8 @@ export interface SupervisorDeps {
   shiftCredentials?: (plan: PostAsPlan | null | undefined) => {
     auth: GitAuth;
     originRefusal(url: string | null | undefined): string | null;
+    /** The app a remote URL posts as under this plan (null = today's credentials and identity). No secret. */
+    appFor?(url: string): { label: string; botName: string; botEmail: string } | null;
   };
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
   orgSourceFolder?: (orgId: string) => string | undefined;
@@ -1190,6 +1198,21 @@ export class ShiftSupervisor {
       this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
       return;
     }
+    // A DevOps request about a card whose repository posts as an app (a conflict resolution): every commit of the
+    // engineer is the app's, or the request does not run. Other DevOps requests keep today's identity.
+    if (msg.kind === 'devops' && msg.agent.isDevops) {
+      const appIdentity = await devopsRequestIdentity(
+        msg.postAs,
+        msg.devops?.card?.remoteUrlNormalized,
+        paths.root,
+        this.deps.appProbe,
+      );
+      if (typeof appIdentity === 'string') {
+        this.reject(msg.shiftId, 'internal', appIdentity);
+        return;
+      }
+      if (appIdentity) identity = appIdentity;
+    }
     s.identity = identity;
     const sandbox = await ensureSandbox(
       paths,
@@ -1657,6 +1680,8 @@ export class ShiftSupervisor {
         : {}),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
+    // The DevOps engineer's raw pushes to app repositories go nowhere (it uses `aom git push --repo`, run here).
+    if (msg.kind === 'devops' && msg.agent.isDevops) s.env = withAppPushRefusal(s.env, msg.postAs);
     // A remote target: its address, and the test accounts declared for it as a 0600 file the tester's tools read.
     if (hasEnv && testEnv?.mode === 'remote' && testEnv.target) {
       s.env.AOM_TARGET_URL = testEnv.target.url;
@@ -1730,7 +1755,7 @@ export class ShiftSupervisor {
       msg.kind === 'ceo' ||
       msg.kind === 'devops' ||
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
-    const devopsGuard = devopsGuardFor(msg);
+    const devopsGuard = devopsGuardFor(msg, s.identity?.email);
     if (guardedShift(msg) && !devopsGuard) {
       this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
       return;
@@ -2401,6 +2426,13 @@ export class ShiftSupervisor {
             req.params,
             s.msg.kind === 'devops' && s.msg.agent.isDevops === true,
           );
+        if (req.method === 'hygiene.run') return this.hygieneRun(s);
+        if (
+          (req.method === 'git.push' || req.method === 'git.fetch') &&
+          s.msg.kind === 'devops' &&
+          s.msg.agent.isDevops === true
+        )
+          return this.devopsGit(s, req.method, req.params);
         if (
           req.method === 'git.push' ||
           req.method === 'git.fetch' ||
@@ -2733,6 +2765,105 @@ export class ShiftSupervisor {
   }
 
   /** `aom git push|fetch|merge-main|verify-merge`: the architect's runner-run git (investigate stages only). */
+  /**
+   * `hygiene.run` (the DevOps engineer's `aom hygiene run`): repository hygiene runs here, in the runner, so a
+   * repository that posts as an app fetches, pulls and pushes with the app's token (which never reaches the agent) and
+   * the commits a pull rewrites get the app as committer. The spec comes from this runner's copy of the brief.
+   */
+  private async hygieneRun(s: ActiveShift): Promise<IpcRpcResponse> {
+    const { msg } = s;
+    if (msg.kind !== 'devops' || msg.agent.isDevops !== true)
+      return { ok: false, error: 'only the DevOps engineer can run repository hygiene' };
+    const spec = msg.devops?.hygiene;
+    if (!spec) return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
+    const run = await runHygiene(spec, this.worktreePaths(), {
+      changeState: async (q) => {
+        try {
+          const r = await this.deps.rpc(msg.shiftId, 'hygiene.change_state', q);
+          return r.ok ? ((r.result as { state?: 'open' | 'merged' | 'closed' | null }).state ?? null) : null;
+        } catch {
+          return null;
+        }
+      },
+      ...this.devopsAppAuth(msg.postAs),
+    });
+    this.addProgress(s, 'status', 'aom hygiene run: done');
+    return { ok: true, result: run };
+  }
+
+  /** Per-repository app auth of a DevOps shift's plan; empty for a runner without post-as credentials. */
+  private devopsAppAuth(plan: PostAsPlan | null | undefined): Pick<HygieneDeps, 'appAuth'> {
+    const creds = this.deps.shiftCredentials?.(plan);
+    if (!creds?.appFor) return {};
+    const appFor = creds.appFor.bind(creds);
+    return {
+      appAuth: async (url) => {
+        const app = appFor(url);
+        if (!app) return null;
+        const a = await creds.auth(url);
+        return { ...a, identity: { name: app.botName, email: app.botEmail } };
+      },
+    };
+  }
+
+  /**
+   * `aom git push|fetch --repo <dir>` of the DevOps engineer: the runner talks to origin, so an app repository is
+   * reached with the app's token (the agent never sees it), and a repository not on an app with plain git, exactly as
+   * the engineer's own `git push` would. No force, no options in refspecs, no delete of a main branch.
+   */
+  private async devopsGit(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const denied = (error: string): IpcRpcResponse => ({ ok: false, error });
+    const repo = typeof params.repo === 'string' ? params.repo : '';
+    if (!repo) return denied('usage: aom git push|fetch --repo <dir> [<refspec>...]');
+    const dir = resolve(repo);
+    const roots = [...(this.deps.config.repoRoots ?? []), this.deps.paths.worktrees, tmpdir()].map((r) =>
+      resolve(r),
+    );
+    if (!roots.some((r) => dir === r || dir.startsWith(`${r}/`)))
+      return denied(`${repo} is not inside a repository folder, a worktree or the temporary folder of this runner`);
+    const refspecs = Array.isArray(params.refspecs)
+      ? params.refspecs.filter((r): r is string => typeof r === 'string' && r.length > 0)
+      : [];
+    const op = method === 'git.push' ? 'push' : 'fetch';
+    const plan = devopsPushPlan(op, refspecs, params.delete === true, params.tags === true);
+    if ('error' in plan) return denied(plan.error);
+    const url = (await git(dir, ['remote', 'get-url', 'origin'])).stdout.trim();
+    if (!url) return denied(`${repo} has no origin`);
+    const creds = this.deps.shiftCredentials?.(s.msg.postAs);
+    const app = creds?.appFor?.(url) ?? null;
+    let auth = { args: [] as string[], env: {} as Record<string, string> };
+    if (creds && app) {
+      const refusal = creds.originRefusal(url);
+      if (refusal) return denied(refusal);
+      try {
+        auth = await creds.auth(url);
+      } catch (err) {
+        if (!(err instanceof AppIdentityError)) throw err;
+        const entry = postAsFor(s.msg.postAs, normalizeRemoteUrl(url));
+        return denied(
+          appIdentityWire(
+            inContext(err, {
+              ...(entry?.projectKey ? { projectKey: entry.projectKey } : {}),
+              operation: plan.operation,
+              repo: repoNameOf(normalizeRemoteUrl(url)),
+            }),
+          ),
+        );
+      }
+    }
+    const r = await git(dir, [...auth.args, ...plan.args], { env: auth.env });
+    this.addProgress(s, 'status', `aom git ${op} --repo ${repo}: ${r.exitCode === 0 ? 'done' : 'failed'}`);
+    if (r.exitCode !== 0) return denied(redactGitError(r.stderr || r.stdout || `git ${op} failed`));
+    return {
+      ok: true,
+      result: { message: (r.stderr || r.stdout).trim() || `${op} done${app ? ` as the app ${app.label}` : ''}` },
+    };
+  }
+
   private async architectGit(
     s: ActiveShift,
     method: string,

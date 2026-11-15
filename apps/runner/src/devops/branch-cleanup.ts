@@ -40,6 +40,8 @@ export interface CleanupInput {
   /** Worktrees with a running shift: never touched. */
   busy: string[];
   changeState?: ChangeStateLookup;
+  /** The app auth of an app repository for the remote delete (absent = plain git, as without an app). */
+  auth?: { args: string[]; env: Record<string, string> };
   /** Records a command that changed something (for the audit trail). */
   log: (command: string) => void;
 }
@@ -195,14 +197,19 @@ export async function cleanFinishedCards(
     } else if (wt) continue;
     if (originSha) {
       input.log(`git -C ${repoPath} push --delete origin ${ob}`);
-      const del = await git(repoPath, [
+      const del = await git(
+        repoPath,
+        [
+        ...(input.auth?.args ?? []),
         'push',
         '--delete',
         `--force-with-lease=refs/heads/${ob}:${originSha}`,
         'origin',
         '--',
         ob,
-      ]);
+        ],
+        input.auth ? { env: input.auth.env } : {},
+      );
       if (del.exitCode === 0) entry.origin = true;
       else {
         const why = (del.stderr || del.stdout).trim().split('\n')[0] ?? 'git failed';
