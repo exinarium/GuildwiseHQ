@@ -3,6 +3,7 @@ import { MockScriptSchema } from '../cards/fields.ts';
 import { StoredFinalizeAction } from '../cards/types.ts';
 import { EnvNameSchema } from '../delivery/gate.ts';
 import { RegressionPlatform } from '../events/testing.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
 import { SpecCardTaskSchema, specCardBriefOutcomes } from '../intake/spec-card.ts';
 import { MailDraftTaskSchema, mailDraftBriefOutcomes } from '../mail/draft.ts';
@@ -552,6 +553,8 @@ export const BranchCheckMergedPayloadSchema = z.object({
   branchName: z.string(),
   workingBranch: z.string(),
   action: z.enum(['pr', 'push_branch']),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type BranchCheckMergedPayload = z.infer<typeof BranchCheckMergedPayloadSchema>;
 

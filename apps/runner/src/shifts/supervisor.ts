@@ -1319,6 +1319,8 @@ export class ShiftSupervisor {
               msg.worktree.baseBranch,
               msg.commitAs ?? null,
               boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
+              // the fetch before the rebase goes with the app's token when the project posts as one
+              msg.postAs ? this.shiftAuth(msg) : undefined,
             ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
@@ -2676,6 +2678,8 @@ export class ShiftSupervisor {
       return;
     }
     if (sync.kind !== 'needs_card_merge') return;
+    // what the host refused and the bypass or permission the app needs, for the owner to grant
+    if (sync.report) this.log.warn(`${msg.brief.card.ref}: ${sync.report}`);
     const wt = s.worktree.path;
     const main = msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch;
     const r = await mergeMainIntoCard(wt, {

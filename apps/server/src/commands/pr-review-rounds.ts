@@ -11,6 +11,7 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { one } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict } from '../errors.ts';
@@ -256,12 +257,13 @@ export async function startPrReviewRound(
     })),
     { tx },
   );
+  const postAs = await postAsFieldFor(tx, input.projectId, pick.id, { write: false });
   for (const r of runs)
     await enqueueRunnerCommand(
       tx,
       pick.id,
       'pr_review.run',
-      r.payload,
+      { ...r.payload, ...postAs },
       new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
     );
   return { started: true, target: pick.id, roundId, runIds: runs.map((r) => r.runId) };

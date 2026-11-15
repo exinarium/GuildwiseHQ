@@ -3,6 +3,7 @@ import { PR_LIST_CAPABILITY, type PrReviewProblem, RepoListPrsResultSchema, stre
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
@@ -151,6 +152,7 @@ export async function requestPrList(
       repoId,
       remoteUrlNormalized: repo.remote_url_normalized,
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(await postAsFieldFor(ctx.pool, repo.project_id, ws.id, { write: false })),
     },
     new Date(now.getTime() + PENDING_MS),
   );

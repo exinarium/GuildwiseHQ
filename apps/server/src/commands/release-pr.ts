@@ -3,6 +3,7 @@ import { type ReleasePrRequested, RepoOpenPrResultSchema } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
@@ -67,6 +68,7 @@ export async function requestReleasePr(
       title: `Merge ${head} into ${repo.main_branch ?? 'the main branch'}`,
       body: `Brings the work integrated on ${head} into ${repo.main_branch ?? 'the main branch'}.`,
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(await postAsFieldFor(tx, projectId, ws.id, { write: true })),
     });
     return { requestId, workstationId: ws.id as string };
   });

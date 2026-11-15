@@ -1,7 +1,15 @@
 import { basename, join } from 'node:path';
 import { type CommitAs, isSafeGitRef } from '@aom/shared';
-import { isProtectedBranchRejection } from './gh.ts';
-import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
+import { describePushRejection, isProtectedBranchRejection } from './gh.ts';
+import {
+  ambiguousMainMessage,
+  git,
+  gitOk,
+  hasRemote,
+  originAuth,
+  resolveDefaultBranch,
+  revParse,
+} from './git.ts';
 import { type BoundPostAs, commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
@@ -42,6 +50,8 @@ export type SyncMainOutcome =
       reason: 'conflict' | 'protected' | 'push_failed';
       files: string[];
       main: string;
+      /** With an app: what the host refused and the bypass or permission the app needs (absent otherwise). */
+      report?: string;
     };
 
 async function pushWorking(
@@ -74,7 +84,10 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
     const message = `Merge ${main} into ${working}`;
 
     const attempt = async (): Promise<SyncMainOutcome | 'retry'> => {
-      const fetched = await git(repoPath, ['fetch', '--', 'origin', main, working]);
+      const fa = await originAuth(repoPath, input.auth);
+      const fetched = fa
+        ? await git(repoPath, [...fa.args, 'fetch', '--', 'origin', main, working], { env: fa.env })
+        : { stdout: '', stderr: 'no credentials for origin', exitCode: 1 };
       // A branch that is not on origin (yet) has nothing to sync; a failed fetch (offline) is not a reason to stop the shift.
       if (fetched.exitCode !== 0) return { kind: 'nothing' };
       const mainRef = `refs/remotes/origin/${main}`;
@@ -104,11 +117,14 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
           const commit = await gitOk(integration, ['rev-parse', 'HEAD']);
           const pushed = await pushWorking(repoPath, integration, working, input.auth);
           if (pushed.ok) return { kind: 'merged_into_working', commit, main: mainSha };
+          const app = input.postAs?.source === 'app' ? (input.postAs.app ?? null) : null;
+          const report = app ? describePushRejection(pushed.why, app) : null;
+          const extra = report ? { report } : {};
           if (pushed.protectedBranch)
-            return { kind: 'needs_card_merge', reason: 'protected', files: [], main: mainSha };
+            return { kind: 'needs_card_merge', reason: 'protected', files: [], main: mainSha, ...extra };
           // The working branch moved while we merged: fetch again and retry once; any other failure falls back.
           if (/non-fast-forward|fetch first|rejected|stale info/i.test(pushed.why)) return 'retry';
-          return { kind: 'needs_card_merge', reason: 'push_failed', files: [], main: mainSha };
+          return { kind: 'needs_card_merge', reason: 'push_failed', files: [], main: mainSha, ...extra };
         },
       );
       if (!out.ok) return { kind: 'needs_card_merge', reason: 'push_failed', files: [], main: mainSha };
@@ -157,7 +173,10 @@ export async function mergeMainIntoCard(
     main = found.branch ?? undefined;
   }
   if (!main || !isSafeGitRef(main)) return { error: 'the main branch of this repository is not known' };
-  if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', main]);
+  if (await hasRemote(worktree)) {
+    const a = await originAuth(worktree, opts.auth);
+    if (a) await git(worktree, [...a.args, 'fetch', '--', 'origin', main], { env: a.env });
+  }
   const target = (await revParse(worktree, `refs/remotes/origin/${main}`)) ? `origin/${main}` : main;
   const mainSha = await revParse(worktree, target);
   if (!mainSha) return { error: `the main branch '${main}' does not exist in this repository` };

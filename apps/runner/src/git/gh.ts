@@ -1,4 +1,4 @@
-import type { ForgeKind } from '@aom/shared';
+import { type ForgeKind, type PostAsAppIdentity, type PostAsPlan, postAsFor } from '@aom/shared';
 import { execa } from 'execa';
 
 export interface PrInput {
@@ -101,3 +101,22 @@ export const ghPrCreator: PrCreator = {
     return url ? { url: url.trim() } : {};
   },
 };
+
+/** The app a repository posts as in a plan (for refusal reports), or null. */
+export function appOfPlan(
+  plan: PostAsPlan | null | undefined,
+  remoteUrlNormalized: string,
+): PostAsAppIdentity | null {
+  const e = postAsFor(plan, remoteUrlNormalized);
+  return e?.source === 'app' ? (e.app ?? null) : null;
+}
+
+/** `message` plus, on a following line, what the app needs when the host refused it ({@link describePushRejection}). */
+export function withPushReport(
+  message: string,
+  why: string,
+  app: { label: string; botName?: string } | null | undefined,
+): string {
+  const report = describePushRejection(why, app);
+  return report ? `${message}\n${report}` : message;
+}

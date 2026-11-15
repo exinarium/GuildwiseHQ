@@ -22,6 +22,7 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
@@ -231,7 +232,8 @@ export async function enqueueReviewPost(
   expiresAt: Date,
 ): Promise<void> {
   if (run.replay_id) throw new Error('replay runs are never posted');
-  await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', post, expiresAt);
+  const postAs = await postAsFieldFor(tx, post.spec.projectId, workstationId, { write: false });
+  await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', { ...post, ...postAs }, expiresAt);
 }
 
 type Emit = (type: string, payload: Record<string, unknown>) => Promise<unknown>;

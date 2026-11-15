@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {
+  PostAsPlan,
   PrReviewCancelPayload,
   PrReviewCancelResult,
   PrReviewNoticePayload,
@@ -14,7 +15,7 @@ import type { SandboxState } from '../adapters/claude-policy.ts';
 import type { RuntimeAdapter } from '../adapters/types.ts';
 import { ForgeUnavailableError } from '../forge/http.ts';
 import { forgeForUrl } from '../forge/index.ts';
-import type { ForgeEnv } from '../forge/types.ts';
+import type { AppActor, ForgeEnv } from '../forge/types.ts';
 import type { GitAuth } from '../git/worktrees.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { wipeAgent } from '../sandbox/sandbox.ts';
@@ -39,6 +40,15 @@ export interface PrReviewCommandsEnv {
   sandboxState: (adapter: RuntimeAdapter) => SandboxState;
   fetch: typeof fetch;
   log: (line: string) => void;
+  /**
+   * The credentials of one payload's "post as" plan: without a plan (or for a repository not on an app) exactly
+   * `forgeEnv`/`gitAuth`; a repository on an app fetches, reads heads and posts reviews with its installation token.
+   */
+  scope?: (plan: PostAsPlan | undefined) => {
+    forgeEnv: ForgeEnv;
+    auth: GitAuth;
+    actorFor(url: string): AppActor | null;
+  };
 }
 
 /** How long a cancel for a run that has not arrived yet is remembered. */
@@ -114,8 +124,9 @@ export class PrReviewCommands {
   post(payload: PrReviewPostPayload): Promise<PrReviewPostResult> {
     const live = this.posts.get(payload.runId);
     if (live) return live;
+    const actor = this.env.scope?.(payload.postAs).actorFor(payload.spec.remoteUrlNormalized) ?? null;
     const p = postPrReview(
-      { poster: new GitHubReviewPoster({ fetch: this.env.fetch, tokens: this.env.tokens }) },
+      { poster: new GitHubReviewPoster({ fetch: this.env.fetch, tokens: this.env.tokens, actor }) },
       payload,
     ).finally(() => this.posts.delete(payload.runId));
     this.posts.set(payload.runId, p);
@@ -135,7 +146,10 @@ export class PrReviewCommands {
   }
 
   private async start(payload: PrReviewRunPayload, signal: AbortSignal): Promise<PrReviewRunResult> {
-    const e = this.env;
+    const scope = this.env.scope?.(payload.postAs);
+    const e = scope ? { ...this.env, forgeEnv: scope.forgeEnv, gitAuth: scope.auth } : this.env;
+    // A repository on an app posts with the installation token, so no saved reviewer token is needed.
+    const onApp = !!scope?.actorFor(payload.remoteUrlNormalized);
     const adapter = e.adapters.get(payload.runtime);
     if (!adapter)
       return {
@@ -188,7 +202,7 @@ export class PrReviewCommands {
               auth: e.gitAuth,
             },
             spec,
-            { requireToken: !payload.offline },
+            { requireToken: !payload.offline && !onApp },
           ),
         dispose: disposeReviewerRun,
       },

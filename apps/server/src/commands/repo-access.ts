@@ -2,6 +2,7 @@ import { type GitAccessMethod, type GitSshPayload, streamId } from '@aom/shared'
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
@@ -60,6 +61,7 @@ export async function setRepoAccessMethod(
         remoteUrl: r.remote_url,
         ...(accessMethod ? { accessMethod } : {}),
         ...(r.forge_kind ? { forge: r.forge_kind } : {}),
+        ...(await postAsFieldFor(tx, projectId, w.id as string, { write: false })),
       });
       workstations.push(w.id as string);
     }

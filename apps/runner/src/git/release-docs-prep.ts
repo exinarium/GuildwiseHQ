@@ -29,6 +29,7 @@ import {
 } from './release-docs-prep-steps.ts';
 import { lastReleaseTagAt } from './release-facts.ts';
 import { pushFastForward } from './release-ship.ts';
+import { appOfPlan } from './gh.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -579,8 +580,15 @@ async function commitPush(
     return failed(`${p.releaseBranch} moved since the prepared commit was made: run prep again`, {
       commit: sha,
     });
-  const pushed = await pushFastForward(repoPath, sha, p.releaseBranch, a);
-  if (!pushed.ok) return failed(pushed.error, { commit: sha });
+  const pushed = await pushFastForward(
+    repoPath,
+    sha,
+    p.releaseBranch,
+    a,
+    appOfPlan(p.postAs, p.remoteUrlNormalized),
+  );
+  if (!pushed.ok)
+    return failed(pushed.report ? `${pushed.error}\n${pushed.report}` : pushed.error, { commit: sha });
   await cleanup(repoPath, p.runId);
   await advanceLocalBranch(repoPath, p.releaseBranch, sha);
   return passed({ commit: sha, pushed: true });

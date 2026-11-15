@@ -5,7 +5,7 @@ import {
   type RepoBumpSubmodulePayload,
   type RepoBumpSubmoduleResult,
 } from '@aom/shared';
-import { isProtectedBranchRejection } from './gh.ts';
+import { appOfPlan, isProtectedBranchRejection, withPushReport } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
   AppIdentityError,
@@ -211,11 +211,25 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
         // checked first: a host that declines a push through a hook words the lost race the same way
         if (isMovedRejection(why)) return 'moved';
         if (isProtectedBranchRejection(why))
-          return fail(`${branch} refused the push of the pin: ${why.slice(0, 300)}`, {
-            protectedBranch: true,
-            path: found.path,
-          });
-        return fail(`pushing ${branch} failed: ${why.slice(0, 300)}`, { path: found.path });
+          return fail(
+            withPushReport(
+              `${branch} refused the push of the pin: ${why.slice(0, 300)}`,
+              why,
+              appOfPlan(p.postAs, p.remoteUrlNormalized),
+            ),
+            {
+              protectedBranch: true,
+              path: found.path,
+            },
+          );
+        return fail(
+          withPushReport(
+            `pushing ${branch} failed: ${why.slice(0, 300)}`,
+            why,
+            appOfPlan(p.postAs, p.remoteUrlNormalized),
+          ),
+          { path: found.path },
+        );
       }
       return { ok: true, commit: newHead, path: found.path };
     },

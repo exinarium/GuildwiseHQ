@@ -27,6 +27,7 @@ import {
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -137,6 +138,7 @@ export async function startReplay(
         remoteUrlNormalized: repo.remote_url_normalized,
         ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
         limit: REPLAY_LIST_LIMIT,
+        ...(await postAsFieldFor(tx, projectId, ws.id as string, { write: false })),
       },
       new Date(ctx.clock.now().getTime() + LIST_WAIT_MS),
     );
@@ -385,7 +387,7 @@ async function dispatchOne(ctx: Ctx, replayId: string): Promise<boolean> {
       tx,
       ws.id as string,
       'pr_review.run',
-      payload,
+      { ...payload, ...(await postAsFieldFor(tx, projectId, ws.id as string, { write: false })) },
       new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
     );
     target = ws.id as string;

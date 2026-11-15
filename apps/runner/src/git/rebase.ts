@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { CommitAs, RebaseErrorInfo } from '@aom/shared';
 import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
 import { redactSecrets } from '../secrets/redact.ts';
-import { type GitResult, git, hasRemote, revParse } from './git.ts';
+import { type GitResult, git, hasRemote, originAuth, type RemoteAuth, revParse } from './git.ts';
 import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
 
 /**
@@ -136,10 +136,15 @@ export async function rebaseOntoBase(
   baseBranch: string,
   commitAs?: CommitAs | null,
   postAs?: BoundPostAs | null,
+  /** The host's credentials for origin (the project's app when it posts as one); absent: git's own. */
+  auth?: RemoteAuth,
 ): Promise<'up_to_date' | 'rebased' | 'merged'> {
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   // Best effort: a failed fetch leaves the last fetched origin/<base>, which is still a valid base.
-  if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', baseBranch]);
+  if (await hasRemote(worktree)) {
+    const a = await originAuth(worktree, auth);
+    if (a) await git(worktree, [...a.args, 'fetch', '--', 'origin', baseBranch], { env: a.env });
+  }
   const target = await baseTarget(worktree, baseBranch);
   if (!(await revParse(worktree, target)))
     throw new RebaseError({

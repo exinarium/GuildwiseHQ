@@ -186,6 +186,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       p.baseBranch,
       p.commitAs,
       boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+      p.postAs ? input.auth : undefined,
     );
   } catch (err) {
     if (err instanceof RebaseConflictError)

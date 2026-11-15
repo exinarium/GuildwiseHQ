@@ -12,6 +12,7 @@ import {
 import { followupFinishedEvent, followupVerdict, startFollowup } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from '../commands/commit-as.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { requestDeployRun } from '../delivery/runs.ts';
@@ -96,6 +97,7 @@ async function mergeChecks(ctx: Ctx): Promise<void> {
       branchName: c.branch_name,
       workingBranch: branch,
       action: c.finalize_action,
+      ...(await postAsFieldFor(ctx.pool, c.project_id, c.home_workstation_id, { write: false })),
     });
     touched.add(c.home_workstation_id);
   }

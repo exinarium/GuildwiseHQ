@@ -15,6 +15,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
@@ -125,6 +126,7 @@ export async function repoSetupEvents(
       ...(repo.working_branch ? { workingBranch: repo.working_branch } : {}),
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
       ...(repo.access_method ? { accessMethod: repo.access_method } : {}),
+      ...(await postAsFieldFor(tx, project.id, w.id, { write: false })),
       ...(creates && opts.create
         ? {
             create: {

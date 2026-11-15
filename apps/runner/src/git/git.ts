@@ -274,7 +274,7 @@ export async function remoteDefaultBranch(cwd: string, auth?: RemoteAuth): Promi
 }
 
 /** The credentials for origin (none without `auth`); null when `auth` refused (an app that cannot mint). */
-async function originAuth(
+export async function originAuth(
   cwd: string,
   auth?: RemoteAuth,
 ): Promise<{ args: string[]; env: Record<string, string> } | null> {
