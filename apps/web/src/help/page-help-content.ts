@@ -39,6 +39,50 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+  '/p/:projectKey/pull-requests': {
+    title: 'Pull requests',
+    article: 'board-and-cards',
+    intro:
+      "The open pull requests of this project's PR-only repositories and what the reviewer did with each. A run that finishes posts its findings together as one review, at most one finding per 100 changed lines (1 to 5, most important first); the rest are held back, not posted, and Show held-back findings opens them; a run that times out or fails posts nothing and leaves the pull request Not reviewed. The owner marks each posted finding Useful or Noise with one tap (Show posted findings); the reviewer is shown only after the mark. Reviewer precision, at the top, is useful ÷ posted. At most the project's daily cap of pull requests (20 by default) is reviewed automatically each day; the rest wait in the Queue, oldest first, and Review now starts one by hand past the cap. Nothing here needs typing.",
+    controls: [
+      {
+        name: 'Reviewed / Not reviewed',
+        text: "Reviewed means the reviewer's comments are on the pull request. Not reviewed means it is waiting, running, timed out or failed; the line under it says which, and shows the error when there is one.",
+      },
+      {
+        name: 'View on GitHub',
+        text: 'Opens the review the reviewer posted.',
+      },
+    ],
+  },
+  '/p/:projectKey/pull-requests/replay': {
+    title: '20-PR replay',
+    article: 'board-and-cards',
+    intro:
+      'Measures both reviewers (Sonnet and Opus) offline on the 20 most recently merged pull requests of a PR-only repository. Nothing is posted to any pull request. The owner starts it, marks every finding Useful or Noise, and then sees precision per reviewer and the recorded review effort.',
+    controls: [
+      {
+        name: 'Start replay',
+        text: 'Starts 40 offline reviews on your workstation. This can take several hours. Only one replay runs at a time.',
+      },
+    ],
+  },
+  '/p/:projectKey/pull-requests/replay/:replayId': {
+    title: 'Replay',
+    article: 'board-and-cards',
+    intro:
+      'Progress, one-at-a-time blind marking, and the result of one replay. You do not see which reviewer wrote a finding until every finding is marked. When the replay is finished, type the targets for reviewer precision and baseline review effort and select Save.',
+    controls: [
+      {
+        name: 'Useful / Noise',
+        text: 'Marks the finding on screen. The time you take is recorded as review effort, at most 10 minutes per finding.',
+      },
+      {
+        name: 'Save',
+        text: 'Saves the targets you typed on the project. They are not computed from the result.',
+      },
+    ],
+  },
   '/p/:projectKey/board': {
     title: 'Board',
     intro:

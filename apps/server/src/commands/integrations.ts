@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  APP_PROVIDER_IDS,
   CLAUDE_ACCOUNTS_CAPABILITY,
   checkIntegrationRequest,
   ENVELOPE_COMMANDS,
@@ -29,7 +30,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { conflict, notFound, unprocessable } from '../errors.ts';
+import { conflict, HttpError, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { userActor, userScope } from './common.ts';
 import { deliver } from './workstation-setup.ts';
@@ -643,6 +644,7 @@ export async function requestConnect(
   workstationId: string,
   body: IntegrationConnectRequest,
 ): Promise<{ id: string; state: string }> {
+  assertNotOrgApp(body.kind);
   await gate(ctx, user, workstationId, body.kind, body.instance, body.method, 'fields', body.envelope.keyId);
   await withAppendTx(ctx.pool, async (tx) => {
     if (await one(tx, 'SELECT 1 AS x FROM integration_requests WHERE id=$1', [body.requestId]))
@@ -796,6 +798,12 @@ export async function requestSessionCancel(
   return { id: sessionId, state: 'cancelled' };
 }
 
+/** An automated app is an organization object managed by its Owner, not a credential of the workstation's user (D2). */
+export function assertNotOrgApp(kind: string): void {
+  if ((APP_PROVIDER_IDS as readonly string[]).includes(kind))
+    throw new HttpError(403, 'manage_in_org', 'Manage this app in Settings > Automated apps');
+}
+
 async function requestAction(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -806,6 +814,7 @@ async function requestAction(
   const w = await ownWorkstation(ctx, user.id, workstationId);
   const kind = integrationKind(body.kind);
   if (!kind) throw unprocessable('invalid_integration_request', 'unknown integration');
+  assertNotOrgApp(body.kind);
   if (!ctx.services.runners.isOnline(workstationId))
     throw conflict('workstation_offline', 'this workstation is offline: start its runner and try again');
   if (!integrationsSupportedBy(w.integrations_version, kind))

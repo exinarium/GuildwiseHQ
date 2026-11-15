@@ -1,5 +1,6 @@
 import { feedMaxItems } from '../cards/fields.ts';
 import type { CheckEvidence } from '../cards/lean-v6.ts';
+import { NO_SIZE_BUDGET, SIZE_UNIT_WORDS } from '../projects/size-verdict.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderUntrusted } from './untrusted.ts';
@@ -166,6 +167,15 @@ const indent = (text: string, pad: string): string =>
     .map((l) => pad + l)
     .join('\n');
 
+/** The architect's size estimate at design time: one line, from the project's size settings. */
+export function designSizeLine(s: NonNullable<NonNullable<ShiftBrief['investigation']>['sizing']>): string {
+  if (!s.unit)
+    return `- Size: this project has no size unit or budget set (${NO_SIZE_BUDGET}): no size estimate is needed.`;
+  const words = s.unit in SIZE_UNIT_WORDS ? SIZE_UNIT_WORDS[s.unit as keyof typeof SIZE_UNIT_WORDS] : s.unit;
+  const budget = s.budget != null ? String(s.budget) : `not set: ${NO_SIZE_BUDGET}`;
+  return `- Size: estimate this change in ${words} and add \`--size <n>\` and \`--path "<folder or file>"\` (repeat; name the most specific folders or files) to \`aom design\`. The budget is ${budget}. Over budget, also name at least 2 split seams with \`--seam "<title>: <folder>, <folder>"\`: the needs-split question is then raised in your name. A declared \`--risk low|medium|high\` can only raise the risk class from the path-to-risk map.${s.riskStatus ? ` Risk class ${s.riskStatus}.` : ''}`;
+}
+
 /** Investigate & design: where the architect writes, what was recorded, the investigation-only note for the BA. */
 function investigationContext(brief: ShiftBrief): string {
   const inv = brief.investigation;
@@ -220,6 +230,7 @@ function investigationContext(brief: ShiftBrief): string {
       '- Design writes only the report. Do not create or edit source code or tests: the builder does that, and the runner discards every other change at the end of the shift.',
     );
     if (inv.note) lines.push(`- ${inv.note}`);
+    if (inv.sizing && !brief.card.investigationOnly) lines.push(designSizeLine(inv.sizing));
     if (inv.mergeMainFirst && !inv.readOnly)
       lines.push('- The latest main branch is merged first (see the note on a waiting merge below, if any).');
   }

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { noAppPlan, POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { latestMerge } from '../src/delivery/gate.ts';
 import { automatedCommitAllowed, requestDeployRun } from '../src/delivery/runs.ts';
@@ -182,6 +183,40 @@ describe('a merge into a submodule moves the pin, then deploys the repository th
     await until(async () => execs().length === before + 1, 4000, 'deploy of D as it is');
     expect(execs().at(-1)!.payload).toMatchObject({ commit: null, repo: { repoId: D } });
     expect(await notices()).toHaveLength(0);
+  });
+
+  it('with no app selected, a post-as:2 runner gets the empty plan; an older runner gets no plan field, as before', async () => {
+    const pinOnce = async (commit: string) => {
+      const before = execs().length;
+      const cmds = pins().length;
+      await mergeIn(X, commit);
+      await settle();
+      await until(async () => pins().length === cmds + 1, 4000, 'command');
+      const cmd = pins().at(-1)!;
+      answer(cmd, { ok: true, unchanged: true, commit: hex('e') });
+      await until(async () => execs().length === before + 1, 4000, 'deploy');
+      // the deploy is left running: end it so the next merge gets its own pin command
+      await q(
+        `UPDATE deploy_runs SET status='failed', finished_at=now() WHERE status IN ('queued','running','requested','waiting_release')`,
+      );
+      return cmd.payload as Record<string, unknown>;
+    };
+    expect(await pinOnce(hex('7'))).not.toHaveProperty('postAs');
+    const caps = await q('SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1', [
+      d.w.workstationId,
+    ]);
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`,
+      [d.w.workstationId, [POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY]],
+    );
+    try {
+      expect((await pinOnce(hex('8'))).postAs).toEqual(noAppPlan());
+    } finally {
+      await q('UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1', [
+        d.w.workstationId,
+        caps[0]?.capabilities,
+      ]);
+    }
   });
 
   it('an older runner gets no command: D is deployed as it is, and a notice says the pin was not moved', async () => {

@@ -134,6 +134,10 @@ export const DeskItemDtoSchema = z.object({
       linkExpiresAt: z.string().optional(),
       journeyName: z.string().optional(),
       linkId: z.string().optional(),
+      /** code v7 design gate (`approval_step` at the gate): the existing design report the owner approves. */
+      design: z
+        .object({ reportPath: z.string().nullable(), commit: z.string().nullable(), summary: z.string() })
+        .optional(),
     })
     .optional(),
   /** The CEO agent (docs/design/ceo-agent-v2.md section 6): the action that answered or handled the item (Undo), and its recommendation. */

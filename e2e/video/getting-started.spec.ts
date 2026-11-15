@@ -22,7 +22,7 @@ const SLUG = 'getting-started';
 
 /**
  * What the mock agents do with the card made on camera: the first agent to pick it up asks once (the BA passes it on),
- * then all is ok. A card with a complete brief goes from Specify straight to Build, so the builder is that agent.
+ * then all is ok. The planner and architect pass the card on (lean flow); the builder is the first to ask.
  */
 const MOCK_SCRIPT = { build: ['question', 'ok'], question: ['escalate', 'escalate'] };
 

@@ -1,6 +1,7 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentUxProjectors } from './agent-ux.ts';
 import { agentProjectors } from './agents.ts';
+import { appIntegrationProjectors } from './app-integrations.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
 import { boardProjectors } from './board.ts';
@@ -13,8 +14,10 @@ import { ceoTopicProjectors } from './ceo-topics.ts';
 import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
+import { postAsProjectors } from './post-as.ts';
 import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
+import { designGateProjectors } from './design-gate.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { discoveryProjectors } from './discovery.ts';
@@ -25,6 +28,7 @@ import { formProjectors } from './forms.ts';
 import { governanceProjectors } from './governance.ts';
 import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
+import { industryBundleProjectors } from './industry-bundles.ts';
 import { intakeProjectors } from './intake.ts';
 import { intakeBatchProjectors } from './intake-batch.ts';
 import { interestRunProjectors } from './interest-runs.ts';
@@ -34,11 +38,15 @@ import { journeyProjectors } from './journeys.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
+import { ownerPendingProjectors } from './owner-pending.ts';
 import { packProjectors } from './packs.ts';
 import { phaseProjectors } from './phases.ts';
 import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { playbookProjectors } from './playbooks.ts';
+import { prReplayProjectors } from './pr-replays.ts';
+import { prReviewRunProjectors } from './pr-review-runs.ts';
+import { prSizeCheckProjectors } from './pr-size-check.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { providerKeyProjectors } from './provider-keys.ts';
@@ -55,6 +63,7 @@ import { scheduleProjectors } from './schedules.ts';
 import { sessionProjectors } from './sessions.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
+import { sizeExceptionProjectors } from './size-exception.ts';
 import { socialPostProjectors } from './social-posts.ts';
 import { storageProjectors } from './storage.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
@@ -81,18 +90,24 @@ const domains: Array<Record<string, Projector>> = [
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
+  prReviewRunProjectors,
+  prSizeCheckProjectors,
+  sizeExceptionProjectors,
+  prReplayProjectors,
   projectWorkflowProjectors,
   agentProjectors,
   cardProjectors,
   subworkflowProjectors,
   journeyProjectors,
   journeyWaitProjectors,
+  ownerPendingProjectors,
   shiftProjectors,
   costProjectors,
   providerKeyProjectors,
   threadProjectors,
   deskProjectors,
   ledgerProjectors,
+  industryBundleProjectors,
   chatProjectors,
   vaultProjectors,
   graphProjectors,
@@ -118,12 +133,14 @@ const domains: Array<Record<string, Projector>> = [
   interestRunProjectors,
   runProjectors,
   commitAsProjectors,
+  postAsProjectors,
   ceoProjectors,
   ceoFrontDoorProjectors,
   deliveryProjectors,
   ceoTopicProjectors,
   questionFlowProjectors,
   codeV6Projectors,
+  designGateProjectors,
   sessionProjectors,
   discoveryProjectors,
   boardProjectors,
@@ -135,6 +152,7 @@ const domains: Array<Record<string, Projector>> = [
   agentUxProjectors,
   relayProjectors,
   storageProjectors,
+  appIntegrationProjectors,
   formProjectors,
   publicFormProjectors,
 ];
@@ -188,6 +206,15 @@ export const PROJECTION_TABLES = [
   'projects',
   'project_provider_accounts',
   'project_repos',
+  'pr_reviews',
+  'pr_review_rounds',
+  'pr_review_runs',
+  'pr_review_findings',
+  'pr_review_finding_marks',
+  'pr_split_notices',
+  'pr_replays',
+  'pr_replay_prs',
+  'pr_replay_finding_views',
   'project_members',
   'project_workflows',
   'workflow_versions',
@@ -220,6 +247,8 @@ export const PROJECTION_TABLES = [
   'journey_waits',
   'journey_webhook_calls',
   'journey_hook_triggers',
+  'owner_pending_timers',
+  'pr_size_exceptions',
   'card_handoffs',
   'card_transitions',
   'card_activity',
@@ -237,6 +266,7 @@ export const PROJECTION_TABLES = [
   'ledger_entries',
   'ledger_entry_versions',
   'org_rule_packs',
+  'org_industry_bundles',
   'vaults',
   'project_graphs',
   'shift_context_metrics',
@@ -275,6 +305,8 @@ export const PROJECTION_TABLES = [
   'backlog_items',
   'relay_integrations',
   'storage_connections',
+  'org_app_integrations',
+  'org_app_integration_workstations',
   'forms',
   'form_versions',
   'form_publications',

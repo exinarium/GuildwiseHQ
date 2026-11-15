@@ -91,9 +91,9 @@ export async function applyDevopsAudit(
   for (const e of msg.entries) {
     await exec(
       tx,
-      `INSERT INTO devops_audit (workstation_id, at, session_ref, kind, decision, rule, command)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [ws.id, e.at, e.sessionRef, e.kind, e.decision, e.rule, e.command],
+      `INSERT INTO devops_audit (workstation_id, at, session_ref, kind, shift_kind, decision, rule, command)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [ws.id, e.at, e.sessionRef, e.kind, e.shiftKind ?? null, e.decision, e.rule, e.command],
     );
   }
 }
@@ -104,7 +104,7 @@ export async function listDevopsAudit(
 ): Promise<Row[]> {
   return rows(
     ctx.pool,
-    `SELECT id, workstation_id, at, session_ref, kind, decision, rule, command FROM devops_audit
+    `SELECT id, workstation_id, at, session_ref, kind, shift_kind, decision, rule, command FROM devops_audit
       WHERE ($1::uuid IS NULL OR workstation_id=$1) AND (NOT $2 OR decision='refused')
       ORDER BY at DESC, id DESC LIMIT $3`,
     [opts.workstationId ?? null, opts.refusedOnly ?? false, Math.min(Math.max(1, opts.limit ?? 100), 1000)],

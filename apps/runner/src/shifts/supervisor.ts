@@ -32,12 +32,15 @@ import {
   isTerminalReport,
   isValidReportPath,
   type LedgerMatch,
+  normalizeRemoteUrl,
   normalizeUrl,
   type OrgGraphScope,
   outcomeDataSchema,
+  type PostAsPlan,
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
+  postAsFor,
   type ReadableFolder,
   type RebaseErrorInfo,
   type RepoReport,
@@ -91,8 +94,10 @@ import {
   delegateUsageReporter,
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
+import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
 import { redactCommand } from '../devops/guard.ts';
-import { cardPayload, devopsGuardFor, shiftTexts } from '../devops/requests.ts';
+import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
+import { cardPayload, devopsGuardFor, guardedShift, shiftTexts } from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import {
@@ -105,7 +110,16 @@ import {
 import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
-import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  inContext,
+  NO_IDENTITY_WIRE,
+  repoNameOf,
+  resolveCommitIdentity,
+} from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
@@ -114,6 +128,7 @@ import {
   removePrepTaskWorktree,
 } from '../git/release-prep-task.ts';
 import { resetSubmoduleDrift, submoduleResetNote } from '../git/submodule-drift.ts';
+import { redactGitError } from '../git/submodule-fill.ts';
 import {
   abortMerge,
   mergeInProgress,
@@ -126,6 +141,7 @@ import {
   ensureReadOnlyCheckout,
   ensureWorktree,
   type GitAuth,
+  initWorktreeSubmodules,
   RebaseConflictError,
   RebaseError,
   rebaseOntoBase,
@@ -171,13 +187,14 @@ import {
   withReachability,
 } from '../sandbox/test-services.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
+import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import { e2eAreasSection } from '../testing/e2e-areas.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
-import { type PrepResult, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
+import { type PrepResult, type PrepStep, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
 import {
   agentPath,
   describeToolchains,
@@ -287,6 +304,8 @@ export interface SupervisorDeps {
   log?: Logger;
   /** Finds the local clone for a normalized remote URL. */
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
+  /** This runner's app token probe (its own key store and broker); none: a shift for a selected app fails closed. */
+  appProbe?: AppTokenProbe | null;
   /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
   findLocal?: (localKey: string) => Promise<{ localPath: string } | undefined>;
   /** The runner's HTTP calls to the server (attachment bytes). Absent: attachments are not copied. */
@@ -340,6 +359,17 @@ export interface SupervisorDeps {
   external?: () => ExternalAdapters | undefined;
   /** Credentials for pushing a working branch the runner creates (absent: the user's own git setup). */
   gitAuth?: GitAuth;
+  /**
+   * Credentials for one shift from its post-as plan: repositories that post as an app push and fetch with this runner's
+   * installation tokens, every other repository with `gitAuth`. `originRefusal` is the fail-closed check of a clone's
+   * origin (an app pushes over https only), as a wire error. Absent: `gitAuth` for every shift, as before.
+   */
+  shiftCredentials?: (plan: PostAsPlan | null | undefined) => {
+    auth: GitAuth;
+    originRefusal(url: string | null | undefined): string | null;
+    /** The app a remote URL posts as under this plan (null = today's credentials and identity). No secret. */
+    appFor?(url: string): { label: string; botName: string; botEmail: string } | null;
+  };
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
   orgSourceFolder?: (orgId: string) => string | undefined;
   /** Brings the local working branch of a repository up to date after a fetch (runs under the clone's lock). */
@@ -356,6 +386,8 @@ export interface SupervisorDeps {
   runs?: RunManager;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
   prepareWorktree?: typeof prepareWorktree;
+  /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
+  initWorktreeSubmodules?: typeof initWorktreeSubmodules;
   /** Called after the local test services seen at a shift start changed (the runner writes them to its status file). */
   onTestServices?: () => void;
   /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
@@ -406,6 +438,8 @@ interface ActiveShift {
   delegateWork?: DelegateWork;
   startedAt: Date;
   token?: string;
+  /** The token's env file; `revoke()` ends both (see session/shift-credential.ts). */
+  credential?: IssuedShiftCredential;
   session?: RuntimeSession;
   worktree?: WorktreeResult;
   /** A design before the dependencies landed: a detached read-only checkout of the working branch, removed at the end. */
@@ -465,6 +499,8 @@ interface ActiveShift {
   prepAbort?: AbortController;
   /** What preparing the new card worktree did (reported with `shift.started`, told to the agent). */
   worktreePrep?: PrepResult;
+  /** What filling the card worktree's submodules did (one `submodules` step; part of `worktreePrep`). */
+  submodulesStep?: PrepStep;
   /** Check results by head, check and command: a second handoff at the same head does not run them again. */
   checkCache?: Map<string, { evidence: CheckEvidence; log: string }>;
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
@@ -521,6 +557,8 @@ export const IDLE_LIMITS: IdleLimits = {
 
 /** The workflow stage of the QA-steps shifts (the server's `QA_STEPS_STAGE`); they are short. */
 const QA_STEPS_STAGE = 'qa_steps';
+/** The longest design report text attached to an investigation hand-off (the schema's cap). */
+const REPORT_TEXT_MAX = 200_000;
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
 
@@ -711,7 +749,8 @@ export class ShiftSupervisor {
       if (shift.readOnlyCheckout)
         await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
       if (shift.prepTask) await removePrepTaskWorktree(shift.prepTask);
-      if (shift.token) this.deps.ipc.revoke(shift.token);
+      if (shift.credential) shift.credential.revoke();
+      else if (shift.token) this.deps.ipc.revoke(shift.token);
       this.delegates.endCaller(msg.shiftId, 'the shift ended');
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
@@ -921,6 +960,16 @@ export class ShiftSupervisor {
 
   // ------------------------------------------------------------------ internals
 
+  /** The git credentials of a shift: its post-as plan's (app repositories), else this workstation's. */
+  private shiftAuth(msg: { postAs?: PostAsPlan | null | undefined }): GitAuth | undefined {
+    return this.deps.shiftCredentials?.(msg.postAs).auth ?? this.deps.gitAuth;
+  }
+
+  /** Refuses a shift before it starts (the runner's post-as gate): nothing is prepared, the reason goes to the server. */
+  refuseStart(shiftId: string, detail: string): void {
+    this.reject(shiftId, 'internal', detail);
+  }
+
   private reject(
     shiftId: string,
     reason:
@@ -1126,13 +1175,43 @@ export class ShiftSupervisor {
     // "Commit as", else the clone's git config, else the workstation's (backlog #65). With none set a shift that works in
     // a repository is refused, there is no fallback to an agent or product name.
     const identityRepo = msg.worktree ? await this.deps.findRepo(msg.worktree.remoteUrlNormalized) : null;
-    const identity = await resolveCommitIdentity(identityRepo?.localPath ?? paths.root, msg.commitAs);
     // Read-only work never commits: a read-only checkout (planning, design before a dependency lands) and the reviewing
     // roles are not refused for a missing identity (a rebase they need still fails on its own, naming the identity).
     const commits = msg.worktree?.mode !== 'readonly' && !READ_ONLY_ROLES.has(msg.agent.roleKey);
+    // With an app selected for this repository the shift runs as the app or not at all (fail closed).
+    let identity: Awaited<ReturnType<typeof resolveCommitIdentity>>;
+    try {
+      identity = await resolveCommitIdentity(
+        identityRepo?.localPath ?? paths.root,
+        msg.commitAs,
+        boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
+      );
+    } catch (err) {
+      if (!(err instanceof AppIdentityError)) throw err;
+      if (commits) {
+        this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        return;
+      }
+      identity = null;
+    }
     if (identityRepo && !identity && commits) {
       this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
       return;
+    }
+    // A DevOps request about a card whose repository posts as an app (a conflict resolution): every commit of the
+    // engineer is the app's, or the request does not run. Other DevOps requests keep today's identity.
+    if (msg.kind === 'devops' && msg.agent.isDevops) {
+      const appIdentity = await devopsRequestIdentity(
+        msg.postAs,
+        msg.devops?.card?.remoteUrlNormalized,
+        paths.root,
+        this.deps.appProbe,
+      );
+      if (typeof appIdentity === 'string') {
+        this.reject(msg.shiftId, 'internal', appIdentity);
+        return;
+      }
+      if (appIdentity) identity = appIdentity;
     }
     s.identity = identity;
     const sandbox = await ensureSandbox(
@@ -1141,6 +1220,7 @@ export class ShiftSupervisor {
       msg.agent.name,
       identity,
       accountKey === 'main' ? undefined : accountKey,
+      { log: this.log },
     );
     s.sandbox = sandbox;
     // The DevOps engineer's directory carries a marker, so an unpair can clear it (see unpaired.ts).
@@ -1157,6 +1237,14 @@ export class ShiftSupervisor {
       const rp = msg.releasePrep;
       if (!rp) {
         this.reject(msg.shiftId, 'internal', 'a release prep shift without its task');
+        return;
+      }
+      if (msg.agent.isDevops && !rp.releaseBranch?.trim()) {
+        this.reject(
+          msg.shiftId,
+          'internal',
+          'a release prep shift without its release branch: the DevOps guard cannot protect it, so the shift does not start',
+        );
         return;
       }
       const repo = await this.deps.findRepo(rp.remoteUrlNormalized);
@@ -1188,7 +1276,7 @@ export class ShiftSupervisor {
           baseBranch: msg.worktree.baseBranch,
           path,
           roots: [paths.worktrees],
-          auth: this.deps.gitAuth,
+          auth: this.shiftAuth(msg),
         });
         s.readOnlyCheckout = { path: co.path, repoPath: repo.localPath, baseBranch: msg.worktree.baseBranch };
       } catch (err) {
@@ -1201,22 +1289,37 @@ export class ShiftSupervisor {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
         return;
       }
+      // An app pushes over https only: an ssh origin is refused now, before any commit is made as the bot.
+      const sshRefusal =
+        this.deps.shiftCredentials?.(msg.postAs).originRefusal(repo.remoteUrl ?? null) ?? null;
+      if (sshRefusal) {
+        this.reject(msg.shiftId, 'internal', sshRefusal);
+        return;
+      }
       // Merge the latest main first: into the working branch before the card branch is cut from it (never for a resumed shift).
       const syncWanted = msg.prepare.syncMain && msg.worktree.mode === 'create' && !s.resumed;
       let sync: SyncMainOutcome | undefined;
       if (syncWanted && msg.prepare.syncMain) {
-        sync = await syncMainIntoWorking({
+        const synced = await syncMainIntoWorking({
           repoPath: repo.localPath,
           ...(msg.prepare.syncMain.mainBranch ? { mainBranch: msg.prepare.syncMain.mainBranch } : {}),
           workingBranch: msg.prepare.syncMain.workingBranch,
           ref: msg.brief.card.ref,
           commitAs: msg.commitAs ?? null,
+          postAs: boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
           integrationDir: paths.integration,
-          ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+          ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
         }).catch((err) => {
+          // A selected app that cannot mint stops the shift: the merge is never made under another identity.
+          if (err instanceof AppIdentityError) return err;
           this.log.warn(`merging the latest main failed for ${msg.brief.card.ref}: ${String(err)}`);
           return undefined;
         });
+        if (synced instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(synced));
+          return;
+        }
+        sync = synced;
       }
       try {
         s.worktree = await ensureWorktree({
@@ -1224,7 +1327,7 @@ export class ShiftSupervisor {
           spec: msg.worktree,
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
           roots: [paths.worktrees],
-          auth: this.deps.gitAuth,
+          auth: this.shiftAuth(msg),
           // Bring the local working branch up to date with the fetch just made (only the project's own working branch).
           ...(this.deps.syncAfterFetch && msg.worktree.baseBranch === msg.brief.project.workingBranch
             ? {
@@ -1239,12 +1342,21 @@ export class ShiftSupervisor {
         });
         if (msg.prepare.rebase && !s.resumed)
           s.rebased = ['rebased', 'merged'].includes(
-            await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null),
+            await rebaseOntoBase(
+              s.worktree.path,
+              msg.worktree.baseBranch,
+              msg.commitAs ?? null,
+              boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
+              // the fetch before the rebase goes with the app's token when the project posts as one
+              msg.postAs ? this.shiftAuth(msg) : undefined,
+            ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);
       } catch (err) {
-        if (err instanceof RebaseConflictError) {
+        if (err instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        } else if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
         } else if (err instanceof RebaseError) {
           // Not a conflict: the existing worktree_failed route (an older server parses it), with git's details.
@@ -1334,8 +1446,13 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
-    // A card worktree this shift just added is prepared before the agent starts (after the accept: the server releases a
-    // shift that is not accepted within 30 s): submodules, then the project's dependencies in the run-step sandbox.
+    // The card worktree's submodules are filled before the agent starts (after the accept: the server releases a shift
+    // that is not accepted within 30 s, and a submodule clone can take minutes). Fresh or reopened, never for a resumed
+    // shift; only what is still uninitialised.
+    if (msg.kind === 'card' && s.worktree && msg.worktree && !s.resumed) await this.fillWorktreeSubmodules(s);
+
+    // A card worktree this shift just added is prepared before the agent starts: the project's dependencies in the
+    // run-step sandbox (the submodule step above is carried into its result).
     if (
       msg.kind === 'card' &&
       s.worktree?.added &&
@@ -1345,6 +1462,8 @@ export class ShiftSupervisor {
       msg.worktree
     )
       await this.prepareNewWorktree(s, msg.brief.project.projectPath);
+    else if (s.submodulesStep)
+      s.worktreePrep = { ok: s.submodulesStep.status !== 'failed', steps: [s.submodulesStep] };
 
     // The vaults this shift reads (read-only). A card shift reads every vault the server named (`vaults`; an older server
     // sends only `vault`); question, BA task and CEO shifts read their one `vault`; a DevOps shift reads none.
@@ -1544,13 +1663,16 @@ export class ShiftSupervisor {
     // the agent's name and seniority close the file: everything before is shared by every agent of the role and project
     texts.instructions = identityLast(texts.instructions);
     await adapter.writeInstructions(sandbox, texts.instructions);
-    s.token = this.deps.ipc.registerShift(this.handlerFor(s));
+    s.credential?.revoke();
+    const cred = issueShiftCredential(
+      { ipc: this.deps.ipc, runnerRoot: paths.root, log: this.log },
+      { sessionId: msg.shiftId, handler: this.handlerFor(s) },
+    );
+    s.token = cred.token;
+    s.credential = cred;
     s.env = {
       ...sandboxEnv(sandbox, undefined, tc?.env, identity),
-      AOM_IPC_URL: this.deps.ipc.url,
-      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-      AOM_SHIFT_TOKEN: s.token,
-      AOM_SHIFT_ID: msg.shiftId,
+      ...cred.env,
       ...(s.worktree?.path ? { AOM_WORKDIR: s.worktree.path } : {}),
       // A suite or regression card of a phase follow-up tests the deployed app: Playwright configs read this.
       ...(msg.agent.roleKey === 'tester' && typeof msg.brief.card.fields.targetUrl === 'string'
@@ -1558,6 +1680,8 @@ export class ShiftSupervisor {
         : {}),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
+    // The DevOps engineer's raw pushes to app repositories go nowhere (it uses `aom git push --repo`, run here).
+    if (msg.kind === 'devops' && msg.agent.isDevops) s.env = withAppPushRefusal(s.env, msg.postAs);
     // A remote target: its address, and the test accounts declared for it as a 0600 file the tester's tools read.
     if (hasEnv && testEnv?.mode === 'remote' && testEnv.target) {
       s.env.AOM_TARGET_URL = testEnv.target.url;
@@ -1631,6 +1755,11 @@ export class ShiftSupervisor {
       msg.kind === 'ceo' ||
       msg.kind === 'devops' ||
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
+    const devopsGuard = devopsGuardFor(msg, s.identity?.email);
+    if (guardedShift(msg) && !devopsGuard) {
+      this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
+      return;
+    }
     try {
       s.session = await adapter.start({
         shiftId: msg.shiftId,
@@ -1641,7 +1770,7 @@ export class ShiftSupervisor {
         ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(accountKey !== 'main' ? { account: accountKey } : {}),
-        ...(devopsGuardFor(msg) ? { devopsGuard: devopsGuardFor(msg) } : {}),
+        ...(devopsGuard ? { devopsGuard } : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
@@ -2028,6 +2157,67 @@ export class ShiftSupervisor {
     this.deps.transport.send('run.usage', { kind: 'shift', id: s.msg.shiftId, usage: u });
   }
 
+  /**
+   * Fills the card worktree's uninitialised submodules at their pinned commits (never throws, never fails the shift).
+   * The outcome becomes the `submodules` step of the worktree preparation; each failure is logged and told to the owner
+   * with the submodule's path and git's error, credentials redacted.
+   */
+  private async fillWorktreeSubmodules(s: ActiveShift): Promise<void> {
+    const wt = s.worktree;
+    if (!wt || !existsSync(join(wt.path, '.gitmodules'))) return;
+    this.addProgress(s, 'status', 'filling the submodules');
+    this.flushProgress(s);
+    const started = Date.now();
+    const fill = this.deps.initWorktreeSubmodules ?? initWorktreeSubmodules;
+    let fills: Awaited<ReturnType<typeof initWorktreeSubmodules>>;
+    try {
+      fills = await fill(wt.path, {
+        findRepo: this.deps.findRepo,
+        ...(this.shiftAuth(s.msg) ? { auth: this.shiftAuth(s.msg) } : {}),
+      });
+    } catch (err) {
+      fills = [{ name: '', path: '', status: 'failed', detail: redactGitError(String(err)) }];
+    }
+    const ms = Date.now() - started;
+    if (fills.length === 0) return;
+    const failed = fills.filter((f) => f.status === 'failed');
+    for (const f of failed) {
+      const what = f.path || f.name || 'submodules';
+      this.log.warn(
+        `could not fill the submodule ${f.name || what} of ${s.msg.shiftId}: ${f.detail ?? 'failed'}`,
+      );
+      this.addProgress(s, 'status', `the submodule ${what} could not be filled: ${f.detail ?? 'failed'}`);
+    }
+    const describe = (f: (typeof fills)[number]) =>
+      `${f.path || f.name || 'submodules'}: ${f.detail ?? f.status}`;
+    if (failed.length) {
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'failed',
+        detail: failed.map(describe).join('; ').slice(0, 400),
+        ms,
+      };
+    } else if (fills.every((f) => f.status === 'skipped')) {
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'skipped',
+        detail: fills.map(describe).join('; ').slice(0, 400),
+        ms,
+      };
+    } else {
+      const skipped = fills.filter((f) => f.status === 'skipped');
+      s.submodulesStep = {
+        name: 'submodules',
+        status: 'done',
+        ...(skipped.length
+          ? { detail: `not filled: ${skipped.map(describe).join('; ')}`.slice(0, 400) }
+          : {}),
+        ms,
+      };
+    }
+    this.flushProgress(s);
+  }
+
   /** Prepares the card worktree this shift just added (never throws; a failure is recorded and told to the agent). */
   private async prepareNewWorktree(s: ActiveShift, projectPath: string | undefined): Promise<void> {
     const wt = s.worktree;
@@ -2050,6 +2240,7 @@ export class ShiftSupervisor {
           : {}),
         platform: process.platform as Platform,
         signal: s.prepAbort.signal,
+        ...(s.submodulesStep ? { submodules: s.submodulesStep } : {}),
       });
     } catch (err) {
       s.worktreePrep = {
@@ -2118,6 +2309,7 @@ export class ShiftSupervisor {
                 ...(s.env?.PATH ? { PATH: s.env.PATH } : {}),
               },
             },
+            ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
           }
         : {}),
     };
@@ -2234,6 +2426,13 @@ export class ShiftSupervisor {
             req.params,
             s.msg.kind === 'devops' && s.msg.agent.isDevops === true,
           );
+        if (req.method === 'hygiene.run') return this.hygieneRun(s);
+        if (
+          (req.method === 'git.push' || req.method === 'git.fetch') &&
+          s.msg.kind === 'devops' &&
+          s.msg.agent.isDevops === true
+        )
+          return this.devopsGit(s, req.method, req.params);
         if (
           req.method === 'git.push' ||
           req.method === 'git.fetch' ||
@@ -2280,7 +2479,12 @@ export class ShiftSupervisor {
       if (method === 'source.read') {
         const ref = String(params.ref ?? '').trim();
         if (!ref) return { ok: false, error: 'usage: aom source read --ref <KEY>' };
-        return { ok: true, result: formatSource(await external.readText(ref)) };
+        return {
+          ok: true,
+          result: formatSource(
+            await external.readText(ref, s.msg.trackerApp ? { app: s.msg.trackerApp } : undefined),
+          ),
+        };
       }
       if (!s.sandbox) return { ok: false, error: 'this shift has no workspace yet' };
       const deps = {
@@ -2512,13 +2716,16 @@ export class ShiftSupervisor {
       return;
     }
     if (sync.kind !== 'needs_card_merge') return;
+    // what the host refused and the bypass or permission the app needs, for the owner to grant
+    if (sync.report) this.log.warn(`${msg.brief.card.ref}: ${sync.report}`);
     const wt = s.worktree.path;
     const main = msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch;
     const r = await mergeMainIntoCard(wt, {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
       commitAs: msg.commitAs ?? null,
-      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
+      ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
     });
     if ('error' in r) {
       this.log.warn(`merging the latest main into ${msg.brief.card.ref} failed: ${r.error}`);
@@ -2557,6 +2764,117 @@ export class ShiftSupervisor {
     }
   }
 
+  /**
+   * `hygiene.run` (the DevOps engineer's `aom hygiene run`): repository hygiene runs here, in the runner, so a
+   * repository that posts as an app fetches, pulls and pushes with the app's token (which never reaches the agent) and
+   * the commits a pull rewrites get the app as committer. The spec comes from this runner's copy of the brief.
+   */
+  private async hygieneRun(s: ActiveShift): Promise<IpcRpcResponse> {
+    const { msg } = s;
+    if (msg.kind !== 'devops' || msg.agent.isDevops !== true)
+      return { ok: false, error: 'only the DevOps engineer can run repository hygiene' };
+    const spec = msg.devops?.hygiene;
+    if (!spec)
+      return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
+    const run = await runHygiene(spec, this.worktreePaths(), {
+      changeState: async (q) => {
+        try {
+          const r = await this.deps.rpc(msg.shiftId, 'hygiene.change_state', q);
+          return r.ok ? ((r.result as { state?: 'open' | 'merged' | 'closed' | null }).state ?? null) : null;
+        } catch {
+          return null;
+        }
+      },
+      ...this.devopsAppAuth(msg.postAs),
+      ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
+    });
+    this.addProgress(s, 'status', 'aom hygiene run: done');
+    return { ok: true, result: run };
+  }
+
+  /** Per-repository app auth of a DevOps shift's plan; empty for a runner without post-as credentials. */
+  private devopsAppAuth(plan: PostAsPlan | null | undefined): Pick<HygieneDeps, 'appAuth'> {
+    const creds = this.deps.shiftCredentials?.(plan);
+    if (!creds?.appFor) return {};
+    const appFor = creds.appFor.bind(creds);
+    return {
+      appAuth: async (url) => {
+        const app = appFor(url);
+        if (!app) return null;
+        const a = await creds.auth(url);
+        return { ...a, identity: { name: app.botName, email: app.botEmail } };
+      },
+    };
+  }
+
+  /**
+   * `aom git push|fetch --repo <dir>` of the DevOps engineer: the runner talks to origin, so an app repository is
+   * reached with the app's token (the agent never sees it), and a repository not on an app with plain git, exactly as
+   * the engineer's own `git push` would. No force, no options in refspecs, no delete of a main branch.
+   */
+  private async devopsGit(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const denied = (error: string): IpcRpcResponse => ({ ok: false, error });
+    const repo = typeof params.repo === 'string' ? params.repo : '';
+    if (!repo) return denied('usage: aom git push|fetch --repo <dir> [<refspec>...]');
+    const dir = resolve(repo);
+    const roots = [...(this.deps.config.repoRoots ?? []), this.deps.paths.worktrees, tmpdir()].map((r) =>
+      resolve(r),
+    );
+    if (!roots.some((r) => dir === r || dir.startsWith(`${r}/`)))
+      return denied(
+        `${repo} is not inside a repository folder, a worktree or the temporary folder of this runner`,
+      );
+    const refspecs = Array.isArray(params.refspecs)
+      ? params.refspecs.filter((r): r is string => typeof r === 'string' && r.length > 0)
+      : [];
+    const op = method === 'git.push' ? 'push' : 'fetch';
+    const plan = devopsPushPlan(
+      op,
+      refspecs,
+      params.delete === true,
+      params.tags === true,
+      devopsGuardFor(s.msg)?.protectedBranches ?? [],
+    );
+    if ('error' in plan) return denied(plan.error);
+    const url = (await git(dir, ['remote', 'get-url', 'origin'])).stdout.trim();
+    if (!url) return denied(`${repo} has no origin`);
+    const creds = this.deps.shiftCredentials?.(s.msg.postAs);
+    const app = creds?.appFor?.(url) ?? null;
+    let auth = { args: [] as string[], env: {} as Record<string, string> };
+    if (creds && app) {
+      const refusal = creds.originRefusal(url);
+      if (refusal) return denied(refusal);
+      try {
+        auth = await creds.auth(url);
+      } catch (err) {
+        if (!(err instanceof AppIdentityError)) throw err;
+        const entry = postAsFor(s.msg.postAs, normalizeRemoteUrl(url));
+        return denied(
+          appIdentityWire(
+            inContext(err, {
+              ...(entry?.projectKey ? { projectKey: entry.projectKey } : {}),
+              operation: plan.operation,
+              repo: repoNameOf(normalizeRemoteUrl(url)),
+            }),
+          ),
+        );
+      }
+    }
+    const r = await git(dir, [...auth.args, ...plan.args], { env: auth.env });
+    this.addProgress(s, 'status', `aom git ${op} --repo ${repo}: ${r.exitCode === 0 ? 'done' : 'failed'}`);
+    if (r.exitCode !== 0) return denied(redactGitError(r.stderr || r.stdout || `git ${op} failed`));
+    return {
+      ok: true,
+      result: {
+        message: (r.stderr || r.stdout).trim() || `${op} done${app ? ` as the app ${app.label}` : ''}`,
+      },
+    };
+  }
+
   /** `aom git push|fetch|merge-main|verify-merge`: the architect's runner-run git (investigate stages only). */
   private async architectGit(
     s: ActiveShift,
@@ -2576,7 +2894,8 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
-      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
+      ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
         this.persist(s);
@@ -2650,7 +2969,8 @@ export class ShiftSupervisor {
       }
       if (!real.startsWith(`${realpathSync(wt)}/`) || !statSync(real).isFile())
         return { error: `the report '${rel}' must be a file inside the worktree` };
-      const leak = secretsIn(readFileSync(real, 'utf8'));
+      const reportText = readFileSync(real, 'utf8');
+      const leak = secretsIn(reportText);
       if (leak) return { error: leak };
       if ((await git(wt, ['cat-file', '-e', `HEAD:${rel}`])).exitCode !== 0)
         return {
@@ -2665,6 +2985,8 @@ export class ShiftSupervisor {
           summary: data.summary,
           location: 'repo',
           commit,
+          // the design gate shows the full report to the owner (the card branch is not pushed yet)
+          reportText: reportText.slice(0, REPORT_TEXT_MAX),
           ...(data.assumptions ? { assumptions: data.assumptions } : {}),
           ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
           ...(data.review ? { review: data.review } : {}),
@@ -2963,7 +3285,12 @@ export class ShiftSupervisor {
             );
           toSend = { ...toSend, data: { ...toSend.data, proposal: checked.proposal, files: [] } };
         } else {
-          const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+          const done = await finishPrepTask(
+            s.prepTask,
+            msg.releasePrep,
+            msg.commitAs,
+            boundPostAsFor(msg.postAs, msg.releasePrep.remoteUrlNormalized, this.deps.appProbe),
+          );
           toSend = done.ok
             ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
             : {

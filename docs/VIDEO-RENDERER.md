@@ -30,6 +30,12 @@ Output in `--out`: `video.mp4` (`short.mp4` for a Short: 1080x1920 with large bu
 `captions.srt`, `thumb.png` (long only, 1280x720), `description.txt`, `script.json`, `render.log`. H.264 high 30 fps
 CRF 20, AAC 48 kHz stereo, fast start; 0.3 s cross fades; slow zoom on cards.
 
+Every H.264 encode runs `AOM_VIDEO_ENCODE_THREADS` threads (default 4, lowered to the machine's cores; a missing or
+invalid value uses 4), and each scene segment is decoded with one thread in the final encode, so peak memory does not grow
+with the core count. `render.log` (and the worker log, with the post and render id) records the count once per render.
+Each scene still costs about 70 MB of peak memory in the final encode: a typical 10 to 30 scene video peaks at 1.4 to
+2.9 GB, and very long scripts (over about 45 scenes) need more than 4 GB.
+
 ## Needs
 
 The voice and a static ffmpeg: `e2e/video/setup-voice.sh` (installs into `~/.cache/aom-video`, `AOM_VIDEO_HOME`).

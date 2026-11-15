@@ -11,7 +11,6 @@ import {
   type GuardConfig,
   writeGuardState,
 } from './guard-hook.ts';
-import { writeShiftEnvFile } from './shift-env.ts';
 
 const quote = (w: string): string => `'${w.replace(/'/g, `'\\''`)}'`;
 
@@ -35,6 +34,7 @@ const PRIVATE_ENTRIES = [
   'active-shifts',
   'deploys',
   'logs',
+  'session-env',
 ];
 
 /** The runner's own service units can be inspected (`systemctl status`, `journalctl`) but not stopped from inside a turn. */
@@ -107,7 +107,7 @@ export interface TurnFilesInput {
   /** The static brief (persona, routing rule, verbs, policy): written every turn, because a resumed session does not keep it. */
   brief: string;
   mode: 'owner' | 'order';
-  /** The shift variables (see OWNER_SHIFT_KEYS): the relay's environment and the `shift-env.json` fallback for `aom`. */
+  /** The shift variables (see SHIFT_ENV_KEYS), including AOM_SHIFT_ENV_FILE: the relay MCP server's environment. */
   shiftEnv: Record<string, string>;
   runnerRoots: readonly string[];
   pid: number;
@@ -123,7 +123,6 @@ export function writeTurnFiles(i: TurnFilesInput): void {
   } catch {
     // not supported on every platform
   }
-  writeShiftEnvFile(i.turnDir, i.shiftEnv);
   writeFileSync(join(i.turnDir, OWNER_BRIEF_FILE), i.brief, { mode: 0o600 });
   const aom = selfCommand('aom');
   const relay = {

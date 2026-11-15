@@ -29,6 +29,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import {
   agentActor,
   cardMessage,
@@ -687,6 +688,19 @@ export async function hygieneReportEvents(
     actor: agentActor(agentId),
     scope: orgScope(req.org_id),
   });
+  // A repository whose selected app could not be used: the project's app alert, as for a stopped shift.
+  for (const r of reported) {
+    if (r.problem?.kind !== 'app_identity_failed') continue;
+    const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
+    events.push(
+      ...(await appIdentityAlertEvents(tx, {
+        orgId: req.org_id as string,
+        projectId: spec1.projectId,
+        detail: r.problem.detail,
+        what: 'DevOps hygiene',
+      })),
+    );
+  }
   // The user's unsaved edits were stored on a saved-work branch: tell the project's managers (a notice, nothing to decide).
   for (const r of reported) {
     const sw = r.savedWork;

@@ -14,10 +14,10 @@
   ],
   "captions": "/videos/getting-started.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 139.2,
+  "duration": 154.7,
   "chapters": [
     {
-      "t": 8.9,
+      "t": 8.8,
       "title": "The Get started checklist"
     },
     {
@@ -33,19 +33,19 @@
       "title": "Hire a lean team"
     },
     {
-      "t": 82,
+      "t": 81.8,
       "title": "Create a card and talk to the BA"
     },
     {
-      "t": 104.7,
+      "t": 104.5,
       "title": "Answer on the Desk"
     },
     {
-      "t": 115.5,
+      "t": 130.9,
       "title": "Watch the board"
     },
     {
-      "t": 126.7,
+      "t": 142.1,
       "title": "Help and shortcuts"
     }
   ]

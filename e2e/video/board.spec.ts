@@ -34,6 +34,21 @@ const waitCard = (title: string, what: string, pred: (c: CardRow) => boolean, ms
     ms,
   ) as Promise<CardRow>;
 
+/** Fails at once when the card's workflow has no Owner approval stage (the classic `code` v5 flow): it could never get there. */
+async function requireOwnerApprovalStage(cardId: string): Promise<void> {
+  const rows = await q(
+    `SELECT 1 FROM cards c JOIN workflow_stages s ON s.workflow_version_id=c.workflow_version_id
+      WHERE c.id=$1 AND s.stage_id='owner_approval'`,
+    [cardId],
+  );
+  expect(
+    rows.length,
+    'The Board video needs the lean workflow (code v6+, which has an owner_approval stage), but this project runs a ' +
+      'workflow without one. The video stack must start the server with the lean team on: AOM_E2E_LEAN=1 (the default ' +
+      'of e2e/video/defaults.ts), not AOM_NO_LEAN_TEAM.',
+  ).toBeGreaterThan(0);
+}
+
 async function makeCard(
   api: APIRequestContext,
   projectId: string,
@@ -126,13 +141,15 @@ test('record the board video', async ({ browser }) => {
     requirements,
     criteria,
   });
-  await makeCard(
-    api,
-    projectId,
-    rid,
-    card(DONE_OLD, 'The footer says "Copyrigth".', 'Spell "Copyright" correctly in the footer.', [
-      'The footer reads "Copyright"',
-    ]),
+  await requireOwnerApprovalStage(
+    await makeCard(
+      api,
+      projectId,
+      rid,
+      card(DONE_OLD, 'The footer says "Copyrigth".', 'Spell "Copyright" correctly in the footer.', [
+        'The footer reads "Copyright"',
+      ]),
+    ),
   );
   await makeCard(
     api,

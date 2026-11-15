@@ -130,7 +130,7 @@ describe('code v4', () => {
     expect(codeWorkflowV4.version).toBe(4);
     expect(getBuiltinWorkflow('code', 4)).toBe(codeWorkflowV4);
     expect(BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version)).toEqual([
-      1, 2, 3, 4, 5, 6,
+      1, 2, 3, 4, 5, 6, 7,
     ]);
     const strip = (d: WorkflowDefinition) =>
       JSON.stringify(d.stages.filter((s) => s.id !== 'test').map((s) => s));

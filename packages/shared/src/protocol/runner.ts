@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
+import {
+  AppAdoptPayloadSchema,
+  AppConnectPayloadSchema,
+  AppRemovePayloadSchema,
+  AppSyncPayloadSchema,
+  AppTestPayloadSchema,
+} from '../apps/index.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { PackAgentBriefSchema } from '../capabilities/pack-team.ts';
 import {
@@ -115,7 +122,15 @@ import {
   RepoCreatePayloadSchema,
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
+import { AppAccessCheckPayloadSchema, PostAsPlanSchema, TrackerAppSchema } from '../repo/post-as.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
+import {
+  PrReviewCancelPayloadSchema,
+  PrReviewNoticePayloadSchema,
+  PrReviewPostPayloadSchema,
+  PrReviewRunPayloadSchema,
+} from '../review/pr-review.ts';
+import { ReviewerTokenFactSchema } from '../review/reviewer-run.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   CHECKS_MAX,
@@ -250,6 +265,8 @@ export const RepoReportSchema = z.object({
   headBranch: z.string().nullable(),
   /** The git identity commits get in this clone without a project setting (repository, global or system git config); absent: none set. Additive. */
   identity: RepoIdentityFactSchema.nullable().optional(),
+  /** Whether this workstation holds a comment-only reviewer token for the repository (never the token). Additive. */
+  reviewerToken: ReviewerTokenFactSchema.optional(),
 });
 export type RepoReport = z.infer<typeof RepoReportSchema>;
 
@@ -456,6 +473,18 @@ export const ShiftBriefSchema = z.object({
               .optional(),
           }),
         )
+        .optional(),
+      /** The project's size settings for the design-time size estimate (absent from older servers). */
+      sizing: z
+        .object({
+          unit: z.string().nullable(),
+          budget: z.number().nullable(),
+          riskMapSet: z.boolean(),
+          /** Why the size verdict is inactive (no budget or unit), else null. */
+          sizeStatus: z.string().nullable(),
+          /** Why the risk class is inactive (no path-to-risk map), else null. */
+          riskStatus: z.string().nullable(),
+        })
         .optional(),
       /** The report that was recorded by the investigate stage (later stages read it). */
       report: z
@@ -722,6 +751,8 @@ export const IntegrationRunPayloadSchema = z.object({
   /** Only issues with this label (a labelled-issue trigger). */
   label: z.string().max(100).optional(),
   limit: z.number().int().min(1).max(100).default(30),
+  /** GitHub only: the project's GitHub App to poll as; absent = the workstation's own `gh` login. */
+  trackerApp: TrackerAppSchema.optional(),
 });
 export type IntegrationRunPayload = z.infer<typeof IntegrationRunPayloadSchema>;
 
@@ -811,6 +842,8 @@ export const RepoOpenPrPayloadSchema = z.object({
   title: z.string().max(300),
   body: z.string().max(5000),
   forge: ForgeKindSchema.optional(),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoOpenPrPayload = z.infer<typeof RepoOpenPrPayloadSchema>;
 
@@ -839,6 +872,8 @@ export const RepoReleaseFactsPayloadSchema = z.object({
   base: z.string().min(1).optional(),
   forge: ForgeKindSchema.optional(),
   components: ComponentRulesSchema.default([]),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoReleaseFactsPayload = z.infer<typeof RepoReleaseFactsPayloadSchema>;
 
@@ -875,6 +910,79 @@ export type RepoReleaseFactsResult = z.infer<typeof RepoReleaseFactsResultSchema
 export const RELEASE_FACTS_CAPABILITY = 'release-facts:1';
 
 /**
+ * `repo.list_prs`: read-only. The open pull requests of a repository on its git host, listed with the workstation's own
+ * login. The answer is a `RepoListPrsResult`.
+ */
+export const RepoListPrsPayloadSchema = z.object({
+  requestId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
+});
+export type RepoListPrsPayload = z.infer<typeof RepoListPrsPayloadSchema>;
+
+/** Announced by a runner that understands `repo.list_prs`. */
+export const PR_LIST_CAPABILITY = 'pr-list:1';
+
+/**
+ * `repo.commit_status`: sets a commit status (for example the hard size check, context `size-budget`) on a commit of the
+ * repository's git host, with the workstation's size check status token. The answer is a `RepoCommitStatusResult`.
+ */
+export const RepoCommitStatusPayloadSchema = z.object({
+  statusId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+  sha: z.string().regex(/^[0-9a-f]{40}$/),
+  state: z.enum(['success', 'failure', 'pending']),
+  context: z.string().min(1).max(100),
+  description: z.string().max(140),
+  targetUrl: z.string().url().max(500).optional(),
+  /** The project's "post as" plan: with an app the status is posted with its token, never the status token. */
+  postAs: PostAsPlanSchema.optional(),
+});
+export type RepoCommitStatusPayload = z.infer<typeof RepoCommitStatusPayloadSchema>;
+export const RepoCommitStatusResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true) }),
+  z.object({
+    ok: z.literal(false),
+    code: z.enum([
+      'no_clone',
+      'no_token',
+      'forbidden',
+      'not_found',
+      'invalid_sha',
+      'unsupported',
+      'app_identity_failed',
+      'error',
+    ]),
+    error: z.string().max(400),
+  }),
+]);
+export type RepoCommitStatusResult = z.infer<typeof RepoCommitStatusResultSchema>;
+
+/**
+ * `repo.list_merged_prs`: read-only. The most recently merged pull requests of a repository (20-PR replay). The answer
+ * is a `RepoListMergedPrsResult`.
+ */
+export const RepoListMergedPrsPayloadSchema = z.object({
+  requestId: z.uuid(),
+  replayId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+  limit: z.number().int().positive().max(100),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
+});
+export type RepoListMergedPrsPayload = z.infer<typeof RepoListMergedPrsPayloadSchema>;
+
+/** Announced by a runner that understands `repo.list_merged_prs` and offline replay runs. */
+export const REPLAY_CAPABILITY = 'pr-replay:1';
+
+/**
  * `release.ship`: the release commit on the working branch (CHANGELOG.md moved to the version, component versions
  * bumped), pushed without force. Idempotent: a branch that already has the version section answers `alreadyDone`.
  */
@@ -908,6 +1016,8 @@ export const ReleaseShipPayloadSchema = z.object({
   /** Only used when the repository has no CHANGELOG.md. */
   notes: z.string().max(50_000).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   /** Absent: the runner detects whether the repository asks for a DCO sign-off. */
   signOff: z.boolean().optional(),
   forge: ForgeKindSchema.optional(),
@@ -988,6 +1098,8 @@ export const ReleasePublishPayloadSchema = z.object({
   /** Only for `commits`: the approved notes. */
   notes: z.string().max(50_000).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type ReleasePublishPayload = z.infer<typeof ReleasePublishPayloadSchema>;
 
@@ -1051,6 +1163,8 @@ export const RepoBumpSubmodulePayloadSchema = z.object({
   /** X's newest merge commit. */
   commit: z.string().regex(/^[0-9a-f]{7,64}$/),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   forge: ForgeKindSchema.optional(),
   /** What the server does with the answer (echoed back by the command row, ignored by the runner). */
   envs: z.array(z.string()).optional(),
@@ -1109,8 +1223,16 @@ export const RepoSyncPayloadSchema = z.object({
   repoId: z.uuid(),
   remoteUrlNormalized: z.string().min(1).max(500),
   workingBranch: z.string().min(1).max(200),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoSyncPayload = z.infer<typeof RepoSyncPayloadSchema>;
+
+/** `repo.access` as sent to a runner: the access change plus the project's "post as" plan, when the project has one. */
+export const RepoAccessCommandPayloadSchema = RepoAccessPayloadSchema.extend({
+  postAs: PostAsPlanSchema.optional(),
+});
+export type RepoAccessCommandPayload = z.infer<typeof RepoAccessCommandPayloadSchema>;
 export const RepoSyncStateSchema = z.enum([
   'synced',
   'updated',
@@ -1250,6 +1372,13 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.access',
   'repo.open_pr',
   'repo.release_facts',
+  'repo.list_prs',
+  'repo.commit_status',
+  'repo.list_merged_prs',
+  'pr_review.run',
+  'pr_review.cancel',
+  'pr_review.post',
+  'pr_review.notice',
   'release.ship',
   'release.ref_cleanup',
   'release.docs_prep',
@@ -1275,6 +1404,12 @@ export const RunnerCommandNameSchema = z.enum([
   'storage.remove',
   'storage.sync',
   'storage.discard',
+  'app.connect',
+  'app.test',
+  'app.adopt',
+  'app.remove',
+  'app.sync',
+  'app.access_check',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1361,9 +1496,16 @@ export const CommandPayloadSchemas = {
   'git.status': z.object({}),
   'forge.repos': ForgeReposPayloadSchema,
   'git.ssh': GitSshPayloadSchema,
-  'repo.access': RepoAccessPayloadSchema,
+  'repo.access': RepoAccessCommandPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
+  'repo.list_prs': RepoListPrsPayloadSchema,
+  'repo.commit_status': RepoCommitStatusPayloadSchema,
+  'repo.list_merged_prs': RepoListMergedPrsPayloadSchema,
+  'pr_review.run': PrReviewRunPayloadSchema,
+  'pr_review.cancel': PrReviewCancelPayloadSchema,
+  'pr_review.post': PrReviewPostPayloadSchema,
+  'pr_review.notice': PrReviewNoticePayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
   'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
@@ -1389,6 +1531,12 @@ export const CommandPayloadSchemas = {
   'storage.remove': StorageRemovePayloadSchema,
   'storage.sync': StorageSyncPayloadSchema,
   'storage.discard': StorageDiscardPayloadSchema,
+  'app.connect': AppConnectPayloadSchema,
+  'app.test': AppTestPayloadSchema,
+  'app.adopt': AppAdoptPayloadSchema,
+  'app.remove': AppRemovePayloadSchema,
+  'app.sync': AppSyncPayloadSchema,
+  'app.access_check': AppAccessCheckPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -1495,6 +1643,12 @@ export const RunnerShiftOutcomeSchema = z.enum(['reported', 'no_report', 'stoppe
 
 // ----------------------------------------------------------------- runner -> server
 
+/**
+ * Upper bound of `hello.capabilities`. Runners announce one entry per feature and the list only grows, so the bound sits
+ * well above today's count: a runner whose hello fails this check gets no welcome and never connects.
+ */
+export const MAX_HELLO_CAPABILITIES = 200;
+
 export const HelloSchema = msg('hello', {
   runnerVersion: z.string(),
   protocol: z.literal(PROTOCOL_VERSION),
@@ -1521,7 +1675,7 @@ export const HelloSchema = msg('hello', {
   /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
   sudoKey: SudoKeySchema.optional(),
   /** Features this runner has (additive): `runs:1` = it can run a branch (`run.start`); the web app hides the buttons otherwise. */
-  capabilities: z.array(z.string().max(40)).max(50).optional(),
+  capabilities: z.array(z.string().max(40)).max(MAX_HELLO_CAPABILITIES).optional(),
   /** The runner's cap on run environments held at once (default 2 when absent). */
   maxRunEnvironments: z.number().int().positive().optional(),
   /** The runner supports connecting integrations from the web (docs/design/integrations-page.md). Absent from older runners. */
@@ -1545,7 +1699,11 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * Which git providers this workstation is connected to (facts only, never a token). Sent after `hello`, after
  * `aom-runner git-connect` and on the `git.status` command.
  */
-export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+export const GitReportSchema = msg('git.report', {
+  connections: GitConnectionsSchema,
+  /** Keys (`github@github.com`) of the size check status tokens this workstation holds; never a token. */
+  statusTokens: z.array(z.string().max(200)).max(50).optional(),
+});
 /**
  * Jira on this workstation (docs/RUNNER.md "Jira on the runner"): facts only, never the token. `connected`: the saved
  * credentials were accepted; `refused`: Jira said no (wrong or expired token); `not_connected`: none saved.
@@ -1786,6 +1944,8 @@ export const DevopsAuditEntrySchema = z.object({
   /** The DevOps shift or chat the command ran in. */
   sessionRef: z.string().max(100),
   kind: z.enum(['shift', 'chat']),
+  /** For a shift: which kind (a DevOps request or a release prep task). Absent for chats and older runners. */
+  shiftKind: z.enum(['devops', 'release_prep']).optional(),
   decision: z.enum(['allowed', 'refused']),
   /** The rule that refused it, or the class an allowed command fell in. */
   rule: z.string().max(80),
@@ -2098,6 +2258,10 @@ export const ShiftStartSchema = msg('shift.start', {
   mcpServers: z.array(z.string()).optional(),
   /** The project's "Commit as" setting, used for every commit of this shift (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
+  /** The project's GitHub App for GitHub issue reads in this shift (`aom source read`); absent when none is selected. */
+  trackerApp: TrackerAppSchema.optional(),
   /**
    * Continue this Claude Code session (the agent's own earlier session on this card, group or question) instead of
    * starting cold. The runner refuses it and starts fresh when the stored session is over 120K context tokens, over

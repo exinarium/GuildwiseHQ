@@ -6,8 +6,10 @@ import {
   PolledIssueSchema,
 } from '@aom/shared';
 import { z } from 'zod';
-import { defaultExec, type Exec } from '../external/github.ts';
+import type { AppTokenSource } from '../external/app-token.ts';
+import { type Exec, runGh } from '../external/github.ts';
 import { type JiraProvider, jiraOf } from '../external/jira-store.ts';
+import { redactSecrets } from '../secrets/redact.ts';
 
 type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -27,6 +29,8 @@ export class IntegrationPoller {
     private readonly opts: {
       ghBin?: string;
       exec?: Exec;
+      /** The runner's token source for a project's selected GitHub App (`trackerApp` in the payload). */
+      appTokens?: AppTokenSource;
       jira?: JiraProvider;
       fetch?: FetchFn;
       /** Mock runtime: read the issues from this file when it exists. */
@@ -58,7 +62,7 @@ export class IntegrationPoller {
   }
 
   private async github(p: IntegrationRunPayload): Promise<PolledIssue[]> {
-    const exec = this.opts.exec ?? defaultExec;
+    const repo = p.query.trim();
     const args = [
       'issue',
       'list',
@@ -72,17 +76,17 @@ export class IntegrationPoller {
       'number,title,body,url,labels',
       ...(p.label ? ['--label', p.label] : []),
     ];
-    let r: Awaited<ReturnType<Exec>>;
-    try {
-      r = await exec(this.opts.ghBin ?? 'gh', args);
-    } catch (err) {
-      if ((err as { code?: string }).code === 'ENOENT')
-        throw new Error('the GitHub CLI (`gh`) is not installed on this workstation');
-      throw err;
-    }
+    // As the project's GitHub App when one is selected and covers the repository; a failing app fails the poll.
+    const r = await runGh(
+      { bin: this.opts.ghBin, exec: this.opts.exec, appTokens: this.opts.appTokens },
+      args,
+      repo,
+      p.trackerApp ? { app: p.trackerApp } : undefined,
+      (m) => new Error(m),
+    );
     if (r.exitCode !== 0)
       throw new Error(
-        `gh issue list failed: ${(r.stderr || r.stdout).trim().slice(0, 500) || `exit ${r.exitCode}`}`,
+        `gh issue list failed: ${redactSecrets((r.stderr || r.stdout).trim()).slice(0, 500) || `exit ${r.exitCode}`}`,
       );
     const list = JSON.parse(r.stdout) as Array<{
       number: number;

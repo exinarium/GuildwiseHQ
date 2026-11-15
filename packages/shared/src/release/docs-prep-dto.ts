@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { AgentRuntimeSpecSchema } from '../protocol/agent-runtime.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
@@ -201,6 +202,8 @@ export const ReleaseDocsPrepPayloadSchema = z.object({
   base: z.object({ sha: z.string().max(40), tag: z.string().max(100).nullable() }).optional(),
   message: z.string().max(500).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   signOff: z.boolean().optional(),
   /** Input of a content step, checked by the step's own schema on the runner. */
   stepInput: z.record(z.string(), z.unknown()).optional(),

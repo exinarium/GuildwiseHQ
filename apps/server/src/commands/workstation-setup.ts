@@ -20,6 +20,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 
 /**
@@ -125,6 +126,7 @@ export async function repoSetupEvents(
       ...(repo.working_branch ? { workingBranch: repo.working_branch } : {}),
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
       ...(repo.access_method ? { accessMethod: repo.access_method } : {}),
+      ...(await postAsFieldFor(tx, project.id, w.id, { write: false })),
       ...(creates && opts.create
         ? {
             create: {

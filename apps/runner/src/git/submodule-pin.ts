@@ -5,14 +5,24 @@ import {
   type RepoBumpSubmodulePayload,
   type RepoBumpSubmoduleResult,
 } from '@aom/shared';
-import { isProtectedBranchRejection } from './gh.ts';
+import { appOfPlan, isProtectedBranchRejection, withPushReport } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  commitEnv,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface BumpSubmoduleInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: RepoBumpSubmodulePayload;
   /** Local clone of the deploy repository (D). */
   repoPath: string;
@@ -35,13 +45,41 @@ const isMovedRejection = (why: string): boolean =>
   );
 
 /**
- * The submodules a `.gitmodules` file declares: name, path and url. A relative url (`../core.git`) is resolved against
- * the url of D's own origin, the way git does.
+ * A relative submodule url (`./x`, `../core.git`) resolved against the superproject's raw origin url, the way git does:
+ * each `..` drops one path component of the origin url (`https://h/o/r.git` + `../core.git` -> `https://h/o/core.git`;
+ * `git@h:o/r.git` + `../core.git` -> `git@h:o/core.git`).
+ */
+export function resolveRelativeSubmoduleUrl(originRaw: string, rel: string): string {
+  let base = originRaw.trim().replace(/\/+$/, '');
+  const scp = !/^[a-z][a-z0-9+.-]*:\/\//i.test(base) && /^[^/\s]+:/.test(base);
+  const parts = rel.split('/');
+  let i = 0;
+  for (; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === '.') continue;
+    if (p !== '..') break;
+    const slash = base.lastIndexOf('/');
+    const colon = scp ? base.indexOf(':') : -1;
+    const cut = Math.max(slash, colon);
+    // never cut into the scheme and host of a url (`https://h`)
+    const schemeEnd = /^[a-z][a-z0-9+.-]*:\/\/[^/]*/i.exec(base)?.[0].length ?? 0;
+    if (cut < schemeEnd || cut < 0) break;
+    // scp-like `host:repo`: keep the colon (`git@h:` + `core.git`)
+    base = base.slice(0, cut === colon && slash < colon ? cut + 1 : cut);
+  }
+  const restPath = parts.slice(i).join('/');
+  if (!restPath) return base;
+  return scp && base.endsWith(':') ? `${base}${restPath}` : `${base}/${restPath}`;
+}
+
+/**
+ * The submodules a `.gitmodules` file declares: name, path, the clonable url and its normalized form. A relative url
+ * (`../core.git`) is resolved against the url of D's own origin, the way git does.
  */
 export async function readSubmodules(
   worktree: string,
   originUrl: string,
-): Promise<Array<{ name: string; path: string; normalized: string }>> {
+): Promise<Array<{ name: string; path: string; url: string; normalized: string }>> {
   const r = await git(worktree, ['config', '--file', '.gitmodules', '--list', '-z']);
   if (r.exitCode !== 0) return [];
   const byName = new Map<string, { path?: string; url?: string }>();
@@ -55,13 +93,15 @@ export async function readSubmodules(
     cur[m[2].toLowerCase() as 'path' | 'url'] = value.trim();
     byName.set(m[1], cur);
   }
-  const out: Array<{ name: string; path: string; normalized: string }> = [];
+  const out: Array<{ name: string; path: string; url: string; normalized: string }> = [];
   for (const [name, s] of byName) {
     if (!s.path || !s.url) continue;
-    const url = /^\.{1,2}\//.test(s.url)
+    const relative = /^\.{1,2}\//.test(s.url);
+    const url = relative && originUrl ? resolveRelativeSubmoduleUrl(originUrl, s.url) : s.url;
+    const normalized = relative
       ? posix.normalize(`${normalizeRemoteUrl(originUrl)}/${s.url}`)
-      : s.url;
-    out.push({ name, path: s.path, normalized: normalizeRemoteUrl(url) });
+      : normalizeRemoteUrl(s.url);
+    out.push({ name, path: s.path, url, normalized: normalizeRemoteUrl(normalized) });
   }
   return out;
 }
@@ -93,6 +133,7 @@ export async function bumpSubmodule(input: BumpSubmoduleInput): Promise<RepoBump
     });
   } catch (err) {
     if (err instanceof NoCommitIdentityError) return fail(err.message);
+    if (err instanceof AppIdentityError) return fail(appIdentityWire(err));
     return fail(errMsg(err));
   }
 }
@@ -134,7 +175,11 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
       if (m[1] === p.commit || m[1].startsWith(p.commit))
         return { ok: true, unchanged: true, commit: head, path: found.path };
 
-      const id = await requireCommitIdentity(repoPath, p.commitAs);
+      const id = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+      );
       const env = commitEnv(id);
       const set = await git(wt, ['update-index', '--add', '--cacheinfo', `160000,${p.commit},${found.path}`]);
       if (set.exitCode !== 0)
@@ -166,11 +211,25 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
         // checked first: a host that declines a push through a hook words the lost race the same way
         if (isMovedRejection(why)) return 'moved';
         if (isProtectedBranchRejection(why))
-          return fail(`${branch} refused the push of the pin: ${why.slice(0, 300)}`, {
-            protectedBranch: true,
-            path: found.path,
-          });
-        return fail(`pushing ${branch} failed: ${why.slice(0, 300)}`, { path: found.path });
+          return fail(
+            withPushReport(
+              `${branch} refused the push of the pin: ${why.slice(0, 300)}`,
+              why,
+              appOfPlan(p.postAs, p.remoteUrlNormalized),
+            ),
+            {
+              protectedBranch: true,
+              path: found.path,
+            },
+          );
+        return fail(
+          withPushReport(
+            `pushing ${branch} failed: ${why.slice(0, 300)}`,
+            why,
+            appOfPlan(p.postAs, p.remoteUrlNormalized),
+          ),
+          { path: found.path },
+        );
       }
       return { ok: true, commit: newHead, path: found.path };
     },

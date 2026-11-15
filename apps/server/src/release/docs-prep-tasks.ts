@@ -26,6 +26,12 @@ import {
 import { publicText } from '../blog/releases.ts';
 import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole } from '../catalogue/loader.ts';
+import {
+  canPostAs,
+  explicitPostAs,
+  loadIdentityPlan,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+} from '../commands/commit-as.ts';
 import { orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -357,6 +363,15 @@ export async function releasePrepTaskPass(
       await fail('the task cannot be read');
       continue;
     }
+    // An app is selected: a runner that does not know post-as would commit the task's files as the owner.
+    if (
+      (await loadIdentityPlan(ctx.pool, t.project_id)).postAs &&
+      !(await canPostAs(ctx.pool, t.workstation_id))
+    ) {
+      await fail(POST_AS_RUNNER_TOO_OLD_MESSAGE);
+      lastWhy.delete(t.id);
+      continue;
+    }
     const ws = await one(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [t.workstation_id]);
     const what = taskLabel(task.data);
     const kindOf = task.data.kind;
@@ -475,6 +490,12 @@ export async function buildReleasePrepShiftStart(
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [t.agent_id]);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [t.project_id]);
   if (!task.success || !agent || !project) return null;
+  // A post-as:2 runner gets the empty plan when no app is selected.
+  const postAs = await explicitPostAs(
+    ctx.pool,
+    (await loadIdentityPlan(ctx.pool, project.id)).postAs,
+    t.workstation_id,
+  );
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
   const title = PREP_TASK_KINDS[task.data.kind].title(task.data, t.release_branch);
@@ -532,6 +553,7 @@ export async function buildReleasePrepShiftStart(
     worktree: null,
     prepare: { rebase: false },
     maxShiftMinutes: RELEASE_PREP_MAX_SHIFT_MINUTES,
+    ...(postAs ? { postAs } : {}),
     ...accountOf(
       await one(ctx.pool, 'SELECT account_key FROM shifts WHERE id=$1', [shiftId]).then((s) => s ?? {}),
     ),
@@ -544,6 +566,7 @@ export async function buildReleasePrepShiftStart(
       remoteUrlNormalized: t.remote_url_normalized,
       workRef: `refs/guildwise/docs-prep/${t.run_id}/work`,
       startSha: t.head_sha,
+      releaseBranch: t.release_branch,
       task: task.data,
       writable: writableFilesFor(task.data),
     },

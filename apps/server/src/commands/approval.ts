@@ -8,7 +8,10 @@ import {
   type CardDiffResponse,
   type CheckEvidence,
   checkEvidenceRows,
+  DESIGN_GATE_REASON_TEXT,
+  DESIGN_GATE_STAGE,
   DESK_SUBKIND,
+  type DesignGateReason,
   getStage,
   isOrgManager,
   isProjectOwner,
@@ -147,7 +150,19 @@ export async function mayDecide(
   return isOrgManager({ orgRole: await orgRoleOf(db, user.id, card.org_id) });
 }
 
+/** code v7: what the design gate's desk item says and carries (the existing design report, no new artifact). */
+function designGateDesk(card: Row): { doing: string; design: Record<string, unknown> } {
+  const inv = (card.investigation ?? {}) as { reportPath?: string; commit?: string | null; summary?: string };
+  const reason = card.design_gate_reason as DesignGateReason | null;
+  const why = reason ? `: ${DESIGN_GATE_REASON_TEXT[reason]}` : '';
+  return {
+    doing: `${card.ref} waits for your design approval${why}. Design report: ${inv.reportPath ?? 'none recorded'}.`,
+    design: { reportPath: inv.reportPath ?? null, commit: inv.commit ?? null, summary: inv.summary ?? '' },
+  };
+}
+
 function deskQuestion(card: Row, stage: Stage, approverUserId: string, deskItemId: string): AppendInput {
+  const gate = stage.id === DESIGN_GATE_STAGE ? designGateDesk(card) : null;
   return {
     streamId: streamId.desk(deskItemId),
     event: {
@@ -157,8 +172,10 @@ function deskQuestion(card: Row, stage: Stage, approverUserId: string, deskItemI
         cardId: card.id,
         projectId: card.project_id,
         askedBy: { kind: 'system' },
-        doing: `${card.ref} is waiting for your approval at "${stage.label}".`,
-        question: `Approve ${card.ref}: ${card.title}`,
+        doing: gate?.doing ?? `${card.ref} is waiting for your approval at "${stage.label}".`,
+        question: gate
+          ? `Approve the design of ${card.ref}: ${card.title}`
+          : `Approve ${card.ref}: ${card.title}`,
         options: APPROVAL_OPTIONS,
         recommendation: 'approve',
         blocking: false,
@@ -168,7 +185,12 @@ function deskQuestion(card: Row, stage: Stage, approverUserId: string, deskItemI
         pinned: false,
         subkind: DESK_SUBKIND.approvalStep,
         addresseeUserId: approverUserId,
-        data: { cardId: card.id, cardRef: card.ref, stageId: stage.id },
+        data: {
+          cardId: card.id,
+          cardRef: card.ref,
+          stageId: stage.id,
+          ...(gate ? { design: gate.design } : {}),
+        },
       },
     },
     actor: SYSTEM_ACTOR,
@@ -236,7 +258,8 @@ export async function enterHumanStep(ctx: Ctx, cardId: string): Promise<boolean>
               ...(approver.fellBack ? { fellBack: true } : {}),
               deskItemId,
               ...(entrySeq ? { entrySeq } : {}),
-              ...(card.head_sha ? { sha: card.head_sha as string } : {}),
+              // The design gate approves the design, not a commit: a reworked card may carry an old head.
+              ...(card.head_sha && stage.id !== DESIGN_GATE_STAGE ? { sha: card.head_sha as string } : {}),
             },
           },
           actor: SYSTEM_ACTOR,
@@ -525,7 +548,34 @@ export async function cardApprovalDto(
     sentBackCount: ap.sentBackCount ?? 0,
     canAct: open && (await mayDecide(db, viewer, card, projectRole)),
     deskItemId: ap.deskItemId,
-    ...(card.head_sha ? { review: await approvalReviewInfo(db, card, ap) } : {}),
+    ...(stage.id === DESIGN_GATE_STAGE
+      ? { design: designInfo(card) }
+      : card.head_sha
+        ? { review: await approvalReviewInfo(db, card, ap) }
+        : {}),
+  };
+}
+
+/** code v7: the design report the owner reviews at the design gate. */
+function designInfo(card: Row): NonNullable<CardApproval['design']> {
+  const inv = (card.investigation ?? {}) as {
+    reportPath?: string;
+    location?: 'repo' | 'vault';
+    commit?: string | null;
+    summary?: string;
+    text?: string;
+  };
+  const reason = (card.design_gate_reason as DesignGateReason | null) ?? null;
+  return {
+    reportPath: inv.reportPath ?? '',
+    location: inv.location ?? null,
+    commit: inv.commit ?? null,
+    summary: inv.summary ?? '',
+    text: inv.text ? inv.text.slice(0, 200_000) : null,
+    cardBrief: (card.card_brief as string | null) ?? null,
+    reason,
+    reasonText: reason ? DESIGN_GATE_REASON_TEXT[reason] : null,
+    highRiskPaths: (card.design_gate_paths as string[] | null) ?? [],
   };
 }
 

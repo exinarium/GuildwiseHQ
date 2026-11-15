@@ -2,6 +2,7 @@ export * from './brief.ts';
 export * from './builtin/index.ts';
 export * from './business.ts';
 export * from './custom.ts';
+export * from './design-gate.ts';
 export * from './diff.ts';
 export * from './explain.ts';
 // One high-risk definition for the card flow and the platform team's deploy policy (`platform/index.ts` classifies with it).

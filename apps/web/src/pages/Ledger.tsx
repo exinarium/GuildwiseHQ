@@ -12,6 +12,7 @@ import {
 import { useProjects } from '../api/queries/projects.ts';
 import { FullPowerControl } from '../components/ceo/FullPowerControl.tsx';
 import { EnforcedByBadge } from '../components/EnforcedByBadge.tsx';
+import { IndustryBundlesDialog } from '../components/IndustryBundlesDialog.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { RulePacksDialog } from '../components/RulePacksDialog.tsx';
 import {
@@ -417,6 +418,7 @@ export function Ledger() {
   const [projectId, setProjectId] = useState('');
   const [adding, setAdding] = useState(false);
   const [packs, setPacks] = useState(false);
+  const [bundles, setBundles] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
   const [dueOnly, setDueOnly] = useState(false);
   const entries = useLedger({
@@ -440,6 +442,9 @@ export function Ledger() {
                 Rule packs
               </Button>
             }
+            <Button variant="secondary" onClick={() => setBundles(true)}>
+              Industry bundles
+            </Button>
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add entry
             </Button>
@@ -544,6 +549,7 @@ export function Ledger() {
         <LedgerForm onDone={() => setAdding(false)} />
       </Dialog>
       {<RulePacksDialog open={packs} onOpenChange={setPacks} />}
+      <IndustryBundlesDialog open={bundles} onOpenChange={setBundles} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
+  APP_ERROR_TEXT,
   ClaudeAccountKeySchema,
   CONNECTABLE_FORGES,
   type ConnectableForge,
@@ -26,6 +27,14 @@ import {
 } from './adapters/claude-account-provision.ts';
 import { displayDir, expandHome } from './adapters/claude-accounts.ts';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
+import {
+  type AppsConnectOptions,
+  appProviderOf,
+  appsConnect,
+  appsList,
+  readAppKey,
+  readHiddenPem,
+} from './apps/cli.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -33,10 +42,17 @@ import { JiraCredentialStore, jiraFile } from './external/jira-store.ts';
 import { connectSteps, describeConnection, sshUploadHelp, touchRecheck } from './forge/connect.ts';
 import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
+import {
+  STATUS_TOKEN_SETTINGS_LINES,
+  saveStatusToken,
+  statusTokenStatusLines,
+} from './forge/status-token-cli.ts';
+import { FileStatusTokenStore } from './forge/status-tokens.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
+import { AutomatedAppIntegration } from './integrations/automated-app.ts';
 import { ClaudeCredentialStore, claudeAccountFile, claudeFile } from './integrations/claude-store.ts';
 import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
 import { JiraIntegration } from './integrations/jira.ts';
@@ -57,6 +73,8 @@ import {
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
+import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-token-cli.ts';
+import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
@@ -869,9 +887,105 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
     return;
   }
   console.log(
-    `Connected to ${result.site}${result.account ? ` as ${result.account}` : ''}. Saved on this machine only (mode 0600).`,
+    `Connected to ${result.site}${result.account ? ` as ${result.account}` : ''}. Saved on this machine only, sealed with the runner key.`,
   );
   done();
+}
+
+/**
+ * `guildwise-runner reviewer-token set|remove|status <remote url>`: the comment-only token reviewers post with. It is read
+ * from a hidden prompt (never an argument), checked against the repository and saved encrypted on this machine only.
+ */
+async function reviewerTokenCommand(
+  action: string,
+  remoteUrl: string | undefined,
+  opts: { dataDir?: string; pairing?: string },
+): Promise<void> {
+  if (!['set', 'remove', 'status'].includes(action))
+    throw new Error(
+      'use `reviewer-token set <remote url>`, `remove <remote url>` or `status [<remote url>]`',
+    );
+  if (action !== 'status' && !remoteUrl)
+    throw new Error(`reviewer-token ${action} needs the repository's remote url`);
+  const { root, entries } = selectPairings(opts);
+  const stores = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return {
+      paths,
+      store: new FileReviewerTokenStore(`${paths.secrets}/reviewer-tokens.json`, fileKeyOf(paths.secrets)),
+    };
+  });
+  if (action === 'status') {
+    for (const l of reviewerTokenStatusLines((stores[0] as (typeof stores)[number]).store, remoteUrl))
+      console.log(l);
+    return;
+  }
+  const url = remoteUrl as string;
+  if (action === 'remove') {
+    for (const s of stores) s.store.remove(url);
+    for (const s of stores) touchRecheck(s.paths.secrets);
+    console.log('Reviewer token removed from this machine.');
+    return;
+  }
+  const token = await promptSecret('Paste the reviewer token (it is not shown): ');
+  for (const s of stores) {
+    const r = await setReviewerToken({ store: s.store, remoteUrl: url, token, fetch });
+    if (!r.ok) {
+      console.error(`The token was not saved: ${r.error}.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  for (const s of stores) touchRecheck(s.paths.secrets);
+  console.log(
+    'Saved on this machine only (encrypted, mode 0600). A running runner reports "present" within a minute.',
+  );
+}
+
+/**
+ * `guildwise-runner status-token github [--host <h>] [--status] [--remove]`: the token the hard size check posts its
+ * commit status with (Commit statuses: write only). Read without echo, kept encrypted on this machine, never sent to the
+ * server. Not the git host login and not the reviewer token.
+ */
+async function statusTokenCommand(
+  provider: string,
+  opts: { dataDir?: string; pairing?: string; host?: string; status?: boolean; remove?: boolean },
+): Promise<void> {
+  if (provider !== 'github')
+    throw new Error('the size check status is supported for GitHub only: `status-token github`');
+  const host = (opts.host ?? 'github.com').toLowerCase();
+  const { root, entries } = selectPairings(opts);
+  const stores = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return {
+      paths,
+      store: new FileStatusTokenStore(`${paths.secrets}/status-tokens.json`, fileKeyOf(paths.secrets)),
+    };
+  });
+  if (opts.status) {
+    for (const l of statusTokenStatusLines((stores[0] as (typeof stores)[number]).store)) console.log(l);
+    return;
+  }
+  if (opts.remove) {
+    for (const s of stores) s.store.remove('github', host);
+    for (const s of stores) touchRecheck(s.paths.secrets);
+    console.log(`Status token for ${host} removed from this machine.`);
+    return;
+  }
+  for (const l of STATUS_TOKEN_SETTINGS_LINES) console.log(l);
+  const token = await promptSecret('Paste the status token (it is not shown): ');
+  for (const s of stores) {
+    const r = saveStatusToken({ store: s.store, host, token });
+    if (!r.ok) {
+      console.error(`The token was not saved: ${r.error}.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  for (const s of stores) touchRecheck(s.paths.secrets);
+  console.log(
+    'Saved on this machine only (encrypted, mode 0600). A running runner reports it within a minute.',
+  );
 }
 
 interface GitConnectOpts {
@@ -1109,6 +1223,64 @@ async function integrationsList(opts: { dataDir?: string; pairing?: string }): P
       }
     }
   }
+}
+
+/** The automated app adapters of one pairing (CLI). */
+function appAdapters(opts: { dataDir?: string; pairing?: string }): AutomatedAppIntegration[] {
+  const { adapters } = headlessAdapters(pairingPaths(opts));
+  return [...adapters.values()].filter(
+    (a): a is AutomatedAppIntegration => a instanceof AutomatedAppIntegration,
+  );
+}
+
+function appAdapter(opts: { dataDir?: string; pairing?: string }, provider: string): AutomatedAppIntegration {
+  const a = appAdapters(opts).find((x) => x.kind === provider);
+  if (!a) throw new Error(`This runner does not support ${provider}.`);
+  return a;
+}
+
+async function appsListCmd(opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  for (const l of await appsList(appAdapters(opts))) console.log(l);
+}
+
+async function appsConnectCmd(
+  provider: string,
+  opts: AppsConnectOptions & { dataDir?: string; pairing?: string },
+): Promise<void> {
+  const adapter = appAdapter(opts, appProviderOf(provider));
+  const key = await readAppKey(opts, {
+    isTTY: !!process.stdin.isTTY,
+    stdin: async () => {
+      let v = '';
+      for await (const chunk of process.stdin) v += String(chunk);
+      return v;
+    },
+    prompt: () => readHiddenPem(process.stdin, process.stdout),
+  });
+  const r = await appsConnect(adapter, opts, key);
+  for (const l of r.lines) console.log(l);
+  if (!r.ok) process.exitCode = 1;
+}
+
+async function appsTestCmd(instance: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const r = await appAdapter(opts, 'github-app').verifyStored(instance);
+  console.log(
+    r.ok
+      ? `${instance}: connected as ${r.identity?.botLogin} ("${r.identity?.commitName} <${r.identity?.commitEmail}>").`
+      : `${instance}: ${r.message ?? APP_ERROR_TEXT[r.code ?? 'unexpected']}`,
+  );
+  if (!r.ok) process.exitCode = 1;
+}
+
+async function appsRemoveCmd(instance: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const a = appAdapter(opts, 'github-app');
+  const had = a.broker().store.get(instance);
+  await a.remove(instance);
+  console.log(
+    had
+      ? `Removed ${instance}: the sealed key is deleted on this workstation.`
+      : `${instance} is not on this workstation.`,
+  );
 }
 
 /** `aom-runner accounts list`: the Claude accounts of this machine, as the runner reports them. */
@@ -1406,6 +1578,25 @@ export function buildProgram(): Command {
     .option(...dataDirOpt)
     .action(gitConnect);
   program
+    .command('reviewer-token <action> [remote-url]')
+    .description(
+      'set, remove or show the comment-only token reviewers post with (action: set | remove | status); it stays encrypted on this machine',
+    )
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(reviewerTokenCommand);
+  program
+    .command('status-token <provider>')
+    .description(
+      'set, show or remove the token the hard size check posts its commit status with (provider: github); it stays encrypted on this machine',
+    )
+    .option('--host <host>', 'the git host (default github.com; set it for GitHub Enterprise Server)')
+    .option('--status', 'only show which hosts have a token')
+    .option('--remove', 'remove the token for the host')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(statusTokenCommand);
+  program
     .command('whatsapp-connect [integration-id]')
     .description(
       'bind the Meta app secret and verify token of a WhatsApp relay integration; they stay encrypted on this machine',
@@ -1449,6 +1640,42 @@ export function buildProgram(): Command {
     .description('the pairing that may change machine-wide logins (~/.claude, gh, MCP) from the web')
     .option(...dataDirOpt)
     .action(integrationsMachineAdmin);
+  const apps = program
+    .command('apps')
+    .description(
+      'automated apps (a GitHub App) this workstation can act as; the key is sealed here, tokens stay in memory',
+    );
+  apps
+    .command('list', { isDefault: true })
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsListCmd);
+  apps
+    .command('connect <provider>')
+    .description('connect an app installation from this terminal (provider: github)')
+    .requiredOption('--app-id <id>', 'the App ID or client ID')
+    .option(
+      '--installation <id>',
+      'the installation ID (empty: the only installation, or a list to pick from)',
+    )
+    .option('--host <host>', 'GitHub Enterprise Server host', 'github.com')
+    .option('--key-file <path>', 'read the private key (.pem) from this file')
+    .option('--key-stdin', 'read the private key from stdin')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsConnectCmd);
+  apps
+    .command('test <instance>')
+    .description('check an app with its provider (signs a JWT, reads the installation, mints a token)')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsTestCmd);
+  apps
+    .command('remove <instance>')
+    .description('delete the sealed key of an app on this workstation')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(appsRemoveCmd);
   const accounts = program
     .command('accounts')
     .description(

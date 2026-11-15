@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  APP_IDENTITY_FAILED_CODE,
   allowedOutcomes,
   BRIEF_STAGE_ID,
   BuildEvidenceInputSchema,
@@ -8,7 +9,9 @@ import {
   capDiff,
   checkEvidenceProblem,
   DEFAULT_OWNER_APPROVAL_POLICY,
+  DESIGN_GATE_STAGE,
   DESK_SUBKIND,
+  type DesignSizing,
   type DiffStats,
   type DigestData,
   getOutcome,
@@ -35,11 +38,14 @@ import {
   type ShiftCapacity,
   type ShiftEndOutcome,
   type StoredBuildEvidence,
+  type StoredNeedsSplitProposal,
   shiftLimitSourceOf,
+  sizingLine,
   streamId,
   type TestEvidence,
   UNLIMITED_SHIFTS,
   WorkflowResolveError,
+  workflowHasDesignGate,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { applyCeoReport } from '../ceo/report.ts';
@@ -50,6 +56,7 @@ import type { Tx } from '../db/tx.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { applyReleasePrepReport, endReleasePrepShift } from '../release/docs-prep-tasks.ts';
+import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { checkBriefNote } from './brief-check.ts';
@@ -57,6 +64,17 @@ import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { decideDesignGate, designGateMessage } from './design-gate.ts';
+import {
+  checkedProposal,
+  designModeOf,
+  designSizeStep,
+  needsSplitQuestionEvents,
+  needsSplitStateOf,
+  needsSplitTakenFor,
+  needsSplitTakenIn,
+  splitDecision,
+} from './design-size.ts';
 import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
@@ -318,9 +336,19 @@ export async function applyShiftReport(
   const after: AppendInput[] = [];
   /** Events that belong to the outcome and follow it (desk items, thread notes). */
   const followUps: AppendInput[] = [];
+  /** Events projected before the outcome (the design gate decision the reactor reads when the card enters the gate). */
+  const beforeMain: AppendInput[] = [];
   let acceptMessage: string | undefined;
   /** Refs of the unlanded dependencies when this design is held for the assumption review. */
   let holdDesign: string[] | undefined;
+  /** The design's size estimate and verdict (a design, not an investigation-only card). */
+  let designSize:
+    | { sizing: DesignSizing; split: 'none' | 'continued' | 'split'; proposal?: StoredNeedsSplitProposal }
+    | undefined;
+  /** Over budget: the design is not handed on while the needs split is decided. */
+  let stopForSplit = false;
+  /** Over budget on a card that already went to the BA once: GWP-208's owner route, after the handoff is appended. */
+  let splitTaken: StoredNeedsSplitProposal | undefined;
   switch (outcome.event) {
     case 'ReviewRequested': {
       const diffStats = msg.diffStats ?? ZERO_DIFF;
@@ -614,6 +642,28 @@ export async function applyShiftReport(
         }
         const review = inv.review;
         const confirming = pending && review?.decision === 'confirm';
+        // The size estimate and the risk class of a design (not of an investigation-only card), and the verdict.
+        if (!card.investigation_only && String(card.stage).startsWith('investigate')) {
+          const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+          const wsRow = await one(tx, 'SELECT runner_version FROM workstations WHERE id=$1', [ws.id]);
+          const step = designSizeStep({
+            card,
+            project,
+            inv,
+            mode: designModeOf(inv),
+            runnerVersion: wsRow?.runner_version ?? null,
+          });
+          if ('error' in step) return { accepted: false, error: step.error };
+          const split = splitDecision(step.sizing, await needsSplitStateOf(tx, card));
+          let proposal: StoredNeedsSplitProposal | undefined;
+          if (split === 'split') {
+            const checked = checkedProposal(step.sizing, inv.summary);
+            if ('error' in checked) return { accepted: false, error: checked.error };
+            proposal = checked.proposal;
+          }
+          designSize = { sizing: step.sizing, split, ...(proposal ? { proposal } : {}) };
+        }
+        const sizeLine = designSize ? `\n\n${sizingLine(designSize.sizing)}` : '';
         // A revised design keeps the tests-only flag of the design it revises (`aom design revise` cannot repeat it).
         const testsOnly =
           !!inv.testsOnly || (review?.decision === 'revise' && card.investigation?.testsOnly === true);
@@ -673,6 +723,7 @@ export async function applyShiftReport(
                   summary: inv.summary,
                   ...(inv.commit ? { commit: inv.commit } : {}),
                   ...(inv.body ? { body: inv.body } : {}),
+                  ...(inv.reportText ? { reportText: inv.reportText } : {}),
                   ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
                   investigationOnly: !!card.investigation_only,
                   ...(testsOnly ? { testsOnly: true } : {}),
@@ -685,31 +736,115 @@ export async function applyShiftReport(
               card,
               { kind: 'agent', agentId: agent.id },
               'comment',
-              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}`,
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}${testsOnly ? '\n\nTests-only: the change is only in end-to-end test files, so the tester works the build stage.' : ''}${sizeLine}`,
             ),
           );
+        } else if (designSize) {
+          followUps.push(
+            cardMessage(card, { kind: 'agent', agentId: agent.id }, 'comment', sizingLine(designSize.sizing)),
+          );
         }
+        // After InvestigationReported: that projector rewrites the report JSON.
+        if (designSize)
+          followUps.push(mk({ type: 'DesignSized', payload: { cardId, sizing: designSize.sizing } }));
         if (early && inv.assumptions?.length) holdDesign = unlanded.map((d) => d.ref);
+        // code v7: the design gate is decided at every design hand-off (high-risk paths > card switch > project).
+        // Needs-split comes first: an over-budget design stops for the split question and does not enter the gate now,
+        // but the decision is still recorded so "build it as designed" later goes through the gate when it applies.
+        let gated = false;
+        const splitStop = designSize?.split === 'split' && !!designSize.proposal;
+        if (
+          !holdDesign &&
+          !card.investigation_only &&
+          outcome.id === 'handoff' &&
+          workflowHasDesignGate(wf.definition)
+        ) {
+          const gate = await decideDesignGate(tx, card, inv.summary ?? card.investigation?.summary);
+          if (!splitStop) {
+            resolved = resolveOutcome(
+              wf.definition,
+              { ...workflowCard, designGate: gate.required },
+              card.stage,
+              outcome.id,
+            );
+            if (resolved.toStage === DESIGN_GATE_STAGE) {
+              // The owner's approval at the gate does not check Build's fields: check them now.
+              const build = getStage(wf.definition, 'build');
+              const missing = build ? requiredMissing(cardView(card), build) : [];
+              if (missing.length)
+                return {
+                  accepted: false,
+                  error: `${card.ref} cannot move to ${build?.label ?? 'build'}: required fields are missing (${missing.join(', ')}); ask the manager or update the card`,
+                };
+              gated = true;
+            }
+          }
+          beforeMain.push(
+            mk({
+              type: 'DesignGateDecided',
+              payload: { cardId, required: gate.required, reason: gate.reason, highRiskPaths: gate.paths },
+            }),
+          );
+          followUps.push(designGateMessage(card, gate));
+        }
         acceptMessage = holdDesign
           ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
           : card.investigation_only
             ? 'Recorded. The BA records the result next. Finish now.'
-            : testsOnly
-              ? 'Recorded. The card is tests-only: the tester works the build stage with your design. Finish now.'
-              : 'Recorded. The card goes to the builder with your design. Finish now.';
+            : gated
+              ? testsOnly
+                ? "Recorded. The card waits at the design gate for the owner's approval; after it the tester works the build stage (tests-only). Finish now."
+                : "Recorded. The card waits at the design gate for the owner's approval. Finish now."
+              : testsOnly
+                ? 'Recorded. The card is tests-only: the tester works the build stage with your design. Finish now.'
+                : 'Recorded. The card goes to the builder with your design. Finish now.';
+        // Over budget (not held, the owner has not kept it as one card): the design is not handed on. The first time the
+        // architect's needs-split question is raised; a card that already went to the BA once goes to the owner.
+        if (!holdDesign && designSize?.split === 'split' && designSize.proposal) {
+          if (await needsSplitTakenFor(tx, card)) {
+            splitTaken = designSize.proposal;
+          } else {
+            after.push(
+              ...(await needsSplitQuestionEvents(
+                ctx,
+                tx,
+                card,
+                agent,
+                shift.id,
+                designSize.sizing,
+                designSize.proposal,
+                outcome.id,
+              )),
+            );
+          }
+          stopForSplit = true;
+          acceptMessage =
+            "Recorded. The estimate is over the project's size budget: the needs-split question is raised in your name. Finish now.";
+        } else if (!holdDesign && designSize?.split === 'continued') {
+          followUps.push(
+            cardMessage(
+              card,
+              { kind: 'agent', agentId: agent.id },
+              'comment',
+              'Over budget; the owner kept the card as one card.',
+            ),
+          );
+        }
       }
       main = holdDesign
         ? mk({ type: 'DesignHeld', payload: { cardId, dependencies: holdDesign, agentId: agent.id } })
-        : mk({
-            type: 'StageCompleted',
-            payload: {
-              cardId,
-              fromStage: card.stage,
-              toStage: resolved.toStage,
-              outcome: outcome.id,
-              ...(outcome.rework ? { rework: true } : {}),
-            },
-          });
+        : stopForSplit
+          ? undefined
+          : mk({
+              type: 'StageCompleted',
+              payload: {
+                cardId,
+                fromStage: card.stage,
+                toStage: resolved.toStage,
+                outcome: outcome.id,
+                ...(outcome.rework ? { rework: true } : {}),
+              },
+            });
       if (outcome.effect === 'resume_parent' && card.parent_card_id) {
         const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
         if (parent && parent.status === 'waiting') {
@@ -795,6 +930,7 @@ export async function applyShiftReport(
           data: handoffData,
         },
       }),
+      ...beforeMain,
       ...(mains ?? (main ? [main] : [])),
       ...followUps,
       mk({
@@ -811,6 +947,7 @@ export async function applyShiftReport(
     ],
     { tx },
   );
+  if (splitTaken) await needsSplitTakenIn(ctx, tx, card, agent, splitTaken, outcome.id);
   // A stage that ran against the project's environment is over: stop it (kept for a while after a failure).
   if ((await stageEnvironmentOf(tx, card)) === 'project') {
     const nudge = await endTestEnvironmentIn(ctx, tx, card, outcome.kind === 'failure');
@@ -1239,6 +1376,17 @@ async function noCommitIdentityNotice(tx: Tx, ws: WsRef, card: Row): Promise<App
   ];
 }
 
+/** One open alert per project and reason when a shift stopped because the project's selected app could not be used. */
+async function appIdentityFailedNotice(tx: Tx, card: Row, detail: string): Promise<AppendInput[]> {
+  return appIdentityAlertEvents(tx, {
+    orgId: card.org_id as string,
+    projectId: card.project_id as string,
+    cardId: card.id as string,
+    detail,
+    what: 'Shifts',
+  });
+}
+
 export async function applyShiftRejected(
   ctx: Ctx,
   tx: Tx,
@@ -1357,25 +1505,30 @@ export async function applyShiftRejected(
   const noIdentity =
     msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${NO_COMMIT_IDENTITY_CODE}:`);
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
+  const appFailed =
+    msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${APP_IDENTITY_FAILED_CODE}:`);
+  if (appFailed) extra.push(...(await appIdentityFailedNotice(tx, card, msg.detail ?? '')));
   const text = noIdentity
     ? NO_COMMIT_IDENTITY_MESSAGE
-    : rebaseFailed
-      ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
-          rebaseError: msg.rebaseError ?? null,
-          detail: msg.detail ?? null,
-          fileLessConflict,
-        })}\nThe card is back in the queue.`
-      : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
-        ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
-        : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
-          ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
-          : msg.reason === 'usage_limited'
-            ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
-            : msg.reason === 'auth_expired'
-              ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-              : msg.reason === 'busy' && msg.capacity
-                ? await shiftCapMessage(tx, ws.id, msg.capacity)
-                : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+    : appFailed
+      ? `The shift was stopped instead of committing under another identity. ${(msg.detail ?? '').slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim().slice(0, 1000)}\nThe card is back in the queue.`
+      : rebaseFailed
+        ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
+            rebaseError: msg.rebaseError ?? null,
+            detail: msg.detail ?? null,
+            fileLessConflict,
+          })}\nThe card is back in the queue.`
+        : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
+          ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
+          : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
+            ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
+            : msg.reason === 'usage_limited'
+              ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
+              : msg.reason === 'auth_expired'
+                ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+                : msg.reason === 'busy' && msg.capacity
+                  ? await shiftCapMessage(tx, ws.id, msg.capacity)
+                  : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
   // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
   for (const ev of released)

@@ -10,6 +10,7 @@ import { ClaudeAccountPanel } from '../components/ClaudeAccountPanel.tsx';
 import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
+import { DesignGatePanel } from '../components/DesignGatePanel.tsx';
 import { EnvironmentsPointer } from '../components/environments/Pointer.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
 import { GraphStatusPanel } from '../components/GraphStatusPanel.tsx';
@@ -23,16 +24,21 @@ import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
+import { PrReviewCapPanel } from '../components/PrReviewCapPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { ReleaseDocsPrepPanel } from '../components/ReleaseDocsPrepPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoComponentRulesControl } from '../components/RepoComponentRulesControl.tsx';
+import { RepoPrOnlyControl } from '../components/RepoPrOnlyControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { RepoReleaseNameControl } from '../components/RepoReleaseNameControl.tsx';
+import { RepoReviewerTokenStatus } from '../components/RepoReviewerTokenStatus.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { ReviewSettingsPanel } from '../components/ReviewSettingsPanel.tsx';
 import { Reword } from '../components/Reword.tsx';
+import { SecondReviewerPanel } from '../components/SecondReviewerPanel.tsx';
 import { TestServicesPanel } from '../components/TestServicesPanel.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
@@ -156,6 +162,7 @@ export function ProjectSettings() {
           { id: 'merge', label: 'Merging' },
         ]
       : []),
+    ...(project && traits.usesRepos ? [{ id: 'review-settings', label: 'Review settings' }] : []),
     { id: 'budget', label: 'Budget' },
     { id: 'members', label: 'Team' },
     { id: 'danger', label: 'Archive' },
@@ -312,7 +319,14 @@ export function ProjectSettings() {
                   <li key={r.id} className="flex flex-col py-3 text-sm first:pt-0">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="min-w-0">
-                        <span className="block text-base font-medium text-fg">{r.name}</span>
+                        <span className="flex flex-wrap items-center gap-2 text-base font-medium text-fg">
+                          {r.name}
+                          {traits.usesRepos && r.prOnly && (
+                            <Badge tone="blue" data-testid={`repo-pr-only-badge-${r.name}`}>
+                              PR-only
+                            </Badge>
+                          )}
+                        </span>
                         <span className="block font-mono text-xs break-all text-subtle">{r.remoteUrl}</span>
                       </span>
                       <Button
@@ -330,6 +344,10 @@ export function ProjectSettings() {
                     {traits.usesRepos && (
                       <RepoAccessControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                     )}
+                    {traits.usesRepos && (
+                      <RepoPrOnlyControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                    )}
+                    {traits.usesRepos && <RepoReviewerTokenStatus repo={r} />}
                     {traits.usesRepos && (
                       <RepoProjectPathControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                     )}
@@ -469,6 +487,20 @@ export function ProjectSettings() {
         </div>
       )}
       {project && traits.usesRepos && (
+        <div id="review-settings" className="scroll-mt-20">
+          <ReviewSettingsPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="design-gate" className="scroll-mt-20">
+          <DesignGatePanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
         <div id="claude-account" className="scroll-mt-20">
           <ClaudeAccountPanel
             projectId={id}
@@ -518,6 +550,21 @@ export function ProjectSettings() {
       {project && (
         <div id="concurrency" className="scroll-mt-20">
           <ConcurrencyCapPanel projectId={id} project={project} />
+        </div>
+      )}
+      {project && activeRepos.some((r) => r.prOnly) && (
+        <div id="pr-review-cap" className="scroll-mt-20">
+          <PrReviewCapPanel projectId={id} project={project} canChange={project.myRole === 'owner'} />
+        </div>
+      )}
+      {project && activeRepos.some((r) => r.prOnly) && (
+        <div id="second-reviewer" className="scroll-mt-20">
+          <SecondReviewerPanel
+            projectId={id}
+            projectKey={project.key}
+            project={project}
+            canChange={project.myRole === 'owner'}
+          />
         </div>
       )}
       <div id="members" className="scroll-mt-20">

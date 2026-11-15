@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BuildHandoffDataSchema } from '../cards/lean-v6.ts';
-import { ReviewData, TestEvidence } from '../cards/types.ts';
+import { NEEDS_SPLIT_MAX_SEAMS } from '../cards/needs-split.ts';
+import { ReviewData, ReviewRisk, TestEvidence } from '../cards/types.ts';
 import { CeoDoneDataSchema, CeoReportDataSchema } from '../ceo/ipc.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
@@ -96,6 +97,29 @@ export const DesignReviewDataSchema = z.object({
 });
 export type DesignReviewData = z.infer<typeof DesignReviewDataSchema>;
 
+/** The architect's size estimate at design time: lenient here, the server validates the seams when it needs them. */
+export const DesignSizeDataSchema = z.object({
+  /** The estimate in the project's size unit. */
+  estimate: z.number().int().min(0).max(10_000_000),
+  /** The folders and files the change touches (the risk class is derived from them and the Affected areas). */
+  paths: z.array(z.string().min(1).max(300)).max(100).default([]),
+  /** A declared risk class: it can only raise the class from the path-to-risk map. */
+  risk: ReviewRisk.optional(),
+  /** Proposed split seams (`--seam "<title>: <folder>, <folder>"`). */
+  seams: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(200),
+        folders: z.array(z.string().min(1).max(300)).min(1).max(20),
+        repo: z.string().min(1).max(200).optional(),
+        note: z.string().max(2000).optional(),
+      }),
+    )
+    .max(NEEDS_SPLIT_MAX_SEAMS)
+    .default([]),
+});
+export type DesignSizeData = z.infer<typeof DesignSizeDataSchema>;
+
 /** Architect outcome data (`aom design` / `aom investigate`): where the report is and a short summary for the next stage. */
 export const InvestigationDataSchema = z.object({
   reportPath: z.string().min(1),
@@ -105,12 +129,19 @@ export const InvestigationDataSchema = z.object({
   commit: z.string().optional(),
   /** Filled by the runner for a `repo` report written without a card branch: the text the builder commits later. */
   body: z.string().max(200_000).optional(),
+  /**
+   * Filled by the runner for a committed `repo` report: its text, so the owner can read the design report at the design
+   * gate before the card branch is pushed. Not `body` (that one is committed later).
+   */
+  reportText: z.string().max(200_000).optional(),
   /** A design made before dependencies landed lists what it assumed about them (at least one, unless `noAssumptions`). */
   assumptions: z.array(DesignAssumptionSchema).max(50).optional(),
   /** The architect states the design assumes nothing about the unlanded dependencies. */
   noAssumptions: z.string().max(1000).optional(),
   /** Set by the assumption-review shift (`aom design confirm|revise`). */
   review: DesignReviewDataSchema.optional(),
+  /** The architect's size estimate (`aom design --size --path [--risk] [--seam]`); the server gives the verdict. */
+  size: DesignSizeDataSchema.optional(),
   /**
    * `aom design --tests-only`: the change is only in end-to-end test files, so the build stage is worked by the tester
    * instead of a builder (BLOCKERS.md section 2). Old runners drop it; the card then goes to a builder as before.
@@ -271,6 +302,7 @@ export const RpcMethodSchema = z.enum([
   'git.verify_merge',
   /** DevOps repository hygiene, answered by the runner itself: the shifts with a running worktree, and a pull request's state. */
   'hygiene.busy_worktrees',
+  'hygiene.run',
   'hygiene.change_state',
   /** The BA's finalize shift on an investigation-only card: record the result in the ledger and PROJECT.md. */
   'investigation.record',

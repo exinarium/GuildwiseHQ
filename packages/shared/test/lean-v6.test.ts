@@ -6,6 +6,7 @@ import {
   canonicalWorkflowKey,
   capDiff,
   codeWorkflowV6,
+  codeWorkflowV7,
   DIFF_MAX_BYTES,
   DIFF_TRUNCATED_NOTE,
   DomainEventSchema,
@@ -277,8 +278,8 @@ describe('code version 6 (the lean team flow)', () => {
 describe('code v6 rolled out like v3 to v5 (no workflow of its own)', () => {
   it('is the newest built-in version of `code`, flagged lean team, and no built-in has the legacy key', () => {
     const codes = BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version);
-    expect(Math.max(...codes)).toBe(6);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV6);
+    expect(Math.max(...codes)).toBe(7);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV7);
     expect(codeWorkflowV6).toMatchObject({ key: 'code', version: 6, leanTeam: true });
     expect(BUILTIN_WORKFLOWS.some((w) => w.key === LEGACY_CODE_V6_KEY)).toBe(false);
     // the classic versions are not lean team

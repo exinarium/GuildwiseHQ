@@ -82,7 +82,7 @@ export interface RenderOutcome {
 }
 export type RenderFn = (
   script: VideoScript,
-  opts: { outDir: string; log: (l: string) => void },
+  opts: { outDir: string; log: (l: string) => void; encodeThreads?: number; renderLabel?: string },
 ) => Promise<RenderOutcome>;
 
 export interface SweepDeps {
@@ -96,7 +96,12 @@ export interface SweepDeps {
 
 const defaultRender: RenderFn = async (script, opts) => {
   const { renderScript } = await import('./renders.ts');
-  return renderScript(script, { outDir: opts.outDir, log: opts.log });
+  return renderScript(script, {
+    outDir: opts.outDir,
+    log: opts.log,
+    encodeThreads: opts.encodeThreads,
+    renderLabel: opts.renderLabel,
+  });
 };
 
 // ---- renders
@@ -224,7 +229,16 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = 
     if (!script) throw new Error('the post has no script');
     await rm(outDir, { recursive: true, force: true });
     await mkdir(outDir, { recursive: true });
-    const out = await (deps.render ?? defaultRender)(script, { outDir, log: (l) => lines.push(l) });
+    const out = await (deps.render ?? defaultRender)(script, {
+      outDir,
+      encodeThreads: ctx.config.videoEncodeThreads,
+      renderLabel: `post ${r.post_id} render ${r.id}`,
+      // also to the worker log: render.log is only written at the end, so a killed render would leave nothing
+      log: (l) => {
+        lines.push(l);
+        ctx.log.info({ postId: r.post_id, renderId: r.id }, `video render: ${l}`);
+      },
+    });
     const max = VIDEO_LIMITS.maxSeconds[script.format];
     if (out.durationSeconds > max) {
       await exec(

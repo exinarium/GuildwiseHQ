@@ -15,6 +15,7 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
   const [showDiff, setShowDiff] = useState(false);
   const diff = useCardDiff(cardId, showDiff);
   const busy = approve.isPending || sendBack.isPending;
+  const design = item.data?.design;
   if (!item.card) return <p className="mt-2 text-sm text-subtle">This card is gone.</p>;
   return (
     <div className="mt-2 flex flex-col gap-3" data-testid="approval-desk-item">
@@ -25,18 +26,33 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
         to look at it first, or decide here.
       </p>
       {/* lean team: the owner reads the final diff of the reviewed commit before approving it (a card without one has none). */}
-      <div className="flex flex-col gap-2">
-        <Button
-          variant="secondary"
-          onClick={() => setShowDiff((o) => !o)}
-          data-testid="approval-desk-diff-toggle"
-        >
-          {showDiff ? 'Hide the diff' : 'Show the diff'}
-        </Button>
-        {showDiff && diff.isLoading && <p className="text-sm text-subtle">Loading the diff…</p>}
-        {showDiff && diff.error && <p className="text-sm text-subtle">No diff was stored for this card.</p>}
-        {showDiff && diff.data && <DiffView diff={diff.data.body} truncated={diff.data.truncated} />}
-      </div>
+      {design && (
+        <div className="flex flex-col gap-1 text-sm" data-testid="approval-desk-design">
+          <p className="font-medium text-fg">Design report</p>
+          <p className="max-h-[40vh] overflow-auto whitespace-pre-wrap text-muted">{design.summary}</p>
+          {design.reportPath && (
+            <p className="break-all font-mono text-xs text-subtle">
+              {design.reportPath}
+              {design.commit ? ` @ ${design.commit.slice(0, 10)}` : ''}
+            </p>
+          )}
+          <p className="text-xs text-subtle">The full report is on the card page.</p>
+        </div>
+      )}
+      {!design && (
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setShowDiff((o) => !o)}
+            data-testid="approval-desk-diff-toggle"
+          >
+            {showDiff ? 'Hide the diff' : 'Show the diff'}
+          </Button>
+          {showDiff && diff.isLoading && <p className="text-sm text-subtle">Loading the diff…</p>}
+          {showDiff && diff.error && <p className="text-sm text-subtle">No diff was stored for this card.</p>}
+          {showDiff && diff.data && <DiffView diff={diff.data.body} truncated={diff.data.truncated} />}
+        </div>
+      )}
       <TextArea
         label={failing ? 'What is missing? (required)' : 'Note (optional)'}
         value={note}
@@ -60,7 +76,7 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
                 })
               }
             >
-              Approve
+              {design ? 'Approve the design' : 'Approve'}
             </Button>
             <Button
               variant="danger"
@@ -68,7 +84,7 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
               data-testid="approval-desk-fail"
               onClick={() => setFailing(true)}
             >
-              Send back
+              {design ? 'Return to design' : 'Send back'}
             </Button>
           </>
         ) : (

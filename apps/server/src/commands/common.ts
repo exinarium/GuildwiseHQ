@@ -16,6 +16,18 @@ export const agentActor = (id: string) => ({ kind: 'agent', id }) as const;
 export const runnerActor = (workstationId: string) => ({ kind: 'runner', id: workstationId }) as const;
 export const SYSTEM_ACTOR = { kind: 'system', id: null } as const;
 
+/**
+ * Longest person name an event may carry (ThreadParticipantAdded.displayName, discovery and board author names).
+ * A user's display name can be longer.
+ */
+export const EVENT_NAME_MAX = 100;
+
+/** A user's display name as an event may carry it: trimmed, and clipped to EVENT_NAME_MAX with an ellipsis. */
+export const clipEventName = (name: string): string => {
+  const s = name.trim();
+  return s.length > EVENT_NAME_MAX ? `${s.slice(0, EVENT_NAME_MAX - 1)}…` : s;
+};
+
 /** A `ThreadMessagePosted` for a card thread (thread id == card id). */
 export function cardMessage(
   card: Record<string, any>,

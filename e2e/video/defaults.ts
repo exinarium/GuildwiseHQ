@@ -23,3 +23,6 @@ process.env.AOM_E2E_ADMIN_ORG ??= 'Acme';
 process.env.AOM_E2E_ADMIN_NAME ??= 'Alex Morgan';
 // the mock BA answers the demo question like a real analyst (a recording-only reply map, see the mock adapter)
 process.env.AOM_MOCK_CHAT_TOKEN_MS ??= '55';
+// the videos show the lean team flow production runs (Planning, Review and Owner approval columns): the e2e suite's
+// classic flow has no Owner approval stage. Set AOM_E2E_LEAN=0 to record the classic flow (read by e2e/global-setup.ts).
+process.env.AOM_E2E_LEAN ??= '1';

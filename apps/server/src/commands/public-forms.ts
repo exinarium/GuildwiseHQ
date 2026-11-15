@@ -18,7 +18,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
-import { queueFormUploadCleanup } from '../public-forms/cleanup.ts';
+import { ANSWERS_LABELS, queueFormUploadCleanup, storingGraceMs } from '../public-forms/cleanup.ts';
 import { newLinkId, newPublicId, signClientLink } from '../public-forms/tokens.ts';
 import { orgScope, userActor } from './common.ts';
 
@@ -431,9 +431,9 @@ export async function listSubmissions(
         json?: StorageReference;
         pdf?: StorageReference;
       };
-      if (refs.json) stored.push({ label: 'Answers (JSON)', path: refs.json.path });
-      if (refs.html) stored.push({ label: 'Answers (readable)', path: refs.html.path });
-      if (refs.pdf) stored.push({ label: 'Answers (PDF)', path: refs.pdf.path });
+      if (refs.json) stored.push({ label: ANSWERS_LABELS.json, path: refs.json.path });
+      if (refs.html) stored.push({ label: ANSWERS_LABELS.html, path: refs.html.path });
+      if (refs.pdf) stored.push({ label: ANSWERS_LABELS.pdf, path: refs.pdf.path });
       for (const p of x.parts as Array<{ field: string; reference?: StorageReference }>)
         if (p.reference) stored.push({ label: p.field, path: p.reference.path });
       const queued = cleanup.get(x.id);
@@ -463,13 +463,17 @@ export async function listSubmissions(
   };
 }
 
-/** Expires submissions that ran out, and deletes expired ones older than 30 days. `complete` rows stay. */
+/**
+ * Expires submissions that ran out, and deletes expired ones older than 30 days. `complete` rows stay. A `storing` row
+ * is expired only when no write has touched it for 2 × the write timeout: its complete may still be writing.
+ */
 export async function pruneFormSubmissions(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
   await ctx.pool.query(
     `UPDATE form_submissions SET status='expired', updated_at=$1
-      WHERE expires_at < $1 AND status IN ('receiving','failed','storing')`,
-    [now],
+      WHERE expires_at < $1
+        AND (status IN ('receiving','failed') OR (status='storing' AND updated_at < $2))`,
+    [now, new Date(now.getTime() - storingGraceMs(ctx))],
   );
   await queueFormUploadCleanup(ctx);
   // A row whose files still wait to be removed is kept: the desk shows them and the sweep needs the row.

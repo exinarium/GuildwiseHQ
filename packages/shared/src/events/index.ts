@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { agentEvents } from './agent.ts';
 import { agentUxEvents } from './agent-ux.ts';
 import { approvalEvents } from './approval.ts';
+import { appIntegrationEvents } from './apps.ts';
 import { backlogEvents } from './backlog.ts';
 import { blogEvents } from './blog.ts';
 import { boardEvents } from './board.ts';
@@ -14,6 +15,7 @@ import { chatEvents } from './chat.ts';
 import { codeV6Events } from './code-v6.ts';
 import { costEvents } from './cost.ts';
 import { deliveryEvents } from './delivery.ts';
+import { designGateEvents } from './design-gate.ts';
 import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
 import { discoveryEvents } from './discovery.ts';
@@ -25,6 +27,7 @@ import { governanceEvents } from './governance.ts';
 import { graphEvents } from './graph.ts';
 import { hrEvents } from './hr.ts';
 import { hygieneEvents } from './hygiene.ts';
+import { industryBundleEvents } from './industry-bundles.ts';
 import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
 import { interestEvents } from './interest.ts';
@@ -34,10 +37,12 @@ import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
+import { ownerPendingEvents } from './owner-pending.ts';
 import { packEvents } from './pack.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
 import { playbookEvents } from './playbook.ts';
+import { prReplayEvents } from './pr-replay.ts';
 import { projectEvents } from './project.ts';
 import { projectWorkflowEvents, workflowFoldEvents } from './project-workflows.ts';
 import { providerKeyEvents } from './provider-keys.ts';
@@ -55,6 +60,7 @@ import { sessionEvents } from './session.ts';
 import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
+import { sizeExceptionEvents } from './size-exception.ts';
 import { storageEvents } from './storage.ts';
 import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
@@ -68,6 +74,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...orgEvents,
   ...workstationEvents,
   ...projectEvents,
+  ...prReplayEvents,
   ...projectWorkflowEvents,
   ...workflowFoldEvents,
   ...cardEvents,
@@ -78,6 +85,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...ceoTopicEvents,
   ...deskEvents,
   ...ledgerEvents,
+  ...industryBundleEvents,
   ...chatEvents,
   ...vaultEvents,
   ...graphEvents,
@@ -113,6 +121,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...questionFlowEvents,
   ...platformEvents,
   ...codeV6Events,
+  ...designGateEvents,
   ...sessionEvents,
   ...discoveryEvents,
   ...boardEvents,
@@ -124,9 +133,12 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...agentUxEvents,
   ...relayEvents,
   ...storageEvents,
+  ...appIntegrationEvents,
   ...formEvents,
   ...journeyEvents,
   ...journeyWaitEvents,
+  ...ownerPendingEvents,
+  ...sizeExceptionEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -136,6 +148,7 @@ export type EventPayload<T extends EventType> = EventOf<T>['payload'];
 export * from './agent.ts';
 export * from './agent-ux.ts';
 export * from './approval.ts';
+export * from './apps.ts';
 export * from './backlog.ts';
 export * from './blog.ts';
 export * from './board.ts';
@@ -147,6 +160,7 @@ export * from './chat.ts';
 export * from './code-v6.ts';
 export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';
+export * from './design-gate.ts';
 export * from './desk.ts';
 export * from './devops.ts';
 export * from './discovery.ts';
@@ -158,6 +172,7 @@ export * from './form.ts';
 export * from './governance.ts';
 export * from './hr.ts';
 export * from './hygiene.ts';
+export * from './industry-bundles.ts';
 export * from './intake.ts';
 export * from './intake-batch.ts';
 export * from './interest.ts';
@@ -166,8 +181,10 @@ export * from './ledger.ts';
 export * from './mail.ts';
 export * from './org.ts';
 export * from './outbound.ts';
+export * from './owner-pending.ts';
 export * from './phase.ts';
 export * from './playbook.ts';
+export * from './pr-replay.ts';
 export * from './project.ts';
 export * from './project-workflows.ts';
 export * from './qa.ts';
@@ -181,6 +198,7 @@ export * from './schedule.ts';
 export * from './session.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
+export * from './size-exception.ts';
 export * from './storage.ts';
 export * from './testing.ts';
 export * from './user.ts';

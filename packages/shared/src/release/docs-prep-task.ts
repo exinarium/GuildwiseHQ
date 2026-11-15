@@ -110,6 +110,8 @@ export const ReleasePrepShiftSchema = z.object({
   /** Where to start when the work ref does not exist yet (the analysed head). */
   startSha: z.string().regex(/^[0-9a-f]{40}$/),
   task: ReleasePrepTaskSchema,
+  /** The release branch this prep belongs to: frozen for the shift's DevOps guard. Optional so an older start parses and the runner rejects it. */
+  releaseBranch: z.string().trim().min(1).max(200).optional(),
   /** The only files the shift may create or change. */
   writable: z.array(z.string().max(400)).min(1).max(20),
 });

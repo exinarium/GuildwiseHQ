@@ -67,6 +67,8 @@ export async function createTestApp(
      * for the classic code flow (v5) keep running on it, because the resolver takes the newest version of `code`.
      */
     lean?: boolean;
+    /** Also register `code` version 7 (v6 plus the design gate): new `code` cards then start on v7. Needs `lean`. */
+    designGate?: boolean;
     listen?: boolean;
     /** The landing-page assistant's Anthropic client (a fake; the real API is never called in tests). */
     assistantClient?: AnthropicLike | null;
@@ -90,7 +92,11 @@ export async function createTestApp(
   // Without `lean` the release has no code v6 yet (not registered at all, so a projection rebuild agrees): the resolver
   // takes v5 for `code`, as the suites written for the classic flow expect.
   if (opts.builtins !== false)
-    await registerBuiltins(app.ctx, (d) => opts.lean === true || !(d.key === 'code' && d.version >= 6));
+    await registerBuiltins(app.ctx, (d) =>
+      d.key === 'code' && d.version >= 7
+        ? opts.lean === true && opts.designGate === true
+        : opts.lean === true || !(d.key === 'code' && d.version >= 6),
+    );
   if (opts.listen) await app.listen({ port: 0, host: '127.0.0.1' });
   await app.ready();
 

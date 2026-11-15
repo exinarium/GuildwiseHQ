@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
@@ -67,6 +68,8 @@ export const DESK_SUBKIND = {
   mainBranchUnset: 'main_branch_unset',
   /** Backlog #65: no commit identity is set for a project on a workstation, so the runner refuses to commit (an alert). */
   noCommitIdentity: 'no_commit_identity',
+  /** A project's selected app could not be used on a workstation, so its shift stopped instead of committing as anyone else. */
+  appIdentityFailed: 'app_identity_failed',
   /** The runtime's login (Claude Code `/login`) expired on a workstation; cleared when it works again (a notice). */
   claudeAuthExpired: 'claude_auth_expired',
   /** The runner's role smoke test failed for a role on a workstation: that role gets no work there (an alert). */
@@ -146,6 +149,8 @@ export const FinalizeExecutePayloadSchema = z.object({
   forge: ForgeKindSchema.optional(),
   /** The project's "Commit as" setting (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   /**
    * lean team: the commit the review and the owner approval were for. The runner refuses to land a branch that is at another
    * commit (before its own rebase onto the working branch); absent: no check.

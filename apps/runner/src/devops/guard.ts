@@ -1,7 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { DevopsAuditEntry } from '@aom/shared';
+import { type DevopsAuditEntry, normalizeRemoteUrl } from '@aom/shared';
 import { redactSecrets } from '../redact.ts';
 
 /**
@@ -35,6 +36,26 @@ export interface GuardConfig {
   readOnlyScan?: boolean;
   /** Folders a scan may not read at all (the runner's secrets and keys), besides the user's own credential folders. */
   secretRoots?: string[];
+  /** For a shift: its kind, copied into every audit entry. */
+  shiftKind?: 'devops' | 'release_prep';
+  /** Branches this session may not change at all (release prep: the release branch). Empty for devops shifts and chats. */
+  frozenBranches?: string[];
+  /**
+   * Repositories of the shift's plan that post as an app (normalized remote, app label, bot e-mail; no secret). Raw
+   * network git, `gh` writes and commits not made as the bot are refused there (`app_repo`). Absent or empty (projects
+   * without an app): no refusal of this kind at all.
+   */
+  appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
+  /** The commit e-mail of the session's environment (the bot's on a card request for an app repository). */
+  identityEmail?: string;
+}
+
+/** Lookups the classifier needs from the machine, injected so `classifyCommand` stays pure. */
+export interface GuardDeps {
+  /** The branch checked out in a directory: null when detached or not a repository, 'unknown' when it cannot be told. */
+  headBranch?: (dir: string) => string | null | 'unknown';
+  /** The normalized origin URL of the repository a directory is in; null when none or not a repository. */
+  originUrl?: (dir: string) => string | null;
 }
 
 export interface GuardVerdict {
@@ -362,6 +383,7 @@ interface Ctx {
   /** Inside `aom sudo -- <cmd>`: the user/sudo rule does not apply (that is how privileged work is done). */
   viaAomSudo: boolean;
   usedApproval: boolean;
+  deps: GuardDeps;
 }
 
 const inside = (child: string, parent: string): boolean => {
@@ -420,6 +442,109 @@ function offWorkstation(c: Ctx, seg: Segment, what: string): GuardVerdict {
   );
 }
 
+/** git subcommands that talk to a remote, and those that make or move commits (HEAD). */
+const GIT_NETWORK = new Set(['push', 'fetch', 'pull', 'ls-remote', 'clone']);
+const GIT_HEAD_MOVING = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull']);
+const looksLikeUrl = (w: string): boolean =>
+  /^[a-z][a-z0-9+.-]*:\/\//i.test(w) || /^[^\s/@]+@[^\s:]+:/.test(w);
+
+function appFor(cfg: GuardConfig, normalized: string | null | undefined) {
+  if (!normalized) return undefined;
+  const n = normalized.toLowerCase().replace(/\.git$/, '');
+  return cfg.appRepos?.find((a) => a.remote.toLowerCase().replace(/\.git$/, '') === n);
+}
+
+const appRepoRefusal = (label: string, repo: string, what: string): GuardVerdict =>
+  refuse('app_repo', `${repo} posts as the app '${label}': ${what}`);
+
+/**
+ * `app_repo`: in a repository that posts as an app, the engineer's own git must not reach origin with the user's
+ * credentials, nor make commits under another identity. Network git goes through `aom git push|fetch --repo <dir>`
+ * (the runner uses the app's token); commits are made as the app (a card request runs with the bot identity).
+ */
+function appRepoGit(words: string[], c: Ctx): GuardVerdict | null {
+  if (!c.cfg.appRepos?.length) return null;
+  let i = 1;
+  let dir = c.cwd;
+  while (i < words.length) {
+    const w = words[i] as string;
+    if (w === '-C') {
+      dir = resolve(c.cwd, (words[i + 1] as string) ?? '.');
+      i += 2;
+    } else if (w === '-c' || w === '--git-dir' || w === '--work-tree' || w === '--namespace') i += 2;
+    else if (w.startsWith('-')) i++;
+    else break;
+  }
+  const sub = words[i];
+  if (!sub) return null;
+  const positional = words.slice(i + 1).filter((a) => !a.startsWith('-'));
+  const urlArg = positional.find(looksLikeUrl);
+  const origin = (): string | null => c.deps.originUrl?.(dir) ?? null;
+  if (GIT_NETWORK.has(sub)) {
+    const target = urlArg ? normalizeRemoteUrl(urlArg) : sub === 'clone' ? null : origin();
+    const app = appFor(c.cfg, target);
+    if (app) {
+      if (sub === 'clone')
+        return appRepoRefusal(app.label, app.remote, 'the runner keeps its clone; work in it.');
+      const use =
+        sub === 'push'
+          ? `use \`aom git push --repo ${shellQuote(dir)} <refspec>...\` (add --delete or --tags as needed)`
+          : `use \`aom git fetch --repo ${shellQuote(dir)}\`${sub === 'pull' ? ' and then merge or rebase locally' : ''}`;
+      return appRepoRefusal(app.label, app.remote, `${use}; the runner reaches origin with the app's token.`);
+    }
+  }
+  if (GIT_HEAD_MOVING.has(sub)) {
+    const app = appFor(c.cfg, origin());
+    if (app && (c.cfg.identityEmail ?? '').toLowerCase() !== app.botEmail.toLowerCase())
+      return appRepoRefusal(
+        app.label,
+        app.remote,
+        'commits here must be made as the app; ask for this as a card request (it runs as the app), or use `aom hygiene run`.',
+      );
+  }
+  return null;
+}
+
+const GH_WRITES: Record<string, Set<string>> = {
+  pr: new Set(['create', 'edit', 'comment', 'merge', 'close', 'reopen', 'review', 'ready']),
+  issue: new Set(['create', 'edit', 'comment', 'close', 'reopen', 'delete', 'transfer', 'lock', 'unlock']),
+  release: new Set(['create', 'edit', 'delete', 'upload', 'delete-asset']),
+  label: new Set(['create', 'edit', 'delete', 'clone']),
+};
+
+/** `app_repo` for `gh`: a write aimed at an app repository (`-R/--repo`, else the directory's origin) is refused. */
+function appRepoGh(words: string[], c: Ctx): GuardVerdict | null {
+  if (!c.cfg.appRepos?.length) return null;
+  const [group, action] = words.slice(1).filter((w) => !w.startsWith('-'));
+  let write = !!(group && action && GH_WRITES[group]?.has(action));
+  if (group === 'api') {
+    const m = words.findIndex((w) => w === '-X' || w === '--method');
+    const method = m >= 0 ? (words[m + 1] ?? '').toUpperCase() : '';
+    write =
+      (method !== '' && method !== 'GET') ||
+      words.some(
+        (w) => w === '-f' || w === '-F' || w === '--field' || w === '--raw-field' || w === '--input',
+      );
+  }
+  if (!write) return null;
+  const r = words.findIndex((w) => w === '-R' || w === '--repo');
+  const named = r >= 0 ? words[r + 1] : words.find((w) => w.startsWith('--repo='))?.slice(7);
+  let target: string | null;
+  if (named)
+    target =
+      named.includes('/') && named.split('/').length === 2
+        ? `github.com/${named}`
+        : normalizeRemoteUrl(named);
+  else target = c.deps.originUrl?.(c.cwd) ?? null;
+  const app = appFor(c.cfg, target);
+  if (!app) return null;
+  return appRepoRefusal(
+    app.label,
+    app.remote,
+    'pull requests, merges, comments and releases there are made by the runner as the app (the card finishes through it), not with your gh login.',
+  );
+}
+
 function gitPush(words: string[], cfg: GuardConfig): GuardVerdict | null {
   // skip git's global options up to the subcommand
   let i = 1;
@@ -459,6 +584,140 @@ function gitPush(words: string[], cfg: GuardConfig): GuardVerdict | null {
     if (protectedSet.has(dst)) return fail(`Branch "${dst}" is protected`);
   }
   return null;
+}
+
+/** The git subcommand of a words list, with its arguments and the directory it acts on (null: cannot be known). */
+function gitSubcommand(
+  words: string[],
+  cwd: string,
+  home: string,
+): { sub: string | undefined; args: string[]; dir: string | null } {
+  let i = 1;
+  let dir: string | null = cwd;
+  while (i < words.length) {
+    const w = words[i] as string;
+    if (w === '-C') {
+      const v = words[i + 1];
+      dir = dir === null || v === undefined ? null : resolveArg(v, dir, home);
+      i += 2;
+    } else if (w === '--git-dir' || w === '--work-tree') {
+      dir = null;
+      i += 2;
+    } else if (w.startsWith('--git-dir=') || w.startsWith('--work-tree=')) {
+      dir = null;
+      i++;
+    } else if (w === '-c' || w === '--namespace') i += 2;
+    else if (w.startsWith('-')) i++;
+    else break;
+  }
+  return { sub: words[i], args: words.slice(i + 1), dir };
+}
+
+const frozenRefusal = (b: string): GuardVerdict =>
+  refuse(
+    'frozen_branch',
+    `Branch "${b}" is the release branch of this release prep and may not be pushed, reset, moved, checked out or deleted here. Release prep never pushes: write your files and finish with \`aom prep done\`.`,
+  );
+
+/** Commands that move the branch checked out in their directory. */
+const HEAD_MOVING = new Set(['commit', 'merge', 'rebase', 'pull', 'cherry-pick', 'revert', 'am']);
+
+/**
+ * The release branch of a release prep is frozen: nothing may push it, delete it, move it or check it out, and no command
+ * may move a branch that is checked out where the command runs when that branch is a frozen one (or cannot be told).
+ */
+function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
+  const frozen = new Set((c.cfg.frozenBranches ?? []).map((b) => b.replace(/^refs\/heads\//, '')));
+  if (frozen.size === 0) return null;
+  const first = [...frozen][0] as string;
+  const { sub, args, dir } = gitSubcommand(words, c.cwd, c.cfg.home);
+  if (sub === undefined) return null;
+  const dd = args.indexOf('--');
+  const beforeDd = dd === -1 ? args : args.slice(0, dd);
+  const flags = beforeDd.filter((a) => a.startsWith('-') && a !== '-');
+  const positional = beforeDd.filter((a) => !a.startsWith('-') || a === '-');
+  const hit = (name: string): string | null => {
+    const n = name.replace(/^\+/, '').replace(/^refs\/heads\//, '');
+    return frozen.has(n) ? n : null;
+  };
+
+  if (sub === 'push') {
+    if (flags.some((f) => f === '--all' || f === '--mirror' || f === '--prune')) return frozenRefusal(first);
+    const refspecs = positional.slice(1);
+    if (refspecs.length === 0) return frozenRefusal(first);
+    for (const spec of refspecs) {
+      const s = spec.replace(/^\+/, '');
+      const dst = (s.includes(':') ? s.slice(s.lastIndexOf(':') + 1) : s).replace(/^refs\/heads\//, '');
+      if (dst === 'HEAD' || dst === '') return frozenRefusal(first);
+      const h = hit(dst);
+      if (h) return frozenRefusal(h);
+    }
+    return null;
+  }
+  if (sub === 'branch') {
+    const changes = flags.some(
+      (f) => /^--(delete|force|move|copy)$/.test(f) || /^-[a-zA-Z]*[dDfmMcC][a-zA-Z]*$/.test(f),
+    );
+    if (!changes) return null;
+    for (const p of positional) {
+      const h = hit(p);
+      if (h) return frozenRefusal(h);
+    }
+    return null;
+  }
+  if (sub === 'update-ref') {
+    for (const a of args) {
+      const h = hit(a);
+      if (h) return frozenRefusal(h);
+    }
+    return null;
+  }
+  if (sub === 'checkout' || sub === 'switch') {
+    let creating = false;
+    let target: string | undefined;
+    for (let i = 0; i < beforeDd.length; i++) {
+      const a = beforeDd[i] as string;
+      if (/^(-b|-B|-c|-C|--orphan)$/.test(a)) {
+        creating = true;
+        const h = hit(beforeDd[i + 1] ?? '');
+        if (h) return frozenRefusal(h);
+        i++;
+      } else if (a === '--detach' || a === '-d') creating = true;
+      else if (a.startsWith('-') && a !== '-') continue;
+      else if (target === undefined) target = a;
+    }
+    // `git checkout <branch> -- <paths>` only reads the branch
+    const h = target === undefined ? null : hit(target);
+    if (h && !creating && !(sub === 'checkout' && dd !== -1)) return frozenRefusal(h);
+    return null;
+  }
+  if (sub === 'worktree') {
+    if (positional[0] !== 'add') return null;
+    const named = beforeDd.findIndex((a) => a === '-b' || a === '-B');
+    if (named !== -1) {
+      const h = hit(beforeDd[named + 1] ?? '');
+      return h ? frozenRefusal(h) : null;
+    }
+    for (const p of positional.slice(1)) {
+      const h = hit(p);
+      if (h) return frozenRefusal(h);
+    }
+    return null;
+  }
+  let moves = HEAD_MOVING.has(sub);
+  if (sub === 'reset') {
+    if (flags.some((f) => /^--(hard|soft|mixed|keep|merge)$/.test(f))) moves = true;
+    else if (positional.length > 0) {
+      // `git reset HEAD <paths>` only unstages
+      moves = positional[0] !== 'HEAD';
+    }
+  }
+  if (!moves) return null;
+  // null (detached) must stay null: only a missing lookup counts as unknown
+  const head = dir === null || !c.deps.headBranch ? 'unknown' : c.deps.headBranch(dir);
+  if (head === null) return null;
+  if (head === 'unknown') return frozenRefusal(first);
+  return frozen.has(head) ? frozenRefusal(head) : null;
 }
 
 /** The verdict for one simple command. */
@@ -622,8 +881,14 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     return ok('delete_inside');
   }
   if (cmd === 'git') {
+    const app = appRepoGit(words, c);
+    if (app) return app;
     const push = gitPush(words, c.cfg);
     if (push) return push;
+    if (c.cfg.frozenBranches?.length) {
+      const frozen = frozenGit(words, c);
+      if (frozen) return frozen;
+    }
     // `git clean` and `git rm -r` act on the working copy: only inside a worktree or data folder
     let dir = c.cwd;
     for (let i = 1; i < words.length - 1; i++)
@@ -632,6 +897,11 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     if (sub === 'clean' && !c.cfg.deleteRoots.some((r) => inside(dir, resolve(r)) || dir === resolve(r)))
       return refuse('delete_outside', 'git clean outside a worktree or data folder is not allowed.');
     return ok();
+  }
+
+  if (cmd === 'gh') {
+    const app = appRepoGh(words, c);
+    if (app) return app;
   }
 
   // leaving the workstation
@@ -713,13 +983,14 @@ export function classifyCommand(
   command: string,
   cfg: GuardConfig,
   cwd: string = process.cwd(),
+  deps: GuardDeps = {},
 ): GuardVerdict {
   if (cfg.readOnlyScan) {
     const scan = scanVerdict(command, cfg, cwd);
     if (scan) return scan;
   }
   // a whole-command approval matches however the line is built
-  const c: Ctx = { cfg, cwd, viaAomSudo: false, usedApproval: false };
+  const c: Ctx = { cfg, cwd, viaAomSudo: false, usedApproval: false, deps };
   const whole = normWs(command);
   const v = judgeLine(command, c);
   if (
@@ -1534,7 +1805,7 @@ export function redactCommand(command: string): string {
 }
 
 export function auditEntry(
-  cfg: Pick<GuardConfig, 'sessionRef' | 'kind'>,
+  cfg: Pick<GuardConfig, 'sessionRef' | 'kind' | 'shiftKind'>,
   command: string,
   v: GuardVerdict,
   now: Date,
@@ -1543,6 +1814,7 @@ export function auditEntry(
     at: now.toISOString(),
     sessionRef: cfg.sessionRef.slice(0, 100),
     kind: cfg.kind,
+    ...(cfg.shiftKind ? { shiftKind: cfg.shiftKind } : {}),
     decision: v.decision,
     rule: v.rule,
     command: redactCommand(command),
@@ -1560,6 +1832,36 @@ export function appendAuditFile(file: string, entry: DevopsAuditEntry): void {
 
 // ------------------------------------------------------------------------------------------------ hook
 
+/** The branch checked out in `dir` (`git symbolic-ref`): null when detached or not a repository, 'unknown' on any other error. */
+/** The normalized origin URL of the repository `dir` is in (read only); null when there is none. */
+export function gitOriginUrl(dir: string): string | null {
+  try {
+    const r = spawnSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+    const url = r.status === 0 ? r.stdout.trim() : '';
+    return url ? normalizeRemoteUrl(url) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function gitHeadBranch(dir: string): string | null | 'unknown' {
+  try {
+    const r = spawnSync('git', ['-C', dir, 'symbolic-ref', '-q', '--short', 'HEAD'], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+    if (r.error || r.signal) return 'unknown';
+    if (r.status === 0) return r.stdout.trim() || 'unknown';
+    if (r.status === 1) return null;
+    return /not a git repository/i.test(r.stderr ?? '') ? null : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function defaultGuardConfig(kind: 'shift' | 'chat' = 'shift'): GuardConfig {
   return {
     sessionRef: 'unknown',
@@ -1568,6 +1870,7 @@ export function defaultGuardConfig(kind: 'shift' | 'chat' = 'shift'): GuardConfi
     home: homedir(),
     protectedBranches: [],
     approvedCommands: [],
+    frozenBranches: [],
   };
 }
 
@@ -1597,6 +1900,7 @@ export async function runGuardHook(opts: {
   now?: () => Date;
   /** Sends the entry to the runner (which forwards it to the server); false when it could not. */
   report: (entries: DevopsAuditEntry[]) => Promise<boolean>;
+  deps?: GuardDeps;
 }): Promise<HookResult> {
   let input: { tool_name?: string; tool_input?: { command?: unknown }; cwd?: string };
   try {
@@ -1607,7 +1911,7 @@ export async function runGuardHook(opts: {
   if (input.tool_name !== undefined && input.tool_name !== 'Bash') return { stdout: '', code: 0 };
   const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : '';
   if (!command.trim()) return { stdout: '', code: 0 };
-  const verdict = classifyCommand(command, opts.cfg, input.cwd ?? process.cwd());
+  const verdict = classifyCommand(command, opts.cfg, input.cwd ?? process.cwd(), opts.deps);
   const entry = auditEntry(opts.cfg, command, verdict, (opts.now ?? (() => new Date()))());
   let sent = false;
   try {

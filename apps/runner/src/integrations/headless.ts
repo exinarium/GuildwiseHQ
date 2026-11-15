@@ -6,6 +6,8 @@ import { realClaudeBlocked } from '../adapters/claude-code.ts';
 import { codexMainFolder, detectCodex } from '../adapters/codex.ts';
 import { detectGemini, geminiMainFolder } from '../adapters/gemini.ts';
 import { CODEX_DEF, GEMINI_DEF, LoginAccountRegistry } from '../adapters/login-accounts.ts';
+import { AppTokenBroker } from '../apps/broker.ts';
+import { AppKeyStore } from '../apps/store.ts';
 import { loadConfig } from '../config.ts';
 import { touchRecheck } from '../forge/connect.ts';
 import { SshSettingsStore } from '../forge/ssh.ts';
@@ -103,6 +105,12 @@ export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> =
     repoHosts: () => ({}),
     sessionCwd: join(paths.root, 'tmp', 'integrations'),
     touchRecheck: () => touchRecheck(paths.secrets),
+    // the CLI's own broker for `apps connect|test|list`: the key sealed with the runner's file key, tokens in memory only
+    apps: new AppTokenBroker({
+      store: new AppKeyStore(paths.secrets, keyOf),
+      fetch: globalThis.fetch,
+      now: Date.now,
+    }),
     ...overrides,
   };
 }

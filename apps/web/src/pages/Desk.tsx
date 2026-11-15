@@ -1,4 +1,11 @@
-import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  type DeskItemDto,
+  isPhaseDeskSubkind,
+  NEEDS_SPLIT_DESK_SUBKIND,
+  SIZE_EXCEPTION_SUBKIND,
+  WORKING_BRANCH_SUBKIND,
+} from '@aom/shared';
 import {
   Bell,
   CheckCheck,
@@ -29,12 +36,14 @@ import {
 } from '../components/ceo/DeskCeo.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
 import { FormOfflineLinkBlock } from '../components/desk/FormOfflineLinkBlock.tsx';
+import { SizeExceptionDeskItem } from '../components/desk/SizeExceptionDeskItem.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
+import { NeedsSplitSummary } from '../components/NeedsSplitPanel.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
@@ -482,7 +491,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <span className="tnum ml-auto text-xs text-subtle" title={formatDateTime(item.createdAt)}>
           asked {ageLabel(item.createdAt, now)} ago
         </span>
-        <SnoozeSelect item={item} />
+        {item.subkind !== SIZE_EXCEPTION_SUBKIND && <SnoozeSelect item={item} />}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -513,6 +522,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <p className="mt-1.5 text-base whitespace-pre-wrap text-muted">{item.body}</p>
       )}
       {item.subkind === 'ceo_report' && <CeoReportBlock item={item} />}
+      {item.subkind === NEEDS_SPLIT_DESK_SUBKIND && <NeedsSplitSummary data={item.data} />}
       <CeoAnswered item={item} />
       {!usesAnswerForm(item) && <CeoRecommendation item={item} />}
       {item.floor && (
@@ -622,6 +632,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <PhaseDeskItem item={item} />
       ) : item.subkind === 'unmapped_ticket' ? (
         <MappingForm item={item} />
+      ) : item.kind === 'approval' && item.subkind === SIZE_EXCEPTION_SUBKIND ? (
+        <SizeExceptionDeskItem item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
         <OutboundApproval item={item} />
       ) : item.kind === 'approval' && item.subkind === 'ship_release' ? (

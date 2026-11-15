@@ -14,8 +14,11 @@ import {
   RUNNER_UPDATE_CHECK_CAPABILITY,
   RunnerUpdateCheckResultSchema,
   repoTagUrl,
+  reviewSettingsStatus,
   SHIFT_LIMIT_CAPABILITY,
+  SizeUnitSchema,
   StopLossSettingsSchema,
+  StoredRiskMapSchema,
   tagVersion,
   UNLIMITED_SHIFTS,
   type WorkstationDto,
@@ -25,6 +28,8 @@ import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import { mcpServerCandidates } from '../commands/mcp-servers.ts';
+import { loadPrReviewStatus } from '../commands/pr-only.ts';
+import { sizeStatusDtoOf } from '../commands/pr-size-status.ts';
 import { UPDATE_CHECK_MIN_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_MS } from '../commands/update-check.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
@@ -32,6 +37,7 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
 import { releaseDocsPrepViewFor } from '../release/docs-prep.ts';
+import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
 import {
   effectiveShiftLimit,
@@ -46,6 +52,7 @@ import {
   type StoredWorkstationRepo,
   workstationRepoCandidates,
 } from '../runner-gateway/workstation-repos.ts';
+import { latestRecordedReplay } from './pr-replays.ts';
 import { usageLimitsFor } from './usage-limit.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
@@ -78,6 +85,18 @@ const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp
 const PROVIDER_ACCOUNTS_SQL = `(SELECT jsonb_object_agg(pa.scope, jsonb_build_object('key', pa.account_key, 'fallbackToMain', pa.fallback_to_main))
     FROM project_provider_accounts pa WHERE pa.project_id = p.id) AS provider_accounts`;
 
+/** The project's review settings as stored: unset stays null (no defaults), with what the dependent checks miss. */
+export function reviewSettingsOf(p: Row): NonNullable<ProjectDto['reviewSettings']> {
+  const budget = Number.isInteger(p.size_budget) && p.size_budget >= 1 ? (p.size_budget as number) : null;
+  const map = StoredRiskMapSchema.safeParse(p.risk_map).data ?? null;
+  const review = {
+    sizeBudget: budget,
+    sizeUnit: SizeUnitSchema.safeParse(p.size_unit).data ?? null,
+    riskMap: map && map.length > 0 ? map : null,
+  };
+  return { ...review, status: reviewSettingsStatus(review) };
+}
+
 export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
     id: p.id,
@@ -105,14 +124,24 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
+    prReviewDailyCap: (p.pr_review_daily_cap as number | undefined) ?? 20,
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
+    reviewSettings: reviewSettingsOf(p),
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     regressionLoop: p.regression_loop ?? false,
+    reviewTargets: {
+      precisionTarget: p.review_precision_target == null ? null : Number(p.review_precision_target),
+      effortTargetHoursPerWeek:
+        p.review_effort_target_hours == null ? null : Number(p.review_effort_target_hours),
+      replayId: p.review_targets_replay_id ?? null,
+      setAt: iso(p.review_targets_set_at),
+    },
     claudeAccount: { key: p.claude_account_key ?? null, fallbackToMain: p.claude_account_fallback ?? false },
     ...(p.provider_accounts && typeof p.provider_accounts === 'object'
       ? { providerAccounts: p.provider_accounts as NonNullable<ProjectDto['providerAccounts']> }
       : {}),
     ownerApprovalPolicy: p.owner_approval_policy ?? 'large_or_high_risk',
+    designGate: p.design_gate === true,
     e2eAreas: p.e2e_areas ?? null,
     decisionsProjectOnly: p.decisions_project_only ?? false,
     testWithoutEnvironment: p.test_without_environment ?? false,
@@ -250,6 +279,19 @@ function releasePrOf(r: Record<string, any> | undefined) {
   };
 }
 
+/** The second-reviewer switch and the replay that allows it (precision per reviewer, no longer blind once the replay is finished). */
+async function secondReviewerDto(ctx: Ctx, p: Row): Promise<NonNullable<ProjectDto['secondReviewer']>> {
+  const replay = await latestRecordedReplay(ctx.pool, p.id as string);
+  const precisionOf = (who: 'first' | 'second') =>
+    replay?.result.reviewers.find((r) => r.reviewer === who)?.precision ?? null;
+  return {
+    enabled: p.pr_review_second_reviewer === true,
+    replayId: replay?.id ?? null,
+    replayRecordedAt: replay?.finishedAt ?? null,
+    precision: replay ? { first: precisionOf('first'), second: precisionOf('second') } : null,
+  };
+}
+
 export async function getProjectDetail(
   ctx: Ctx,
   userId: string,
@@ -340,9 +382,16 @@ export async function getProjectDetail(
     [projectId],
   );
   const limit = (await usageLimitsFor(ctx, [p])).get(p.id);
+  const prReviewStatus = await loadPrReviewStatus(ctx.pool, projectId);
+  const reviewerTokens = await reviewerTokenStates(
+    ctx.pool,
+    repos.filter((r) => r.pr_only).map((r) => r.id as string),
+  );
   return {
     project: {
       ...toProjectDto(p, p.my_role),
+      secondReviewer: await secondReviewerDto(ctx, p),
+      sizeStatus: await sizeStatusDtoOf(ctx.pool, p.id),
       pendingConversion: await pendingConversionOf(ctx.pool, p),
       budget: (await budgetsFor(ctx, userId, [p])).get(p.id) as BudgetDto,
       ...(limit ? { usageLimit: limit } : {}),
@@ -357,6 +406,11 @@ export async function getProjectDetail(
       removedAt: iso(r.removed_at),
       projectPath: r.project_path ?? null,
       accessMethod: r.access_method ?? null,
+      prOnly: r.pr_only ?? false,
+      prReview: r.pr_only
+        ? (prReviewStatus.get(r.id) ?? { waiting: 0, checkedAt: null, problem: null })
+        : null,
+      reviewerToken: r.pr_only ? (reviewerTokens.get(r.id) ?? 'missing') : null,
       mainBranch: r.main_branch ?? null,
       componentRules: ComponentRulesSchema.catch([]).parse(r.component_rules ?? []),
       workingBranchCreated: r.working_branch_created_at

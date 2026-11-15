@@ -9,6 +9,7 @@ import type {
   Usage,
 } from '@aom/shared';
 import type { GrantedSkill } from '../capabilities/materialize.ts';
+import type { ReviewerRun } from '../review/reviewer-sandbox.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -59,6 +60,14 @@ export interface DevopsGuardInput {
   approvedCommands?: string[];
   /** A "Scan with DevOps" shift: read-only. The guard refuses commands that start, build, install, connect or write (devops/guard.ts). */
   readOnlyScan?: boolean;
+  /** For a shift: its kind, copied into every audit entry. */
+  shiftKind?: 'devops' | 'release_prep';
+  /** Branches the session may not change at all (release prep: the release branch). */
+  frozenBranches?: string[];
+  /** Repositories of the plan that post as an app (the guard's `app_repo` rule); absent without an app. */
+  appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
+  /** The commit e-mail of the session's environment. */
+  identityEmail?: string;
 }
 
 /**
@@ -110,7 +119,7 @@ export interface ShiftStartInput {
   cwd: string;
   sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
+  /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_SHIFT_ENV_FILE, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
   /** Read access: vault folder of the card's project. */
   addDirs: string[];
@@ -225,7 +234,7 @@ export interface ChatStartInput {
   cwd: string;
   sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
+  /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, AOM_SHIFT_ENV_FILE, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
   /** Previous runtime session of this conversation. */
   resumeSessionId?: string;
@@ -275,6 +284,11 @@ export interface ChatStartInput {
   maxSteps?: number;
   /** The organization of the chat or session turn: its provider key (not another organization's) is the one used. */
   orgId?: string;
+  /**
+   * A reviewer run on a PR-only repository: Claude Code then uses the reviewer policy of that run (read-only checkout,
+   * no network, no git dir) instead of the chat settings. No MCP server, skill or subagent is written for it.
+   */
+  reviewRun?: ReviewerRun;
   logFile?: string;
 }
 
@@ -290,7 +304,7 @@ export interface OwnerTurnInput {
   /** The conversation's fixed working directory (`--resume` keys sessions by it). */
   cwd: string;
   agent: AgentRuntimeSpec;
-  /** AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_CEO_TURN_DIR, PATH (runner bin first). */
+  /** AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_CEO_TURN_DIR, AOM_SHIFT_ENV_FILE, PATH (runner bin first). */
   env: Record<string, string>;
   /** `<runner root>/ceo-turns/<chatId>`: holds ceo-brief.md, aom-permission.json, floor.json, guard.json. */
   turnDir: string;

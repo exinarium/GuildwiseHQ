@@ -18,6 +18,7 @@ import {
   PublicationsResponseSchema,
   type SetArchitectSettingsRequest,
   type SetClaudeAccountRequest,
+  type SetReviewSettingsRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
@@ -243,6 +244,18 @@ export function useSetOwnerApproval(id: string) {
   });
 }
 
+/** code v7: stop every card after the design for the owner's approval (default off). */
+export function useSetDesignGate(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => put(`/projects/${id}/design-gate`, { on }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 /** lean team: the manual full E2E suite run on the working branch (the automatic run after every merge is off). */
 export function useRunFullSuite(id: string) {
   const qc = useQueryClient();
@@ -311,6 +324,18 @@ export function useSetMergePolicy(id: string) {
       qc.invalidateQueries({ queryKey: ['projects'] });
       qc.invalidateQueries({ queryKey: ['desk'] });
       qc.invalidateQueries({ queryKey: ['card'] });
+    },
+  });
+}
+
+/** The owner sets the review settings (size budget, unit, path-to-risk map): the whole value, null = not set. */
+export function useSetReviewSettings(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetReviewSettingsRequest) => put(`/projects/${id}/review-settings`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
     },
   });
 }

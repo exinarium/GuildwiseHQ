@@ -1,6 +1,14 @@
-import type { ForgeKind, GitConnection, RepoRef } from '@aom/shared';
+import type {
+  ForgeKind,
+  GitConnection,
+  MergedChange,
+  OpenChange,
+  PostAsAppIdentity,
+  RepoRef,
+} from '@aom/shared';
 import type { Executor } from '../toolchain/exec.ts';
 import type { SshEnv } from './ssh.ts';
+import type { StatusTokenStore } from './status-tokens.ts';
 import type { TokenStore } from './tokens.ts';
 
 /** Everything an adapter needs from the machine. Tests inject fakes: nothing talks to a real forge from tests. */
@@ -8,6 +16,8 @@ export interface ForgeEnv {
   exec: Executor;
   fetch: typeof fetch;
   tokens: TokenStore;
+  /** Tokens that post commit statuses (the hard size check). Absent: no status can be posted. */
+  statusTokens?: StatusTokenStore;
   ghBin?: string;
   glabBin?: string;
   azBin?: string;
@@ -16,7 +26,36 @@ export interface ForgeEnv {
   /** SSH access (key choice, known_hosts). Absent: ssh remotes use the user's own ssh setup. */
   ssh?: SshEnv;
   now?: () => Date;
+  /**
+   * The app a repository posts as (host and lower-cased `owner/name`), or null for today's credentials. Set only by a
+   * payload's actor scope (`app-actor.ts`); absent everywhere else.
+   */
+  app?: (host: string, fullName: string) => AppActor | null;
 }
+
+/** A selected app acting on one repository. */
+export interface AppActor {
+  app: PostAsAppIdentity;
+  /** `owner/name`, lower-cased. */
+  repoName: string;
+  /** A current token for this repository; `AppIdentityError` on any failure. Never cached by the caller. */
+  token(): Promise<string>;
+}
+
+export interface CommitStatusInput {
+  sha: string;
+  state: 'success' | 'failure' | 'pending';
+  context: string;
+  description: string;
+  targetUrl?: string;
+}
+export type CommitStatusOutcome =
+  | { ok: true }
+  | {
+      ok: false;
+      code: 'no_token' | 'forbidden' | 'not_found' | 'invalid_sha' | 'app_identity_failed' | 'error';
+      error: string;
+    };
 
 /** Where a repository is on its forge. */
 export interface RemoteRepo {
@@ -105,4 +144,20 @@ export interface Forge {
   createRelease?(repo: RemoteRepo, r: CreateReleaseInput): Promise<ForgeRelease>;
   /** The commit a merged change landed as on its base branch (squash and rebase merges); null when unknown. */
   changeMergeCommit?(repo: RemoteRepo, id: string): Promise<string | null>;
+  /**
+   * The open pull requests of the repository, at most `limit` (read-only; PR-only review). `complete` is false when
+   * there were more. Absent: the git host is not supported for PR-only review yet.
+   */
+  listOpenChanges?(repo: RemoteRepo, limit: number): Promise<{ changes: OpenChange[]; complete: boolean }>;
+  /** The most recently merged pull requests, newest first, at most `limit` (read-only; the 20-PR replay). */
+  listMergedChanges?(repo: RemoteRepo, limit: number): Promise<MergedChange[]>;
+  /**
+   * The head and base commits of an open pull request right now (read-only; reviewer runs). Absent: the git host is
+   * not supported for reviews.
+   */
+  changeHeads?(repo: RemoteRepo, id: string): Promise<{ headSha: string; baseSha: string }>;
+  /**
+   * Sets a commit status with the size check status token (never the CLI login). Absent: not supported on this host.
+   */
+  setCommitStatus?(repo: RemoteRepo, s: CommitStatusInput): Promise<CommitStatusOutcome>;
 }

@@ -10,9 +10,11 @@ import { STACKS } from './stacks.ts';
 import type { DepStep, Platform } from './types.ts';
 
 /**
- * The one sentence a repository with submodules gets: the preparation never fills them (no host-side `git submodule`,
- * `fetch` or `clone`: every ref and object it could anchor on is writable by the clone's agents). Fixed text: nothing of
- * the worktree's `.gitmodules` is read into it.
+ * The one sentence a repository with submodules gets when no submodule fill ran before the preparation (the caller passed
+ * no `submodules` step). The preparation itself never runs `git submodule`, `fetch` or `clone`; card worktrees are
+ * filled before it by `git/submodule-fill.ts` under the conditions in docs/RUNNER.md (only into a submodule repository
+ * created in that call, through the hardened git, file protocol only for a registered local clone, the submodule host's
+ * own credentials, before the agent session starts). Fixed text: nothing of the worktree's `.gitmodules` is read into it.
  */
 export const SUBMODULES_NOT_PREPARED =
   'the runner does not fill submodules when it prepares a worktree; ask DevOps if you need them';
@@ -44,6 +46,11 @@ export interface PrepareWorktreeInput {
   platform: Platform;
   budgetMs?: number;
   signal?: AbortSignal;
+  /**
+   * What the submodule fill that ran before the preparation did (`initWorktreeSubmodules`, as one step). Absent: no fill
+   * ran, and a repository with submodules gets the fixed `SUBMODULES_NOT_PREPARED` step.
+   */
+  submodules?: PrepStep;
   /** Test hook: the dependency steps of the project folder (default: the toolchain table's `detectStacks` + `deps`). */
   stacks?: (dir: string) => Array<{ id: string; steps: DepStep[] }>;
   spawnImpl?: typeof nodeSpawn;
@@ -92,9 +99,10 @@ async function changedPaths(dir: string): Promise<Array<{ path: string; untracke
 /**
  * Prepares a card worktree the runner just added, so the agent can build and test without asking DevOps: the project's
  * dependency installs (`pnpm install`, `dotnet restore`, ...) in the run-step sandbox with `CI=true` (the worktree may hold
- * agent-written scripts, so nothing it holds runs unsandboxed). Submodules are not filled (1.7.0): no host-side
- * `git submodule`, `fetch` or `clone` runs here, because any ref or object a trust check could read is writable by the
- * agents of the clone; a repository with submodules gets `SUBMODULES_NOT_PREPARED` and they stay a DevOps request.
+ * agent-written scripts, so nothing it holds runs unsandboxed). Submodules are not filled here: no host-side
+ * `git submodule`, `fetch` or `clone` runs in the preparation. The supervisor fills a card worktree's submodules just
+ * before it (`initWorktreeSubmodules`, under the trust conditions of `git/submodule-fill.ts` and docs/RUNNER.md) and passes
+ * the outcome as `submodules`; without it a repository with submodules gets `SUBMODULES_NOT_PREPARED`.
  * On the host only read-only git queries, the restore below and stack detection run. Never throws: a failure is a step
  * with its detail. The whole run has one budget and stops on `signal`. Afterwards no tracked file is left changed and no
  * new unignored file is left behind (a rewritten lockfile is restored, and said so), so the guard and the autocommit see
@@ -116,8 +124,9 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
   try {
     const before = new Set((await changedPaths(i.worktree)).map((c) => c.path));
 
-    // 1. Submodules are never filled here (see above): the agent is told, with one fixed sentence.
-    if (await hasGitmodules(i.worktree))
+    // 1. Submodules are never filled here (see above): the fill that ran before is reported, else one fixed sentence.
+    if (i.submodules) add(i.submodules);
+    else if (await hasGitmodules(i.worktree))
       add({ name: 'submodules', status: 'skipped', detail: SUBMODULES_NOT_PREPARED, ms: 0 });
 
     // 2. The project's dependencies, in its folder, sandboxed.

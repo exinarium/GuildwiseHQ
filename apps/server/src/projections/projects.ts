@@ -117,6 +117,7 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   // Journeys of the project, in foreign-key order (step runs point at its cards).
   const instances = 'SELECT id FROM journey_instances WHERE project_id=$1';
   await exec(tx, 'DELETE FROM journey_waits WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM owner_pending_timers WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM journey_webhook_calls WHERE project_id=$1', P);
   await exec(
     tx,
@@ -383,6 +384,15 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRegressionLoopSet'>).payload;
     await exec(tx, 'UPDATE projects SET regression_loop=$2 WHERE id=$1', [p.projectId, p.enabled]);
   },
+  ProjectReviewTargetsSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectReviewTargetsSet'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET review_precision_target=$2, review_effort_target_hours=$3, review_targets_replay_id=$4,
+              review_targets_set_at=$5, review_targets_set_by=$6 WHERE id=$1`,
+      [p.projectId, p.precisionTarget, p.effortTargetHoursPerWeek, p.replayId, p.at, p.by],
+    );
+  },
   ProjectClaudeAccountSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectClaudeAccountSet'>).payload;
     await exec(tx, 'UPDATE projects SET claude_account_key=$2, claude_account_fallback=$3 WHERE id=$1', [
@@ -409,6 +419,15 @@ export const projectProjectors: Record<string, Projector> = {
         [p.projectId, p.scope, p.accountKey, p.fallbackToMain, e.createdAt],
       );
   },
+  ProjectReviewSettingsSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectReviewSettingsSet'>).payload;
+    await exec(tx, 'UPDATE projects SET size_budget=$2, size_unit=$3, risk_map=$4::jsonb WHERE id=$1', [
+      p.projectId,
+      p.sizeBudget,
+      p.sizeUnit,
+      p.riskMap ? JSON.stringify(p.riskMap) : null,
+    ]);
+  },
   ProjectManualQaSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectManualQaSet'>).payload;
     await exec(tx, 'UPDATE projects SET manual_qa=$2 WHERE id=$1', [p.projectId, p.enabled]);
@@ -419,6 +438,14 @@ export const projectProjectors: Record<string, Projector> = {
       p.projectId,
       JSON.stringify(p.services),
     ]);
+  },
+  ProjectSecondReviewerSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectSecondReviewerSet'>).payload;
+    await exec(tx, 'UPDATE projects SET pr_review_second_reviewer=$2 WHERE id=$1', [p.projectId, p.enabled]);
+  },
+  ProjectPrReviewCapSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectPrReviewCapSet'>).payload;
+    await exec(tx, 'UPDATE projects SET pr_review_daily_cap=$2 WHERE id=$1', [p.projectId, p.cap]);
   },
   ProjectConcurrencyCapSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;
@@ -480,6 +507,50 @@ export const projectProjectors: Record<string, Projector> = {
   ProjectRepoAccessSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoAccessSet'>).payload;
     await exec(tx, 'UPDATE project_repos SET access_method=$2 WHERE id=$1', [p.repoId, p.accessMethod]);
+  },
+  ProjectRepoPrOnlySet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoPrOnlySet'>).payload;
+    await exec(
+      tx,
+      'UPDATE project_repos SET pr_only=$2, pr_only_since=CASE WHEN $2 THEN $3::timestamptz ELSE NULL END WHERE id=$1',
+      [p.repoId, p.prOnly, p.at],
+    );
+  },
+  PrReviewRecorded: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewRecorded'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO pr_reviews (id, project_id, project_repo_id, change_id, url, title, author, head_branch, base_branch,
+                               opened_at, recorded_at, review_state, changed_lines)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (project_repo_id, change_id) DO NOTHING`,
+      [
+        p.prReviewId,
+        p.projectId,
+        p.repoId,
+        p.changeId,
+        p.url,
+        p.title,
+        p.author,
+        p.headBranch,
+        p.baseBranch,
+        p.openedAt,
+        e.createdAt,
+        p.state,
+        p.changedLines ?? null,
+      ],
+    );
+  },
+  PrReviewSizeChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewSizeChanged'>).payload;
+    await exec(tx, 'UPDATE pr_reviews SET changed_lines=$2 WHERE id=$1', [p.prReviewId, p.changedLines]);
+  },
+  PrReviewClosed: async (tx, e) => {
+    const p = (e.event as EventOf<'PrReviewClosed'>).payload;
+    await exec(tx, 'UPDATE pr_reviews SET closed_at=$2 WHERE id=$1 AND closed_at IS NULL', [
+      p.prReviewId,
+      e.createdAt,
+    ]);
   },
   ProjectRepoMainBranchSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoMainBranchSet'>).payload;

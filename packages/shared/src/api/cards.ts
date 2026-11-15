@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CardAttachmentDtoSchema } from '../attachments/index.ts';
+import { NeedsSplitProposalSchema, NeedsSplitRecordSchema } from '../cards/needs-split.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -15,6 +16,7 @@ import {
 import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';
+import { StoredDesignSizingSchema } from '../projects/size-verdict.ts';
 import { CardApprovalSchema } from './approval.ts';
 import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
@@ -99,6 +101,8 @@ export const CardDtoSchema = z.object({
       /** The file on the card branch's forge page when the remote is a known forge (else null). */
       url: z.string().nullable(),
       at: IsoTime,
+      /** The design's size estimate, size verdict and risk class (null: none recorded). */
+      sizing: StoredDesignSizingSchema.nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -335,6 +339,19 @@ export const CardDetailResponseSchema = z.object({
   qa: CardQaSchema.nullable().optional(),
   /** An approval step: the approver, the decision and where the card goes next (absent: the card has no approval step). */
   approval: CardApprovalSchema.nullable().optional(),
+  /**
+   * code v7: the card's design gate switch (absent: the card's workflow has no design gate). `refusal` is why it cannot be
+   * switched on now (no design report yet, Build has started), null when it can.
+   */
+  designGate: z
+    .object({
+      on: z.boolean(),
+      required: z.boolean(),
+      reasonText: z.string().nullable(),
+      canChange: z.boolean(),
+      refusal: z.object({ code: z.string(), message: z.string() }).nullable(),
+    })
+    .optional(),
   /** Sub-workflows: children this card started and the parent that started it (absent: neither). */
   subworkflows: SubworkflowsPanelSchema.optional(),
   /** M6: the published research note of a research card. */
@@ -368,6 +385,10 @@ export const CardDetailResponseSchema = z.object({
     .optional(),
   /** Repository scoping: the card this one was split from. */
   splitFrom: z.object({ id: z.uuid(), ref: z.string() }).optional(),
+  /** Needs split: the latest over-budget return of this card (the architect's folder scope and seams). Null: none. */
+  needsSplit: NeedsSplitRecordSchema.nullable().optional(),
+  /** The card (or the card it was split out of) already went back to the BA once: a new over-budget verdict goes to the owner. */
+  needsSplitTaken: z.boolean().optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 
@@ -462,3 +483,13 @@ export const CancelCardRequestSchema = z.object({
 });
 export type CancelCardRequest = z.infer<typeof CancelCardRequestSchema>;
 export const CardParamsSchema = z.object({ id: z.string().min(1) });
+
+/** `POST /api/cards/:id/needs-split`: confirm needs split on an over-budget card, with the architect's proposal. */
+export const NeedsSplitRequestSchema = NeedsSplitProposalSchema;
+export type NeedsSplitRequest = z.infer<typeof NeedsSplitRequestSchema>;
+
+export const NeedsSplitResponseSchema = CardDetailResponseSchema.extend({
+  needsSplitRoute: z.enum(['ba', 'owner']),
+  notice: z.string(),
+});
+export type NeedsSplitResponse = z.infer<typeof NeedsSplitResponseSchema>;

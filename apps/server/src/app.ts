@@ -2,7 +2,12 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { RUNNER_SUBPROTOCOL, STORAGE_DELETE_CAPABILITY, type StorageKind } from '@aom/shared';
+import {
+  containsPlaintextKey,
+  RUNNER_SUBPROTOCOL,
+  STORAGE_DELETE_CAPABILITY,
+  type StorageKind,
+} from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -95,6 +100,7 @@ import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
 import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
+import { industryBundleRoutes } from './routes/industry-bundles.ts';
 import { installerRoutes } from './routes/installer.ts';
 import { intakeBatchRoutes } from './routes/intake-batches.ts';
 import { intakeRoutes } from './routes/intakes.ts';
@@ -104,6 +110,7 @@ import { invitationRoutes } from './routes/invitations.ts';
 import { journeyWaitRoutes } from './routes/journey-waits.ts';
 import { journeyRoutes } from './routes/journeys.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
+import { orgAppRoutes } from './routes/org-apps.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
 import { orgRoutes } from './routes/orgs.ts';
@@ -114,6 +121,7 @@ import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
 import { playbookRoutes } from './routes/playbooks.ts';
+import { prReplayRoutes } from './routes/pr-replays.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { providerRoutes } from './routes/providers.ts';
@@ -217,7 +225,8 @@ const DESK_LINK_TOKEN =
 
 /**
  * Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`), pairing codes and the one-time
- * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
+ * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`)
+ * and the secret of a journey hook called in the path form (`/api/hooks/<id>/<secret>`).
  */
 export function redactUrl(url: string): string {
   return (
@@ -230,6 +239,8 @@ export function redactUrl(url: string): string {
       .replace(DESK_LINK_TOKEN, '$1[redacted]')
       .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
       .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+      // a journey hook called as `/api/hooks/<id>/<secret>`: keep the id, hide the secret
+      .replace(/(\/api\/hooks\/[^/?#\s]+\/)[^/?#\s]+/gi, '$1[redacted]')
   );
 }
 
@@ -285,6 +296,9 @@ export const LOG_REDACT = {
   paths: [
     'req.body.envelope',
     '*.envelope',
+    // Automated apps: one sealed envelope per workstation share (`*.envelope` covers one level only).
+    'req.body.shares[*].envelope',
+    '*.shares[*].envelope',
     'body.envelope',
     'payload.envelope',
     'err.body.envelope',
@@ -404,6 +418,16 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     if (rawBodyPaths.has(req.url.split('?')[0] ?? ''))
       (req as unknown as { rawBody?: string }).rawBody = body as string;
     if (body === '' || body === undefined) return done(null, undefined);
+    // A broken client that posts an app's private key in the clear: refused before it is parsed, logged or echoed.
+    if (req.url.startsWith('/api/org/apps') && containsPlaintextKey(body as string))
+      return done(
+        new HttpError(
+          400,
+          'plaintext_key_refused',
+          'the private key must be encrypted in the browser, never sent',
+        ),
+        undefined,
+      );
     try {
       done(null, JSON.parse(body as string));
     } catch {
@@ -472,6 +496,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(installerRoutes(ctx));
   await app.register(cloudRoutes(ctx));
   await app.register(projectRoutes(ctx));
+  await app.register(prReplayRoutes(ctx));
   await app.register(projectWorkflowRoutes(ctx));
   await app.register(cardRoutes(ctx));
   await app.register(qaRoutes(ctx));
@@ -480,6 +505,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(shiftRoutes(ctx));
   await app.register(deskRoutes(ctx));
   await app.register(ledgerRoutes(ctx));
+  await app.register(industryBundleRoutes(ctx));
   await app.register(chatRoutes(ctx));
   await app.register(ceoRoutes(ctx));
   await app.register(threadRoutes(ctx));
@@ -489,6 +515,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(devopsRoutes(ctx));
   await app.register(providerRoutes(ctx));
   await app.register(orgProviderRoutes(ctx));
+  await app.register(orgAppRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
   await app.register(releaseDocsPrepRoutes(ctx));

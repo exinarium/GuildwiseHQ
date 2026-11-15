@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StoredBuildEvidenceSchema } from '../cards/lean-v6.ts';
+import { NeedsSplitReason, StoredNeedsSplitProposalSchema } from '../cards/needs-split.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -17,6 +18,7 @@ import {
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { AccountKeySchema } from '../claude/accounts.ts';
+import { StoredDesignSizingSchema } from '../projects/size-verdict.ts';
 import { defineEvent, Id, Note, Stage } from './define.ts';
 
 const Fields = z.record(z.string(), z.unknown());
@@ -470,6 +472,34 @@ export const cardEvents = [
     }),
   ),
   /**
+   * Needs split was confirmed on an over-budget card. `ba`: the card goes back to the BA (spec, draft) with a `spec_card`
+   * task in needs-split mode (`taskId`); `owner`: the card already took that route (or no BA is hired) and the owner
+   * decides on a `needs_split_decision` desk item (`deskItemId`). Lenient: an old event always parses.
+   */
+  defineEvent(
+    'CardNeedsSplitRequested',
+    z.object({
+      cardId: Id,
+      route: z.enum(['ba', 'owner']),
+      reason: NeedsSplitReason,
+      fromStage: z.string(),
+      proposal: StoredNeedsSplitProposalSchema,
+      taskId: Id.optional(),
+      deskItemId: Id.optional(),
+      inheritedFromCardId: Id.optional(),
+    }),
+  ),
+  /** How a needs-split ended: the BA split the card, the BA could not, or the owner kept or cancelled it. */
+  defineEvent(
+    'CardNeedsSplitResolved',
+    z.object({
+      cardId: Id,
+      outcome: z.enum(['split', 'ba_failed', 'owner_continue', 'owner_cancel', 'dropped']),
+      childCardIds: z.array(Id).optional(),
+      note: z.string().max(4000).optional(),
+    }),
+  ),
+  /**
    * The architect's report (investigation or design) was recorded with the outcome of the investigate stage. `location`
    * `repo`: `reportPath` is a file on the card branch (`commit`); `vault`: it is a path in the project vault.
    */
@@ -483,6 +513,8 @@ export const cardEvents = [
       commit: z.string().optional(),
       /** A `repo` report written before the card branch existed: the text the builder commits at `reportPath`. */
       body: z.string().optional(),
+      /** The committed report's text, for the owner to read at the design gate (not committed again, unlike `body`). */
+      reportText: z.string().max(200_000).optional(),
       /** Assumptions about unlanded dependencies (a design made before they landed). */
       assumptions: z
         .array(z.object({ assumption: z.string(), dependency: z.string(), ifWrong: z.string() }))
@@ -501,6 +533,11 @@ export const cardEvents = [
     'DesignHeld',
     z.object({ cardId: Id, dependencies: z.array(z.string()), agentId: Id.optional() }),
   ),
+  /**
+   * The size estimate, the size verdict and the risk class of a design, recorded with the design report (every design
+   * handoff, also a confirmed one). Lenient: the verdict is computed by the server against the project's settings.
+   */
+  defineEvent('DesignSized', z.object({ cardId: Id, sizing: StoredDesignSizingSchema })),
   /**
    * Repair (boot data migration `design-held-status-2026-10`): a card whose design is held but whose projected status
    * still says `queued` (held before the `held` status existed) takes the `held` status. Idempotent in the projection.

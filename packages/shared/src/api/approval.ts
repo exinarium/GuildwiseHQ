@@ -80,6 +80,21 @@ export const CardApprovalSchema = z.object({
   deskItemId: z.uuid().nullable(),
   /** lean team: the owner approval's review information (absent for an approval step of the older workflows). */
   review: ApprovalReviewInfoSchema.optional(),
+  /** code v7: the design gate shows the existing design report instead of a diff. */
+  design: z
+    .object({
+      reportPath: z.string(),
+      location: z.enum(['repo', 'vault']).nullable(),
+      commit: z.string().nullable(),
+      summary: z.string(),
+      /** The full report text, when the runner sent it (older runners: absent, the summary and the path are shown). */
+      text: z.string().max(200_000).nullable(),
+      cardBrief: z.string().nullable(),
+      reason: z.enum(['high_risk', 'card', 'project', 'off']).nullable(),
+      reasonText: z.string().nullable(),
+      highRiskPaths: z.array(z.string()),
+    })
+    .optional(),
 });
 export type CardApproval = z.infer<typeof CardApprovalSchema>;
 

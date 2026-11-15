@@ -314,3 +314,9 @@ Agent shifts with `claude.scrubSubprocessEnv: true` hit the same scrub. Since Cl
 fallback does not help them. A follow-up could generalize `shift-env.json` to every shift, through a non-credential
 pointer variable (for example `AOM_SHIFT_ENV_FILE`) in a place the sandboxed shell can read. This is filed on the
 backlog as a suggestion ("Agent shifts with scrubSubprocessEnv lose AOM_SHIFT_TOKEN").
+
+## Follow-up: GWP-227
+
+The fallback now covers every session: see `docs/investigations/GWP-227-agent-shifts-with-scrubsubprocessenv-lose-aom-shif.md`.
+Each session's shift variables go to `<data dir>/session-env/<session>/env.json` (0600), named by `AOM_SHIFT_ENV_FILE`;
+owner turns use the same path and no longer write `shift-env.json`, which `aom` still reads as a last fallback for one release.

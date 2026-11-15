@@ -17,7 +17,9 @@ import {
   type PatchProjectRequest,
   type ProjectImpact,
   ProviderAccountKeySchema,
+  type ReviewSettings,
   type StopLossSettings,
+  sameRiskMap,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -41,6 +43,7 @@ import { queueAccountEnsure, resyncAccountNotices } from './claude-accounts.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
+import { refreshSizeStatuses } from './pr-size-status.ts';
 import { ensureProjectVaultIn } from './vaults.ts';
 import {
   deliver,
@@ -215,6 +218,52 @@ export async function setMergePolicy(
       { tx },
     );
   });
+}
+
+/**
+ * The project's review settings (size budget, unit, path-to-risk map): project owner only, whole-value replace, no
+ * defaults. An empty map is stored as not set. Nothing is appended when the value is unchanged.
+ */
+export async function setReviewSettings(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  settings: ReviewSettings,
+) {
+  const sizeBudget = settings.sizeBudget ?? null;
+  const sizeUnit = settings.sizeUnit ?? null;
+  const riskMap =
+    settings.riskMap && settings.riskMap.length > 0
+      ? settings.riskMap.map((e) => ({ pattern: e.pattern, risk: e.risk }))
+      : null;
+  const changed = await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    const unchanged =
+      (p.size_budget ?? null) === sizeBudget &&
+      (p.size_unit ?? null) === sizeUnit &&
+      // compared entry by entry: the stored jsonb does not keep the key order
+      sameRiskMap(p.risk_map, riskMap);
+    if (unchanged) return false;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectReviewSettingsSet',
+            payload: { projectId, sizeBudget, sizeUnit, riskMap, by: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+    return true;
+  });
+  // the hard size check follows the new budget and unit: ask for the open pull requests again and re-evaluate the stored ones
+  if (changed) {
+    await refreshSizeStatuses(ctx, { projectId, poll: true });
+  }
 }
 
 /**

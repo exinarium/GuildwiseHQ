@@ -993,20 +993,29 @@ export async function deleteSchedule(
   org: OrgCtx | null,
   id: string,
 ): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const { s } = await lockManaged(tx, user, org, id);
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.schedule(id),
-          event: { type: 'ScheduleDeleted', payload: { scheduleId: s.id } },
-          actor: userActor(user.id),
-          scope: scheduleScope(s),
-        },
-      ],
-      { tx },
-    );
-  });
+  await withAppendTx(ctx.pool, (tx) => deleteScheduleIn(ctx, tx, user, org, id));
+}
+
+/** The delete body, for a caller that already runs in an append transaction. */
+export async function deleteScheduleIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  org: OrgCtx | null,
+  id: string,
+): Promise<void> {
+  const { s } = await lockManaged(tx, user, org, id);
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.schedule(id),
+        event: { type: 'ScheduleDeleted', payload: { scheduleId: s.id } },
+        actor: userActor(user.id),
+        scope: scheduleScope(s),
+      },
+    ],
+    { tx },
+  );
 }
 
 // ------------------------------------------------------------------------------------------ running
@@ -1357,12 +1366,16 @@ export async function fireDueSchedules(ctx: Ctx): Promise<FiredSchedule[]> {
         });
         if (trigger.kind === 'issue_labelled') {
           const { enqueueRunnerCommand } = await import('../runner-gateway/commands-queue.ts');
+          const { trackerAppForPoll } = await import('./post-as.ts');
+          // As the project's GitHub App when one is selected; an older runner fails the fire with a notice.
+          const app = await trackerAppForPoll(tx, s, trigger.provider, trigger.workstationId);
           await enqueueRunnerCommand(tx, trigger.workstationId, 'integration.run', {
             scheduleId: s.id,
             integration: trigger.provider,
             query: trigger.query,
             label: trigger.label,
             limit: 30,
+            ...app,
           });
           await ctx.store.append([...(await resolveFailureNotice(tx, s)), fire()], { tx });
           return {

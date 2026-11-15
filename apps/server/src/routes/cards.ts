@@ -7,12 +7,14 @@ import {
   CommentRequestSchema,
   CreateCardRequestSchema,
   MoveCardRequestSchema,
+  NeedsSplitRequestSchema,
   PatchCardRequestSchema,
   ReleaseCardRequestSchema,
   ReopenCardRequestSchema,
+  SetDesignGateRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { handleMentions } from '../commands/agent-mentions.ts';
 import { sendCardToBa } from '../commands/ba-intake.ts';
@@ -27,6 +29,8 @@ import {
   reopenCard,
   specifyCard,
 } from '../commands/cards.ts';
+import { setCardDesignGate } from '../commands/design-gate.ts';
+import { confirmNeedsSplit } from '../commands/needs-split.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one } from '../db/sql.ts';
 import { getArchive, getBoard, getCardDetail, searchCards, toCardDto } from '../queries/cards.ts';
@@ -141,6 +145,34 @@ export function cardRoutes(ctx: Ctx) {
         const moved = await moveCardWithNotice(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
         const detail = await getCardDetail(ctx, s.user.id, moved.cardId);
         return moved.notice ? { ...detail, moveNotice: moved.notice } : detail;
+      },
+    );
+
+    // Needs split: the owner or a manager confirms that an over-budget card goes back to the BA (once) to be split.
+    app.post(
+      '/api/cards/:id/needs-split',
+      { schema: { params: CardParamsSchema, body: NeedsSplitRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const r = await confirmNeedsSplit(ctx, s.user, req.params.id, req.body);
+        ctx.services.dispatcher.trigger();
+        return {
+          ...(await getCardDetail(ctx, s.user.id, r.cardId)),
+          needsSplitRoute: r.route,
+          notice: r.notice,
+        };
+      },
+    );
+
+    /** code v7: the owner's design gate switch for one card (on only once the card has a design report). */
+    app.put(
+      '/api/cards/:id/design-gate',
+      { schema: { params: CardParamsSchema, body: SetDesignGateRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        const { card } = await loadVisibleCard(ctx.pool, a.session.user.id, req.params.id);
+        await setCardDesignGate(ctx, a.session.user, { id: a.orgId, role: a.role }, card.id, req.body.on);
+        return getCardDetail(ctx, a.session.user.id, card.id);
       },
     );
 

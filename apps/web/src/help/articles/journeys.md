@@ -11,6 +11,8 @@ A **journey** is one complete process, such as a rental from first enquiry to mo
 
 Sidebar, **Journeys**, **New journey** (Owners and Admins). Start from nothing or from the rentals template. Add steps, order them with **Move up** and **Move down**, and for each step set its handoffs: when it is done, cancelled or either, go to another step or to the end, optionally only when a field matches. A handoff may go back to an earlier step. Every **Save** is a new version; running instances finish on the version they began on.
 
+You can also start from an accounting or a law template. Each carries its industry.
+
 ## Waits and gates {#waits-gates}
 
 A **wait** pauses the journey for a length of time, a date on the record, a form from the client or a webhook event. Every wait has a deadline and one timeout action: remind and keep waiting, go to a named step, ask on the desk (**Extend**, **Continue now**, **Go to step**, **Cancel the journey**) or cancel. A **gate** asks a person, a role, the project owner or the organization Owner: **Approve**, or **Reject** with a note. Only the approver decides.

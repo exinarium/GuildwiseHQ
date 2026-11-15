@@ -9,13 +9,21 @@ import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { sweepJourneys } from '../commands/journey-runtime.ts';
+import { pruneAppRequests } from '../commands/org-apps.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
+import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
+import { pollPrOnlyRepos } from '../commands/pr-only.ts';
+import { dispatchReplayRuns } from '../commands/pr-replays.ts';
+import { dispatchPrReviews, sweepStalePrReviewRuns } from '../commands/pr-review-runs.ts';
+import { deliverSplitNotices } from '../commands/pr-size-check.ts';
+import { deliverSizeStatuses } from '../commands/pr-size-status.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
+import { sizeExceptionSweep } from '../commands/size-exception.ts';
 import { socialTick } from '../commands/social.ts';
 import { pruneStorage } from '../commands/storage-connections.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
@@ -153,6 +161,22 @@ export class Scheduler {
         this.ctx.log.error({ err }, 'reachability checks failed'),
       );
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
+      // PR-only repositories: ask a workstation with the clone for the open pull requests (throttled per repository).
+      await pollPrOnlyRepos(this.ctx).catch((err) => this.ctx.log.error({ err }, 'PR-only polling failed'));
+      // The hard size check: the commit status of every open pull request is posted by a workstation with the status token.
+      await deliverSizeStatuses(this.ctx).catch((err) => this.ctx.log.error({ err }, 'size statuses failed'));
+      // Pull requests sent back for size: the author is told on the pull request.
+      await deliverSplitNotices(this.ctx).catch((err) => this.ctx.log.error({ err }, 'split notices failed'));
+      // The first reviewer: runs start on reviewable pull requests (a token is held); lost runs and posts are given up.
+      await dispatchPrReviews(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'PR review dispatch failed'),
+      );
+      await dispatchReplayRuns(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'replay dispatch failed'),
+      );
+      await sweepStalePrReviewRuns(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'PR review sweep failed'),
+      );
       await this.blog();
       // Discovery and boardroom sessions: queued turns go out, approved documents reach the vault.
       await this.ctx.services.sessions
@@ -174,6 +198,14 @@ export class Scheduler {
       await governanceTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'governance tick failed'));
       // Follow-up and chase: open desk items past the organization's window nudge their owner (once per window).
       await followUpSweep(this.ctx).catch((err) => this.ctx.log.error({ err }, 'follow-up sweep failed'));
+      // Owner-pending items: the owner is reminded once after 2 working days without acting (the item's state is kept).
+      await ownerPendingSweep(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'owner-pending reminders failed'),
+      );
+      // Size exception requests: no owner answer within 2 working days sends the pull request back to its author. No reminder.
+      await sizeExceptionSweep(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'size exception sweep failed'),
+      );
       return fired;
     });
     this.chain = next.catch(() => {});
@@ -208,6 +240,7 @@ export class Scheduler {
       this.ctx.log.error({ err }, 'offline form links failed'),
     );
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
+    await pruneAppRequests(this.ctx).catch((err) => this.ctx.log.error({ err }, 'app request prune failed'));
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),
     );

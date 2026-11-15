@@ -2,7 +2,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, storagePath } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
 import { MEMBER, shotPath } from '../support/env.ts';
-import { startRunner } from '../support/runner.ts';
+import { runnerConnected, startRunner, stopRunnerAndWait } from '../support/runner.ts';
 
 // Mobile (PWA) flows at iPhone size (project `mobile`: the iPhone 15 descriptor, WebKit with AOM_E2E_WEBKIT=1, else
 // Chromium). Needs only the pairing spec (member, workstation, project TOY); it hires its own agents.
@@ -13,6 +13,7 @@ let page: Page;
 let api: APIRequestContext;
 let projectId: string;
 let repoId: string;
+let startedRunner = false;
 
 const SPEC = {
   context: 'Mobile flow.',
@@ -47,9 +48,17 @@ test.beforeAll(async ({ browser }) => {
     });
     expect(hire.status(), `${name}: ${await hire.text()}`).toBe(201);
   }
-  startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '50' });
+  // The runner uses the shared workstation home: reuse the one pairing left running instead of starting a second
+  // connection for the same workstation (which supersedes one of them with 4409).
+  if (!(await runnerConnected(api))) {
+    startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '50' });
+    startedRunner = true;
+  }
 });
 test.afterAll(async () => {
+  // Leave the workstation as we found it: a runner this spec started must be gone (server shows none connected)
+  // before the next spec on this workstation (desk) starts its own.
+  if (startedRunner) await stopRunnerAndWait(api);
   await pool.end();
 });
 

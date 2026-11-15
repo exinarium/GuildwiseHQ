@@ -9,6 +9,7 @@ import {
   codeWorkflowV4,
   codeWorkflowV5,
   codeWorkflowV6,
+  codeWorkflowV7,
   DomainEventSchema,
   feedWorkflowV1,
   getBuiltinWorkflow,
@@ -63,18 +64,20 @@ describe('built-in workflows', () => {
       'code@4',
       'code@5',
       'code@6',
+      'code@7',
       'feed@1',
       'research@1',
     ]);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV6);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV7);
+    expect(getBuiltinWorkflow('code', 6)).toBe(codeWorkflowV6);
     expect(getBuiltinWorkflow('code', 5)).toBe(codeWorkflowV5);
     // the legacy key resolves as code (workflows/legacy.ts)
-    expect(getBuiltinWorkflow('code-v6')).toBe(codeWorkflowV6);
+    expect(getBuiltinWorkflow('code-v6')).toBe(codeWorkflowV7);
     expect(getBuiltinWorkflow('code', 4)).toBe(codeWorkflowV4);
     expect(getBuiltinWorkflow('code', 3)).toBe(codeWorkflowV3);
     expect(getBuiltinWorkflow('code', 2)).toBe(codeWorkflowV2);
     expect(getBuiltinWorkflow('code', 1)).toBe(codeWorkflowV1);
-    expect(getBuiltinWorkflow('code', 7)).toBeUndefined();
+    expect(getBuiltinWorkflow('code', 8)).toBeUndefined();
     expect(getBuiltinWorkflow('nope')).toBeUndefined();
   });
 

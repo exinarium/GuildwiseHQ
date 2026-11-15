@@ -51,6 +51,15 @@ const bool = (def: boolean) =>
       v === undefined || v === '' ? def : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase()),
     );
 
+/**
+ * AOM_VIDEO_ENCODE_THREADS: a whole number >= 1, else undefined (the renderer's default applies). Never fails the boot:
+ * the renderer decides the default and lowers the value to the machine's cores.
+ */
+export function parseEncodeThreads(v: string | undefined): number | undefined {
+  const s = v?.trim();
+  return s && /^\d+$/.test(s) && Number(s) >= 1 ? Number(s) : undefined;
+}
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().default('postgres://aom:aom@127.0.0.1:5433/aom'),
   AOM_PORT: z.coerce.number().int().min(0).max(65535).default(4600),
@@ -170,6 +179,11 @@ const EnvSchema = z.object({
     .int()
     .min(100_000_000)
     .default(5 * 1024 ** 3),
+  /**
+   * Render worker: libx264 threads of each encode (default 4, lowered to the cores). Bounds the render's memory on any
+   * machine; a missing or invalid value uses the default.
+   */
+  AOM_VIDEO_ENCODE_THREADS: z.string().optional().transform(parseEncodeThreads),
   /**
    * Simulation organizations: host their simulated workstation (a mock runner the server starts and supervises).
    * Unset: on, except under tests.
@@ -338,6 +352,8 @@ export interface Config {
   videoWorkerPort: number;
   /** AOM_VIDEO_PUSH_URL: where a render worker pushes finished artifacts; undefined = write them to AOM_VIDEO_DIR. */
   videoPushUrl: string | undefined;
+  /** AOM_VIDEO_ENCODE_THREADS; undefined = the renderer's default (4). The renderer lowers it to the machine's cores. */
+  videoEncodeThreads: number | undefined;
   /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
   projectGraphs: { enabled: boolean };
   logLevel: string;
@@ -510,6 +526,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     videoWorkerToken: e.AOM_VIDEO_WORKER_TOKEN,
     videoWorkerPort: e.AOM_VIDEO_WORKER_PORT,
     videoPushUrl: e.AOM_VIDEO_PUSH_URL,
+    videoEncodeThreads: e.AOM_VIDEO_ENCODE_THREADS,
     projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     logLevel: e.LOG_LEVEL,
     storage: {

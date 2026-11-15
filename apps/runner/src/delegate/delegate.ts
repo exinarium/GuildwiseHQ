@@ -54,6 +54,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, sandboxEnv, wipeAgent } from '../sandbox/sandbox.ts';
+import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
 
 /**
  * The caller's working context, which a child that edits or runs commands shares: the same working directory (the parent's
@@ -91,6 +92,11 @@ export interface DelegateCaller {
   /** The targets granted to the caller (from the start message); none: no delegation. */
   delegation?: DelegationSpec | undefined;
   work?: DelegateWork | undefined;
+  /**
+   * The commit identity the caller resolved for its worktree (a shift: the project's app bot, "Commit as" or git config).
+   * A child that works in that worktree commits with it; without one, the workstation's identity as before.
+   */
+  identity?: { name: string; email: string } | null | undefined;
   /** The caller is set to ask before pack scripts: its delegates ask through the caller too. */
   packScriptsGated?: boolean | undefined;
 }
@@ -380,7 +386,7 @@ export class DelegateRunner {
     let usage: Usage = zeroUsage();
     let text = '';
     let error: string | undefined;
-    let token: string | undefined;
+    let credential: IssuedShiftCredential | undefined;
     const agentId = delegateId; // one private sandbox per delegate, removed at the end
     let tmp: string | undefined;
     let releaseTmp: (() => void) | undefined;
@@ -392,7 +398,9 @@ export class DelegateRunner {
         this.deps.paths,
         agentId,
         resolved.name,
-        await resolveCommitIdentity(this.deps.paths.root),
+        works && caller.work && caller.identity
+          ? { name: caller.identity.name, email: caller.identity.email }
+          : await resolveCommitIdentity(this.deps.paths.root),
       );
       tmp = sandbox.tmp;
       releaseTmp = holdAgentTmp(sandbox);
@@ -406,13 +414,13 @@ export class DelegateRunner {
         profile,
       );
       if (!direct) await adapter.writeInstructions(sandbox, instructions);
-      token = this.deps.ipc.registerShift(this.delegateHandler(caller));
+      credential = issueShiftCredential(
+        { ipc: this.deps.ipc, runnerRoot: this.deps.paths.root, log: this.log },
+        { sessionId: delegateId, handler: this.delegateHandler(caller) },
+      );
       const env = {
         ...sandboxEnv(sandbox),
-        AOM_IPC_URL: this.deps.ipc.url,
-        ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
-        AOM_SHIFT_TOKEN: token,
-        AOM_SHIFT_ID: delegateId,
+        ...credential.env,
         ...(works ? (caller.work?.env ?? {}) : {}),
         ...(this.deps.childEnv ?? {}),
         PATH:
@@ -516,7 +524,7 @@ export class DelegateRunner {
     } finally {
       set.delete(handleRun);
       liveChildren.delete(delegateId);
-      if (token) this.deps.ipc.revoke(token);
+      credential?.revoke();
       unlockWork?.();
       releaseTmp?.();
       if (tmp) await cleanAgentTmp(tmp).catch(() => 0);
@@ -1108,7 +1116,7 @@ export function renderDelegateInstructions(
 }
 
 /** Reads a session to its end: the reply text (the final text, else all streamed text) and how it exited. */
-async function readSession(
+export async function readSession(
   session: RuntimeSession,
   maxToolCalls: number | undefined,
   onCap: () => void,

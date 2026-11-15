@@ -234,3 +234,99 @@ export const RulePackRemoveResultSchema = z.object({
   kept: z.array(z.string()),
 });
 export type RulePackRemoveResult = z.infer<typeof RulePackRemoveResultSchema>;
+
+// ---- Industry bundles (one install or uninstall for an industry's rule pack, playbooks, templates, samples) ----
+
+export const IndustryBundleSummarySchema = z.object({
+  id: z.string(),
+  industry: z.enum(['real_estate', 'accounting', 'law']),
+  name: z.string(),
+  description: z.string(),
+  version: z.number().int(),
+  installed: z.boolean(),
+  installedAt: IsoTime.nullable(),
+  counts: z.object({
+    rules: z.number().int(),
+    playbooks: z.number().int(),
+    knowledgeTemplates: z.number().int(),
+    sampleData: z.number().int(),
+    journeyTemplates: z.number().int(),
+  }),
+});
+export type IndustryBundleSummary = z.infer<typeof IndustryBundleSummarySchema>;
+export const IndustryBundleListResponseSchema = z.object({ bundles: z.array(IndustryBundleSummarySchema) });
+export type IndustryBundleListResponse = z.infer<typeof IndustryBundleListResponseSchema>;
+
+const IndustryBundleMemberDoc = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(['new', 'present']),
+  existingId: z.string().nullable(),
+});
+
+export const IndustryBundlePreviewSchema = IndustryBundleSummarySchema.extend({
+  rulePack: RulePackPreviewSchema,
+  playbooks: z.array(
+    z.object({
+      key: z.string(),
+      name: z.string(),
+      description: z.string(),
+      status: z.enum(['new', 'present']),
+      scheduleId: z.string().nullable(),
+    }),
+  ),
+  knowledgeTemplates: z.array(IndustryBundleMemberDoc),
+  sampleData: z.array(IndustryBundleMemberDoc),
+  journeyTemplates: z.array(z.object({ id: z.string(), name: z.string() })),
+  /** Install would fail: fix these first. */
+  blockers: z.array(z.object({ code: z.enum(['project_required', 'no_project']), message: z.string() })),
+});
+export type IndustryBundlePreview = z.infer<typeof IndustryBundlePreviewSchema>;
+
+export const InstallIndustryBundleRequestSchema = z
+  .object({
+    /** Project the playbook cards are made in; only needed with more than one active project. */
+    projectId: z.uuid().optional(),
+    /** Default: the organization's time zone. */
+    timezone: z.string().min(1).max(60).optional(),
+  })
+  .default({});
+export type InstallIndustryBundleRequest = z.infer<typeof InstallIndustryBundleRequestSchema>;
+
+export const IndustryBundleInstallResultSchema = z.object({
+  status: z.enum(['installed', 'already_installed']),
+  /** null: the rule pack was already installed before the bundle (left as it is), or nothing was installed. */
+  rulePack: RulePackInstallResultSchema.nullable(),
+  playbooks: z.object({
+    added: z.array(z.object({ key: z.string(), scheduleId: z.string() })),
+    present: z.array(z.object({ key: z.string(), scheduleId: z.string() })),
+  }),
+  documents: z.object({
+    added: z.array(
+      z.object({ memberId: z.string(), docId: z.string(), kind: z.enum(['template', 'sample']) }),
+    ),
+    present: z.array(z.object({ memberId: z.string(), existingId: z.string() })),
+  }),
+  journeyTemplates: z.array(z.string()),
+});
+export type IndustryBundleInstallResult = z.infer<typeof IndustryBundleInstallResultSchema>;
+
+export const IndustryBundleRemoveResultSchema = z.object({
+  removed: z.object({
+    ruleEntries: z.array(z.string()),
+    schedules: z.array(z.string()),
+    documents: z.array(z.string()),
+  }),
+  /** Created by the bundle but changed by the organization since: never removed. */
+  kept: z.array(
+    z.object({
+      kind: z.enum(['rule', 'playbook', 'document']),
+      id: z.string(),
+      title: z.string(),
+      reason: z.enum(['edited', 'present_before_install']),
+    }),
+  ),
+  /** Already removed by the organization before the uninstall. */
+  gone: z.array(z.object({ kind: z.enum(['rule', 'playbook', 'document']), id: z.string() })),
+});
+export type IndustryBundleRemoveResult = z.infer<typeof IndustryBundleRemoveResultSchema>;

@@ -16,15 +16,25 @@ import {
   replaceComponentVersion,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
-import { isProtectedBranchRejection } from './gh.ts';
+import { appOfPlan, isProtectedBranchRejection, withPushReport } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  type AppTokenProbe,
+  boundPostAsFor,
+  commitEnv,
+  identityErrorWire,
+  NO_IDENTITY_WIRE,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { componentFactsAt } from './release-facts.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleaseShipInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: ReleaseShipPayload;
   /** Local clone of the repository. */
   repoPath: string;
@@ -157,9 +167,16 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
   // 4. the commit, in a throwaway worktree
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
-    return fail('commit', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err));
+    return fail(
+      'commit',
+      err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),
+    );
   }
   const dir = join(input.integrationDir, `release-${p.repoId}`);
   const made = await withIntegrationWorktree(
@@ -288,17 +305,21 @@ export async function pushFastForward(
   sha: string,
   branch: string,
   a: { args: string[]; env: Record<string, string> },
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  /** The app the repository posts as: a refusal then names the bypass or permission it needs. */
+  app?: { label: string; botName?: string } | null,
+): Promise<{ ok: true } | { ok: false; error: string; report?: string }> {
   const push = await git(repoPath, [...a.args, 'push', 'origin', `${sha}:refs/heads/${branch}`], {
     env: a.env,
   });
   if (push.exitCode === 0) return { ok: true };
   const why = (push.stderr || push.stdout).trim();
+  const report = withPushReport('', why, app).trim();
   return {
     ok: false,
     error: isProtectedBranchRejection(why)
       ? `${branch} is protected and refused the push: ${why}`
       : `pushing ${branch} failed: ${why}`,
+    ...(report ? { report } : {}),
   };
 }
 
@@ -325,8 +346,20 @@ async function pushCommit(
     notices: carry.notices,
     ...(carry.section ? { section: carry.section } : {}),
   };
-  const pushed = await pushFastForward(repoPath, sha, p.workingBranch, a);
-  if (!pushed.ok) return { ok: false, step: 'push', error: firstLine(pushed.error), ...base };
+  const pushed = await pushFastForward(
+    repoPath,
+    sha,
+    p.workingBranch,
+    a,
+    appOfPlan(p.postAs, p.remoteUrlNormalized),
+  );
+  if (!pushed.ok)
+    return {
+      ok: false,
+      step: 'push',
+      error: pushed.report ? `${firstLine(pushed.error)}\n${pushed.report}` : firstLine(pushed.error),
+      ...base,
+    };
   await git(repoPath, ['update-ref', '-d', keptReleaseRef(p.version)]);
   await advanceLocalBranch(repoPath, p.workingBranch, sha);
   let section = carry.section;

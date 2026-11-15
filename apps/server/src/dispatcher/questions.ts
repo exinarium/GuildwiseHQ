@@ -137,7 +137,12 @@ export async function questionPass(
     started.push({ deskItemId: r.id, shiftId, agentId: r.routed_agent_id, workstationId: r.ws_id });
     const built = await buildQuestionShiftStart(ctx, r.id, shiftId);
     if (built)
-      ctx.services.runners.send(r.ws_id, 'shift.start', await withCommitAs(ctx, built), ctx.clock.now());
+      ctx.services.runners.send(
+        r.ws_id,
+        'shift.start',
+        await withCommitAs(ctx, built, r.ws_id),
+        ctx.clock.now(),
+      );
   }
   return started;
 }

@@ -60,8 +60,8 @@ export const ClaudeRuntimeConfigSchema = z.object({
   /**
    * Sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1: Claude Code removes credentials from the environment of everything its
    * shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other processes is unreadable.
-   * Off by default because it also removes variables Claude Code considers credentials, which may include the
-   * shift token the `aom` CLI needs; try it on one workstation first (docs/RUNNER.md).
+   * It also removes AOM_SHIFT_TOKEN (Claude Code 2.1.251+); `aom` then reads it from the session's own 0600 file named
+   * by AOM_SHIFT_ENV_FILE (session/shift-credential.ts). Off by default; try it on one workstation first (docs/RUNNER.md).
    */
   scrubSubprocessEnv: z.boolean().default(false),
   /** Additional accounts besides the main one (today's credential); named by the key a project uses. */

@@ -189,6 +189,7 @@ describe('commands are delivered after the commit', () => {
 describe('a release_prep shift through the gateway', () => {
   it('is started by the dispatcher pass, kept on heartbeat, and its prep done renders the new video', async () => {
     const start = await dispatch();
+    expect(start.releasePrep?.releaseBranch).toBe('release/1.5.0');
     expect(start.releasePrep?.task).toMatchObject({ kind: 'new_video', slug: 'forms' });
     expect(start.releasePrep?.writable).toContain('e2e/video/forms.spec.ts');
     expect((await tasks())[0].status).toBe('running');

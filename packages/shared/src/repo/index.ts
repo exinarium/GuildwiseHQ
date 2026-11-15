@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { PostAsPlanSchema } from './post-as.ts';
 import { CONNECTABLE_FORGES, createFullNameError, ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from './commit-identity.ts';
 
 export * from './commit-identity.ts';
+export * from './post-as.ts';
 export * from './rebase-error.ts';
 
 /**
@@ -114,6 +116,8 @@ export const RepoCreatePayloadSchema = z
     branch: z.string().default('main'),
     /** The project's "Commit as" setting for the initial commit (absent: the workstation's git identity). */
     commitAs: CommitAsSchema.nullable().optional(),
+    /** The project's post-as plan per repository; absent when the project has no app selected. */
+    postAs: PostAsPlanSchema.optional(),
   })
   .superRefine((v, ctx) => {
     const err =

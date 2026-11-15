@@ -40,6 +40,13 @@ export interface ClaudePolicyContext {
   accountDirs?: string[];
   /** The runner data dir (`~/.aom-runner`): config (runner token, provider credentials), outbox, all agents. */
   runnerRoot: string;
+  /**
+   * The session's own env-file dir (`<runnerRoot>/session-env/<id>`, see session/shift-credential.ts): readable to this
+   * session's shell, never to another's. Set only from a strictly validated `AOM_SHIFT_ENV_FILE`. Concurrent sessions of
+   * one agent share its settings file, so the later session's dir replaces the earlier one's (aom runs outside the OS
+   * sandbox and still reads its own file).
+   */
+  sessionEnvDir?: string;
   /** This agent's own sandbox root (`<runnerRoot>/agents/<id>`: HOME, CLAUDE_CONFIG_DIR, scratch). */
   agentDir: string;
   /** Worktree of the card, or the agent's scratch dir. */
@@ -92,6 +99,8 @@ export interface ClaudePolicyContext {
   nugetFallbackDir?: string;
   /** `/tmp/.dotnet` (Linux): .NET's named-mutex files; without write access every `dotnet build` fails. */
   dotnetShmDir?: string;
+  /** pnpm 12's fixed lock folders under /tmp that passed `usablePnpmLockDirs` (Linux); writable. */
+  pnpmLockDirs?: string[];
   /** OS user id (default: the runner's), for `/run/user/<uid>`. Injectable for tests. */
   uid?: number;
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
@@ -185,6 +194,8 @@ export interface SandboxProfile {
   readOnlyWorktree: boolean;
   /** macOS: keeps `allowLocalBinding` (`DARWIN_LOCAL_BINDING_ROLES` / browser roles). Ignored on Linux. Default false. */
   darwinLocalBinding?: boolean;
+  /** No network for the shell at all (a reviewer reads a local checkout and needs no host): `allowedDomains` is empty. */
+  offline?: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -277,6 +288,7 @@ export const RUNNER_PRIVATE = [
   'mock-state',
   'secrets',
   'keys',
+  'session-env',
 ];
 
 /**
@@ -458,6 +470,7 @@ function sandboxBlock(
         ...ctx.gitDirs,
         ...(ctx.sharedCacheDir ? [ctx.sharedCacheDir] : []),
         ...(ctx.dotnetShmDir ? [ctx.dotnetShmDir] : []),
+        ...(ctx.pnpmLockDirs ?? []),
       ],
       // never the repository's hooks or config (they run outside the sandbox when the user next uses git), the
       // vault, or the runner's private state
@@ -485,6 +498,8 @@ function sandboxBlock(
         ...ctx.aomReadPaths,
         ...(ctx.toolchainReadPaths ?? []),
         ...(ctx.nugetFallbackDir ? [ctx.nugetFallbackDir] : []),
+        // the session's own env file (the shift variables the subprocess scrub removes); holds no writable path
+        ...(ctx.sessionEnvDir ? [ctx.sessionEnvDir] : []),
       ],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
@@ -495,7 +510,10 @@ function sandboxBlock(
     excludedCommands: aomExcluded(ctx.aomReadPaths),
     network: {
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
-      allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains] : [],
+      allowedDomains:
+        shell && !profile.offline
+          ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains]
+          : [],
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
@@ -744,6 +762,7 @@ export function scanSandboxBlock(
       paths.scratch,
       ...ctx.aomReadPaths,
       ...(ctx.toolchainReadPaths ?? []),
+      ...(ctx.sessionEnvDir ? [ctx.sessionEnvDir] : []),
       // a clone too large to check is not opened at all
       ...masks
         .filter((m) => m.masks !== null)
@@ -836,6 +855,8 @@ export function buildShiftSettings(
   paths: { home: string; configDir: string; scratch: string; tmp: string },
   roleKey?: string,
   isDevops = false,
+  /** Sandbox profile additions the caller decides (a reviewer run: `offline`). Absent: exactly as before. */
+  profileExtra: Pick<SandboxProfile, 'offline'> = {},
 ): ClaudeSettings {
   if (isDevops) return buildDevopsSettings(p, ctx, paths);
   if (roleKey === 'ceo') return buildCeoSettings(ctx, paths);
@@ -902,6 +923,7 @@ export function buildShiftSettings(
       browser: runsBrowsers(p, roleKey),
       readOnlyWorktree: isReadOnlyWorktreeRole(p),
       darwinLocalBinding: keepsLocalBindingOnDarwin(p, roleKey),
+      ...profileExtra,
     },
     testDomains,
   );

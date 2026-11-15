@@ -56,8 +56,10 @@ uploader; someone who controls a client's network (TLS assumed); an operator wit
 ## Residual risks and follow-ups
 
 - Malware inside an allowed file type (T11): handled only on workstations that turn the scan on.
-- Uploads that landed in the firm's storage for a submission that later timed out remain there; a delete operation on the
-  write relay would let the server clean them up.
+- Uploads that landed in the firm's storage for a submission that later timed out are removed through the relay's
+  delete operation; so are the answers documents of a submission that timed out while its complete was saving them (the
+  respondent is told to send again). A submission with answers documents that the respondent may have been told was
+  received is never cleaned up. A file the workstation never confirms removing stays listed on the desk as not removed.
 - Rate limits are per server process; a multi-instance hosted deployment needs a shared store (hosted edge settings).
 - The page's script is served by the same server; a compromised server could serve altered script, as with the rest of
   the web app.

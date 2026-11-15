@@ -402,7 +402,7 @@ export function connectSteps(provider: ConnectableForge, host = defaultHost(prov
       return [
         '1. Either install the GitLab CLI (https://gitlab.com/gitlab-org/cli) and run `glab auth login`,',
         `   or create a personal access token on ${host} (User settings, Access tokens) with the scopes api and write_repository.`,
-        '2. Paste the token when asked. It is kept on this workstation only (secrets/git-tokens.json, mode 0600).',
+        '2. Paste the token when asked. It is kept on this workstation only (secrets/git-tokens.json, sealed with the runner key).',
       ];
     case 'bitbucket-cloud':
       return [

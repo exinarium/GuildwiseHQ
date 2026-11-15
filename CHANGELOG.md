@@ -4,6 +4,66 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-15
+
+Runner 0.1.75.
+
+### Added
+
+- Automated apps. An organization Owner can add a GitHub App under Settings > Automated apps so agents can later act as its bot user. The private key is encrypted in the browser for each chosen workstation and stored there only after GitHub accepted it; the server keeps no key. Workstations mint and refresh short-lived installation tokens by themselves and keep them in memory only. Headless workstations use `guildwise-runner apps connect github`. Update workstations to runner 0.1.75.
+- PR-only review for project repositories. The owner can switch a project repository to PR-only in the project settings, and its open pull requests are then recorded as not reviewed. Waiting pull request list requests are now replaced or expire, and a connected workstation is preferred.
+- PR size check. In a PR-only repository, a pull request over the project's size budget is marked needs split and its author is asked to split it by a comment review on the pull request; nothing is added to the owner's Desk. Stacked pull requests (base branch is the branch of another open pull request) are measured together, each counting its own changes. A timeout alone never sends a pull request back. When an owner re-run times out again, the size check runs at once: over budget goes to needs split; within budget stays not reviewed and the owner gets a timed out twice item with the 2-working-day reminder. Inactive when the project has no size budget. Migration 2970; runner announces `pr-notice:1`.
+- PR size exception. For an over-budget pull request the CEO agent can ask the owner for a size exception with a reason of at least 20 characters (`aom ceo act size-exception --pr <id|url> --text <reason>`); a request without a reason is refused. The owner sees the reason and the size against the budget on the Desk and approves or rejects. Approved: the pull request is exempt from needs split up to the approved size. Rejected, or no answer within 2 working days (owner's time zone, no reminder): the pull request goes to needs split and its author is notified. Requests and outcomes are kept in a Size exceptions history on the Pull requests page. Migration 2980.
+- Hard size check. A project with a size budget and unit now gets a commit status named `size-budget` on every open pull request of its GitHub repositories: failed when the pull request (or the stack of pull requests it belongs to) is over the budget, passed within it, and passed with "owner exception" when the owner approved a size exception. The message names the size, the budget and the unit. Nothing is posted for a project without a budget. The owner makes the status required on the branch on GitHub (user guide 4.3d); GuildWise never changes branch protection. A workstation posts it with its own status token (`guildwise-runner status-token github`, Commit statuses: write only), kept encrypted on that workstation. Migration 2990; runner announces `commit-status:1`. Update workstations to runner 0.1.75.
+- Owner reminder for pending items. When an item has been waiting on the owner for 2 working days, the owner gets one reminder. The state of the item is not changed, so nothing moves on without the owner.
+- Design gate. New cards on the lean team workflow (code version 7) can stop after Investigate & design until the project owner approves the design. The gate is off by default; switch it on per project in Project settings, or for one card once its design report exists. The owner reads the existing design report on the desk item and approves it (the card moves to Build) or returns it with a note. Designs that touch high-risk paths stop at the gate even with the gate off. Cards already in flight keep their workflow.
+- Second reviewer (Opus) on live PR-only pull requests. After a 20-PR replay has been recorded, the project owner can switch it on in Project settings. Both reviewers then review each pull request, their findings are merged (duplicates posted once and credited to both reviewers), the findings cap applies to the merged set, and a timeout or failure of either run posts nothing. A pair counts as one automatic review against the daily limit. Needs a runner that supports review pairs.
+
+- Card worktrees get their submodules. When a card shift starts on a card worktree (new or reopened), the runner fills the submodules at the commits the branch pins, from the repository registered on the workstation or else from the submodule's own url, before the agent starts. No git config is written, `git status` stays clean, and a submodule that cannot be filled is reported on the card without stopping the shift. Run worktrees use the same lookup and no longer write the clone's git config.
+
+- Industry bundles for accounting and law. Open **Industry bundles** on Rules & decisions to browse, preview, install and uninstall a bundle in one step. A bundle brings a rule pack, playbooks, knowledge templates, sample data and journey templates, so an accounting or law firm can start from ready-made material and remove it cleanly.
+
+- Agents act as the selected app. Each project can choose which automated app its agents post as. Commits, pushes, pull requests, merges, releases, comments, and ticket and issue posts then carry the app's identity with automatically refreshed tokens. Projects with no app selected keep today's behaviour. Project settings show the identity each repository will use and warn when an app lacks access.
+
+- First PR reviewer. In a PR-only repository an automatic reviewer now reviews each pull request in an isolated read-only checkout and posts its findings as comments only. A review stops after 10 minutes and posts nothing partial. A new **Pull requests** tab lists the reviews. Links in the checkout that point outside it are replaced before the review starts.
+
+- Reviewer findings cap. The reviewer posts at most 1 finding per 100 changed lines, with a minimum of 1 and a maximum of 5. The rest are held back and shown on request, so pull requests are not flooded with comments.
+
+- Daily cap on automatic reviews. Each project gets at most 20 automatic reviews per day, queued oldest first, and the used count is shown. The owner can still start a review by hand and that goes past the cap.
+
+- Review by hand and re-run. The owner can start a review of a pull request with **Review now**, including a re-run of a timed-out or failed review. The re-run shows when the timed-out run started.
+
+- Useful or noise marks on findings. The owner marks each posted finding as useful or noise without seeing which reviewer wrote it. A precision figure per reviewer is then shown, so you can tell which reviewer is worth keeping.
+
+- 20-PR replay. Before the second reviewer goes live, the owner can replay 20 merged pull requests offline through both reviewers, mark the findings blind, and see the precision of each reviewer and a baseline review effort. The replay does not post anything to the pull requests.
+
+- Review settings per project. The owner sets a size budget, a size unit and a map from paths to risk in Project settings. There are no defaults, so size and risk checks stay off until the project sets them.
+
+- Size estimate and needs split at design time. The architect now estimates the size of a design and gives a verdict against the project's budget. Only an over-budget card goes back to the business analyst once, with the folder scope and suggested split points, and the owner decides after that. Upgrade: update workstations to runner 0.1.75 to use the needs-split step.
+
+### Changed
+
+- Deploy checkouts allow a local (`file://` or path) submodule url only when it is a repository registered on the workstation.
+
+- Free hosting. Hosted pricing and billing text is removed from the product, since hosting is free.
+
+- Video rendering uses fewer encoding threads. The renderer now limits ffmpeg to 4 threads by default so it no longer overloads the machine. Self-hosters can change this with `AOM_VIDEO_ENCODE_THREADS`.
+
+### Fixed
+
+- Parking or answering a discovery question no longer fails with a server error. Long display names are now shortened to the allowed length, so people with long names can park and answer questions as normal.
+- The secret of a journey hook called as `POST /api/hooks/<id>/<secret>` no longer appears in the app request log or in the bundled Caddy logs; it is replaced with `[redacted]` and the hook id stays visible. Self-hosters who copied an older `deploy/Caddyfile` should copy the new global log filter from it.
+
+- Creating a discovery session no longer fails with a server error when the owner's display name is longer than 100 characters. The name is now shortened to the allowed length.
+
+- Package installs work in sandboxed agent shifts. The sandbox now allows the fixed lock folders that pnpm 12 uses and points pnpm 11 and later at the shared package store. Installs that used to fail in shifts now complete.
+
+- A public form submission that expired while it was being stored is no longer answered as received. The person filling it in now learns that it was not kept instead of believing it was.
+
+- Agent shifts that run with a cleaned process environment no longer lose their shift token. Each session now gets its own environment file, so those shifts can still talk to the platform.
+
+- A workstation no longer replaces a stored git token file that is not a readable token file with an empty one. Your existing file is kept as it was, so tokens are not lost during the move to encrypted storage.
+
 ## [1.7.0] - 2026-11-14
 
 Runner 0.1.74. No migrations and no new environment variables. Roles changed: tester v14, planner v3, architect v6, builder v8.

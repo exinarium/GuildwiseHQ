@@ -40,7 +40,7 @@ import {
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import { effectiveRegistry, resolvePersona } from '../capabilities/registry.ts';
-import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { clipEventName, orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import { openItemForSubject, raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import { scopeOfDoc, versionEvent } from '../commands/documents.ts';
 import { startIntakeIn } from '../commands/intake.ts';
@@ -1119,7 +1119,7 @@ export class DiscoveryService {
 
   private async userName(db: Queryable, userId: string): Promise<string> {
     const u = await one(db, 'SELECT display_name FROM users WHERE id=$1', [userId]);
-    return u?.display_name ?? 'Owner';
+    return clipEventName(u?.display_name ?? '') || 'Owner';
   }
 
   async answer(

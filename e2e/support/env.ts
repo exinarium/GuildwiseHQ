@@ -60,6 +60,8 @@ export const BIZCARDS = {
 /** A Member invited to the admin's organization by the Owner (org-members spec). */
 export const ORGMEM = { email: 'orgmem@e2e.test', name: 'E2E OrgMem', password: 'orgmem-password-12345' };
 export const OTHER = { email: 'other@e2e.test', name: 'E2E Other', password: 'other-password-12345' };
+/** Review settings spec: a manager of its own project (kept apart from OTHER, which core-loop creates fresh). */
+export const REVMGR = { email: 'revmgr@e2e.test', name: 'E2E RevMgr', password: 'revmgr-password-12345' };
 
 /** M3 specs: one user for the DevOps/vault flows, an owner and a guest for project sharing. */
 export const DEVOPS = { email: 'devops@e2e.test', name: 'E2E DevOps', password: 'devops-password-12345' };

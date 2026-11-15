@@ -13,14 +13,18 @@ import {
   canCommentOnCard,
   canManageCard,
   columnFor,
+  DESIGN_GATE_REASON_TEXT,
+  type DesignGateReason,
   getStage,
   isBusinessWorkflowKey,
   movableStages,
   repoFileUrl,
   type ShiftDto,
   scrubRemoteUrl,
+  storedDesignSizing,
   streamId,
   type WorkflowDefinition,
+  workflowHasDesignGate,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
@@ -30,6 +34,8 @@ import { cardApprovalDto } from '../commands/approval.ts';
 import { canSendCardToBa } from '../commands/ba-intake.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
 import { effectiveCompletion } from '../commands/completion.ts';
+import { cardDesignGateRefusal } from '../commands/design-gate.ts';
+import { currentNeedsSplitRecord, needsSplitTaken } from '../commands/needs-split.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import { cardQaDto } from '../commands/qa.ts';
 import { humanPurposeOf } from '../commands/qa-flow.ts';
@@ -87,8 +93,9 @@ async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigatio
     summary: string;
     commit: string | null;
     at: string;
+    sizing?: unknown;
   } | null;
-  if (!inv) return null;
+  if (!inv?.reportPath) return null;
   let url: string | null = null;
   if (inv.location === 'repo' && c.repo_id && c.branch_name) {
     const repo = await one(ctx.pool, 'SELECT remote_url, forge_kind FROM project_repos WHERE id=$1', [
@@ -104,6 +111,7 @@ async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigatio
     commit: inv.commit ?? null,
     url,
     at: iso(inv.at) as string,
+    sizing: storedDesignSizing(inv.sizing),
   };
 }
 
@@ -231,6 +239,18 @@ export function toShiftDto(s: Row): ShiftDto {
 export const SHIFT_SELECT = `SELECT s.*, a.name AS agent_name, c.ref AS card_ref FROM shifts s
   JOIN agents a ON a.id = s.agent_id LEFT JOIN cards c ON c.id = s.card_id`;
 
+/** code v7: the card's design gate switch as the card page shows it. */
+function designGateDto(card: Row, manage: boolean): NonNullable<CardDetailResponse['designGate']> {
+  const reason = card.design_gate_reason as DesignGateReason | null;
+  return {
+    on: card.design_gate_card === true,
+    required: card.design_gate_required === true,
+    reasonText: reason ? (DESIGN_GATE_REASON_TEXT[reason] ?? null) : null,
+    canChange: manage && !['done', 'cancelled'].includes(card.status),
+    refusal: card.design_gate_card === true ? null : cardDesignGateRefusal(card, true),
+  };
+}
+
 export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): Promise<CardDetailResponse> {
   const { card, role } = await loadVisibleCard(ctx.pool, userId, idOrRef);
   const handoffs = await rows(
@@ -274,6 +294,9 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
   const manage = canManageCard(ctxAuth);
   const open = !['done', 'cancelled'].includes(card.status);
   const wf = manage && open ? await loadWorkflowById(ctx.pool, card.workflow_version_id) : undefined;
+  const gateWf = wf ?? (await loadWorkflowById(ctx.pool, card.workflow_version_id));
+  const designGate =
+    gateWf && workflowHasDesignGate(gateWf.definition) ? designGateDto(card, manage) : undefined;
   const lastDiff = [...handoffs].reverse().find((h) => h.data?.diffStats);
   const workability = (await cardWorkability(ctx, [card])).get(card.id);
   return {
@@ -362,6 +385,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     diffStats: lastDiff?.data?.diffStats ?? null,
     testing: await cardTesting(ctx, card, manage),
     subworkflows: await subworkflowsPanel(ctx, userId, card),
+    ...(designGate ? { designGate } : {}),
     qa: await cardQaDto(ctx.pool, card, { id: userId }, role),
     approval: await cardApprovalDto(ctx.pool, card, { id: userId }, role),
     blockers: (
@@ -379,6 +403,8 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
     ...(await splitLinks(ctx, card)),
+    needsSplit: await currentNeedsSplitRecord(ctx.pool, card),
+    needsSplitTaken: (await needsSplitTaken(ctx.pool, card)).taken,
     canSendToBa: await canSendCardToBa(ctx, ctx.pool, card),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
       ? {

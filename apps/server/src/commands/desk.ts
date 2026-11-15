@@ -10,8 +10,10 @@ import {
   isOrgManager,
   isPhaseDeskSubkind,
   PLATFORM_APPROVAL_SUBKINDS,
+  PR_TIMED_OUT_TWICE_SUBKIND,
   type ResolveDeskItemRequest,
   type ShipReleaseApproval,
+  SIZE_EXCEPTION_SUBKIND,
   streamId,
   TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
@@ -42,6 +44,7 @@ import {
 } from '../sessions/playbooks.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
+import { needsSplitQuestionAnswered } from './design-size.ts';
 import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
@@ -51,11 +54,14 @@ import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { editLedgerEntry } from './ledger.ts';
 import { findNearDuplicate } from './ledger-checks.ts';
+import { needsSplitAnswered } from './needs-split.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { relayAuthoredBundles } from './pack-authoring.ts';
 import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignmentIn } from './pack-holders.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
+import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
+import { resolveSizeExceptionIn } from './size-exception.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
@@ -252,6 +258,18 @@ export async function answerDeskItem(
       actor: userActor(user.id),
       author: { kind: 'user', userId: user.id },
     });
+    // Needs split: the owner keeps the over-budget card, sends it to the BA anyway or cancels it.
+    await needsSplitAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      name: user.displayName,
+    });
+    // The architect's needs-split question: split sends the card back to the BA, build completes the design.
+    await needsSplitQuestionAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      name: user.displayName,
+    });
     after.item = item;
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
@@ -382,6 +400,9 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === SIZE_EXCEPTION_SUBKIND) {
+      // A size exception: approved keeps the over-budget pull request as one, rejected sends it back to its author.
+      await resolveSizeExceptionIn(ctx, tx, user, item, resolution, note);
     } else if (item.kind === 'approval' && PLATFORM_APPROVAL_SUBKINDS.has(item.subkind)) {
       // Platform team (Lean Team v3): deploy and downtime approvals and stop-loss decisions on the platform organisation's
       // desk, a grant request on the client organisation's desk.
@@ -505,6 +526,12 @@ async function closeItem(
       item.subkind === BATCH_QUESTION_SUBKIND && resolution === 'dismissed'
         ? await batchDismissedEvents(tx, item)
         : [];
+    // The owner decided about a "timed out twice" pull request (re-run it elsewhere, or leave it): the reminder stops.
+    if (item.subkind === PR_TIMED_OUT_TWICE_SUBKIND && !retryClosedAlert && !partial) {
+      const prReviewId = (item.data as { prReviewId?: string } | null)?.prReviewId;
+      if (prReviewId)
+        await resolveTimedOutTwice(ctx, tx, prReviewId, 'owner_acted', user.id, { skipAlertClose: true });
+    }
     if (!retryClosedAlert && !partial)
       await ctx.store.append(
         [

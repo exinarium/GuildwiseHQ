@@ -174,8 +174,13 @@ fi`,
     );
     const subs = await readSubmodules(repo.clone, 'git@github.com:acme/cloud.git');
     expect(subs).toEqual([
-      { name: 'a.b', path: 'libs/a', normalized: 'github.com/acme/core' },
-      { name: 'c', path: 'c', normalized: 'example.test/x/c' },
+      {
+        name: 'a.b',
+        path: 'libs/a',
+        url: 'git@github.com:acme/core.git',
+        normalized: 'github.com/acme/core',
+      },
+      { name: 'c', path: 'c', url: 'https://example.test/x/c', normalized: 'example.test/x/c' },
     ]);
   });
 });

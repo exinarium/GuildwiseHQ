@@ -72,6 +72,8 @@ Agents read your vaults during shifts to find shared knowledge. Research interes
 
 Vaults let you keep a searchable knowledge base that grows with your team's work.
 
+On **Rules & decisions**, **Industry bundles** lets Owners and Admins install an accounting or a law bundle in one step. A bundle brings a rule pack, playbooks (switched off until you turn them on), knowledge templates and sample data (both as drafts in **Documents**) and journey templates. Preview a bundle first. Uninstalling removes only what the bundle added and nobody edited.
+
 ## Vault conflicts {#vault-conflicts}
 
 If a local change conflicts with a remote change, sync of that vault pauses on that workstation. The Vaults page shows a **Sync paused: conflict** badge with the conflicting files, and a desk item of kind Vault conflict appears.

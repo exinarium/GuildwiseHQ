@@ -24,6 +24,8 @@ export const streamId = {
   agent: (id: string) => `agent-${id}`,
   thread: (id: string) => `thread-${id}`,
   desk: (id: string) => `desk-${id}`,
+  /** An owner-pending timer (a reminder after 2 working days without owner action). */
+  ownerPending: (id: string) => `owner-pending-${id}`,
   platformPause: (id: string) => `platform-pause-${id}`,
   platformTeam: () => 'platform-team',
   /** The blog writer's topic queue: one stream for the platform, with no organization in it (ceo-blog-topics.md 3.2). */
@@ -31,6 +33,7 @@ export const streamId = {
   ledger: (id: string) => `ledger-${id}`,
   /** One stream per organization and rule pack (business mode). */
   rulePack: (orgId: string, packId: string) => `rule-pack-${orgId}-${packId}`,
+  industryBundle: (orgId: string, bundleId: string) => `industry-bundle-${orgId}-${bundleId}`,
   intake: (id: string) => `intake-${id}`,
   outbound: (id: string) => `outbound-${id}`,
   mailInbox: (id: string) => `mailinbox-${id}`,
@@ -38,9 +41,12 @@ export const streamId = {
   release: (id: string) => `release-${id}`,
   /** Release prep (docs and videos) runs. The kind must not start with `release-` so the web can route it. */
   releaseDocsPrep: (id: string) => `releasedocs-${id}`,
+  /** One 20-PR replay (offline reviewer measurement). The kind must not start with `release-`. */
+  prReplay: (id: string) => `prreplay-${id}`,
   schedule: (id: string) => `schedule-${id}`,
   relayIntegration: (id: string) => `relay-${id}`,
   storageConnection: (id: string) => `storage-${id}`,
+  appIntegration: (id: string) => `app-integration-${id}`,
   form: (id: string) => `form-${id}`,
   interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,

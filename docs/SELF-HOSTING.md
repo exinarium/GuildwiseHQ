@@ -252,7 +252,7 @@ The bundled Caddy configuration (`deploy/Caddyfile`) does two things for the pub
 **Log redaction.** Caddy logs handler errors (a `502` while the app restarts, a `413`, a client abort) with the request address and headers, even without an access log. Every Caddy log line goes through one global filter that:
 
 - deletes the headers `X-Form-Link`, `X-Upload-Token`, `X-File-Name`, `X-Guildwise-Signature`, `X-Hub-Signature-256`, `X-Signature`, `X-Goog-Channel-Token`, `Idempotency-Key`, `X-Guildwise-Delivery`, `Cookie`, `Authorization`, `Proxy-Authorization` and the response `Set-Cookie`;
-- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
+- replaces with `[redacted]` the secret part of the address: everything after `/relay/in/` and `/hooks/in/` (query included), the hook secret in `/api/hooks/<id>/<secret>` (the id stays visible), the id after `/f/` and `/api/public/forms/`, the token after `/invite/` and `/api/invitations/`, the token in `/m/desk/<token>`, and the values of `token`, `code`, `invite` and `pairing_code` in a query string.
 
 If a relay kind of yours sends a secret in another header, add a `request>headers>Name delete` line to the filter.
 
@@ -407,7 +407,7 @@ Guildwise HQ can turn articles, releases and tutorials into narrated, faceless v
 `AOM_SECRET_KEY` as the app, plus Chromium, ffmpeg and the offline voice (Kokoro, about 0.5 GB), and shares a `video` volume
 with the app (read-only there) for the rendered files. Give it 2 CPUs and 3 GB. It renders one video at a time, so a render
 (a few minutes) never starves the app.
-A video renders shortly before its slot, not when its script is written, and the MP4 is removed after publishing; `AOM_VIDEO_MAX_BYTES` (default 5 GB, on the app and the worker) is the disk budget: no render starts while the rendered videos plus 300 MB would pass it.
+A video renders shortly before its slot, not when its script is written, and the MP4 is removed after publishing; `AOM_VIDEO_MAX_BYTES` (default 5 GB, on the app and the worker) is the disk budget: no render starts while the rendered videos plus 300 MB would pass it. `AOM_VIDEO_ENCODE_THREADS` (worker only, default 4) caps the threads of each H.264 encode and keeps the render's memory the same on any machine; a value above the machine's cores is lowered to the cores, and a missing or invalid value (not a whole number, or below 1) uses 4. Raise it only on a large machine with memory to spare: memory grows with it. The bundled compose file does not pass it through, so the default applies there.
 
 The help videos (the clips are cut from them) are not in the build context: `.dockerignore` leaves out `media/videos/*.mp4` and
 `*.webm` (about 180 MB) so every app build stays small. The app image only needs their metadata (the `.json` and `.vtt` files, from

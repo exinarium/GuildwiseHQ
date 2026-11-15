@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PostAsRepoRowSchema, PostAsSettingsSchema } from './post-as.ts';
 
 /**
  * "Commit as" (backlog #65, invisible organisation): the name and e-mail every commit of a project carries. Not a secret.
@@ -21,7 +22,7 @@ export type CommitAs = z.infer<typeof CommitAsSchema>;
 export const SetCommitAsRequestSchema = z.object({ commitAs: CommitAsSchema.nullable() });
 export type SetCommitAsRequest = z.infer<typeof SetCommitAsRequestSchema>;
 
-export const COMMIT_IDENTITY_SOURCES = ['project', 'repo', 'global', 'system'] as const;
+export const COMMIT_IDENTITY_SOURCES = ['project', 'repo', 'global', 'system', 'app'] as const;
 export const CommitIdentitySourceSchema = z.enum(COMMIT_IDENTITY_SOURCES);
 export type CommitIdentitySource = z.infer<typeof CommitIdentitySourceSchema>;
 
@@ -39,6 +40,7 @@ export const COMMIT_IDENTITY_SOURCE_LABEL: Record<CommitIdentitySource, string> 
   repo: "the repository's own git config",
   global: "the workstation's global git config",
   system: "the workstation's system git config",
+  app: "the project's selected app",
 };
 
 /** The message when no identity is set anywhere; names the three places to set it. */
@@ -60,6 +62,10 @@ export const CommitAsResponseSchema = z.object({
       identity: RepoIdentityFactSchema.nullable(),
     }),
   ),
+  /** The apps the project posts as; absent from older servers. */
+  postAs: PostAsSettingsSchema.optional(),
+  /** Per project repository, the resolved identity (see resolvePostAsRepo) and the last access check. */
+  repos: z.array(PostAsRepoRowSchema).optional(),
 });
 export type CommitAsResponse = z.infer<typeof CommitAsResponseSchema>;
 

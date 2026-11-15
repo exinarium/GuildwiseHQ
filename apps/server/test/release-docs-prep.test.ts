@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  noAppPlan,
+  POST_AS_CAPABILITY,
+  POST_AS_V2_CAPABILITY,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
   RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
@@ -327,6 +330,61 @@ describe('prep run', () => {
     expect(run.status).toBe('passed');
     expect(run.repos[0]).toMatchObject({ baseTag: 'v1.3.0', commitSha: PREP, pushed: true });
     expect(run.repos[0].summary.commitCount).toBe(1);
+  });
+
+  it('with no app selected, a post-as:2 runner gets the empty plan on every step; an older runner gets no plan field', async () => {
+    await enable();
+    await runToPassed(PREP);
+    expect((await cmds()).every((c: any) => !('postAs' in c.payload))).toBe(true);
+    await q(`TRUNCATE runner_commands CASCADE`);
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`,
+      [w.workstationId, [POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY]],
+    );
+    await runToPassed(PREP);
+    const list = await cmds();
+    expect(list.length).toBe(3);
+    for (const c of list) expect(c.payload.postAs).toEqual(noAppPlan());
+  });
+
+  it('with an app selected, every step carries the app plan', async () => {
+    const orgId = (await q2('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0].org_id;
+    const id = randomUUID();
+    await q(
+      `INSERT INTO org_app_integrations (id, org_id, provider, label, host, app_id, app_slug, app_name, installation_id, account,
+         bot_login, bot_user_id, commit_name, commit_email, status, created_by, created_at, updated_at)
+       VALUES ($1,$2,'github-app','Guild bot','github.com','5001','guild-bot','Guild bot','801','acme','guild-bot[bot]','98',
+               'guild-bot[bot]','98+guild-bot[bot]@users.noreply.github.com','active',$3,now(),now())`,
+      [id, orgId, randomUUID()],
+    );
+    await q(
+      `INSERT INTO org_app_integration_workstations (integration_id, workstation_id, via, added_at) VALUES ($1,$2,'web',now())`,
+      [id, w.workstationId],
+    );
+    await q(
+      `INSERT INTO workstation_integrations (workstation_id, kind, instance, status, checked_at)
+       VALUES ($1,'github-app','5001:801',$2::jsonb,now())
+       ON CONFLICT (workstation_id, kind, instance) DO UPDATE SET status=EXCLUDED.status`,
+      [w.workstationId, JSON.stringify({ state: 'connected' })],
+    );
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`,
+      [w.workstationId, [POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY, 'app-integrations:1']],
+    );
+    await ok(owner('PUT', `/api/projects/${w.projectId}/post-as`, { apps: [{ integrationId: id }] }));
+    try {
+      await enable();
+      await runToPassed(PREP);
+      const list = await cmds();
+      expect(list.length).toBe(3);
+      for (const c of list)
+        expect(c.payload.postAs.repos.find((e: any) => e.repoId === w.repoId)).toMatchObject({
+          source: 'app',
+          app: { integrationId: id },
+        });
+    } finally {
+      await ok(owner('PUT', `/api/projects/${w.projectId}/post-as`, { apps: [] }));
+    }
   });
 
   it('refuses a second run while one is running', async () => {

@@ -308,7 +308,9 @@ describe('the run manager and the guides', () => {
       const { pathMap } = await t.mgr.buildGuides(envId);
       const wt = pathMap[0]?.worktreePath as string;
       expect(readFileSync(join(wt, 'modules', 'server', 'embedded.txt'), 'utf8')).toBe('embedded server\n');
-      expect(authFor).toEqual([t.repo.origin]);
+      // the submodule is fetched with the credentials of its own url's host, not the superproject's
+      expect(authFor).toContain(sub.clone);
+      expect(readFileSync(join(t.repo.clone, '.git', 'config'), 'utf8')).not.toContain(wt);
       // removing the environment removes the worktree with its submodule
       await t.mgr.stop({ envId, reason: 'stopped' });
       expect(existsSync(wt)).toBe(false);
@@ -334,6 +336,9 @@ describe('the run manager and the guides', () => {
       const sub = makeRepo();
       sh(t.repo.clone, 'git', ['submodule', 'add', sub.clone, 'modules/server']);
       sh(t.repo.clone, 'git', ['commit', '-m', 'add the submodule']);
+      // the pinned commit exists nowhere (the clone's own copy of the submodule cannot supply it either)
+      sh(t.repo.clone, 'git', ['update-index', '--cacheinfo', `160000,${'a'.repeat(40)},modules/server`]);
+      sh(t.repo.clone, 'git', ['commit', '-m', 'pin a commit that exists nowhere']);
       rmSync(sub.root, { recursive: true, force: true }); // the submodule's remote is gone
       const { p, envId } = t.start();
       expect(await t.mgr.startEnv(p)).toEqual({ ok: true });

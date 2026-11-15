@@ -43,6 +43,8 @@ const config = defineConfig({
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
     { name: 'desk', testMatch: 'desk.spec.ts', dependencies: ['core-loop'] },
     { name: 'chat', testMatch: 'chat.spec.ts', dependencies: ['desk'] },
+    // No "post as" app on TOY: the builder commits keep today's identity and no credential lands in git config or logs.
+    { name: 'post-as-fallback', testMatch: 'post-as-fallback.spec.ts', dependencies: ['core-loop'] },
     { name: 'ceo-chat', testMatch: 'ceo-chat.spec.ts', dependencies: ['chat'] },
     { name: 'devops', testMatch: 'devops.spec.ts', dependencies: ['chat'] },
     { name: 'sharing', testMatch: 'sharing.spec.ts', dependencies: ['devops'] },
@@ -50,7 +52,12 @@ const config = defineConfig({
     { name: 'research', testMatch: 'research.spec.ts', dependencies: ['sharing'] },
     { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
     // Discovery Studio (phase B): its own user, runner and project; needs only the shared stack.
+    { name: 'pr-only', testMatch: 'pr-only.spec.ts', dependencies: ['auth'] },
+    { name: 'second-reviewer', testMatch: 'second-reviewer.spec.ts', dependencies: ['auth'] },
+    { name: 'pr-review-daily-cap', testMatch: 'pr-review-daily-cap.spec.ts', dependencies: ['auth'] },
+    { name: 'review-settings', testMatch: 'review-settings.spec.ts', dependencies: ['auth'] },
     { name: 'discovery', testMatch: 'discovery.spec.ts', dependencies: ['auth'] },
+    { name: 'discovery-long-name', testMatch: 'discovery-long-name.spec.ts', dependencies: ['auth'] },
     // Boardroom (phase C): its own user and runner; needs only the shared stack.
     { name: 'boardroom', testMatch: 'boardroom.spec.ts', dependencies: ['auth'] },
     { name: 'hr', testMatch: 'hr.spec.ts', dependencies: ['intake'] },
@@ -66,6 +73,7 @@ const config = defineConfig({
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Business mode: its own user and paired mock workstation (no runner process); needs only the shared stack.
     { name: 'business-mode', testMatch: 'business-mode.spec.ts', dependencies: ['auth'] },
+    { name: 'industry-bundles', testMatch: 'industry-bundles.spec.ts', dependencies: ['auth'] },
     // Business card types (enquiry, quote, ...): its own user and mock runner, an organization with no repository.
     { name: 'business-card-types', testMatch: 'business-card-types.spec.ts', dependencies: ['auth'] },
     // Business mode wording (Knowledge, Rules & decisions): its own user and organization; needs only the shared stack.
@@ -116,6 +124,7 @@ const config = defineConfig({
     { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['installer'] },
     // Journeys (designer, instances, handoffs, the shared record): its own user, organization and project.
     { name: 'journeys', testMatch: 'journeys.spec.ts', dependencies: ['auth'] },
+    { name: 'hook-secret-log', testMatch: 'hook-secret-log.spec.ts', dependencies: ['auth'] },
     // Journey waits, gates and webhooks: its own user, project and mock runner; moves the server's test clock by minutes and hours.
     { name: 'journey-waits', testMatch: 'journey-waits.spec.ts', dependencies: ['auth'] },
     // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the

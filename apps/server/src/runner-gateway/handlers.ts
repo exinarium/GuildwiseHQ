@@ -23,6 +23,11 @@ import { ceoRpc } from '../ceo/gateway.ts';
 import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
+import {
+  appIdentityAlertEvents,
+  appIdentityFailureText,
+  commandProject,
+} from '../commands/app-identity-alert.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
@@ -48,6 +53,7 @@ import {
 } from '../commands/integrations.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
+import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyResealResult } from '../commands/org-provider-keys.ts';
@@ -62,6 +68,12 @@ import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { applyAppAccessCheckResult } from '../commands/post-as.ts';
+import { applyPrListResult } from '../commands/pr-only.ts';
+import { applyMergedPrList } from '../commands/pr-replays.ts';
+import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
+import { applySplitNoticeResult } from '../commands/pr-size-check.ts';
+import { applyCommitStatusResult } from '../commands/pr-size-status.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -275,7 +287,7 @@ export class RunnerHandlers {
         ]);
         return;
       case 'git.report':
-        await applyGitReport(this.ctx, conn.workstationId, msg.connections);
+        await applyGitReport(this.ctx, conn.workstationId, msg.connections, msg.statusTokens);
         return;
       case 'integrations.report':
         await applyIntegrationsReport(this.ctx, conn.workstationId, msg);
@@ -412,6 +424,7 @@ export class RunnerHandlers {
         if (!claimed) return this.ack(conn, msg);
         try {
           await this.applyCommandResult(conn, msg, cmd);
+          await this.alertAppIdentityFailure(msg, cmd);
         } catch (err) {
           await exec(
             this.ctx.pool,
@@ -520,6 +533,22 @@ export class RunnerHandlers {
 
   /** A re-probe: store the runtimes and, when availability or sandbox state moved, tell the browsers (live refresh). */
   /** What a runner's answer to a durable command does, by the command's type. Called once per command (see the claim). */
+  /**
+   * A repository command (commit status, PR notice, a command refused for a missing plan) that failed because the
+   * project's selected app could not be used raises the project's app alert, the same as a stopped shift.
+   */
+  private async alertAppIdentityFailure(msg: RunnerToServerOf<'command.result'>, cmd: Row): Promise<void> {
+    const result = msg.result as { error?: unknown } | undefined;
+    const detail = appIdentityFailureText(msg.error) ?? appIdentityFailureText(result?.error);
+    if (!detail) return;
+    const target = await commandProject(this.ctx.pool, cmd.payload);
+    if (!target) return;
+    await withAppendTx(this.ctx.pool, async (tx) => {
+      const events = await appIdentityAlertEvents(tx, { ...target, detail, what: 'Repository commands' });
+      if (events.length) await this.ctx.store.append(events, { tx });
+    });
+  }
+
   private async applyCommandResult(
     conn: RunnerConn,
     msg: RunnerToServerOf<'command.result'>,
@@ -610,6 +639,36 @@ export class RunnerHandlers {
       // Terminal: the facts (or why not) are stored; the proposal is reconciled with them.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseFactsResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.list_prs') {
+      // Terminal: the open pull requests of a PR-only repository (or why not) are recorded; the next poll asks again.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrListResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.commit_status') {
+      // Terminal: the status is on the commit, or why not (retried by the scheduler; never redelivered by the queue).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyCommitStatusResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.list_merged_prs') {
+      // Terminal: the merged pull requests the replay takes its 20 from (or why not).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyMergedPrList(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.run') {
+      // Terminal: a timeout or a failure is recorded as it is (never redelivered: a second run would be a second review).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrReviewRunResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.cancel') {
+      // Terminal and log only: the server already marked the run cancelled; `found: false` means it had not started.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      this.ctx.log.info(
+        { runId: (cmd.payload as { runId?: string }).runId, ok: msg.ok },
+        'pull request review cancel answered',
+      );
+    } else if (cmd?.type === 'pr_review.post') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPrReviewPostResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'pr_review.notice') {
+      // Terminal: the author was told, or why not (the server retries a few times by itself).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applySplitNoticeResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'release.ship') {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -819,6 +878,32 @@ export class RunnerHandlers {
         msg.ok,
         msg.result,
         String(cmd.payload.keyId ?? ''),
+      );
+    } else if (cmd?.type === 'app.access_check') {
+      // Which project repositories the app reaches: states and value-free reasons only.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyAppAccessCheckResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'app.connect' || cmd?.type === 'app.test') {
+      // The sealed key is forgotten whatever the answer was; only facts (identity, typed error) are kept.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await this.ctx.pool.query(`UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+        msg.commandId,
+      ]);
+      await applyAppCommandResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.type,
+        cmd.payload,
+        msg.ok,
+        msg.result,
       );
     } else if (cmd?.type === 'provider.key.set' || cmd?.type === 'provider.key.clear') {
       // The sealed key is forgotten whatever the answer was; only the fact is kept for the page.
@@ -1124,6 +1209,7 @@ export class RunnerHandlers {
     await sendStorageSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'storage sync not queued'),
     );
+    await sendAppSync(ctx, conn.workstationId).catch((err) => ctx.log.warn({ err }, 'app sync not queued'));
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
   }
@@ -1420,9 +1506,18 @@ export class RunnerHandlers {
           matched.add(m.id as string);
           await exec(
             tx,
-            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at, git_identity) VALUES ($1,$2,$3,$4,$5::jsonb)
-             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at, git_identity=EXCLUDED.git_identity`,
-            [conn.workstationId, m.id, r.localPath, now, r.identity ? JSON.stringify(r.identity) : null],
+            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at, git_identity, reviewer_token, reviewer_token_problem) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
+             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at, git_identity=EXCLUDED.git_identity, reviewer_token=EXCLUDED.reviewer_token, reviewer_token_problem=EXCLUDED.reviewer_token_problem`,
+            [
+              conn.workstationId,
+              m.id,
+              r.localPath,
+              now,
+              r.identity ? JSON.stringify(r.identity) : null,
+              // only whether a reviewer token is held and why it cannot be used: never the token
+              r.reviewerToken?.present ?? null,
+              r.reviewerToken?.problem ?? null,
+            ],
           );
         }
       }

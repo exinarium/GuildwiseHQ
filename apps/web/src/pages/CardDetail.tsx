@@ -44,6 +44,7 @@ import { CardPhase } from '../components/CardPhase.tsx';
 import { MentionBox } from '../components/cards/MentionBox.tsx';
 import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
 import { DependenciesPanel } from '../components/DependenciesPanel.tsx';
+import { CardDesignGateSwitch } from '../components/DesignGatePanel.tsx';
 import { DelegationStep } from '../components/delegation/DelegationSteps.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
@@ -52,6 +53,7 @@ import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPanel.tsx';
 import { CardMailReply } from '../components/MailThreadPanel.tsx';
 import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
+import { NeedsSplitPanel } from '../components/NeedsSplitPanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
@@ -484,6 +486,7 @@ export function CardDetailView({
         </Callout>
       )}
 
+      <NeedsSplitPanel needsSplit={data.needsSplit} />
       <SplitLinks splitInto={data.splitInto} splitFrom={data.splitFrom} />
       <SubworkflowWaitLine data={data.subworkflows} />
       <StartedByLine data={data.subworkflows} />
@@ -563,6 +566,9 @@ export function CardDetailView({
             <Sec t="brief">
               {data.publication && <PublicationPanel publication={data.publication} />}
               <InvestigationPanel card={card} />
+              {data.designGate && (data.designGate.canChange || data.designGate.on) && (
+                <CardDesignGateSwitch cardId={card.id} gate={data.designGate} />
+              )}
               {keys.length > 0 && (
                 <Panel title={business ? 'Details' : 'What to build'} data-testid="card-spec">
                   <dl className="flex flex-col gap-4 text-base">

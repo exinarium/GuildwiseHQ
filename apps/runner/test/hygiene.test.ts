@@ -190,6 +190,35 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     expect(second.result.actions).toContain('main is in order');
   });
 
+  it('a repository not on an app: commits a pull rewrites get the shift identity as committer and keep their author', async () => {
+    const repo = makeRepo();
+    remoteCommit(repo, 'theirs.txt', 'x');
+    write(repo, 'mine.txt', 'mine');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'local work']);
+    const identity = { name: 'Dev Ops', email: 'devops@example.test' };
+    const { result } = await hygieneRepo(spec(repo), [], { identity, appAuth: async () => null });
+    expect(result.problem).toBeNull();
+    expect(result.actions.join(' ')).toContain('rebased main');
+    const show = (f: string) => sh(repo.origin, 'git', ['log', '-1', `--format=${f}`, 'main']);
+    expect(show('%s')).toBe('local work');
+    expect(show('%cn <%ce>')).toBe('Dev Ops <devops@example.test>');
+    expect(show('%an <%ae>')).toBe('Test <test@example.test>');
+  });
+
+  it('without a shift identity the rebase keeps the git environment and configuration, as before', async () => {
+    const repo = makeRepo();
+    remoteCommit(repo, 'theirs.txt', 'x');
+    write(repo, 'mine.txt', 'mine');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'local work']);
+    const { result } = await hygieneRepo(spec(repo));
+    expect(result.problem).toBeNull();
+    expect(sh(repo.origin, 'git', ['log', '-1', '--format=%cn <%ce>', 'main'])).toBe(
+      'Test <test@example.test>',
+    );
+  });
+
   it('pulls what the remote has while the unsaved edits stay in the checkout', async () => {
     const repo = makeRepo();
     remoteCommit(repo, 'theirs.txt', 'x');
@@ -333,6 +362,11 @@ describe('aom hygiene run', () => {
       },
       rpc: async (r) => {
         rpcs.push(r);
+        // The runner runs hygiene (supervisor `hygiene.run`) from its own copy of the brief.
+        if (r.method === 'hygiene.run')
+          return hygiene
+            ? { ok: true, result: await runHygiene(hygiene as Parameters<typeof runHygiene>[0]) }
+            : { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
         return { ok: true, result: { devops: { hygiene } } };
       },
     });

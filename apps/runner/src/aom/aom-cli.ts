@@ -9,6 +9,7 @@ import {
   type BaTaskShift,
   type DesignAssumption,
   DesignAssumptionSchema,
+  type DesignSizeData,
   type DevopsShift,
   formatCommandLine,
   formatLedgerMatches,
@@ -21,6 +22,7 @@ import {
   parseCommandLine,
   parseRunHealth,
   parseRunPort,
+  parseSeamFlag,
   parseWaitDuration,
   QA_FOCUS_MAX,
   QUESTION_TOPICS,
@@ -46,7 +48,6 @@ import {
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
-import { resolveShiftEnv } from '../ceo/shift-env.ts';
 import {
   denyHook,
   loadSubagentGuardConfig,
@@ -54,9 +55,9 @@ import {
   runSubagentDone,
   runSubagentGuard,
 } from '../delegate/subagent-guard.ts';
-import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
-import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
-import { runHygiene } from '../devops/hygiene.ts';
+import { gitHeadBranch, gitOriginUrl, loadGuardConfig, runGuardHook } from '../devops/guard.ts';
+import type { HygieneRun } from '../devops/hygiene.ts';
+import { missingTokenMessage, resolveShiftEnv, type ShiftEnvAttempt } from '../session/shift-credential.ts';
 
 export interface AomIo {
   out(s: string): void;
@@ -68,6 +69,8 @@ export interface AomContext {
   io: AomIo;
   fetch: typeof fetch;
   readFile: (path: string) => string;
+  /** What the entry tried when AOM_SHIFT_TOKEN was not in the environment (named in the missing-token error). */
+  shiftEnvAttempts?: ShiftEnvAttempt[];
   /** Test hooks for `aom question --wait` (real timers when absent). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -80,6 +83,8 @@ interface Parsed {
 
 const BOOLEAN_FLAGS = new Set([
   'json',
+  'delete',
+  'tags',
   'local',
   'ssh-hosts',
   'non-blocking',
@@ -197,7 +202,8 @@ function textFlag(ctx: AomContext, p: Parsed, key: string, required: boolean): s
 function ipc(ctx: AomContext): { url: string; token: string } {
   const url = ctx.env.AOM_IPC_URL;
   const token = ctx.env.AOM_SHIFT_TOKEN;
-  if (!url || !token)
+  if (!token) throw new UsageError(missingTokenMessage(ctx.env, ctx.shiftEnvAttempts));
+  if (!url)
     throw new UsageError('AOM_IPC_URL / AOM_SHIFT_TOKEN are not set: `aom` only works inside an agent shift');
   return { url, token };
 }
@@ -742,8 +748,41 @@ function designAssumptions(ctx: AomContext, p: Parsed): DesignAssumption[] {
   return out;
 }
 
+/**
+ * `--size <n> --path "<folder or file>"... [--risk low|medium|high] [--seam "<title>: <folder>, <folder>"]...`: the size
+ * estimate in the project's unit. Undefined when neither `--size` nor `--path` is given (the server says when it is needed).
+ */
+export function designSizeFlags(p: Parsed): DesignSizeData | undefined {
+  const rawSize = one(p, 'size');
+  const paths = many(p, 'path')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (rawSize === undefined && paths.length === 0) return undefined;
+  if (rawSize === undefined || !/^\d+$/.test(rawSize.trim()))
+    throw new UsageError(
+      `--size takes your estimate as a whole number in the project's size unit (got: ${rawSize ?? 'nothing'}); name the folders or files with --path`,
+    );
+  const risk = one(p, 'risk')?.trim();
+  if (risk !== undefined && !['low', 'medium', 'high'].includes(risk))
+    throw new UsageError(`--risk is low, medium or high (got: ${risk})`);
+  const seams = many(p, 'seam').map((raw) => {
+    try {
+      return parseSeamFlag(raw);
+    } catch (e) {
+      throw new UsageError((e as Error).message);
+    }
+  });
+  return {
+    estimate: Number(rawSize.trim()),
+    paths,
+    ...(risk ? { risk: risk as 'low' | 'medium' | 'high' } : {}),
+    seams,
+  };
+}
+
 const DESIGN_USAGE_EXTRA =
   ' [--tests-only]' +
+  '\n       the size estimate (when the project has a size unit): --size <n> --path "<folder or file>" (repeatable) [--risk low|medium|high]; over the budget also --seam "<title>: <folder>, <folder>" (2 to 8)' +
   '\n       --tests-only: the whole change is in the end-to-end tests (no product code, no unit tests): the tester works the build stage' +
   '\n       a design made before its dependencies landed also needs --assumption "<assumption> | <dependency ref> | <what changes if wrong>" (repeatable) or --no-assumptions "<why>"' +
   '\n       the assumption review: aom design confirm --summary "<how you checked>"   |   aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed>"';
@@ -769,8 +808,9 @@ async function investigationReport(
       );
     if (sub === 'revise' && (!one(p, 'report') || revised.length === 0))
       throw new UsageError(
-        'usage: aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>"',
+        'usage: aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>" [--size <n> --path "<folder or file>" ...]',
       );
+    const reviseSize = sub === 'revise' ? designSizeFlags(p) : undefined;
     return report(
       ctx,
       outcome(outcomeId, summary.slice(0, 20000), {
@@ -778,6 +818,7 @@ async function investigationReport(
         summary: summary.slice(0, 2000),
         location: 'repo',
         review: { decision: sub, revised, note: (one(p, 'note') ?? '').slice(0, 4000) },
+        ...(reviseSize ? { size: reviseSize } : {}),
       }),
     );
   }
@@ -789,6 +830,7 @@ async function investigationReport(
   const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
   const assumptions = verb === 'design' ? designAssumptions(ctx, p) : [];
   const none = verb === 'design' ? one(p, 'no-assumptions')?.trim() : undefined;
+  const size = verb === 'design' ? designSizeFlags(p) : undefined;
   if (verb !== 'design' && has(p, 'tests-only'))
     throw new UsageError(
       '--tests-only is for `aom design` (a card that will be built), not `aom investigate`',
@@ -803,6 +845,7 @@ async function investigationReport(
       location: 'repo',
       ...(assumptions.length ? { assumptions } : {}),
       ...(none ? { noAssumptions: none } : {}),
+      ...(size ? { size } : {}),
       ...(testsOnly ? { testsOnly: true } : {}),
     }),
   );
@@ -1985,9 +2028,22 @@ const VERBS: Record<string, Verb> = {
    */
   git: async (ctx, p) => {
     const usage =
-      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push --repo <dir> [--delete] [--tags] <refspec>... | aom git fetch --repo <dir>   (the DevOps engineer: the runner pushes and fetches)\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
     const sub = p.positionals[0];
     const host = one(p, 'host');
+    // The DevOps engineer's push and fetch of a repository: the runner talks to origin (an app repository with the app's
+    // token, which never reaches this process; any other with plain git).
+    const repo = one(p, 'repo');
+    if ((sub === 'push' || sub === 'fetch') && repo) {
+      const r = (await rpc(ctx, `git.${sub}`, {
+        repo: resolvePath(repo),
+        refspecs: p.positionals.slice(1),
+        ...(has(p, 'delete') ? { delete: true } : {}),
+        ...(has(p, 'tags') ? { tags: true } : {}),
+      })) as { message?: string };
+      ctx.io.out(`${r?.message ?? 'Done.'}\n`);
+      return 0;
+    }
     // Agents never push (backlog #61): the runner lands the work, and pushes a branch only for a pull request.
     if (sub === 'push')
       throw new UsageError(
@@ -2050,9 +2106,15 @@ const VERBS: Record<string, Verb> = {
    * records the command through the runner and prints the permission decision. Not listed in `aom help`: agents never call it.
    */
   'devops-guard': async (ctx) => {
+    const guardCfg = loadGuardConfig(ctx.env.AOM_DEVOPS_GUARD);
     const r = await runGuardHook({
       stdin: ctx.readFile('-'),
-      cfg: loadGuardConfig(ctx.env.AOM_DEVOPS_GUARD),
+      cfg: guardCfg,
+      // only a session with frozen branches asks git which branch is checked out
+      deps: {
+        ...(guardCfg.frozenBranches?.length ? { headBranch: gitHeadBranch } : {}),
+        ...(guardCfg.appRepos?.length ? { originUrl: gitOriginUrl } : {}),
+      },
       report: async (entries) => {
         try {
           await rpc(ctx, 'devops.audit', { entries });
@@ -2155,29 +2217,9 @@ const VERBS: Record<string, Verb> = {
    */
   hygiene: async (ctx, p) => {
     if (p.positionals[0] !== 'run') throw new UsageError('usage: aom hygiene run [--note "<text>"]');
-    const brief = (await rpc(ctx, 'card.get')) as { devops?: DevopsShift };
-    const spec = brief.devops?.hygiene;
-    if (!spec) throw new UsageError('this request is not a repository hygiene request: nothing to run');
-    // Repositories with a running card shift are left for the next run (hygiene moves refs in the shared .git).
-    let busy: string[] = [];
-    try {
-      busy = ((await rpc(ctx, 'hygiene.busy_worktrees')) as { worktrees?: string[] }).worktrees ?? [];
-    } catch {
-      // older runner: no deferral
-    }
-    // Pull request states come from the runner (it holds the git host logins); without it the branches of cards that
-    // went through a pull request are judged by their commits alone.
-    const changeState: ChangeStateLookup = async (q) => {
-      try {
-        const r = (await rpc(ctx, 'hygiene.change_state', q)) as {
-          state?: 'open' | 'merged' | 'closed' | null;
-        };
-        return r.state ?? null;
-      } catch {
-        return null;
-      }
-    };
-    const run = await runHygiene(spec, busy, { changeState });
+    // Hygiene runs in the runner: it reads the spec from its own copy of the brief, and an app repository reaches
+    // origin with the app's token, which never enters this process.
+    const run = (await rpc(ctx, 'hygiene.run', {})) as HygieneRun;
     const note = textFlag(ctx, p, 'note', false)?.trim();
     const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
     ctx.io.out(`${summary}\n`);
@@ -3022,7 +3064,7 @@ async function preloadGuardStdin(): Promise<string> {
 
 if (isEntry) {
   // a bypass owner turn's Bash child has its credential-named variables scrubbed: refill what is missing from the turn dir
-  const entryEnv = resolveShiftEnv(process.env);
+  const { env: entryEnv, attempts: shiftEnvAttempts } = resolveShiftEnv(process.env);
   const confined = confinedReader(entryEnv, process.cwd());
   const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
   // the two time-limit hooks of a native subagent read their input the same way (the deadline fails closed, the done hook has nothing to protect)
@@ -3036,6 +3078,7 @@ if (isEntry) {
       io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
       fetch: entryEnv.AOM_IPC_SOCKET ? socketFetch(entryEnv.AOM_IPC_SOCKET, fetch) : fetch,
       readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
+      shiftEnvAttempts,
     });
   })().then(
     (code) => process.exit(isGuard && code !== 0 ? 2 : code),

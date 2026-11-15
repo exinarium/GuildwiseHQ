@@ -284,7 +284,7 @@ sections 3 and 5). It is a cap the machine owner holds against any server:
   existing opt-in: the Claude Code classifier plus the desk relay) or `bypass`. `guildwise-runner ceo full-power on --bypass` is the
   explicit opt-in to `--permission-mode bypassPermissions` for the Owner's own chat: nothing is judged or asked, like his terminal,
   and the runner sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so his shell cannot print the runner's provider credential.
-  That scrub also strips `AOM_SHIFT_TOKEN` from the shell, so every owner turn writes its shift variables to a 0600 `shift-env.json` in its turn dir and `aom` fills in only the missing ones from `<AOM_CEO_TURN_DIR>/shift-env.json` (variables already set win).
+  That scrub also strips `AOM_SHIFT_TOKEN` from the shell, so the owner turn, like every other session, gets its shift variables in a 0600 file named by `AOM_SHIFT_ENV_FILE` (see `scrubSubprocessEnv` below) and `aom` fills in only the missing ones from it (variables already set win). A `<AOM_CEO_TURN_DIR>/shift-env.json` written by an older runner is still read as a last fallback for one release.
   `on --strict` sets `auto` again; plain `on` keeps the current choice. **A standing-order turn always runs `auto` with the desk
   relay**, whatever this says. The classifier's refusals are final and never reach the desk, so in `auto` an ordinary step can still be
   refused; that is the price of not choosing `--bypass`.
@@ -513,7 +513,7 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 - **Precedence of the limit (GWP-95).** (1) The server's value from the last `welcome` or `shifts.limit` of this process: the workstation setting, or the platform cap over it. (2) Before the server has answered since the runner started: `server-limits.json` (the last value the server sent), else `config.json` `maxConcurrentShifts`; this is the *local fallback* and lasts only until the first `welcome`. (3) When the owner chose "Runner's own value" (null): `config.json` under the platform cap, source *runner config*. A runner that announces `shift-limit:2` reports the limit it enforces and its source in every heartbeat (`load.maxShifts`, `load.limitSource`; sources `workstation_setting`, `platform_cap`, `runner_config`, `local_fallback`, `pairing_budget`). The Workstations page shows it next to the server's view, flags a mismatch, and shows "unknown" for an older runner. A `busy` rejection carries `capacity` (limit, source, running count and the shifts holding the slots, identifiers only), and the card's message names them.
 - **What takes a slot.** Card, question, DevOps and BA task shifts. Chat turns (owner chat, CEO owner/order turns, @mention work) and the CEO shift do not (`SHIFT_KINDS_OUTSIDE_LIMIT`). The runner, the dispatcher and the Workstations page count with this one rule; the page shows chat/CEO turns apart as "not counted". Unlimited removes Guildwise's own cap only: memory, CPU and the model usage limit remain, and `AOM_MAX_SHIFTS_PER_WORKSTATION` stays a platform ceiling the super admin controls (`0` = no ceiling).
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
-- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (the project's dependencies in the run-step sandbox; submodules are not filled) before the agent starts; see "A new card worktree is prepared".
+- **prepareWorktrees** (default `true`): prepare a card worktree the runner creates (the project's dependencies in the run-step sandbox; the submodules are filled separately, see "A new card worktree is prepared") before the agent starts; see "A new card worktree is prepared".
 - **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
 - **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
 
@@ -950,6 +950,7 @@ aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host 
 aom git status [<provider>] | aom git connect <provider> [--host <h>]   # DevOps only: check or start this workstation's git host login
 aom git fetch | merge-main | verify-merge   # architect only (investigate stages): the runner fetches origin, merges the latest main, checks a conflict resolution (`aom git push` is refused: agents never push)
 aom design --report <path> --summary "<text>" [--tests-only]   # architect: hand the designed card to build (outcome handoff); --tests-only: the Build stage goes to the tester
+aom design|design revise ... --size <n> --path "<folder or file>"... [--risk low|medium|high] [--seam "<title>: <folder>, <folder>"...]   # architect: size estimate in the project unit, paths touched, declared risk (only raises), split seams (2-8, needed when over budget)
 aom risk large --reason "<why>"                       # planner, architect: mark the card large (BA also small)
 aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
 aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
@@ -1127,7 +1128,7 @@ codex exec --json --skip-git-repo-check --strict-config --color never --cd <work
 - **Skills.** Granted skills (`grantedSkills`) are written by `materializeSkills` into `agents/<id>/home/.agents/skills` (Codex's USER scope, under the agent's private `HOME`), replacing the folder each session; nothing is written into the worktree. Codex has no switch for the repository's own `.agents/skills` (REPO scope), so those load too; Codex's bundled skills are turned off.
 - **Environment.** The codex process gets the allow-listed variables (`PATH`, locale, proxies, certificates), the session's variables (`HOME` private, `AOM_*`, caches), `CODEX_HOME` and, in `api_key` mode, `CODEX_API_KEY`: nothing else of the runner's environment (no `GH_TOKEN`, ssh agent, cloud keys, the runner token). The **shell** Codex starts for the agent gets exactly the session's variables (`inherit = "none"` plus `set`), without `CODEX_*`. Codex strips variables named `*KEY*`, `*SECRET*`, `*TOKEN*` by default; `set` is applied afterwards, so `AOM_SHIFT_TOKEN` arrives (checked). `allow_login_shell = false` keeps `/etc/profile` from rewriting `PATH`.
 
-**The sandbox profile.** A permission profile named `aom`, built per session (`codexPermissions` in `adapters/codex.ts`): the filesystem is **deny by default** (`:minimal` system read, then only the paths below), the network is off. Paths granted: write: the working folder (the worktree, or read-only for a role without `edit` and for chats), the agent's private home, scratch and temp folder, the shared package caches, `/tmp/.dotnet`; read: the toolchain folders (Node install, `toolchainPaths`), the runner's `bin/` and the `aom` script's folder, the codex install, the vault folder, reference repositories (their `.env`, `*.pem`, `id_*`, ... files denied), NuGet's fallback folder; for a role that commits, the worktree's git admin folder (`.git/worktrees/<name>`), `objects`, `refs` and `logs` of the main repository, writable; its `config` and `hooks` stay read-only. Everything else, including the owner's home, the runner's data directory with its token and secrets, other agents' folders, `~/.ssh` and **this agent's own Codex home with `auth.json`**, does not exist for the shell (checked with the real binary).
+**The sandbox profile.** A permission profile named `aom`, built per session (`codexPermissions` in `adapters/codex.ts`): the filesystem is **deny by default** (`:minimal` system read, then only the paths below), the network is off. Paths granted: write: the working folder (the worktree, or read-only for a role without `edit` and for chats), the agent's private home, scratch and temp folder, the shared package caches, `/tmp/.dotnet`, the pnpm lock folders `/tmp/pnpm-*-locks-<uid>` (when they pass the ownership check); read: the toolchain folders (Node install, `toolchainPaths`), the runner's `bin/` and the `aom` script's folder, the codex install, the vault folder, reference repositories (their `.env`, `*.pem`, `id_*`, ... files denied), NuGet's fallback folder; for a role that commits, the worktree's git admin folder (`.git/worktrees/<name>`), `objects`, `refs` and `logs` of the main repository, writable; its `config` and `hooks` stay read-only. Everything else, including the owner's home, the runner's data directory with its token and secrets, other agents' folders, `~/.ssh` and **this agent's own Codex home with `auth.json`**, does not exist for the shell (checked with the real binary).
 
 **The `aom` command.** Inside Codex's network-restricted sandbox a Unix socket cannot be connected (`connect()` fails with EPERM, checked on 0.163.0) and loopback is a separate network namespace, so the sandboxed shell cannot reach the runner. `rules/aom.rules` therefore holds `prefix_rule(pattern=["aom"], decision="allow")`: Codex runs a standalone `aom ...` command **outside the sandbox without asking**, the same way Claude Code's excluded `aom` runs (and with the same hint: run `aom` as its own command, not in a pipe or after `cd`). A compound command that contains anything else stays sandboxed. The rules file also forbids (`decision="forbidden"`) the role's denied shell patterns that are plain command prefixes, `git push`, `git reset --hard`, `git stash drop|pop|clear` and, except for builders, `git rebase|checkout|switch`; this is defence in depth, the structure above (no network, no credentials, read-only `.git` config) is what holds.
 
@@ -1241,7 +1242,7 @@ Gemini CLI and opencode have no OS sandbox of their own that holds under Linux, 
 | Private `HOME` and config | yes | yes | yes (`GEMINI_CLI_HOME` / XDG dirs in `agents/<id>`) |
 | Runner environment kept out | allow-list | allow-list | new env; empty root, new user, pid, ipc, uts, cgroup namespaces |
 | Owner's home, runner data dir and token, other agents, `~/.ssh`, Docker socket | hidden | hidden | not present in the box |
-| Writes only in worktree, home, scratch, tmp, caches | yes | yes | yes (worktree read-only for roles without `edit` and for chats) |
+| Writes only in worktree, home, scratch, tmp, caches (plus `/tmp/.dotnet` and the pnpm lock folders on Linux) | yes | yes | yes (worktree read-only for roles without `edit` and for chats) |
 | Secret files in reference repos | masked | deny globs fixed at start | masked with /dev/null at start |
 | Network | domain allow-list | off | no interface; egress proxy with domain allow-list, ports 80 and 443, public addresses only (plus the shift's exact local test-service `host:port` entries) |
 | Model API key | in the CLI process | in the CLI process | **not in the box**: the proxy adds it upstream (Google login excepted, see below) |
@@ -1338,6 +1339,73 @@ On top of that, Claude Code sessions run inside Claude Code's own sandbox and pe
 runs its shifts **and its chats** outside this sandbox by design, so that it can deploy to the local Docker stack
 (`docker compose -p myapp ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
 See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
+
+### Reviewer runs (PR-only repositories)
+
+A reviewer run reads one pull request of a PR-only repository and posts its findings. It is built so that it cannot change
+the repository and cannot reach any credential.
+
+- **A fresh, standalone checkout per run.** The runner fetches the pull request head (`refs/pull/<n>/head`) into the owner's
+  clone under a private ref, builds a separate repository from it at `<data dir>/reviews/<runId>/checkout` with one local
+  fetch of the head and base commits, detaches it, and deletes the private ref again. The checkout has its own `.git`, **no
+  remote**, no credential or include configuration and no hooks. Then the whole tree loses its write bit (`chmod -R a-w`), so a
+  write, `git add` or `git commit` fails even outside the sandbox. A push has nowhere to go.
+- **The shell is read-only and offline.** The checkout is the working directory with `readOnlyWorktree`, there is no git dir
+  or extra folder, and the sandbox profile is `offline`: no domain is allowed, so github.com is unreachable. `git push` is denied by the policy as for every role.
+- **Fresh home, scratch and tmp.** Each run gets `reviews/<runId>/{home,scratch}` and its own `/tmp/aom-r-<hash>`. They are removed when the
+  run ends, and a startup sweep removes any `reviews/*` and `aom-r-*` left by a crash. Nothing an earlier run left is visible to the next one.
+- **The runner posts, not the agent.** The runner sends **one** pull request review with the event hard-coded to `COMMENT` and the
+  `commit_id` of the head, using `fetch` and the reviewer token only. It never calls `gh` and never falls back to the owner's own
+  login. If the host rejects a line comment (422, a line outside the diff) the same findings are sent once more in the review body.
+- **No token, no run.** Before anything is created, the runner refuses with `reviewer_token_missing` when it holds no token for the
+  repository (or the sandbox is not enforced, or the git host is not GitHub). The server also lists no pull request of such a
+  repository for review (`listReviewablePrs`), and the repository shows "Reviewer token missing" in the project settings.
+
+**Token setup (DevOps / Anvil).** The token is created by DevOps, not by this card:
+
+1. Create a dedicated bot account and give it the **Read** role on the repository. Read is enough to comment on pull requests and can
+   never push or merge, even if the token were scoped too widely.
+2. Create a fine-grained personal access token for that account, limited to that one repository, with **Pull requests: read and write**,
+   **Contents: read** and **Metadata: read**, and an expiry date. (A GitHub App with the same three permissions works the same way.)
+3. On the workstation: `guildwise-runner reviewer-token set <remote url>` (`--pairing <id>` for one pairing). The token is read from a
+   hidden prompt or from stdin, never from an argument. It is checked against the repository, and a classic token that carries a write scope (`repo`, `public_repo`, `write:*`)
+   is refused. `reviewer-token status [<remote url>]` shows present or missing, `reviewer-token remove <remote url>` deletes it.
+
+The first reviewer runs as two server commands (announced as `pr-review:1`):
+
+- `pr_review.run` looks up the pull request's head and base commits (`gh pr view --json headRefOid,baseRefOid`, with the owner's
+  own login), builds the read-only checkout above, writes `pr.diff` into the run's scratch and runs a Sonnet chat session under
+  the reviewer policy (offline, checkout read-only, no git dir). Each run has its own agent dir, `agents/pr-review-<runId>/`, so
+  two concurrent runs never share a `settings.json`; it is wiped at the end and swept at startup. A 10-minute timer covers the
+  whole run (also a checkout that hangs). The run never posts: it answers `completed` (findings), `timeout` or `failed`.
+- `pr_review.post` is only sent for a completed run. It first looks for a review that already holds the run marker
+  (`<!-- review-run:<runId> -->`), then posts one `COMMENT` review with the comment-only token. A command sent again for a live run
+  id awaits the same run.
+
+- `pr_review.cancel` stops a live `pr_review.run` (the other run of a two-reviewer round timed out or failed): the run answers
+  `failed` with code `cancelled` and its folders are removed. A cancel that arrives before its run is remembered for 15 minutes,
+  and the run then answers `cancelled` without a checkout or a model session. A runner that can do this announces
+  `pr-review-pair:1`; the server starts a two-reviewer round only on such a workstation.
+
+- `pr_review.notice` (announced as `pr-notice:1`) tells the author of a pull request that is over the size budget to split it. It
+  looks for a review that already holds the notice marker (`<!-- size-check:<noticeId> -->`), then posts one body-only `COMMENT`
+  review with the same comment-only token (Pull requests: read and write). It never uses `gh`. `repo.list_prs` also asks `gh pr list`
+  for `changedFiles`, `isCrossRepository` and `headRefOid` next to the added and removed lines; the server adds the sizes of stacked
+  pull requests.
+
+The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by the normalized remote url), separate from the
+git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
+`workstation_repos.reviewer_token`), never the token.
+
+**Hard size check status (`repo.commit_status`, announced as `commit-status:1`).** The server decides the status of each open
+pull request; the runner only posts it. `repo.commit_status` sets one commit status (context `size-budget`, state, a description of
+at most 140 characters) with `POST /repos/{owner}/{repo}/statuses/{sha}` on `api.github.com`, or `<host>/api/v3` for GitHub
+Enterprise Server, over `fetch`. It uses a token of its own, never the `gh` login and never the reviewer token. Create a
+fine-grained token with **Commit statuses: Read and write** only, then run `guildwise-runner status-token github [--host <host>]`
+(hidden prompt; `--status` lists hosts, `--remove` deletes). The token lives sealed in `secrets/status-tokens.json` (mode 0600, keyed
+`github@<host>`), separate from `git-tokens.json` and `reviewer-tokens.json`. The server learns only the keys
+(`git.report` `statusTokens`), never a token, and a token never appears in a log or an answer. Answers: `no_token` (none saved, or
+GitHub answered 401), `forbidden` (403), `not_found` (404), `invalid_sha` (422), `no_clone`, `unsupported`, `error`.
 
 ### Per-agent directories
 
@@ -1446,6 +1514,16 @@ is under your home (for example `~/.dotnet`) it is found automatically, see "Age
 sandbox (`dotnet new console` and `dotnet build`, with a package from the fallback folder and one downloaded into the
 shared cache); `test/sandbox-caches.test.ts` repeats it under bubblewrap and skips when `bwrap` or `dotnet` is missing.
 
+**pnpm 12 lock folders.** pnpm 12 takes its locks in three fixed folders,
+`/tmp/pnpm-{store-operation,dir,verify-deps-install}-locks-<uid>`, and ignores `TMPDIR`, so every `pnpm install` (and
+every `pnpm run`/`pnpm exec` that installs first) failed in a shift with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`. Before
+a sandbox starts, the runner creates the three folders for its own uid (mode 0700, never through a symlink) and puts
+them in the write list of every agent sandbox (Claude Code, Codex and the harness box). A folder that is a symlink, not a
+directory or owned by another uid is not granted, and the runner logs why once; pnpm in shifts then fails as before
+until that folder is removed. Under `/tmp` only these three folders and `/tmp/.dotnet` are writable; the rest stays
+read-only. The folder names are `PNPM_LOCK_DIR_NAMES` in `sandbox/sandbox.ts`. Run environments have a private `/tmp`
+and need none of this.
+
 **MSBuild worker nodes.** A `dotnet build`/`test` of more than one project makes MSBuild start one worker node per CPU.
 The nodes talk to the build over a named pipe, which .NET implements as a Unix socket at the hard-coded path
 `/tmp/MSBuild<pid>` (it ignores `TMPDIR`). In the sandbox that fails twice over: the Linux seccomp filter refuses
@@ -1540,6 +1618,37 @@ pull requests, `Update notes <time>` for vault syncs; the ticket is the tracker 
 The runner reports the identity each clone would use (`identity: {name, email, source}`) in `hello` and `repos.report`; the
 web app shows it in Project settings. Tests set `GIT_CONFIG_GLOBAL` to a temporary file (`test/setup-git.ts`); nothing reads
 the real `~/.gitconfig`.
+
+### Acting as the project's app (push, fetch, `gh`)
+
+A project that posts as a GitHub App sends its post-as plan (`postAs`) with `shift.start`, `finalize.execute`,
+`repo.create` and the forge commands (`repo.open_pr`, `repo.release_facts`, `repo.list_prs`, `repo.list_merged_prs`,
+`repo.clone`, `repo.access`, `pr_review.run`, `pr_review.post`, `branch.check_merged`, `repo.sync`). The commit identity
+of an app repository is the bot (`<slug>[bot]`, from `postAs`), ahead of every step above. The credentials come from `forge/app-actor.ts`:
+`actorScope(forgeEnv, broker, plan, tripwire)` returns the forge env, the git `auth` and `actorFor(url)` for one payload.
+Without a plan, or for a repository whose plan entry is not `source: 'app'`, it is exactly today's env and `gitAuthFor`.
+
+- **git:** `GitHubForge.gitAuth` gives an app repository a credential helper env with `x-access-token` and a token minted
+  for that one git process (plus `AOM_GIT_APP`). The token is never in a remote URL, a git config file or a long-lived
+  env var. Every push and fetch (completion, rebase, sync-main, merged-branch checks, release ship/publish/docs prep,
+  submodule pins, `repo.create`) asks for its auth right before the git command, so a push hours later gets a token
+  that is valid then (the broker refreshes it before expiry).
+- **`gh`:** each call gets `GH_TOKEN` (`GH_ENTERPRISE_TOKEN` on GHES) freshly fetched for that call. The review poster
+  posts with the app token for app repositories.
+- **Fail closed:** a mint failure is `AppIdentityError` (`app_identity_failed: <app>: <reason>`), never a fallback to the
+  owner's login. An `ssh` origin on an app repository fails at shift or command start, before any bot commit. A push
+  tripwire (per runner root, `forge/app-repos.ts`) refuses a push to an app repository that carries no app credential.
+  It follows the server's current plan: a `shift.start`, or a command whose payload schema has a `postAs` field, that
+  acts on a repository (the payload's own `remoteUrlNormalized` or its worktree's; reference repositories do not count)
+  without an app entry for it in its plan, including a payload with no plan once the owner deselects the app, releases
+  that repository, so its pushes go out with today's credentials again. A command that never carries a plan
+  (`repo.commit_status`, `release.ref_cleanup`, runs, DevOps environments, ...) releases nothing. Pushes
+  that have no app path (DevOps hygiene, saved work, branch cleanup) are refused for an app repository: they fail
+  closed rather than push as the owner.
+- **Branch protection:** a refused push is described by `describePushRejection` (`git/gh.ts`): the rule and the bypass or
+  permission the bot needs.
+- **Agents** stay credential-free: their sandbox has the bot identity for commits and no token; the runner pushes. A
+  delegate that works in its caller's worktree commits with the caller shift's identity.
 
 ### `repo.release_facts` (read-only)
 
@@ -1650,10 +1759,36 @@ retried: a failed or cut-off preparation is a line in the shift's progress, a no
 and a paragraph in the agent's instructions that names what was not prepared (the agent asks DevOps only for that). The
 config switch `prepareWorktrees` (default `true`) turns it off.
 
-Submodules are not filled (1.7.0): the preparation runs no `git submodule`, `fetch` or `clone` on the host, because every
-ref and object a trust check could anchor on is writable by the agents working in the clone. A repository with
-submodules gets one fixed line ("the runner does not fill submodules when it prepares a worktree; ask DevOps if you need
-them"), and submodules stay a DevOps request. Deploy checkouts fill their submodules as before.
+**Submodules are filled before the preparation.** For every card shift with a card worktree (fresh or reopened, never a
+resumed shift, DevOps conflict attempts included) the runner fills the submodules listed in the worktree's `.gitmodules`
+at the commits the index pins, after it accepted the shift and before the agent starts (not inside the worktree creation,
+which runs before the 30-second accept and under the clone's lock). A repository without `.gitmodules` gets no extra git
+call. The url comes from the one shared resolver (`apps/runner/src/git/submodule-fill.ts`, also used by run worktrees and
+deploy checkouts): the submodule's repository registered on this workstation (a pinned commit it lacks is fetched into it
+first, under that clone's lock), else the submodule's own url with the credentials of that url's host. Nothing is written
+to any git config: each submodule is one `git -c submodule.<name>.active=true -c submodule.<name>.url=<url> submodule
+update -- <path>` (no `--init`, no `--recursive`), so `.git/config` stays byte-for-byte the same (also when it is
+read-only) and `git status --porcelain` stays empty. A failed submodule does not stop the shift: the runner logs the
+submodule's name and git's error (url userinfo and secret shapes removed), adds a progress line and reports a
+`submodules` step in `shift.started.worktreePrep` and the agent's instructions. The fill has a 10-minute timeout.
+
+The trust conditions (they replace the 1.7.0 rule "never fill submodules on the host"):
+1. Only into a submodule repository created in that call. A submodule whose repository (`<git dir>/modules/<name>`)
+   already exists in any form, or whose folder holds anything, counts as initialised or as agent content: it is left as
+   it is and no git runs inside it. That is also why reopening a worktree never clones again. A `modules` folder that is
+   a symbolic link skips the fill.
+2. Through the runner's hardened git (hooks off, no fsmonitor, no system config, pointer check), with
+   `GIT_LFS_SKIP_SMUDGE=1`; submodule names and paths that could escape a `-c` key or the worktree are skipped.
+3. `protocol.file.allow=always` only when the url is a registered local clone. A `.gitmodules` url that is a local path
+   or `file://` with no registered clone gets no file protocol, so git refuses it and the failure is reported.
+4. Credentials are those of the submodule url's own host, so an agent that points `.gitmodules` at another host gets no
+   token sent there.
+5. It runs before the agent session starts, so the sandbox keeps the new `modules/<name>/config` and `hooks` read-only
+   for the whole session.
+
+The preparation itself still runs no `git submodule`, `fetch` or `clone`; without a fill (an older caller) a repository
+with submodules gets the fixed line "the runner does not fill submodules when it prepares a worktree; ask DevOps if you
+need them".
 
 #### Base branch and the per-clone lock
 
@@ -1704,13 +1839,13 @@ cannot loosen anything.
 | --- | --- | --- |
 | `permissions.defaultMode` | `dontAsk` | anything no allow rule approves is denied (`acceptEdits` approved every edit in the worktree whatever the role) |
 | `permissions.allow` | per `allowedTools`: `Read, Glob, Grep`; `Bash`; `WebFetch, WebSearch`; `Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per `writableGlobs` entry | explicit allow |
-| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
+| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs`, `session-env` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
 | `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir, the vault and the project's read-only folders (`--add-dir`; see "Reference repositories and other read-only folders" below); other agents' sandboxes and other cards' worktrees are out of reach |
 | `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the copied `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
-| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the other cards' `.git/worktrees/<other>` admin folders, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git; see "Git metadata in the shift sandbox" below |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") + the three pnpm lock folders `/tmp/pnpm-*-locks-<uid>` on Linux when they pass the ownership check / the repository's `.git/hooks` and `.git/config`, the other cards' `.git/worktrees/<other>` admin folders, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git; see "Git metadata in the shift sandbox" below |
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles on Linux/WSL2 (no effect there); on macOS only for builder, tester and browser roles (see "macOS: local binding (loopback) per role") | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
 
 **Git metadata in the shift sandbox.** A card worktree is a linked worktree: git keeps its index, `HEAD`, `logs`,
@@ -1789,9 +1924,15 @@ makes the mock runtime report that state.
 
 `scrubSubprocessEnv: true` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code then strips credentials from the
 environment of everything its shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other
-processes is unreadable. It is off by default because Claude Code also removes variables it recognizes as credentials,
-and we could not verify (without running a real session) that `AOM_SHIFT_TOKEN` survives. Turn it on for one
-workstation, run a shift and check that `aom card` still works; the per-shift IPC token is the only secret it protects.
+processes is unreadable. Since Claude Code 2.1.251 the scrub also removes `AOM_SHIFT_TOKEN` from the shell. So every
+session that gets a shift token (background shifts, chats, CEO owner turns, delegates, the role smoke test) also gets
+`AOM_SHIFT_ENV_FILE`, the absolute path of `<data dir>/session-env/<session>.<8 hex>/env.json` (dir 0700, file 0600,
+written atomically). The file holds `AOM_IPC_URL`, `AOM_IPC_SOCKET`, `AOM_SHIFT_TOKEN`, `AOM_SHIFT_ID` (and
+`AOM_CEO_TURN_DIR` for an owner turn). `aom` uses `AOM_SHIFT_TOKEN` from the environment when it is there and reads
+nothing; otherwise it fills the missing variables from that file. Only the session's own dir is added to its sandbox
+`allowRead`; `session-env` is runner-private for every other agent. The runner removes the dir when the session ends and
+sweeps leftovers at start and stop. It is still off by default: turn it on for one workstation, run a shift and check
+that `aom card` works.
 
 ### macOS: local binding (loopback) per role
 
@@ -2011,6 +2152,8 @@ pairings the credentials go to all of them unless `--pairing` names one. A runni
 the minute (no restart); the same file posts the approved updates to Jira.
 
 ### Sealed credential files
+
+Reviewer tokens (`secrets/reviewer-tokens.json`, set with `guildwise-runner reviewer-token set`) are sealed the same way; only present or missing is reported to the server.
 
 `secrets/jira.json` and `secrets/git-tokens.json` are sealed like the storage, WhatsApp and Google Sheets secrets:
 AES-256-GCM with a key derived from `secrets/runner-key.pem` (`{ v: 1, alg: 'A256GCM', iv, ct, tag }`). A copy of
@@ -2425,8 +2568,10 @@ and the DevOps engineer split the work:
   worktree* (`pathMap`) with the instruction to map paths in a guide accordingly. The plan fingerprint (the runner's `buildHash`)
   covers the repository guides and every parent or configured guide (path and content hash; a README fallback is not part of
   it, and with no guide above the repositories the value is the same as before). A new parent guide, or a changed one, makes
-  the plan stale. **Submodules:** a new run worktree runs `git submodule update --init --recursive` with the repository's git
-  auth (the origin's token or ssh key); a failure does not stop the start, the runner logs it and `aom run info` shows
+  the plan stale. **Submodules:** a new run worktree fills its submodules through the shared resolver of card worktrees (the
+  registered local clone first, else the submodule's own url with that host's credentials; nothing written to the clone's
+  `.git/config`), then runs `git submodule update --init --recursive` inside each filled submodule that has submodules of
+  its own; a failure does not stop the start, the runner logs it (credentials redacted) and `aom run info` shows
   "WARNING: the submodules could not be initialised: ...".
 - **The DevOps engineer works out how.** Its brief carries the guides above, the project's run instructions and the declared
   services, and the rules of the role: follow the guide first and literally, check the environment's own configuration
@@ -2577,7 +2722,7 @@ every agent, DevOps included, because the runtime is reported unavailable as a w
   `blockReadsOutsideWorkingDirectories`; `defaultMode` stays `dontAsk` (no human at the terminal);
 - deny: the session tools (`ListAgents`, `SendMessage`, ...), the role's shell patterns (`rm -rf /*`), Read and
   Edit of the runner's private files (`config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`,
-  `logs`, `mock-state`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
+  `logs`, `mock-state`, `session-env`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
   `git push` is not denied for DevOps (it is for the other roles). The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
 - environment: `HOME` is the user's real home (docker, ssh and kube configs work); `CLAUDE_CONFIG_DIR` and `TMPDIR` stay the
   agent's own; `SSH_AUTH_SOCK`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `KUBECONFIG` and `XDG_RUNTIME_DIR` are

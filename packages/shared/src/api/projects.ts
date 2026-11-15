@@ -18,6 +18,12 @@ import {
 import { CARD_BRANCH_PREFIX } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
+import {
+  ReviewSettingsSchema,
+  ReviewSettingsStatusSchema,
+  SizeUnitSchema,
+  StoredRiskMapSchema,
+} from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
 import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
@@ -28,6 +34,9 @@ import {
   RepoVisibilitySchema,
   repoNameError,
 } from '../repo/index.ts';
+import { PrReviewProblemSchema } from '../review/pr-review.ts';
+import { ReviewTargetsDtoSchema } from '../review/replay.ts';
+import { ReviewerTokenStateSchema } from '../review/reviewer-run.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -52,6 +61,22 @@ export const ProjectRepoDtoSchema = z.object({
   projectPath: z.string().nullable().optional(),
   /** The owner's access method for this repository (`ssh` or `https`); null: the workstation default of the host. */
   accessMethod: GitAccessMethodSchema.nullable().optional(),
+  /** PR-only review: open pull requests of this repository are recorded for review and no card is built for them. */
+  prOnly: z.boolean().optional(),
+  /**
+   * While PR-only: pull requests waiting for review (`waiting`), the last time the open list was read, and why the
+   * repository is not being read (`problem`; null when it works). Null when the repository is not PR-only.
+   */
+  prReview: z
+    .object({
+      waiting: z.number().int().nonnegative(),
+      checkedAt: IsoTime.nullable(),
+      problem: PrReviewProblemSchema.nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** While PR-only: whether a workstation holds the comment-only reviewer token. Null when the repository is not PR-only. */
+  reviewerToken: ReviewerTokenStateSchema.nullable().optional(),
   /** The main branch (where pull requests go) when the owner named one; null: the repository's default branch. */
   mainBranch: z.string().nullable().optional(),
   /** The component version rules (expert mode); empty: a release only gets the release version. */
@@ -233,8 +258,12 @@ export const ProjectDtoSchema = z.object({
   fullSuiteAfterFinalize: z.boolean().optional(),
   /** A failed regression run is redeployed by DevOps and run again once its bugs are merged (default false). */
   regressionLoop: z.boolean().optional(),
+  /** The owner's targets for reviewer precision and baseline review effort (set after the 20-PR replay). */
+  reviewTargets: ReviewTargetsDtoSchema.optional(),
   /** lean team: when the owner approves a card after the review (large and high-risk cards by default). */
   ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
+  /** lean team (code v7): every design stops for the owner's approval before Build (default false; high risk always stops). */
+  designGate: z.boolean().optional(),
   /** lean team: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
   e2eAreas: E2eAreaMapSchema.nullable().optional(),
   /** Answers and orders of this project stay at project scope (the platform project): no org-wide promotion (default off). */
@@ -254,8 +283,38 @@ export const ProjectDtoSchema = z.object({
   investigationLocation: z.enum(['repo', 'vault']).optional(),
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
+  /** Automatic PR reviews per day (default 20). */
+  prReviewDailyCap: z.number().int().optional(),
+  /** Second reviewer (Opus) on live PR-only pull requests: the switch, and the replay that allows it. */
+  secondReviewer: z
+    .object({
+      enabled: z.boolean(),
+      replayId: z.uuid().nullable(),
+      replayRecordedAt: z.string().nullable(),
+      precision: z.object({ first: z.number().nullable(), second: z.number().nullable() }).nullable(),
+    })
+    .optional(),
   /** Stop-loss budget by card size: build passes, review rounds and shifts before a card is parked for its architect. */
   stopLoss: StopLossSettingsSchema.optional(),
+  /** Review settings (owner only, no defaults): every value null until set, with what the dependent checks miss. */
+  reviewSettings: z
+    .object({
+      sizeBudget: z.number().int().nullable(),
+      sizeUnit: SizeUnitSchema.nullable(),
+      riskMap: StoredRiskMapSchema.nullable(),
+      status: ReviewSettingsStatusSchema,
+    })
+    .optional(),
+  /** The hard size check on pull requests (a commit status, read-only here); absent in lists that do not compute it. */
+  sizeStatus: z
+    .object({
+      context: z.string(),
+      state: z.enum(['inactive', 'active', 'no_token', 'no_runner']),
+      /** Pull requests whose status is failing now. */
+      failing: z.number().int(),
+      lastPostedAt: IsoTime.nullable(),
+    })
+    .optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
   budget: BudgetDtoSchema.optional(),
   /**
@@ -312,6 +371,10 @@ export type PauseProjectRequest = z.infer<typeof PauseProjectRequestSchema>;
 /** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/3/25). */
 export const SetStopLossRequestSchema = z.object({ settings: StopLossSettingsSchema.nullable() });
 export type SetStopLossRequest = z.infer<typeof SetStopLossRequestSchema>;
+
+/** `PUT /api/projects/:id/review-settings` (project owner only): the whole value, each field null for not set. */
+export const SetReviewSettingsRequestSchema = ReviewSettingsSchema;
+export type SetReviewSettingsRequest = z.input<typeof SetReviewSettingsRequestSchema>;
 
 /** `PUT /api/projects/:id/concurrency-cap`: a number of shifts, or null to remove the cap. */
 export const SetConcurrencyCapRequestSchema = z.object({ cap: z.number().int().min(1).max(50).nullable() });
@@ -593,6 +656,8 @@ export const PatchRepoRequestSchema = z
     componentRules: ComponentRulesSchema.optional(),
     /** The name in the release tag message and title (null or empty: the project name). */
     releaseName: z.string().trim().max(100).nullable().optional(),
+    /** PR-only review on or off (owner only). */
+    prOnly: z.boolean().optional(),
   })
   .refine(
     (b) =>
@@ -601,8 +666,9 @@ export const PatchRepoRequestSchema = z
       b.accessMethod !== undefined ||
       b.mainBranch !== undefined ||
       b.componentRules !== undefined ||
-      b.releaseName !== undefined,
-    { message: 'send forge, projectPath, accessMethod, mainBranch, componentRules or releaseName' },
+      b.releaseName !== undefined ||
+      b.prOnly !== undefined,
+    { message: 'send forge, projectPath, accessMethod, mainBranch, componentRules, releaseName or prOnly' },
   );
 
 /** `POST /api/projects/:id/repos/:repoId/release-pr` answer: the request was queued for the repository's workstation. */

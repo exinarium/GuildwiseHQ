@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useOrg } from '../api/queries/orgs.ts';
+import { AppsTab } from '../components/orgsettings/AppsTab.tsx';
 import { AuditTab } from '../components/orgsettings/AuditTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
 import { GuestsTab } from '../components/orgsettings/GuestsTab.tsx';
@@ -28,6 +29,7 @@ type TabId =
   | 'audit'
   | 'relay'
   | 'storage'
+  | 'apps'
   | (string & {});
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
@@ -42,6 +44,7 @@ export function OrgSettings() {
     { id: 'members', label: 'Members' },
     { id: 'relay', label: 'Inbound webhooks' },
     { id: 'storage', label: 'Storage' },
+    { id: 'apps', label: 'Automated apps' },
     ...(manager
       ? [
           { id: 'invitations', label: 'Invitations' },
@@ -91,6 +94,7 @@ export function OrgSettings() {
         {tab === 'members' && role && <MembersTab me={{ userId: me.data.user.id, role }} />}
         {tab === 'relay' && <RelayTab canManage={manager} />}
         {tab === 'storage' && <StorageTab canManage={manager} />}
+        {tab === 'apps' && <AppsTab />}
         {tab === 'invitations' && manager && role && (
           <InvitationsTab role={role === 'owner' ? 'owner' : 'admin'} />
         )}

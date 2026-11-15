@@ -3,8 +3,10 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { listSubmissions, pruneFormSubmissions } from '../src/commands/public-forms.ts';
 import {
+  cleanupGraceMs,
   MAX_CLEANUP_ATTEMPTS,
   resetFormUploadCleanupForTests,
+  storingGraceMs,
   sweepFormUploadCleanup,
 } from '../src/public-forms/cleanup.ts';
 import { q } from './helpers/db.ts';
@@ -241,5 +243,83 @@ describe('cleanup of expired submissions', () => {
     await sweepFormUploadCleanup(ctx());
     await pruneFormSubmissions(ctx());
     expect(await q('SELECT 1 FROM form_submissions WHERE id=$1', [s.sid])).toHaveLength(0);
+  });
+});
+
+describe('expiry of submissions that are being stored', () => {
+  const ago = (ms: number) => new Date(ctx().clock.now().getTime() - ms);
+  const statusOf = async (sid: string) =>
+    (await q('SELECT status FROM form_submissions WHERE id=$1', [sid]))[0]?.status as string;
+
+  it('uses twice the answers write timeout as the storing grace', () => {
+    expect(storingGraceMs(ctx())).toBe(2 * ctx().config.storage.writeTimeoutMs);
+    expect(cleanupGraceMs(ctx())).toBe(storingGraceMs(ctx()) + 60_000);
+  });
+
+  it('keeps a storing row whose last update is inside the grace, even past expires_at', async () => {
+    const s = await stalled();
+    await q(`UPDATE form_submissions SET status='storing', updated_at=$2, expires_at=$3 WHERE id=$1`, [
+      s.sid,
+      ago(storingGraceMs(ctx()) - 1_000),
+      ago(DAY),
+    ]);
+    await pruneFormSubmissions(ctx());
+    expect(await statusOf(s.sid)).toBe('storing');
+    expect(await cleanupRows(s.sid)).toHaveLength(0);
+  });
+
+  it('expires a storing row not updated for longer than the grace and queues its files as before', async () => {
+    const s = await stalled();
+    await q(`UPDATE form_submissions SET status='storing', updated_at=$2, expires_at=$3 WHERE id=$1`, [
+      s.sid,
+      ago(storingGraceMs(ctx()) + 1_000),
+      ago(DAY),
+    ]);
+    await pruneFormSubmissions(ctx());
+    expect(await statusOf(s.sid)).toBe('expired');
+    expect((await cleanupRows(s.sid)).map((r) => r.path).sort()).toEqual([...s.paths].sort());
+    const row = (await q('SELECT cleanup_queued_at FROM form_submissions WHERE id=$1', [s.sid]))[0];
+    expect(row?.cleanup_queued_at).not.toBeNull();
+  });
+
+  it('expires receiving and failed rows by the clock alone, as before, and leaves complete rows', async () => {
+    const receiving = await stalled();
+    const failed = await stalled();
+    for (const [sid, status] of [
+      [receiving.sid, 'receiving'],
+      [failed.sid, 'failed'],
+    ] as const)
+      await q(`UPDATE form_submissions SET status=$2, updated_at=$3, expires_at=$4 WHERE id=$1`, [
+        sid,
+        status,
+        ctx().clock.now(),
+        ago(1_000),
+      ]);
+    const { publicId } = await pf.published(pf.definition(`Done ${Math.random()}`));
+    const done = await pf.submit(publicId, { full_name: 'Done' }, [
+      { field: 'id_copy', name: 'id.png', bytes: PNG },
+    ]);
+    expect(done.complete?.status).toBe(200);
+    await expireAgo(done.sid, DAY);
+    await pruneFormSubmissions(ctx());
+    expect(await statusOf(receiving.sid)).toBe('expired');
+    expect(await statusOf(failed.sid)).toBe('expired');
+    expect(await statusOf(done.sid)).toBe('complete');
+  });
+
+  it('leaves rows of every status alone while expires_at is in the future', async () => {
+    const ids: Array<[string, string]> = [];
+    for (const status of ['receiving', 'failed', 'storing']) {
+      const s = await stalled();
+      await q(`UPDATE form_submissions SET status=$2, updated_at=$3, expires_at=$4 WHERE id=$1`, [
+        s.sid,
+        status,
+        ago(DAY),
+        new Date(ctx().clock.now().getTime() + 60_000),
+      ]);
+      ids.push([s.sid, status]);
+    }
+    await pruneFormSubmissions(ctx());
+    for (const [sid, status] of ids) expect(await statusOf(sid)).toBe(status);
   });
 });

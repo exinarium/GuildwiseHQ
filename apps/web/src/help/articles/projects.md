@@ -22,6 +22,28 @@ You can also click **Pick from my repositories** to list the repositories of a c
 
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
 
+## PR-only repositories {#pr-only-repositories}
+
+A repository can be reviewed instead of built: its open pull requests are recorded for review, and no card is started for them.
+
+In the project's settings, under **Repos**, tick **PR-only review** under the repository. Only the project owner can change it; other members see the switch but cannot change it. It is off until the owner turns it on, and can be turned off again at any time. A **PR-only** badge next to the repository name shows which repositories are reviewed this way.
+
+About every 5 minutes, a workstation that has a clone of the repository lists its open pull requests with your own git login on that workstation. Each pull request opened after you turned PR-only on is recorded as **not reviewed**. Pull requests opened before that are not picked up, and neither are the pull requests that cards open: those keep going through the card's own review.
+
+Under the switch you see the number of pull requests waiting for review and the time of the last check, or why nothing could be read (no workstation has a clone, the runner needs an update, the git host is not supported yet, the workstation is not signed in to the git host, or the list could not be read). This works for GitHub for now. Each recorded pull request then gets one automatic review. A reviewer reads a read-only copy of it and posts its findings together as comments, only when the review has finished, and stops after 10 minutes without posting anything partial. Reviews need a comment-only reviewer token on a workstation that has the clone; until one is set, the repository shows **Reviewer token missing**. When you turn PR-only off, no new pull requests are recorded. When you turn it on again, only pull requests opened from then on are picked up.
+
+The **Pull requests** tab of the project (next to **Board** and **Backlog**) shows each pull request and what happened to its review. A pull request shows **Reviewed** with the time and the number of comments posted, or stays **Not reviewed** when the review timed out or failed. Nothing is retried by itself.
+
+The reviewer posts at most 1 finding per 100 changed lines, at least 1 and at most 5. The rest are held back, and **Show N held-back findings** opens them. As project owner you mark each posted finding **Useful** or **Noise** without seeing which reviewer wrote it, and the tab then shows how precise each reviewer is.
+
+At most 20 pull requests per project are reviewed automatically each day, oldest first. The others wait in the **Queue**. The owner can change the number under **Daily automatic reviews**. The project owner, and organization Owners and Admins, can start a review by hand with **Review now**, which goes past the daily limit, or **Re-run review** after a timed-out or failed review.
+
+In **Project settings**, **Review settings**, the owner sets a **size budget**, a **size unit** and a map from paths to risk. There are no defaults, so the size and risk checks stay off until you set them. A pull request over the budget is marked **Needs split** and its author is asked to split it. Pull requests stacked on each other are measured together. A timeout alone never sends a pull request back.
+
+The owner can approve a size exception for an over-budget pull request. Johnny asks with a reason and you decide on your Desk. If you do not answer within 2 working days, the pull request goes to **Needs split**. A project with a size budget also gets a `size-budget` status on each open pull request on GitHub. You can make that status required on the branch on GitHub.
+
+Once a 20-PR replay has finished, the project owner can switch on a **Second reviewer (Opus)** in **Project settings**. Both reviewers then review each pull request. Their findings are merged and the same finding is posted once. If either review times out or fails, nothing is posted. The replay, under **20-PR replay** on the **Pull requests** tab, runs both reviewers offline on 20 merged pull requests, lets you mark the findings blind, and shows the precision of each reviewer. It posts nothing to the pull requests.
+
 ## Architect settings {#architect-settings}
 
 Under **Architect** in the project settings the owner decides whether new cards are investigated and designed by an architect before the builder starts (off by default), whether the latest main branch is merged first (on by default), and where the architect's reports go (a folder in the repository, or the knowledge vault). See [The architect](/help/architect).
@@ -29,6 +51,8 @@ Under **Architect** in the project settings the owner decides whether new cards 
 ## Commit as {#commit-as}
 
 Commits made for a project carry your name, never an agent's. Under **Commit as** in the project settings the Owner (or an organization Owner or Admin) can set the name and e-mail. Empty: the repository's git setting is used, then the workstation's global one. With none of the three, nothing is committed and the desk tells you.
+
+A project can also post as a GitHub App. First an organization Owner adds the app under **Settings > Automated apps**. Then the project settings let you choose which app its agents act as. Commits, pushes, pull requests, merges, releases and comments, and ticket and issue posts, then carry the app's bot identity, and the workstation refreshes the app's short-lived token by itself. The settings show the identity each repository will use and warn when the app lacks access. A project with no app selected keeps the behaviour above.
 
 ## Reference repositories {#reference-repos}
 
@@ -57,6 +81,10 @@ A project has one **primary** workflow (its type) and can enable more. Open the 
 - **Disable** removes a workflow from the project's choices; its open cards finish as planned. The primary workflow always stays.
 
 The board shows the columns of every enabled workflow, a step you inserted appears where you put it, and a card on a workflow other than the primary shows the workflow's name on its tile.
+
+New cards on the lean team workflow can stop after **Investigate & design** until the project owner approves the design. This **Design gate** is off by default. Switch it on in **Project settings**, or for one card once its design report exists. The owner reads the report on the Desk item and presses **Approve the design** to send the card to Build, or **Return to design** with a note. Designs that touch high-risk paths stop at the gate even when it is off.
+
+When a design is over the project's size budget, the card goes back to the business analyst once, with the folders involved and suggested places to split it. The owner decides after that.
 
 ## The priority order {#ranking}
 

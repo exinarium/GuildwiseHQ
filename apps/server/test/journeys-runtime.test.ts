@@ -1,4 +1,9 @@
-import type { JourneyDefinitionInput } from '@aom/shared';
+import {
+  ACCOUNTING_TEMPLATE_ID,
+  getJourneyTemplate,
+  type JourneyDefinitionInput,
+  LAW_TEMPLATE_ID,
+} from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { completeStep, sweepJourneys } from '../src/commands/journey-runtime.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -103,6 +108,21 @@ describe('designer round trip', () => {
     );
     const got = await asOwner('GET', `/api/journeys/${id}`);
     expect(got.definition.steps).toHaveLength(10);
+  });
+  it.each([
+    [ACCOUNTING_TEMPLATE_ID, 'accounting'],
+    [LAW_TEMPLATE_ID, 'law'],
+  ])('creates a journey from the %s template', async (templateId, industry) => {
+    const listed = (await asOwner('GET', '/api/journey-templates')).items;
+    expect(listed.find((x: any) => x.id === templateId)?.industry).toBe(industry);
+    const { id } = await asOwner('POST', '/api/journeys', { projectId: w.projectId, templateId }, 201);
+    const got = await asOwner('GET', `/api/journeys/${id}`);
+    const t = getJourneyTemplate(templateId)!;
+    expect(got.definition.steps.map((s: any) => s.id)).toEqual(t.definition.steps.map((s) => s.id));
+    expect(got.definition.recordType).toBe(t.definition.recordType);
+  });
+  it('refuses an unknown template id', async () => {
+    await asOwner('POST', '/api/journeys', { projectId: w.projectId, templateId: 'nope' }, 404);
   });
   it('refuses to start a journey that has errors', async () => {
     const id = await createJourney(

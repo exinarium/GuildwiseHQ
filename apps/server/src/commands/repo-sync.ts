@@ -5,6 +5,7 @@ import { exec, one, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 
 /**
  * The local working branch against origin (backlog #57). The runner fetches, fast-forwards when that is safe and
@@ -54,7 +55,7 @@ export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: 
 async function queueSync(ctx: Ctx, workstationId: string, repoId: string): Promise<boolean> {
   const r = await one(
     ctx.pool,
-    `SELECT remote_url_normalized, working_branch FROM project_repos
+    `SELECT project_id, remote_url_normalized, working_branch FROM project_repos
       WHERE id=$1 AND removed_at IS NULL AND working_branch IS NOT NULL`,
     [repoId],
   );
@@ -70,6 +71,7 @@ async function queueSync(ctx: Ctx, workstationId: string, repoId: string): Promi
     repoId,
     remoteUrlNormalized: r.remote_url_normalized,
     workingBranch: r.working_branch,
+    ...(await postAsFieldFor(ctx.pool, r.project_id, workstationId, { write: false })),
   });
   return true;
 }

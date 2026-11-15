@@ -43,6 +43,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { getFormVersion } from '../queries/forms.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { buildAnswersHtml, buildAnswersJson } from './answers-doc.ts';
+import { EXPIRED_DURING_COMPLETE } from './cleanup.ts';
 import { clientKey, createFormLimits, type FormLimits } from './limits.ts';
 import { offlineRequestHandler } from './offline.ts';
 import { defaultRunnerOfflineHook, type RunnerOfflineEvent } from './offline-hook.ts';
@@ -1340,13 +1341,11 @@ export function publicFormRoutes(
           status: 'complete',
           confirmation: def.settings.confirmationText,
         });
+        const expiredError = () =>
+          new PfError(410, 'submission_expired', 'This submission timed out. Please send the form again.');
         if (row.status === 'complete') return done();
         if (row.status === 'expired' || new Date(row.expires_at).getTime() <= ctx.clock.now().getTime())
-          throw new PfError(
-            410,
-            'submission_expired',
-            'This submission timed out. Please send the form again.',
-          );
+          throw expiredError();
         const parts = row.parts as Part[];
         const pending = parts.filter((p) => p.state !== 'stored');
         if (pending.length)
@@ -1377,19 +1376,56 @@ export function publicFormRoutes(
         if (!claimed) {
           const again = await rowOf(pub, sid);
           if (again.status === 'complete') return done();
+          if (again.status === 'expired') throw expiredError();
           throw new PfError(409, 'submission_busy', 'This submission is already being processed.');
         }
 
-        try {
-          const failWith = async (e: StorageWriteError) => {
+        type AnswersRefs = {
+          html?: StorageReference;
+          json?: StorageReference;
+          pdf?: StorageReference;
+          pdfError?: string;
+        };
+        const statusOf = async (): Promise<string | null> =>
+          (await one<{ status: string }>(ctx.pool, 'SELECT status FROM form_submissions WHERE id=$1', [sid]))
+            ?.status ?? null;
+        /** The row left 'storing' under us (the sweep expired it, or another request finished it). Never a false success. */
+        const notStoring = async (
+          found: string | null,
+          refs: AnswersRefs,
+        ): Promise<SubmissionCompleteDto> => {
+          // ids and status only: no answers, file names or paths
+          ctx.log.warn(
+            {
+              publicForm: { op: 'complete', submissionId: sid, orgId: pub.orgId, found: found ?? 'missing' },
+            },
+            'public form complete: the submission is no longer being stored',
+          );
+          if (found === 'complete') return done();
+          if (found === 'expired')
+            // The respondent is told to send again: let the expiry cleanup take the answers documents too.
+            // updated_at stays: it dates the expiry for the 30-day delete.
             await ctx.pool.query(
-              `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1`,
+              `UPDATE form_submissions SET error_code=$2, answers_refs=$3::jsonb
+                WHERE id=$1 AND status='expired' AND completed_at IS NULL`,
+              [sid, EXPIRED_DURING_COMPLETE, JSON.stringify(refs)],
+            );
+          throw expiredError();
+        };
+
+        try {
+          /** Marks the row failed while this request still owns it; false when it is no longer 'storing'. */
+          const failWith = async (e: StorageWriteError): Promise<boolean> => {
+            const r = await ctx.pool.query(
+              `UPDATE form_submissions SET status='failed', error_code=$2, updated_at=$3 WHERE id=$1 AND status='storing'`,
               [sid, e.code, ctx.clock.now()],
             );
+            return !!r.rowCount;
           };
           const dest = def.settings.answersDestination;
           if (!dest.connectionId) {
-            await failWith({ code: 'not_found', message: 'missing', retryable: false });
+            if (!(await failWith({ code: 'not_found', message: 'missing', retryable: false })))
+              return await notStoring(await statusOf(), (claimed.answers_refs ?? {}) as AnswersRefs);
             throw new PfError(
               409,
               'destination_missing',
@@ -1428,12 +1464,6 @@ export function publicFormRoutes(
             answers: body.data.answers,
             files,
           };
-          type AnswersRefs = {
-            html?: StorageReference;
-            json?: StorageReference;
-            pdf?: StorageReference;
-            pdfError?: string;
-          };
           const have = (claimed.answers_refs ?? {}) as AnswersRefs;
           const refs: AnswersRefs = { ...have };
           for (const kind of ['html', 'json'] as const) {
@@ -1457,7 +1487,7 @@ export function publicFormRoutes(
               ...(kind === 'html' ? { derive: { pdf: true as const } } : {}),
             });
             if (!w.ok) {
-              await failWith(w.error);
+              if (!(await failWith(w.error))) return await notStoring(await statusOf(), refs);
               if (w.error.code === 'runner_offline')
                 return offline(req, reply, 'complete', pub, row.link_id, sid, [dest.connectionId]);
               throw storageFailure(w.error);
@@ -1473,6 +1503,7 @@ export function publicFormRoutes(
                 refs.pdfError = w.derived?.pdf.ok === false ? w.derived.pdf.code : 'pdf_unavailable';
               }
             }
+            // Also the heartbeat: pruneFormSubmissions keeps a 'storing' row while updated_at is recent. Keep updated_at here.
             await ctx.pool.query(
               `UPDATE form_submissions SET answers_refs=$2::jsonb, updated_at=$3 WHERE id=$1`,
               [sid, JSON.stringify(refs), ctx.clock.now()],
@@ -1482,13 +1513,19 @@ export function publicFormRoutes(
           // Both documents have references: only now is the submission complete.
           const html = refs.html as StorageReference;
           const json = refs.json as StorageReference;
-          await withAppendTx(ctx.pool, async (tx) => {
+          const outcome = await withAppendTx(ctx.pool, async (tx) => {
             const n = await tx.query(
               `UPDATE form_submissions SET status='complete', completed_at=$2, updated_at=$2, error_code=NULL, answers_refs=$3::jsonb
                 WHERE id=$1 AND status='storing'`,
               [sid, ctx.clock.now(), JSON.stringify(refs)],
             );
-            if (!n.rowCount) return;
+            if (!n.rowCount) {
+              const r = await tx.query<{ status: string }>(
+                'SELECT status FROM form_submissions WHERE id=$1',
+                [sid],
+              );
+              return { ok: false as const, found: r.rows[0]?.status ?? null };
+            }
             const events: any[] = [];
             if (row.link_id)
               events.push({
@@ -1558,7 +1595,9 @@ export function publicFormRoutes(
                 { tx },
               );
             }
+            return { ok: true as const };
           });
+          if (!outcome.ok) return await notStoring(outcome.found, refs);
         } catch (err) {
           // An unexpected error after the claim must not leave the row 'storing': the retry would get submission_busy.
           await ctx.pool

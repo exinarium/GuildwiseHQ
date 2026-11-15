@@ -126,6 +126,12 @@ const JOURNEY_DATA_KEYS = [
   'journeyName',
 ] as const;
 
+/** code v7: an approval step item at the design gate carries `data.design` (the design report it is about). */
+function isDesignGateData(data: unknown): data is { design: Record<string, unknown> } {
+  const d = (data as { design?: unknown } | null)?.design;
+  return !!d && typeof d === 'object';
+}
+
 export function toDeskDto(
   r: Row,
   userId: string,
@@ -173,6 +179,7 @@ export function toDeskDto(
       r.data.key ||
       r.data.askId ||
       r.subkind === 'playbook_input_needed' ||
+      isDesignGateData(r.data) ||
       JOURNEY_DESK_SUBKINDS.has(r.subkind))
       ? {
           data: {
@@ -184,6 +191,17 @@ export function toDeskDto(
               : {}),
             ...(typeof r.data.workstationId === 'string' ? { workstationId: r.data.workstationId } : {}),
             ...(typeof r.data.key === 'string' ? { key: r.data.key } : {}),
+            // code v7: the design gate's desk item carries the design report (path, commit, summary)
+            ...(isDesignGateData(r.data)
+              ? {
+                  design: {
+                    reportPath:
+                      typeof r.data.design.reportPath === 'string' ? r.data.design.reportPath : null,
+                    commit: typeof r.data.design.commit === 'string' ? r.data.design.commit : null,
+                    summary: String(r.data.design.summary ?? ''),
+                  },
+                }
+              : {}),
             ...(r.subkind === 'playbook_input_needed' && typeof r.data.threadId === 'string'
               ? { threadId: r.data.threadId }
               : {}),

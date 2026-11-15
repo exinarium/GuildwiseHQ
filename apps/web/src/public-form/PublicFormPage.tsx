@@ -52,6 +52,10 @@ interface Submission {
 
 /** The offline flow answered "we will send you a secure link": nothing more to do on this page. */
 class LinkLater extends Error {}
+/** The complete call itself said the submission expired: tell the person instead of starting over on our own. */
+class CompleteExpired {
+  constructor(readonly err: PublicApiError) {}
+}
 const errorOfPart = (code: string | undefined): PublicApiError => {
   switch (code) {
     case 'type_refused':
@@ -258,7 +262,10 @@ export function PublicFormPage({
       else laterOf(await publicApi.putPart(publicId, s.id, p.index, f, s.token));
     }
     setProgress('Finishing…');
-    const out = await publicApi.complete(publicId, s.id, s.token, answers.current);
+    const out = await publicApi.complete(publicId, s.id, s.token, answers.current).catch((e: unknown) => {
+      if (e instanceof PublicApiError && e.code === 'submission_expired') throw new CompleteExpired(e);
+      throw e;
+    });
     laterOf(out);
     return out.status === 'complete' ? (out.confirmation ?? '') : (out.message ?? '');
   };
@@ -427,6 +434,11 @@ export function PublicFormPage({
           return;
         } catch (e) {
           if (e instanceof LinkLater) throw e;
+          // The next "Try again" starts a new submission; the answers and files stay on the page.
+          if (e instanceof CompleteExpired) {
+            sub.current = null;
+            throw e.err;
+          }
           const err = e instanceof PublicApiError ? e : new PublicApiError(0, 'network', 'failed', true);
           // The submission ran out, or the page's session was used or is stale: start again with what is kept.
           const again = [

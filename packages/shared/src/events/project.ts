@@ -3,9 +3,21 @@ import { AccountKeySchema, ClaudeAccountKeySchema } from '../claude/accounts.ts'
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { PostAsAppRefSchema } from '../repo/post-as.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
+import { FindingDispositionSchema } from '../review/findings.ts';
+import { FindingMarkSchema } from '../review/marks.ts';
+import {
+  PR_REVIEW_FAILURE_CODES,
+  PrReviewerSchema,
+  PrReviewFindingSchema,
+  PrReviewStateSchema,
+  PrReviewTriggerSchema,
+} from '../review/pr-review.ts';
+import { SPLIT_REASONS } from '../review/size-check.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -13,7 +25,7 @@ import {
   ProjectPathSchema,
   VaultFolderSchema,
 } from '../safe.ts';
-import { defineEvent, Id } from './define.ts';
+import { defineEvent, Id, IsoDate } from './define.ts';
 
 /**
  * The work/personal domain and the priority tier of a project were dropped (the organization ranks its projects; see
@@ -145,6 +157,16 @@ export const projectEvents = [
     'ProjectCommitAsSet',
     z.object({ projectId: Id, commitAs: CommitAsSchema.nullable(), setBy: Id.optional() }),
   ),
+  /** The apps the project posts as changed (references only, never a key or token). Empty `apps` = none. */
+  defineEvent(
+    'ProjectPostAsAppsSet',
+    z.object({
+      projectId: Id,
+      apps: z.array(PostAsAppRefSchema).max(8),
+      previous: z.array(PostAsAppRefSchema).max(8),
+      setBy: Id,
+    }),
+  ),
   /** The runner found the working branch missing in the repository and created it from `from` (pushed when `pushed`). */
   defineEvent(
     'ProjectRepoWorkingBranchCreated',
@@ -165,6 +187,306 @@ export const projectEvents = [
   defineEvent(
     'ProjectRepoAccessSet',
     z.object({ projectId: Id, repoId: Id, accessMethod: GitAccessMethodSchema.nullable() }),
+  ),
+  /** The owner turned PR-only review on or off for a repository. On: open pull requests opened from `at` are recorded for review. */
+  defineEvent(
+    'ProjectRepoPrOnlySet',
+    z.object({ projectId: Id, repoId: Id, prOnly: z.boolean(), at: IsoDate, by: Id }),
+  ),
+  /** An open pull request of a PR-only repository was seen for the first time; it waits for review. */
+  defineEvent(
+    'PrReviewRecorded',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      changeId: z.string().min(1).max(40),
+      url: z.string().max(500),
+      title: z.string().max(300),
+      author: z.string().max(100).nullable(),
+      headBranch: z.string().max(200),
+      baseBranch: z.string().max(200),
+      openedAt: IsoDate,
+      state: PrReviewStateSchema,
+      changedLines: z.number().int().nonnegative().nullable().default(null),
+    }),
+  ),
+  /** The size (added + removed lines) of a recorded pull request changed or became known. */
+  defineEvent(
+    'PrReviewSizeChanged',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      changedLines: z.number().int().nonnegative().nullable(),
+    }),
+  ),
+  /** A recorded pull request is no longer open on the git host. */
+  defineEvent('PrReviewClosed', z.object({ projectId: Id, repoId: Id, prReviewId: Id })),
+  /** A reviewer run of a recorded pull request was sent to a workstation. */
+  defineEvent(
+    'PrReviewRunStarted',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      runId: Id,
+      /** The review round this run belongs to. Events from before rounds: the round is the run itself. */
+      roundId: Id.optional(),
+      reviewer: PrReviewerSchema,
+      runtime: z.string().max(40),
+      model: z.string().max(120),
+      workstationId: Id,
+      timeoutMs: z.number().int().positive(),
+      /** Events from before the daily cap read as automatic. */
+      trigger: PrReviewTriggerSchema.default('auto'),
+      requestedBy: Id.nullable().default(null),
+      /** The timed-out run a manual re-run replaces. */
+      rerunOfRunId: Id.nullable().default(null),
+      at: IsoDate,
+    }),
+  ),
+  /** The run finished and handed back its findings. Nothing is on the pull request yet. */
+  defineEvent(
+    'PrReviewRunCompleted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      headSha: z.string(),
+      baseSha: z.string(),
+      durationMs: z.number().int().nonnegative(),
+      summary: z.string().max(2000),
+      /** Optional: events from before the findings cap replay as all posted, line count unknown. */
+      changedLines: z.number().int().nonnegative().nullable().optional(),
+      findingsCap: z.number().int().min(1).max(5).optional(),
+      findings: z
+        .array(
+          PrReviewFindingSchema.extend({
+            findingId: Id,
+            rank: z.number().int().positive().optional(),
+            disposition: FindingDispositionSchema.optional(),
+          }),
+        )
+        .max(50),
+      at: IsoDate,
+    }),
+  ),
+  /** The run hit its time limit. The pull request stays not reviewed and nothing is posted. */
+  defineEvent(
+    'PrReviewRunTimedOut',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      durationMs: z.number().int().nonnegative(),
+      phase: z.enum(['checkout', 'review']),
+      by: z.enum(['runner', 'server']),
+      at: IsoDate,
+    }),
+  ),
+  /** The size check found a pull request (or the chain it is stacked in) over the size budget: sent back to its author. */
+  defineEvent(
+    'PrReviewNeedsSplit',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      /** One id per size check decision: the members of a chain share it. */
+      checkId: Id,
+      reason: z.enum(SPLIT_REASONS),
+      unit: SizeUnitSchema,
+      budget: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+      members: z.array(z.object({ changeId: z.string(), size: z.number().int().nonnegative() })).max(200),
+      runId: Id.optional(),
+      /** The author notice that follows (one per member and decision). */
+      noticeId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** A pull request that needed splitting is within the budget again (or the budget was removed): reviewable again. */
+  defineEvent(
+    'PrReviewSplitCleared',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      checkId: Id,
+      verdict: z.enum(['within', 'inactive']),
+      total: z.number().int().nonnegative().optional(),
+      budget: z.number().int().nonnegative().optional(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticeQueued',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      workstationId: Id,
+      attempt: z.number().int().positive(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticePosted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      reviewUrl: z.string().max(500),
+      alreadyPosted: z.boolean(),
+      at: IsoDate,
+    }),
+  ),
+  defineEvent(
+    'PrReviewSplitNoticeFailed',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      noticeId: Id,
+      code: z.string().max(40),
+      error: z.string().max(400),
+      retryable: z.boolean(),
+      at: IsoDate,
+    }),
+  ),
+  /** A re-run timed out again while the pull request is within the budget: it stays not reviewed and the owner decides. */
+  defineEvent(
+    'PrReviewTimedOutTwice',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      prReviewId: Id,
+      runId: Id,
+      verdict: z.enum(['within', 'inactive', 'unknown']),
+      total: z.number().int().nonnegative().optional(),
+      budget: z.number().int().nonnegative().optional(),
+      unit: SizeUnitSchema.optional(),
+      deskItemId: Id,
+      timerId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** The "timed out twice" mark of a pull request ended (the owner acted, or the pull request closed or needs a split). */
+  defineEvent(
+    'PrReviewAttentionCleared',
+    z.object({ projectId: Id, prReviewId: Id, reason: z.enum(['owner_acted', 'closed']), at: IsoDate }),
+  ),
+  /** The run (or its posting) failed. The pull request stays not reviewed and the error is kept for the owner. */
+  defineEvent(
+    'PrReviewRunFailed',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      stage: z.enum(['run', 'post']),
+      code: z.enum([...PR_REVIEW_FAILURE_CODES, 'forbidden', 'not_found', 'stale_head', 'unreachable']),
+      error: z.string().max(400),
+      retryable: z.boolean(),
+      durationMs: z.number().int().nonnegative().optional(),
+      at: IsoDate,
+    }),
+  ),
+  /** The owner switched the second reviewer (Opus) on or off for live pull requests. `replayId`: the replay that allowed it. */
+  defineEvent(
+    'ProjectSecondReviewerSet',
+    z.object({ projectId: Id, enabled: z.boolean(), by: Id, replayId: Id.nullable().default(null) }),
+  ),
+  /** A review round started: the reviewers' runs follow as `PrReviewRunStarted` with this round id. */
+  defineEvent(
+    'PrReviewRoundStarted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      reviewers: z.array(PrReviewerSchema).min(1).max(2),
+      trigger: PrReviewTriggerSchema.default('auto'),
+      requestedBy: Id.nullable().default(null),
+      workstationId: Id,
+      at: IsoDate,
+    }),
+  ),
+  /** The server stopped a run because its partner in the round timed out or failed. */
+  defineEvent(
+    'PrReviewRunCancelled',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      runId: Id,
+      reason: z.enum(['partner_timeout', 'partner_failed']),
+      at: IsoDate,
+    }),
+  ),
+  /** The runs of the round are merged and capped as one list. Overwrites rank and disposition of every finding of the round. */
+  defineEvent(
+    'PrReviewRoundMerged',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      changedLines: z.number().int().nonnegative().nullable(),
+      findingsCap: z.number().int().min(1).max(5),
+      findings: z
+        .array(
+          z.object({
+            findingId: Id,
+            disposition: FindingDispositionSchema,
+            rank: z.number().int().positive().nullable(),
+            mergedInto: Id.nullable(),
+            severity: z.enum(['high', 'medium', 'low']),
+          }),
+        )
+        .max(100),
+      at: IsoDate,
+    }),
+  ),
+  /** The round ended without a post: a run timed out or failed, the heads differ, or the post did not finish. Nothing was posted. */
+  defineEvent(
+    'PrReviewRoundEnded',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      roundId: Id,
+      outcome: z.enum(['timed_out', 'failed']),
+      causeRunId: Id.nullable(),
+      code: z.string().max(60).nullable(),
+      at: IsoDate,
+    }),
+  ),
+  /** The findings are on the pull request as one review: it now counts as reviewed. */
+  defineEvent(
+    'PrReviewPosted',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      /** The round that was posted (absent on events from before rounds: the round id is the run id). */
+      roundId: Id.optional(),
+      /** Every reviewer of the posted round. */
+      reviewers: z.array(PrReviewerSchema).optional(),
+      reviewer: PrReviewerSchema,
+      reviewUrl: z.string().max(500),
+      postedFindingIds: z.array(Id).max(50),
+      at: IsoDate,
+    }),
+  ),
+  /** The project owner marked a posted finding useful or noise. No reviewer in the payload (blind marking). */
+  defineEvent(
+    'PrReviewFindingMarked',
+    z.object({
+      projectId: Id,
+      prReviewId: Id,
+      runId: Id,
+      findingId: Id,
+      mark: FindingMarkSchema,
+      previousMark: FindingMarkSchema.nullable(),
+      markedBy: Id,
+      at: IsoDate,
+    }),
   ),
   /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */
   defineEvent(
@@ -325,6 +647,18 @@ export const projectEvents = [
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /** The regression loop (redeploy and rerun a failed regression run once its bugs are merged) turned on or off. */
   defineEvent('ProjectRegressionLoopSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /** The owner typed the targets for reviewer precision and baseline review effort, based on a finished replay. */
+  defineEvent(
+    'ProjectReviewTargetsSet',
+    z.object({
+      projectId: Id,
+      precisionTarget: z.number().min(0).max(1),
+      effortTargetHoursPerWeek: z.number().min(0).max(168),
+      replayId: Id,
+      by: Id,
+      at: IsoDate,
+    }),
+  ),
   /**
    * Manual QA after Finalize (docs/design/manual-qa.md) turned off or on for the project. On by default. Only cards
    * that have not yet passed Finalize are affected.
@@ -335,6 +669,21 @@ export const projectEvents = [
     z.object({ projectId: Id, services: LocalTestServicesSchema, by: Id }),
   ),
   defineEvent('ProjectManualQaSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /**
+   * The project owner set the review settings (whole value; null = not set, there are no defaults): the size budget, the
+   * unit it is measured in and the path-to-risk map. Lenient on purpose: the strict checks live in the request schema,
+   * so a later rule change never makes an old event fail to parse.
+   */
+  defineEvent(
+    'ProjectReviewSettingsSet',
+    z.object({
+      projectId: Id,
+      sizeBudget: z.number().int().min(1).nullable(),
+      sizeUnit: SizeUnitSchema.nullable(),
+      riskMap: StoredRiskMapSchema.nullable(),
+      by: Id,
+    }),
+  ),
   /**
    * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &
    * design step by default, whether the latest main branch is merged first, and where the architect's reports go.
@@ -354,6 +703,10 @@ export const projectEvents = [
    * A project member set (or cleared, with null) the cap on shifts that may run at once on this project, whatever the
    * number of agents. Off by default (restructure.md decision 11).
    */
+  defineEvent(
+    'ProjectPrReviewCapSet',
+    z.object({ projectId: Id, cap: z.number().int().min(1).max(100), by: Id }),
+  ),
   defineEvent(
     'ProjectConcurrencyCapSet',
     z.object({ projectId: Id, cap: z.number().int().min(1).max(50).nullable(), by: Id }),

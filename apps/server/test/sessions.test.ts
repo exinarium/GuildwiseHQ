@@ -178,6 +178,48 @@ describe('creating a session', () => {
     expect((await raw('DELETE', `/api/sessions/${s.threadId}/participants/${me.id}`)).status).toBe(409);
   });
 
+  it('clips a user participant name longer than an event allows, on create and when added', async () => {
+    const long = 'N'.repeat(120);
+    const clipped = `${'N'.repeat(99)}…`;
+    const [before] = await q('SELECT display_name FROM users WHERE id=$1', [w.owner.id]);
+    await q('UPDATE users SET display_name=$1 WHERE id=$2', [long, w.owner.id]);
+    let threadId = '';
+    try {
+      const res = await raw('POST', '/api/sessions', {
+        kind: 'boardroom',
+        title: 'Long owner',
+        participants: [persona('cost-hawk')],
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const s = (res.body as any).session;
+      threadId = s.threadId;
+      expect(s.participants.find((x: any) => x.kind === 'user').displayName).toBe(clipped);
+    } finally {
+      await q('UPDATE users SET display_name=$1 WHERE id=$2', [before?.display_name, w.owner.id]);
+    }
+    // a second member with a long name, then one with a short name
+    const guest = await w.t.userSession(uniqueEmail('longname'));
+    await w.t.addOrgMember(w.owner.id, guest.id);
+    await q('UPDATE users SET display_name=$1 WHERE id=$2', [long, guest.id]);
+    const added = await raw('POST', `/api/sessions/${threadId}/participants`, {
+      kind: 'user',
+      refId: guest.id,
+      seat: 'Guest',
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    expect((added.body as any).participant.displayName).toBe(clipped);
+    const short = await w.t.userSession(uniqueEmail('shortname'));
+    await w.t.addOrgMember(w.owner.id, short.id);
+    await q('UPDATE users SET display_name=$1 WHERE id=$2', ['Grace Hopper', short.id]);
+    const addedShort = await owner(
+      'POST',
+      `/api/sessions/${threadId}/participants`,
+      { kind: 'user', refId: short.id, seat: 'Guest' },
+      201,
+    );
+    expect(addedShort.participant.displayName).toBe('Grace Hopper');
+  });
+
   it('stores a human message without queueing a turn', async () => {
     const s = await newSession();
     const m = await owner(

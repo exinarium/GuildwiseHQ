@@ -19,6 +19,7 @@ export const INTEGRATION_KIND_IDS = [
   'mcp',
   'whatsapp',
   'google-sheets',
+  'github-app',
 ] as const;
 export const IntegrationKindIdSchema = z.enum(INTEGRATION_KIND_IDS);
 export type IntegrationKindId = z.infer<typeof IntegrationKindIdSchema>;
@@ -79,6 +80,10 @@ export const IntegrationStatusSchema = z.object({
   publicKey: z.string().max(1000).optional(),
   /** Jira base URL, GitLab host, Azure organization. */
   site: z.string().max(300).optional(),
+  /** Automated apps: when a short-lived access token was last minted successfully. */
+  refreshedAt: z.iso.datetime().optional(),
+  /** A machine-readable reason next to `detail` (automated apps: an `AppErrorCode`). */
+  errorCode: z.string().max(40).optional(),
 });
 export type IntegrationStatus = z.infer<typeof IntegrationStatusSchema>;
 

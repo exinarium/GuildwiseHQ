@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -12,7 +22,15 @@ import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
+import {
+  agentTmpDir,
+  CACHE_ENV_KEYS,
+  DOTNET_SHM_DIR,
+  usablePnpmLockDirs,
+  userNugetPackages,
+} from '../sandbox/sandbox.ts';
+import { sessionEnvDirOf } from '../session/shift-credential.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
 import {
@@ -347,7 +365,7 @@ export function buildClaudeOwnerTurnCommand(
   // Without the classifier or the relay in front of the shell, the runner's provider credential must not be readable by it
   // (`env`, `printenv`): Claude Code strips Anthropic and cloud-provider credentials from the subprocesses it starts.
   // The scrub also removes credential-named variables such as AOM_SHIFT_TOKEN from the Bash children, so `aom` refills
-  // them from `<turnDir>/shift-env.json` (see ceo/shift-env.ts).
+  // them from the file named by AOM_SHIFT_ENV_FILE (see session/shift-credential.ts).
   if (ownerBypasses(input)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
 }
@@ -393,6 +411,41 @@ export function accountClaudeConfig(base: ClaudeConfig, credential: AccountCrede
 
 /** `RuntimeInfoSchema.accounts` allows 20. */
 const MAX_REPORTED_ACCOUNTS = 20;
+
+/** The folder of the per-session DevOps guard files inside an agent's config dir. */
+export const GUARD_DIR = 'devops-guard';
+/** Guard files older than this are removed when a new one is written (a running session has a fresh file). */
+const GUARD_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The guard file of one session: no two sessions of an agent share one (`kind` is 'shift' or 'chat'). */
+export function guardFileFor(configDir: string, kind: 'shift' | 'chat', sessionRef: string): string {
+  const safe = /^[A-Za-z0-9-]{1,80}$/.test(sessionRef)
+    ? sessionRef
+    : createHash('sha256').update(sessionRef).digest('hex').slice(0, 32);
+  return join(configDir, GUARD_DIR, `${kind}-${safe}.json`);
+}
+
+/** Removes guard files (and the legacy shared `devops-guard.json`) that are over a day old. Never throws. */
+function pruneGuardFiles(configDir: string, now: number = Date.now()): void {
+  const old = (f: string): boolean => {
+    try {
+      return now - statSync(f).mtimeMs > GUARD_FILE_MAX_AGE_MS;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    const legacy = join(configDir, 'devops-guard.json');
+    if (old(legacy)) rmSync(legacy, { force: true });
+    const folder = join(configDir, GUARD_DIR);
+    for (const name of readdirSync(folder)) {
+      const f = join(folder, name);
+      if (name.endsWith('.json') && old(f)) rmSync(f, { force: true });
+    }
+  } catch {
+    // a prune that fails must not stop a start
+  }
+}
 
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
@@ -532,8 +585,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
     const nugetFallbackDir = userNugetPackages(this.realHome());
+    const sessionEnvDir = sessionEnvDirOf(input.env.AOM_SHIFT_ENV_FILE, root);
     return {
       runnerRoot: root,
+      ...(sessionEnvDir ? { sessionEnvDir } : {}),
       agentDir: dirname(input.sandbox.home),
       cwd,
       addDirs: input.addDirs ?? [],
@@ -553,7 +608,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ]),
       sharedCacheDir: input.sandbox.cacheRoot ?? join(root, 'cache'),
       ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+      ...(process.platform === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
       ...(readOnlyScan ? { readOnlyScan: true } : {}),
@@ -578,13 +635,33 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       protectedBranches: guard.protectedBranches ?? [],
       approvedCommands: guard.approvedCommands ?? [],
       ...(guard.readOnlyScan ? { readOnlyScan: true } : {}),
+      ...(guard.shiftKind ? { shiftKind: guard.shiftKind } : {}),
+      frozenBranches: guard.frozenBranches ?? [],
+      ...(guard.appRepos?.length ? { appRepos: guard.appRepos } : {}),
+      ...(guard.identityEmail ? { identityEmail: guard.identityEmail } : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
-    const file = join(configDir, 'devops-guard.json');
+    const file = guardFileFor(configDir, kind, guard.sessionRef);
+    pruneGuardFiles(configDir);
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file };
+  }
+
+  /** A start that failed after the guard file was written leaves nothing behind. */
+  private dropGuardFile(
+    input: { agent: { isDevops?: boolean }; sandbox: { configDir: string } },
+    kind: 'shift' | 'chat',
+    ref: string | undefined,
+  ): void {
+    if (!input.agent.isDevops || !ref) return;
+    try {
+      rmSync(guardFileFor(input.sandbox.configDir, kind, ref), { force: true });
+    } catch {
+      // nothing to remove
+    }
   }
 
   private warnedTruncated = false;
@@ -883,6 +960,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       return await this.startShiftSession(input, account, bk);
     } catch (err) {
       bk?.cleanup();
+      this.dropGuardFile(input, 'shift', input.devopsGuard?.sessionRef);
       throw err;
     }
   }
@@ -895,6 +973,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
+    if (input.agent.isDevops && input.kind === 'release_prep' && !guard)
+      throw new Error(
+        'the DevOps guard could not be attached to this release prep shift (no guard settings or no runner paths)',
+      );
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // A role that edits or commits must not get its own main clone as a read-only folder: that bind would cover the
     // writable git dir (GWP-86). Read-only roles and DevOps keep their folders unchanged.
@@ -980,6 +1062,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           dropPlaceholders();
           releaseRepo();
           bk?.cleanup();
+          if (guard) rmSync(guard.file, { force: true });
         }
       },
     });
@@ -1011,6 +1094,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       return await this.startChatSession(input, chatInput, devops, account, bk);
     } catch (err) {
       bk?.cleanup();
+      this.dropGuardFile(input, 'chat', input.devopsGuard?.sessionRef);
       throw err;
     }
   }
@@ -1028,40 +1112,44 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
-    const used = this.writeMcpConfig(
-      dir,
-      input.agent.permissions.allowedTools,
-      devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
-      intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
-    );
-    const chatSettings: ClaudeSettings = devops
-      ? buildDevopsChatSettings(
-          input.agent.permissions,
-          this.policy(input, input.cwd, false, guard?.command),
-          input.sandbox,
-        )
-      : input.agent.roleKey === 'ceo'
-        ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-        : input.work
-          ? buildMentionWorkSettings(
-              input.agent.permissions,
-              this.policy(chatInput, input.cwd, false),
-              input.sandbox,
-            )
-          : buildChatSettings(
-              input.readOnly,
-              [
-                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                ...used.map((u) => `mcp__${u.name}`),
-              ],
-              this.policy(chatInput, input.cwd, true),
-              input.sandbox,
-            );
-    const withSkills = this.prepareSubagents(
-      dir,
-      this.prepareSkills(dir, chatInput, chatSettings),
-      chatSettings,
-    );
+    const review = input.reviewRun;
+    // A review run grants no MCP server, but Claude Code still needs the (empty) file the command points at.
+    const used = review
+      ? this.writeMcpConfig(dir, [], undefined)
+      : this.writeMcpConfig(
+          dir,
+          input.agent.permissions.allowedTools,
+          devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
+          intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
+        );
+    const chatSettings: ClaudeSettings = review
+      ? reviewerPolicy(review, this.policy(chatInput, input.cwd, true)).settings
+      : devops
+        ? buildDevopsChatSettings(
+            input.agent.permissions,
+            this.policy(input, input.cwd, false, guard?.command),
+            input.sandbox,
+          )
+        : input.agent.roleKey === 'ceo'
+          ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+          : input.work
+            ? buildMentionWorkSettings(
+                input.agent.permissions,
+                this.policy(chatInput, input.cwd, false),
+                input.sandbox,
+              )
+            : buildChatSettings(
+                input.readOnly,
+                [
+                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                  ...used.map((u) => `mcp__${u.name}`),
+                ],
+                this.policy(chatInput, input.cwd, true),
+                input.sandbox,
+              );
+    const withSkills = review
+      ? chatInput
+      : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
     if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
     else await this.linkCredentials(dir, used, account.key);
@@ -1092,7 +1180,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
-      ...(bk || releaseRepo
+      ...(bk || releaseRepo || guard
         ? {
             onExit: async (r: Parameters<NonNullable<typeof hooks.onExit>>[0]) => {
               try {
@@ -1100,6 +1188,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               } finally {
                 releaseRepo?.();
                 bk?.cleanup();
+                if (guard) rmSync(guard.file, { force: true });
               }
             },
           }

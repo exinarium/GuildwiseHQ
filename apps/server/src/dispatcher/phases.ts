@@ -1,4 +1,5 @@
 import { isFollowupTerminal, nextFollowup, phaseCompletion, type Recipe, streamId } from '@aom/shared';
+import { postAsFieldFor } from '../commands/commit-as.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import {
   cardOutcomes,
@@ -96,6 +97,7 @@ async function mergeChecks(ctx: Ctx): Promise<void> {
       branchName: c.branch_name,
       workingBranch: branch,
       action: c.finalize_action,
+      ...(await postAsFieldFor(ctx.pool, c.project_id, c.home_workstation_id, { write: false })),
     });
     touched.add(c.home_workstation_id);
   }

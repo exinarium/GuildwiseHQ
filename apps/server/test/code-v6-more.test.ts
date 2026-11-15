@@ -98,7 +98,8 @@ describe('code v6 follows automatically, like v3 to v5: new cards take it, cards
     const fresh = await w.card({ title: 'After the release' });
     expect(fresh).toMatchObject({
       workflowKey: 'code',
-      workflowVersion: 6,
+      // the boot registers every missing built-in: code v7 (v6 plus the design gate) is now the newest lean version
+      workflowVersion: 7,
       stage: 'planning',
       designNeeded: true,
     });

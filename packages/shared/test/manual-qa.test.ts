@@ -95,6 +95,7 @@ describe('manual QA workflow (code v3)', () => {
 
   it('knows the derived flags as boolean fields', () => {
     expect(Object.keys(DERIVED_BOOLEAN_FIELDS).sort()).toEqual([
+      'designGate',
       'manualQa',
       'mergeReview',
       'ownerApproval',

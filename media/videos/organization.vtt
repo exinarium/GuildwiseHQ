@@ -1,45 +1,45 @@
 WEBVTT
 
 1
-00:00:00.360 --> 00:00:06.973
+00:00:00.420 --> 00:00:07.033
 Organization is where the Owner and Admins manage who belongs to your organization, and what your plan allows.
 
 2
-00:00:07.677 --> 00:00:16.104
+00:00:07.740 --> 00:00:16.167
 Open Organization in the sidebar. General shows the name of the organization, its Owner, and your role. Here, you are the Owner.
 
 3
-00:00:16.805 --> 00:00:26.960
+00:00:16.873 --> 00:00:27.028
 Members lists everyone with their role. Admins help run the organization; Members work on the projects they are given. As the Owner, you change a role right here.
 
 4
-00:00:27.659 --> 00:00:35.808
+00:00:27.728 --> 00:00:35.877
 To add someone, choose Invite member. Enter their email, pick the role and the projects they start on, then choose Send invitation.
 
 5
-00:00:36.509 --> 00:00:44.530
+00:00:36.580 --> 00:00:44.601
 Invitations shows who was invited and whether they joined. Resend sends the email again. Revoke makes the link in it stop working.
 
 6
-00:00:45.233 --> 00:00:51.505
+00:00:45.304 --> 00:00:51.576
 Guests belong to another organization and work on one of your projects. They do not count against your limits.
 
 7
-00:00:52.206 --> 00:01:01.273
+00:00:52.279 --> 00:01:01.346
 E-mail inbox gives your organization addresses whose mail can become draft cards, once your platform administrator has connected a mail provider.
 
 8
-00:01:01.972 --> 00:01:07.391
+00:01:02.045 --> 00:01:07.464
 Project links record how your projects depend on each other, or on something outside Guildwise.
 
 9
-00:01:08.095 --> 00:01:11.956
+00:01:08.170 --> 00:01:12.031
 Plan and limits shows your plan, what you use, and the limits that apply.
 
 10
-00:01:12.659 --> 00:01:22.856
+00:01:12.735 --> 00:01:22.932
 Storage connects your own OneDrive, S3, folder or vault, so forms and journeys write client files to your storage. It has its own video and Help article.
 
 11
-00:01:23.556 --> 00:01:28.569
+00:01:23.632 --> 00:01:28.645
 That is Organization: who is in, what each person may do, and what your plan allows.

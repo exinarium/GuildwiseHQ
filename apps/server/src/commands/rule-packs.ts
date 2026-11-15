@@ -45,7 +45,7 @@ async function linkedRows(db: Tx, orgId: string, packId: string): Promise<Linked
   );
 }
 
-async function installedPackIds(db: Tx, orgId: string): Promise<Set<string>> {
+export async function installedPackIds(db: Tx, orgId: string): Promise<Set<string>> {
   const r = await rows<{ pack_id: string }>(
     db,
     'SELECT pack_id FROM org_rule_packs WHERE org_id=$1 AND removed_at IS NULL',
@@ -64,13 +64,17 @@ const summary = (p: RulePack, installed: boolean): RulePackSummary => ({
   installed,
 });
 
-async function assertMember(db: Tx, user: AuthSession['user'], orgId: string): Promise<void> {
+export async function assertMember(db: Tx, user: AuthSession['user'], orgId: string): Promise<void> {
   if (!(await orgRoleOf(db, user.id, orgId))) throw forbidden('you do not belong to this organization');
 }
 
-async function assertManager(db: Tx, user: AuthSession['user'], orgId: string): Promise<void> {
-  if (!isOrgManager({ orgRole: await orgRoleOf(db, user.id, orgId) }))
-    throw forbidden('only the organization Owner and Admins can install or remove rule packs');
+export async function assertManager(
+  db: Tx,
+  user: AuthSession['user'],
+  orgId: string,
+  message = 'only the organization Owner and Admins can install or remove rule packs',
+): Promise<void> {
+  if (!isOrgManager({ orgRole: await orgRoleOf(db, user.id, orgId) })) throw forbidden(message);
 }
 
 /** The packs with their installed flag. Business organizations only. */
@@ -95,7 +99,13 @@ export async function previewRulePack(
 ): Promise<RulePackPreview> {
   return withTx(ctx.pool, async (tx) => {
     await assertMember(tx, user, orgId);
-    const p = pack(packId);
+    return previewRulePackTx(tx, orgId, pack(packId));
+  });
+}
+
+/** The preview body, for a caller that already runs in a transaction and has checked access. */
+export async function previewRulePackTx(tx: Tx, orgId: string, p: RulePack): Promise<RulePackPreview> {
+  {
     const linked = new Map((await linkedRows(tx, orgId, p.id)).map((l) => [l.rule_pack_rule_id, l]));
     const live = await liveOrdersFor(tx, orgId, undefined);
     const installed = (await installedPackIds(tx, orgId)).has(p.id);
@@ -122,7 +132,7 @@ export async function previewRulePack(
         return { ...base, status: 'new' as const, existing: [] };
       }),
     };
-  });
+  }
 }
 
 /**
@@ -138,7 +148,19 @@ export async function installRulePack(
 ): Promise<RulePackInstallResult> {
   return withAppendTx(ctx.pool, async (tx) => {
     await assertManager(tx, user, orgId);
-    const p = pack(packId);
+    return installRulePackTx(ctx, tx, user, orgId, pack(packId));
+  });
+}
+
+/** The install body, for a caller that already runs in an append transaction and has checked access. */
+export async function installRulePackTx(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  orgId: string,
+  p: RulePack,
+): Promise<RulePackInstallResult> {
+  {
     const existing = await linkedRows(tx, orgId, p.id);
     const have = new Set(existing.map((l) => l.rule_pack_rule_id));
     const out: RulePackInstallResult = {
@@ -185,7 +207,7 @@ export async function installRulePack(
       { tx },
     );
     return out;
-  });
+  }
 }
 
 /** Retires the pack's rules whose wording was never edited; edited ones stay as the organization's own. */
@@ -197,7 +219,19 @@ export async function removeRulePack(
 ): Promise<RulePackRemoveResult> {
   return withAppendTx(ctx.pool, async (tx) => {
     await assertManager(tx, user, orgId);
-    const p = pack(packId);
+    return removeRulePackTx(ctx, tx, user, orgId, pack(packId));
+  });
+}
+
+/** The remove body, for a caller that already runs in an append transaction and has checked access. */
+export async function removeRulePackTx(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  orgId: string,
+  p: RulePack,
+): Promise<RulePackRemoveResult> {
+  {
     const retired: string[] = [];
     const kept: string[] = [];
     for (const l of await linkedRows(tx, orgId, p.id)) {
@@ -228,5 +262,5 @@ export async function removeRulePack(
       { tx },
     );
     return { retired, kept };
-  });
+  }
 }

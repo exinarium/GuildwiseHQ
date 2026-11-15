@@ -17,9 +17,17 @@ import { errText, ForgeUnavailableError } from '../forge/http.ts';
 import { forgeForUrl } from '../forge/index.ts';
 import type { ChangeState, ForgeEnv } from '../forge/types.ts';
 import { detectSignOff } from './dco.ts';
-import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
+import { appOfPlan, isProtectedBranchRejection, type PrCreator, withPushReport } from './gh.ts';
 import { git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  type AppTokenProbe,
+  boundPostAsFor,
+  commitEnv,
+  identityErrorWire,
+  NO_IDENTITY_WIRE,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { isAncestor } from './merged.ts';
 import { resolveReleaseBase } from './release-pr.ts';
@@ -27,6 +35,8 @@ import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleasePublishInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: ReleasePublishPayload;
   repoPath: string;
   integrationDir: string;
@@ -152,9 +162,17 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   if (decision.action === 'create') {
     let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
     try {
-      identity = await requireCommitIdentity(repoPath, p.commitAs);
+      identity = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+      );
     } catch (err) {
-      return failed('tag', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errText(err), carry);
+      return failed(
+        'tag',
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)),
+        carry,
+      );
     }
     const made = await git(repoPath, ['tag', '-a', p.tag, '-m', p.title, target], {
       env: commitEnv(identity),
@@ -165,7 +183,15 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   if (decision.action === 'create' || decision.action === 'push') {
     const push = await git(repoPath, [...a.args, 'push', 'origin', `refs/tags/${p.tag}`], authEnv);
     if (push.exitCode !== 0)
-      return failed('tag', `pushing ${p.tag} failed: ${(push.stderr || push.stdout).trim()}`, carry);
+      return failed(
+        'tag',
+        withPushReport(
+          `pushing ${p.tag} failed: ${(push.stderr || push.stdout).trim()}`,
+          push.stderr || push.stdout,
+          appOfPlan(p.postAs, p.remoteUrlNormalized),
+        ),
+        carry,
+      );
   }
   const tagUrl = repoTagUrl(url, p.tag, p.forge);
   carry.tag = {
@@ -324,9 +350,18 @@ async function landByMerge(
   const R = p.releaseCommitSha;
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
-    return { result: failed('land', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errText(err)) };
+    return {
+      result: failed(
+        'land',
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)),
+      ),
+    };
   }
   const tip = await revParse(repoPath, baseRef);
   if (!tip) return { result: failed('land', `the main branch '${base}' does not exist on origin`) };
@@ -397,7 +432,12 @@ async function landByMerge(
               },
             };
         }
-        return { result: failed('land', `pushing ${base} failed: ${why}`) };
+        return {
+          result: failed(
+            'land',
+            withPushReport(`pushing ${base} failed: ${why}`, why, appOfPlan(p.postAs, p.remoteUrlNormalized)),
+          ),
+        };
       }
       return { sha, signedOff };
     },

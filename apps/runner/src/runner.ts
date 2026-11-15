@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir, hostname, platform } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import {
+  APP_INTEGRATIONS_CAPABILITY,
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_DIAGNOSTICS_CAPABILITY,
@@ -11,6 +12,7 @@ import {
   CHECKS_CAPABILITY,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
+  COMMIT_STATUS_CAPABILITY,
   CommandPayloadSchemas,
   DELEGATE_GRANTS_FEATURE,
   DELIVERY_CAPABILITY,
@@ -34,6 +36,14 @@ import {
   PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
+  POST_AS_CAPABILITY,
+  POST_AS_V2_CAPABILITY,
+  type PostAsPlan,
+  PostAsPlanSchema,
+  PR_LIST_CAPABILITY,
+  PR_NOTICE_CAPABILITY,
+  PR_REVIEW_CAPABILITY,
+  PR_REVIEW_PAIR_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -50,6 +60,9 @@ import {
   RELEASE_PUBLISH_CAPABILITY,
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
+  REPLAY_CAPABILITY,
+  type RepoOpenPrPayload,
+  type RepoOpenPrResult,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -71,6 +84,7 @@ import {
   STORAGE_CAPABILITY,
   STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
+  TRACKER_POST_AS_CAPABILITY,
   UNLIMITED_SHIFTS,
   uuidv7,
   type WorktreeSweepResult,
@@ -92,6 +106,9 @@ import {
 } from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { appTokenProbe, checkAppAccess } from './apps/access-check.ts';
+import { AppTokenBroker } from './apps/broker.ts';
+import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
@@ -110,23 +127,39 @@ import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
+import { type AppTokenSource, brokerTokenSource } from './external/app-token.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
+import {
+  type ActorScope,
+  actorScope,
+  appOriginRefusal,
+  commandCarriesPlan,
+  devopsRepoUrls,
+  missingPlanRefusal,
+  payloadRepoUrls,
+  releaseUncoveredRepos,
+} from './forge/app-actor.ts';
+import { appRepos } from './forge/app-repos.ts';
+import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,
+  FileStatusTokenStore,
   FileTokenStore,
   forgeForUrl,
   forgePrCreator,
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
+import { listMergedPrs, listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
+import { AppIdentityError, type AppTokenProbe, appIdentityWire } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
@@ -168,6 +201,9 @@ import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
+import { PrReviewCommands, sweepPrReviewAgents } from './review/pr-review-commands.ts';
+import { sweepReviewRuns } from './review/reviewer-sandbox.ts';
+import { FileReviewerTokenStore, reviewerTokenFact } from './review/reviewer-tokens.ts';
 import { RunManager } from './runs/manager.ts';
 import { removeOrphanAgentTmps, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
@@ -175,6 +211,7 @@ import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
+import { sweepSessionEnvFiles } from './session/shift-credential.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
@@ -226,6 +263,8 @@ export interface RunnerOptions {
   probeTarget?: (url: string) => Promise<string | null>;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`, submodules and dependencies). */
   prepareWorktree?: SupervisorDeps['prepareWorktree'];
+  /** Test hook: how a card worktree's submodules are filled (default: `initWorktreeSubmodules`). */
+  initWorktreeSubmodules?: SupervisorDeps['initWorktreeSubmodules'];
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
   /** Test hook: milliseconds between the periodic scratch and worktree sweeps (default: `scratch.sweepIntervalHours`). */
@@ -330,6 +369,10 @@ export class Runner {
   private readonly repoAccess: RepoAccessUpdater;
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
+  /** Comment-only tokens reviewers post with: sealed here, only present/missing is ever reported. */
+  readonly reviewerTokens: FileReviewerTokenStore;
+  /** `pr_review.run` / `pr_review.post`: the first reviewer of a PR-only repository. */
+  private readonly prReviews: PrReviewCommands;
   private readonly packCredentials: PackCredentialStore;
   readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
@@ -402,6 +445,8 @@ export class Runner {
   readonly forgeEnv: ForgeEnv;
   private readonly agentGit: AgentGit;
   private lastGit: string | undefined;
+  /** Commit status posts that are in flight, by status id. */
+  private readonly statusPosts = new LiveOnce();
   private lastJira: string | undefined;
   /** The runner's own HTTP calls to the server (attachment bytes); the token is read fresh (it can rotate). */
   private readonly serverHttp: ServerHttp;
@@ -420,6 +465,8 @@ export class Runner {
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
+    // the app repositories of this root survive a restart: a registry entry only ever refuses a push
+    appRepos.persist(this.paths.root);
     this.relay = new RelayDispatcher({
       integrations: () => [
         ...opts.config.relay.integrations.filter((i) => i.kind !== 'whatsapp_cloud'),
@@ -438,9 +485,19 @@ export class Runner {
     });
     this.exec = opts.executor ?? realExecutor;
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
+    this.reviewerTokens = new FileReviewerTokenStore(
+      join(this.paths.secrets, 'reviewer-tokens.json'),
+      (n) => this.keys.deriveFileKey(n),
+      { warn: (m) => this.log.warn(m) },
+    );
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
+      statusTokens: new FileStatusTokenStore(
+        join(this.paths.secrets, 'status-tokens.json'),
+        (n) => this.keys.deriveFileKey(n),
+        { warn: (m) => this.log.warn(m) },
+      ),
       tokens: new FileTokenStore(
         join(this.paths.secrets, 'git-tokens.json'),
         (n) => this.keys.deriveFileKey(n),
@@ -559,6 +616,24 @@ export class Runner {
         },
         { codex: this.codexAccounts, gemini: this.geminiAccounts },
       );
+    this.prReviews = new PrReviewCommands({
+      paths: this.paths,
+      adapters: this.adapters,
+      tokens: this.reviewerTokens,
+      forgeEnv: this.forgeEnv,
+      findRepo: async (n) => {
+        const r = await this.findRepo(n);
+        return r ? { localPath: r.localPath, remoteUrl: r.remoteUrl } : undefined;
+      },
+      gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      scope: (plan) => this.scopeFor(plan),
+      sandboxState: (a) =>
+        a instanceof ClaudeCodeAdapter
+          ? a.sandboxStatus()
+          : { state: 'unavailable', reason: 'this runtime has no enforced sandbox' },
+      fetch: globalThis.fetch,
+      log: (l) => this.log.info(l),
+    });
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
       keys: this.keys,
@@ -690,6 +765,7 @@ export class Runner {
     this.toolchains.onChange = () => this.reportToolchains(false);
     this.runs = new RunManager({
       paths: this.paths,
+      appProbe: this.appProbe,
       findRepo: (n) => this.findRepo(n),
       send: (type, payload) => void this.client.send(type as never, payload as never),
       log: this.log,
@@ -717,6 +793,7 @@ export class Runner {
       paths: this.paths,
       config: opts.config,
       adapters: this.adapters,
+      appProbe: this.appProbe,
       beforeAuthReject: () => this.reportRuntimes(),
       ipc: this.ipc,
       outbox: this.outbox,
@@ -748,6 +825,7 @@ export class Runner {
       envChecker: opts.envChecker,
       ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
+      ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,
@@ -756,6 +834,17 @@ export class Runner {
       targetSecrets: this.targetSecrets,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      shiftCredentials: (plan) => {
+        const scope = this.scopeFor(plan);
+        return {
+          auth: scope.auth,
+          originRefusal: (url) => appOriginRefusal(scope, url),
+          appFor: (url) => {
+            const a = scope.actorFor(url)?.app;
+            return a ? { label: a.label, botName: a.botName, botEmail: a.botEmail } : null;
+          },
+        };
+      },
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       external: () => this.external,
@@ -768,6 +857,7 @@ export class Runner {
       ExternalAdapters.defaults({
         ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
         jira: () => this.jiraConfig(),
+        appTokens: this.appTokenSource,
       });
     this.restartAfterReply = new RestartAfterReply({
       replyAcked: (frame) => !frame || !this.outbox.has(frame),
@@ -810,6 +900,8 @@ export class Runner {
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
       forge: () => this.forgeEnv,
+      appProbe: this.appProbe,
+      scopeFor: (plan) => this.scopeFor(plan),
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.graph = new GraphService({
@@ -864,6 +956,7 @@ export class Runner {
     });
     this.poller = new IntegrationPoller({
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+      appTokens: this.appTokenSource,
       jira: () => this.jiraConfig(),
       ...(opts.config.runtimes.mock?.enabled ? { mockFile: join(this.paths.root, 'mock-issues.json') } : {}),
     });
@@ -975,7 +1068,65 @@ export class Runner {
       sessionCwd: join(this.paths.root, 'tmp', 'integrations'),
       touchRecheck: () => touchRecheck(this.paths.secrets),
       sealKey: (name) => this.keys.deriveFileKey(name),
+      apps: this.appBroker(),
     };
+  }
+
+  private appTokens: AppTokenBroker | undefined;
+
+  /** One token broker per runner process: the app keys stay sealed on disk, the tokens in memory only. */
+  private appBroker(): AppTokenBroker {
+    if (!this.appTokens) {
+      const broker = new AppTokenBroker({
+        store: new AppKeyStore(this.paths.secrets, (n) => this.keys.deriveFileKey(n)),
+        fetch: globalThis.fetch,
+        now: Date.now,
+        onChange: () => void this.integrations?.report(true),
+      });
+      this.appTokens = broker;
+    }
+    return this.appTokens;
+  }
+
+  /**
+   * This runner's own app token probe, handed to every commit path (shifts, finalize, release, submodule, run rebase).
+   * A project that posts as an app commits as its bot only after a scoped token could be minted from THIS runner's key
+   * store: several pairings run in one process, each with its own keys, so the probe is never shared through a global.
+   */
+  private readonly appProbe: AppTokenProbe = {
+    ensure: (app, repoName) => appTokenProbe(this.appBroker()).ensure(app, repoName),
+  };
+
+  /** This runner's token source for GitHub issue traffic as a project's GitHub App (per runner, like `appProbe`). */
+  private readonly appTokenSource: AppTokenSource = brokerTokenSource(() => this.appBroker());
+
+  /**
+   * The credentials one payload acts with: without a plan (or with no repository on an app) exactly today's forge env
+   * and git auth; repositories that post as an app push, fetch and call gh with this runner's installation tokens.
+   */
+  private scopeFor(plan?: PostAsPlan | null): ActorScope {
+    return actorScope(this.forgeEnv, this.appBroker(), plan, appRepos.forRoot(this.paths.root));
+  }
+
+  /** `repo.open_pr` as the project's app when it has one (an ssh origin or a mint failure is the answer, not a crash). */
+  private async openPrAs(
+    p: RepoOpenPrPayload,
+    repo: { localPath: string; remoteUrl: string },
+  ): Promise<RepoOpenPrResult> {
+    const scope = this.scopeFor(p.postAs);
+    const refusal = appOriginRefusal(scope, repo.remoteUrl);
+    if (refusal) return { ok: false, error: refusal };
+    try {
+      return await openReleasePr({
+        payload: p,
+        repoPath: repo.localPath,
+        pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+        auth: scope.auth,
+      });
+    } catch (err) {
+      if (err instanceof AppIdentityError) return { ok: false, error: appIdentityWire(err) };
+      throw err;
+    }
   }
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
@@ -1208,6 +1359,13 @@ export class Runner {
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     this.repairPdfRenderer();
     await this.scan();
+    // reviewer runs left by a crash: their checkouts and tmp dirs are removed (a new run always starts fresh)
+    await sweepReviewRuns(this.paths, this.prReviews.liveRunIds())
+      .then(async (n) => {
+        n += await sweepPrReviewAgents(this.paths, this.prReviews.liveRunIds());
+        if (n) this.log.info(`review sweep: removed ${n} leftover reviewer run folder(s)`);
+      })
+      .catch((err) => this.log.warn(`review sweep failed: ${String(err)}`));
     // Backlog #81: temp content left by earlier shifts (and a crashed runner) goes before anything runs.
     await sweepAgentTmps(this.paths, this.supervisor.persistedAgentIds())
       .then((r) => {
@@ -1221,6 +1379,8 @@ export class Runner {
         if (n) this.log.info(`temp sweep: removed ${n} temp dir(s) of agents that no longer exist`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    // session env files of a crashed runner: no token of an earlier process is live (the IPC registry is in memory)
+    this.sweepSessionEnv('start');
     this.startScratchSweeps();
     this.supervisor.resumePersisted();
     await this.runs
@@ -1255,6 +1415,11 @@ export class Runner {
           this.lastRecheck = m;
           void this.reportGit(false);
           void this.reportIntegrations(false);
+          // a reviewer token was set or removed: tell the server whether each repository has one
+          this.client.send('repos.report', {
+            repos: this.reposWithReviewerToken(),
+            repoCatalog: this.repoCatalog(),
+          });
           if (this.whatsapp.reload()) this.announceRelay();
         }
       } catch {
@@ -1293,7 +1458,18 @@ export class Runner {
     await this.pdfRepairRun?.done;
     await this.pdf.close();
     await this.ipc.stop();
+    // every token is dead once the IPC server stopped; a shift whose cleanup outlived the grace leaves its file behind
+    this.sweepSessionEnv('stop');
     this.writeStatus(false);
+  }
+
+  private sweepSessionEnv(when: 'start' | 'stop'): void {
+    try {
+      const n = sweepSessionEnvFiles(this.paths.root);
+      if (n) this.log.info(`session env sweep (${when}): removed ${n} leftover session env dir(s)`);
+    } catch (err) {
+      this.log.warn(`session env sweep failed: ${(err as NodeJS.ErrnoException).code ?? 'error'}`);
+    }
   }
 
   /** The PDF browser of a new runner version is fetched in the background; until then copies report 'unavailable'. */
@@ -1536,7 +1712,7 @@ export class Runner {
         this.lastRuntimes = JSON.stringify(r);
         return r;
       }),
-      repos: this.repos,
+      repos: this.reposWithReviewerToken(),
       repoCatalog: this.repoCatalog(),
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
@@ -1554,12 +1730,22 @@ export class Runner {
             : ['runs:1', 'runs:2', 'runs:3']),
         'ceo:1',
         STORAGE_CAPABILITY,
+        APP_INTEGRATIONS_CAPABILITY,
+        POST_AS_CAPABILITY,
+        POST_AS_V2_CAPABILITY,
+        TRACKER_POST_AS_CAPABILITY,
         STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,
         QUESTION_CONTINUE_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
+        PR_LIST_CAPABILITY,
+        COMMIT_STATUS_CAPABILITY,
+        PR_REVIEW_CAPABILITY,
+        PR_REVIEW_PAIR_CAPABILITY,
+        PR_NOTICE_CAPABILITY,
+        REPLAY_CAPABILITY,
         RELEASE_SHIP_CAPABILITY,
         RELEASE_REF_CLEANUP_CAPABILITY,
         // The runner runs the project's confirmed checks (lint, format, typecheck) at `aom handoff`
@@ -1629,7 +1815,10 @@ export class Runner {
 
   private async rescan(): Promise<void> {
     await this.scan();
-    this.client.send('repos.report', { repos: this.repos, repoCatalog: this.repoCatalog() });
+    this.client.send('repos.report', {
+      repos: this.reposWithReviewerToken(),
+      repoCatalog: this.repoCatalog(),
+    });
     // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
     await this.reportRuntimes();
     await this.reportGit(false);
@@ -1718,10 +1907,11 @@ export class Runner {
         }
       }
       const connections = await gitConnections(this.forgeEnv, hosts);
-      const key = JSON.stringify(connections.map(({ checkedAt: _c, ...c }) => c));
+      const statusTokens = (this.forgeEnv.statusTokens?.list() ?? []).map((t) => t.key).sort();
+      const key = JSON.stringify([connections.map(({ checkedAt: _c, ...c }) => c), statusTokens]);
       if (!force && key === this.lastGit) return;
       this.lastGit = key;
-      this.client.send('git.report', { connections });
+      this.client.send('git.report', { connections, statusTokens });
     } catch (err) {
       this.log.warn(`git status check failed: ${String(err)}`);
     }
@@ -1855,6 +2045,14 @@ export class Runner {
     });
   }
 
+  /** The repositories as reported to the server, each with whether a reviewer token is held (never the token). */
+  private reposWithReviewerToken(): RepoReport[] {
+    return this.repos.map((r) => ({
+      ...r,
+      reviewerToken: reviewerTokenFact(this.reviewerTokens, r.remoteUrl),
+    }));
+  }
+
   /** Scans the repoRoots once: project matching sees every clone with a remote, the picker catalog only what may be opened. */
   private async scan(): Promise<void> {
     const all = await scanAllRepos(this.opts.config.repoRoots);
@@ -1947,11 +2145,30 @@ export class Runner {
     });
   }
 
+  /**
+   * Keeps the push tripwire in step with the server's current plan, with one rule: a payload that carries a plan
+   * (even the empty one, which is how a `post-as:2` server says "no app") releases the repositories it does not put
+   * on an app; a payload that could carry one but does not is refused when it touches a registered app repository, and
+   * otherwise runs as today. Returns the refusal text, or null to go on.
+   */
+  private tripwireGate(urls: ReadonlyArray<string>, postAs: unknown, operation: string): string | null {
+    const tripwire = appRepos.forRoot(this.paths.root);
+    if (postAs === undefined || postAs === null) return missingPlanRefusal(tripwire, operation, urls);
+    // a malformed plan is left to the command's own validation: nothing is released
+    if (!PostAsPlanSchema.safeParse(postAs).success) return null;
+    releaseUncoveredRepos(tripwire, postAs as PostAsPlan, urls);
+    return null;
+  }
+
   private onMessage(msg: ServerToRunner): void {
     switch (msg.type) {
-      case 'shift.start':
-        void this.supervisor.handleStart(msg);
+      case 'shift.start': {
+        const urls = msg.kind === 'devops' ? devopsRepoUrls(msg.postAs) : payloadRepoUrls(msg);
+        const refused = this.tripwireGate(urls, msg.postAs, 'shift start');
+        if (refused) this.supervisor.refuseStart(msg.shiftId, refused);
+        else void this.supervisor.handleStart(msg);
         break;
+      }
       case 'shift.stop':
         void this.supervisor.handleStop(msg.shiftId, msg.reason);
         break;
@@ -1978,6 +2195,22 @@ export class Runner {
         break;
       }
       case 'command':
+        // Only a command that can carry a plan says anything about it: a missing plan on any other command (commit
+        // status, ref cleanup, runs, ...) is not a deselected app and must leave the tripwire alone.
+        if (commandCarriesPlan(msg.command)) {
+          const refused = this.tripwireGate(
+            payloadRepoUrls(msg.payload),
+            msg.payload && typeof msg.payload === 'object'
+              ? (msg.payload as { postAs?: unknown }).postAs
+              : undefined,
+            msg.command,
+          );
+          if (refused) {
+            this.log.warn(`command ${msg.command} refused: ${refused}`);
+            this.client.send('command.result', { commandId: msg.commandId, ok: false, error: refused });
+            break;
+          }
+        }
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':
@@ -2210,18 +2443,23 @@ export class Runner {
         if (!repo) {
           done(true, { ok: false, action: p.action, error: `no local clone for ${p.remoteUrlNormalized}` });
         } else {
-          const completion = await executeCompletion({
-            payload: p,
-            repoPath: repo.localPath,
-            worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
-            worktreesDir: this.paths.worktrees,
-            integrationDir: this.paths.integration,
-            pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-            auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-            rules:
-              this.opts.branchRules ??
-              ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
-          });
+          const scope = this.scopeFor(p.postAs);
+          const sshRefusal = appOriginRefusal(scope, repo.remoteUrl);
+          const completion = sshRefusal
+            ? { ok: false, action: p.action, error: sshRefusal }
+            : await executeCompletion({
+                payload: p,
+                repoPath: repo.localPath,
+                appProbe: this.appProbe,
+                worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+                worktreesDir: this.paths.worktrees,
+                integrationDir: this.paths.integration,
+                pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+                auth: scope.auth,
+                rules:
+                  this.opts.branchRules ??
+                  ((cwd, branch, forge) => branchRulesFor(scope.forgeEnv, cwd, branch, forge)),
+              });
           done(true, completion);
           // The working branch on origin may have moved (a merge, or a pull request merged since): bring the local one along.
           if (completion.ok && (p.action === 'pr' || p.action === 'merge'))
@@ -2238,12 +2476,7 @@ export class Runner {
         done(
           true,
           repo
-            ? await openReleasePr({
-                payload: p,
-                repoPath: repo.localPath,
-                pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              })
+            ? await this.openPrAs(p, repo)
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
       } else if (command === 'repo.release_facts') {
@@ -2256,10 +2489,64 @@ export class Runner {
             ? await readReleaseFacts({
                 payload: p,
                 repoPath: repo.localPath,
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+                auth: this.scopeFor(p.postAs).auth,
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
+      } else if (command === 'repo.list_prs') {
+        // Read-only (PR-only review). "No clone here", an unsupported git host and a missing login are answers.
+        const p = CommandPayloadSchemas['repo.list_prs'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await listOpenPrs({
+            payload: p,
+            remoteUrl: repo?.remoteUrl ?? null,
+            forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+          }),
+        );
+      } else if (command === 'repo.commit_status') {
+        // Sets one commit status with the size check status token. A resent command for a post that is still live
+        // is answered once, under its own command id.
+        const p = CommandPayloadSchemas['repo.commit_status'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await this.statusPosts.once(p.statusId, () =>
+            postCommitStatus({
+              payload: p,
+              remoteUrl: repo?.remoteUrl ?? null,
+              forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+            }),
+          ),
+        );
+      } else if (command === 'repo.list_merged_prs') {
+        // Read-only (20-PR replay). "No clone here", an unsupported git host and a missing login are answers.
+        const p = CommandPayloadSchemas['repo.list_merged_prs'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await listMergedPrs({
+            payload: p,
+            remoteUrl: repo?.remoteUrl ?? null,
+            forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+          }),
+        );
+      } else if (command === 'pr_review.run') {
+        // The run never posts: it answers with its findings, a timeout or a failure. A resent command for a live run
+        // awaits the same run (one model session) and answers under its own command id.
+        const p = CommandPayloadSchemas['pr_review.run'].parse(payload);
+        done(true, await this.prReviews.run(p));
+      } else if (command === 'pr_review.cancel') {
+        const p = CommandPayloadSchemas['pr_review.cancel'].parse(payload);
+        done(true, this.prReviews.cancel(p));
+      } else if (command === 'pr_review.post') {
+        const p = CommandPayloadSchemas['pr_review.post'].parse(payload);
+        done(true, await this.prReviews.post(p));
+      } else if (command === 'pr_review.notice') {
+        // A body-only comment review that tells the author to split the pull request (reviewer token, never gh).
+        const p = CommandPayloadSchemas['pr_review.notice'].parse(payload);
+        done(true, await this.prReviews.notice(p));
       } else if (command === 'release.ship') {
         // "No clone here" and every git refusal are answers (ok:true, result.ok:false): the server puts them on the desk.
         const p = CommandPayloadSchemas['release.ship'].parse(payload);
@@ -2268,8 +2555,9 @@ export class Runner {
           ? await shipReleaseCommit({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
             })
           : {
               ok: false,
@@ -2301,9 +2589,10 @@ export class Runner {
           ? await runReleaseDocsPrep({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();
@@ -2337,10 +2626,11 @@ export class Runner {
           ? await publishRelease({
               payload: p,
               repoPath: repo.localPath,
+              appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              forgeEnv: this.forgeEnv,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+              forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+              auth: this.scopeFor(p.postAs).auth,
+              pr: this.opts.prCreator ?? forgePrCreator(this.scopeFor(p.postAs).forgeEnv),
             })
           : {
               ok: false,
@@ -2365,8 +2655,9 @@ export class Runner {
             ? await bumpSubmodule({
                 payload: p,
                 repoPath: repo.localPath,
+                appProbe: this.appProbe,
                 integrationDir: this.paths.integration,
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+                auth: this.scopeFor(p.postAs).auth,
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
@@ -2380,7 +2671,12 @@ export class Runner {
         done(
           true,
           repo
-            ? await checkBranchMerged({ repoPath: repo.localPath, payload: p })
+            ? await checkBranchMerged({
+                repoPath: repo.localPath,
+                payload: p,
+                // without a plan: git's own credentials, exactly as before
+                ...(p.postAs ? { auth: (url: string) => this.scopeFor(p.postAs).auth(url) } : {}),
+              })
             : { merged: false, reason: `no local clone for ${p.remoteUrlNormalized}` },
         );
       } else if (command === 'integration.run') {
@@ -2463,6 +2759,12 @@ export class Runner {
       ) {
         // Refusals (web turned off, wrong envelope, machine-wide login) are answers: ok:true with a sentence, never a retry.
         done(true, await this.integrations.handle(command, payload));
+      } else if (command === 'app.access_check') {
+        // Which project repositories the app's installation reaches: states and value-free reasons only.
+        done(true, await checkAppAccess(this.appBroker(), payload, globalThis.fetch));
+      } else if (command.startsWith('app.')) {
+        // Automated apps (Settings > Automated apps): typed refusals are answers, never a retry; never a key or token.
+        done(true, await this.integrations.handleApp(command, payload));
       } else if (command.startsWith('storage.')) {
         // Typed errors are answers (ok:true with `error`), never a retry; no secret is ever in an answer.
         done(true, await this.storage.handle(command, payload));
