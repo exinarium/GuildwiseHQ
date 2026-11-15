@@ -98,9 +98,25 @@ export async function checkAppAccess(
 export function appTokenProbe(broker: AccessCheckBroker): AppTokenProbe {
   return {
     ensure: async (app, repoName) => {
-      await appAccessToken(broker, app, repoName);
+      await scopedMint(broker, app, repoName);
     },
   };
+}
+
+/** The stored-copy checks, then the broker's (cached) token for one repository, as the broker returned it. */
+async function scopedMint(
+  broker: AccessCheckBroker,
+  { instance, integrationId }: { instance: string; integrationId: string },
+  repoName: string,
+): Promise<unknown> {
+  const stored = broker.store.get(instance);
+  if (!stored)
+    throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
+  if (!stored.refs.some((r) => r.integrationId === integrationId))
+    throw new AppTokenError('app_mismatch', APP_ERROR_TEXT.app_mismatch);
+  // GitHub scopes an installation token by repository name (without the owner).
+  const name = repoName.split('/').pop() ?? repoName;
+  return broker.getAccessToken(instance, { repositories: [name] });
 }
 
 /**
@@ -110,17 +126,10 @@ export function appTokenProbe(broker: AccessCheckBroker): AppTokenProbe {
  */
 export async function appAccessToken(
   broker: AccessCheckBroker,
-  { instance, integrationId }: { instance: string; integrationId: string },
+  app: { instance: string; integrationId: string },
   repoName: string,
 ): Promise<string> {
-  const stored = broker.store.get(instance);
-  if (!stored)
-    throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
-  if (!stored.refs.some((r) => r.integrationId === integrationId))
-    throw new AppTokenError('app_mismatch', APP_ERROR_TEXT.app_mismatch);
-  // GitHub scopes an installation token by repository name (without the owner).
-  const name = repoName.split('/').pop() ?? repoName;
-  const got = (await broker.getAccessToken(instance, { repositories: [name] })) as { token?: unknown } | null;
+  const got = (await scopedMint(broker, app, repoName)) as { token?: unknown } | null;
   if (!got || typeof got.token !== 'string' || !got.token)
     throw new AppTokenError('unexpected', 'The broker returned no token.');
   return got.token;
