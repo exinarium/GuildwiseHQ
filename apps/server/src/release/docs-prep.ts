@@ -33,7 +33,7 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
-import { loadCommitAs } from '../commands/commit-as.ts';
+import { loadIdentityPlan } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -661,7 +661,7 @@ async function dispatchAction(
     return [];
   }
   const project = await one(tx, 'SELECT key, name FROM projects WHERE id=$1', [run.project_id]);
-  const commitAs = await loadCommitAs(tx, run.project_id);
+  const { commitAs, postAs } = await loadIdentityPlan(tx, run.project_id);
   const deliver: string[] = [];
   let failedHere = false;
   for (const repoId of action.repoIds) {
@@ -717,6 +717,7 @@ async function dispatchAction(
         ...(action.phase ? { phase: action.phase } : {}),
         projectKey: project?.key ?? '',
         commitAs: commitAs ?? null,
+        ...(postAs ? { postAs } : {}),
         ...(changelog ? { changelog } : {}),
         ...(stepInput ? { stepInput } : {}),
         ...(input && !changelog ? { input } : {}),

@@ -49,6 +49,7 @@ import {
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
+import { applyAppAccessCheckResult } from '../commands/post-as.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyResealResult } from '../commands/org-provider-keys.ts';
@@ -851,6 +852,10 @@ export class RunnerHandlers {
         msg.result,
         String(cmd.payload.keyId ?? ''),
       );
+    } else if (cmd?.type === 'app.access_check') {
+      // Which project repositories the app reaches: states and value-free reasons only.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyAppAccessCheckResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'app.connect' || cmd?.type === 'app.test') {
       // The sealed key is forgotten whatever the answer was; only facts (identity, typed error) are kept.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

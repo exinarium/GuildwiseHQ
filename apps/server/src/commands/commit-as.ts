@@ -1,5 +1,6 @@
 import {
   type CommitAs,
+  type PostAsPlan,
   type CommitAsResponse,
   CommitAsSchema,
   isOrgManager,
@@ -14,6 +15,7 @@ import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
+import { loadPostAsPlan, postAsSettings } from './post-as.ts';
 
 /**
  * "Commit as" (backlog #65): the name and e-mail every commit of a project carries. The runner resolves the identity
@@ -32,13 +34,34 @@ export async function loadCommitAs(
   return parsed.success ? parsed.data : null;
 }
 
-/** Adds the project's `commitAs` to a `shift.start` payload (additive; absent when the project sets none). */
+/**
+ * The project's identity plan: the Commit as setting and the post-as plan per repository. `postAs` is `null` when no app
+ * is selected, so callers spread it only when set and the payloads stay exactly as before.
+ */
+export async function loadIdentityPlan(
+  db: Queryable,
+  projectId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs: PostAsPlan | null }> {
+  const commitAs = await loadCommitAs(db, projectId);
+  return { commitAs, postAs: await loadPostAsPlan(db, projectId, commitAs) };
+}
+
+/** `{ commitAs }` exactly as before (null when unset) plus `postAs` only when an app is selected. */
+export async function identityFields(
+  db: Queryable,
+  projectId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
+  const { commitAs, postAs } = await loadIdentityPlan(db, projectId);
+  return postAs ? { commitAs, postAs } : { commitAs };
+}
+
+/** Adds the project's `commitAs` and `postAs` to a `shift.start` payload (additive; each absent when not set). */
 export async function withCommitAs<T extends { brief: { project: { id: string } } }>(
   ctx: Ctx,
   payload: T,
-): Promise<T & { commitAs?: CommitAs }> {
-  const commitAs = await loadCommitAs(ctx.pool, payload.brief.project.id);
-  return commitAs ? { ...payload, commitAs } : payload;
+): Promise<T & { commitAs?: CommitAs; postAs?: PostAsPlan }> {
+  const { commitAs, postAs } = await loadIdentityPlan(ctx.pool, payload.brief.project.id);
+  return { ...payload, ...(commitAs ? { commitAs } : {}), ...(postAs ? { postAs } : {}) };
 }
 
 export async function getCommitAs(
@@ -57,8 +80,12 @@ export async function getCommitAs(
     [projectId],
   );
   const parsed = CommitAsSchema.safeParse(p.commit_as ?? null);
+  const commitAs = parsed.success ? parsed.data : null;
+  const { postAs, repos } = await postAsSettings(ctx.pool, user, p as Parameters<typeof postAsSettings>[2], commitAs);
   return {
-    commitAs: parsed.success ? parsed.data : null,
+    commitAs,
+    postAs,
+    repos,
     clones: clones.map((c) => {
       const id = RepoIdentityFactSchema.safeParse(c.git_identity ?? null);
       return {

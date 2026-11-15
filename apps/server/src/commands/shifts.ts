@@ -23,6 +23,7 @@ import {
   isValidReportPath,
   type LedgerMatch,
   NO_COMMIT_IDENTITY_CODE,
+  APP_IDENTITY_FAILED_CODE,
   NO_COMMIT_IDENTITY_MESSAGE,
   OWNER_APPROVAL_REASON_TEXT,
   type OwnerApprovalPolicy,
@@ -1374,6 +1375,45 @@ async function noCommitIdentityNotice(tx: Tx, ws: WsRef, card: Row): Promise<App
   ];
 }
 
+/** One open alert per project and reason when a shift stopped because the project's selected app could not be used. */
+async function appIdentityFailedNotice(tx: Tx, card: Row, detail: string): Promise<AppendInput[]> {
+  const project = await one<{ name: string }>(tx, 'SELECT name FROM projects WHERE id=$1', [card.project_id]);
+  const reason = detail.slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim().slice(0, 1000);
+  const label = /^The app (.+?) could not be used:/.exec(reason)?.[1] ?? 'selected';
+  const title = `Shifts for ${project?.name ?? 'a project'} stopped: the app ${label} cannot be used`;
+  const open = await one(
+    tx,
+    `SELECT id FROM desk_items WHERE project_id=$1 AND subkind=$2 AND status='open' AND title=$3`,
+    [card.project_id, DESK_SUBKIND.appIdentityFailed, title],
+  );
+  if (open) return [];
+  const deskItemId = randomUUID();
+  return [
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.appIdentityFailed,
+          title,
+          body: reason,
+          options: [],
+          blocking: false,
+          pinned: false,
+          cardId: card.id,
+          projectId: card.project_id,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+  ];
+}
+
 export async function applyShiftRejected(
   ctx: Ctx,
   tx: Tx,
@@ -1492,9 +1532,14 @@ export async function applyShiftRejected(
   const noIdentity =
     msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${NO_COMMIT_IDENTITY_CODE}:`);
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
+  const appFailed =
+    msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${APP_IDENTITY_FAILED_CODE}:`);
+  if (appFailed) extra.push(...(await appIdentityFailedNotice(tx, card, msg.detail ?? '')));
   const text = noIdentity
     ? NO_COMMIT_IDENTITY_MESSAGE
-    : rebaseFailed
+    : appFailed
+      ? `The shift was stopped instead of committing under another identity. ${(msg.detail ?? '').slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim().slice(0, 1000)}\nThe card is back in the queue.`
+      : rebaseFailed
       ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
           rebaseError: msg.rebaseError ?? null,
           detail: msg.detail ?? null,

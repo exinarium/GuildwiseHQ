@@ -68,6 +68,8 @@ export const DESK_SUBKIND = {
   mainBranchUnset: 'main_branch_unset',
   /** Backlog #65: no commit identity is set for a project on a workstation, so the runner refuses to commit (an alert). */
   noCommitIdentity: 'no_commit_identity',
+  /** A project's selected app could not be used on a workstation, so its shift stopped instead of committing as anyone else. */
+  appIdentityFailed: 'app_identity_failed',
   /** The runtime's login (Claude Code `/login`) expired on a workstation; cleared when it works again (a notice). */
   claudeAuthExpired: 'claude_auth_expired',
   /** The runner's role smoke test failed for a role on a workstation: that role gets no work there (an alert). */

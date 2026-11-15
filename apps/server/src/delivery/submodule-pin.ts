@@ -4,7 +4,7 @@ import {
   runnerAtLeast,
   type Trigger,
 } from '@aom/shared';
-import { loadCommitAs } from '../commands/commit-as.ts';
+import { loadIdentityPlan } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -92,7 +92,7 @@ export async function requestSubmodulePin(
     return 'unsupported';
   }
 
-  const commitAs = await loadCommitAs(ctx.pool, p.projectId);
+  const { commitAs, postAs } = await loadIdentityPlan(ctx.pool, p.projectId);
   const payload: RepoBumpSubmodulePayload = {
     projectId: p.projectId,
     repoId: p.deployRepo.id,
@@ -102,6 +102,7 @@ export async function requestSubmodulePin(
     submoduleRemoteUrlNormalized: source.remote_url_normalized,
     commit: merge.commit,
     ...(commitAs ? { commitAs } : {}),
+    ...(postAs ? { postAs } : {}),
     ...(p.deployRepo.forge_kind
       ? { forge: p.deployRepo.forge_kind as RepoBumpSubmodulePayload['forge'] }
       : {}),

@@ -9,7 +9,7 @@ import {
   releaseTitle,
   streamId,
 } from '@aom/shared';
-import { loadCommitAs } from '../commands/commit-as.ts';
+import { identityFields } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -76,7 +76,7 @@ export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<Releas
         : { mode: 'pr', ...((pr?.url ?? ship.pr_url) ? { prUrl: pr?.url ?? ship.pr_url } : {}) },
     notesSource: proposal?.notes_source === 'commits' ? 'commits' : 'changelog',
     ...(proposal?.notes_source === 'commits' && proposal.notes ? { notes: proposal.notes } : {}),
-    commitAs: await loadCommitAs(tx, ship.project_id),
+    ...(await identityFields(tx, ship.project_id)),
   });
 }
 

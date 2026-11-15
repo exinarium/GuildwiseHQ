@@ -28,7 +28,7 @@ import { conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadManageable } from './cards.ts';
-import { loadCommitAs } from './commit-as.ts';
+import { identityFields } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
@@ -204,7 +204,7 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     prTitle: naming.prTitle,
     prBody: naming.prBody,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
-    commitAs: await loadCommitAs(tx, project.id),
+    ...(await identityFields(tx, project.id)),
     // lean team: the runner lands only the commit that was reviewed (and approved).
     ...(card.head_sha && card.build_evidence ? { expectedSha: card.head_sha as string } : {}),
   };
