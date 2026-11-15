@@ -9,6 +9,7 @@ import {
   type ReleaseDocsPrepSummary,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
+import { appOfPlan } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
   type AppTokenProbe,
@@ -29,7 +30,6 @@ import {
 } from './release-docs-prep-steps.ts';
 import { lastReleaseTagAt } from './release-facts.ts';
 import { pushFastForward } from './release-ship.ts';
-import { appOfPlan } from './gh.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 

@@ -3,10 +3,10 @@ import { MockScriptSchema } from '../cards/fields.ts';
 import { StoredFinalizeAction } from '../cards/types.ts';
 import { EnvNameSchema } from '../delivery/gate.ts';
 import { RegressionPlatform } from '../events/testing.ts';
-import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
 import { SpecCardTaskSchema, specCardBriefOutcomes } from '../intake/spec-card.ts';
 import { MailDraftTaskSchema, mailDraftBriefOutcomes } from '../mail/draft.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 

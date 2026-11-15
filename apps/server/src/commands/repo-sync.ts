@@ -1,11 +1,11 @@
 import { type RepoSyncStatus, RepoSyncStatusSchema } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 
 /**
  * The local working branch against origin (backlog #57). The runner fetches, fast-forwards when that is safe and

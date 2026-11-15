@@ -15,12 +15,12 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 
 /**

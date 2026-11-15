@@ -3,12 +3,12 @@ import { type ReleasePrRequested, RepoOpenPrResultSchema } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 
 /**
  * "Open a pull request from the working branch to the main branch" (project settings, owner only). The pull request

@@ -6,8 +6,8 @@ import {
   ReleaseFactsSchema,
   RepoReleaseFactsResultSchema,
 } from '@aom/shared';
-import type { Ctx } from '../context.ts';
 import { postAsFieldFor } from '../commands/commit-as.ts';
+import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { reconcileReleaseProposal } from './reconcile.ts';

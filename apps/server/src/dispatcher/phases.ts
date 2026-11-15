@@ -1,4 +1,5 @@
 import { isFollowupTerminal, nextFollowup, phaseCompletion, type Recipe, streamId } from '@aom/shared';
+import { postAsFieldFor } from '../commands/commit-as.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import {
   cardOutcomes,
@@ -12,7 +13,6 @@ import {
 import { followupFinishedEvent, followupVerdict, startFollowup } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from '../commands/commit-as.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { requestDeployRun } from '../delivery/runs.ts';

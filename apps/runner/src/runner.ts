@@ -38,8 +38,6 @@ import {
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
   type PostAsPlan,
-  type RepoOpenPrPayload,
-  type RepoOpenPrResult,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -61,6 +59,8 @@ import {
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   REPLAY_CAPABILITY,
+  type RepoOpenPrPayload,
+  type RepoOpenPrResult,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -130,9 +130,9 @@ import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
-import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { type ActorScope, actorScope, appOriginRefusal } from './forge/app-actor.ts';
 import { appRepos } from './forge/app-repos.ts';
+import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,

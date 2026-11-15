@@ -22,7 +22,6 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
@@ -30,6 +29,7 @@ import { manualReviewAction } from '../review/manual-action.ts';
 import { mayStart } from '../review/may-start.ts';
 import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
 import { ownerPendingOf } from './owner-pending.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';

@@ -11,7 +11,6 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { one } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict } from '../errors.ts';
@@ -21,6 +20,7 @@ import { mayStart } from '../review/may-start.ts';
 import { pickReviewerWorkstation, reviewerGate } from '../review/reviewer-gate.ts';
 import { reviewersFor } from '../review/reviewers-for.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { requireSpendOwner } from './pr-review-cap.ts';
 

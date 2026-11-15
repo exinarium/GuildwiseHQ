@@ -27,7 +27,6 @@ import {
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -35,6 +34,7 @@ import { conflict, forbidden, notFound } from '../errors.ts';
 import { getReplayDto, replayFindingStep } from '../queries/pr-replays.ts';
 import { listReviewablePrs } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { mayStart } from './pr-review-runs.ts';
 

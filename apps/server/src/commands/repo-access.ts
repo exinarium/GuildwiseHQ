@@ -2,11 +2,11 @@ import { type GitAccessMethod, type GitSshPayload, streamId } from '@aom/shared'
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { postAsFieldFor } from './commit-as.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, userActor } from './common.ts';
 
 /**
