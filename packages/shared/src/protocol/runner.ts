@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AppAccessCheckPayloadSchema, PostAsPlanSchema } from '../repo/post-as.ts';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import {
   AppAdoptPayloadSchema,
@@ -968,6 +969,8 @@ export const ReleaseShipPayloadSchema = z.object({
   /** Only used when the repository has no CHANGELOG.md. */
   notes: z.string().max(50_000).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   /** Absent: the runner detects whether the repository asks for a DCO sign-off. */
   signOff: z.boolean().optional(),
   forge: ForgeKindSchema.optional(),
@@ -1048,6 +1051,8 @@ export const ReleasePublishPayloadSchema = z.object({
   /** Only for `commits`: the approved notes. */
   notes: z.string().max(50_000).optional(),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type ReleasePublishPayload = z.infer<typeof ReleasePublishPayloadSchema>;
 
@@ -1111,6 +1116,8 @@ export const RepoBumpSubmodulePayloadSchema = z.object({
   /** X's newest merge commit. */
   commit: z.string().regex(/^[0-9a-f]{7,64}$/),
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   forge: ForgeKindSchema.optional(),
   /** What the server does with the answer (echoed back by the command row, ignored by the runner). */
   envs: z.array(z.string()).optional(),
@@ -1346,6 +1353,7 @@ export const RunnerCommandNameSchema = z.enum([
   'app.adopt',
   'app.remove',
   'app.sync',
+  'app.access_check',
   'shifts.limit',
   'runner.pin',
   'runner.update.check',
@@ -1471,6 +1479,7 @@ export const CommandPayloadSchemas = {
   'app.adopt': AppAdoptPayloadSchema,
   'app.remove': AppRemovePayloadSchema,
   'app.sync': AppSyncPayloadSchema,
+  'app.access_check': AppAccessCheckPayloadSchema,
   /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
   'shifts.limit': z.object({
     shiftLimit: ShiftLimitSettingSchema,
@@ -2188,6 +2197,8 @@ export const ShiftStartSchema = msg('shift.start', {
   mcpServers: z.array(z.string()).optional(),
   /** The project's "Commit as" setting, used for every commit of this shift (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
+  /** The project's post-as plan per repository; absent when the project has no app selected. */
+  postAs: PostAsPlanSchema.optional(),
   /**
    * Continue this Claude Code session (the agent's own earlier session on this card, group or question) instead of
    * starting cold. The runner refuses it and starts fresh when the stored session is over 120K context tokens, over
