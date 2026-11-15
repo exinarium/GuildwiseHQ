@@ -10,10 +10,13 @@ import {
   canPostAsV2,
   DEVOPS_POST_AS_RUNNER_TOO_OLD,
   devopsPostAs,
+  explicitPostAs,
   identityFieldsFor,
+  loadIdentityPlan,
   POST_AS_RUNNER_TOO_OLD_MESSAGE,
   postAsFieldFor,
 } from '../src/commands/commit-as.ts';
+import { cardConflictBrief } from '../src/commands/conflict-attempts.ts';
 import { pickStatusWorkstation } from '../src/commands/pr-size-status.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -218,6 +221,36 @@ describe('an app selected', () => {
     } finally {
       await capabilities(ALL);
     }
+  });
+});
+
+describe('an app deselected', () => {
+  it('a post-as:2 runner gets the empty plan again on every command, so it releases the repository', async () => {
+    await ok(
+      w.t.req('PUT', `/api/projects/${w.projectId}/post-as`, {
+        cookie: w.owner.cookie,
+        body: { apps: [] },
+      }),
+    );
+    const { postAs } = await loadIdentityPlan(db(), w.projectId);
+    expect(postAs).toBeNull();
+    expect(await explicitPostAs(db(), postAs, w.workstationId)).toEqual(noAppPlan());
+    expect((await identityFieldsFor(db(), w.projectId, w.workstationId)).postAs).toEqual(noAppPlan());
+    // an older runner still gets no field, exactly as before
+    expect(await explicitPostAs(db(), postAs, randomUUID())).toBeNull();
+  });
+});
+
+describe('the conflict brief', () => {
+  it('fetches through the runner, which works in every repository and is the only fetch allowed in an app one', () => {
+    const text = cardConflictBrief(
+      { ref: 'GWP-1', title: 'T', branch_name: 'aom/gwp-1', worktree_path: '/w' },
+      1,
+      'build',
+      'main',
+      ['a.ts'],
+    );
+    expect(text).toContain('aom git fetch --repo <the scratch worktree>');
   });
 });
 

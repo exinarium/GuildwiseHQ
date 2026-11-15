@@ -33,7 +33,12 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
-import { canPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from '../commands/commit-as.ts';
+import {
+  canPostAs,
+  explicitPostAs,
+  loadIdentityPlan,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+} from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -715,6 +720,7 @@ async function dispatchAction(
       failedHere = true;
       continue;
     }
+    const plan = await explicitPostAs(tx, postAs, repo.workstation_id);
     const hook = DOCS_PREP_STEP_HOOKS[action.step];
     const stepInput = hook?.stepInput ? await hook.stepInput(tx, run, repo) : undefined;
     const inputOf = PHASE_INPUTS[`${action.step}/${action.phase ?? ''}`];
@@ -731,7 +737,7 @@ async function dispatchAction(
         ...(action.phase ? { phase: action.phase } : {}),
         projectKey: project?.key ?? '',
         commitAs: commitAs ?? null,
-        ...(postAs ? { postAs } : {}),
+        ...(plan ? { postAs: plan } : {}),
         ...(changelog ? { changelog } : {}),
         ...(stepInput ? { stepInput } : {}),
         ...(input && !changelog ? { input } : {}),
@@ -835,6 +841,7 @@ export async function sendDocsPrepStepCommand(
     phase?: string;
     projectKey: string;
     commitAs: ReleaseDocsPrepPayload['commitAs'];
+    postAs?: ReleaseDocsPrepPayload['postAs'];
     changelog?: ReleaseDocsPrepPayload['changelog'];
     stepInput?: ReleaseDocsPrepPayload['stepInput'];
     input?: ReleaseDocsPrepPayload['input'];
@@ -859,6 +866,7 @@ export async function sendDocsPrepStepCommand(
     ...(repo.base_sha ? { base: { sha: repo.base_sha, tag: repo.base_tag ?? null } } : {}),
     message: `docs(release): prepare the release documentation for ${repo.branch}`,
     commitAs: o.commitAs ?? null,
+    ...(o.postAs ? { postAs: o.postAs } : {}),
     ...(o.changelog ? { changelog: o.changelog } : {}),
     ...(o.stepInput ? { stepInput: o.stepInput } : {}),
     ...(o.input ? { input: o.input } : {}),

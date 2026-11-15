@@ -174,6 +174,23 @@ describe('push tripwire registry survives a restart', () => {
     expect(r2.find(bad, REMOTE)).toBeNull();
   });
 
+  it('an app deselected: the empty plan the server now sends releases the repository, so later commands run as before', () => {
+    const root = tmp('app-repos-deselect-');
+    const reg = new AppRepoRegistry();
+    reg.persist(root);
+    // a shift or command while the app was selected registered the repository
+    reg.forRoot(root).set(REMOTE, { integrationId: INTEGRATION, label: 'Guild Bot' });
+    expect(missingPlanRefusal(reg.forRoot(root), 'repo.bump_submodule', [REMOTE])).not.toBeNull();
+    // after the owner deselects the app, the next command (a submodule pin, a docs prep step) carries the empty plan
+    releaseUncoveredRepos(reg.forRoot(root), { repos: [] }, [REMOTE]);
+    expect(missingPlanRefusal(reg.forRoot(root), 'repo.bump_submodule', [REMOTE])).toBeNull();
+    expect(missingPlanRefusal(reg.forRoot(root), 'release.docs_prep', [REMOTE])).toBeNull();
+    // a project source entry (no app) releases it as well
+    reg.forRoot(root).set(REMOTE, { integrationId: INTEGRATION, label: 'Guild Bot' });
+    releaseUncoveredRepos(reg.forRoot(root), plan('project'), [REMOTE]);
+    expect(missingPlanRefusal(reg.forRoot(root), 'release.docs_prep', [REMOTE])).toBeNull();
+  });
+
   it('nothing registered: a missing plan is not refused (a project without an app)', () => {
     expect(missingPlanRefusal(appRepos.forRoot(tmp('r-')), 'repo.open_pr', [REMOTE])).toBeNull();
   });

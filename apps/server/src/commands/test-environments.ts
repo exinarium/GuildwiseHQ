@@ -31,7 +31,12 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { workflowView } from './cards.ts';
-import { canPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from './commit-as.ts';
+import {
+  canPostAs,
+  explicitPostAs,
+  loadIdentityPlan,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+} from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { openItemForSubject, raiseOrCoalesce } from './desk-coalesce.ts';
 import { createDevOpsRequestIn } from './devops.ts';
@@ -179,10 +184,12 @@ export async function startTestRunIn(
   if (!ws?.connected) return { skip: 'its workstation is offline' };
   const caps = await capsOf(tx, ws.id);
   if (!caps.testEnv) return { skip: 'the runner on its workstation cannot start test environments' };
-  const { commitAs, postAs } = await loadIdentityPlan(tx, project.id);
+  const { commitAs, postAs: appPlan } = await loadIdentityPlan(tx, project.id);
   // The card branch is rebased as the project's app: a runner that does not know post-as would rebase as the owner.
-  if (postAs && !opts.noRebase && !(await canPostAs(tx, ws.id)))
+  if (appPlan && !opts.noRebase && !(await canPostAs(tx, ws.id)))
     return { skip: POST_AS_RUNNER_TOO_OLD_MESSAGE };
+  // A post-as:2 runner gets the empty plan when no app is selected.
+  const postAs = await explicitPostAs(tx, appPlan, ws.id);
   const live = await one(
     tx,
     `SELECT count(*)::int AS n FROM run_environments e WHERE e.workstation_id=$1 AND ${LIVE}`,

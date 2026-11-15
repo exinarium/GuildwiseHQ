@@ -92,6 +92,20 @@ export async function canPostAsV2(db: Queryable, workstationId: string | null | 
 }
 
 /**
+ * The plan a command carries on its way to one workstation: the project's plan when an app is selected; the empty plan
+ * for a post-as:2 runner when none is (it refuses a plan-carrying command without one for a repository it knows as an
+ * app repository, so "no app" must be said); `null` (no field, as before) for an older runner.
+ */
+export async function explicitPostAs(
+  db: Queryable,
+  postAs: PostAsPlan | null,
+  workstationId: string | null | undefined,
+): Promise<PostAsPlan | null> {
+  if (postAs) return postAs;
+  return (await canPostAsV2(db, workstationId)) ? noAppPlan() : null;
+}
+
+/**
  * {@link identityFields} for a command sent to one workstation. With an app selected and a runner without post-as:1 the
  * command is refused (409 runner_too_old) instead of reaching a runner that would ignore the app (fail closed). A
  * post-as:2 runner always gets a plan (the empty one when no app is selected).
@@ -140,7 +154,7 @@ export async function withCommitAs<T extends { brief: { project: { id: string } 
   workstationId?: string | null,
 ): Promise<T & { commitAs?: CommitAs; postAs?: PostAsPlan; trackerApp?: TrackerApp }> {
   const { commitAs, postAs: plan } = await loadIdentityPlan(ctx.pool, payload.brief.project.id);
-  const postAs = plan ?? ((await canPostAsV2(ctx.pool, workstationId)) ? noAppPlan() : null);
+  const postAs = await explicitPostAs(ctx.pool, plan, workstationId);
   // GitHub issue reads in the shift (`aom source read`) as the project's GitHub App.
   const trackerApp = await trackerAppFor(ctx.pool, payload.brief.project.id);
   return {

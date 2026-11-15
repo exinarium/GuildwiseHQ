@@ -34,7 +34,7 @@ export function cardConflictBrief(
       : '',
     'Do this:',
     `1. Work in a SCRATCH worktree, never in the card's own worktree: from the repository that holds the card worktree run \`git worktree add -b ${tmp} <a new folder under your temp directory> ${branch}\` and do steps 2 and 3 there. The card's worktree stays exactly as it is until step 4, so a failure or a full disk never leaves it on a conflict branch.`,
-    `2. Fetch origin and rebase ${tmp} onto origin/${base}. Resolve every conflict so that the intent of BOTH sides is kept, and change nothing else (no refactoring, no behaviour change): a reviewer reads the resolution next.`,
+    `2. Fetch origin with \`aom git fetch --repo <the scratch worktree>\` (it works in every repository; in one that posts as an app it is the only fetch allowed) and rebase ${tmp} onto origin/${base}. Resolve every conflict so that the intent of BOTH sides is kept, and change nothing else (no refactoring, no behaviour change): a reviewer reads the resolution next.`,
     '3. Run the project build and its unit tests.',
     `4. Only if they pass, move the card branch to the result in one step: in the card's worktree (where ${branch} is checked out) run \`git merge --ff-only ${tmp}\`; then remove the scratch worktree and delete ${tmp}.`,
     `5. If you cannot resolve it or the tests fail, do not touch the card worktree: remove the scratch worktree, delete ${tmp}, and say what blocked you.`,

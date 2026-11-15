@@ -2764,7 +2764,6 @@ export class ShiftSupervisor {
     }
   }
 
-  /** `aom git push|fetch|merge-main|verify-merge`: the architect's runner-run git (investigate stages only). */
   /**
    * `hygiene.run` (the DevOps engineer's `aom hygiene run`): repository hygiene runs here, in the runner, so a
    * repository that posts as an app fetches, pulls and pushes with the app's token (which never reaches the agent) and
@@ -2787,6 +2786,7 @@ export class ShiftSupervisor {
         }
       },
       ...this.devopsAppAuth(msg.postAs),
+      ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
     });
     this.addProgress(s, 'status', 'aom hygiene run: done');
     return { ok: true, result: run };
@@ -2875,6 +2875,7 @@ export class ShiftSupervisor {
     };
   }
 
+  /** `aom git push|fetch|merge-main|verify-merge`: the architect's runner-run git (investigate stages only). */
   private async architectGit(
     s: ActiveShift,
     method: string,

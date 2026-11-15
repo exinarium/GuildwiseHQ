@@ -57,7 +57,11 @@ class Repo {
   readonly commands: string[] = [];
   /** Null = plain git with the user's own credentials, exactly as without an app. */
   net: HygieneNetAuth | null = null;
-  constructor(readonly path: string) {}
+  constructor(
+    readonly path: string,
+    /** The DevOps shift's own identity: the committer of commits a pull rewrites in a repository not on an app. */
+    readonly plainIdentity?: { name: string; email: string },
+  ) {}
 
   /** Runs git; `log` records the command for the audit trail. */
   async git(args: string[], log = false, config: string[] = []) {
@@ -68,7 +72,11 @@ class Repo {
 
   /** A command that talks to origin (fetch, pull, push): with the app's auth on an app repository. */
   async remote(args: string[], log = true, rewrites = false) {
-    if (!this.net) return this.git(args, log);
+    if (!this.net) {
+      if (!rewrites || !this.plainIdentity) return this.git(args, log);
+      if (log) this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
+      return git(this.path, args, { env: committerEnv(this.plainIdentity) });
+    }
     if (log) this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
     const env = {
       ...this.net.env,
@@ -248,6 +256,11 @@ export interface HygieneDeps {
    * runner's own credentials). Throws `AppIdentityError` when the app is selected but cannot be used.
    */
   appAuth?: (url: string) => Promise<HygieneNetAuth | null>;
+  /**
+   * The DevOps shift's resolved commit identity. Hygiene used to run in the engineer's process, whose environment set
+   * it as committer; a repository not on an app keeps that committer for the commits a pull rewrites.
+   */
+  identity?: { name: string; email: string };
 }
 
 export async function hygieneRepo(
@@ -265,7 +278,7 @@ export async function hygieneRepo(
     removedBranches: [],
     cleaned: [],
   };
-  const repo = new Repo(spec.localPath);
+  const repo = new Repo(spec.localPath, deps.identity);
   const done = () => ({ result: res, commands: repo.commands });
 
   if (!existsSync(spec.localPath) || (await repo.git(['rev-parse', '--git-dir'])).exitCode !== 0) {

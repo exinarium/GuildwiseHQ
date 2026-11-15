@@ -89,7 +89,11 @@ async function runDevops(
   const adapter = new ScriptedAdapter(script);
   h = await startHarness({}, { adapters: new Map([['mock', adapter]]), supervisorOverrides: over }, repo);
   const base = makeDevopsStart({ summary: 'tidy the repositories' }) as Record<string, any>;
-  const msg = { ...base, ...extra, devops: { ...base.devops, ...(extra.devops ?? {}) } };
+  const msg: Record<string, any> = {
+    ...base,
+    ...extra,
+    devops: { ...base.devops, ...((extra.devops as object | undefined) ?? {}) },
+  };
   h.server.send('shift.start', msg);
   await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
   await h.runner.supervisor.whenSettled(msg.shiftId);

@@ -148,7 +148,7 @@ export async function devopsPass(
     const conn = ctx.services.runners.get(r.workstation_id);
     if (!conn || !conn.reconciled) continue;
     // Every app repository on the workstation is worked as its app; a runner that cannot honour that gets no DevOps
-    // shift (the request stays queued until the runner is updated), never one that would act as the owner.
+    // shift: the request fails with the reason (update the runner and ask again), never one that would act as the owner.
     const postAs = await devopsPostAs(ctx.pool, r.workstation_id);
     if ('refused' in postAs) {
       await failRefusedRequest(ctx, r.id as string, postAs.refused);
