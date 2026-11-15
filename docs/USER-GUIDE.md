@@ -308,7 +308,7 @@ A workstation is the computer where your agents will work. The guided installer 
 1. Open **Workstations** in the sidebar and click **Add a workstation**.
 2. **Choose where your agents run**: **My computer** (the rest of this section), **A VPS (SSH)** or **GitHub Codespaces** (section 4.19). For your own computer, **pick the system**. The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
 3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
-4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask to restart once. The installer carries on by itself when you sign in again.
+4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows asks to restart only when it really needs one, and at most twice. The installer carries on by itself when you sign in again. If WSL2 is still not working after that, the installer stops and says what is still off.
 5. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
 
 **Pair with a code.** If you would rather not paste the long command, use **Pair with a code** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
@@ -2006,7 +2006,7 @@ If an interest cannot run (for example its workstation is offline), it shows a r
 | The command link says it expired | The link works for 30 minutes. Choose your system again on the page to get a new command. |
 | "Paired" never appears | The computer cannot reach this website. Check its internet connection, proxy and clock. Run the command again, it is safe to repeat. |
 | A health check shows a warning (Claude, sandbox, Docker, yt-dlp, a repository) | Each row says what is wrong and how to fix it. Claude not signed in: run `claude` on the workstation and sign in. Sandbox missing on Linux: install `bubblewrap` and `socat`. Docker and yt-dlp are optional. |
-| Windows asked to restart | Restart. The installer continues by itself when you sign in again. |
+| Windows asked to restart | Restart. The installer continues by itself when you sign in again. It asks only when a restart is really pending, and at most twice. If it stops with a message that names what is still off, fix that and run the command again. |
 | Anything else | Open **Contact us** from the installer's failure screen. It already knows what went wrong. |
 
 ![The installer help in the Help centre](guide/assets/help-install.jpg)
