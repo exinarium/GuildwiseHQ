@@ -2417,7 +2417,12 @@ export class ShiftSupervisor {
       if (method === 'source.read') {
         const ref = String(params.ref ?? '').trim();
         if (!ref) return { ok: false, error: 'usage: aom source read --ref <KEY>' };
-        return { ok: true, result: formatSource(await external.readText(ref)) };
+        return {
+          ok: true,
+          result: formatSource(
+            await external.readText(ref, s.msg.trackerApp ? { app: s.msg.trackerApp } : undefined),
+          ),
+        };
       }
       if (!s.sandbox) return { ok: false, error: 'this shift has no workspace yet' };
       const deps = {

@@ -111,6 +111,10 @@ export function PostAsBlock({ projectId, data }: { projectId: string; data: Comm
         Shifts commit, push and post as the ticked app's bot on repositories its installation reaches. Without
         an app, the Commit as setting below is used.
       </p>
+      <p className="text-xs text-subtle" data-testid="post-as-trackers">
+        Comments on GitHub issues are posted as the selected GitHub App too. Jira comments still use this
+        workstation's Jira connection: a GitHub App cannot post to Jira.
+      </p>
       {options.length === 0 && (
         <p className="text-sm text-subtle">
           No apps are registered on the Apps tab of Organization settings.

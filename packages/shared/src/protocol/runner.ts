@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { AppAccessCheckPayloadSchema, PostAsPlanSchema } from '../repo/post-as.ts';
 import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import {
   AppAdoptPayloadSchema,
@@ -123,6 +122,7 @@ import {
   RepoCreatePayloadSchema,
   RepoIdentityFactSchema,
 } from '../repo/index.ts';
+import { AppAccessCheckPayloadSchema, PostAsPlanSchema, TrackerAppSchema } from '../repo/post-as.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import {
   PrReviewCancelPayloadSchema,
@@ -751,6 +751,8 @@ export const IntegrationRunPayloadSchema = z.object({
   /** Only issues with this label (a labelled-issue trigger). */
   label: z.string().max(100).optional(),
   limit: z.number().int().min(1).max(100).default(30),
+  /** GitHub only: the project's GitHub App to poll as; absent = the workstation's own `gh` login. */
+  trackerApp: TrackerAppSchema.optional(),
 });
 export type IntegrationRunPayload = z.infer<typeof IntegrationRunPayloadSchema>;
 
@@ -2199,6 +2201,8 @@ export const ShiftStartSchema = msg('shift.start', {
   commitAs: CommitAsSchema.nullable().optional(),
   /** The project's post-as plan per repository; absent when the project has no app selected. */
   postAs: PostAsPlanSchema.optional(),
+  /** The project's GitHub App for GitHub issue reads in this shift (`aom source read`); absent when none is selected. */
+  trackerApp: TrackerAppSchema.optional(),
   /**
    * Continue this Claude Code session (the agent's own earlier session on this card, group or question) instead of
    * starting cold. The runner refuses it and starts fresh when the stored session is over 120K context tokens, over

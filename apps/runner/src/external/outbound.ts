@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  type AdapterCallContext,
   type ApprovedDraft,
   checkOutboundLeaks,
   leakMessage,
@@ -17,6 +18,11 @@ interface PostRecord {
   /** `refused`: the command whose refusal this is, and the refusal; see `post`. */
   commandId?: string;
   error?: string;
+  /**
+   * `refused` after an ambiguous earlier attempt (the record was 'attempting' when the refused command started): that
+   * attempt may have landed, so the next command looks for the text before posting.
+   */
+  lookFirst?: boolean;
   at: string;
 }
 
@@ -73,7 +79,7 @@ export class OutboundExecutor {
     if (done?.state === 'refused') {
       // Redelivery of the command already refused: answer again, post nothing. A different command is a retry.
       if (commandId && done.commandId === commandId) return { ok: false, error: done.error ?? 'refused' };
-      done = null;
+      done = done.lookFirst ? { state: 'attempting', at: done.at } : null;
     }
     if (done?.state === 'posted')
       return { ok: true, duplicate: true, ...(done.externalRef ? { externalRef: done.externalRef } : {}) };
@@ -92,9 +98,15 @@ export class OutboundExecutor {
       kind: payload.kind,
       body: payload.body,
     };
+    // The project's GitHub App, when the server sent one; absent = the calls of before, unchanged.
+    const ctx: AdapterCallContext | undefined = payload.trackerApp ? { app: payload.trackerApp } : undefined;
+    const ambiguous = done?.state === 'attempting';
     try {
-      if (done?.state === 'attempting' && adapter.findPosted) {
-        const found: PostResult | null = await adapter.findPosted(draft).catch(() => null);
+      if (ambiguous && adapter.findPosted) {
+        const found: PostResult | null = await (ctx
+          ? adapter.findPosted(draft, ctx)
+          : adapter.findPosted(draft)
+        ).catch(() => null);
         if (found) {
           this.write(payload.draftId, {
             state: 'posted',
@@ -108,7 +120,7 @@ export class OutboundExecutor {
         }
       }
       this.write(payload.draftId, { state: 'attempting' });
-      const r = await adapter.postApproved(draft);
+      const r = await (ctx ? adapter.postApproved(draft, ctx) : adapter.postApproved(draft));
       this.write(payload.draftId, {
         state: 'posted',
         ...(r.externalRef ? { externalRef: r.externalRef } : {}),
@@ -117,8 +129,16 @@ export class OutboundExecutor {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The system said no: nothing was posted, so there is nothing to look for on a retry.
+      // Unless an earlier attempt was ambiguous: then the next command still looks first.
       if (err instanceof PostError) {
-        if (commandId) this.write(payload.draftId, { state: 'refused', commandId, error: message });
+        if (commandId)
+          this.write(payload.draftId, {
+            state: 'refused',
+            commandId,
+            error: message,
+            ...(ambiguous ? { lookFirst: true } : {}),
+          });
+        else if (ambiguous) this.write(payload.draftId, { state: 'attempting' });
         else rmSync(this.file(payload.draftId), { force: true });
       }
       return { ok: false, error: message };

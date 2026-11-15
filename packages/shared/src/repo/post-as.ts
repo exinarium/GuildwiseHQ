@@ -3,8 +3,8 @@ import {
   type AppErrorCode,
   AppErrorCodeSchema,
   AppHostSchema,
-  AppProviderIdSchema,
   type AppProviderId,
+  AppProviderIdSchema,
 } from '../apps/index.ts';
 import { type ForgeKind, ForgeKindSchema } from '../forge/index.ts';
 import type { CommitAs } from './commit-identity.ts';
@@ -24,6 +24,9 @@ export const APP_PROVIDER_LABEL: Record<AppProviderId, string> = { 'github-app':
 
 /** The capability a runner announces when it understands `postAs` and `app.access_check`. */
 export const POST_AS_CAPABILITY = 'post-as:1';
+
+/** The capability a runner announces when it posts to and reads GitHub issues as the `trackerApp` it is sent. */
+export const TRACKER_POST_AS_CAPABILITY = 'tracker-post-as:1';
 
 /** The most apps one project may tick. */
 export const MAX_POST_AS_APPS = 8;
@@ -46,6 +49,10 @@ export const PostAsAppIdentitySchema = PostAsAppRefSchema.extend({
   host: z.string().max(200),
 });
 export type PostAsAppIdentity = z.infer<typeof PostAsAppIdentitySchema>;
+
+/** The GitHub App a project posts to and reads GitHub issues as. Only its public identity, never a key or token. */
+export const TrackerAppSchema = PostAsAppIdentitySchema;
+export type TrackerApp = PostAsAppIdentity;
 
 export const POST_AS_FALLBACK_REASONS = ['no_app_for_forge', 'not_covered', 'app_removed'] as const;
 export const PostAsFallbackReasonSchema = z.enum(POST_AS_FALLBACK_REASONS);

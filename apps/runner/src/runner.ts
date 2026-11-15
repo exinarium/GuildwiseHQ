@@ -78,6 +78,7 @@ import {
   STORAGE_CAPABILITY,
   STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
+  TRACKER_POST_AS_CAPABILITY,
   UNLIMITED_SHIFTS,
   uuidv7,
   type WorktreeSweepResult,
@@ -120,6 +121,7 @@ import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
+import { type AppTokenSource, brokerTokenSource } from './external/app-token.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
@@ -815,6 +817,7 @@ export class Runner {
       ExternalAdapters.defaults({
         ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
         jira: () => this.jiraConfig(),
+        appTokens: this.appTokenSource,
       });
     this.restartAfterReply = new RestartAfterReply({
       replyAcked: (frame) => !frame || !this.outbox.has(frame),
@@ -911,6 +914,7 @@ export class Runner {
     });
     this.poller = new IntegrationPoller({
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+      appTokens: this.appTokenSource,
       jira: () => this.jiraConfig(),
       ...(opts.config.runtimes.mock?.enabled ? { mockFile: join(this.paths.root, 'mock-issues.json') } : {}),
     });
@@ -1050,6 +1054,9 @@ export class Runner {
   private readonly appProbe: AppTokenProbe = {
     ensure: (app, repoName) => appTokenProbe(this.appBroker()).ensure(app, repoName),
   };
+
+  /** This runner's token source for GitHub issue traffic as a project's GitHub App (per runner, like `appProbe`). */
+  private readonly appTokenSource: AppTokenSource = brokerTokenSource(() => this.appBroker());
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
   private repoHosts(): Partial<Record<'github' | 'gitlab', string[]>> {
@@ -1654,6 +1661,7 @@ export class Runner {
         STORAGE_CAPABILITY,
         APP_INTEGRATIONS_CAPABILITY,
         POST_AS_CAPABILITY,
+        TRACKER_POST_AS_CAPABILITY,
         STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,

@@ -155,6 +155,13 @@ describe('Post as app (project settings)', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ apps: [] }));
   });
 
+  it('says GitHub issue comments use the app and Jira keeps its own connection', async () => {
+    wrap(<CommitAsPanel projectId={PROJECT} canEdit />);
+    const line = await screen.findByTestId('post-as-trackers');
+    expect(line.textContent).toMatch(/GitHub issues are posted as the selected GitHub App/);
+    expect(line.textContent).toMatch(/Jira comments still use this workstation's Jira connection/);
+  });
+
   it('without postAs from the server the panel renders as before', async () => {
     state = { commitAs: null, clones: [] };
     wrap(<CommitAsPanel projectId={PROJECT} canEdit />);

@@ -43,6 +43,7 @@ import { resolveCardWorkflow, specifyTarget } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { requestHygiene } from './hygiene.ts';
+import { trackerAppForPoll } from './post-as.ts';
 import { regressionRunEvents } from './regression.ts';
 import { buildDigest } from './schedule-digest.ts';
 
@@ -481,12 +482,15 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
 
   // integration
   if (isPollAction(action)) {
+    // A GitHub poll of a project with a GitHub App selected runs as the app (only on a runner that understands it).
+    const app = await trackerAppForPoll(tx, s, action.integration, action.workstationId);
     await enqueueRunnerCommand(tx, action.workstationId, 'integration.run', {
       scheduleId: s.id,
       runId,
       integration: action.integration,
       query: action.query,
       limit: 30,
+      ...app,
     });
     const wsId = action.workstationId;
     return {

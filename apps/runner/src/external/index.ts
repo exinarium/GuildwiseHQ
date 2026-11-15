@@ -1,4 +1,5 @@
 import {
+  type AdapterCallContext,
   type ExternalAdapter,
   type ExternalRef,
   type ExternalSource,
@@ -6,6 +7,7 @@ import {
   renderUntrusted,
 } from '@aom/shared';
 import { allowedJiraKeys } from '../attachments/index.ts';
+import type { AppTokenSource } from './app-token.ts';
 import { type Exec, GithubAdapter, PostError, SourceReadError } from './github.ts';
 import { JiraAdapter } from './jira.ts';
 import type { JiraProvider } from './jira-store.ts';
@@ -27,12 +29,15 @@ export class ExternalAdapters {
       exec?: Exec;
       jira?: JiraProvider;
       jiraFetch?: (url: string, init: RequestInit) => Promise<Response>;
+      /** The runner's token source for a project's selected GitHub App (GitHub only). */
+      appTokens?: AppTokenSource;
     } = {},
   ): ExternalAdapters {
     return new ExternalAdapters([
       new GithubAdapter({
         ...(opts.ghBin ? { bin: opts.ghBin } : {}),
         ...(opts.exec ? { exec: opts.exec } : {}),
+        ...(opts.appTokens ? { appTokens: opts.appTokens } : {}),
       }),
       new JiraAdapter({ config: opts.jira, ...(opts.jiraFetch ? { fetch: opts.jiraFetch } : {}) }),
     ]);
@@ -48,20 +53,20 @@ export class ExternalAdapters {
     return this.byName.get(system);
   }
 
-  async readSource(ref: ExternalRef): Promise<ExternalSource> {
+  async readSource(ref: ExternalRef, ctx?: AdapterCallContext): Promise<ExternalSource> {
     const a = this.byName.get(ref.system);
     if (!a) throw new SourceReadError(`no adapter for ${ref.system}`);
-    return a.readSource(ref);
+    return ctx ? a.readSource(ref, ctx) : a.readSource(ref);
   }
 
   /** `aom source read --ref ...`: the ref text may be a key, `owner/repo#n` or a URL. */
-  async readText(text: string): Promise<ExternalSource> {
+  async readText(text: string, ctx?: AdapterCallContext): Promise<ExternalSource> {
     const ref = parseExternalRef(text);
     if (!ref)
       throw new SourceReadError(
         `'${text}' does not look like a Jira key (ABC-123), a GitHub issue (owner/repo#12) or a ticket URL`,
       );
-    return this.readSource(ref);
+    return this.readSource(ref, ctx);
   }
 }
 
