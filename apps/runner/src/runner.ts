@@ -135,6 +135,7 @@ import {
   type ActorScope,
   actorScope,
   appOriginRefusal,
+  commandCarriesPlan,
   payloadRepoUrls,
   releaseUncoveredRepos,
 } from './forge/app-actor.ts';
@@ -2176,12 +2177,15 @@ export class Runner {
         break;
       }
       case 'command':
-        this.releaseUncovered(
-          msg.payload,
-          msg.payload && typeof msg.payload === 'object'
-            ? (msg.payload as { postAs?: unknown }).postAs
-            : undefined,
-        );
+        // Only a command that can carry a plan says anything about it: a missing plan on any other command (commit
+        // status, ref cleanup, runs, ...) is not a deselected app and must leave the tripwire alone.
+        if (commandCarriesPlan(msg.command))
+          this.releaseUncovered(
+            msg.payload,
+            msg.payload && typeof msg.payload === 'object'
+              ? (msg.payload as { postAs?: unknown }).postAs
+              : undefined,
+          );
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':

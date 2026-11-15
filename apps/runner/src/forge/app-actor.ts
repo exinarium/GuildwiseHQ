@@ -1,5 +1,6 @@
 import {
   APP_ERROR_TEXT,
+  CommandPayloadSchemas,
   type ForgeKind,
   normalizeRemoteUrl,
   type PostAsAppIdentity,
@@ -105,25 +106,32 @@ export function actorScope(
 }
 
 /**
- * The repositories a payload acts on (every `remoteUrlNormalized` string in it, a few levels deep). Used only to keep
- * the push tripwire in step with the server's current plan.
+ * The repositories a payload acts on: its own `remoteUrlNormalized` and its worktree's. Reference repositories
+ * (`readRepos`, `localReadRepos`) and anything nested deeper are only read, so they never release an entry. Used only
+ * to keep the push tripwire in step with the server's current plan.
  */
-export function payloadRepoUrls(payload: unknown, depth = 4): string[] {
+export function payloadRepoUrls(payload: unknown): string[] {
+  if (payload === null || typeof payload !== 'object') return [];
   const out = new Set<string>();
-  const walk = (v: unknown, d: number): void => {
-    if (d < 0 || v === null || typeof v !== 'object') return;
-    if (Array.isArray(v)) {
-      for (const x of v) walk(x, d - 1);
-      return;
-    }
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      if (k === 'postAs') continue;
-      if (k === 'remoteUrlNormalized' && typeof x === 'string' && x) out.add(x.toLowerCase());
-      else walk(x, d - 1);
-    }
+  const add = (v: unknown): void => {
+    if (typeof v === 'string' && v) out.add(v.toLowerCase());
   };
-  walk(payload, depth);
+  const p = payload as { remoteUrlNormalized?: unknown; worktree?: unknown };
+  add(p.remoteUrlNormalized);
+  if (p.worktree !== null && typeof p.worktree === 'object')
+    add((p.worktree as { remoteUrlNormalized?: unknown }).remoteUrlNormalized);
   return [...out];
+}
+
+/**
+ * Whether a command's payload can carry a post-as plan (its schema has a `postAs` field). Only for those does a
+ * missing plan mean "no app selected"; every other command says nothing about the plan and releases nothing.
+ */
+export function commandCarriesPlan(command: string): boolean {
+  if (!Object.hasOwn(CommandPayloadSchemas, command)) return false;
+  const schema = (CommandPayloadSchemas as Record<string, unknown>)[command];
+  const shape = (schema as { shape?: unknown } | undefined)?.shape;
+  return shape !== null && typeof shape === 'object' && Object.hasOwn(shape, 'postAs');
 }
 
 /**

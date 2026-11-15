@@ -7,6 +7,7 @@ import { type AppProviderFactory, AppTokenError } from '../src/apps/types.ts';
 import {
   actorScope,
   appOriginRefusal,
+  commandCarriesPlan,
   payloadRepoUrls,
   releaseUncoveredRepos,
 } from '../src/forge/app-actor.ts';
@@ -416,19 +417,133 @@ describe('runner keeps the tripwire in step with each payload', () => {
     expect(registered()).toBe(true);
     expect(seen).toEqual(['command', 'command', 'shift', 'command']);
   });
+
+  it('a command that never carries a plan keeps the entry, and a push without the app is still refused', async () => {
+    const { Runner } = await import('../src/runner.ts');
+    const r = new Runner({ config: makeConfig('ws://127.0.0.1:9'), dataDir: tmp('aom-data-') });
+    const internals = r as unknown as {
+      onMessage(msg: unknown): void;
+      runCommand: (...a: unknown[]) => Promise<void>;
+      supervisor: { handleStart: (msg: unknown) => Promise<void> };
+    };
+    internals.runCommand = async () => {};
+    internals.supervisor.handleStart = async () => {};
+
+    const root = r.paths.root;
+    const bare = join(root, 'remote.git');
+    sh(root, 'git', ['init', '-q', '--bare', bare]);
+    const clone = join(root, 'clone');
+    sh(root, 'git', ['init', '-q', '-b', 'main', clone]);
+    sh(clone, 'git', [
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@e',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'x',
+    ]);
+    sh(clone, 'git', ['remote', 'add', 'origin', bare]);
+    const { normalizeRemoteUrl } = await import('@aom/shared');
+    const remote = normalizeRemoteUrl(bare);
+    const { broker } = realBroker({ t: T0 });
+
+    // the app project's shift registers the repository
+    internals.onMessage({
+      type: 'shift.start',
+      shiftId: 's1',
+      worktree: { remoteUrlNormalized: remote },
+      postAs: plan('app', remote),
+    });
+    actorScope(baseEnv(new FakeExec()), broker, plan('app', remote), appRepos.forRoot(root));
+    expect(appRepos.find(root, remote)).not.toBeNull();
+
+    // commands whose payloads never carry a plan say nothing about it
+    for (const command of ['repo.commit_status', 'release.ref_cleanup', 'run.start']) {
+      internals.onMessage({
+        type: 'command',
+        commandId: `c-${command}`,
+        command,
+        payload: { projectId: 'p', remoteUrlNormalized: remote, sha: 'a'.repeat(40) },
+      });
+      expect(appRepos.find(root, remote)).not.toBeNull();
+    }
+    // nor does a shift of a project without an app that only reads the repository
+    internals.onMessage({
+      type: 'shift.start',
+      shiftId: 's2',
+      worktree: { remoteUrlNormalized: 'github.com/acme/other' },
+      readRepos: [{ remoteUrlNormalized: remote }],
+      localReadRepos: [{ remoteUrlNormalized: remote }],
+    });
+    expect(appRepos.find(root, remote)).not.toBeNull();
+
+    const refused = await git(clone, ['push', 'origin', 'main']);
+    expect(refused.exitCode).toBe(128);
+    expect(refused.stderr).toContain("posts as the app 'Guild Bot'");
+    expect(sh(bare, 'git', ['for-each-ref'])).toBe('');
+
+    // a command that carries plans, sent without one (the owner deselected the app), releases it
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c-open',
+      command: 'repo.open_pr',
+      payload: { remoteUrlNormalized: remote },
+    });
+    expect(appRepos.find(root, remote)).toBeNull();
+    expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(0);
+  });
+});
+
+describe('commandCarriesPlan', () => {
+  it('is true exactly for the commands whose payload schema has a postAs field', () => {
+    for (const command of [
+      'repo.open_pr',
+      'repo.release_facts',
+      'repo.list_prs',
+      'repo.list_merged_prs',
+      'repo.clone',
+      'repo.access',
+      'repo.create',
+      'repo.sync',
+      'repo.bump_submodule',
+      'pr_review.run',
+      'pr_review.post',
+      'branch.check_merged',
+      'release.ship',
+      'release.publish',
+      'release.docs_prep',
+    ])
+      expect(commandCarriesPlan(command), command).toBe(true);
+    for (const command of [
+      'repo.commit_status',
+      'release.ref_cleanup',
+      'run.start',
+      'pr_review.cancel',
+      'worktree.remove',
+      'no.such.command',
+      'constructor',
+      '__proto__',
+    ])
+      expect(commandCarriesPlan(command), command).toBe(false);
+  });
 });
 
 describe('payloadRepoUrls', () => {
-  it('collects every remoteUrlNormalized a few levels deep, lowercased, ignoring the plan itself', () => {
+  it('takes the payload repository and its worktree only, lowercased, never reference repositories', () => {
     expect(
       payloadRepoUrls({
         remoteUrlNormalized: 'GitHub.com/Acme/Web',
-        worktree: { remoteUrlNormalized: 'github.com/acme/web' },
-        releasePrep: { remoteUrlNormalized: 'github.com/acme/api' },
-        repos: [{ remoteUrlNormalized: 'github.com/acme/docs' }],
+        worktree: { remoteUrlNormalized: 'github.com/acme/api' },
+        readRepos: [{ remoteUrlNormalized: 'github.com/acme/read' }],
+        localReadRepos: [{ remoteUrlNormalized: 'github.com/acme/local' }],
+        releasePrep: { remoteUrlNormalized: 'github.com/acme/nested' },
         postAs: plan('app', 'github.com/acme/planned'),
       }).sort(),
-    ).toEqual(['github.com/acme/api', 'github.com/acme/docs', 'github.com/acme/web']);
+    ).toEqual(['github.com/acme/api', 'github.com/acme/web']);
+    expect(payloadRepoUrls({ worktree: null })).toEqual([]);
     expect(payloadRepoUrls(null)).toEqual([]);
     expect(payloadRepoUrls({ remoteUrlNormalized: '' })).toEqual([]);
   });
