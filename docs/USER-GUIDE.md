@@ -42,6 +42,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.3a Project vaults and the code map](#43a-project-vaults-and-the-code-map)
   - [4.3b The project backlog](#43b-the-project-backlog)
   - [4.3c PR-only repositories](#43c-pr-only-repositories)
+  - [4.3d Hard size check on pull requests](#43d-hard-size-check-on-pull-requests)
   - [4.4 Agents, hiring and allow-lists](#44-agents-hiring-and-allow-lists)
   - [4.5 The desk, the ledger and standing orders](#45-the-desk-the-ledger-and-standing-orders)
   - [4.6 Budgets and costs](#46-budgets-and-costs)
