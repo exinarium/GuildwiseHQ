@@ -11,7 +11,8 @@ import { projectScope, SYSTEM_ACTOR } from './common.ts';
 export function appIdentityFailureText(text: unknown): string | null {
   if (typeof text !== 'string') return null;
   const t = text.trim();
-  if (t.startsWith(`${APP_IDENTITY_FAILED_CODE}:`)) return t.slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim();
+  if (t.startsWith(`${APP_IDENTITY_FAILED_CODE}:`))
+    return t.slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim();
   if (/^The app .+? could not be used:/.test(t)) return t;
   return null;
 }
@@ -77,7 +78,9 @@ export async function commandProject(
   const cardId = str(p.cardId);
   const byProject = str(p.projectId);
   const row = byProject
-    ? await one<{ id: string; org_id: string }>(db, 'SELECT id, org_id FROM projects WHERE id=$1', [byProject])
+    ? await one<{ id: string; org_id: string }>(db, 'SELECT id, org_id FROM projects WHERE id=$1', [
+        byProject,
+      ])
     : str(p.repoId)
       ? await one<{ id: string; org_id: string }>(
           db,

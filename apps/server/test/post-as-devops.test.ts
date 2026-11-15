@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import {
-  COMMIT_STATUS_CAPABILITY,
-  noAppPlan,
-  POST_AS_CAPABILITY,
-  POST_AS_V2_CAPABILITY,
-} from '@aom/shared';
+import { COMMIT_STATUS_CAPABILITY, noAppPlan, POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  appIdentityAlertEvents,
+  appIdentityFailureText,
+  commandProject,
+} from '../src/commands/app-identity-alert.ts';
 import {
   canPostAsV2,
   DEVOPS_POST_AS_RUNNER_TOO_OLD,
@@ -14,11 +14,6 @@ import {
   POST_AS_RUNNER_TOO_OLD_MESSAGE,
   postAsFieldFor,
 } from '../src/commands/commit-as.ts';
-import {
-  appIdentityAlertEvents,
-  appIdentityFailureText,
-  commandProject,
-} from '../src/commands/app-identity-alert.ts';
 import { pickStatusWorkstation } from '../src/commands/pr-size-status.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -55,7 +50,10 @@ const remote = async () =>
 
 /** Sets the workstation's announced capabilities (a runner on an older version announces fewer). */
 async function capabilities(caps: string[]) {
-  await q('UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1', [w.workstationId, caps]);
+  await q('UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1', [
+    w.workstationId,
+    caps,
+  ]);
 }
 const ALL = [POST_AS_CAPABILITY, POST_AS_V2_CAPABILITY, COMMIT_STATUS_CAPABILITY, 'app-integrations:1'];
 
@@ -175,8 +173,7 @@ describe('an app selected', () => {
       const id = (created as any).id ?? (created as any).request?.id;
       await w.t.app.ctx.services.dispatcher.run();
       await until(
-        async () =>
-          (await q('SELECT status FROM devops_requests WHERE id=$1', [id]))[0]?.status === 'failed',
+        async () => (await q('SELECT status FROM devops_requests WHERE id=$1', [id]))[0]?.status === 'failed',
         5000,
         'request failed',
       );
@@ -198,7 +195,11 @@ describe('an app selected', () => {
     try {
       await expect(
         postAsFieldFor(db(), w.projectId, w.workstationId, { write: true, v2Only: true }),
-      ).rejects.toMatchObject({ status: 409, code: 'runner_too_old', message: POST_AS_RUNNER_TOO_OLD_MESSAGE });
+      ).rejects.toMatchObject({
+        status: 409,
+        code: 'runner_too_old',
+        message: POST_AS_RUNNER_TOO_OLD_MESSAGE,
+      });
       // a post-as:1 runner still gets the plan for the commands it honours
       expect(
         (await postAsFieldFor(db(), w.projectId, w.workstationId, { write: true })).postAs,
@@ -226,7 +227,9 @@ describe('the app alert for repository commands and DevOps hygiene', () => {
 
   it('reads the failure text from the wire form and the plain sentence only', () => {
     expect(appIdentityFailureText(wire)).toMatch(/^The app Guild bot could not be used/);
-    expect(appIdentityFailureText('The app X could not be used: gone.')).toBe('The app X could not be used: gone.');
+    expect(appIdentityFailureText('The app X could not be used: gone.')).toBe(
+      'The app X could not be used: gone.',
+    );
     expect(appIdentityFailureText('push rejected')).toBeNull();
     expect(appIdentityFailureText(undefined)).toBeNull();
   });
@@ -236,19 +239,25 @@ describe('the app alert for repository commands and DevOps hygiene', () => {
     expect(target).toEqual({ projectId: w.projectId, orgId, cardId: null });
     expect(await commandProject(db(), { something: 'else' })).toBeNull();
     const name = (await q('SELECT name FROM projects WHERE id=$1', [w.projectId]))[0]?.name as string;
-    const events = await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'Repository commands' });
+    const events = await appIdentityAlertEvents(db(), {
+      ...target!,
+      detail: wire,
+      what: 'Repository commands',
+    });
     expect(events).toHaveLength(1);
     expect(events[0]?.event.payload).toMatchObject({
       kind: 'alert',
       title: `Repository commands for ${name} stopped: the app Guild bot cannot be used`,
       projectId: w.projectId,
     });
-    expect(String((events[0]?.event.payload as any).body)).toContain('commit status');
+    expect(String((events[0]?.event.payload as any)?.body)).toContain('commit status');
     await w.t.app.ctx.store.append(events);
     // already open: not raised twice
-    expect(await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'Repository commands' })).toEqual([]);
+    expect(
+      await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'Repository commands' }),
+    ).toEqual([]);
     // DevOps hygiene is its own alert
     const hygiene = await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'DevOps hygiene' });
-    expect((hygiene[0]?.event.payload as any).title).toContain('DevOps hygiene for');
+    expect((hygiene[0]?.event.payload as any)?.title).toContain('DevOps hygiene for');
   });
 });

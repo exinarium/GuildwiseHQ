@@ -20,10 +20,14 @@ import {
 } from '@aom/shared';
 import { applyCapabilitiesReport } from '../capabilities/registry.ts';
 import { ceoRpc } from '../ceo/gateway.ts';
-import { appIdentityAlertEvents, appIdentityFailureText, commandProject } from '../commands/app-identity-alert.ts';
 import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
+import {
+  appIdentityAlertEvents,
+  appIdentityFailureText,
+  commandProject,
+} from '../commands/app-identity-alert.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';

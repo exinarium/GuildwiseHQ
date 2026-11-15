@@ -29,6 +29,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import {
   agentActor,
   cardMessage,
@@ -38,7 +39,6 @@ import {
   userActor,
   userScope,
 } from './common.ts';
-import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import { hygieneConflictEvents } from './conflict-attempts.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
 import { userBy } from './phase-events.ts';

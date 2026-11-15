@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  APP_IDENTITY_FAILED_CODE,
   allowedOutcomes,
   BRIEF_STAGE_ID,
   BuildEvidenceInputSchema,
@@ -23,7 +24,6 @@ import {
   isValidReportPath,
   type LedgerMatch,
   NO_COMMIT_IDENTITY_CODE,
-  APP_IDENTITY_FAILED_CODE,
   NO_COMMIT_IDENTITY_MESSAGE,
   OWNER_APPROVAL_REASON_TEXT,
   type OwnerApprovalPolicy,
@@ -56,12 +56,12 @@ import type { Tx } from '../db/tx.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { applyReleasePrepReport, endReleasePrepShift } from '../release/docs-prep-tasks.ts';
+import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { checkBriefNote } from './brief-check.ts';
 import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
-import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { decideDesignGate, designGateMessage } from './design-gate.ts';

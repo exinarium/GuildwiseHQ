@@ -87,11 +87,7 @@ async function runDevops(
   script: ConstructorParameters<typeof ScriptedAdapter>[0],
 ) {
   const adapter = new ScriptedAdapter(script);
-  h = await startHarness(
-    {},
-    { adapters: new Map([['mock', adapter]]), supervisorOverrides: over },
-    repo,
-  );
+  h = await startHarness({}, { adapters: new Map([['mock', adapter]]), supervisorOverrides: over }, repo);
   const base = makeDevopsStart({ summary: 'tidy the repositories' }) as Record<string, any>;
   const msg = { ...base, ...extra, devops: { ...base.devops, ...(extra.devops ?? {}) } };
   h.server.send('shift.start', msg);
@@ -123,22 +119,28 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
     const pushes = recordPushes(repo);
     const c = fakeCredentials(false);
     const seen: Record<string, any> = {};
-    const adapter = await runDevops(repo, c.overrides, { postAs: planFor(repo.remoteNormalized) }, async (_i, ctl) => {
-      seen.push = await ctl.post('/v1/rpc', {
-        method: 'git.push',
-        params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'] },
-      });
-      seen.tag = await ctl.post('/v1/rpc', {
-        method: 'git.push',
-        params: { repo: repo.clone, refspecs: ['refs/tags/v1.0.0'] },
-      });
-      seen.del = await ctl.post('/v1/rpc', {
-        method: 'git.push',
-        params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'], delete: true },
-      });
-      seen.fetch = await ctl.post('/v1/rpc', { method: 'git.fetch', params: { repo: repo.clone } });
-    });
-    for (const k of ['push', 'tag', 'del', 'fetch']) expect(seen[k].json.ok, `${k}: ${seen[k].json.error}`).toBe(true);
+    const adapter = await runDevops(
+      repo,
+      c.overrides,
+      { postAs: planFor(repo.remoteNormalized) },
+      async (_i, ctl) => {
+        seen.push = await ctl.post('/v1/rpc', {
+          method: 'git.push',
+          params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'] },
+        });
+        seen.tag = await ctl.post('/v1/rpc', {
+          method: 'git.push',
+          params: { repo: repo.clone, refspecs: ['refs/tags/v1.0.0'] },
+        });
+        seen.del = await ctl.post('/v1/rpc', {
+          method: 'git.push',
+          params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'], delete: true },
+        });
+        seen.fetch = await ctl.post('/v1/rpc', { method: 'git.fetch', params: { repo: repo.clone } });
+      },
+    );
+    for (const k of ['push', 'tag', 'del', 'fetch'])
+      expect(seen[k].json.ok, `${k}: ${seen[k].json.error}`).toBe(true);
     expect(seen.push.json.result.message).toBeTruthy();
     expect(pushes()).toEqual([APP_TOKEN_MARK, APP_TOKEN_MARK, APP_TOKEN_MARK]);
     expect(originBranches(repo)).toEqual(['main', 'v1.0.0']);
@@ -210,12 +212,17 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
     const pushes = recordPushes(repo);
     const c = fakeCredentials(true);
     const seen: Record<string, any> = {};
-    await runDevops(repo, c.overrides, { postAs: planFor(repo.remoteNormalized, 'project') }, async (_i, ctl) => {
-      seen.push = await ctl.post('/v1/rpc', {
-        method: 'git.push',
-        params: { repo: repo.clone, refspecs: ['aom/gwp-4-fix'] },
-      });
-    });
+    await runDevops(
+      repo,
+      c.overrides,
+      { postAs: planFor(repo.remoteNormalized, 'project') },
+      async (_i, ctl) => {
+        seen.push = await ctl.post('/v1/rpc', {
+          method: 'git.push',
+          params: { repo: repo.clone, refspecs: ['aom/gwp-4-fix'] },
+        });
+      },
+    );
     expect(seen.push.json.ok, seen.push.json.error).toBe(true);
     expect(pushes()).toEqual(['owner']);
     expect(c.auth).not.toHaveBeenCalled();
@@ -251,7 +258,16 @@ describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
     sh(repo.root, 'git', ['clone', '-q', repo.origin, other]);
     writeFileSync(join(other, 'theirs.txt'), 'theirs');
     sh(other, 'git', ['add', '-A']);
-    sh(other, 'git', ['-c', 'user.name=Other', '-c', 'user.email=other@example.test', 'commit', '-q', '-m', 'theirs']);
+    sh(other, 'git', [
+      '-c',
+      'user.name=Other',
+      '-c',
+      'user.email=other@example.test',
+      'commit',
+      '-q',
+      '-m',
+      'theirs',
+    ]);
     sh(other, 'git', ['push', '-q', 'origin', 'main']);
   }
 
