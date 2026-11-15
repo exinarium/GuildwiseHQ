@@ -34,7 +34,10 @@ export const devopsOf = (msg: ShiftStartMsg): DevopsShift | undefined =>
  * is its guardrail). Its own requests (`devops`) and, since GWP-189, the release prep tasks (`release_prep`) it writes; no
  * other shift kind, and no other agent, gets a guard. The working branch of the project is protected from force-pushes.
  */
-export function devopsGuardFor(msg: ShiftStartMsg, identityEmail?: string | null): DevopsGuardInput | undefined {
+export function devopsGuardFor(
+  msg: ShiftStartMsg,
+  identityEmail?: string | null,
+): DevopsGuardInput | undefined {
   if (!guardedShift(msg)) return undefined;
   if (msg.kind === 'release_prep') {
     // the release branch is frozen for the whole shift; nothing is pre-approved

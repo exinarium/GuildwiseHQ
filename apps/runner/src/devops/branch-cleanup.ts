@@ -200,13 +200,13 @@ export async function cleanFinishedCards(
       const del = await git(
         repoPath,
         [
-        ...(input.auth?.args ?? []),
-        'push',
-        '--delete',
-        `--force-with-lease=refs/heads/${ob}:${originSha}`,
-        'origin',
-        '--',
-        ob,
+          ...(input.auth?.args ?? []),
+          'push',
+          '--delete',
+          `--force-with-lease=refs/heads/${ob}:${originSha}`,
+          'origin',
+          '--',
+          ob,
         ],
         input.auth ? { env: input.auth.env } : {},
       );

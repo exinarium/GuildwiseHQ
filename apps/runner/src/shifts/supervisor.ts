@@ -32,15 +32,15 @@ import {
   isTerminalReport,
   isValidReportPath,
   type LedgerMatch,
+  normalizeRemoteUrl,
   normalizeUrl,
   type OrgGraphScope,
   outcomeDataSchema,
-  normalizeRemoteUrl,
   type PostAsPlan,
-  postAsFor,
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
+  postAsFor,
   type ReadableFolder,
   type RebaseErrorInfo,
   type RepoReport,
@@ -2775,7 +2775,8 @@ export class ShiftSupervisor {
     if (msg.kind !== 'devops' || msg.agent.isDevops !== true)
       return { ok: false, error: 'only the DevOps engineer can run repository hygiene' };
     const spec = msg.devops?.hygiene;
-    if (!spec) return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
+    if (!spec)
+      return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
     const run = await runHygiene(spec, this.worktreePaths(), {
       changeState: async (q) => {
         try {
@@ -2824,7 +2825,9 @@ export class ShiftSupervisor {
       resolve(r),
     );
     if (!roots.some((r) => dir === r || dir.startsWith(`${r}/`)))
-      return denied(`${repo} is not inside a repository folder, a worktree or the temporary folder of this runner`);
+      return denied(
+        `${repo} is not inside a repository folder, a worktree or the temporary folder of this runner`,
+      );
     const refspecs = Array.isArray(params.refspecs)
       ? params.refspecs.filter((r): r is string => typeof r === 'string' && r.length > 0)
       : [];
@@ -2860,7 +2863,9 @@ export class ShiftSupervisor {
     if (r.exitCode !== 0) return denied(redactGitError(r.stderr || r.stdout || `git ${op} failed`));
     return {
       ok: true,
-      result: { message: (r.stderr || r.stdout).trim() || `${op} done${app ? ` as the app ${app.label}` : ''}` },
+      result: {
+        message: (r.stderr || r.stdout).trim() || `${op} done${app ? ` as the app ${app.label}` : ''}`,
+      },
     };
   }
 

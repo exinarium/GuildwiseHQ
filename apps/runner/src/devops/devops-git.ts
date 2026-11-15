@@ -25,21 +25,35 @@ export function devopsPushPlan(
     if (refspecs.length > 0 || del || tags) return { error: 'aom git fetch --repo <dir> takes no refspec' };
     return { args: ['fetch', '--prune', 'origin'], operation: 'fetch' };
   }
-  if (refspecs.length === 0 && !tags) return { error: 'aom git push --repo <dir> needs at least one refspec' };
+  if (refspecs.length === 0 && !tags)
+    return { error: 'aom git push --repo <dir> needs at least one refspec' };
   for (const r of refspecs) {
     if (r.startsWith('+') || r.startsWith('-'))
       return { error: `refusing ${JSON.stringify(r)}: aom git push never forces and takes no options` };
     const parts = r.split(':');
-    if (parts.length > 2 || parts.some((p) => p !== '' && !isSafeGitRef(p.replace(/^refs\/(heads|tags)\//, ''))))
+    if (
+      parts.length > 2 ||
+      parts.some((p) => p !== '' && !isSafeGitRef(p.replace(/^refs\/(heads|tags)\//, '')))
+    )
       return { error: `refusing unsafe refspec ${JSON.stringify(r)}` };
     const dst = (parts[1] ?? parts[0] ?? '').replace(/^refs\/heads\//, '');
     if (del && CONVENTIONAL_MAIN_BRANCHES.includes(dst))
       return { error: `refusing to delete ${dst} from origin` };
-    if (!del && parts[0] === '' ) return { error: 'use --delete to remove a branch from origin' };
+    if (!del && parts[0] === '') return { error: 'use --delete to remove a branch from origin' };
   }
-  const operation = del ? 'delete branch' : tags || refspecs.some((r) => r.startsWith('refs/tags/')) ? 'push tag' : 'push';
+  const operation = del
+    ? 'delete branch'
+    : tags || refspecs.some((r) => r.startsWith('refs/tags/'))
+      ? 'push tag'
+      : 'push';
   return {
-    args: ['push', ...(del ? ['--delete'] : []), ...(tags ? ['--tags'] : []), 'origin', ...(refspecs.length ? ['--', ...refspecs] : [])],
+    args: [
+      'push',
+      ...(del ? ['--delete'] : []),
+      ...(tags ? ['--tags'] : []),
+      'origin',
+      ...(refspecs.length ? ['--', ...refspecs] : []),
+    ],
     operation,
   };
 }

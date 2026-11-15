@@ -241,15 +241,21 @@ export async function deliverSizeStatuses(ctx: Ctx, scope: { projectId?: string 
   return sent;
 }
 
-/** The workstation that can post for a repository: holds the clone, announces the command, holds a token for the host. */
 /** Whether the repository's project puts it on a post-as app (its plan entry has `source: 'app'`). */
-export async function repoOnApp(db: Queryable, repoId: string, remoteUrlNormalized: string): Promise<boolean> {
-  const r = await one<{ project_id: string }>(db, 'SELECT project_id FROM project_repos WHERE id=$1', [repoId]);
+export async function repoOnApp(
+  db: Queryable,
+  repoId: string,
+  remoteUrlNormalized: string,
+): Promise<boolean> {
+  const r = await one<{ project_id: string }>(db, 'SELECT project_id FROM project_repos WHERE id=$1', [
+    repoId,
+  ]);
   if (!r) return false;
   const { postAs } = await loadIdentityPlan(db, r.project_id);
   return postAsFor(postAs, remoteUrlNormalized)?.source === 'app';
 }
 
+/** The workstation that can post for a repository: holds the clone, announces the command, holds a token for the host. */
 export async function pickStatusWorkstation(
   db: Queryable,
   repoId: string,

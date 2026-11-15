@@ -445,7 +445,8 @@ function offWorkstation(c: Ctx, seg: Segment, what: string): GuardVerdict {
 /** git subcommands that talk to a remote, and those that make or move commits (HEAD). */
 const GIT_NETWORK = new Set(['push', 'fetch', 'pull', 'ls-remote', 'clone']);
 const GIT_HEAD_MOVING = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull']);
-const looksLikeUrl = (w: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(w) || /^[^\s/@]+@[^\s:]+:/.test(w);
+const looksLikeUrl = (w: string): boolean =>
+  /^[a-z][a-z0-9+.-]*:\/\//i.test(w) || /^[^\s/@]+@[^\s:]+:/.test(w);
 
 function appFor(cfg: GuardConfig, normalized: string | null | undefined) {
   if (!normalized) return undefined;
@@ -483,7 +484,8 @@ function appRepoGit(words: string[], c: Ctx): GuardVerdict | null {
     const target = urlArg ? normalizeRemoteUrl(urlArg) : sub === 'clone' ? null : origin();
     const app = appFor(c.cfg, target);
     if (app) {
-      if (sub === 'clone') return appRepoRefusal(app.label, app.remote, 'the runner keeps its clone; work in it.');
+      if (sub === 'clone')
+        return appRepoRefusal(app.label, app.remote, 'the runner keeps its clone; work in it.');
       const use =
         sub === 'push'
           ? `use \`aom git push --repo ${shellQuote(dir)} <refspec>...\` (add --delete or --tags as needed)`
@@ -520,13 +522,19 @@ function appRepoGh(words: string[], c: Ctx): GuardVerdict | null {
     const method = m >= 0 ? (words[m + 1] ?? '').toUpperCase() : '';
     write =
       (method !== '' && method !== 'GET') ||
-      words.some((w) => w === '-f' || w === '-F' || w === '--field' || w === '--raw-field' || w === '--input');
+      words.some(
+        (w) => w === '-f' || w === '-F' || w === '--field' || w === '--raw-field' || w === '--input',
+      );
   }
   if (!write) return null;
   const r = words.findIndex((w) => w === '-R' || w === '--repo');
   const named = r >= 0 ? words[r + 1] : words.find((w) => w.startsWith('--repo='))?.slice(7);
   let target: string | null;
-  if (named) target = named.includes('/') && named.split('/').length === 2 ? `github.com/${named}` : normalizeRemoteUrl(named);
+  if (named)
+    target =
+      named.includes('/') && named.split('/').length === 2
+        ? `github.com/${named}`
+        : normalizeRemoteUrl(named);
   else target = c.deps.originUrl?.(c.cwd) ?? null;
   const app = appFor(c.cfg, target);
   if (!app) return null;
@@ -1828,7 +1836,10 @@ export function appendAuditFile(file: string, entry: DevopsAuditEntry): void {
 /** The normalized origin URL of the repository `dir` is in (read only); null when there is none. */
 export function gitOriginUrl(dir: string): string | null {
   try {
-    const r = spawnSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 3000 });
+    const r = spawnSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
     const url = r.status === 0 ? r.stdout.trim() : '';
     return url ? normalizeRemoteUrl(url) : null;
   } catch {

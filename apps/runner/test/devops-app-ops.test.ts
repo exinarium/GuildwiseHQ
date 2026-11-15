@@ -9,9 +9,9 @@ import {
   withAppPushRefusal,
 } from '../src/devops/devops-git.ts';
 import { classifyCommand, type GuardConfig } from '../src/devops/guard.ts';
-import { commandCarriesPlan } from '../src/forge/app-actor.ts';
 import { type HygieneNetAuth, hygieneRepo } from '../src/devops/hygiene.ts';
 import { migrateSavedWorkBranches } from '../src/devops/saved-work.ts';
+import { commandCarriesPlan } from '../src/forge/app-actor.ts';
 import { git } from '../src/git/git.ts';
 import { AppIdentityError, commitEnv } from '../src/git/identity.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
@@ -255,7 +255,7 @@ describe('DevOps card request on an app repository: conflict resolution as the a
     );
   });
 
-  it('a card repository not on an app keeps today\'s identity (null), and so does a request without a card', async () => {
+  it("a card repository not on an app keeps today's identity (null), and so does a request without a card", async () => {
     const p = probe();
     expect(await devopsRequestIdentity(plan('project'), REMOTE, tmp(), p)).toBeNull();
     expect(await devopsRequestIdentity({ repos: [] }, REMOTE, tmp(), p)).toBeNull();
@@ -270,7 +270,9 @@ describe('aom git push|fetch --repo (runner side plan)', () => {
       args: ['push', 'origin', '--', 'feature'],
       operation: 'push',
     });
-    expect(devopsPushPlan('push', ['refs/tags/v1.2.0'], false, false)).toMatchObject({ operation: 'push tag' });
+    expect(devopsPushPlan('push', ['refs/tags/v1.2.0'], false, false)).toMatchObject({
+      operation: 'push tag',
+    });
     expect(devopsPushPlan('push', [], false, true)).toEqual({
       args: ['push', '--tags', 'origin'],
       operation: 'push tag',
