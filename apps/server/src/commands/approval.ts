@@ -4,6 +4,7 @@ import {
   type ApprovalReviewInfo,
   type ApprovalSendBackRequest,
   type Approver,
+  agentEvidenceRows,
   type CardApproval,
   type CardDiffResponse,
   type CheckEvidence,
@@ -607,7 +608,10 @@ async function approvalReviewInfo(db: Queryable, card: Row, ap: ApprovalDoc): Pr
       : null,
     diff: diff ? { bytes: Number(diff.bytes), truncated: !!diff.truncated, files: Number(diff.files) } : null,
     evidence: ev
-      ? { commands: [...(ev.commands ?? []), ...checkEvidenceRows(ev.checks)], waived: ev.waived ?? null }
+      ? {
+          commands: [...agentEvidenceRows(ev.commands ?? []), ...checkEvidenceRows(ev.checks)],
+          waived: ev.waived ?? null,
+        }
       : null,
     verdicts: verdicts.map((v) => ({
       reviewerName: v.name ?? 'a reviewer',

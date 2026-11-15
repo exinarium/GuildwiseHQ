@@ -5,6 +5,7 @@ import {
   type IntegrationSuite,
   type IntegrationTests,
   parseCommandLine,
+  UNIT_HANDOFF_TIMEOUT_MIN,
   validateIntegrationTests,
 } from '@aom/shared';
 import { Plus, Trash2 } from 'lucide-react';
@@ -18,12 +19,15 @@ interface Row {
   repoId: string;
   cwd: string;
   cmd: string;
-  kind: 'integration' | 'e2e' | 'check';
+  kind: 'integration' | 'e2e' | 'check' | 'unit';
   timeoutMin: number;
   destructive: boolean;
   junit: string;
   /** A check only: the formatter or import sorter that repairs what the check reports. */
   fix: string;
+  /** A unit suite only: the command that runs the tests of given files at a builder's handoff (contains `{files}`). */
+  handoffCmd: string;
+  handoffTimeoutMin: number;
   confirmed: boolean;
 }
 
@@ -38,11 +42,13 @@ const toRow = (s: IntegrationSuite, key: number): Row => ({
   destructive: s.destructive,
   junit: s.junit ?? '',
   fix: s.fix ? formatCommandLine(s.fix) : '',
+  handoffCmd: s.handoffCmd ? formatCommandLine(s.handoffCmd) : '',
+  handoffTimeoutMin: s.handoffTimeoutMin ?? UNIT_HANDOFF_TIMEOUT_MIN,
   confirmed: s.confirmed,
 });
 
 function fromRow(r: Row): IntegrationSuite {
-  const what = r.kind === 'check' ? 'Check' : 'Suite';
+  const what = r.kind === 'check' ? 'Check' : r.kind === 'unit' ? 'Unit suite' : 'Suite';
   const where = `${what} "${r.name || '(no name)'}"`;
   if (!r.name.trim()) throw new Error(`Every ${what.toLowerCase()} needs a name`);
   if (!r.cmd.trim()) throw new Error(`${where}: the command is empty`);
@@ -57,6 +63,9 @@ function fromRow(r: Row): IntegrationSuite {
       destructive: r.destructive,
       ...(r.junit.trim() ? { junit: r.junit.trim() } : {}),
       ...(r.kind === 'check' && r.fix.trim() ? { fix: parseCommandLine(r.fix) } : {}),
+      ...(r.kind === 'unit' && r.handoffCmd.trim()
+        ? { handoffCmd: parseCommandLine(r.handoffCmd), handoffTimeoutMin: r.handoffTimeoutMin }
+        : {}),
       confirmed: r.confirmed,
     };
   } catch (err) {
@@ -123,6 +132,7 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
       keepOnFailureMin: keep,
       flakyRetry: retry,
       checkDetection: q.data.settings.checkDetection,
+      unitDetection: q.data.settings.unitDetection,
     };
     const issues = validateIntegrationTests(
       settings,
@@ -231,7 +241,7 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
                 it finds and proposes it here for you to confirm.
               </p>
               {rows
-                .filter((r) => r.kind !== 'check')
+                .filter((r) => r.kind !== 'check' && r.kind !== 'unit')
                 .map((r) => (
                   <div
                     key={r.key}
@@ -354,6 +364,8 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
                           destructive: false,
                           junit: '',
                           fix: '',
+                          handoffCmd: '',
+                          handoffTimeoutMin: UNIT_HANDOFF_TIMEOUT_MIN,
                           confirmed: true,
                         },
                       ])
@@ -371,9 +383,9 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
         <fieldset className="flex flex-col gap-3" data-testid="checks-settings">
           <legend className="text-sm font-medium">Checks</legend>
           <p className="text-xs text-subtle">
-            The runner runs every confirmed check on the builder's committed change at each handoff and
-            refuses the handoff while the change fails a check in a file it changed. Failures only in other
-            files are shown to the reviewers. Proposed checks do not run until you confirm them.
+            The runner runs every confirmed check over the whole repository at each handoff of a builder, a
+            tester and a writer, and refuses the handoff while a check finds a problem in any file, or cannot
+            run (an error or a timeout). Proposed checks do not run until you confirm them.
           </p>
           {!canRunChecks && (
             <Callout tone="warning">
@@ -488,6 +500,8 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
                       destructive: false,
                       junit: '',
                       fix: '',
+                      handoffCmd: '',
+                      handoffTimeoutMin: UNIT_HANDOFF_TIMEOUT_MIN,
                       confirmed: true,
                     },
                   ])
@@ -495,6 +509,150 @@ export function IntegrationTestsSettings({ projectId, canEdit }: { projectId: st
               >
                 <Plus aria-hidden="true" className="size-4" />
                 Add a check
+              </Button>
+            </div>
+          )}
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-3" data-testid="unit-settings">
+          <legend className="text-sm font-medium">Unit tests</legend>
+          <p className="text-xs text-subtle">
+            At a builder's handoff the runner runs the unit tests of the files the card changed, with the
+            handoff command ({'{files}'} is replaced by those files), and refuses the handoff while one fails
+            or cannot run. A suite without a handoff command is not run at handoff: it runs at regression. On
+            regression and full suite cards the runner runs every confirmed unit suite whole. Proposed suites
+            do not run until you confirm them.
+          </p>
+          {rows
+            .filter((r) => r.kind === 'unit')
+            .map((r) => (
+              <div
+                key={r.key}
+                className="flex flex-col gap-2 rounded-control border border-line p-3"
+                data-testid={`unit-row-${r.name || r.key}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {!r.confirmed && <Badge tone="warning">Proposed from the repository</Badge>}
+                  {!r.confirmed && canEdit && (
+                    <Button
+                      size="sm"
+                      data-testid={`confirm-suite-${r.name}`}
+                      loading={confirm.isPending}
+                      onClick={() => confirm.mutate({ name: r.name, confirmed: true })}
+                    >
+                      Confirm {r.name}
+                    </Button>
+                  )}
+                  {!r.handoffCmd.trim() && <Badge>Not run at handoff: runs at regression</Badge>}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <TextInput
+                    label="Name"
+                    value={r.name}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { name: e.target.value })}
+                  />
+                  <Select
+                    label="Repository"
+                    value={r.repoId}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { repoId: e.target.value })}
+                  >
+                    {repos.map((x) => (
+                      <option key={x.repoId} value={x.repoId}>
+                        {x.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <TextInput
+                    label="Folder"
+                    value={r.cwd}
+                    disabled={!canEdit}
+                    onChange={(e) => patchRow(r.key, { cwd: e.target.value })}
+                  />
+                </div>
+                <TextInput
+                  label="Whole suite (regression)"
+                  value={r.cmd}
+                  disabled={!canEdit}
+                  placeholder="pnpm test"
+                  onChange={(e) => patchRow(r.key, { cmd: e.target.value })}
+                />
+                <TextInput
+                  label="Handoff command (optional)"
+                  value={r.handoffCmd}
+                  disabled={!canEdit}
+                  placeholder="npx vitest related --run --passWithNoTests {files}"
+                  hint="Runs the tests of the changed files at a builder's handoff; must contain {files}."
+                  onChange={(e) => patchRow(r.key, { handoffCmd: e.target.value })}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TextInput
+                    label="Longest handoff run (minutes)"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={r.handoffTimeoutMin}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      patchRow(r.key, {
+                        handoffTimeoutMin: Math.min(10, Math.max(1, Number(e.target.value) || 1)),
+                      })
+                    }
+                  />
+                  <TextInput
+                    label="Longest whole run (minutes)"
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={r.timeoutMin}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      patchRow(r.key, { timeoutMin: Math.min(120, Math.max(1, Number(e.target.value) || 1)) })
+                    }
+                  />
+                </div>
+                {canEdit && (
+                  <div>
+                    <Button
+                      size="sm"
+                      variant="danger-ghost"
+                      onClick={() => setRows((cur) => cur.filter((x) => x.key !== r.key))}
+                    >
+                      <Trash2 aria-hidden="true" className="size-4" />
+                      Remove {r.name || 'unit suite'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          {canEdit && repos.length > 0 && (
+            <div>
+              <Button
+                data-testid="add-unit"
+                onClick={() =>
+                  setRows((cur) => [
+                    ...cur,
+                    {
+                      key: Math.max(-1, ...cur.map((x) => x.key)) + 1,
+                      name: '',
+                      repoId: repos[0]?.repoId ?? '',
+                      cwd: '.',
+                      cmd: '',
+                      kind: 'unit',
+                      timeoutMin: 30,
+                      destructive: false,
+                      junit: '',
+                      fix: '',
+                      handoffCmd: '',
+                      handoffTimeoutMin: UNIT_HANDOFF_TIMEOUT_MIN,
+                      confirmed: true,
+                    },
+                  ])
+                }
+              >
+                <Plus aria-hidden="true" className="size-4" />
+                Add a unit suite
               </Button>
             </div>
           )}

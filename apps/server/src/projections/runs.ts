@@ -44,14 +44,18 @@ export const runProjectors: Record<string, Projector> = {
     // an event without check suites changes nothing here.
     const detected = [...new Set(p.suites.filter((s) => s.kind === 'check').map((s) => s.repoId))];
     const newlyDetected = detected.filter((r) => !settings.checkDetection.includes(r));
+    // The same for unit suites (their own marker: the checks' one already marks most repositories).
+    const unitRepos = [...new Set(p.suites.filter((s) => s.kind === 'unit').map((s) => s.repoId))];
+    const newUnitRepos = unitRepos.filter((r) => !settings.unitDetection.includes(r));
     const take = fits ? added : [];
-    if (take.length === 0 && newlyDetected.length === 0) return;
+    if (take.length === 0 && newlyDetected.length === 0 && newUnitRepos.length === 0) return;
     await exec(tx, 'UPDATE projects SET integration_tests=$2::jsonb WHERE id=$1', [
       p.projectId,
       JSON.stringify({
         ...settings,
         suites: [...settings.suites, ...take],
         checkDetection: [...settings.checkDetection, ...newlyDetected].slice(0, 100),
+        unitDetection: [...settings.unitDetection, ...newUnitRepos].slice(0, 100),
       }),
     ]);
   },

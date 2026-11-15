@@ -89,7 +89,11 @@ export function SuiteResultsPanel({ cardId, testing }: { cardId: string; testing
                       <span className="font-medium text-fg">{r.suite}</span>
                       {r.kind && (
                         <span className="ml-1 text-xs text-subtle">
-                          {r.kind === 'e2e' ? 'end-to-end' : 'integration'}
+                          {r.kind === 'e2e'
+                            ? 'end-to-end'
+                            : r.kind === 'unit'
+                              ? 'unit (run by the runner)'
+                              : 'integration'}
                         </span>
                       )}
                       {r.attempts > 1 && (
