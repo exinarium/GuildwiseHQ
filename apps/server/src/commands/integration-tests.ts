@@ -121,7 +121,11 @@ export async function setIntegrationTests(
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
     // The repositories whose checks were proposed are the server's record, not the client's.
-    const settings = { ...req.settings, checkDetection: integrationTestsOf(p).checkDetection };
+    const settings = {
+      ...req.settings,
+      checkDetection: integrationTestsOf(p).checkDetection,
+      unitDetection: integrationTestsOf(p).unitDetection,
+    };
     const problems = validateIntegrationTests(settings, await projectRepoIds(tx, projectId));
     if (req.settings.mode === 'remote' && req.settings.deployTargetId) {
       const t = await one(

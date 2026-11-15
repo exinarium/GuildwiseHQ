@@ -56,6 +56,8 @@ Files that look like passwords or keys (`.env` files, `*.pem`, names with *key* 
 
 If hygiene finds a conflict, an authentication failure, or a missing clone, it does not force anything. These show as failures in your BA's daily report until a later run finds the repository clean.
 
+When a project has an app selected under **Commit as** (see [Projects](/help/projects#commit-as)), the pushes and fetches of repository hygiene, and the DevOps engineer's git work for that project, run as that app too. If the app cannot be used, the request fails and the desk gives the reason.
+
 ## New repositories and the toolchain {#setup}
 
 When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`guildwise-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository**, choose the git host and fill in what it asks (for example owner and name, and the visibility), and the DevOps engineer creates it there with that workstation's login for the host, then clones it. The workstation must be connected to the host first (see [Git hosts](/help/workstations-and-installer#git-hosts)). Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.

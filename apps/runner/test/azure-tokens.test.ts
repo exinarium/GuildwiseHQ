@@ -45,11 +45,20 @@ describe('Azure DevOps tokens are kept per organization', () => {
   it('other providers stay keyed by provider and host only', () => {
     const file = storeFile();
     const s = new FileTokenStore(file, key);
-    s.set({ provider: 'gitlab', host: 'gitlab.com', token: 'GL' });
-    expect(s.get('gitlab', 'GitLab.com')?.token).toBe('GL');
-    expect(s.get('gitlab', 'gitlab.com', 'whatever')?.token).toBe('GL');
+    // A token long and with dashes: base64 ciphertext never has a '-', so it cannot show up in the file by chance (a
+    // two-letter token did, about 1 run in 30).
+    const token = 'glpat-plain-token-value';
+    s.set({ provider: 'gitlab', host: 'gitlab.com', token });
+    expect(s.get('gitlab', 'GitLab.com')?.token).toBe(token);
+    expect(s.get('gitlab', 'gitlab.com', 'whatever')?.token).toBe(token);
     expect(sealedKeys(file)).toEqual(['gitlab@gitlab.com']);
-    expect(readFileSync(file, 'utf8')).not.toContain('GL');
+    // stored encrypted: the plain token is not in the file, and decrypting it gives the token back
+    expect(readFileSync(file, 'utf8')).not.toContain(token);
+    const sealed = new SealedFile(file, key, z.record(z.string(), z.unknown())).load() as Record<
+      string,
+      { token?: string }
+    >;
+    expect(sealed['gitlab@gitlab.com']?.token).toBe(token);
   });
 
   it('remove drops only that organization', () => {

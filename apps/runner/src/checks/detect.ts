@@ -304,3 +304,70 @@ export async function detectChecksFromRef(
     rmSync(tmp, { recursive: true, force: true });
   }
 }
+
+export interface UnitProposal {
+  name: string;
+  cmd: string[];
+  cwd: string;
+  kind: 'unit';
+  timeoutMin: number;
+  handoffCmd?: string[];
+  handoffTimeoutMin?: number;
+}
+
+const UNIT_PROPOSALS_MAX = 10;
+const UNIT_SCRIPTS = ['test:unit', 'test'];
+
+/**
+ * Proposes `unit` suites from the repository's base branch (`ref`): one per package (`package.json` outside
+ * `node_modules`, up to three folders deep) with a `test:unit` or `test` script. `cmd` runs the whole suite (regression);
+ * `handoffCmd` only where the runner knows a "related tests" mode: vitest (`vitest related`) and jest
+ * (`--findRelatedTests`). The root package is left out when the repository has other packages (its test script usually
+ * runs them all). Never executes anything; proposals wait unconfirmed.
+ */
+export async function detectUnitSuitesFromRef(worktree: string, ref: string): Promise<UnitProposal[]> {
+  const list = await git(worktree, ['ls-tree', '-r', '--name-only', '-z', ref]);
+  if (list.exitCode !== 0) return [];
+  const files = list.stdout.split('\0').filter(Boolean);
+  const pkgs = files
+    .filter((f) => posix.basename(f) === 'package.json' && !f.includes('node_modules/'))
+    .filter((f) => f.split('/').length <= 4)
+    .sort();
+  const lock = (n: string) => files.includes(n);
+  const pm: 'pnpm' | 'npm' | 'yarn' = lock('pnpm-lock.yaml') ? 'pnpm' : lock('yarn.lock') ? 'yarn' : 'npm';
+  const out: UnitProposal[] = [];
+  for (const f of pkgs) {
+    if (out.length >= UNIT_PROPOSALS_MAX) break;
+    const dir = posix.dirname(f);
+    if (dir === '.' && pkgs.length > 1) continue;
+    const blob = await git(worktree, ['show', `${ref}:${f}`]);
+    if (blob.exitCode !== 0) continue;
+    let scripts: Record<string, string> = {};
+    try {
+      const j = JSON.parse(blob.stdout) as { scripts?: Record<string, string> };
+      scripts = j.scripts && typeof j.scripts === 'object' ? j.scripts : {};
+    } catch {
+      continue;
+    }
+    const script = UNIT_SCRIPTS.find((s) => typeof scripts[s] === 'string' && scripts[s]?.trim());
+    if (!script) continue;
+    const body = scripts[script] as string;
+    if (/no test specified/.test(body)) continue;
+    const cmd = script === 'test' ? [pm, 'test'] : pm === 'npm' ? ['npm', 'run', script] : [pm, script];
+    const handoffCmd = /\bvitest\b/.test(body)
+      ? ['npx', 'vitest', 'related', '--run', '--passWithNoTests', '{files}']
+      : /\bjest\b/.test(body)
+        ? ['npx', 'jest', '--findRelatedTests', '--passWithNoTests', '{files}']
+        : undefined;
+    const name = `unit ${dir === '.' ? 'root' : dir}`.slice(0, 60);
+    out.push({
+      name,
+      cmd,
+      cwd: dir,
+      kind: 'unit',
+      timeoutMin: 30,
+      ...(handoffCmd ? { handoffCmd, handoffTimeoutMin: 5 } : {}),
+    });
+  }
+  return out;
+}

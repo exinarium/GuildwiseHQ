@@ -9,6 +9,7 @@ import {
   useTestOrgApp,
 } from '../../api/queries/org-apps.ts';
 import { sealIntegration } from '../../lib/runner-seal.ts';
+import { newId } from '../../lib/secure.ts';
 import {
   Badge,
   Button,
@@ -157,7 +158,7 @@ export function AddAppDialog({ data, onClose }: { data: OrgAppsResponse; onClose
         targets
           .filter((t) => picked.includes(t.id))
           .map(async (t) => {
-            const ref = crypto.randomUUID();
+            const ref = newId();
             const envelope = await sealIntegration({
               key: { keyId: t.keyId, publicKey: t.publicKey },
               serverTime: data.serverTime,
@@ -173,7 +174,7 @@ export function AddAppDialog({ data, onClose }: { data: OrgAppsResponse; onClose
           }),
       );
       const r = await add.mutateAsync({
-        requestId: crypto.randomUUID(),
+        requestId: newId(),
         provider: 'github-app',
         label: label.trim() || 'GitHub App',
         host,

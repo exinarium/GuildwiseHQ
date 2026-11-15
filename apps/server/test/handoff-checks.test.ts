@@ -105,7 +105,7 @@ describe('the checks in the build brief', () => {
     await team();
     await cardInBuild();
     const start = await p.next('Bea');
-    expect(start.brief.checks).toEqual({ suites: [], detect: true });
+    expect(start.brief.checks).toEqual({ suites: [], detect: true, detectUnits: true });
     await p.startShift(r, start);
     const res = await rpc(start.shiftId, 'env.suites.propose', {
       suites: [{ name: 'lint', cmd: ['pnpm', 'lint'], kind: 'check', cwd: '.', timeoutMin: 5 }],
@@ -127,7 +127,7 @@ describe('the checks in the build brief', () => {
     await p.run('Pia', planned());
     await p.run('Arc', designed(card2.ref));
     const next = await p.next('Bea');
-    expect(next.brief.checks).toEqual({ suites: [], detect: false });
+    expect(next.brief.checks).toEqual({ suites: [], detect: false, detectUnits: true });
     await p.startShift(r, next);
     r.ended(next.shiftId, 'reported');
   });
@@ -253,6 +253,57 @@ describe('a handoff with checks', () => {
       'passed',
       'passed (failures only in files the card did not change)',
     ]);
+  });
+
+  it('policy 2: a deferred check passes; a runner without checks:2 reads it as preexisting, a newer one as deferred', async () => {
+    await team();
+    await putSettings([check()]);
+    const card = await cardInBuild();
+    const checks = [
+      evidenceOf('passed'),
+      evidenceOf('deferred', {
+        name: 'fmt',
+        owedBy: 'tester',
+        owed: ['e2e/a.spec.ts:1 x'],
+        summary: 'owed by the tester',
+      }),
+    ];
+    const res = (
+      await p.runAt(
+        'Bea',
+        handoffEv(),
+        leanAttach(SHA1, ['src/feature.ts'], { checks, checksPolicy: 2 }),
+        SHA1,
+      )
+    ).res;
+    expect(res.accepted).toBe(true);
+    expect((await cardRow(card.id)).build_evidence.checks[1]).toMatchObject({
+      status: 'deferred',
+      owedBy: 'tester',
+    });
+    await q(`UPDATE workstation_capabilities SET capabilities = array_remove(capabilities, 'checks:2')`);
+    const start = await p.next('Pre');
+    expect(start.brief.buildEvidence?.checks?.[1]).toMatchObject({ status: 'preexisting' });
+    expect(start.brief.buildEvidence?.checks?.[1]?.summary).toContain('deferred: owed by the tester');
+    await p.startShift(r, start, SHA1);
+    await p.report(r, start.shiftId, verdict('changes'));
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('policy 2: an error or a timeout refuses the build handoff on the server too', async () => {
+    await team();
+    await cardInBuild();
+    const start = await p.next('Bea');
+    await p.startShift(r, start);
+    const res = await p.report(
+      r,
+      start.shiftId,
+      handoffEv(),
+      leanAttach(SHA1, ['src/feature.ts'], { checks: [evidenceOf('timeout')], checksPolicy: 2 }),
+    );
+    expect(res.accepted).toBe(false);
+    expect(res.error).toContain('did not produce a verdict (timed out');
+    r.ended(start.shiftId, 'reported');
   });
 
   it('refuses a failed check (defence in depth), with the text naming the check and the fix', async () => {

@@ -11,6 +11,7 @@ import {
   IntegrationSuiteSchema,
   type IntegrationTests,
   isLiveRunState,
+  isSuiteCard,
   type RunnerToServerOf,
   type RunStartPayload,
   resolveOutcome,
@@ -21,6 +22,7 @@ import {
   type TestSuiteReport,
   TestSuiteReportSchema,
   testerSuites,
+  unitSuites,
   type WorkflowCardView,
   workflowHasIntegrationGuard,
 } from '@aom/shared';
@@ -31,12 +33,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { workflowView } from './cards.ts';
-import {
-  canPostAs,
-  explicitPostAs,
-  loadIdentityPlan,
-  POST_AS_RUNNER_TOO_OLD_MESSAGE,
-} from './commit-as.ts';
+import { canPostAs, explicitPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { openItemForSubject, raiseOrCoalesce } from './desk-coalesce.ts';
 import { createDevOpsRequestIn } from './devops.ts';
@@ -822,9 +819,22 @@ export async function recordSuiteResult(
     if (agent?.role_key !== 'tester') return [false, undefined, 'only a tester reports suites'];
     const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
     const settings = integrationTestsOf(project);
-    const configured = testerSuites(settings).find(
+    const unit = unitSuites(settings, card.repo_id ?? null).find(
       (s) => s.name.toLowerCase() === parsed.data.name.toLowerCase(),
     );
+    // A unit suite is the runner's measurement on a suite card, never the agent's report.
+    if (unit && !(parsed.data.kind === 'unit' && parsed.data.measured))
+      return [
+        false,
+        undefined,
+        `"${unit.name}" is a unit suite: the runner runs it and reports the result itself; do not report it with \`aom test suite\``,
+      ];
+    if (!unit && parsed.data.kind === 'unit')
+      return [false, undefined, `"${parsed.data.name}" is not a confirmed unit suite of this repository`];
+    const testerSuite = testerSuites(settings).find(
+      (s) => s.name.toLowerCase() === parsed.data.name.toLowerCase(),
+    );
+    const configured = unit ?? testerSuite;
     const earlier = await rows<{ status: string }>(
       tx,
       `SELECT status FROM test_suite_results WHERE shift_id=$1 AND lower(suite)=lower($2) ORDER BY created_at, event_seq`,
@@ -867,7 +877,7 @@ export async function recordSuiteResult(
               shiftId: shift.id,
               testerAgentId: shift.agent_id,
               suite: configured?.name ?? report.name,
-              kind: configured?.kind ?? null,
+              kind: unit ? ('unit' as const) : (testerSuite?.kind ?? null),
               envMode: remote?.target ? 'remote' : env ? 'local' : null,
               envId: remote?.target ? null : (env?.id ?? null),
               deployTargetId: remote?.target?.id ?? null,
@@ -953,7 +963,6 @@ async function flakyNotice(ctx: Ctx, tx: Tx, card: Row, suite: string): Promise<
 
 /** The suites a `aom test pass` still waits for in this shift (empty: it may pass). */
 export async function openSuitesOf(db: Queryable, card: Row, shift: Row): Promise<string[]> {
-  if ((await stageEnvironmentOf(db, card)) !== 'project') return [];
   const project = await one(db, 'SELECT integration_tests FROM projects WHERE id=$1', [card.project_id]);
   const settings = integrationTestsOf(project);
   const results = await rows(
@@ -961,6 +970,40 @@ export async function openSuitesOf(db: Queryable, card: Row, shift: Row): Promis
     `SELECT suite, status FROM test_suite_results WHERE shift_id=$1 ORDER BY created_at, event_seq`,
     [shift.id],
   );
+  return [...openUnits(card, settings, results), ...(await openTesterSuites(db, card, settings, results))];
+}
+
+/**
+ * A suite card (regression, full suite) does not pass while a confirmed unit suite of its repository has no passing result
+ * measured by the runner in this shift (failed, timed out, still running or unreported). Empty for any other card.
+ */
+function openUnits(card: Row, settings: ReturnType<typeof integrationTestsOf>, results: Row[]): string[] {
+  if (!isSuiteCard(card.card_type, card.origin)) return [];
+  return suitesWithoutPass(
+    unitSuites(settings, card.repo_id ?? null),
+    results.map((r) => ({ suite: r.suite, status: r.status })),
+  );
+}
+
+/** The unit suites a suite card's `aom test pass` still waits for in this shift (empty: it may pass). */
+export async function openUnitSuitesOf(db: Queryable, card: Row, shift: Row): Promise<string[]> {
+  if (!isSuiteCard(card.card_type, card.origin)) return [];
+  const project = await one(db, 'SELECT integration_tests FROM projects WHERE id=$1', [card.project_id]);
+  const results = await rows(
+    db,
+    `SELECT suite, status FROM test_suite_results WHERE shift_id=$1 ORDER BY created_at, event_seq`,
+    [shift.id],
+  );
+  return openUnits(card, integrationTestsOf(project), results);
+}
+
+async function openTesterSuites(
+  db: Queryable,
+  card: Row,
+  settings: ReturnType<typeof integrationTestsOf>,
+  results: Row[],
+): Promise<string[]> {
+  if ((await stageEnvironmentOf(db, card)) !== 'project') return [];
   const remote =
     settings.mode === 'remote' ? await remoteEnvironment(db, card.project_id, settings) : undefined;
   let suites = testerSuites(settings);
@@ -1004,14 +1047,21 @@ export async function proposeSuites(
       // A proposed check gets a timeout the owner can save (default 5, at most the limit); set here, never in the projector.
       const raw = s as { kind?: string; timeoutMin?: unknown };
       const timeout =
-        raw.kind === 'check'
+        raw.kind === 'unit'
           ? {
               timeoutMin: Math.min(
-                CHECK_TIMEOUT_MAX_MIN,
-                typeof raw.timeoutMin === 'number' && raw.timeoutMin >= 1 ? raw.timeoutMin : 5,
+                120,
+                typeof raw.timeoutMin === 'number' && raw.timeoutMin >= 1 ? raw.timeoutMin : 30,
               ),
             }
-          : {};
+          : raw.kind === 'check'
+            ? {
+                timeoutMin: Math.min(
+                  CHECK_TIMEOUT_MAX_MIN,
+                  typeof raw.timeoutMin === 'number' && raw.timeoutMin >= 1 ? raw.timeoutMin : 5,
+                ),
+              }
+            : {};
       return IntegrationSuiteSchema.safeParse({ ...(s as object), ...timeout, repoId, confirmed: false });
     });
     const bad = parsed.find((r) => !r.success);

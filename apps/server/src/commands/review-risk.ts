@@ -1,4 +1,5 @@
 import {
+  agentEvidenceRows,
   type CheckEvidence,
   checkEvidenceRows,
   type LeanCardDto,
@@ -87,7 +88,7 @@ export function leanCardDto(card: Row): LeanCardDto {
     evidence: ev
       ? {
           sha: ev.sha,
-          commands: [...(ev.commands ?? []), ...checkEvidenceRows(ev.checks)],
+          commands: [...agentEvidenceRows(ev.commands ?? []), ...checkEvidenceRows(ev.checks)],
           waived: ev.waived ?? null,
           at: ev.at,
         }

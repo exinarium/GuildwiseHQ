@@ -54,9 +54,15 @@ function Stop-Install([string]$What, [string]$Todo = '') {
 
 function Get-State {
   if (Test-Path $StatePath) { try { return Get-Content $StatePath -Raw | ConvertFrom-Json } catch { } }
-  return [pscustomobject]@{ rebootRequested = $false }
+  return [pscustomobject]@{ rebootRequested = $false; wslRestarts = 0; ubuntuRestartRequested = $false; restartBootTime = '' }
 }
 function Save-State($State) { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding ASCII }
+# An older state file has no field for what was added later: Add-Member -Force sets it either way.
+function Set-StateValue([string]$Name, $Value) {
+  $state = Get-State
+  $state | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+  Save-State $state
+}
 
 function Test-Admin {
   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -83,9 +89,22 @@ function Get-Distros {
   return @(($raw | Out-String) -replace "`0", '' -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+# When Windows last started. Saved with every restart request: answering N to the prompt (or never restarting) leaves it
+# unchanged, so the next run can tell "back after a restart" from "run again without one".
+function Get-BootTime {
+  try { return (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToString('o') } catch { return '' }
+}
+function Test-RestartedSince {
+  $then = [string](Get-State).restartBootTime
+  $now = Get-BootTime
+  if (-not $then -or -not $now) { return $true }
+  return ([Math]::Abs(([datetime]$now - [datetime]$then).TotalSeconds) -gt 60)
+}
+
 function Request-Restart([string]$Reason) {
   $state = Get-State
   $state.rebootRequested = $true
+  $state | Add-Member -NotePropertyName restartBootTime -NotePropertyValue (Get-BootTime) -Force
   Save-State $state
   $runOnce = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
   $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$SelfPath`""
@@ -97,6 +116,39 @@ function Request-Restart([string]$Reason) {
   $answer = Read-Host 'Restart now? (y/N)'
   if ($answer -match '^(y|yes)$') { Restart-Computer -Force } else { Write-Host 'Restart Windows when you are ready; the installer continues after you sign in.' }
   exit 0
+}
+
+$WslFeatureNames = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')
+
+# WSL2 can be used when VirtualMachinePlatform is on and wsl.exe answers --status. The legacy feature does not decide:
+# the Store version of WSL runs without it. Pending is true when a feature waits for a restart.
+function Get-WslReadiness {
+  $states = [ordered]@{}
+  foreach ($n in $WslFeatureNames) { $states[$n] = [string](Get-WindowsOptionalFeature -Online -FeatureName $n -ErrorAction Stop).State }
+  $code = 1
+  $raw = ''
+  try { $raw = & wsl.exe --status 2>&1; $code = $LASTEXITCODE } catch { $raw = $_.Exception.Message }
+  $lines = @((($raw | Out-String) -replace "`0", '') -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  $last = if ($lines.Count -gt 0) { $lines[$lines.Count - 1] } else { '(no output)' }
+  $pending = @($states.Values | Where-Object { $_ -match 'Pending' }).Count -gt 0
+  $summary = (($WslFeatureNames | ForEach-Object { "$_ is $($states[$_])" }) -join '; ') + "; wsl.exe --status said: $last"
+  return @{ Ready = ($states['VirtualMachinePlatform'] -eq 'Enabled' -and $code -eq 0); Pending = $pending; States = $states; Summary = $summary }
+}
+
+# Turns on every WSL feature that is not on yet. True when something changed, so that a restart is really pending.
+# A failure is kept in $script:WslEnableError for the stop message instead of going to the trap.
+$script:WslEnableError = ''
+function Enable-WslFeatures {
+  $changed = $false
+  try {
+    foreach ($f in $WslFeatureNames) {
+      $before = [string](Get-WindowsOptionalFeature -Online -FeatureName $f -ErrorAction Stop).State
+      if ($before -eq 'Enabled') { continue }
+      Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All -ErrorAction Stop | Out-Null
+      $changed = $true
+    }
+  } catch { $script:WslEnableError = "Enabling $f failed: $($_.Exception.Message)" }
+  return $changed
 }
 
 trap { Stop-Install "Unexpected problem: $($_.Exception.Message)" 'Run the command again; if it repeats, contact us.' }
@@ -147,18 +199,54 @@ catch { if (-not (Test-Path $LinuxScriptPath)) { Stop-Install "Could not downloa
 
 # ---- 2. WSL2 --------------------------------------------------------------------------------------------------------------
 Start-Step 'Turning on WSL2 (Linux on Windows)'
-$features = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') | ForEach-Object { Get-WindowsOptionalFeature -Online -FeatureName $_ -ErrorAction Stop }
-$missing = @($features | Where-Object { $_.State -ne 'Enabled' })
-if ($missing.Count -gt 0) {
-  Write-Info 'Enabling the Windows features WSL2 needs ...'
-  & wsl.exe --install --no-distribution 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    foreach ($f in @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')) {
-      Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All -ErrorAction Stop | Out-Null
+$wslRestarts = [int](Get-State).wslRestarts
+# Windows has not restarted since the last request (the answer was N): that request does not count.
+if ($wslRestarts -gt 0 -and -not (Test-RestartedSince)) { $wslRestarts--; Set-StateValue 'wslRestarts' $wslRestarts }
+$wsl = Get-WslReadiness
+if (-not $wsl.Ready) {
+  $changed = $false
+  if ($wslRestarts -eq 0) {
+    Write-Info 'Turning on WSL2 ...'
+    & wsl.exe --install --no-distribution 2>&1 | Out-Null
+    $installed = ($LASTEXITCODE -eq 0)
+    $wsl = Get-WslReadiness
+    # Enable the features ourselves when wsl.exe failed or left one of them off (not just waiting for a restart).
+    $off = @($wsl.States.Values | Where-Object { $_ -ne 'Enabled' -and $_ -notmatch 'Pending' })
+    if (-not $wsl.Ready -and (-not $installed -or $off.Count -gt 0)) {
+      Write-Info 'Enabling the Windows features WSL2 needs ...'
+      $changed = Enable-WslFeatures
+      $wsl = Get-WslReadiness
+    }
+  } elseif ($wslRestarts -eq 1) {
+    # Back after the restart and still not ready: do the enabling here, once.
+    Write-Info 'WSL2 is not ready after the restart. Enabling the Windows features myself ...'
+    $changed = Enable-WslFeatures
+    $wsl = Get-WslReadiness
+  }
+  if (-not $wsl.Ready) {
+    # A restart only when one is really pending, and never more than twice for WSL2.
+    if (($wsl.Pending -or $changed) -and $wslRestarts -lt 2) {
+      Set-StateValue 'wslRestarts' ($wslRestarts + 1)
+      Request-Restart 'to finish turning on WSL2'
+    }
+    # Both features are on but this wsl.exe has no --status (older Windows 10 without the Store update): if it can
+    # still set version 2 as the default, carry on rather than stop a PC that works.
+    $allOn = @($wsl.States.Values | Where-Object { $_ -ne 'Enabled' }).Count -eq 0
+    if ($allOn) {
+      & wsl.exe --set-default-version 2 2>&1 | Out-Null
+      if ($LASTEXITCODE -eq 0) { $wsl.Ready = $true }
+    }
+    if (-not $wsl.Ready) {
+      Set-StateValue 'wslRestarts' 0
+      $detail = $wsl.Summary
+      if ($script:WslEnableError) { $detail = "$detail; $($script:WslEnableError)" }
+      $todo = 'Turn on virtualization in the BIOS/UEFI of this PC, or open PowerShell and run: wsl --install   Then run the same command again.'
+      if ($wsl.Pending) { $todo = "Restart Windows first (a feature is waiting for it). $todo" }
+      Stop-Install "WSL2 is still not ready. $detail." $todo
     }
   }
-  Request-Restart 'to finish turning on WSL2'
 }
+Set-StateValue 'wslRestarts' 0
 & wsl.exe --update 2>&1 | Out-Null
 & wsl.exe --set-default-version 2 2>&1 | Out-Null
 Complete-Step 'WSL2 is on'
@@ -175,10 +263,19 @@ if (-not $Distro) {
     if ($ubuntuExe) { & $ubuntuExe.Source install --root 2>&1 | Out-Host }
     $Distro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
   }
-  if (-not $Distro) { Request-Restart 'to finish installing Ubuntu' }
+  if (-not $Distro) {
+    if ((Get-State).ubuntuRestartRequested -and (Test-RestartedSince)) {
+      Set-StateValue 'ubuntuRestartRequested' $false
+      $listed = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ''
+      Stop-Install "Ubuntu is still not installed after a restart. wsl.exe -l -q returned: $($listed.Trim())" 'Open PowerShell and run: wsl --install -d Ubuntu   Then run the same command again.'
+    }
+    Set-StateValue 'ubuntuRestartRequested' $true
+    Request-Restart 'to finish installing Ubuntu'
+  }
   # A Store distribution that was just installed still has to be registered: running a command does that.
   & wsl.exe -d $Distro -u root -- true 2>&1 | Out-Null
 }
+Set-StateValue 'ubuntuRestartRequested' $false
 $LinuxUser = (& wsl.exe -d $Distro -- whoami 2>$null | Out-String).Trim()
 if (-not $LinuxUser -or $LinuxUser -eq 'root') {
   Write-Host ''

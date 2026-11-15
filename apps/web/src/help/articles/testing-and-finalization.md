@@ -73,3 +73,6 @@ After finalization, a **full suite** card is created for testers to run the enti
 If you do not want these extra cards, open the project's **Settings**, find **Full test run after each card** and untick **Run the full end-to-end test suite after each finished card**. It is on by default. The project Owner and the organization's Owners and Admins can change it; everyone else sees it read-only. Turning it off only stops new suite cards; the normal testing of every card stays as it is.
 
 To run a regression suite, open the project's board and click **Run regression**, pick the **Platform** (Web, Mobile or Both) and click **Run**. One regression card per platform is queued for the testers. The button only appears on projects with a test stage.
+
+On a regression or full suite card the runner also runs every confirmed unit suite in full. Every failing test file becomes a bug card for a builder. The same failure is not filed again when you run the suite again.
+

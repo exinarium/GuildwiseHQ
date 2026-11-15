@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { AgentRuntimeSpecSchema } from '../protocol/agent-runtime.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { ReleasePrepChangelogPayloadSchema } from './changelog-entries.ts';
 
 /** The change summary of 'Analyse changes' for one repository (stored per repo, capped to keep events small). */
@@ -243,6 +243,9 @@ export const RELEASE_DOCS_PREP_CAPABILITY = 'release-docs-prep:1';
 export const RELEASE_DOCS_PREP_CHANGELOG_CAPABILITY = 'release-docs-prep-changelog:1';
 /** The runner fails a configured, missing user guide instead of skipping it. */
 export const RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY = 'release-docs-prep-guide-path:1';
+
+/** The runner has the step 'assistant-pack' (regenerates the assistant knowledge pack after the Help articles). */
+export const RELEASE_DOCS_PREP_ASSISTANT_PACK_CAPABILITY = 'release-docs-prep-assistant-pack:1';
 
 /** The runner takes the writer work of the content steps as release prep tasks (changelog_entries, guide_edits, new_video). */
 export const RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY = 'release-docs-prep-writer-tasks:1';

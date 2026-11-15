@@ -10,21 +10,30 @@ const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const list = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
-/** One check result for the reviewers: a passed check one line; failures and unjudged checks say what to trust. */
+/**
+ * One check result for the reviewers. The checks are the runner's measurement (the evidence); a passed check is one line,
+ * a deferred one names who owes it, everything else is shown with its findings.
+ */
 function checkEvidenceLines(c: CheckEvidence): string[] {
-  const head = `- check ${c.name}: \`${c.command}\``;
-  if (c.status === 'passed') return [`${head} passed`];
+  const head = `- ${c.kind === 'unit' ? 'unit tests' : 'check'} ${c.name}: \`${c.command}\``;
+  if (c.status === 'passed') return [`${head} passed (measured by the runner)`];
+  if (c.status === 'regression_only') return [`${head} not run at handoff: runs at regression`];
   if (c.status === 'error' || c.status === 'timeout')
     return [
       `${head} could not run: ${c.summary || c.status}; treat it as unverified (run it yourself if it matters for this change)`,
     ];
-  const intro = c.status === 'failed' ? c.introduced.slice(0, 5).map((l) => `  - ${l}`) : [];
+  if (c.status === 'deferred')
+    return [
+      `${head} deferred: ${c.summary}`,
+      ...(c.owed ?? []).slice(0, 5).map((l) => `  - owed by the ${c.owedBy ?? 'tester'}: ${l}`),
+    ];
+  const intro = c.introduced.slice(0, 5).map((l) => `  - ${l}`);
   return [
     `${head} ${c.status}${c.summary ? `: ${c.summary}` : ''}`,
     ...intro,
     ...(c.elsewhere.length
       ? [
-          `  Failures in files this card did not change (${c.elsewhereCount || c.elsewhere.length}, information):`,
+          `  In files this card did not change (${c.elsewhereCount || c.elsewhere.length}):`,
           ...c.elsewhere.slice(0, 5).map((l) => `  - ${l}`),
         ]
       : []),
@@ -412,16 +421,26 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
           .join('\n') || 'None.',
       ),
     );
-  if (brief.checks?.suites.length)
+  if (brief.checks?.suites.length || brief.checks?.units?.length)
     parts.push(
       section(
         'Checks on handoff',
         [
-          'The runner runs these repository checks on your committed change at `aom handoff` and refuses the handoff while they fail in files you changed (failures only in other files do not block). Run them yourself first. The checks can take minutes: give `aom handoff` a Bash timeout of 10 minutes.',
-          ...brief.checks.suites.map(
+          'The runner runs these repository checks over the whole repository on your committed change when you hand off, and refuses the handoff while any of them finds a problem in any file (also in files you did not change) or cannot run (an error or a timeout). Run them yourself first. The checks can take minutes: give the handoff command a Bash timeout of 15 minutes. What the runner measured is the evidence; your own results are only your note.',
+          ...(brief.checks?.suites ?? []).map(
             (c) =>
               `- ${c.name}: \`${c.cmd.join(' ')}\` in ${c.cwd}${c.fix ? ` (fix: \`${c.fix.join(' ')}\`)` : ''}`,
           ),
+          ...(brief.checks?.units?.length
+            ? [
+                'Unit tests: the runner runs the tests of the files you changed (the test files and the tests related to your sources) and refuses the handoff while one fails:',
+                ...brief.checks.units.map((u) =>
+                  u.handoffCmd
+                    ? `- ${u.name}: \`${u.handoffCmd.join(' ')}\` in ${u.cwd}`
+                    : `- ${u.name}: not run at handoff (runs at regression)`,
+                ),
+              ]
+            : []),
         ].join('\n'),
       ),
     );
@@ -432,8 +451,10 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
         'Build evidence (the builder built and tested this commit; do not rebuild)',
         [
           `Commit: ${e.sha}`,
-          ...e.commands.map(
-            (c) => `- ${c.kind}: \`${c.command}\` ${c.status}${c.result ? `: ${c.result}` : ''}`,
+          ...e.commands.map((c) =>
+            c.kind === 'lint' || c.kind === 'test'
+              ? `- ${c.kind} (the builder's note, not the evidence; the runner's checks below are): \`${c.command}\` ${c.status}${c.result ? `: ${c.result}` : ''}`
+              : `- ${c.kind}: \`${c.command}\` ${c.status}${c.result ? `: ${c.result}` : ''}`,
           ),
           ...(e.waived ? [`- No build or tests, because: ${e.waived}`] : []),
           ...(e.checks ?? []).flatMap((c) => checkEvidenceLines(c)),

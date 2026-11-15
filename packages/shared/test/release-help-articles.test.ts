@@ -333,7 +333,8 @@ describe('schemas, hints and the step registry', () => {
   it('help sits between guide and videos, follows the per-project switch and needs analyse', () => {
     const ids = releaseDocsPrepSteps().map((s) => s.id);
     expect(ids.indexOf('help')).toBe(ids.indexOf('guide') + 1);
-    expect(ids.indexOf('videos')).toBe(ids.indexOf('help') + 1);
+    // the assistant knowledge pack is regenerated from the Help articles right after them
+    expect(ids.indexOf('videos')).toBe(ids.indexOf('help') + 2);
     expect(enabledReleaseDocsPrepSteps({ steps: {} }).some((s) => s.id === 'help')).toBe(true);
     expect(enabledReleaseDocsPrepSteps({ steps: { help: false } }).some((s) => s.id === 'help')).toBe(false);
     const help = releaseDocsPrepStep('help');

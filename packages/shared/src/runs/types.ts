@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { RunPlanSchema, RunSettingsSchema } from './plan.ts';
 

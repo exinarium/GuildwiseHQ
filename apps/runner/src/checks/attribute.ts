@@ -1,9 +1,10 @@
 import { posix } from 'node:path';
 
 /**
- * Which output lines of a check name a file this card changed (introduced: they block the handoff) and which name only
- * other existing files (elsewhere: information). One run on the card's head, attribution by file (docs: the 1.5.0 design of
- * the builder handoff checks). Pure: the caller gives the changed set and a file-exists test.
+ * Which output lines of a check name a file of the repository, grouped into files this card changed (`introduced`) and other
+ * files (`elsewhere`). Both block a handoff since the whole-repository checks (the grouping only tells the agent where to
+ * look); each finding also carries the paths it names, so the caller can tell which role may fix it. One run on the card's
+ * head. Pure: the caller gives the changed set and a file-exists test.
  */
 
 export interface AttributeOptions {
@@ -21,20 +22,44 @@ export interface AttributeOptions {
   capped?: boolean;
 }
 
+/** One output line that names files of the repository. */
+export interface Finding {
+  line: string;
+  /** The repository-relative paths the line names (changed or existing). */
+  paths: string[];
+  /** It names a file this card changed. */
+  changed: boolean;
+}
+
 export interface Attribution {
+  /** Every finding, in output order (complete; the lists below are capped). */
+  findings: Finding[];
   introduced: string[];
   elsewhere: string[];
   introducedCount: number;
   elsewhereCount: number;
-  /** Why this output cannot be judged completely (hint included); the check is then a warning, not a block. */
+  /** Why this output cannot be judged completely (hint included). */
   incomplete?: string;
+  /**
+   * Output lines that look like a diagnostic location (`file.ts:12:3`, `file.ts(12,3)`) but name no file of the repository
+   * the runner could match (a path with spaces, an unresolved prefix): such a finding cannot be given to another role.
+   */
+  unattributed: number;
 }
 
 const LIST_MAX = 20;
 const LINE_MAX = 300;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
-const TOKEN = /(?:[A-Za-z]:)?[\w@.+\-/\\]+\.[A-Za-z0-9]{1,8}(?=[:(\s]|$)/g;
+// path characters include `[ ] ( )` for route folders such as `[id].tsx` and `(group)/`
+const TOKEN = /(?:[A-Za-z]:)?[\w@.+\-/\\[\]()]+\.[A-Za-z0-9]{1,8}(?=[:(\s]|$)/g;
+/** A diagnostic location: `<name>.<ext>:<line>[:<col>]` or `<name>.<ext>(<line>,<col>)`. */
+const LOCATION = /\S\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?\b|\(\d+,\d+\))/;
+/**
+ * A source code frame line under a diagnostic (Biome and friends: `> 12 │ code`, `13 │ code`, `│   ^^^`): it shows code, so
+ * a URL with a port or a `foo.ts:12` comment in it is not a diagnostic location.
+ */
+const CODE_FRAME = /^(?:>\s*)?\d*\s*[│|]/;
 const PNPM_PREFIX = /^(\S+) [\w:-]+: /;
 
 export const stripAnsi = (s: string): string => s.replace(ANSI, '');
@@ -47,6 +72,8 @@ const clean = (p: string): string => {
 export function attribute(output: string, o: AttributeOptions): Attribution {
   const introduced = new Set<string>();
   const elsewhere = new Set<string>();
+  const findings = new Map<string, Finding>();
+  let unattributed = 0;
   const wt = o.worktree ? `${o.worktree.replace(/\\/g, '/').replace(/\/+$/, '')}/` : null;
   for (const raw of stripAnsi(output).split(/\r?\n/)) {
     const line = raw.trim();
@@ -55,6 +82,7 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
     const prefixDir = prefix && o.exists(clean(prefix)) ? clean(prefix) : null;
     let hitIntroduced = false;
     let hitElsewhere = false;
+    const paths = new Set<string>();
     for (const m of line.matchAll(TOKEN)) {
       const token = m[0].replace(/\\/g, '/');
       const candidates: string[] = [];
@@ -64,12 +92,24 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
         if (o.cwd && o.cwd !== '.') candidates.push(clean(`${o.cwd}/${token}`));
         candidates.push(clean(token));
       }
-      if (candidates.some((c) => o.changed.has(c))) hitIntroduced = true;
-      else if (candidates.some((c) => c && !c.startsWith('..') && o.exists(c))) hitElsewhere = true;
+      const changedHit = candidates.find((c) => o.changed.has(c));
+      if (changedHit) {
+        hitIntroduced = true;
+        paths.add(changedHit);
+        continue;
+      }
+      const existing = candidates.find((c) => c && !c.startsWith('..') && o.exists(c));
+      if (existing) {
+        hitElsewhere = true;
+        paths.add(existing);
+      }
     }
     const shown = line.slice(0, LINE_MAX);
     if (hitIntroduced) introduced.add(shown);
     else if (hitElsewhere) elsewhere.add(shown);
+    if (!hitIntroduced && !hitElsewhere && !CODE_FRAME.test(line) && LOCATION.test(line)) unattributed++;
+    if ((hitIntroduced || hitElsewhere) && !findings.has(shown))
+      findings.set(shown, { line: shown, paths: [...paths], changed: hitIntroduced });
   }
   const reasons: string[] = [];
   if (/Diagnostics not shown|exceeds the number allowed/i.test(output))
@@ -79,10 +119,12 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
     reasons.push('a recursive run stops at the first failing package (add `--no-bail`)');
   if (o.capped) reasons.push('the output was longer than the 2 MiB the runner keeps');
   return {
+    findings: [...findings.values()],
     introduced: [...introduced].slice(0, LIST_MAX),
     elsewhere: [...elsewhere].slice(0, LIST_MAX),
     introducedCount: introduced.size,
     elsewhereCount: elsewhere.size,
+    unattributed,
     ...(reasons.length ? { incomplete: reasons.join('; ') } : {}),
   };
 }

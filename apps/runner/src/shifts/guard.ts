@@ -444,6 +444,25 @@ export function effectiveWritableGlobs(input: GuardInput): string[] | null {
 }
 
 /**
+ * May this role edit `path` (the guard's own scope rules, so the handoff checks and the guard never disagree)? Its write
+ * scope (`effectiveWritableGlobs`), and for a builder not E2E test content (`builderE2eMatcher`). A role that may not
+ * commit edits nothing.
+ */
+export function mayEdit(input: GuardInput, path: string): boolean {
+  if (!input.permissions.mayCommit) return false;
+  const globs = effectiveWritableGlobs(input);
+  if (globs && !picomatch(globs, { dot: true })(path)) return false;
+  if (input.roleKey === 'builder' && input.e2eGlobs.length > 0 && builderE2eMatcher(input.e2eGlobs)(path))
+    return false;
+  return true;
+}
+
+/** The role that can fix a finding in `path` another role may not edit: the tester for E2E test content, else a builder. */
+export function ownerOf(e2eGlobs: readonly string[], path: string): 'tester' | 'builder' {
+  return e2eGlobs.length > 0 && builderE2eMatcher(e2eGlobs)(path) ? 'tester' : 'builder';
+}
+
+/**
  * Paths a path-scoped role changed outside its scope (tester: E2E globs; any role with `writableGlobs`, such as the
  * writer or a custom role); empty for unscoped roles. The guard rejects these, and the runner discards them instead
  * of auto-committing them.

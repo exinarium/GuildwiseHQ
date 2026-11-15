@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { PostAsPlanSchema } from './post-as.ts';
 import { CONNECTABLE_FORGES, createFullNameError, ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from './commit-identity.ts';
+import { PostAsPlanSchema } from './post-as.ts';
 
 export * from './commit-identity.ts';
 export * from './post-as.ts';

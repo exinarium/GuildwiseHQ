@@ -4,6 +4,8 @@ import {
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
   allowedOutcomes,
+  CHECKS_MAX,
+  CHECKS_POLICY_CAPABILITY,
   type CheckEvidence,
   checkSuites,
   DevOpsAccessSchema,
@@ -15,6 +17,8 @@ import {
   type InvestigationLocation,
   isBriefWorkflowKey,
   isBusinessCardType,
+  isHandoffCheckRole,
+  isSuiteCard,
   type LocalTestService,
   LocalTestServicesSchema,
   type PackAgentBrief,
@@ -27,6 +31,7 @@ import {
   type ServerToRunnerOf,
   type ShiftBrief,
   streamId,
+  unitSuites,
   VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
   workReference,
@@ -40,6 +45,7 @@ import { effectiveCompletionAction } from '../commands/completion.ts';
 import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { graphScopeFor } from '../commands/graph.ts';
+import { runnerHasChecksPolicy } from '../commands/handoff-checks.ts';
 import { integrationTestsOf } from '../commands/integration-tests.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
@@ -407,7 +413,13 @@ export async function buildBrief(
       ? { builderTestsNonBlocking: true }
       : {}),
     ...(await leanBrief(ctx, card, project, stage.id, agent)),
-    ...(stage.requireBuildEvidence ? checksBrief(card, project) : {}),
+    ...checksBrief(
+      card,
+      project,
+      stage,
+      agent,
+      await runnerHasChecksPolicy(ctx.pool, shift.workstation_id ?? agent.workstation_id),
+    ),
     ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
       ? { testWithoutEnvironment: true }
       : {}),
@@ -459,16 +471,78 @@ async function testGapsOf(ctx: Ctx, card: Row, agent: Row): Promise<{ testGaps?:
 }
 
 /**
- * lean team, a build stage: the project's confirmed checks of the card's repository (the runner runs them at `aom handoff`)
- * and whether the runner should propose checks from the repository first (once per repository). An older runner ignores it.
+ * The handoff checks of an agent stage with a worktree claimed by a builder, tester or writer (`HANDOFF_CHECK_ROLES`): the
+ * project's confirmed checks of the card's repository (the runner runs them over the whole repository at the role's success
+ * handoff) and whether the runner should propose checks or unit suites from the repository first (once per repository).
+ * A builder also gets the confirmed unit suites (the tests of the changed files run at its handoff); a tester never does.
+ * A suite card's tester gets `regressionUnits`: every confirmed unit suite of the repository, which the runner runs whole.
+ * An older runner ignores all of it.
  */
-function checksBrief(card: Row, project: Row): Partial<ShiftBrief> {
-  if (!card.repo_id) return {};
+export function checksBrief(
+  card: Row,
+  project: Row,
+  stage: { worktree?: string; requireBuildEvidence?: boolean },
+  agent: Row,
+  policy2: boolean,
+): Partial<ShiftBrief> {
+  if (!card.repo_id || agent.is_devops) return {};
+  if (!stage.worktree || stage.worktree === 'none') return {};
+  // the three roles that hand off changed files, and any role (a custom one) at a build stage that keeps build evidence
+  if (!isHandoffCheckRole(agent.role_key) && !stage.requireBuildEvidence) return {};
   const s = integrationTestsOf(project);
   const repo = card.repo_id as string;
   const detect =
     !s.checkDetection.includes(repo) && !s.suites.some((x) => x.kind === 'check' && x.repoId === repo);
-  return { checks: { suites: checkSuites(s, repo), detect } };
+  const builder = agent.role_key === 'builder';
+  const units = builder ? unitSuites(s, repo) : [];
+  const detectUnits =
+    builder &&
+    !s.unitDetection.includes(repo) &&
+    !s.suites.some((x) => x.kind === 'unit' && x.repoId === repo);
+  // An older runner (no `checks:2`) cannot run the unit suites of a suite card: it keeps today's behaviour for one release.
+  const suiteCard = policy2 && agent.role_key === 'tester' && isSuiteCard(card.card_type, card.origin);
+  const regression = suiteCard ? unitSuites(s, repo) : [];
+  return {
+    checks: {
+      suites: checkSuites(s, repo),
+      detect,
+      ...(units.length ? { units } : {}),
+      ...(detectUnits ? { detectUnits } : {}),
+    },
+    ...(regression.length ? { regressionUnits: regression } : {}),
+  };
+}
+
+/**
+ * The stored check results as the agent's runner can read them: a runner without `checks:2` does not know the statuses
+ * `deferred` and `regression_only` and reads at most `CHECKS_MAX` results (its schema would refuse the whole shift), so it
+ * gets those statuses as `preexisting` (shown as not blocking) with the summary saying what they were, and the first ten.
+ */
+async function checksForRunner(ctx: Ctx, agent: Row, checks: CheckEvidence[]): Promise<CheckEvidence[]> {
+  if (
+    checks.length <= CHECKS_MAX &&
+    !checks.some((c) => c.status === 'deferred' || c.status === 'regression_only')
+  )
+    return checks;
+  const caps = await one<{ capabilities: string[] }>(
+    ctx.pool,
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+    [agent.workstation_id],
+  );
+  if (caps?.capabilities?.includes(CHECKS_POLICY_CAPABILITY)) return checks;
+  // (an older runner also reads at most CHECKS_MAX results)
+  return checks.slice(0, CHECKS_MAX).map((c) =>
+    c.status === 'deferred' || c.status === 'regression_only'
+      ? {
+          ...c,
+          status: 'preexisting' as const,
+          summary: `${c.status === 'deferred' ? 'deferred' : 'not run at handoff'}: ${c.summary}`.slice(
+            0,
+            500,
+          ),
+        }
+      : c,
+  );
 }
 
 const REVIEW_SIDE = new Set(['pre_review', 'review', 'merge_review']);
@@ -506,14 +580,16 @@ async function leanBrief(
     at: string;
     checks?: CheckEvidence[];
   } | null;
-  if (ev && (REVIEW_SIDE.has(stageId) || ['test', 'qa_steps'].includes(stageId)))
+  if (ev && (REVIEW_SIDE.has(stageId) || ['test', 'qa_steps'].includes(stageId))) {
+    const checks = ev.checks?.length ? await checksForRunner(ctx, agent, ev.checks) : undefined;
     out.buildEvidence = {
       sha: ev.sha,
       commands: ev.commands,
       ...(ev.waived ? { waived: ev.waived } : {}),
-      ...(ev.checks?.length ? { checks: ev.checks } : {}),
+      ...(checks?.length ? { checks } : {}),
       at: ev.at,
     };
+  }
   if (card.high_risk && (REVIEW_SIDE.has(stageId) || stageId === 'test')) {
     const paths = (card.high_risk_paths ?? []) as string[];
     out.highRisk = { paths, labels: highRiskSummary(paths).labels };

@@ -300,6 +300,13 @@ export const RunnerConfigSchema = z.object({
    * in the run-step sandbox) before the agent starts. A kill switch: false leaves new worktrees as git checks them out.
    */
   prepareWorktrees: z.boolean().default(true),
+  /**
+   * The worktree preparation installs offline, from the shared package store, with no network: it trusts the committed
+   * lockfile (`pnpm_config_trust_lockfile`), because pnpm cannot re-verify a lockfile against its supply-chain policies
+   * without the registry. False: such an install fails fast with a plain reason (and the checks then report the missing
+   * tools). The packages come only from the store, which agents filled through online, verified installs.
+   */
+  prepTrustLockfile: z.boolean().default(true),
 });
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;
 

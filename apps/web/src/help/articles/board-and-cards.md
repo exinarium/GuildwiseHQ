@@ -114,7 +114,9 @@ With integration tests off (the default) the Test step still runs: the tester ch
 
 ## Checks before review {#checks}
 
-In the same **Tests and settings** dialog, **Checks** lists the repository's lint, format and typecheck commands. The runner proposes them from what the repository declares; an Owner confirms, edits or removes them. At each handoff the runner runs the confirmed checks on the builder's commit and refuses the handoff while the change fails a check in a file it changed, with the failing lines. Failures only in other files, and checks that could not run, are shown to the reviewers.
+In the same **Tests and settings** dialog, **Checks** lists the repository's lint, format and typecheck commands. The runner proposes them from what the repository declares; an Owner confirms, edits or removes them. At each handoff of a builder, a tester or a writer, the runner runs the confirmed checks over the whole repository. The handoff is refused while a check finds a problem in any file (also one the card did not change), or when a check cannot run at all (an error or a timeout). The agent fixes what the refusal lists and hands off again. The refusal is posted on the card. When a check cannot run twice in a row, your desk gets an alert: fix the tool or the command, or remove the check.
+
+The same dialog lists your **unit tests**. At a builder's handoff the runner runs the unit tests of the files the card changed, and a failing test refuses the handoff. A unit suite that cannot run at handoff (for example one that needs a database) is shown as not run at handoff: it runs at regression.
 
 ## Backing off {#backing-off}
 

@@ -26,8 +26,8 @@
   {
     "kind": "role",
     "key": "builder",
-    "version": 8,
-    "sha256": "bc35ab9c418929726ec9d4d5b170ca6a9aadf4046c798e8a4198f330e9834bd5"
+    "version": 9,
+    "sha256": "82056ee8f29f2733d5229cffcd068f922ca0627e86414d17473db84b827dcbc9"
   },
   {
     "kind": "role",
@@ -122,14 +122,14 @@
   {
     "kind": "role",
     "key": "tester",
-    "version": 14,
-    "sha256": "47b69f094bb56f8d59ac9f6c123db6162c3648a2e07df5b49c5190ed36bbb5d1"
+    "version": 15,
+    "sha256": "13b5987caaec24efe36fa8d3c28eb5552de091de6cdbcb3c33d8cd8d211a5186"
   },
   {
     "kind": "role",
     "key": "writer",
-    "version": 4,
-    "sha256": "0bffb0459e7b4c3ac8f4a94669ee28135fd236f01e56d26a597ea2137cecc206"
+    "version": 5,
+    "sha256": "d3efd099c72d6267710c6f113a56b570ed7b0d1f94dab60ebe4c2cdbb20c5b6d"
   },
   {
     "kind": "workflow",

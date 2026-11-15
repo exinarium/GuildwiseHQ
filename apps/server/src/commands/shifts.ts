@@ -79,6 +79,7 @@ import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
+import { handoffRefusalEvents, runnerHasChecksPolicy } from './handoff-checks.ts';
 import { workingBranchQuestionEvents } from './hygiene.ts';
 import { loopBreakerPlan, rejectionBackoffEvents } from './loop-breaker.ts';
 import { qaStepsEvents } from './qa.ts';
@@ -92,6 +93,7 @@ import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from './stop-
 import {
   endTestEnvironmentIn,
   openSuitesOf,
+  openUnitSuitesOf,
   reviewApprovedPlan,
   runProblemEvents,
   stageEnvironmentOf,
@@ -253,10 +255,11 @@ export async function applyShiftReport(
   if (!agent) return { accepted: false, error: 'agent not found' };
 
   if (report.kind === 'comment') {
-    await ctx.store.append(
-      [cardMessage(card, { kind: 'agent', agentId: agent.id }, 'comment', report.note)],
-      { tx },
-    );
+    // A handoff the runner's checks refused: the comment carries the results (stored on the card, desk alert when broken).
+    const events = msg.checks?.length
+      ? await handoffRefusalEvents(tx, card, agent.id, ws.id, report.note, msg.checks, msg.headSha)
+      : [cardMessage(card, { kind: 'agent', agentId: agent.id }, 'comment', report.note)];
+    await ctx.store.append(events, { tx });
     return { accepted: true };
   }
   if (report.kind === 'question') return raiseQuestion(ctx, tx, shift, card, agent, report);
@@ -349,6 +352,17 @@ export async function applyShiftReport(
   let stopForSplit = false;
   /** Over budget on a card that already went to the BA once: GWP-208's owner route, after the handoff is appended. */
   let splitTaken: StoredNeedsSplitProposal | undefined;
+  // The handoff checks of a tester's or writer's success handoff (and of a build stage that keeps no build evidence): the
+  // runner refuses a failing one before it sends the report; this is the server's defence in depth (policy 2 runners only).
+  // The results are kept on the handoff, so the card shows what was measured.
+  const otherChecks =
+    outcome.kind === 'success' &&
+    !!msg.checks?.length &&
+    !(outcome.event === 'ReviewRequested' && stage.requireBuildEvidence);
+  if (otherChecks) {
+    const problem = checkEvidenceProblem(msg.checks, msg.checksPolicy);
+    if (problem) return { accepted: false, error: problem };
+  }
   switch (outcome.event) {
     case 'ReviewRequested': {
       const diffStats = msg.diffStats ?? ZERO_DIFF;
@@ -364,7 +378,8 @@ export async function applyShiftReport(
         lean = built;
         handoffData = { diffStats, riskTier, buildEvidence: built.evidence, highRisk: built.highRisk };
         await storeCardDiff(ctx, tx, cardId, built.evidence.sha, msg);
-        // A check that could not be judged never passes silently: the handoff goes on, and the card says so.
+        // An older runner's check that could not be judged never passes silently: the handoff goes on, and the card says
+        // so (policy 2 runners refuse it before they report, and the server refuses it in `leanHandoff`).
         const unjudged = (built.evidence.checks ?? []).filter(
           (c) => c.status === 'error' || c.status === 'timeout',
         );
@@ -544,6 +559,27 @@ export async function applyShiftReport(
             ?.regression_loop
         )
           return { accepted: false, error: TARGET_LINE_REQUIRED };
+        // The unit suites the runner runs on a suite card: no pass while one failed, is still running or is unreported.
+        // A runner without `checks:2` cannot run them: its pass goes through as today, with a note on the card.
+        if (outcome.event === 'TestPassed' && !(await runnerHasChecksPolicy(tx, ws.id))) {
+          const skipped = await openUnitSuitesOf(tx, card, shift);
+          if (skipped.length > 0)
+            followUps.push(
+              cardMessage(
+                card,
+                { kind: 'system' },
+                'system',
+                `The unit ${skipped.length === 1 ? 'suite' : 'suites'} ${skipped.join(', ')} did not run on ${card.ref}: the workstation's runner is older than the release that runs them. Update the runner.`,
+              ),
+            );
+        } else if (outcome.event === 'TestPassed') {
+          const openUnits = await openUnitSuitesOf(tx, card, shift);
+          if (openUnits.length > 0)
+            return {
+              accepted: false,
+              error: `the unit ${openUnits.length === 1 ? 'suite' : 'suites'} ${openUnits.join(', ')} ${openUnits.length === 1 ? 'has' : 'have'} no passing result measured by the runner in this shift: a failing unit suite is reported with \`aom test fail\` (the runner adds a bug section per failing test file); a running one is waited for.`,
+            };
+        }
         mains = await suiteOutcomeEvents(
           ctx,
           tx,
@@ -915,6 +951,8 @@ export async function applyShiftReport(
       };
   }
 
+  if (otherChecks) handoffData = { ...handoffData, handoffChecks: msg.checks };
+
   await ctx.store.append(
     [
       mk({
@@ -986,7 +1024,7 @@ function leanHandoff(
   if (!parsed.success) return { ok: false, error: 'the build evidence is not valid' };
   // The runner already refuses a failed check before it sends the report; this is the server's defence in depth. A report
   // without `checks` (an older runner) is never refused for it.
-  const checkProblem = checkEvidenceProblem(msg.checks);
+  const checkProblem = checkEvidenceProblem(msg.checks, msg.checksPolicy);
   if (checkProblem) return { ok: false, error: checkProblem };
   if (!msg.headSha)
     return {

@@ -63,7 +63,7 @@ describe('runHandoffChecks', () => {
     expect(r.evidence[0]?.summary).toContain('inside the repository');
   });
 
-  it('a failure in a changed file blocks: the refusal has the lines, the fix, the log path and the rest as information', async () => {
+  it('a failure blocks with findings in every file: the refusal groups them (this card, other files), with the fix and the log path', async () => {
     const s = setup();
     const r = await runHandoffChecks({
       worktree: s.worktree,
@@ -97,28 +97,34 @@ describe('runHandoffChecks', () => {
     expect(r.refusal).toContain('the check "lint"');
     expect(r.refusal).toContain('  src/a.ts:12:3 lint/style/useConst bad');
     expect(r.refusal).toContain('Fix: `pnpm format`');
-    expect(r.refusal).toContain('Not blocking: 2 problems in files this card did not change.');
-    expect(r.refusal).toContain('Nothing was handed to review.');
+    expect(r.evidence[0]?.elsewhere).toEqual(['src/b.ts:1:1 old', 'src/b.ts:2:1 old']);
+    expect(r.refusal).toContain('In files this card changed (1):');
+    expect(r.refusal).toContain('In other files (2):\n  src/b.ts:1:1 old\n  src/b.ts:2:1 old');
+    expect(r.refusal).toContain('also in files you did not change');
+    expect(r.refusal).toContain('aom question --topic environment');
+    expect(r.refusal).toContain('Nothing was handed on.');
     const log = /Full output: (.+)/.exec(r.refusal)?.[1] as string;
     expect(existsSync(log)).toBe(true);
     expect(readFileSync(log, 'utf8')).toContain('src/b.ts:2:1 old');
   });
 
-  it('failures only in unchanged files are information: preexisting, no block', async () => {
+  it('whole repository: failures only in files the card did not change block too (no "preexisting" pass)', async () => {
     const r = await run({ suites: [suite('lint', 'echo "src/b.ts:1:1 old"; exit 1')] });
-    expect(r.evidence[0]).toMatchObject({ status: 'preexisting', elsewhereCount: 1, introduced: [] });
-    expect(r.blocking).toEqual([]);
-    expect(r.summary).toContain('passed (1 problem only in files this card did not change)');
+    expect(r.evidence[0]).toMatchObject({ status: 'failed', elsewhereCount: 1, introduced: [] });
+    expect(r.blocking).toHaveLength(1);
+    expect(r.refusal).toContain('In other files (1):');
   });
 
-  it('a failure that names no file is an unjudged warning', async () => {
-    const r = await run({ suites: [suite('lint', 'echo boom; exit 2')] });
-    expect(r.evidence[0]).toMatchObject({ status: 'error' });
+  it('a failure that names no file is an error, and an error blocks with the last lines of the output', async () => {
+    const r = await run({ suites: [suite('lint', 'echo first; echo boom; exit 2')] });
+    expect(r.evidence[0]).toMatchObject({ status: 'error', tail: ['first', 'boom'] });
     expect(r.evidence[0]?.summary).toContain('without naming a file');
-    expect(r.blocking).toEqual([]);
+    expect(r.blocking).toHaveLength(1);
+    expect(r.refusal).toContain('did not produce a verdict (error)');
+    expect(r.refusal).toContain('Last lines of its output:\n  first\n  boom');
   });
 
-  it('a missing binary, exit 127 and a missing script are errors, not passes or blocks', async () => {
+  it('a missing binary, exit 127 and a missing script are errors that block, naming what is missing', async () => {
     const r = await run({
       suites: [
         suite('a', 'x', { cmd: ['definitely-not-a-binary-xyz'] }),
@@ -128,17 +134,30 @@ describe('runHandoffChecks', () => {
     });
     expect(r.evidence.map((e) => e.status)).toEqual(['error', 'error', 'error']);
     expect(r.evidence[0]?.summary).toContain('missing tool');
-    expect(r.blocking).toEqual([]);
+    expect(r.evidence[2]?.summary).toContain('ERR_PNPM_NO_SCRIPT Missing script: lint');
+    expect(r.blocking).toHaveLength(3);
   });
 
-  it('output cut by the tool is incomplete (error), but a changed file in it still blocks', async () => {
+  it('a bare ENOENT in the output is not a missing tool (PREREVIEW 6): an error that names no file', async () => {
+    const r = await run({
+      suites: [suite('lint', 'echo "Error: ENOENT: no such file or directory, open \'x.json\'"; exit 1')],
+    });
+    expect(r.evidence[0]?.status).toBe('error');
+    expect(r.evidence[0]?.summary).toContain('without naming a file');
+    const spawned = await run({ suites: [suite('lint', 'echo "Error: spawn biome ENOENT"; exit 1')] });
+    expect(spawned.evidence[0]?.summary).toContain('missing tool');
+  });
+
+  it('output cut by the tool with no findings is incomplete (error); with findings in any file it fails; both block', async () => {
+    const cutOnly = 'echo "Diagnostics not shown: 120."; exit 1';
+    expect((await run({ suites: [suite('lint', cutOnly)] })).evidence[0]?.status).toBe('error');
     const cut = 'echo "src/b.ts:1:1 old"; echo "Diagnostics not shown: 120."; exit 1';
-    expect((await run({ suites: [suite('lint', cut)] })).evidence[0]?.status).toBe('error');
+    expect((await run({ suites: [suite('lint', cut)] })).evidence[0]?.status).toBe('failed');
     const withMine = 'echo "src/a.ts:1:1 mine"; echo "Diagnostics not shown: 120."; exit 1';
     expect((await run({ suites: [suite('lint', withMine)] })).evidence[0]?.status).toBe('failed');
   });
 
-  it('a timeout kills the process group and is a warning', async () => {
+  it('a timeout kills the process group and blocks', async () => {
     const s = setup();
     const marker = join(s.worktree, 'child-survived');
     const t0 = Date.now();
@@ -152,7 +171,8 @@ describe('runHandoffChecks', () => {
       suites: [suite('slow', `(sleep 4; touch ${marker}) & sleep 30`)],
     });
     expect(r.evidence[0]?.status).toBe('timeout');
-    expect(r.blocking).toEqual([]);
+    expect(r.blocking).toHaveLength(1);
+    expect(r.refusal).toContain('"slow"');
     expect(Date.now() - t0).toBeLessThan(8000);
     await new Promise((res) => setTimeout(res, 4500));
     expect(existsSync(marker)).toBe(false);
@@ -167,14 +187,14 @@ describe('runHandoffChecks', () => {
   it('keeps at most 2 MiB of output and says so when it cannot judge', async () => {
     const r = await run({
       suites: [
-        suite('big', 'yes "src/b.ts:1:1 old" | head -c 3000000; exit 1', {
-          cmd: ['sh', '-c', 'yes "src/b.ts:1:1 old" | head -c 3000000; exit 1'],
+        suite('big', 'yes "no file here" | head -c 3000000; exit 1', {
+          cmd: ['sh', '-c', 'yes "no file here" | head -c 3000000; exit 1'],
         }),
       ],
     });
-    // only one distinct line: elsewhere, but the capture was cut, so the verdict is a warning
     expect(r.evidence[0]?.status).toBe('error');
     expect(r.evidence[0]?.summary).toContain('2 MiB');
+    expect(r.blocking).toHaveLength(1);
   });
 
   it('without a launcher, or when it throws, the check is an error', async () => {
