@@ -159,9 +159,17 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   if (decision.action === 'create') {
     let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
     try {
-      identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+      identity = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        postAsFor(p.postAs, p.remoteUrlNormalized),
+      );
     } catch (err) {
-      return failed('tag', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)), carry);
+      return failed(
+        'tag',
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)),
+        carry,
+      );
     }
     const made = await git(repoPath, ['tag', '-a', p.tag, '-m', p.title, target], {
       env: commitEnv(identity),
@@ -333,7 +341,12 @@ async function landByMerge(
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return { result: failed('land', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err))) };
+    return {
+      result: failed(
+        'land',
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)),
+      ),
+    };
   }
   const tip = await revParse(repoPath, baseRef);
   if (!tip) return { result: failed('land', `the main branch '${base}' does not exist on origin`) };

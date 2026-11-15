@@ -23,7 +23,10 @@ export interface AccessCheckBroker {
 
 /** `github.com/owner/name` -> host and lower-cased `owner/name`. */
 export function splitRemote(remoteUrlNormalized: string): { host: string; fullName: string } | null {
-  const parts = remoteUrlNormalized.replace(/\.git$/, '').split('/').filter(Boolean);
+  const parts = remoteUrlNormalized
+    .replace(/\.git$/, '')
+    .split('/')
+    .filter(Boolean);
   if (parts.length < 3) return null;
   const host = (parts[0] ?? '').toLowerCase();
   return { host, fullName: parts.slice(-2).join('/').toLowerCase() };
@@ -62,7 +65,8 @@ export async function checkAppAccess(
           headers: { authorization: `token ${token}`, accept: 'application/vnd.github+json' },
         });
         if (res.status === 401) return { status: 401 };
-        if (!res.ok) throw new AppTokenError(res.status === 403 ? 'permission_missing' : 'unexpected', 'listing failed');
+        if (!res.ok)
+          throw new AppTokenError(res.status === 403 ? 'permission_missing' : 'unexpected', 'listing failed');
         const body = (await res.json()) as { repositories?: Array<{ full_name?: string }> };
         const list = body.repositories ?? [];
         for (const r of list) if (r.full_name) names.add(r.full_name.toLowerCase());
@@ -95,7 +99,8 @@ export function appTokenProbe(broker: AccessCheckBroker): AppTokenProbe {
   return {
     ensure: async ({ instance, integrationId }, repoName) => {
       const stored = broker.store.get(instance);
-      if (!stored) throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
+      if (!stored)
+        throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
       if (!stored.refs.some((r) => r.integrationId === integrationId))
         throw new AppTokenError('app_mismatch', APP_ERROR_TEXT.app_mismatch);
       // GitHub scopes an installation token by repository name (without the owner).

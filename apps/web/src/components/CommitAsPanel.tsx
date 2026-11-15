@@ -6,6 +6,7 @@ import {
 } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useCommitAs, useSaveCommitAs } from '../api/queries/commit-as.ts';
+import { PostAsBlock } from './PostAsBlock.tsx';
 import { Button, ErrorBox, Panel, TextInput, useToast } from './ui.tsx';
 
 type Clone = CommitAsResponse['clones'][number];
@@ -65,6 +66,7 @@ export function CommitAsPanel({ projectId, canEdit }: { projectId: string; canEd
 
   return (
     <Panel title="Commit as" data-testid="commit-as">
+      <PostAsBlock projectId={projectId} data={d} />
       <form onSubmit={submit} className="flex flex-col gap-3" aria-label="Commit as">
         <p className="text-sm text-muted">
           Every commit and merge made for this project carries this name and e-mail address, so the work reads

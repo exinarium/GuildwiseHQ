@@ -172,7 +172,11 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
       if (m[1] === p.commit || m[1].startsWith(p.commit))
         return { ok: true, unchanged: true, commit: head, path: found.path };
 
-      const id = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
+      const id = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        postAsFor(p.postAs, p.remoteUrlNormalized),
+      );
       const env = commitEnv(id);
       const set = await git(wt, ['update-index', '--add', '--cacheinfo', `160000,${p.commit},${found.path}`]);
       if (set.exitCode !== 0)

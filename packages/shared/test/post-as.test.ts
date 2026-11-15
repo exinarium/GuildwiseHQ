@@ -43,12 +43,19 @@ const repo = { repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', forge: 
 describe('resolvePostAsRepo (the single resolver)', () => {
   it('app covering the repository -> app', () => {
     const r = resolvePostAsRepo({ repo, selected: [app()], access: () => 'covered', commitAs });
-    expect(r).toEqual({ repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', source: 'app', app: identity });
+    expect(r).toEqual({
+      repoId: REPO_A,
+      remoteUrlNormalized: 'github.com/acme/a',
+      source: 'app',
+      app: identity,
+    });
   });
 
   it('coverage unknown or errored -> still app (fail closed)', () => {
     expect(resolvePostAsRepo({ repo, selected: [app()], access: () => null, commitAs }).source).toBe('app');
-    expect(resolvePostAsRepo({ repo, selected: [app()], access: () => 'error', commitAs: null }).source).toBe('app');
+    expect(resolvePostAsRepo({ repo, selected: [app()], access: () => 'error', commitAs: null }).source).toBe(
+      'app',
+    );
   });
 
   it('app not covering the repository -> Commit as, else repo, with the reason', () => {
@@ -93,7 +100,12 @@ describe('resolvePostAsRepo (the single resolver)', () => {
     const plan = PostAsPlanSchema.parse({
       repos: [
         { repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', source: 'app', app: identity },
-        { repoId: REPO_B, remoteUrlNormalized: 'github.com/acme/b', source: 'repo', fallbackReason: 'not_covered' },
+        {
+          repoId: REPO_B,
+          remoteUrlNormalized: 'github.com/acme/b',
+          source: 'repo',
+          fallbackReason: 'not_covered',
+        },
       ],
     });
     expect(postAsFor(plan, 'github.com/acme/b')?.repoId).toBe(REPO_B);
@@ -112,7 +124,10 @@ describe('commit identity source', () => {
   });
 
   it('an old settings response (no postAs, no repos) still parses', () => {
-    expect(CommitAsResponseSchema.parse({ commitAs: null, clones: [] })).toEqual({ commitAs: null, clones: [] });
+    expect(CommitAsResponseSchema.parse({ commitAs: null, clones: [] })).toEqual({
+      commitAs: null,
+      clones: [],
+    });
   });
 });
 
@@ -129,14 +144,17 @@ describe('ProjectPostAsAppsSet event', () => {
 
   it('old ProjectCommitAsSet events still parse', () => {
     expect(
-      DomainEventSchema.parse({ type: 'ProjectCommitAsSet', payload: { projectId: REPO_A, commitAs: null } }).payload,
+      DomainEventSchema.parse({ type: 'ProjectCommitAsSet', payload: { projectId: REPO_A, commitAs: null } })
+        .payload,
     ).toEqual({ projectId: REPO_A, commitAs: null });
   });
 });
 
 describe('protocol', () => {
   const plan = {
-    repos: [{ repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', source: 'app' as const, app: identity }],
+    repos: [
+      { repoId: REPO_A, remoteUrlNormalized: 'github.com/acme/a', source: 'app' as const, app: identity },
+    ],
   };
 
   it('finalize.execute without postAs parses to exactly the old object; with postAs it round-trips', () => {
@@ -178,7 +196,8 @@ describe('protocol', () => {
       }).instance,
     ).toBe('42:777');
     expect(
-      AppAccessCheckResultSchema.safeParse({ repos: [{ repoId: REPO_A, state: 'covered', token: 'x' }] }).success,
+      AppAccessCheckResultSchema.safeParse({ repos: [{ repoId: REPO_A, state: 'covered', token: 'x' }] })
+        .success,
     ).toBe(false);
     expect(
       AppAccessCheckResultSchema.parse({

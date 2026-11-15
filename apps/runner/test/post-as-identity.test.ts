@@ -60,9 +60,22 @@ describe('resolution order with a post-as plan', () => {
     const ensure = vi.fn(async () => {});
     setAppTokenProbe({ ensure });
     const repo = repoWithConfig();
-    const entry: PostAsRepo = { ...appEntry, source: 'project', app: undefined, fallbackReason: 'not_covered' };
-    expect(await resolveCommitIdentity(repo.clone, PROJECT, entry)).toEqual({ ...PROJECT, source: 'project' });
-    const repoEntry: PostAsRepo = { ...appEntry, source: 'repo', app: undefined, fallbackReason: 'not_covered' };
+    const entry: PostAsRepo = {
+      ...appEntry,
+      source: 'project',
+      app: undefined,
+      fallbackReason: 'not_covered',
+    };
+    expect(await resolveCommitIdentity(repo.clone, PROJECT, entry)).toEqual({
+      ...PROJECT,
+      source: 'project',
+    });
+    const repoEntry: PostAsRepo = {
+      ...appEntry,
+      source: 'repo',
+      app: undefined,
+      fallbackReason: 'not_covered',
+    };
     expect(await resolveCommitIdentity(repo.clone, null, repoEntry)).toMatchObject({ source: 'repo' });
     expect(ensure).not.toHaveBeenCalled();
   });
@@ -84,24 +97,29 @@ describe('fail closed when the selected app cannot be used', () => {
     ['installation_suspended', APP_ERROR_TEXT.installation_suspended],
     ['repository_not_accessible', APP_ERROR_TEXT.repository_not_accessible],
     ['app_mismatch', APP_ERROR_TEXT.app_mismatch],
-  ] as const)('%s -> AppIdentityError naming the app and the reason, never another identity', async (code, text) => {
-    setAppTokenProbe({
-      ensure: async () => {
-        throw new AppTokenError(code, 'raw provider message with secret-ish details');
-      },
-    });
-    const repo = repoWithConfig();
-    const err = await resolveCommitIdentity(repo.clone, PROJECT, appEntry).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(AppIdentityError);
-    const e = err as AppIdentityError;
-    expect(e.message).toContain('Acme bot');
-    expect(e.message).toContain(text);
-    expect(e.message).not.toContain('secret-ish');
-    expect(appIdentityWire(e)).toMatch(/^app_identity_failed: The app Acme bot could not be used/);
-    expect(identityErrorWire(e)).toBe(appIdentityWire(e));
-    await expect(requireCommitIdentity(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(AppIdentityError);
-    await expect(rebaseEnv(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(AppIdentityError);
-  });
+  ] as const)(
+    '%s -> AppIdentityError naming the app and the reason, never another identity',
+    async (code, text) => {
+      setAppTokenProbe({
+        ensure: async () => {
+          throw new AppTokenError(code, 'raw provider message with secret-ish details');
+        },
+      });
+      const repo = repoWithConfig();
+      const err = await resolveCommitIdentity(repo.clone, PROJECT, appEntry).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(AppIdentityError);
+      const e = err as AppIdentityError;
+      expect(e.message).toContain('Acme bot');
+      expect(e.message).toContain(text);
+      expect(e.message).not.toContain('secret-ish');
+      expect(appIdentityWire(e)).toMatch(/^app_identity_failed: The app Acme bot could not be used/);
+      expect(identityErrorWire(e)).toBe(appIdentityWire(e));
+      await expect(requireCommitIdentity(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(
+        AppIdentityError,
+      );
+      await expect(rebaseEnv(repo.clone, PROJECT, appEntry)).rejects.toBeInstanceOf(AppIdentityError);
+    },
+  );
 
   it('no probe wired (old wiring): fails closed', async () => {
     const repo = repoWithConfig();
@@ -132,7 +150,9 @@ describe('appTokenProbe (shift-time check against the broker)', () => {
   });
 
   it('missing key -> installation_not_found; foreign copy -> app_mismatch; else a mint scoped by repo name', async () => {
-    await expect(appTokenProbe(broker(undefined)).ensure({ instance: '42:777', integrationId: APP_ID }, 'acme/a')).rejects.toMatchObject({
+    await expect(
+      appTokenProbe(broker(undefined)).ensure({ instance: '42:777', integrationId: APP_ID }, 'acme/a'),
+    ).rejects.toMatchObject({
       code: 'installation_not_found',
     });
     await expect(
@@ -158,14 +178,19 @@ describe('app.access_check', () => {
       { repoId: REPO_B, remoteUrlNormalized: 'github.com/acme/b' },
     ],
   };
-  const brokerWith = (have: unknown, withToken: (fn: (t: string) => Promise<unknown>) => Promise<unknown>) => ({
+  const brokerWith = (
+    have: unknown,
+    withToken: (fn: (t: string) => Promise<unknown>) => Promise<unknown>,
+  ) => ({
     store: { get: () => have } as never,
     getAccessToken: vi.fn(),
     withToken: ((_i: string, _s: unknown, fn: (t: string) => Promise<unknown>) => withToken(fn)) as never,
   });
 
   it('matches host and owner/name case-insensitively; never returns the token', async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ repositories: [{ full_name: 'acme/a' }] })));
+    const fetchFn = vi.fn(
+      async () => new Response(JSON.stringify({ repositories: [{ full_name: 'acme/a' }] })),
+    );
     const r = await checkAppAccess(
       brokerWith({ refs: [{ orgId: 'o', integrationId: APP_ID }] }, (fn) => fn('ghs_secret')),
       payload,
@@ -178,7 +203,9 @@ describe('app.access_check', () => {
       ],
     });
     expect(JSON.stringify(r)).not.toContain('ghs_secret');
-    expect(String((fetchFn.mock.calls[0] as unknown[])[0])).toContain('https://api.github.com/installation/repositories');
+    expect(String((fetchFn.mock.calls[0] as unknown[])[0])).toContain(
+      'https://api.github.com/installation/repositories',
+    );
   });
 
   it('a broker error marks every repository error with the typed code and its sentence', async () => {
@@ -195,7 +222,11 @@ describe('app.access_check', () => {
 
   it('no key on this workstation -> error, nothing fetched', async () => {
     const fetchFn = vi.fn();
-    const r = await checkAppAccess(brokerWith(undefined, async () => ({})), payload, fetchFn as unknown as typeof fetch);
+    const r = await checkAppAccess(
+      brokerWith(undefined, async () => ({})),
+      payload,
+      fetchFn as unknown as typeof fetch,
+    );
     expect(r.repos[0]).toMatchObject({ state: 'error', code: 'installation_not_found' });
     expect(fetchFn).not.toHaveBeenCalled();
   });

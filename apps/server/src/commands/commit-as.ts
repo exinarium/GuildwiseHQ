@@ -81,7 +81,12 @@ export async function getCommitAs(
   );
   const parsed = CommitAsSchema.safeParse(p.commit_as ?? null);
   const commitAs = parsed.success ? parsed.data : null;
-  const { postAs, repos } = await postAsSettings(ctx.pool, user, p as Parameters<typeof postAsSettings>[2], commitAs);
+  const { postAs, repos } = await postAsSettings(
+    ctx.pool,
+    user,
+    p as Parameters<typeof postAsSettings>[2],
+    commitAs,
+  );
   return {
     commitAs,
     postAs,

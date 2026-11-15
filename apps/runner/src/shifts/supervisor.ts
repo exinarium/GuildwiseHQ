@@ -106,7 +106,12 @@ import {
 import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
-import { AppIdentityError, appIdentityWire, NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import {
+  AppIdentityError,
+  appIdentityWire,
+  NO_IDENTITY_WIRE,
+  resolveCommitIdentity,
+} from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,

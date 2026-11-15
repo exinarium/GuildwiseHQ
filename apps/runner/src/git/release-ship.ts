@@ -166,7 +166,10 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return fail('commit', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)));
+    return fail(
+      'commit',
+      err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),
+    );
   }
   const dir = join(input.integrationDir, `release-${p.repoId}`);
   const made = await withIntegrationWorktree(

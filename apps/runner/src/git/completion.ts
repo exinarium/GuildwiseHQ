@@ -287,7 +287,9 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
   if (merged.exitCode === 0)
     return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
 
-  const env = commitEnv(await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized)));
+  const env = commitEnv(
+    await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized)),
+  );
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = integrationBranchName(p.ref.toLowerCase());
   const result = await withIntegrationWorktree(

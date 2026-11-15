@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { type AppErrorCode, AppErrorCodeSchema, AppHostSchema, AppProviderIdSchema, type AppProviderId } from '../apps/index.ts';
+import {
+  type AppErrorCode,
+  AppErrorCodeSchema,
+  AppHostSchema,
+  AppProviderIdSchema,
+  type AppProviderId,
+} from '../apps/index.ts';
 import { type ForgeKind, ForgeKindSchema } from '../forge/index.ts';
 import type { CommitAs } from './commit-identity.ts';
 
@@ -99,7 +105,10 @@ export function resolvePostAsRepo(i: {
 }
 
 /** The resolved entry for one repository of a plan, by its normalized remote URL. */
-export function postAsFor(plan: PostAsPlan | null | undefined, remoteUrlNormalized: string | null | undefined): PostAsRepo | null {
+export function postAsFor(
+  plan: PostAsPlan | null | undefined,
+  remoteUrlNormalized: string | null | undefined,
+): PostAsRepo | null {
   if (!plan || !remoteUrlNormalized) return null;
   return plan.repos.find((r) => r.remoteUrlNormalized === remoteUrlNormalized) ?? null;
 }

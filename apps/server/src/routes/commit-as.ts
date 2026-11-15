@@ -37,11 +37,15 @@ export function commitAsRoutes(ctx: Ctx) {
       },
     );
 
-    app.post('/api/projects/:id/post-as/check', { schema: { params: IdParamsSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
-      await assertCanCheckPostAs(ctx, s.user, req.params.id);
-      const sent = await requestPostAsChecks(ctx, req.params.id);
-      return reply.code(202).send({ sent });
-    });
+    app.post(
+      '/api/projects/:id/post-as/check',
+      { schema: { params: IdParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await assertCanCheckPostAs(ctx, s.user, req.params.id);
+        const sent = await requestPostAsChecks(ctx, req.params.id);
+        return reply.code(202).send({ sent });
+      },
+    );
   };
 }

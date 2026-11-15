@@ -323,7 +323,11 @@ async function workStart(
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return { result: failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err))) };
+    return {
+      result: failed(
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),
+      ),
+    };
   }
   const kept = await revParse(repoPath, workRef(p.runId));
   const start = kept ?? p.summary?.headSha ?? tip;
@@ -479,7 +483,9 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
   try {
     identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)));
+    return failed(
+      err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),
+    );
   }
   const kept = await revParse(repoPath, commitRef(p.runId));
   if (kept) {

@@ -22,7 +22,8 @@ afterAll(async () => {
 });
 
 const url = () => `/api/projects/${w.projectId}/post-as`;
-const owner = (method: string, u: string, body?: unknown) => w.t.req(method, u, { cookie: w.owner.cookie, body });
+const owner = (method: string, u: string, body?: unknown) =>
+  w.t.req(method, u, { cookie: w.owner.cookie, body });
 const db = () => w.t.app.ctx.pool;
 
 let n = 0;
@@ -84,7 +85,9 @@ describe('post-as app selection (GWP-212.2)', () => {
     const m = await addMember(w, 'postas-member');
     const res = await w.t.req('PUT', url(), { cookie: m.cookie, body: { apps: [{ integrationId: id }] } });
     expect(res.status).toBe(403);
-    const view = await ok<any>(w.t.req('GET', `/api/projects/${w.projectId}/commit-as`, { cookie: m.cookie }));
+    const view = await ok<any>(
+      w.t.req('GET', `/api/projects/${w.projectId}/commit-as`, { cookie: m.cookie }),
+    );
     expect(view.postAs.canSelect).toBe(false);
   });
 
@@ -92,7 +95,9 @@ describe('post-as app selection (GWP-212.2)', () => {
     appA = await addApp({ label: 'Acme bot', connected: 'connected' });
     const res = await owner('PUT', url(), { apps: [{ integrationId: appA }] });
     expect(res.status).toBe(200);
-    expect(res.body.postAs.selected).toMatchObject([{ integrationId: appA, label: 'Acme bot', state: 'connected' }]);
+    expect(res.body.postAs.selected).toMatchObject([
+      { integrationId: appA, label: 'Acme bot', state: 'connected' },
+    ]);
     expect(res.body.postAs.lastChange).toMatchObject({ by: expect.any(String) });
     const ev = await q(`SELECT payload FROM events WHERE type='ProjectPostAsAppsSet' ORDER BY seq`);
     expect(ev.at(-1)?.payload).toEqual({
@@ -105,13 +110,23 @@ describe('post-as app selection (GWP-212.2)', () => {
     await owner('PUT', url(), { apps: [{ integrationId: appA }] });
     expect((await q(`SELECT 1 FROM events WHERE type='ProjectPostAsAppsSet'`)).length).toBe(ev.length);
 
-    const cmd = await q(`SELECT payload FROM runner_commands WHERE type='app.access_check' ORDER BY created_at DESC LIMIT 1`);
-    expect(cmd[0]?.payload).toMatchObject({ projectId: w.projectId, integrationId: appA, host: 'github.com' });
+    const cmd = await q(
+      `SELECT payload FROM runner_commands WHERE type='app.access_check' ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(cmd[0]?.payload).toMatchObject({
+      projectId: w.projectId,
+      integrationId: appA,
+      host: 'github.com',
+    });
     expect(JSON.stringify(cmd[0]?.payload)).not.toMatch(/token|key/i);
 
     // coverage unknown: resolves to the app (fail closed)
     const plan = await loadIdentityPlan(db(), w.projectId);
-    expect(plan.postAs?.repos[0]).toMatchObject({ repoId: w.repoId, source: 'app', app: { integrationId: appA } });
+    expect(plan.postAs?.repos[0]).toMatchObject({
+      repoId: w.repoId,
+      source: 'app',
+      app: { integrationId: appA },
+    });
     expect((await identityFields(db(), w.projectId)).postAs).toBeDefined();
   });
 
@@ -119,7 +134,9 @@ describe('post-as app selection (GWP-212.2)', () => {
     const appB = await addApp({ label: 'Other bot', connected: 'connected' });
     const res = await owner('PUT', url(), { apps: [{ integrationId: appA }, { integrationId: appB }] });
     expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).toContain('A project can post as one GitHub App only; untick Acme bot first');
+    expect(JSON.stringify(res.body)).toContain(
+      'A project can post as one GitHub App only; untick Acme bot first',
+    );
   });
 
   it('a repository the installation cannot reach is a warning and uses the fallback', async () => {

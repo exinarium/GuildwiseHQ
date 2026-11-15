@@ -41,7 +41,9 @@ export class AppIdentityError extends Error {
     readonly app: { label: string; integrationId: string },
     readonly reason: string,
   ) {
-    super(`The app ${app.label} could not be used: ${reason} Nothing was committed or pushed under another identity.`);
+    super(
+      `The app ${app.label} could not be used: ${reason} Nothing was committed or pushed under another identity.`,
+    );
   }
 }
 
@@ -80,7 +82,10 @@ export function appReason(err: unknown): string {
 
 /** `owner/name` of a normalized remote (`github.com/owner/name`). */
 export function repoNameOf(remoteUrlNormalized: string): string {
-  const parts = remoteUrlNormalized.replace(/\.git$/, '').split('/').filter(Boolean);
+  const parts = remoteUrlNormalized
+    .replace(/\.git$/, '')
+    .split('/')
+    .filter(Boolean);
   return parts.slice(-2).join('/');
 }
 
@@ -134,9 +139,16 @@ export async function resolveCommitIdentity(
 ): Promise<CommitIdentity | null> {
   if (postAs?.source === 'app') {
     const app = postAs.app;
-    if (!app) throw new AppIdentityError({ label: 'unknown app', integrationId: '' }, 'The app reference is missing.');
+    if (!app)
+      throw new AppIdentityError(
+        { label: 'unknown app', integrationId: '' },
+        'The app reference is missing.',
+      );
     try {
-      await probe.ensure({ instance: app.instance, integrationId: app.integrationId }, repoNameOf(postAs.remoteUrlNormalized));
+      await probe.ensure(
+        { instance: app.instance, integrationId: app.integrationId },
+        repoNameOf(postAs.remoteUrlNormalized),
+      );
     } catch (err) {
       throw new AppIdentityError(app, appReason(err));
     }

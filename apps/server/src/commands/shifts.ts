@@ -1540,22 +1540,22 @@ export async function applyShiftRejected(
     : appFailed
       ? `The shift was stopped instead of committing under another identity. ${(msg.detail ?? '').slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim().slice(0, 1000)}\nThe card is back in the queue.`
       : rebaseFailed
-      ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
-          rebaseError: msg.rebaseError ?? null,
-          detail: msg.detail ?? null,
-          fileLessConflict,
-        })}\nThe card is back in the queue.`
-      : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
-        ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
-        : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
-          ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
-          : msg.reason === 'usage_limited'
-            ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
-            : msg.reason === 'auth_expired'
-              ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-              : msg.reason === 'busy' && msg.capacity
-                ? await shiftCapMessage(tx, ws.id, msg.capacity)
-                : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+        ? `${rebaseErrorText(card.stage, card.base_branch ?? '', {
+            rebaseError: msg.rebaseError ?? null,
+            detail: msg.detail ?? null,
+            fileLessConflict,
+          })}\nThe card is back in the queue.`
+        : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
+          ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
+          : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
+            ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
+            : msg.reason === 'usage_limited'
+              ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
+              : msg.reason === 'auth_expired'
+                ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+                : msg.reason === 'busy' && msg.capacity
+                  ? await shiftCapMessage(tx, ws.id, msg.capacity)
+                  : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
   // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
   for (const ev of released)

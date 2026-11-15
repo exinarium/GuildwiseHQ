@@ -221,15 +221,23 @@ async function optionsFor(db: Queryable, states: SelectedAppState[]): Promise<Po
 export async function postAsSettings(
   db: Queryable,
   user: AuthSession['user'],
-  project: { id: string; org_id: string | null; post_as?: unknown; post_as_set_by?: string | null; post_as_set_at?: Date | null },
+  project: {
+    id: string;
+    org_id: string | null;
+    post_as?: unknown;
+    post_as_set_by?: string | null;
+    post_as_set_at?: Date | null;
+  },
   commitAs: CommitAs | null,
 ): Promise<{ postAs: PostAsSettings; repos: PostAsRepoRow[] }> {
   const refs = storedPostAs(project.post_as);
   const selectedStates = await selectedAppStates(db, project.org_id, refs);
   const activeRows = project.org_id
-    ? await rows<AppRow>(db, `SELECT * FROM org_app_integrations WHERE org_id=$1 AND status='active' ORDER BY created_at, id`, [
-        project.org_id,
-      ])
+    ? await rows<AppRow>(
+        db,
+        `SELECT * FROM org_app_integrations WHERE org_id=$1 AND status='active' ORDER BY created_at, id`,
+        [project.org_id],
+      )
     : [];
   const activeStates: SelectedAppState[] = activeRows.map((a) => ({
     ref: { integrationId: a.id, provider: a.provider as AppProviderId },
@@ -240,7 +248,9 @@ export async function postAsSettings(
     ? isOrgManager({ orgRole: await orgRoleOf(db, user.id, project.org_id) })
     : false;
   const by = project.post_as_set_by
-    ? await one<{ display_name: string }>(db, 'SELECT display_name FROM users WHERE id=$1', [project.post_as_set_by])
+    ? await one<{ display_name: string }>(db, 'SELECT display_name FROM users WHERE id=$1', [
+        project.post_as_set_by,
+      ])
     : null;
   const [repos, access] = await Promise.all([projectRepos(db, project.id), accessRows(db, project.id)]);
   return {
@@ -305,10 +315,11 @@ export async function setPostAsApps(
     const kept = previous.filter((r) => ids.includes(r.integrationId));
     const added = ids.filter((id) => !previous.some((r) => r.integrationId === id));
     const addedRows = added.length
-      ? await rows<AppRow>(tx, `SELECT * FROM org_app_integrations WHERE org_id=$1 AND id = ANY($2::uuid[])`, [
-          p.org_id,
-          added,
-        ])
+      ? await rows<AppRow>(
+          tx,
+          `SELECT * FROM org_app_integrations WHERE org_id=$1 AND id = ANY($2::uuid[])`,
+          [p.org_id, added],
+        )
       : [];
     const conn = await appConnectionStates(tx, added);
     const next: PostAsAppRef[] = [...kept];
@@ -330,8 +341,14 @@ export async function setPostAsApps(
     for (const r of next) {
       const other = next.find((o) => o !== r && o.provider === r.provider);
       if (other) {
-        const otherLabel = next.indexOf(other) < next.indexOf(r) ? labels.get(other.integrationId) : labels.get(r.integrationId);
-        throw badRequest('one_app_per_provider', oneAppPerProviderMessage(r.provider, otherLabel ?? 'the other app'));
+        const otherLabel =
+          next.indexOf(other) < next.indexOf(r)
+            ? labels.get(other.integrationId)
+            : labels.get(r.integrationId);
+        throw badRequest(
+          'one_app_per_provider',
+          oneAppPerProviderMessage(r.provider, otherLabel ?? 'the other app'),
+        );
       }
     }
     if (sameSet(previous, next)) return false;
@@ -339,7 +356,10 @@ export async function setPostAsApps(
       [
         {
           streamId: streamId.project(projectId),
-          event: { type: 'ProjectPostAsAppsSet', payload: { projectId, apps: next, previous, setBy: user.id } },
+          event: {
+            type: 'ProjectPostAsAppsSet',
+            payload: { projectId, apps: next, previous, setBy: user.id },
+          },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
         },
@@ -352,7 +372,11 @@ export async function setPostAsApps(
 }
 
 /** Forbidden for anyone who is not an organization Owner or Admin. */
-export async function assertCanCheckPostAs(ctx: Ctx, user: AuthSession['user'], projectId: string): Promise<void> {
+export async function assertCanCheckPostAs(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+): Promise<void> {
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   if (!p.org_id || !isOrgManager({ orgRole: await orgRoleOf(ctx.pool, user.id, p.org_id) }))
     throw forbidden('only an organization Owner or Admin can do this');
@@ -428,7 +452,11 @@ export async function applyAppAccessCheckResult(
     : {
         repos: repos
           .filter((r): r is { repoId: string } => typeof r.repoId === 'string')
-          .map((r) => ({ repoId: r.repoId, state: 'error' as const, detail: (error ?? 'The check failed.').slice(0, 400) })),
+          .map((r) => ({
+            repoId: r.repoId,
+            state: 'error' as const,
+            detail: (error ?? 'The check failed.').slice(0, 400),
+          })),
       };
   const now = ctx.clock.now();
   for (const r of answer.repos)
@@ -442,4 +470,3 @@ export async function applyAppAccessCheckResult(
       [projectId, r.repoId, integrationId, r.state, r.code ?? null, r.detail ?? null, now, workstationId],
     );
 }
-
