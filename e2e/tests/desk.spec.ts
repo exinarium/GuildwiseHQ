@@ -3,7 +3,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, storagePath } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
 import { MAILPIT_API, MEMBER, OTHER, paths, shotPath } from '../support/env.ts';
-import { startRunner } from '../support/runner.ts';
+import { startRunner, stopRunnerAndWait } from '../support/runner.ts';
 
 // M2: decision desk, questions and ledger. Runs after core-loop, which leaves the runner killed and the server
 // clock one hour ahead; the builders Ada and Grace and the reviewer Linus are still hired.
@@ -30,7 +30,10 @@ test.beforeAll(async ({ browser }) => {
   const projects = (await (await api.get('/api/projects')).json()).projects;
   projectId = projects.find((p: { key: string }) => p.key === 'TOY').id;
   repoId = (await (await api.get(`/api/projects/${projectId}`)).json()).repos[0].id;
-  // core-loop ended with the runner killed; bring it back (slow chat tokens so streaming is observable).
+  // core-loop ended with the runner killed; bring it back (slow chat tokens so streaming is observable). A spec that
+  // ran in between (mobile) may have left its runner on this workstation: end it first, or the second connection
+  // supersedes one of them (4409) and the build shift is released as runner_lost_shift.
+  await stopRunnerAndWait(api);
   startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '150' });
 });
 

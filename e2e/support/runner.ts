@@ -78,6 +78,30 @@ export function killRunner(signal: NodeJS.Signals = 'SIGKILL', home = paths.runn
   current.delete(home);
 }
 
+type ApiGet = { get(url: string): Promise<{ json(): Promise<unknown> }> };
+
+/** True when the server shows a connected workstation for the caller (`api` is the member's request context). */
+export async function runnerConnected(api: ApiGet): Promise<boolean> {
+  const body = (await (await api.get('/api/workstations')).json()) as {
+    workstations?: Array<{ connected?: boolean }>;
+  };
+  return (body.workstations ?? []).some((w) => w.connected === true);
+}
+
+/**
+ * End the default-home runner (SIGTERM, the pid recorded by whichever spec started it) and wait until the server shows
+ * no connected workstation for the member, so the next `startRunner()` on the shared workstation is the only one.
+ */
+export async function stopRunnerAndWait(api: ApiGet, timeoutMs = 30_000): Promise<void> {
+  killRunner('SIGTERM');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await runnerConnected(api))) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error('timed out waiting for the runner to disconnect');
+}
+
 /** Global teardown: every runner any spec started. */
 export function killAllRunners(signal: NodeJS.Signals = 'SIGTERM'): void {
   const homes = new Set([...current.keys(), ...Object.keys(readPids())]);
